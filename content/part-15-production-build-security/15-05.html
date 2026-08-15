@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Certificate และ endpoint production</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">15-05 · Production</span><h1>Certificate และ endpoint production</h1><p>Part 15: Production Build, Security &amp; Resilience</p></header>
 <div class="note"><strong>HandshakeException คือสัญญาณให้แก้ trust chain:</strong> ห้ามแก้ด้วย <code>badCertificateCallback = (_,__,___) =&gt; true</code> เพราะเท่ากับปิดการยืนยันตัวตนของ server และเปิดทาง man-in-the-middle</div>
 <section><h2>1. Certificate ต้องตรงอะไร</h2><p>ยังไม่หมดอายุ/ยังไม่เริ่มก่อนเวลา, chain ถึง CA ที่ device เชื่อถือ, hostname/IP ตรง SAN และ device clock ถูกต้อง Certificate ที่ออกให้ DNS name จะไม่ผ่านเมื่อเรียกด้วย raw IP หาก SAN ไม่มี IP นั้น</p></section>
 <section><h2>2. Endpoint production</h2><p>ใช้ stable DNS name เช่น <code>wms-api.company.internal</code> แทน IP ที่เปลี่ยนง่าย และให้ reverse proxy/load balancerจัด renewal ทดสอบ health endpoint ผ่าน URL เดียวกับแอป ไม่ใช้ URL คนละชุดสำหรับ probe กับ request</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Server hardening</h2><p>ใช้ TLS versions/ciphers ที่รองรับ device fleet, ส่ง full chain, redirect HTTP อย่างระวังช่วง migration, HSTS เมื่อทุก subdomain พร้อม และ monitor certificate expiry ก่อนผู้ใช้เจอ</p></section>
 <section><h2>7. Test matrix</h2><p>valid chain, expired/not-yet-valid, wrong hostname, missing intermediate, untrusted root, clock skew, rotated cert และ offline ต้องแปลเป็น failure คนละแบบ ไม่ retry handshake errorแบบถี่ ๆ</p></section>
 <section><h2>8. Operational evidence</h2><div class="success">เก็บ endpoint host, certificate issuer/fingerprint แบบไม่ลับ, expiry alert, owner และ renewal rehearsal แต่ไม่ log token/request bodyหรือ private key</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

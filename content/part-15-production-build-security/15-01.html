@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Debug/Profile/Release ต่างกันอย่างไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">15-01 · Production</span><h1>Debug/Profile/Release ต่างกันอย่างไร</h1><p>Part 15: Production Build, Security &amp; Resilience</p></header>
 <div class="note"><strong>Build mode ไม่ใช่ environment:</strong> debug/profile/release ควบคุม compiler, assertions และเครื่องมือวัด ส่วน dev/staging/prod คือ endpoint/configuration ต้องออกแบบแยกกันและห้ามให้ release ชี้ production โดยอาศัยชื่อ mode อย่างเดียว</div>
 <section><h2>1. Debug</h2><p>มี assertions, service extensions, debugger/hot reload และ optimization ไม่เต็ม เหมาะพัฒนาและ widget tests แต่เวลา frame/ขนาดไฟล์ไม่แทน production อย่าส่ง debug APK ให้ผู้ใช้จริงเพราะเซ็นด้วย debug key และเปิด surface สำหรับพัฒนา</p></section>
 <section><h2>2. Profile</h2><p>คงเครื่องมือ profiling สำคัญและ optimize ใกล้ release ใช้วัด jank/CPU/memory บนอุปกรณ์จริง ไม่มี hot reload แบบ debug พฤติกรรมบาง platform ต่างกัน จึงต้อง reproduce performance ใน profile ไม่ใช่ debug</p></section>
@@ -18,5 +12,3 @@ const apiBase = String.fromEnvironment('WMS_API_BASE_URL');
 <section><h2>6. Flavors</h2><p>ใช้ flavors/schemes เมื่อ dev/staging/prod ต้องมี application ID, display name, icon, signing หรือ entitlements ต่างกัน ให้เห็นชัดว่าแอปทดสอบไม่ใช่ production และติดตั้งคู่กันได้</p></section>
 <section><h2>7. Matrix ที่ต้องทดสอบ</h2><table><thead><tr><th>Artifact</th><th>Endpoint</th><th>จุดประสงค์</th></tr></thead><tbody><tr><td>debug-dev</td><td>local</td><td>พัฒนา</td></tr><tr><td>profile-stage</td><td>staging</td><td>วัด performance</td></tr><tr><td>release-stage</td><td>staging</td><td>release rehearsal</td></tr><tr><td>release-prod</td><td>production</td><td>แจกจริง</td></tr></tbody></table></section>
 <section><h2>8. Gate</h2><div class="success">CI ต้องบันทึก Flutter/Dart commit, mode, flavor, version, build number, Git SHA และ endpoint class โดยไม่เผย token พร้อม smoke test artifact เดียวกับที่จะส่ง ไม่ rebuild ใหม่หลังอนุมัติ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

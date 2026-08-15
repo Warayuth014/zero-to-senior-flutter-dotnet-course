@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Android manifest permission</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">15-03 · Production</span><h1>Android manifest permission</h1><p>Part 15: Production Build, Security &amp; Resilience</p></header>
 <div class="note"><strong>Manifest คือ capability declaration:</strong> ขอเฉพาะสิทธิ์ที่ feature ใช้จริงและวางใน source set ที่ถูกต้อง ปัจจุบัน main manifest ของ <code>wmsapp</code> ไม่มี INTERNET ขณะที่ permission อยู่ใน debug/profile จึงต้องตรวจ release manifest ก่อนแจก</div>
 <section><h2>1. INTERNET ใน main</h2><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
   &lt;uses-permission android:name="android.permission.INTERNET" /&gt;
@@ -16,5 +10,3 @@
 <section><h2>6. Merged manifest</h2><p>ตรวจผล merge ของ main + flavor + build type + plugins ไม่อ่านไฟล์เดียวแล้วสรุป ใช้ Android Studio Merged Manifest หรือ build report เพื่อตรวจ permission/provider ที่ dependency เพิ่มมา</p></section>
 <section><h2>7. Feature audit</h2><table><thead><tr><th>Capability</th><th>ต้องมี</th><th>ตรวจ</th></tr></thead><tbody><tr><td>API</td><td>INTERNET</td><td>release call</td></tr><tr><td>Camera</td><td>ตาม picker/plugin</td><td>deny/grant</td></tr><tr><td>Scanner wedge</td><td>มักเป็น keyboard</td><td>device จริง</td></tr></tbody></table></section>
 <section><h2>8. Security gate</h2><div class="success">release manifest ไม่มี debug-only component, broad storage/location permission, test provider หรือ cleartext global โดยไม่อนุมัติ และทุก exported component มีเหตุผล/authorization test</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
