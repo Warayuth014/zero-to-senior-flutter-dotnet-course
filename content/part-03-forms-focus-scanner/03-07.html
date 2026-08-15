@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Debounce กับ duplicate scan</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">03-07 · Flutter UI</span><h1>Debounce กับ duplicate scan</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
 <div class="note">Debounce จัดการ event ต่อเนื่องตามเวลา ส่วน duplicate detection จัดการค่าซ้ำตาม identity และ business window ทั้งสองเรื่องต่างกัน และไม่แทน idempotency ของ backend</div>
 <section><h2>1. Debounce vs throttle vs lock</h2><ul><li>Debounce: รอเงียบช่วงหนึ่งแล้วใช้ event ล่าสุด เหมาะ search-as-you-type</li><li>Throttle: รับไม่เกินหนึ่งครั้งต่อช่วง เหมาะ telemetry/UI action</li><li>Busy lock: ไม่รับ commandใหม่จนงานเดิมจบ เหมาะ scan→API</li><li>Duplicate set/window: ปฏิเสธ canonical code ที่เคยรับใน session/ช่วงเวลา</li></ul></section>
 <section><h2>2. Scanner ที่มี Enter ไม่ต้อง debounce text</h2><p>เมื่อ wedge ส่ง terminatorชัด ให้ submitที่ onSubmitted การ debounce onChanged อาจยิงก่อนอักขระสุดท้ายบนเครื่องช้า ใช้ busy lock และ duplicate policy แทน Debounce เหมาะกับช่องค้นหา filter ที่ไม่มี commit event</p></section>
@@ -20,5 +14,3 @@ ScanDecision acceptSerial(String raw) {
 <section><h2>6. Backend idempotency</h2><p>Mobile lock ป้องกัน UX duplicateใน processเดียว แต่ retry/network timeout/appสองเครื่องยังทำ commitซ้ำได้ Endpoint mutation ควรรับ idempotency/operation key หรือมี unique constraint/version/invariant ฝั่ง .NET แล้วคืนผลเดิม/Conflictอย่างชัดเจน</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Serial เดียวกันถูก triggerสองครั้งห่าง 40ms และ requestแรกยังวิ่ง ต้องป้องกันที่ใดบ้าง?</p><details><summary>แนวคำตอบ</summary><p>UI busy lock ปิด submitที่สอง, local canonical Set/window ให้ feedback duplicate, requestมี operation ID และ backend unique constraint/idempotency ป้องกันข้าม retry/device เมื่อ requestจบให้คืน focusและไม่ลบ accepted stateหาก response timeoutแต่ serverอาจ commitแล้ว ต้อง reconcile</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">Timer debounce อย่างเดียวไม่รับประกันไม่ซ้ำ และ busy boolean อย่างเดียวไม่กัน retryหลัง timeout ออกแบบทั้ง event semantics, local session identity และ server transaction/idempotency ตามระดับความเสียหาย</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ป้องกัน submit ซ้ำระหว่าง API call</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">03-08 · Flutter UI</span><h1>ป้องกัน submit ซ้ำระหว่าง API call</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
 <div class="note">การป้องกัน submitซ้ำต้องทำที่ command boundary ก่อน await แล้วสะท้อนใน UI พร้อม <code>try/finally</code> ไม่ใช่แค่ทำปุ่มเป็นสีเทา เพราะ Enter/scanner/callbackอื่นยังเรียก methodได้</div>
 <section><h2>1. Guard ก่อนงาน async</h2><pre class="code-vs"><code>Future&lt;void&gt; submitScan() async {
   if (_busy) return;
@@ -26,5 +20,3 @@
 <section><h2>6. Optimistic vs pessimistic</h2><p>Warehouse commitที่กระทบ stockมัก pessimistic: รอ serverยืนยันก่อนเพิ่ม committed count อาจแสดง pending rowเพื่อความเร็ว แต่ต้อง reconcile/rollbackเมื่อ fail อย่าแสดง “สำเร็จ” จากการกดก่อน HTTP result</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ยิง scannerและแตะปุ่มส่งเกือบพร้อมกัน ทำไม disabled buttonอย่างเดียวอาจไม่พอ?</p><details><summary>เฉลย</summary><p>ทั้งสอง callbackอาจถูกเรียกก่อน frame rebuildให้ disabled จึงต้องตรวจ/set busy synchronouslyที่ต้น commandใน event loopเดียว จากนั้น UI disableทุก trigger และ backendใช้ idempotency/constraintอีกชั้น</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">ถ้า return หลัง <code>await</code> เพราะ <code>!mounted</code> ก่อนปลด busyโดยไม่มี finally state ownerอื่นอาจค้าง งาน cleanupต้องอยู่ finally; UI updateจึงค่อยตรวจ mounted</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

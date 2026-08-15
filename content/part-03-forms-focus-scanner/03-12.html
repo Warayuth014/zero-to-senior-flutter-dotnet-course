@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Controller/listener ต้อง dispose อย่างไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">03-12 · Flutter UI</span><h1>Controller/listener ต้อง dispose อย่างไร</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
 <div class="note">กฎ ownership: ใครสร้าง resource คนนั้น dispose และ lifetimeต้องตรงกับสิ่งที่ resourceควบคุม Controller/FocusNode/Timer/Subscription/listenerที่หลุดจะทำให้ memory leak, callbackหลังปิดหน้า หรือใช้ objectที่ถูก disposeแล้ว</div>
 <section><h2>1. Lifecycle template</h2><pre class="code-vs"><code>class _ScanState extends State&lt;ScanPage&gt; {
   final _controller = TextEditingController();
@@ -25,5 +19,3 @@
 <section><h2>6. dispose order</h2><p>หยุด producerก่อน consumer: cancel timer/subscription, remove listeners/observers, dispose controllers/notifiers แล้ว <code>super.dispose()</code> ตาม patternของ framework ห้าม setStateใน dispose และอย่าเรียก requestFocusหลัง nodeถูก dispose</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>ScanFieldรับ optional controllerและ optional focusNode ควรจัด ownershipอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>เก็บ <code>_ownController</code>/<code>_ownFocus</code> เฉพาะเมื่อ inputเป็น null, gettersเลือก externalหรือ own, disposeเฉพาะ own หาก widget updateจาก own→external/กลับกันต้องจัด create/disposeใน didUpdateWidget หรือออกแบบ contractไม่เปลี่ยน ownerกลาง lifetimeและ assert/documentไว้</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">Disposeสองครั้ง/child dispose resourceของ parentอันตรายพอ ๆ กับไม่ dispose อาการมักเกิดหลัง navigation/rebuildจึงหาได้ยาก เขียน ownershipใน constructor docและทดสอบ mount→replace→unmount</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
