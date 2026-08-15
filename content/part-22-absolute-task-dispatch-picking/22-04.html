@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>โหลด task และ preserve runtime status</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-04 · Real Codebase</span><h1>โหลด task และ preserve runtime status</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>WarehouseStore.loadTasks()</code> — merge server snapshotใหม่กับ runtime progressเดิมอย่างเลือก field ไม่ copy objectเก่าทั้งตัว</div>
 <section><h2>1. Server เป็น ownerของ assignment</h2><p>mode, persisted status, robotและ task routeมาจาก <code>fetchOpen</code> ทุก pollingรอบ Storeไม่ preserveค่าพวกนี้จาก objectเดิมเพราะ dispatch/ESS/operatorอื่นอาจเปลี่ยนแล้ว การ copyทั้งหมดจะทำให้ PDAแสดงเจ้าของงานเก่า</p></section>
 <section><h2>2. Runtime key</h2><p>mergeใช้ server IDถ้ามี มิฉะนั้น event ID เพื่อจับ taskเดิมข้าม object instances Keyต้อง stableและ unique; หาก fallback event IDซ้ำหรือ serverเปลี่ยน ID local progressจะหายซึ่งปลอดภัยกว่าผูก progressกับ taskผิด</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Error policy</h2><p>failure toastแต่เก็บ tasksเก่าและ notifyหลัง finally ทำให้ใช้งานต่อได้แบบ stale snapshot ควรแสดง last-updated/offline stateเพราะ operatorอาจคิดว่า assignmentยังถูกต้อง และห้ามทำ destructive commandจากข้อมูล staleโดยไม่ให้ backend validate</p></section>
 <section><h2>7. Preserve น้อยอย่างตั้งใจ</h2><p>หลัก mergeคือเริ่มจาก server objectใหม่แล้ว copyเฉพาะสิ่งที่พิสูจน์ว่า local-owned ห้ามเริ่มจาก old objectแล้ว copy serverบาง field เพราะ fieldใหม่จาก APIจะถูกลืมและ stale stateสะสม นี่เป็น reconciliation patternสำคัญสำหรับ pollingทุกระบบ</p></section>
 <section><h2>8. Controlled-future tests</h2><div class="success">สร้าง two polls A/Bและ dispatchคั่นกลาง ควบคุม completion order แล้วพิสูจน์ว่า server assignmentล่าสุดชนะ, local manual stepยังอยู่, completed taskถูกลบ, selectionถูก clear และ requestที่ถูก skipทำ queued refreshหนึ่งครั้งแทนรอ timerรอบถัดไป</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

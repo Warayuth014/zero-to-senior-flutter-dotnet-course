@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Workflow definitions และ navigation state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-01 · Real Codebase</span><h1>Workflow definitions และ navigation state</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/workflow_definitions.dart</code> — รวม vocabulary และ step definitions ที่ store, task views, dispatch และ history ใช้ร่วมกัน</div>
 <section><h2>1. สามแกนที่อย่าสับสน</h2><p><code>TaskType</code> บอกชนิดการเคลื่อนย้าย: putaway/retrieve/returning, <code>TaskStatus</code> บอกสถานะ UI/runtime และ <code>DispatchMode</code> บอก carrier AGV/manual ทั้งสามแกนประกอบกันได้หลายแบบ เช่น retrieve + manual + inProgress หรือ putaway + AGV + executing</p></section>
 <section><h2>2. Server status กับ UI status</h2><p><code>taskStatusLabel</code> รองรับทั้งชื่อและเลข enum จาก backend เช่น PENDING/0, HANDLE/11, AGV/9, COMPLETE/4 และเก็บ unknown stringไว้แสดง ไม่ควรใช้ labelแปลกลับไปตัดสิน flow; logicใช้ canonical enumsหรือ raw server statusที่ normalizeแล้ว</p></section>
@@ -15,5 +9,3 @@ returning:detail → scan pallet → scan location → done</code></pre><p>จ�
 <section><h2>6. Navigation state อยู่ store</h2><p><code>taskId</code>, <code>tStep</code> และ <code>WmsTask.step</code> ทำให้ pauseแล้ว Continue ได้ <code>goBack</code> ลด step, <code>exitFlow</code> preserve, ส่วน bottom navigation reset local progressแต่ไม่ยกเลิก assignmentบน server Navigation จึงเป็น eventของ state machine ไม่ใช่แค่เปลี่ยน widget</p></section>
 <section><h2>7. Location labels เป็น presentation alias</h2><p><code>taskLocationLabel</code> แปลค่า logical เช่น Receiving Area/Any Available/Awaiting Storage โดยยังปล่อย rack, pointและ destination codesจริงไว้ ห้ามส่ง labelภาษาไทยกลับ endpoint; commandต้องใช้ barcode/location codeจาก modelหรือ scan</p></section>
 <section><h2>8. Definition tests</h2><div class="success">ทดสอบ server status aliasesทุกค่า, unknown fallback, type labelsสองภาษา, step keys/expectไม่ซ้ำและ doneอยู่ท้ายเสมอ จากนั้นทำ table testว่า Back/Continue/resetทำงานถูกสำหรับทุก TaskTypeและทุก step index</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

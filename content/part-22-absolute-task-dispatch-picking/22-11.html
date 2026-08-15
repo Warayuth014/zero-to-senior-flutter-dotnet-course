@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Start active pick</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-11 · Real Codebase</span><h1>Start active pick</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>startSelectedConveyorPick</code>, <code>startPick</code> และ <code>mobile_start_pick</code> — handoff จาก arrived conveyor ไป active picking</div>
 <section><h2>1. Preconditions</h2><p>ต้องมี destination, C1/C2ที่ arrived, waiting pickที่ palletตรงกันและ valid server task ID ก่อนเปิด scan dialog เงื่อนไขเหล่านี้กันการเริ่มจาก card staleหรือข้อมูลไม่ครบ</p></section>
 <section><h2>2. Scan เป็น proof of presence</h2><p>ผู้ปฏิบัติงานสแกน palletจริงที่ lane ไม่ใช่แค่กด card การเทียบ exactหลัง normalizeยืนยันว่ากำลังหยิบ palletที่ backendคาดไว้</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. Concurrent operator</h2><p>สองเครื่องอาจเห็น arrivedเดียวกันและกด startพร้อมกัน Backendต้อง compare current status atomically เครื่องที่แพ้ควร reloadแล้วเห็น active/available ไม่แสดง generic errorที่ชวน retryซ้ำ</p></section>
 <section><h2>7. Start success แต่ refresh fail</h2><p>commandอาจสำเร็จแต่ reloadล้มเหลว UIต้องไม่เสนอ Startซ้ำโดยไร้คำเตือน ทางเลือกคือ invalidate snapshot, แสดง “started—refresh pending” และให้ manual refreshที่ reconcileจาก server</p></section>
 <section><h2>8. Start-flow tests</h2><div class="success">ครอบคลุม wrong pallet, missing task ID, double operator conflict, start timeout-after-commit, queue/pick refresh partial failure และ lifecycleตอนปิด dialog โดย assertว่า commandถูกเรียกสูงสุดหนึ่งครั้งต่อ interaction</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

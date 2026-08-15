@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Validate robot point</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-06 · Real Codebase</span><h1>Validate robot point</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>DispatchView</code>, <code>_AgvPickupDialog</code> และ <code>WarehouseStore.validateRobotPoint</code> — validation สองชั้นก่อนส่ง putaway ให้ AGV</div>
 <section><h2>1. ทำไม AGV putaway ต้องสแกนสองค่า</h2><p>palletยืนยันสิ่งของที่จะย้าย ส่วน robot pointยืนยันจุดรับจริง หากเชื่อเพียง task card ผู้ใช้อาจยืนผิดจุดหรือรถรับ palletผิดตัว จึงต้องผ่านทั้ง exact pallet matchและ backend point validationก่อนเปิดปุ่ม Send</p></section>
 <section><h2>2. Exact pallet match</h2><p>dialog normalizeช่องว่าง/caseแล้วเทียบกับ palletของ task ไม่ใช้ contains เพราะ barcodeที่คล้ายกันห้ามผ่าน เมื่อ palletยังไม่ถูก ช่อง pointและการส่งงานยังถูกปิด เป็น progressive validationที่ลด requestไม่จำเป็น</p></section>
@@ -16,5 +10,3 @@
 <section><h2>6. TOCTOU ยังมีอยู่</h2><p>pointอาจ validตอนตรวจแต่ถูกใช้งานก่อน dispatchจริง Backend dispatchจึงต้อง validateซ้ำแบบ atomicกับการจองงาน ไม่ถือว่า validation endpointเป็น authorizationหรือ reservation</p></section>
 <section><h2>7. Error UX ที่ควรแยก</h2><p>“ไม่พบ point”, “pointไม่พร้อม”, network timeout และ unauthorizedควรมีข้อความ/การ retryต่างกัน ปัจจุบัน boolean/resultง่ายต่อ UIแต่สูญเสียเหตุผล Senior designควรคืน typed failureพร้อม codeที่แปลข้อความได้</p></section>
 <section><h2>8. Test contract</h2><div class="success">widget testยืนยันว่าพิมพ์ palletผิดยังเปิด pointไม่ได้, invalid pointไม่ dispatch, valid scanถูก normalizeแล้ว dispatchหนึ่งครั้ง ควรเพิ่ม close-during-request, timeout, double scanและ pointเปลี่ยนสถานะก่อน dispatch</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

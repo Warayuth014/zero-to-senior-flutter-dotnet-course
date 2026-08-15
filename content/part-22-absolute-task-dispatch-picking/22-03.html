@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TasksApi endpoint map</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-03 · Real Codebase</span><h1>TasksApi endpoint map</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/api/tasks_api.dart</code> — adapterใหญ่ที่ reuse grid/history endpointsและเพิ่ม mobile commandsสำหรับการเคลื่อนย้ายทุกช่วง</div>
 <section><h2>1. Query endpoint map</h2><ul><li><code>/api/taskmanage/get_task?includeReceive=true</code>: open transport</li><li><code>get_task?includePick=true</code>: open PICK</li><li><code>get_task_details?task_id=...</code>: detailแรก</li><li><code>/api/data/get_history_event?...Today=true</code>: summary/AGV/Forklift/Picking history</li><li><code>/api/data/get_locationreport</code>: count/free locations</li><li><code>/api/WMS/mobile_destination_queues</code>: queues + C1/C2/C3</li></ul></section>
 <section><h2>2. Command endpoint map</h2><pre class="code-vs"><code>mobile_dispatch / mobile_validate_robot_point
@@ -16,5 +10,3 @@ mobile_stage_store_in / mobile_remove_store_in / mobile_store_in</code></pre><p>
 <section><h2>6. Location และ destination projections</h2><p>location countนับ distinct non-DEST codes, free locationsต้อง enable+idle+ไม่มี container ส่วน destination queue parserอ่าน nested queues/conveyorsพร้อม status/product/reserved location ข้อมูล physical laneจึงมาจาก server snapshotเดียว ไม่ประกอบจาก UI memory</p></section>
 <section><h2>7. Contract risks</h2><ul><li>PageItems 1000 ไม่มี pagination</li><li>row castsและ casingหลายแบบอาจ fail</li><li><code>_firstDetail</code> กลืนทุก error</li><li>task IDใน queryควร URI encode</li><li>statusอื่นทั้งหมดถูก classify executing</li><li>command timeoutอาจสำเร็จฝั่ง serverแล้ว</li></ul></section>
 <section><h2>8. Adapter test matrix</h2><div class="success">ทดสอบ URI/body/optional fieldsของทุก command, task classification aliases, N+1 partial failure, histories dedup/group/sort, location filters, queue nested parsingและ malformed/unknown status ใช้ fault injectionหลัง commitเพื่อกำหนด reconciliation/idempotencyของ dispatch, pickและ Store In</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

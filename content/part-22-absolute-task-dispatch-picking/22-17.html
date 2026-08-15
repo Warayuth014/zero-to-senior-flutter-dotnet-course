@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Polling refresh และ test coverage</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-17 · Real Codebase</span><h1>Polling refresh และ test coverage</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>เป้าหมาย:</strong> เชื่อม polling, reconciliation และ testsให้ Task/Dispatch/Picking flowทนต่อ networkและหลาย operator ไม่ใช่ผ่านเฉพาะ happy path</div>
 <section><h2>1. Polling matrixจริง</h2><table><thead><tr><th>หน้า</th><th>ทุก 5 วินาที</th></tr></thead><tbody><tr><td>AGV</td><td>tasks + AGV history</td></tr><tr><td>Dispatch</td><td>tasks</td></tr><tr><td>Tasks</td><td>tasks + Forklift history</td></tr><tr><td>Picking</td><td>picks + pick history + queues</td></tr><tr><td>Cycle Count waiting/returning</td><td>cycle count refresh</td></tr></tbody></table></section>
 <section><h2>2. Timer lifecycle</h2><p>WarehouseStoreสร้าง periodic timerใน constructorและ cancelใน dispose ป้องกัน memory leak/callbackหลัง storeตาย แต่ควรพิจารณา app lifecycleและ visibilityเพื่อหยุด pollingเมื่อ backgroundหรือ tabซ่อน</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Integration test ที่ควรเพิ่ม</h2><p>ใช้ fake clockและ controllable completersสร้าง out-of-order responses, timeout-after-commit, duplicate operatorและ partial refresh จากนั้น assertว่า latest server versionชนะ, actionไม่ซ้ำและผู้ใช้มี retry path</p></section>
 <section><h2>7. Observability</h2><p>log commandด้วย correlation/task ID, duration, resultและrefresh generation โดยไม่บันทึก tokenหรือข้อมูลอ่อนไหว Metricsควรเห็น timeout, conflict, stale response droppedและpoll latencyเพื่อวิเคราะห์หน้างานจริง</p></section>
 <section><h2>8. Definition of done Part 22</h2><div class="success">อธิบาย task vocabulary/API mapping, manual scans, dispatchสองโหมด, withdraw, C1/C2 picking, C3 Store In, histories, PDA layout, polling racesและ test strategyได้ พร้อมชี้ว่า serverเป็น authorityตรงไหนและ clientต้อง reconcileอย่างไร</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Task/destination models</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-02 · Real Codebase</span><h1>Task/destination models</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>models/task_models.dart</code> และ <code>models/destination_models.dart</code> — แยก DB/API projections ออกจาก mutable operational models ที่ UIใช้</div>
 <section><h2>1. EventView เป็น boundary model</h2><p><code>EventView</code> flatten Eventsกับ detailแรก: IDs/class/status/type, from/to location/point/LPN, robot/requestQty และ product/doc fields Adapterอ่าน modelนี้ก่อนแปลงเป็น <code>WmsTask</code> หรือ <code>Pick</code> จึงเก็บ legacy naming/casingไว้ที่ boundary</p></section>
 <section><h2>2. WmsTask ผสม server กับ runtime</h2><p>immutable identity/type/fromอยู่ร่วมกับ mutable qty, to, loc barcode, scanned destination, mode/status/serverStatus/step/agvName Server refreshสร้าง taskใหม่แล้ว store preserveเฉพาะ runtime fieldsที่ไม่มี server counterpart การรู้ ownerราย fieldป้องกัน pollingเขียนทับ truthผิดฝั่ง</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Queue กับ Conveyor คนละมุม</h2><p><code>DestinationQueueItem</code> คือ unfinished RELOCATE eventรอ destination ส่วน <code>DestinationConveyor</code> คือ physical C1/C2/C3 positionพร้อม pallet/status/task/product <code>DestinationQueueSummary</code> รวม occupancy, free incoming count, conveyorsและ persisted queueต่อ destination</p></section>
 <section><h2>7. Conveyor status predicates</h2><p><code>isAvailable</code> ดู palletว่าง, <code>isArrived</code> exact ARRIVED, <code>isStaged</code>/<code>isDispatched</code> ใช้ prefixเพื่อรองรับ STAGED_PICKING/STAGED_MANUAL และ DISPATCHED_PUTAWAY UIควรตัดสิน actionจาก predicates ไม่ copy string comparisonsหลายหน้า</p></section>
 <section><h2>8. Model tests</h2><div class="success">ทดสอบ event alias→task type/status/mode, RELOCATEไป DESTเทียบ rack, barcode fallback, queue/conveyor predicatesทุก prefix, missing task/product fieldsและ duplicate conveyor numbers เพิ่ม unknown status policyเพื่อไม่ให้ action destructiveเปิดโดยบังเอิญ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Putaway/return/complete move</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-08 · Real Codebase</span><h1>Putaway/return/complete move</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>_putawayAtScan</code>, <code>_returnAtScan</code> และ <code>_completeTask</code> — taskที่หน้าตาคล้ายกันใช้ completion authorityคนละแบบ</div>
 <section><h2>1. Received putaway</h2><p>เมื่อสแกน locationขั้นสุดท้าย storeเรียก <code>mobile_putaway(pallet, location)</code> Backendยืนยัน container/locationแล้วจึงอัปเดต task, refresh historyและไป done หาก failยังค้างที่ scanlocเพื่อแก้และ retry</p></section>
 <section><h2>2. Returning relocate</h2><p>returningเป็น RELOCATEที่กลับ rack จึงใช้ <code>mobile_complete_move(taskId, robot, destination)</code> ไม่ใช่ mobile_putaway แม้ labelหน้า UIเรียก Putaway หลังสำเร็จนำ locationออกจาก free listเพื่อไม่ให้เลือกซ้ำใน session</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Free-location race</h2><p>locationที่ freeตอนโหลดอาจถูกอุปกรณ์อื่นจับจองก่อน scan Backendต้องเป็นผู้ตัดสินและคืน conflict หากชนกัน Clientควร reload free locationsและรักษาค่าที่สแกนไว้ให้ผู้ใช้เข้าใจว่าเหตุใดถูกปฏิเสธ</p></section>
 <section><h2>7. Idempotent completion</h2><p>timeoutหลัง backend commitทำให้ retryได้ Endpointควรตอบผลเดิมเมื่อ taskเดียวกันเสร็จที่ destinationเดียวกัน และ rejectอย่างชัดเจนเมื่อ destinationขัดกัน การพึ่งปุ่ม disabledอย่างเดียวไม่พอสำหรับ distributed system</p></section>
 <section><h2>8. Completion test matrix</h2><div class="success">ครอบคลุม success, validation conflict, timeout-after-commit, retry, duplicate tap, taskถูกปิดจากเครื่องอื่น, history refresh failure และ retrieve unawaited rollback โดย assertทั้ง server call, status, stepและสิ่งที่ผู้ใช้ทำต่อได้</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

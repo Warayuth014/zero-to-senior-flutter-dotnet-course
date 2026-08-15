@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dispatch manual vs AGV</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-05 · Real Codebase</span><h1>Dispatch manual vs AGV</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>WarehouseStore.dispatchTask</code> และ <code>DispatchView</code> — AGVกับ Forklift share pending task แต่ completion authorityต่างกัน</div>
 <section><h2>1. Dispatch queue</h2><p>DispatchViewแบ่ง <code>pendingDispatch</code> เป็นงานรอมอบหมายและ dispatched/inProgress/executingเป็นงานกำลังทำ Cardแสดง task type, pallet/product/route และสอง actions Automatic AGV/Forklift ส่วน statusจริงหลังมอบหมายมาจาก server polling</p></section>
 <section><h2>2. Guard identity ก่อน command</h2><p>storeปฏิเสธ taskที่ไม่มี server IDเพราะ event display IDไม่ใช่ keyสำหรับ mutation สำหรับ AGV putawayยังต้องมี scanned palletและ source pointก่อนส่ง ส่วน retrieve/return dispatch AGVได้โดยใช้ routeที่ taskมีอยู่</p></section>
@@ -21,5 +15,3 @@
 <section><h2>6. Busy state coupling</h2><p>dispatchใช้ <code>recvSubmitting</code> ซึ่งชื่อมาจาก Receivingและถูกใช้ใน pick confirmationด้วย ทำให้ actionคนละ feature blockกันแบบซ่อน coupling ควรแยก operation stateต่อ command/task ID ไม่ใช้ global booleanก้อนเดียวใน God Store</p></section>
 <section><h2>7. Retry/idempotency</h2><p>double tapถูกกันใน process แต่ timeoutหลัง backend persist HANDLE/AGVอาจทำให้ client rollbackแล้วส่งซ้ำ Endpointต้องตรวจ task current statusและ idempotentlyคืน assignmentเดิมหรือ conflictที่ใช้ reload reconcileได้</p></section>
 <section><h2>8. Dispatch tests</h2><div class="success">ทดสอบ missing ID, manual success/fail/timeout, AGVทุก task type, required scans, duplicate tap, optimistic fields/rollbackและ external ESS status change ระหว่าง request ยืนยันว่า server snapshotล่าสุดชนะและไม่มี taskถูก assignสอง carrier</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

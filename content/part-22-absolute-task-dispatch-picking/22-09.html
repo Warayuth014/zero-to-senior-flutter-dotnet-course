@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Withdraw queue</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">22-09 · Real Codebase</span><h1>Withdraw queue</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>WithdrawView</code>, <code>WarehouseStore.confirmWithdraw</code> และ <code>mobile_withdraw</code> — เปลี่ยน stockที่เก็บอยู่ให้เป็น relocation queue</div>
 <section><h2>1. Withdraw ไม่ได้ย้ายของทันที</h2><p>ผู้ใช้เลือก pallet, จำนวนและ destination แล้ว backendสร้างงาน RELOCATE/PENDING ผลลัพธ์คือ queue countใหม่ ส่วน physical stockยังอยู่ที่เดิมจน taskถูก dispatchและ complete</p></section>
 <section><h2>2. Candidate filter</h2><p>pickerแสดงเฉพาะ palletสถานะ STOREDและ quantityมากกว่า 0 เพื่อไม่เสนอ receiving/staged stock การสแกน exact codeใช้ผลเดียวได้ทันที ส่วนหลายผลยังให้ผู้ใช้เลือกเพื่อเลี่ยง ambiguity</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Global busy coupling</h2><p>withdrawแชร์ booleanกับ picking/store-in actions ทำให้ operationคนละชนิด blockกันโดยไม่บอก task ID โครงสร้างที่โตควรใช้ command stateแยก เช่น <code>AsyncAction&lt;WithdrawKey&gt;</code> เพื่อแสดง loading/errorเฉพาะ card</p></section>
 <section><h2>7. Timeout และ duplicate request</h2><p>หาก responseหายหลังสร้าง relocation clientอาจส่งซ้ำและได้สองงาน APIควรรับ idempotency keyหรือ enforceหนึ่ง open relocationต่อ pallet+destination+quantity พร้อมให้ client reload queueก่อน retry</p></section>
 <section><h2>8. Layout และ behavior tests</h2><div class="success">withdraw layout testยืนยัน scannerคงที่ขณะที่ list scrollและ selected flowพอดีจอ ควรเพิ่ม stale stock, invalid quantity, no destination, timeout/duplicate, queue refresh failureและ navigationหลัง success</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
