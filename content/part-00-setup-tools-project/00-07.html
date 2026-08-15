@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>โครง lib, test, assets และ platform folders</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">00-07 · Foundation</span><h1>โครง lib, test, assets และ platform folders</h1><p>Part 0: Setup, Tools &amp; Project Anatomy</p></header>
 <div class="note">อ่าน Flutter repo ให้เริ่มจาก source of truth ไม่หลง generated artifacts: <code>lib/</code>, <code>test/</code>, <code>pubspec.yaml</code>, assets และ platform config ที่ตั้งใจแก้ ส่วน <code>.dart_tool/</code>/<code>build/</code> เป็นผลลัพธ์</div>
 <section><h2>1. แผนที่ root</h2><table><thead><tr><th>Path</th><th>หน้าที่</th><th>ปกติ commit?</th></tr></thead><tbody><tr><td><code>lib/</code></td><td>Dart source ของ app</td><td>ใช่</td></tr><tr><td><code>test/</code></td><td>unit/widget tests + fixtures</td><td>ใช่</td></tr><tr><td><code>assets/</code></td><td>รูป/font/static files</td><td>ใช่</td></tr><tr><td><code>android/ios/web/windows</code></td><td>runner/build/permission/platform code</td><td>ใช่เมื่อ target นั้นรองรับ</td></tr><tr><td><code>.dart_tool/</code>, <code>build/</code></td><td>generated/cache/output</td><td>ไม่</td></tr></tbody></table></section>
 <section><h2>2. เริ่มอ่านจาก main ไม่ใช่เรียงชื่อไฟล์</h2><ol><li>เปิด <code>lib/main.dart</code></li><li>ดู async bootstrap ก่อน runApp</li><li>เปิด root widget/MaterialApp</li><li>ตาม initial screen/application shell</li><li>จาก user action ตาม state owner → repository/client → model</li></ol><p>วิธีนี้ให้ dependency graph และ runtime order แทนการอ่านทุกไฟล์โดยไม่รู้คำถาม</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Test กับ source ต้องเดินคู่กัน</h2><p>เมื่อพบ repository/store ให้ค้นชื่อ class/method ใน <code>test/</code> ทันที Tests บอก expected behavior และ edge cases เร็วกว่าคอมเมนต์ ส่วน test screen ที่อยู่ใน <code>lib/screens/test</code> ของ wmsapp เป็น runtime diagnostic UI ไม่ใช่ automated test ต้องแยกให้ออก</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>ใช้ <code>rg --files lib test</code> และวาด startup map ของสองแอปถึงหน้าแรก พร้อมระบุ dependency ที่สร้างก่อน runApp</p><details><summary>แนวตรวจคำตอบ</summary><p>wmsapp binding → WmsApp → theme listener → MaterialApp → HomeScreen; absolute binding → load language → load connection → system UI → AuthRepository(ApiClient) → WmsApp → LoginScreen ต้องบอกด้วยว่า absolute ห้ามยิง request ก่อน connection load ตาม comment/invariant</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">อย่า review ไฟล์ใน <code>build/</code> หรือ <code>.dart_tool/</code> เพื่อเข้าใจ business logic และอย่าแก้ generated file โดยไม่มี source/generator เพราะ regeneration จะลบงาน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
