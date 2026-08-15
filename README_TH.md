@@ -36,7 +36,8 @@
 - Part 9: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท ครอบคลุม layers, data source/repository/store, DI, SSOT, error translation และ incremental refactoring
 - Part 10: เขียนเนื้อหาเฉพาะบทครบ 13/13 บท ครอบคลุม typed settings, environment/profile, URL normalization, health probe และ safe server switching
 - Part 11: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม themes, design tokens, Thai font/localization, assets/icons และ platform-safe PDA shell
-- Part 12–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 12: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท ครอบคลุม SignalR, typed events/listeners, reconnect/reconciliation และ lifecycle-safe fallback polling
+- Part 13–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

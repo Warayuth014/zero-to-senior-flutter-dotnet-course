@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SignalR Hub ฝั่ง .NET แบบย่อ</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">12-02 · Realtime</span><h1>SignalR Hub ฝั่ง .NET แบบย่อ</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
 <div class="note"><strong>.NET Hub เป็น realtime transport boundary:</strong> endpointทำ business transactionก่อน แล้ว broadcast typed eventหลัง commitให้ group/userที่เกี่ยวข้อง ไม่ให้ clientเรียก hubแทน authorization/domain serviceโดยตรง</div>
 <section><h2>1. Hub skeleton</h2><pre class="code-vs"><code>builder.Services.AddSignalR();
 app.MapHub&lt;TaskHub&gt;("/hubs/tasks");
@@ -25,5 +19,3 @@ await hub.Clients.Group($"wh:{warehouseId}")
 <section><h2>6. Scale-out</h2><p>หลาย .NET instancesต้องมี backplane/serviceเพื่อส่ง eventข้าม instanceและ sticky/transport configตาม hosting architecture ส่วนรายละเอียด backendอ่านต่อในคอร์ส .NET</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>client Aเปลี่ยน taskแล้วควร broadcastจาก controllerหรือหลัง service save?</p><details><summary>เฉลย</summary><p>หลัง transaction commitใน application/integration boundary; ใช้ outboxถ้าต้องรับประกันไม่สูญ eventระหว่าง DB commitกับ publish</p></details></section>
 <section><h2>8. Contract rules</h2><div class="success">event name stable, payload versioned/typed, eventId/entity version/occurredAt, authorization/groupชัด และไม่มี secret/full entityเกินจำเป็น</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
