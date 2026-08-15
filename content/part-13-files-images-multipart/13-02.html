@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>dart:io File กับ kIsWeb</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">13-02 · Files &amp; Platform</span><h1>dart:io File กับ kIsWeb</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
 <div class="note"><strong>กฎสำคัญ:</strong> <code>dart:io File</code> ใช้ได้กับ mobile/desktop แต่ import นี้ทำให้ Flutter Web compile ไม่ผ่านได้ แม้ branch ที่เรียกจะถูกครอบด้วย <code>kIsWeb</code> ก็ตาม</div>
 <section><h2>1. XFile เป็น boundary ที่ดีกว่า</h2><p><code>image_picker</code> คืน <code>XFile</code> ซึ่งอ่านชื่อ, path, length และ bytes ได้ข้าม platform ให้ UI และ repository รับ <code>XFile</code> หรือ type ของเราเอง แล้วค่อยแปลงเป็น multipart ใน data source</p></section>
 <section><h2>2. ปัญหาในโค้ดจริง</h2><pre class="code-vs"><code>// wmsapp ปัจจุบัน
@@ -32,5 +26,3 @@ return Image.file(File(picked.path));</code></pre><p>ตัวอย่างน
   if (dart.library.html) 'preview_web.dart';</code></pre><p>ให้แต่ละ implementation รู้เรื่อง platform ของตน ส่วน screen เรียก interface เดียว ทำให้ test ด้วย fake ได้และไม่กระจาย <code>kIsWeb</code> ทั่ว codebase</p></section>
 <section><h2>7. อย่าเก็บ path เป็นข้อมูลถาวร</h2><p>path จาก picker อาจเป็น temporary file และหายหลังระบบล้าง cache หากต้อง retry ภายหลังให้ copy เข้า app documents/cache ที่มี lifecycle ชัดเจน หรือเก็บ bytes ที่เข้ารหัส พร้อม metadata และ cleanup policy</p></section>
 <section><h2>8. แบบฝึกหัด</h2><p>เปลี่ยน signature ของ <code>uploadPartImage</code> จาก <code>File</code> เป็น <code>XFile</code> หรือ <code>UploadAsset</code> แล้วอธิบายว่าจะใช้ <code>fromPath</code>, <code>fromBytes</code> หรือ stream ในแต่ละ platform</p><details><summary>แนวคำตอบ</summary><p>mobile ใช้ fromPath เพื่อ stream จาก disk, web ใช้ bytes/stream จาก picker และทั้งคู่ต้องตรวจ length ก่อนสร้าง request</p></details></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

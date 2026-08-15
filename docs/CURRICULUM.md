@@ -66,6 +66,7 @@
 | 10 Settings, Environments & Connectivity | Authored + verified | 13/13 |
 | 11 Theme, Localization, Assets & Platform UI | Authored + verified | 14/14 |
 | 12 SignalR, Polling & Realtime | Authored + verified | 12/12 |
-| 13–25 | Scaffold/roadmap | 0/188 |
+| 13 Files, Images & Multipart Upload | Authored + verified | 10/10 |
+| 14–25 | Scaffold/roadmap | 0/178 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา

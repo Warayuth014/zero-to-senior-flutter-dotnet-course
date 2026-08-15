@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Upload timeout/progress/error</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">13-08 · Files &amp; Platform</span><h1>Upload timeout/progress/error</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
 <div class="note"><strong>Timeout ไม่ได้พิสูจน์ว่า upload ล้ม:</strong> server อาจบันทึกสำเร็จแล้วแต่ response กลับไม่ถึง client จึงต้องออกแบบ retry/idempotency และ reconcile ผลจาก server</div>
 <section><h2>1. State ของ upload</h2><pre class="code-vs"><code>sealed class UploadState {}
 class UploadIdle extends UploadState {}
@@ -26,5 +20,3 @@ class UploadFailed extends UploadState { final UploadFailure failure; }</code></
 <section><h2>6. Retry policy</h2><p>retry อัตโนมัติเฉพาะ error ชั่วคราวและเมื่อมี upload ID ที่ server dedupe ได้; 400/401/403/413/415 ไม่ retry แบบเดิม ส่วน timeout หลังส่งครบให้ query สถานะด้วย upload ID ก่อนส่งไฟล์ใหม่</p></section>
 <section><h2>7. UX บน network แย่</h2><p>แสดงชื่อ part, thumbnail, bytes/เปอร์เซ็นต์, ปุ่ม cancel/retry และเก็บหน้าจอใช้งานส่วนอื่นได้ตาม business rule หากออกจากหน้า ให้ store/repository เป็น owner งาน ไม่ให้ widget dispose แล้วงานกลายเป็น zombie</p></section>
 <section><h2>8. Tests</h2><div class="success">จำลอง progress chunks, timeout ก่อนส่ง/หลังส่งครบ, cancel กลางทาง, offline, 413, token หมดอายุ, response เสียรูป, retry key ซ้ำ และ widget ถูก dispose โดยต้องไม่มี setState-after-dispose หรือ success หลอก</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

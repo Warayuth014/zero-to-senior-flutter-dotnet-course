@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MultipartRequest</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">13-03 · Files &amp; Platform</span><h1>MultipartRequest</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
 <div class="note"><strong>Multipart ไม่ใช่ JSON:</strong> request มี boundary แบ่งแต่ละ part ซึ่ง client library ต้องเป็นผู้สร้าง ห้ามกำหนด <code>Content-Type: multipart/form-data</code> เองโดยไม่มี boundary</div>
 <section><h2>1. โครงสร้าง request</h2><p><code>multipart/form-data</code> รวม text fields และ binary file ใน HTTP request เดียว แต่ละ part มีชื่อ เช่น <code>partId</code> และ <code>file</code> ชื่อเหล่านี้คือ API contract และต้องตรงกับ parameter ฝั่ง .NET</p></section>
 <section><h2>2. MultipartRequest ใน wmsapp</h2><pre class="code-vs"><code>final request = http.MultipartRequest('POST', uri);
@@ -29,5 +23,3 @@ if (response.statusCode &lt; 200 || response.statusCode &gt;= 300) {
 <section><h2>6. Retry อย่างระวัง</h2><p>upload POST อาจสำเร็จที่ server แต่ response ขาดระหว่างทาง การ retry แบบทันทีจึงสร้างไฟล์ซ้ำได้ ส่ง <code>Idempotency-Key</code>/<code>uploadId</code> และให้ server คืนผลเดิมเมื่อ key ซ้ำ หรือทำ endpoint แบบ replace ต่อ part ที่ชัดเจน</p></section>
 <section><h2>7. Client lifetime</h2><p>inject <code>http.Client</code> เพื่อ reuse connection และทดสอบได้ อย่าสร้าง client ใหม่ทุก upload โดยไม่ close ใน production ส่วนการยกเลิกต้องปิด request/subscription เฉพาะงาน ไม่ควรปิด shared client แล้วทำให้ request อื่นล้ม</p></section>
 <section><h2>8. Contract test</h2><div class="success">ยืนยัน method/path, header auth, field name, file part name, filename, content type, status 2xx, ProblemDetails และ duplicate upload ID โดยไม่ assert boundary string ที่ library สุ่มขึ้นมา</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
