@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>API extension เทียบกับ repository</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-04 · Architecture</span><h1>API extension เทียบกับ repository</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>เปรียบเทียบ:</strong> wmsappแบ่ง endpointด้วย <code>part</code> extensionsบน singleton <code>ApiService</code>; absoluteประกาศ <code>*Repository</code> interfacesและให้ <code>*Api</code> implement</div>
 <section><h2>1. API extension จุดแข็ง</h2><p>ReceivingApi/PackingApi extensionsจัดไฟล์ endpointตาม domainโดย reuse transport private methodsและ typed models Call siteสั้น, boilerplateน้อยและเหมาะกับ clientตรงไปตรงมาที่ behaviorไม่มีหลาย implementation</p></section>
 <section><h2>2. ข้อจำกัด extension</h2><p>extensionไม่มี instance identityหรือ dependencyของตัวเอง ทุก screenยังผูก ApiService singletonและการ fakeต้องแตะ global/network ทำให้ widget testsยาก แม้ไฟล์ดู modularแต่ runtime couplingยังรวมศูนย์</p></section>
@@ -16,5 +10,3 @@
 <section><h2>6. Interface placement</h2><p>contractควรอยู่ใกล้ consumer/domain ไม่ผูก package http/json เพื่อให้ fakeไม่ต้องเลียน HTTP ส่วน implementationอยู่ infrastructure/APIและมี contract testsเทียบ endpointจริง</p></section>
 <section><h2>7. เลือกตาม volatility</h2><p>simple read-only featureอาจใช้ typed API clientตรงๆ แต่ workflowที่หลาย call, testสำคัญ, offline/cacheหรือ backendเปลี่ยนบ่อยคุ้มกับ repository Absoluteได้ประโยชน์ใน warehouse flowsแต่ AuthRepositoryยังผูก ApiClientได้เพราะ scopeเล็ก</p></section>
 <section><h2>8. Exercise</h2><div class="success">ครอบ PackingApiหนึ่ง featureด้วย PackingRepositoryโดยไม่แก้ endpointเดิม เขียน fake success/failureและ contract test mapping หาก interfaceเพียง copy methodเดิมทุกตัว ให้ทบทวนว่ามี abstraction valueจริงหรือไม่</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

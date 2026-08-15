@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Migration ทีละ seam</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-12 · Architecture</span><h1>Migration ทีละ seam</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>เป้าหมาย:</strong> ย้าย architectureทีละ seamโดยระบบ deployได้ทุกขั้น ไม่สร้าง branchใหญ่ที่เปลี่ยน UI, state, HTTPและmodelsพร้อมกัน</div>
 <section><h2>1. หา seamจาก call boundary</h2><p>จุดที่ดีคือ API call, constructor, pure widget, mapperหรือ command method เพราะสร้าง adapter/fakeได้โดยไม่แตะ backend seamที่ไม่มี testsหรือมี globalอ่านเขียนหลายจุดต้องสร้าง façadeก่อน</p></section>
 <section><h2>2. Strangler pattern</h2><p>ให้ codeใหม่ครอบ codeเดิม เช่น PackingRepositoryเรียก ApiService extensionเดิม Screenเรียก controllerใหม่ทีละ command เมื่อ consumersย้ายครบค่อยลบ direct calls จึงไม่มี rewrite day</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. Feature flagsเมื่อ riskสูง</h2><p>ใช้ flagเลือก old/new implementationที่ repository/controller seam พร้อม metricsเทียบ success/error/latency แต่หลีกเลี่ยงสอง mutation pathsพร้อมกันถ้า backend idempotencyยังไม่พร้อม</p></section>
 <section><h2>7. Migration scoreboard</h2><p>ติดตาม call sitesที่ยัง new singleton, screensที่ยังมี domain transition, raw mapsและ testsต่อ feature ไม่วัดแค่จำนวนไฟล์ migrated และห้ามประกาศเสร็จขณะ façadeเก่ายังเป็น default</p></section>
 <section><h2>8. Rollback plan</h2><div class="success">ทุก seamต้องตอบว่า rollback code/config/dataอย่างไร ไม่มี schema irreversible, command duplicateหรือ cached state incompatible Refactorที่ revertไม่ได้คือ production migration ไม่ใช่ cleanupธรรมดา</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ApiResult เทียบกับ exception</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-03 · Architecture</span><h1>ApiResult เทียบกับ exception</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>โค้ดจริง:</strong> <code>wmsapp.ApiService</code>คืน <code>ApiResult&lt;T&gt;</code>; <code>absolute.ApiClient</code>โยน <code>ApiException</code>แล้ว repository/storeกำหนดว่าจะ catchตรงไหน</div>
 <section><h2>1. ApiResult model</h2><p>ผู้เรียกเห็น success/data/error/statusCodeใน typeและถูกบังคับเชิง conventionให้ branch เหมาะกับ expected failuresและทำให้ UIแสดงข้อความโดยไม่ใช้ try/catch แต่ nullable data+errorยังสร้าง invalid combinationsได้หาก classไม่ sealed</p></section>
 <section><h2>2. Exception model</h2><p>happy pathคืน valueตรงๆและ failureข้าม stackถึง boundaryที่เลือกได้ Absoluteแปล network/statusเป็น ApiException แต่ unexpected parse/type errorsบางชนิดยังหลุดเป็น exceptionอื่น จึงต้องกำหนด catch policyไม่กลืน programmer bug</p></section>
@@ -17,5 +11,3 @@ AppFailure(code, message, status, retryable, cause)</code></pre><p>pattern match
 <section><h2>6. Command uncertainty</h2><p>timeoutของ GET retryได้ง่าย แต่ timeoutหลัง POSTอาจ commitแล้ว ทั้ง ResultและExceptionไม่ได้แก้ปัญหานี้ ต้องมี failure kind “outcome unknown”, idempotency keyและ reconciliation query</p></section>
 <section><h2>7. Migration โดยไม่ big bang</h2><p>สร้าง adapterจาก ApiResultเดิมเป็น Resultใหม่ที่ repository seam แล้ว migrateทีละ feature ไม่เปลี่ยนทุก extensionพร้อมกัน Testsต้องล็อก status/message/retryabilityและ unexpected JSON behavior</p></section>
 <section><h2>8. Decision</h2><div class="success">เลือก styleเดียวภายใน layer, ใช้ typed failuresข้าม domain boundary, exceptionสำหรับ truly unexpected/infrastructureแล้ว catchที่ explicit boundary และไม่ให้ widgetตัดสิน business flowจากข้อความ string</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

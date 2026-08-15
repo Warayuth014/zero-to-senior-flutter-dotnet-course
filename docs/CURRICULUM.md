@@ -76,6 +76,7 @@
 | 20 wms_absolute_mobile: Core, Auth & Shell | Authored + verified | 15/15 |
 | 21 wms_absolute_mobile: Receiving, Inventory & Cycle Count | Authored + verified | 15/15 |
 | 22 wms_absolute_mobile: Task, Dispatch, AGV & Picking | Authored + verified | 17/17 |
-| 23–25 | Scaffold/roadmap | 0/45 |
+| 23 Compare, Refactor & Senior Decisions | Authored + verified | 14/14 |
+| 24–25 | Scaffold/roadmap | 0/31 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Singleton เทียบกับ constructor injection</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-05 · Architecture</span><h1>Singleton เทียบกับ constructor injection</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>โค้ดจริง:</strong> wmsappใช้ singleton <code>ApiService</code>/<code>SignalRService</code>; absoluteใช้ singletonเฉพาะ app-wide language/connection แต่สร้าง ApiClient/Auth/Storeและ repositoriesผ่าน composition</div>
 <section><h2>1. Singletonเหมาะเมื่อใด</h2><p>process-wide policyที่มีหนึ่ง identityจริง เช่น active languageหรือ connection profileอาจใช้ singletonง่ายและทุก listenerเห็นค่าเดียว แต่ยังต้องมี reset/test hooksและชัดว่า lifetimeเท่ากับ app</p></section>
 <section><h2>2. Hidden dependency</h2><p><code>final _api = ApiService()</code>ใน screenดูสะดวกแต่ constructorไม่บอกว่า screenต้องใช้ network Testsแทน implementationไม่ได้และ global cached base/headerอาจรั่วข้าม testหรือ session</p></section>
@@ -14,5 +8,3 @@ client → auth → repositories → feature stores → widgets</code></pre><p>�
 <section><h2>6. SignalR lifecycle</h2><p>หนึ่ง connectionร่วมอาจคุ้ม แต่ subscribersต้อง unsubscribeและ resetเมื่อ session/serverเปลี่ยน Singletonที่ถือ callbacksเก่าทำให้ duplicate eventหรือ user dataรั่ว จึงต้องมี explicit connect/disconnect ownership</p></section>
 <section><h2>7. Migration seam</h2><p>เพิ่ม optional constructor parameterที่ defaultเป็น ApiServiceเดิมก่อน แล้ว composition rootส่ง adapterใน productionและ fakeใน tests จากนั้นค่อยถอด default/globalหลัง call sitesย้ายครบ</p></section>
 <section><h2>8. Decision checklist</h2><div class="success">ระบุ identity, owner, creation, disposal, session reset, test isolationและ concurrency ถ้าตอบไม่ได้อย่าใช้ global singleton; ถ้าข้อมูล app-wideจริงก็ไม่ต้องสร้าง providerซับซ้อนเพียงเพื่อหลีกคำว่า singleton</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

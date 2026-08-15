@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>God Store และ feature store</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-08 · Architecture</span><h1>God Store และ feature store</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>กรณีศึกษา:</strong> <code>WarehouseStore</code>รวม receiving, inventory, cycle count, task, dispatch, picking, navigation, pollingและ feedback callbacks จึงเป็น source of truthที่มีประโยชน์แต่เริ่มข้าม bounded contexts</div>
 <section><h2>1. สัญญาณ God Store</h2><p>ไฟล์ใหญ่ไม่ใช่หลักฐานเดียว ให้ดูหลายเหตุผลในการเปลี่ยน, dependenciesสี่ repositories, busy flagsคนละ feature, navigation strings, timer matrixและ testsที่ต้องสร้าง stateมหาศาลเพื่อแตะ commandเดียว</p></section>
 <section><h2>2. สิ่งที่ต้องรักษา</h2><p>single snapshotของ shared tasks/pallets, runtime step preservation, polling reconciliationและ shell-wide feedbackเป็น behaviorสำคัญ การแยก classแล้ว duplicate listsตาม storeจะสร้าง multiple sources of truthที่แย่กว่า</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Operation state</h2><p>แทน global <code>recvSubmitting</code>/<code>pickingSubmitting</code> ใช้ stateต่อ command/key เช่น dispatch task A, confirm pick B ทำให้ UI disableเฉพาะ action, errorผูก cardและทดสอบ concurrencyได้</p></section>
 <section><h2>7. Extraction order</h2><p>เริ่ม CycleCountเพราะ state/repository/refreshค่อนข้างแยก ตามด้วย Picking แล้ว Task/Receivingที่แชร์มากกว่า ทุกขั้นมี façade methodsเดิมให้ viewsยัง compile จากนั้นย้าย consumersทีละหน้า</p></section>
 <section><h2>8. Success criteria</h2><div class="success">แต่ละ storeมีหนึ่งเหตุผลหลักในการเปลี่ยน, dependencyแคบ, timer/dispose ownerชัด, ไม่มี duplicated mutable truth และ flow testsเดิมผ่าน Refactorที่เพียงย้าย 1,600บรรทัดเป็นสี่ partial filesยังไม่แก้ architecture</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dynamic JSON เทียบกับ typed model</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-06 · Architecture</span><h1>Dynamic JSON เทียบกับ typed model</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>ข้อเท็จจริง:</strong> ทั้งสองแอปมี typed modelsจำนวนมาก แต่ transport/adaptersยังเริ่มจาก <code>Map&lt;String,dynamic&gt;</code>; ประเด็นคือหยุด dynamicที่ boundary ไม่ใช่ห้าม JSON dynamicทั้งหมด</div>
 <section><h2>1. Dynamicจำเป็นตรง wire</h2><p><code>jsonDecode</code>ให้ dynamicและ backendบาง endpoint casing/shapeไม่สม่ำเสมอ Adapterต้องตรวจ runtimeก่อนแปลง แต่ Mapไม่ควรไหลถึง widgetหรือ storeเพราะ typo/castจะพังช้าใน production</p></section>
 <section><h2>2. Typed model value</h2><p>wmsapp receiving/picking/packing modelsและ absolute inbound/task/inventory modelsให้ compilerช่วยเรื่อง field/nullabilityและรวม fromJson logic สิ่งนี้ลด knowledgeของ JSON keysที่กระจายตาม screens</p></section>
@@ -17,5 +11,3 @@ unknown enum → Unknown(raw)
 serialize command → exact .NET property names</code></pre></section>
 <section><h2>7. Code generation trade-off</h2><p>freezed/json_serializableลด boilerplateและเพิ่ม equality/copyWith แต่มี generated files/build_runner cost Manual parserเหมาะ modelน้อยหรือ contractแปลก ไม่ควร migrateทั้ง repoเพียงเพื่อ style consistencyโดยไม่มี test benefit</p></section>
 <section><h2>8. Boundary rule</h2><div class="success">อนุญาต dynamicภายใน decode adapterช่วงสั้นๆ แล้วคืน typed success/failureออกมา Searchหา <code>Map&lt;String,dynamic&gt;</code>ใน widgets/storesเพื่อจัดลำดับ refactorจาก mutation-critical flowsก่อน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session/security review</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-10 · Architecture</span><h1>Session/security review</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>Security reviewจริง:</strong> wmsapp loginเป็น mock user/passwordและเก็บ identityใน SharedPreferences; absoluteเรียก .NET Authenticate, ถือ JWTใน memoryและแนบ Bearer แต่ยังไม่มี secure persistence/roles enforcement/central 401 flow</div>
 <section><h2>1. Authentication vs UI gate</h2><p>wmsappตรวจ password 1234ใน clientและเลือก seeded userจึงเป็น demo gate ไม่ใช่ authentication Backend APIsไม่ควรเชื่อ userId/roleจาก SharedPreferencesหรือปุ่มที่ซ่อน ต้อง authorizeทุก mutationฝั่ง .NET</p></section>
 <section><h2>2. Absolute baseline</h2><p>AuthRepositoryรับ token/expirationจาก <code>/api/Authenticate/login</code>, ตั้ง ApiClient.authTokenและ clearเมื่อ logout ดีกว่าสำหรับ authenticated requests แต่ rolesถูกตั้งว่างและ expirationยังใช้แสดงมากกว่าบังคับ session lifecycle</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Local data hygiene</h2><p>logoutต้อง clear domain stores, scans, cached operator identity, SignalR subscriptionsและpending async generations ไม่ใช่ลบ tokenอย่างเดียว wmsapp <code>prefs.clear()</code>กว้างเกินไปเพราะอาจลบ settingsที่ไม่ใช่ session</p></section>
 <section><h2>7. Logging และ transport</h2><p>ห้าม log JWT/password/full sensitive payload ใช้ HTTPSและ certificate trustที่เหมาะกับ private network ข้อความ errorไม่ควรเผย stack/SQL Backend auditต้องบันทึก authenticated user ไม่เชื่อ usernameที่ clientส่งใน body</p></section>
 <section><h2>8. Security test matrix</h2><div class="success">ทดสอบ bad credentials, expired/revoked token, concurrent 401, logoutระหว่าง request, server switch, role denied, app restartและ log redaction พร้อม .NET authorization integration tests เพราะ widgetซ่อนปุ่มไม่ใช่ security control</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

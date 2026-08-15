@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Race condition/cancellation strategy</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">23-09 · Architecture</span><h1>Race condition/cancellation strategy</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
 <div class="note"><strong>ปัญหาจริง:</strong> mounted guardป้องกัน setStateหลัง dispose แต่ไม่ป้องกัน responseเก่าทับ stateใหม่; absoluteมี receive-session generationบาง flowแต่ pollingบางเส้นยัง overlapได้</div>
 <section><h2>1. Race taxonomy</h2><ul><li>lifecycle: widget/storeถูก dispose</li><li>identity: ผู้ใช้สแกน palletใหม่ก่อนผลเก่ากลับ</li><li>ordering: requestเก่าจบหลัง requestใหม่</li><li>duplication: tap/scanส่ง commandซ้ำ</li><li>uncertainty: timeoutหลัง server commit</li></ul></section>
 <section><h2>2. mountedแก้เพียง lifecycle</h2><p>wmsappตรวจ mountedหลายจุดซึ่งจำเป็น แต่ถ้าหน้ายัง mountedและ inputเปลี่ยน ผล requestเก่ายัง commitได้ ต้อง snapshot identityหรือ generationก่อน awaitแล้วตรวจอีกครั้ง</p></section>
@@ -17,5 +11,3 @@ commit(result);</code></pre><p>เหมาะกับ latest-wins lookupแล
 <section><h2>6. Response version</h2><p>client generationกันลำดับภายใน process แต่หลาย operatorต้องใช้ server version/ETag/current status compare-and-set เช่น STAGED→DISPATCHED ผู้แพ้ reload current truth ไม่ retryโดยเดา</p></section>
 <section><h2>7. Test deterministic</h2><p>ใช้ controllable Completersให้ request Bจบก่อน A, fake clockขยับ timerและ simulate timeout-after-commit Assertว่า latest identityชนะ, duplicate commandหนึ่งครั้งและ disposeไม่ notify</p></section>
 <section><h2>8. Strategy matrix</h2><div class="success">เลือก semanticsต่อ operation: search=latest wins, submit=exhaust+idempotency, refresh=single-flight/coalesce, stream=subscription cancel+reconcile อย่าใช้ boolean loadingเดียวแก้ทุก race</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
