@@ -13,6 +13,15 @@ $authoredParts = if (Test-Path -LiteralPath $authoredPartsPath) {
 $duplicateIds = $ids | Group-Object | Where-Object Count -gt 1
 if ($duplicateIds) { throw "Duplicate lesson IDs: $($duplicateIds.Name -join ', ')" }
 
+$longLessonTitles = @($lessons | Where-Object { ([string]$_.title).Length -gt 32 })
+if ($longLessonTitles) {
+  throw "Lesson titles exceed 32 characters: $($longLessonTitles.id -join ', ')"
+}
+$longPartTitles = @($manifest.parts | Where-Object { ([string]$_.title).Length -gt 32 })
+if ($longPartTitles) {
+  throw "Part titles exceed 32 characters: $($longPartTitles.number -join ', ')"
+}
+
 $missingLessons = @($lessons | Where-Object { -not (Test-Path -LiteralPath (Join-Path $ProjectRoot ($_.path -replace '/', '\'))) })
 if ($missingLessons) { throw "Missing lesson files: $($missingLessons.id -join ', ')" }
 
