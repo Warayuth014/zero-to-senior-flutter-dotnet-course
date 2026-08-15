@@ -28,7 +28,8 @@
 - Part 1: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ตั้งแต่ widget mental model จนถึง lab วิเคราะห์ Dashboard จากโปรเจกต์จริง
 - Part 2: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ครอบคลุม constraints, responsive layout, scrolling, PDA ergonomics และ lab Warehouse Home
 - Part 3: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม form, focus, keyboard-wedge scanner, duplicate guard และ scan state machine
-- Part 4–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 4: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท ครอบคลุม state ownership, async race, polling, idempotency, FSM และ store testing
+- Part 5–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

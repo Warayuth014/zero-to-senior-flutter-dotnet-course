@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Async action และ try/finally</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">04-08 · State &amp; Lifecycle</span><h1>Async action และ try/finally</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
 <div class="note">Async actionที่แข็งแรงต้อง guard concurrent call, publish loading, map error, cleanupใน finally และรักษา state consistency ไม่ว่า success, exception, navigation หรือ disposeจะเกิด</div>
 <section><h2>1. try/finally pattern</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
   if (_submitting) return;
@@ -25,5 +19,3 @@
 <section><h2>6. Cleanup location</h2><p>Busyใน storeปลดใน finallyและ notify ส่วน UI setStateต้องตรวจ mounted แยก Resource cleanupไม่ควรถูกข้ามเพราะ UIหาย หาก commandถูกยกเลิกใช้ cancellation resultเฉพาะไม่เหมารวม error</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>โหลด tasksและsummaryพร้อมกัน Summary failแต่ tasksต้องแสดง จะใช้ Future.waitตรงไหน?</p><details><summary>เฉลย</summary><p>ให้ loadTasks/loadSummaryจับและ publish stateตนเอง แล้ว Future.waitเพื่อรอ completionทั้งหมด หรือใช้ record Results aggregate ไม่ปล่อย summary exceptionทำ global load error หาก summaryเป็น optional ส่วน critical dependenciesค่อย failทั้งหน้า</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">ห้าม set loading=falseเฉพาะ success/catchหลายทางเพราะ return/exceptionใหม่ทำค้าง ใช้ finally และอย่า notify successก่อน serverตอบเพียงเพื่อให้ UIเร็ว หากต้อง optimisticให้มี rollbackชัด</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

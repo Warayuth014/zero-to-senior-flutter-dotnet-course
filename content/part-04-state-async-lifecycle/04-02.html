@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Derived state ไม่เก็บซ้ำ</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">04-02 · State &amp; Lifecycle</span><h1>Derived state ไม่เก็บซ้ำ</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
 <div class="note">Derived state คือค่าที่คำนวณได้จาก source of truth อื่น หากเก็บซ้ำจะต้อง syncหลายจุดและเกิด impossible state ให้เก็บข้อมูลขั้นต่ำแล้วคำนวณ getter/selector เว้นแต่มีเหตุผลด้าน snapshot/performanceที่พิสูจน์ได้</div>
 <section><h2>1. ตัวอย่างไม่เก็บซ้ำ</h2><pre class="code-vs"><code>final List&lt;Task&gt; tasks = [];
 
@@ -17,5 +11,3 @@ Task? taskById(String id) =&gt; tasks.where((t) =&gt; t.id == id).firstOrNull;</
 <section><h2>6. Invariants</h2><p>กำหนดว่า selectionต้อง nullหรือมีใน list หลัง refresh WarehouseStoreตรวจ selected IDแล้ว clearถ้าหาไม่พบ ทำ mutation batchก่อน notifyหนึ่งครั้ง ป้องกัน UIเห็นช่วง listใหม่แต่ selectedเก่า</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>มี <code>requiredQty</code>, set serials และ <code>scannedQty</code> ควรเก็บอะไร?</p><details><summary>เฉลย</summary><p>เก็บ requiredQtyและ Setของ accepted serial IDs; derive scannedQtyจาก set.length, remainingจาก clamp(required-scanned), completeจาก equality/range ไม่เก็บทั้งสามตัวเลขซ้ำ เว้น backendส่ง authoritative countsที่ไม่เท่ากับ local pending ต้องตั้งชื่อแยกชัด</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ getterที่ mutate, ยิง API หรือ notifyListeners Getterควรอ่าน snapshotอย่าง predictable มิฉะนั้น buildที่อ่านซ้ำทำ side effectและ debugยาก</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

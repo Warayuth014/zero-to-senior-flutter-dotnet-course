@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lab: Store ที่ทดสอบได้</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">04-16 · State &amp; Lifecycle</span><h1>Lab: Store ที่ทดสอบได้</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
 <div class="note"><strong>Lab:</strong> สร้าง WarehouseTaskStore ที่ testได้โดยแยก repository/clock/ID generator, ใช้ immutable load state, generation token, polling lifecycle และ idempotent confirm แล้วพิสูจน์ transitionsด้วย fake repository + Completer</div>
 <section><h2>1. Acceptance criteria</h2><ul><li>UIอ่าน immutable snapshotและเรียก commandsเท่านั้น</li><li>loadแยก initial/loading/data/error/refreshing</li><li>responseเก่าไม่ทับ queryใหม่</li><li>pollไม่ overlapและหยุดเมื่อ background/dispose</li><li>confirmซ้ำเรียก repositoryครั้งเดียว</li><li>timeout retryใช้ operation IDเดิมและ reconcileได้</li><li>ไม่มี BuildContextใน store</li></ul></section>
 <section><h2>2. Dependencies</h2><pre class="code-vs"><code>abstract interface class TaskRepository {
@@ -78,5 +72,3 @@ Future&lt;void&gt; load({bool refresh = false}) async {
   expect(store.snapshot.tasks, [taskB]);
 });</code></pre><p>เพิ่ม tests loading→data/empty/error, refreshเก็บ stale data, no overlap polling, pause/dispose, double confirmหนึ่ง call, timeout retry keyเดิมและ repository error cleanup</p></section>
 <section><h2>8. Part 4 Exit Test</h2><div class="success"><ul><li>เลือก setState/ValueNotifier/ChangeNotifierตาม ownershipได้</li><li>ไม่เก็บ derived stateซ้ำและรักษา invariantsได้</li><li>model loading/error/empty/successและ partial refreshได้</li><li>จัด async cleanup, mounted, stale responseและ pollingได้</li><li>ออกแบบ optimistic/idempotent/FSMตามความเสี่ยงได้</li><li>สร้าง storeที่ dependency-injectedและ test raceด้วย Completerได้</li></ul></div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Workflow เป็น finite state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">04-15 · State &amp; Lifecycle</span><h1>Workflow เป็น finite state machine</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
 <div class="note">Finite state machine (FSM) ระบุ finite states, events, guards และ transitions ทำให้ workflowหลายขั้นไม่มี boolean combinationsที่เป็นไปไม่ได้ และบังคับ async resultกลับเข้าทาง eventที่ตรวจ current state</div>
 <section><h2>1. Boolean explosion</h2><p><code>loading, hasPallet, confirmed, error, done</code> ห้าตัวมี 32 combinationsแต่ถูกจริงไม่กี่แบบ เช่น done+loading+errorพร้อมกันอาจไม่มีความหมาย FSMแทนด้วย stateเดียวที่ encodeข้อมูลจำเป็น</p></section>
 <section><h2>2. State types</h2><pre class="code-vs"><code>sealed class ReceiveState { const ReceiveState(); }
@@ -27,5 +21,3 @@ class Completed extends ReceiveState {
 <section><h2>6. Entry/exit effects</h2><p>Focus, polling, fetchและfeedbackเป็น effectsของ transition ไม่อยู่ build เช่นเข้า ScanPallet→focus pallet; เข้า Submitting→call repositoryครั้งเดียว; exit workflow→increment session/cancel request Testsแยก pure reducerจาก effect runnerได้</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Putaway failเพราะ locationเต็มควรไป stateใด?</p><details><summary>เฉลย</summary><p>กลับ/คง ScanLocationพร้อม error effectและ refresh free locations ไม่ไป Completedและไม่ reset taskทั้งหมด Absoluteทำเช่นนี้: catchแล้วปลด submitting, flash/errorและ stay scan stepให้ลอง locationอื่น</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">Enumอย่างเดียวไม่พอถ้า dataของแต่ละ stateยังเป็น nullable fieldsสิบตัว ใช้ sealed classes/recordsที่ stateถือ required dataของตน หรืออย่างน้อยรวม immutable snapshot+validated transitions</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

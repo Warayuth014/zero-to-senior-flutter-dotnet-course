@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ChangeNotifier และ notifyListeners</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">04-05 · State &amp; Lifecycle</span><h1>ChangeNotifier และ notifyListeners</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
 <div class="note"><code>ChangeNotifier</code> เป็น observable mutable owner: commandsรักษา invariantsแล้ว <code>notifyListeners()</code> เพื่อให้ consumersอ่าน snapshotใหม่ ความง่ายนี้แลกกับความรับผิดชอบเรื่อง encapsulation, notification granularity และ async race</div>
 <section><h2>1. Store ขั้นต่ำ</h2><pre class="code-vs"><code>class TaskStore extends ChangeNotifier {
   TaskStore(this.repository);
@@ -35,5 +29,3 @@
 <section><h2>6. Dispose</h2><p>ChangeNotifier disposeหยุดการใช้งานและ assertถ้า notifyภายหลัง Storeต้อง cancel timers/subscriptionsก่อน super.dispose Shellที่สร้าง WarehouseStoreเป็นคน dispose อย่า dispose singleton controllerจาก widgetชั่วคราว</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Commandเพิ่ม taskลง listแล้ว notify แต่ callerยังถือ listจาก getterและแก้ได้ จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>เก็บ list private คืน UnmodifiableListView/List.unmodifiableหรือ immutable snapshot; expose add/remove/update commandsที่ validateและ notify ทำ model immutableเพื่อไม่ให้ callerแก้ fieldภายในโดยไม่ผ่าน store</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">ChangeNotifierไม่ทำ thread safety, cancellation, equality หรือ error handlingให้อัตโนมัติ มันแค่ส่ง notification ต้องออกแบบ state/commands/raceเหมือนเดิม และ God Storeที่ notifyทุกเรื่องจะ scaleยาก</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
