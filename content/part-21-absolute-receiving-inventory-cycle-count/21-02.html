@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Repository interfaces และ fake implementations</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-02 · Real Codebase</span><h1>Repository interfaces และ fake implementations</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> interfaces ใน <code>lib/api/*_api.dart</code> และ <code>test/fakes/fake_repositories.dart</code> — interface เป็น port ของ use case ไม่ใช่สำเนารายละเอียด HTTP</div>
 <section><h2>1. Dependency inversion ที่ใช้งานจริง</h2><p><code>WarehouseStore</code> รับ <code>ReceivingRepository</code>, <code>InventoryRepository</code> และ <code>CycleCountRepository</code> ผ่าน constructor จึงเรียกความสามารถเชิง domain เช่น fetch/lookup/start/confirm โดยไม่รู้ route, JSON casing หรือ <code>ApiClient</code> ฝั่ง production ใช้ API adapters ส่วน tests ใช้ fakes</p></section>
 <section><h2>2. Interface เล็กตาม capability</h2><table><thead><tr><th>Port</th><th>Commands/queries</th></tr></thead><tbody><tr><td>Receiving</td><td><code>fetchOpen</code>, <code>fetchReceivedToday</code>, <code>validatePallet</code>, <code>receive</code></td></tr><tr><td>Inventory</td><td><code>fetch</code></td></tr><tr><td>Cycle Count</td><td><code>lookup</code>, <code>start</code>, <code>confirm</code></td></tr></tbody></table><p>storeไม่ต้องพึ่ง giant API service และ fakeของหนึ่ง featureไม่ต้องจำลองทุก endpointในระบบ</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Error contract ของ port</h2><p>production adaptersโยน <code>ApiException</code> และ storeแปลเฉพาะประเภทนี้เป็น server message ถ้า fakeไม่เคย throw testsจะไม่ครอบ error branch วิธีที่ชัดคือให้ portคืน typed result/domain failure หรืออย่างน้อยสร้าง fakeที่เลือก throw timeout/business errorได้โดยไม่ผูก testกับ HTTP internals</p></section>
 <section><h2>7. Contract tests เชื่อม fake กับ real adapter</h2><p>store testsยืนยัน workflowผ่าน interface ส่วน adapter testsต้องยืนยัน HTTP URI/body/JSON mapping แยกกัน และ reusable repository contract testควรรันกับ fakeกับ adapter test doubleเพื่อให้ semanticsตรงกัน เช่น new profile fetchต้องคืน listใหม่, confirmต้องส่งทุก product และ validationต้องไม่มี stock mutation</p></section>
 <section><h2>8. แบบฝึกเพิ่ม SpyReceivingRepository</h2><div class="success">สร้าง fakeที่เก็บจำนวน callและ argsของ validate/receive, ตั้ง delay/errorได้ แล้วทดสอบว่า scan palletซ้ำระหว่าง validatingไม่เรียกซ้ำ, confirmซ้ำระหว่าง submittingไม่เรียกซ้ำ และ quantity/detailId/palletCodeที่ส่งตรงกับ stateล่าสุดโดยไม่ใช้ network</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

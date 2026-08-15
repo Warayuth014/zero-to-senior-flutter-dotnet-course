@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receive scan/quantity/confirm state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-07 · Real Codebase</span><h1>Receive scan/quantity/confirm state</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> receiving methods ใน <code>WarehouseStore</code> — guided flowนี้มี preflight networkหนึ่งครั้งและ commit networkหนึ่งครั้ง โดยมี local scan/quantity validationคั่นกลาง</div>
 <section><h2>1. State machine</h2><pre class="code-vs"><code>detail
 → scanitem (เทียบ Part ID)
@@ -18,5 +12,3 @@
 <section><h2>6. Commit และ uncertain outcome</h2><p><code>confirmMatch</code> มี <code>recvSubmitting</code> กัน duplicate แล้ว await <code>receive</code> หากสำเร็จและ generationยังตรงจึงตั้ง DONE/qty/palletและ advance แต่ถ้าออกหน้าระหว่างรอ backendอาจ commitแล้ว codeไม่ restore UIเก่าและสั่ง reload นี่คือการยอมรับ “server outcomeอาจสำเร็จแม้ clientเลิกสนใจ response”</p></section>
 <section><h2>7. Retry safety</h2><p>timeoutหลัง server commitทำให้ clientเห็น failureและผู้ใช้อาจกดยืนยันซ้ำ Endpointควรมี idempotency keyหรือ rejectการรับเกิน remainingอย่าง atomic เพียง busy flagกันเฉพาะ concurrent tapใน processเดียว ไม่แก้ network retry/restart</p></section>
 <section><h2>8. Store test matrix</h2><div class="success">ใช้ spy/completerทดสอบ correct/wrong item, quantity -1/0/max/เกิน, prepared pallet mismatch, validate success/failure/double scan, leaveระหว่าง validate/commit, double confirm, partial receiptและ timeout-after-commit โดยตรวจ calls, step, flags, toast/flashและ reload behavior</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

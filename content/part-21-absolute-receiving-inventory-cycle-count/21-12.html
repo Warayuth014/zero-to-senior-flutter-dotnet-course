@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cycle count models และ modes</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-12 · Real Codebase</span><h1>Cycle count models และ modes</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/models/cycle_count_models.dart</code> — modelแยก phaseของ server, counting modeของ client, current products และ immutable history</div>
 <section><h2>1. Phase กับ Mode คนละแกน</h2><p><code>CycleCountPhase</code> มาจาก serverและบอก availability/transport/readiness/returning ส่วน <code>CycleCountMode</code> เป็นทางเลือก UIว่าจะพิมพ์จำนวนหรือยิงทีละชิ้น Palletอาจ readyแต่ยังไม่เลือก mode และ modeไม่ควรเปลี่ยน server phaseเอง</p></section>
 <section><h2>2. Unknown phase สำคัญ</h2><p>parserคืน <code>unknown</code> เมื่อ backendเพิ่มค่าใหม่แทน throwหรือสมมติ available UIควรแสดง safe stateและไม่เปิด destructive actionจนรู้ความหมาย พร้อม telemetryให้ทีมเพิ่ม mapping การ fallbackเป็น availableอาจเริ่มงานผิด phase</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Command DTO</h2><p><code>CycleCountResult</code> มีเพียง product codeกับ count qtyและ <code>toJson</code> ใช้ snake_caseตาม backend การไม่ส่ง systemQty/diffให้ clientตัดสินช่วยให้ serverอ่าน stock snapshotและคำนวณ authoritative diffเอง</p></section>
 <section><h2>7. Decimal และ identity</h2><p>countเป็น doubleรองรับหน่วยทศนิยม แต่ scan-eachเพิ่มทีละ 1 ส่วน manualรับ decimal Product codeเป็น map keyจึงต้อง uniqueต่อ palletและ normalizeเทียบแบบ case-insensitiveตอน scan หาก backendส่ง product codeซ้ำ mapจะรวม inputsผิด ต้อง enforce contractหรือใช้ line identity</p></section>
 <section><h2>8. Model tests</h2><div class="success">ทดสอบ phaseทุกค่า/unknown/casing, null last values, historyหลายรอบ, decimal count serialization, duplicate/case-varied product codes และ snapshot equality/copy strategy จากนั้นกำหนด UI behaviorที่ปลอดภัยสำหรับ unknown phaseกับ empty products</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

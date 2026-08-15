@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tests ของ receiving/inventory/cycle count</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-15 · Real Codebase</span><h1>Tests ของ receiving/inventory/cycle count</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์ทดสอบหลัก:</strong> <code>cycle_count_flow_test.dart</code>, <code>inventory_status_test.dart</code>, <code>scanner_layout_test.dart</code>, <code>flow_navigation_test.dart</code>, <code>pda_ui_test.dart</code> และ fakes — testsปัจจุบันล็อกบาง invariantดี แต่ contract/async pathsยังมีช่องว่าง</div>
 <section><h2>1. Test pyramid ของ Part นี้</h2><ul><li><strong>Model:</strong> status aliases/labelsและ phase parsing</li><li><strong>Store:</strong> receiving/cycle commands, transitions, race guards</li><li><strong>Adapter contract:</strong> URI/payload/grid parsing/status mapping</li><li><strong>Widget:</strong> scanner layout, filters, Continue, phase panels</li><li><strong>Integration:</strong> fake backend→store→viewsทั้ง flow</li></ul></section>
 <section><h2>2. สิ่งที่ cycle testsพิสูจน์แล้ว</h2><p><code>cycle_count_flow_test</code> ยืนยัน scan Part IDสามรูปแบบเพิ่มทีละชิ้นและ undoลดหนึ่ง รวมถึง manual countแยกจาก system qty Testsเร็วเพราะสร้าง storeด้วย fake repositoriesและ dispose timer แต่ยังไม่ทดสอบ lookup/start/confirm, phases, errorsหรือ UI</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Stateful fakes</h2><p>เพิ่ม fakeที่มี completers, call logs, configurable errorsและ transition state: receiveควรลด remaining/เพิ่ม receivedToday, cycle startควร available→waiting→ready และ confirmควร ready→returningพร้อม history แบบนี้ integration testจะตรวจ reconciliationได้ดีกว่า fakeที่คืน objectเดิมทุก method</p></section>
 <section><h2>7. Contract + fault injection</h2><p>Mock HTTPตอบ camel/Pascal, malformed rows, timeoutและ 200ผิด shape แล้วตรวจ adapter/store/UI แยกกัน สำหรับ mutationจำลอง timeoutหลัง server commitเพื่อทดสอบ idempotency/reload และใช้ controlled futuresสลับ completion orderเพื่อจับ stale responseแทนหวังให้ raceเกิดเอง</p></section>
 <section><h2>8. Part 21 capstone</h2><div class="success">ทำ integration harnessหนึ่งชุด: โหลด RO → scan item → partial qty → validate/receive pallet → reload history → inventoryเห็น pallet AWAIT_PUTAWAY → cycle lookup/start/ready → นับสองโหมด → confirm/history โดยบันทึก requestsและแทรก failure/raceอย่างน้อยสามจุด ทุก assertionต้องระบุว่า server, storeหรือ widgetเป็น ownerของ truth</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

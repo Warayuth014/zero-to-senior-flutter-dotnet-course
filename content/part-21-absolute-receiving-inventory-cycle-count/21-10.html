@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>InventoryView search/filter</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-10 · Real Codebase</span><h1>InventoryView search/filter</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>screens/inventory_view.dart</code> เป็น async-state gate แล้วส่งข้อมูลให้ <code>StockView</code> ใน <code>screens/ops_views.dart</code> ทำ search/filter/render</div>
 <section><h2>1. Source of truth เดียวสอง consumers</h2><p><code>WarehouseStore.pallets</code> ใช้ทั้ง Inventory Controlและ outbound picker <code>InventoryView</code> ไม่ fetchเอง; shell/store trigger <code>loadPallets</code> เมื่อเปิด stock/withdrawหรือ home loadAll ทำให้สถานะไม่ขัดกันเพราะแต่ละหน้าถือ cacheของตัวเอง</p></section>
 <section><h2>2. Async UI สามสถานะ</h2><ul><li>loadingและ listว่าง → progressเต็มหน้า</li><li>errorและ listว่าง → message + Retry</li><li>มี cached list → render StockView แม้ refreshกำลังโหลดหรือรอบล่าสุด error</li></ul><p>นี่คือ stale-while-refresh policyที่รักษาข้อมูลเดิมให้ใช้อ้างอิงได้ แต่ควรมี subtle refresh/error indicatorเพื่อไม่ทำให้ผู้ใช้คิดว่าข้อมูลสด</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Row semantics</h2><p>empty palletซ่อน product detailsและแสดง Empty, palletมี stockแสดง qty/unit, locationและ translated status สีเลือกจาก statusบางกลุ่มแล้ว fallback amber ต้องมี text labelคู่สีเสมอ และ sentinel location <code>-</code> ควรแสดงได้แต่ไม่ควรถือเป็นข้อมูล warehouseจริง</p></section>
 <section><h2>7. Performance</h2><p>filterสร้าง listใหม่ทุก buildและ render rowsทั้งหมดใน Columnภายในการ์ดเดียว ไม่ใช้ lazy item builder แม้ outer ListView ดังนั้น 1,000 palletsอาจสร้าง widgetจำนวนมาก ทางเลือกคือ <code>ListView.builder</code>/slivers, debounce searchและ server pagination โดยต้องรักษา fixed header</p></section>
 <section><h2>8. Widget tests</h2><div class="success">ทดสอบ loading/error/retry/cache-on-error, queryทุก fieldรวม case/Thai, clear button, status groupingทุก canonical value, empty row, unknown status, fixed scanner, 390px/text scale และ listขนาดใหญ่ด้วย frame/build profiling</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

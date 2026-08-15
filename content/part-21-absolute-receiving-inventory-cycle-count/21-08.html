@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>InventoryApi grid endpoint</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-08 · Real Codebase</span><h1>InventoryApi grid endpoint</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/api/inventory_api.dart</code> — reuse grid endpointเดียวแล้วแปลง DB-shaped <code>ContainerView</code> เป็น UI-shaped <code>Pallet</code></div>
 <section><h2>1. Shared endpoint</h2><pre class="code-vs"><code>POST /api/data/get_containers?withContents=true
 body: { PageIndex: 1, PageItems: 1000 }
@@ -21,5 +15,3 @@ response: items/Items → ContainerView → Pallet</code></pre><p><code>withCont
 <section><h2>6. Location display กับ domain value</h2><p>หากไม่มี rack location adapterใส่ <code>'-'</code> ลง <code>Pallet.locationCode</code> เพื่อแสดงผลสะดวก แต่ sentinel stringปะปน domainกับ presentation Senior designควรเก็บ nullable locationแล้วแปลงเป็น dashใน widget เพื่อไม่ให้ search/API logicคิดว่า “-” เป็น locationจริง</p></section>
 <section><h2>7. Scaling และ parse risks</h2><ul><li>จำกัด 1,000 containers ไม่มี loop pagination</li><li>ทุก row castเป็น mapโดยตรง</li><li>รองรับ items/Itemsแต่ fieldภายในรองรับ casingเดียว</li><li>statusใหม่ตกไป MOVING/STOREDตาม precedenceโดยไม่เตือน</li><li>การโหลดทั้งคลังทุกครั้งอาจหนักสำหรับ PDA/network</li></ul></section>
 <section><h2>8. Mapping tests</h2><div class="success">ทำ table-driven testsทุก combinationของ product/qty/location/state/inProcess/destination โดยเฉพาะ precedenceชนกัน และ adapter test URI/body/items casing/decimal/มากกว่า 1,000 rows ยืนยันว่า statusใหม่ไม่ถูกจัดหมวดเงียบโดยไม่มี telemetry</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

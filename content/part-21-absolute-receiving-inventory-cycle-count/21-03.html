@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inbound models</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-03 · Real Codebase</span><h1>Inbound models</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/models/inbound_models.dart</code> — แยก header, open detail และ received transaction เพราะแต่ละตัวมาจากคนละ projection ของ backend</div>
 <section><h2>1. InboundOrder เป็น aggregate read model</h2><p><code>InboundOrder</code> มี order ID/no, creator และรายละเอียดลูก แม้ API backendแยก headerกับ detailคนละ endpoint adapterจะ composeเป็น treeก่อนส่งให้ UI ทำให้หน้ารายการคำนวณจำนวน item/qtyและค้นข้ามรายละเอียดได้โดยไม่ยิง requestตอนแตะทุกครั้ง</p></section>
 <section><h2>2. Detail ผสม persisted กับ runtime state</h2><p><code>InboundOrderDetail</code> มีข้อมูลจาก view เช่น line, product, open quantity, unit และ keyจริง <code>inboundOrderDetailId</code> พร้อม field mutable <code>palletCode</code>, <code>status</code>, <code>receivedQty</code> สำหรับ flowปัจจุบัน การผสมนี้สะดวกแต่ต้องจำว่า <code>DONE</code> ใน objectไม่ใช่สถานะถาวรจน server commitและ reloadยืนยัน</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. ReceivedToday เป็น event projection</h2><p><code>InboundReceiveTransaction</code> มาจาก Events/EventDetails/Product มี transaction ID, document, product, qty, pallet, time และ operator แยกจาก open detailsเพื่อไม่เอา transient DONE rowมาปลอมเป็น audit history หาก DateTime parseไม่ได้ adapterใช้เวลาปัจจุบัน ซึ่งช่วยไม่ crashแต่เสี่ยงแสดงรายการผิดเวลา ควรเก็บ null/parse failureชัดกว่า</p></section>
 <section><h2>7. Mutability trade-off</h2><p>การแก้ <code>l.status</code> และ <code>l.receivedQty</code> in-placeลด object mapping แต่ snapshotย้อนหลัง/test equalityยาก และ callerอาจแก้นอก store Senior refactorอาจแยก immutable server DTO/read modelออกจาก <code>ReceivingRunState</code> แล้วใช้ copyWith/reducerให้ commitแต่ละ transitionชัดเจน</p></section>
 <section><h2>8. Model tests</h2><div class="success">ทดสอบ orderที่มี detail IDต่างกันแต่ productเดียวกัน, remaining 0ถูกตัดออก, partial quantity, product code case, creator/brandว่าง และ event timestampเสีย จากนั้นตัดสินใจเชิง contractว่า fractional quantityกับ invalid timestampควรถูก reject, preserve หรือ fallbackอย่างไร</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

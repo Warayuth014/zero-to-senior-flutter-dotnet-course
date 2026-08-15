@@ -74,6 +74,7 @@
 | 18 wmsapp: Putaway & Picking | Authored + verified | 16/16 |
 | 19 wmsapp: Packing, Check-in & Sorting | Authored + verified | 15/15 |
 | 20 wms_absolute_mobile: Core, Auth & Shell | Authored + verified | 15/15 |
-| 21–25 | Scaffold/roadmap | 0/77 |
+| 21 wms_absolute_mobile: Receiving, Inventory & Cycle Count | Authored + verified | 15/15 |
+| 22–25 | Scaffold/roadmap | 0/62 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Inventory models/status mapping</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-09 · Real Codebase</span><h1>Inventory models/status mapping</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/models/inventory_models.dart</code> — raw view modelsรักษาความหมาย backend ส่วน <code>Pallet</code> เป็น read modelสำหรับหลายหน้าจอ</div>
 <section><h2>1. ContainerView คือ boundary model</h2><p>fieldsสะท้อน Container_Reg, Locations, LocationDetailsและ Product projection: registration, location, product text, unit, available qty, inProcessและ state ชื่อ fieldใน Dartอ่านง่ายขึ้นแต่ commentบอกแหล่งจริงไว้เพื่อ traceกลับ DB/APIได้</p></section>
 <section><h2>2. Derived getters รวม legacy rules</h2><p><code>isPicking</code>, <code>isPickCompleted</code> และ <code>isBusy</code> normalize case/aliasที่ model boundary ทำให้ adapterไม่เขียน magic stringsซ้ำหลายจุด Testsยืนยันทั้ง enum-like nameกับ numeric API valueซึ่งเป็นหลักฐานว่า backend contractมีหลาย representationจริง</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. LocationView แยกอีก use case</h2><p><code>LocationView.isFree</code> ต้อง enable, process idleและไม่มี container จึงเหมาะกับรายการตำแหน่งว่างสำหรับ putaway ไม่ควร reuse <code>Pallet.locationCode</code> คำนวณ vacancy เพราะ pallet projectionไม่มี location capacity/enableครบ</p></section>
 <section><h2>7. Immutability และ precision</h2><p>modelsเป็น final fields จึงปลอดภัยกว่ารับเข้า mutable detail แต่ <code>Pallet.qty</code> เป็น intขณะที่ <code>ContainerView.qty</code> เป็น double การแปลงนี้คือ deliberate loss of precisionต้อง documented/tested ถ้ารองรับหน่วยทศนิยมควรเปลี่ยน UI formatterและ quantity commandsพร้อมกัน</p></section>
 <section><h2>8. Model exercise</h2><div class="success">เพิ่ม canonical enumหรือ sealed statusแทน string โดยมี parserรองรับ aliasesเดิมและ unknown case จากนั้นรัน testsยืนยัน localization, filters, withdraw eligibility และ backend valuesเดิมทั้งหมดโดยไม่เปลี่ยน wire contract</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

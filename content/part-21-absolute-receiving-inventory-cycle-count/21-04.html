@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ReceivingApi shared endpoints</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-04 · Real Codebase</span><h1>ReceivingApi shared endpoints</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/api/receiving_api.dart</code> — adapter reuse endpoint ของเว็บสองชุด แล้ว composeข้อมูลสำหรับ mobile แทนสร้าง mobile-list endpointใหม่ทั้งหมด</div>
 <section><h2>1. Endpoint map</h2><pre class="code-vs"><code>POST /api/inbound/get_inbound_order_active
 POST /api/inbound/get_inbound_order_details?order_id=...
@@ -17,5 +11,3 @@ POST /api/WMS/mobile_receive validateOnly // preflight</code></pre><p>สาม 
 <section><h2>6. Received-today mapping</h2><p>report projectionใช้ชื่อ fieldแบบ DB/view เช่น <code>event_event_id</code>, <code>doc_no_display</code>, <code>To_LPN/to_LPN</code> และ typoเดิม <code>band</code> Adapterเป็น anti-corruption layerที่แปลง casing/ชื่อเหล่านี้เป็น Dart model ห้ามปล่อย raw mapถึง widget</p></section>
 <section><h2>7. Parsing risks</h2><ul><li>rowถูก castเป็น mapโดยตรง; shapeผิดจะ throw</li><li>1,000-row capอาจตัดงานโดยไม่มี pagination</li><li>query string order IDควรสร้างด้วย <code>Uri</code> เพื่อ encode</li><li><code>round()</code> เปลี่ยน fractional quantity</li><li>DateTimeเสีย fallbackเป็น nowทำ auditคลาดเคลื่อน</li><li>ไม่มี cancellation เมื่อออกหน้า; storeต้องกัน stale result</li></ul></section>
 <section><h2>8. Adapter contract test</h2><div class="success">ใช้ mock HTTP สร้างสอง ordersหลาย lines ยืนยันจำนวน/ลำดับ requests, absolute/prefixed URI, field casing, open-line filter, empty-order removal, receivedToday mapping และ validateOnlyไม่มี commit side effect เพิ่ม test 1,001 rows/decimal/malformed rowเพื่อบังคับตัดสินใจเรื่อง paginationกับ parse policy</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

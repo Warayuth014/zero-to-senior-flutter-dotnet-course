@@ -108,7 +108,7 @@ function Map-Absolute([string]$path) {
     '^lib/features/warehouse/models/(task|destination)' { return '22-02' }
     '^lib/features/warehouse/screens/receive' { return '21-05' }
     '^lib/features/warehouse/screens/inventory' { return '21-10' }
-    '^lib/features/warehouse/screens/cycle_count' { return '21-13' }
+    '^lib/features/warehouse/screens/cycle_count' { return '21-14' }
     '^lib/features/warehouse/screens/task' { return '22-07' }
     '^lib/features/warehouse/screens/(ops|outbound)' { return '22-16' }
     '^lib/features/warehouse/screens/home' { return '20-14' }

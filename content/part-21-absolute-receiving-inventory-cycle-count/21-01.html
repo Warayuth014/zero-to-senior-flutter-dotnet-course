@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WarehouseStore เป็น runtime SSOT</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-01 · Real Codebase</span><h1>WarehouseStore เป็น runtime SSOT</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/warehouse_store.dart</code> — runtime single source of truth ของ shell ปัจจุบัน รวมข้อมูลจาก server, navigation และ transient workflow state ไว้ใน <code>ChangeNotifier</code> เดียว</div>
 <section><h2>1. Store อยู่ตรงไหนใน graph</h2><pre class="code-vs"><code>WarehouseShell
   └─ WarehouseStore(username, repositories...)
@@ -22,5 +16,3 @@ Shell/Views → rebuild จาก state snapshot ใหม่</code></pre><p>ห
 <section><h2>6. Side effects และ lifecycle</h2><p>store ส่ง toast/flash ผ่าน callbacks ที่ shell ประกอบให้ และสร้าง timer 5 วินาทีสำหรับ task status ใน constructor ก่อน cancel ใน <code>dispose()</code> Store จึงไม่ใช่ pure state object; ผู้สร้างต้อง dispose เสมอและ tests ใช้ <code>addTearDown(store.dispose)</code> เพื่อไม่ให้ periodic timerค้าง</p></section>
 <section><h2>7. จุดแข็งและขีดจำกัดของ God Store</h2><p>ข้อดีคือ trace stateง่ายและ cross-feature badgesใช้ข้อมูลเดียวกัน ข้อเสียคือไฟล์เกิน 1,500 บรรทัด, notify อาจ rebuildกว้าง, receiving/cycle/task lifecycle couplingกัน และ fakeต้องประกอบ repositoryทุกตัว แนว refactorปลอดภัยคือแยก feature storeทีละ seam โดยให้ shellถือ facade/summary และเพิ่ม characterization testsก่อนย้าย state</p></section>
 <section><h2>8. แบบฝึก SSOT audit</h2><div class="success">เลือกหนึ่ง action เช่น “ยืนยันรับเข้า” ทำตาราง state ก่อน/ระหว่าง/สำเร็จ/ล้มเหลว/ออกหน้าระหว่างรอ ระบุ server-backed, derived และ transient fields ทุกตัว จากนั้นตรวจว่าแต่ละ mutationมี notify, stale-response guard และ cleanup ที่สมมาตรหรือไม่</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

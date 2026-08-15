@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Resume receiving session</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-06 · Real Codebase</span><h1>Resume receiving session</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>แกนหลัก:</strong> <code>WarehouseStore.openLine</code>, <code>canResumeLine</code>, <code>exitFlow</code>, <code>goBack</code> และ <code>nav</code> — “หยุดชั่วคราว” กับ “ทิ้ง input ที่ยังไม่ commit” เป็นคนละ command</div>
 <section><h2>1. Runtime ที่ทำให้ resume ได้</h2><p>storeเก็บ <code>recvOrderRo</code>, <code>detailId</code>, <code>rStep</code>, <code>rQty</code>, <code>rPallet</code> และ flagsใน objectที่อยู่ตลอด shell เมื่อออกจาก runกลับ order listแบบ preserve ข้อมูลเหล่านี้ยังอยู่จึงเสนอ Continue ได้ โดยไม่ persistลง diskหรือ backend</p></section>
 <section><h2>2. เงื่อนไข canResumeLine</h2><pre class="code-vs"><code>detailId == requested line
@@ -15,5 +9,3 @@
 <section><h2>6. Reload กับ local pause</h2><p><code>loadReceiving()</code> clear/addAll ordersจาก server จึงสร้าง model instancesใหม่ หาก reloadเกิดตอน paused detail IDอาจยังอยู่แต่ local status/receivedQtyใน objectเก่าหาย <code>canResumeLine</code> lookupด้วย IDจึงพอรักษา stepได้หาก lineยัง open แต่ข้อมูล remainingอาจเปลี่ยน ต้องตัดสินใจว่าจะ refreshแล้ว revalidateหรือ freeze snapshot</p></section>
 <section><h2>7. UX invariant</h2><p>ปุ่ม Continueควรมีเฉพาะการพักด้วย intentชัดเจน ไม่ควรปรากฏหลังผู้ใช้เปลี่ยนเมนูหรือกด Backออกจาก order มิฉะนั้น dataเก่าจะตามกลับมา Testsใน <code>flow_navigation_test.dart</code> และ <code>pda_ui_test.dart</code> ล็อกความแตกต่างนี้ไว้</p></section>
 <section><h2>8. Resume tests</h2><div class="success">ทดสอบ pauseทุก step, resume lineเดิม, เปิด lineอื่น, Backทีละขั้น, bottom navทุกปลายทาง, server reloadที่ lineยังอยู่/หาย/remainingเปลี่ยน และ logout/recreate store ยืนยันว่าไม่มี uncommitted pallet/qtyหลงไป commitกับ lineใหม่</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

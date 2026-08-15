@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CycleCountApi contract</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">21-11 · Real Codebase</span><h1>CycleCountApi contract</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/api/cycle_count_api.dart</code> — สาม commandsใช้ response modelเดียวกัน ทำให้ serverเป็น authorityของ phase, round, productsและ historyหลังทุก transition</div>
 <section><h2>1. Repository contract</h2><pre class="code-vs"><code>lookup(palletCode, station)
 start(palletCode, user, station)
@@ -19,5 +13,3 @@ POST /api/WMS/mobile_cycle_count/confirm</code></pre><p>callsใช้ <code>abs
 <section><h2>6. Phase จาก server</h2><p><code>CycleCountPhase.parse</code> แปลง AVAILABLE, WAITING_FOR_PALLET, READY_TO_COUNT, RETURNING และ unknown APIจึงไม่ hard-codeว่า startแล้ว readyทันที ซึ่งบอกว่า flowอาจมี transport/automationคั่นกลางและ clientต้อง refresh/reconcileกับ server</p></section>
 <section><h2>7. Error/idempotency boundary</h2><p>clientส่ง <code>ApiException</code> ขึ้น store start/confirmควร idempotentหรือ reject duplicateด้วย task/document stateแบบ atomic เพราะ timeoutอาจเกิดหลัง server transitionแล้ว ถ้า confirmถูก retry countsเดิมต้องไม่สร้าง historyสองรอบ</p></section>
 <section><h2>8. API contract tests</h2><div class="success">ยืนยันสาม URI/body, default/response station, snake_case counts, camel/Pascal responses, unknown phase, nullable last values/time, malformed nested rowsและ decimal quantities เพิ่ม timeout-after-start/confirm scenarioเพื่อกำหนด reconciliation endpointกับ idempotency behavior</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
