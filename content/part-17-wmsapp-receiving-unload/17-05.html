@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScanPartScreen state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-05 · Real Codebase</span><h1>ScanPartScreen state machine</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>ScanPartScreen คือ state machine แม้ยังเขียนเป็น fields:</strong> ต้องอ่านเป็น phases—idle → resolving line/lot → scanning serialหรือ qty → choosing pallet → submitting → assigned/pending/auto-closed</div>
 <section><h2>1. State clusters</h2><p>controllers/focus 3 กลุ่ม Part/Serial/Pallet, current PO, scanning item, serial list/manual qty, last pallet memory, assigned lines, resumed pending lines, loadingและ timed scan status หาก fieldใดไม่ resetตาม transitionจะข้ามข้อมูลระหว่าง item</p></section>
 <section><h2>2. Initialize/resume</h2><p><code>_currentPo = widget.po</code>และ copy <code>po.pendingLines</code>เข้า resumed list ทำให้กลับมาแก้ pallet assignmentจาก receiptเดิมได้โดยไม่ submitรับซ้ำ</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. Submit outcomes</h2><p>ReceiptLineResponseอาจ normal success, OVER warning, <code>palletError</code>ให้เข้ารายการ pending หรือ <code>autoClosed</code>แสดง dialog/ปิด flow Outcomeเหล่านี้ควรเป็น sealed resultแทน flagsที่ผสมกันได้หลายแบบ</p></section>
 <section><h2>7. Timer/lifecycle</h2><p>scan statusมี Timer 5sและ ScrollController animateไป serialที่เกี่ยว ต้อง cancel timer/dispose controllers/focus/scrollและ mounted guard post-frame callbacks ป้องกัน leak/setStateหลังออกหน้า</p></section>
 <section><h2>8. Refactor seam</h2><div class="success">สร้าง ReceivingFlowState + reducer/commands, ScanValidator, PalletAssignmentPolicyและ repository แล้วให้ widgetถือเฉพาะ controllers/focus การแยก phaseชัดจะกำจัด state combinationที่เป็นไปไม่ได้</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

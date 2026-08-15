@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Basket/unload models + APIs</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-13 · Real Codebase</span><h1>Basket/unload models + APIs</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Unload/Basket contract เชื่อม inventory สองสถานะ:</strong> model ต้องรักษา session line, part+lot, serial และยอด remaining เพื่อให้ทุก mutation ตรวจย้อนหลังและ retry ได้อย่างปลอดภัย</div>
 <section><h2>1. UnloadApi</h2><p>สามคำสั่งคือ <code>open-session</code>, <code>confirm-unload</code> และ <code>return-pallet-to-asis</code> แต่ละคำสั่งควรแปลง non-2xx, timeout และ malformed JSON เป็น error ที่ต่างกันเพื่อให้ UI ตัดสินใจ refresh/retry ถูก</p></section>
 <section><h2>2. UnloadSession</h2><p><code>UnloadSession</code> มี sessionId, pallet, status, items และ <code>confirmedLineIds</code> Session ID ต้องถูกส่งคืนทุก mutation เพื่อให้ backend ตรวจ ownership/version ของ workflow</p></section>
@@ -14,5 +8,3 @@ POST /basket/load</code></pre><p>endpoint แรกให้ snapshot ของ 
 <section><h2>6. UnloadedItem</h2><p>model มี partId, lotNumber, qtyUnloaded, qtyLoaded, <code>qtyRemaining</code>, basketId, unloadLineIds และ serialNumbers ทำให้ตามที่มาจาก unload หลาย line ได้ แต่ key ใน UI ต้องอย่างน้อย part+lot และอาจต้อง condition/site เพิ่มตาม backend</p></section>
 <section><h2>7. Load response</h2><p><code>LoadToBasketResponse</code> ควรสื่อผลธุรกรรม, basket ปลายทาง, จำนวน accepted/rejected และ remaining อย่าง explicit หาก API คืนเพียง message UI ต้อง reload เสมอและวิเคราะห์ partial result ได้ยาก</p></section>
 <section><h2>8. Contract checklist</h2><div class="success">ใช้ enum/status ที่รองรับ unknown, decimal policy เดียวกันทั้ง Dart/.NET, UTC timestamps, correlation/idempotency key, version/concurrency token, typed problem details และ JSON fixtures ที่ทดสอบทั้งสองฝั่ง</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

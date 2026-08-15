@@ -70,6 +70,7 @@
 | 14 Testing, Debugging & Performance | Authored + verified | 17/17 |
 | 15 Production Build, Security & Resilience | Authored + verified | 12/12 |
 | 16 wmsapp Real Codebase Map | Authored + verified | 12/12 |
-| 17–25 | Scaffold/roadmap | 0/137 |
+| 17 wmsapp: Receiving & Unload | Authored + verified | 14/14 |
+| 18–25 | Scaffold/roadmap | 0/123 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา

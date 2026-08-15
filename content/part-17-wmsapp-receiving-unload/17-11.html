@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UnloadSessionSheet state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-11 · Real Codebase</span><h1>UnloadSessionSheet state</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>UnloadSessionSheet เป็น stateful workflow:</strong> state ไม่ได้มีแค่ loading แต่มี session, line ที่เลือก, serial/qty ที่กรอก, สถานะราย line และการคืน pallet ซึ่งต้องเปลี่ยนอย่างมีลำดับ</div>
 <section><h2>1. State inventory</h2><p>แกนหลักประกอบด้วย <code>_session</code>, <code>_partStatus</code>, selected item, scanned serials, qty controllers, loading/error และ scanner focus การเขียนรายการ state ก่อนแก้โค้ดช่วยเห็น invariant และ cleanup ที่ต้องทำ</p></section>
 <section><h2>2. Open session transition</h2><pre class="code-vs"><code>idle → opening → active
@@ -15,5 +9,3 @@
 <section><h2>6. Authoritative reload</h2><p>หลัง confirm ต้อง reload session เพราะ partial unload อาจสร้าง remainder line ด้วย <code>lineId</code> ใหม่ การ mark local line ว่า confirmed อย่างเดียวจึงไม่พอและอาจทำให้ progress ผิด</p></section>
 <section><h2>7. Lifecycle safety</h2><p>controller, timer และ focus node ต้อง dispose; callback หลัง await ตรวจ mounted; scanner keyboard events ต้องไม่ทำงานขณะ dialog/return flow เปิด มิฉะนั้น event ซ้ำอาจเปลี่ยน state ที่ไม่คาดคิด</p></section>
 <section><h2>8. Refactor target</h2><div class="success">ย้าย workflow ไปเป็น reducer/controller ที่มี event เช่น <code>PalletScanned</code>, <code>PartSelected</code>, <code>SerialAdded</code>, <code>ConfirmRequested</code>, <code>SessionReloaded</code> แล้ว widget มีหน้าที่ render state และส่ง event เท่านั้น</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

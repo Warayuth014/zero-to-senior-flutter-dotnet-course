@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receiving domain map</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-01 · Real Codebase</span><h1>Receiving domain map</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Inbound มีสองการเปลี่ยน ownership:</strong> Receiving ยืนยันของจาก POเข้า WMSและผูก pallet; Unloadเปิด palletจาก ASRSแล้วแยก Part/Lotออกก่อน Load to Basket ทุก commandต้องรักษา line/lot/serial identity</div>
 <section><h2>1. Receiving route</h2><pre class="code-vs"><code>Home → ReceivingMenu
   → ScanPo → ScanPart
@@ -22,5 +16,3 @@ Part ID → PartLinesResponse
 <section><h2>6. Partial success</h2><p>Receiving APIอาจบันทึกรับสำเร็จแต่ผูก palletล้ม โดยคืน <code>palletError</code> Screenต้องเก็บ lineไว้ pendingและห้าม resend receiptทั้งก้อน นี่เป็น outcomeแบบ “success + follow-up required” ไม่ใช่ boolean errorธรรมดา</p></section>
 <section><h2>7. Failure boundaries</h2><p>POไม่พบ, condition/lotไม่ตรง, serialซ้ำ/ผิด line, qtyเกิน, pallet typeขัดกัน, unload partial remainder, session staleและ basket loadซ้ำ แต่ละจุดควรมี typed outcome/idempotency ไม่ใช้ข้อความเป็น control flow</p></section>
 <section><h2>8. Trace rule</h2><div class="success">ทุก actionให้จด stateก่อน → API method/path/payload → response DTO → stateหลัง → focus/navigation → retry semantics โดยเฉพาะ “serverทำสำเร็จแต่ clientไม่เห็น response”</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

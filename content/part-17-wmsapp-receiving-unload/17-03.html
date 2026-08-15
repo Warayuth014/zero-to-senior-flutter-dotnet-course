@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan PO search flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-03 · Real Codebase</span><h1>Scan PO search flow</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Scan PO เป็น read-before-write gate:</strong> normalize input, โหลดเอกสาร/รายการ, แสดง status แล้วอนุญาตเข้า ScanPartเฉพาะ POที่ยังไม่ RECEIVED</div>
 <section><h2>1. State</h2><pre class="code-vs"><code>TextEditingController _poController
 POResponse? _po
@@ -19,5 +13,3 @@ result = await api.getPO(poId);</code></pre><p>clear POเดิมก่อน 
 <section><h2>6. Stale search</h2><p>ถ้าผู้ใช้ค้น Aแล้ว Bก่อน Aจบ response Aอาจทับ B ต้อง disable/serializeหรือใช้ generationผูก poIdกับ response Mounted guardป้องกัน disposeแต่ไม่ป้องกัน out-of-order</p></section>
 <section><h2>7. UI extraction</h2><p><code>PoSearchCard</code>เป็น input/loading action, <code>PoStepIndicator</code>เป็น flow context จึง test wiringแยกจาก parent orchestrationได้ แต่ source of truthของ queryยังอยู่ parent controller</p></section>
 <section><h2>8. Tests</h2><div class="success">trim/uppercase, empty, 404, loading, A/B race, RECEIVEDไม่มี start, active PO pushถูก, reloadหลังกลับและ dispose mid-request โดย assert APIเรียกด้วย PO IDจริง</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

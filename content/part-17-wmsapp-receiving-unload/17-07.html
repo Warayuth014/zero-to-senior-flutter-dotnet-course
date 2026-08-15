@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Assign line เข้า pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-07 · Real Codebase</span><h1>Assign line เข้า pallet</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Receipt + pallet เป็น compound operation:</strong> UIส่ง palletIdพร้อม <code>scan-part</code> แต่ responseแยกผล receiptกับ <code>palletError</code> จึงต้องรองรับ partial successโดยไม่รับสินค้าซ้ำ</div>
 <section><h2>1. Validate qty</h2><p>qtyต้อง &gt;0และไม่เกิน remaining/ordered; serial itemต้องมี serial countเท่ากับ qtyและเป็น partปัจจุบัน Non-serialใช้ manual qtyที่ clampแล้วแต่ validateซ้ำก่อน request</p></section>
 <section><h2>2. Pick pallet</h2><p><code>_pickPallet(defaultPalletId: _lastPalletId)</code>เปิด sheetรับ palletก่อน submitทุกครั้ง ใช้ memoryลดการ scanซ้ำแต่ผู้ใช้ยังยืนยัน/เปลี่ยนได้</p></section>
@@ -15,5 +9,3 @@
 <section><h2>6. Auto close/over</h2><p><code>poItemStatus == OVER</code>แสดง warning; <code>autoClosed/poStatus/closeMessage</code>บอก documentปิด ต้อง refresh/ออก flowตาม responseและกัน callbackเก่าดำเนินต่อ</p></section>
 <section><h2>7. Atomicity decision</h2><p>backendตั้งใจให้ partial successหรือควร transaction receipt+assignmentต้องตัดสินตามธุรกิจ หาก partialถูกต้อง responseควร typed explicit เช่น <code>receiptCommitted=true, palletAssignment=failed</code>และมี operation ID</p></section>
 <section><h2>8. Retry tests</h2><div class="success">normal, receipt reject, timeout ambiguity, pallet partial failure, retry assign success/fail, double tap/idempotency, over receive/conflictและ auto close โดย assertว่า receipt endpointไม่ถูกเรียกซ้ำหลัง partial success</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

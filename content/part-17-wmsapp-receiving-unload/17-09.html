@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receiving models + API extension</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-09 · Real Codebase</span><h1>Receiving models + API extension</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Model คือขอบเขตความจริงของแอป:</strong> อ่าน JSON ให้ได้ไม่พอ ต้องรู้ว่า field ใดเป็น identity, field ใด nullable และ fallback แบบใดอาจซ่อนข้อมูลเสียจาก backend</div>
 <section><h2>1. Receiving API surface</h2><p><code>ReceivingApi</code> มี 6 งานหลัก: อ่าน PO, อ่าน part lines, validate serial, scan receipt, assign pallet และอ่าน pending pallet lines หน้าจอควรเรียกผ่าน service นี้แทนประกอบ URL เอง</p></section>
 <section><h2>2. POResponse</h2><p><code>POResponse</code> รวม header, <code>items</code> และ <code>pendingLines</code> จึงเป็น snapshot ของ receiving document ณ เวลาหนึ่ง วันที่ parse ไม่ได้ถูก fallback เป็น <code>DateTime.now()</code> ในโค้ดจริง ซึ่งทำให้ข้อมูลเสียดูเหมือนข้อมูลใหม่ ควรพิจารณา nullable หรือ parse error ที่สังเกตได้</p></section>
@@ -17,5 +11,3 @@ POST /receiving/scan-part
 POST /receiving/assign-pallet
 GET  /receiving/pending-pallet-lines</code></pre><p>query ต้อง encode ค่า, JSON key ต้องตรง DTO และ error response ควรแปลงเป็น domain exception ที่ UI เข้าใจ</p></section>
 <section><h2>8. Contract hardening</h2><div class="success">เพิ่ม fixture tests สำหรับ missing/null/wrong type, unknown status, invalid date, empty serial list และ <code>palletError</code> พร้อมแยก transport DTO ออกจาก domain model เพื่อให้ API เปลี่ยนโดยไม่กระจายผลไปทุก widget</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

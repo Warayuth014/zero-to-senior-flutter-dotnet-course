@@ -41,7 +41,8 @@
 - Part 14: เขียนเนื้อหาเฉพาะบทครบ 17/17 บท ครอบคลุม unit/contract/store/widget/flow tests, fake time, scanner layout, debugging และ performance profiling
 - Part 15: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท ครอบคลุม release artifacts/signing, platform permissions, HTTPS/certificates, secrets, diagnostics และ resilience checklist
 - Part 16: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท เป็นแผนที่ wmsapp จาก composition, session/routes, config/API extensions/models ไปจนถึง shared UI และ platform files
-- Part 17–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 17: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม receiving PO/part/serial/pallet, pending recovery, unload sessions และ load-to-basket trace
+- Part 18–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

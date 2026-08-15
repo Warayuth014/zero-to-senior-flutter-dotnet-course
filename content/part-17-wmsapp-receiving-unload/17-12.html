@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan pallet/part และ progress</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-12 · Real Codebase</span><h1>Scan pallet/part และ progress</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Progress ต้องมาจาก line identity:</strong> จำนวน part card หรือจำนวนครั้งที่ scan ไม่เท่ากับจำนวนงานสำเร็จ ให้คำนวณจาก session items และ confirmed line IDs เท่านั้น</div>
 <section><h2>1. Scan pallet</h2><p>trim palletId, reject ค่าว่าง, lock ระหว่าง request แล้วเรียก <code>POST /unload/open-session</code> พร้อม operatorId หาก scan pallet ใหม่ต้องถามยืนยันเมื่อ session เดิมยังมีงาน pending</p></section>
 <section><h2>2. Build progress</h2><pre class="code-vs"><code>totalCount = session.items.length
@@ -26,5 +20,3 @@ allConfirmed = totalCount &gt; 0 &amp;&amp; confirmedCount == totalCount</code><
 }</code></pre></section>
 <section><h2>7. Return pallet</h2><p><code>return-pallet-to-asis</code> เป็น transition ปิดงานที่มีผลต่อ inventory ต้องยืนยัน allConfirmed ตามกติกา, ป้องกันกดซ้ำ และใช้ผลจาก API เป็นหลัก การหน่วงเวลา 5 วินาทีใน UI ไม่ใช่หลักฐานว่า backend ทำงานเสร็จ ควรใช้ status/polling หรือ operation result</p></section>
 <section><h2>8. Concurrency tests</h2><div class="success">จำลองสองเครื่องเปิด pallet เดียวกัน, line ถูก confirm จากอีกเครื่อง, partial unload สร้าง line ใหม่, session หมดอายุ และ return pallet ชนกับ confirm โดยคาดหวัง conflict ที่ refresh แล้วทำต่อได้</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

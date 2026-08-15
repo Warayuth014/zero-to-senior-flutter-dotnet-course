@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PO info และ step indicator</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-04 · Real Codebase</span><h1>PO info และ step indicator</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>PO preview คือ decision context:</strong> ผู้ใช้ต้องเห็น supplier, status และยอด ordered/received/remainingต่อ line ก่อนเริ่มรับ แต่ข้อมูลนี้ยังเป็น snapshotและ serverต้อง revalidateตอน command</div>
 <section><h2>1. POResponse</h2><p>เก็บ poId, supplierId/name, status, createdAt, itemsและ pendingLines โดย parser fallbackวันที่ invalidเป็น <code>DateTime.now()</code> ซึ่งทำให้ข้อมูลเสียดูเหมือนปัจจุบัน ควร fail/nullableพร้อม diagnostics</p></section>
 <section><h2>2. POItem</h2><p>identity <code>id</code>ทำหน้าที่ line/lot ID, มี part/owner/brand/description/image, serialRequire, qtyสามค่า, status, condition, lotNumber/expiredDate</p></section>
@@ -14,5 +8,3 @@
 else show completed banner;</code></pre><p>unknown/lowercase/new statusจะเปิด Startโดย default เสี่ยงกว่า enum/allowed-setแบบ fail closed</p></section>
 <section><h2>7. Snapshot freshness</h2><p>หลัง ScanPart routeกลับ reload PO แต่ระหว่างเปิดหน้าคนอุปกรณ์อื่นอาจรับ lineเดียวกัน Serverต้อง check remaining/versionและตอบ conflict; UI refresh/แจ้งผู้ใช้แทนถือ snapshotเป็น lock</p></section>
 <section><h2>8. Contract tests</h2><div class="success">itemsว่าง/หลาย lot, qty partial/complete/over, serial/non-serial, pendingLines, unknown status, invalid date, null image/lotและ Thai text พร้อม snapshotจาก .NETจริง</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pending pallet grouping</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">17-08 · Real Codebase</span><h1>Pending pallet grouping</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
 <div class="note"><strong>Pending pallet คือ recovery queue:</strong> receipt ถูกบันทึกแล้ว แต่ยังผูก pallet ไม่สำเร็จ หน้านี้จึงต้องซ่อมเฉพาะ assignment และห้ามยิงรับสินค้าเดิมซ้ำ</div>
 <section><h2>1. Load pending lines</h2><p><code>PendingPalletScreen</code> เรียก <code>getPendingPalletLines()</code> ตอนเปิดหน้า เก็บ loading/error/data แยกกัน และตรวจ <code>mounted</code> ก่อนเปลี่ยน state หลัง await เพื่อไม่อัปเดต widget ที่ถูก dispose แล้ว</p></section>
 <section><h2>2. Group by PO</h2><pre class="code-vs"><code>final grouped = &lt;String, List&lt;PendingPalletLine&gt;&gt;{};
@@ -22,5 +16,3 @@ for (final line in lines) {
 <section><h2>6. Refresh authoritative data</h2><p>หลัง assign สำเร็จให้โหลด pending จาก server ใหม่แทนการลบ local อย่างเดียว เพราะ backend อาจ normalize pallet, เปลี่ยนสถานะ หรือมีรายการใหม่จากอุปกรณ์อื่นระหว่างนั้น</p></section>
 <section><h2>7. Error และ retry</h2><p>network timeout ทำให้ไม่รู้แน่ว่า server commit หรือยัง ทางปลอดภัยคือ refresh ก่อน retry ถ้า line หายจาก pending แปลว่าสำเร็จแล้ว ถ้ายังอยู่จึงค่อยส่ง assignment ซ้ำ และ backend ควรทำ operation นี้ให้ idempotent</p></section>
 <section><h2>8. แบบฝึกหัด</h2><div class="success">เพิ่ม bulk assignment โดยเลือกหลาย line ภายใน PO เดียว ตรวจ condition ให้เข้ากัน สแกน pallet ครั้งเดียว แล้วส่ง <code>lineIds</code> ทั้งชุด พร้อมทดสอบ success, partial conflict และ refresh หลัง timeout</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
