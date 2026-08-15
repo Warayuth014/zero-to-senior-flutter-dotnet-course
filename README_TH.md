@@ -38,7 +38,8 @@
 - Part 11: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม themes, design tokens, Thai font/localization, assets/icons และ platform-safe PDA shell
 - Part 12: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท ครอบคลุม SignalR, typed events/listeners, reconnect/reconciliation และ lifecycle-safe fallback polling
 - Part 13: เขียนเนื้อหาเฉพาะบทครบ 10/10 บท ครอบคลุม image picking, cross-platform files, multipart upload, validation/progress และ secure .NET endpoint
-- Part 14–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 14: เขียนเนื้อหาเฉพาะบทครบ 17/17 บท ครอบคลุม unit/contract/store/widget/flow tests, fake time, scanner layout, debugging และ performance profiling
+- Part 15–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

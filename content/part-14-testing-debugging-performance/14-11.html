@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Timer และ async test</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">14-11 · Testing</span><h1>Timer และ async test</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
 <div class="note"><strong>ห้ามใช้เวลาจริงเป็น synchronization:</strong> <code>Future.delayed</code> และ <code>sleep</code> ทำ suite ช้า/flaky ให้ inject scheduler หรือใช้ fake async/WidgetTester clock เพื่อเดินเวลาอย่าง deterministic</div>
 <section><h2>1. Timer ใน codebase</h2><p><code>WarehouseStore</code> มี <code>Timer.periodic</code> สำหรับ refresh tasks และ animation บางหน้ามี timer ทุกวินาที ทั้งคู่ต้อง cancel ตอน dispose และไม่ควรเริ่มโดยหลบอยู่ใน constructor หาก test ต้องควบคุม lifecycle</p></section>
 <section><h2>2. Inject periodic scheduler</h2><pre class="code-vs"><code>typedef StartPeriodic = Cancelable Function(
@@ -26,5 +20,3 @@ class Poller {
 <section><h2>6. Concurrent async</h2><p>ใช้ Completer คุมลำดับ response ไม่ใช้ delay จำลอง race: B เสร็จก่อน A, dispose ก่อน response, cancel ระหว่าง operation และ event มาระหว่าง refresh แต่ละ scenario ควรจบโดยไม่มี pending future</p></section>
 <section><h2>7. Microtask กับ timer</h2><p><code>await Future<void>.delayed(Duration.zero)</code> ขยับ event queue แต่ไม่ใช่คำตอบทั่วไป แยกว่ารอ notification microtask, timer หรือ frame แล้วใช้ <code>pump</code>/<code>flushMicrotasks</code>/Completer ให้ตรงชนิด</p></section>
 <section><h2>8. Leak test</h2><div class="success">start → tick → stop/dispose → tick/advance อีกครั้ง แล้ว assert ไม่มี repository call/notification เพิ่ม รวมถึง restart ไม่สร้าง timer ซ้อนและ app lifecycle pause หยุด polling ตาม policy</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

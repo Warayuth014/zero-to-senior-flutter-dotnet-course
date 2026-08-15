@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fake repository</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">14-03 · Testing</span><h1>Fake repository</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
 <div class="note"><strong>Fake ไม่ใช่ mock ทุก call:</strong> fake repository เป็น implementation ขนาดเล็กที่เก็บ state และจำลอง behavior ของ domain ทำให้ flow test อ่านเหมือนงานจริงและไม่เปราะตามลำดับ method ภายใน</div>
 <section><h2>1. ตัวอย่างจากโปรเจกต์จริง</h2><p><code>test/fakes/fake_repositories.dart</code> ของ wms_absolute_mobile มี <code>FakeReceivingRepository</code>, <code>FakeTasksRepository</code> และ <code>FakeInventoryRepository</code> คืนสำเนารายการ พร้อมบันทึก <code>dispatchCallCount</code>, pallet ที่ส่ง และเปลี่ยน status เมื่อเริ่ม/จบ pick</p></section>
 <section><h2>2. Interface คือ test seam</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
@@ -29,5 +23,3 @@ Future&lt;ReceivingPage&gt; fetchOpen(...) =&gt; response.future;
 <section><h2>6. Fake ต้องรักษา contract</h2><p>ถ้า real repository trim/throw/paginate แต่ fake ไม่ทำ flow test อาจผ่านผิด ๆ ใช้ contract test suite เดียวรันกับ fake และ adapter จริงในระดับเหมาะสม หรือจำลองเฉพาะ semantics ที่ scenario อาศัย</p></section>
 <section><h2>7. เมื่อไรใช้ mock</h2><p>mock เหมาะกับ interaction ที่เป็นผลลัพธ์เอง เช่น audit event ต้องถูกส่งหนึ่งครั้ง แต่ state/result มักตรวจด้วย fake/stub ง่ายกว่า หลีกเลี่ยง verify ลำดับ call ภายในที่ refactor แล้ว behavior ไม่เปลี่ยน</p></section>
 <section><h2>8. Cleanup</h2><div class="success">สร้าง fake ใหม่ต่อ test, ใช้ <code>addTearDown(store.dispose)</code>, ไม่แชร์ mutable singleton และเพิ่ม failure controls เช่น unauthorized/conflict/timeout เพื่อครอบคลุม error path จริง</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
