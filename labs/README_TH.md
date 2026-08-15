@@ -78,3 +78,17 @@ flutter test --no-pub
 ```
 
 Lab ใช้ `drift 2.34.3`, `drift_flutter 0.3.1` และ SQLite ผ่าน dependency ที่ resolve ใน `pubspec.lock` สำหรับ Flutter Web ต้องติดตั้งไฟล์ SQLite WASM/worker ตามเอกสาร Drift และทดสอบ runtime จริงเพิ่มเติม ไม่ควรถือว่า web build ผ่านแล้ว asset พร้อมเสมอ
+
+## Freezed & JSON Code Generation (Part 30)
+
+`WmsTask` ตัวจริงถูก refactorให้ใช้ Freezed และ json_serializable โดยยัง normalize/validate API contract เดิม ส่วน `TaskSyncState` แสดง sealed union และ exhaustive Dart patterns:
+
+```powershell
+Set-Location .\flutter_wms_companion
+dart run build_runner build
+dart format lib test
+flutter analyze --no-pub
+flutter test --no-pub
+```
+
+Lab resolve `freezed 3.2.5`, `freezed_annotation 3.1.0`, `json_serializable 6.14.1` และ `json_annotation 4.12.0` Generated `.freezed.dart`/`.g.dart` ถูก commitเพื่อให้ศึกษาและตรวจ diffได้ แต่ห้ามแก้โดยตรง ให้แก้ annotated sourceแล้ว generateใหม่

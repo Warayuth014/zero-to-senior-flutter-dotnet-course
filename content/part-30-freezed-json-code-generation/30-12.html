@@ -1,0 +1,9 @@
+<div class="note"><strong>build_runner เป็น orchestrator:</strong> มันจัด dependency graphและรันหลาย builders ไม่ได้เป็น generatorของ Freezed/JSONเอง</div>
+<section><h2>1. Build</h2><pre class="code-vs"><code>dart run build_runner build</code></pre><p>เหมาะ one-shot/CIและคืน nonzeroเมื่อ generatorล้ม</p></section>
+<section><h2>2. Watch</h2><p><code>dart run build_runner watch</code> สร้างใหม่เมื่อ sourceเปลี่ยน เหมาะ development sessionแต่ต้องหยุด processเก่าหาก cache/lockชน</p></section>
+<section><h2>3. Conflicts</h2><p>อย่าใช้ flagลบ outputแบบอัตโนมัติโดยไม่อ่าน diff โดยเฉพาะเมื่อ generated fileมีการแก้มือซึ่งควรถูกค้นและแก้ workflow</p></section>
+<section><h2>4. Cache</h2><p><code>.dart_tool</code> เป็น disposable build cacheไม่ commit หาก cacheเสียให้ใช้ commandของ build_runner/pubที่เหมาะ ไม่ลบ directoryกว้างผิด workspace</p></section>
+<section><h2>5. Multiple builders</h2><p>labมี Freezed, JSONและDrift บน graphเดียว Outputจำนวนมากใน logอาจเป็น intermediate assets; gitควรเห็นเฉพาะ declared partsที่เปลี่ยนจริง</p></section>
+<section><h2>6. Determinism</h2><p>หลัง generateแล้วรันซ้ำโดย source/lockfileไม่เปลี่ยน Git diffต้องว่าง หากไม่ว่างตรวจ version, locale, formatterและgenerator nondeterminism</p></section>
+<section><h2>7. CI drift check</h2><p>CI generateแล้ว failเมื่อ <code>git diff --exit-code</code> มีผลต่าง เพื่อจับ developerลืม commit outputหรือ source/outputไม่ตรง</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">แก้ fieldใน branchทดลอง รัน build ตรวจ generated delta แล้ว revertผ่าน patch/commitอย่างปลอดภัย ไม่แก้ .g.dartตรง ๆ</div></section>

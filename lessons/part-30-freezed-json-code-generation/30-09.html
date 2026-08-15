@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nested models genericArgumentFactories และ DTO collections</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-09 · Foundation</span><h1>Nested models genericArgumentFactories และ DTO collections</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>Nested/generic models ต้องกำหนด boundary:</strong> generatorตาม fromJson/toJson conventionsได้ แต่ไม่รู้ว่า objectใดควรเป็น entity, value object หรือ pagination envelope</div>
+<section><h2>1. Nested models</h2><p>เมื่อ childมี <code>fromJson/toJson</code> generatorสร้างการ decodeได้ เปิด <code>explicitToJson</code>เมื่อ encoding nested objectต้องเรียก methodชัด</p></section>
+<section><h2>2. Typed collections</h2><p><code>List&lt;TaskDto&gt;</code> ดีกว่า List<dynamic>แต่ response rootยังต้องตรวจว่า itemsเป็น listและ error envelopeไม่ถูก parseเป็นข้อมูล</p></section>
+<section><h2>3. Pagination</h2><p>สร้าง <code>Page&lt;T&gt;</code> สำหรับ items/cursor/totalได้ แต่อาจต้อง <code>genericArgumentFactories</code> เพื่อส่ง parserของ Tตอน runtime</p></section>
+<section><h2>4. Generic factory</h2><pre class="code-vs"><code>Page.fromJson(json, (value) =&gt; TaskDto.fromJson(value))</code></pre><p>call siteบอกวิธีสร้าง generic typeที่ runtime type erasureไม่รู้</p></section>
+<section><h2>5. Maps</h2><p>JSON object keyเป็น stringเป็นหลัก หากใช้ Map&lt;Enum,Model&gt; ต้องกำหนด converterและ round-trip fixtures</p></section>
+<section><h2>6. Large graphs</h2><p>อย่าสร้าง model graphตาม responseทั้งหมดโดยอัตโนมัติ เลือก fieldsที่ featureต้องใช้เพื่อลด couplingและ accidental data retention</p></section>
+<section><h2>7. Recursion</h2><p>tree modelsรองรับได้แต่ตรวจ depth/sizeจาก serverเพื่อป้องกัน memory/stack pressureและ UI recursive buildเกินควบคุม</p></section>
+<section><h2>8. Exercise</h2><div class="success">ออกแบบ generic pageสำหรับ taskพร้อม nextCursor แล้ว test empty list, null cursor, malformed childและ round trip</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

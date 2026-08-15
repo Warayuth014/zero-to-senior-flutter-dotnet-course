@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serialization equality union และ compatibility tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-15 · Foundation</span><h1>Serialization equality union และ compatibility tests</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>Tests ตรวจ contract ไม่ตรวจว่า generator “น่าจะถูก”:</strong> ตรึง wire fixturesและ public behaviorที่แอปพึ่งเพื่อให้ upgrade/refactorปลอดภัย</div>
+<section><h2>1. Golden fixtures</h2><p>เก็บ JSONขั้นต่ำ/เต็ม/legacyจาก API contractโดย redactข้อมูลจริง ตรวจ decode fieldsและ errorของ malformed payload</p></section>
+<section><h2>2. Round trip</h2><p>test model→JSON→modelสำหรับ writable DTO พร้อมยอมรับ normalizationที่ตั้งใจ เช่น status input uppercaseออก lowercase</p></section>
+<section><h2>3. Equality/copy</h2><p>ตรวจ value equality, hash collection behavior, copyWithและ original immutabilityโดยเฉพาะ nested list/map</p></section>
+<section><h2>4. Union cases</h2><p>สร้างทุก case ตรวจ payload/label/serializationและ exhaustive switch; เพิ่ม caseใหม่ควรทำให้จุดที่ต้องตัดสิน behavior compile fail</p></section>
+<section><h2>5. Compatibility matrix</h2><p>test missing/null/extra/renamed/unknown enum/wrong type แยกกันเพื่อบอก policyชัด ไม่ใช้ fixtureเดียวที่ failหลายเหตุผล</p></section>
+<section><h2>6. Generated drift</h2><p>CI regenerateและตรวจ Git diff รวม analyze/test ทำให้ source, lockfileและ generated outputอยู่ชุดเดียวกัน</p></section>
+<section><h2>7. Performance</h2><p>benchmarkเฉพาะ large payload/hot pathจริง Codegenมักลด reflection overheadแต่ allocation/deep equalityใหญ่ยังมีต้นทุน</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">ก่อน upgrade generatorให้รัน compatibility suiteบน old fixturesและตรวจ generated diff ไม่พึ่ง compileผ่านอย่างเดียว</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -54,8 +54,9 @@
 - Part 27: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท พร้อม lab เปรียบเทียบ Provider, Riverpod และ BLoC/Cubit จาก TaskRepository เดียวกัน ครอบคลุม ownership, async state, rebuild, testing, package evaluation และ migration
 - Part 28: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท พร้อม go_router lab ครอบคลุม URL contract, path/query, nested StatefulShellRoute, root scanner, auth redirect, intended deep link, browser history, platform setup และ routing tests
 - Part 29: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท พร้อม Drift/SQLite offline-first lab ครอบคลุม local source of truth, reactive query, transactional outbox, optimistic UI, idempotent sync/retry, conflict, migration, security และ in-memory database tests
+- Part 30: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท พร้อม refactor WmsTask ด้วย Freezed/json_serializable และ sealed TaskSyncState ครอบคลุม immutability, equality, copyWith, JSON/enum/converter, unions, build_runner, DTO-domain boundary และ compatibility tests
 
-คอร์สเขียนเนื้อหาเฉพาะบทครบแล้ว 452/452 บท ไม่มีบท scaffold เหลือ
+คอร์สเขียนเนื้อหาเฉพาะบทครบแล้ว 468/468 บท ไม่มีบท scaffold เหลือ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

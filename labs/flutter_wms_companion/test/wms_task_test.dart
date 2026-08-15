@@ -12,6 +12,34 @@ void main() {
 
     expect(task.id, 'TASK-001');
     expect(task.status, TaskStatus.working);
+    expect(task.toJson(), {
+      'id': 'TASK-001',
+      'from': 'A-01',
+      'to': 'PACK-01',
+      'status': 'working',
+    });
+  });
+
+  test('generated equality และ copyWith ไม่แก้ object เดิม', () {
+    const original = WmsTask(
+      id: 'TASK-001',
+      from: 'A-01',
+      to: 'PACK-01',
+      status: TaskStatus.waiting,
+    );
+    final working = original.copyWith(status: TaskStatus.working);
+
+    expect(
+      original,
+      const WmsTask(
+        id: 'TASK-001',
+        from: 'A-01',
+        to: 'PACK-01',
+        status: TaskStatus.waiting,
+      ),
+    );
+    expect(working.status, TaskStatus.working);
+    expect(original.status, TaskStatus.waiting);
   });
 
   test('reject task ที่ id ว่างแทนการสร้าง model เสีย', () {

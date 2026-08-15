@@ -1,0 +1,9 @@
+<div class="note"><strong>copyWith สร้าง snapshotใหม่:</strong> ใช้อธิบาย transitionอย่างชัดโดย objectเดิมไม่เปลี่ยน แต่ nullable fieldมีรายละเอียดสำคัญ</div>
+<section><h2>1. Basic copy</h2><pre class="code-vs"><code>final working = task.copyWith(status: TaskStatus.working);</code></pre><p>fieldsที่ไม่ส่งคงค่าเดิมและคืน instanceใหม่</p></section>
+<section><h2>2. Nullable distinction</h2><p>generated proxyแยก “ไม่ส่ง argument” จาก “ส่ง null” จึง clear nullable fieldได้ ตรวจ signatureจริงเมื่อใช้ร่วมกับ custom wrapper</p></section>
+<section><h2>3. Nested copy</h2><p>Freezedรองรับ deep copy syntaxสำหรับ nested Freezed objects แต่การ chainยาวอาจบอกว่า aggregateใหญ่เกินหรือ ownershipไม่ชัด</p></section>
+<section><h2>4. Collections</h2><p>การ copy modelพร้อม Listเดิมอาจแชร์สมาชิกเดิม ถ้าต้องเปลี่ยนรายการให้สร้าง collectionใหม่และรักษา element immutability</p></section>
+<section><h2>5. Invariants</h2><p>copyWithอาจสร้าง combinationที่ domainห้าม เช่น completedแต่ไม่มี completedAt ใช้ union/named command/domain methodเมื่อ fieldsต้องเปลี่ยนพร้อมกัน</p></section>
+<section><h2>6. Patch semantics</h2><p>อย่าสับสน copyWithใน memoryกับ HTTP PATCH; omit/null/valueบน wireต้องมี DTO tri-state contractแยก</p></section>
+<section><h2>7. Lab</h2><p><code>wms_task_test.dart</code> เปลี่ยน statusด้วย copyWith แล้วตรวจ originalยัง waitingและ snapshotใหม่เป็น working</p></section>
+<section><h2>8. Exercise</h2><div class="success">แทนการแก้ mutable stateหนึ่งจุดด้วย copyWith แล้วเพิ่ม testทั้งค่าใหม่และการไม่เปลี่ยนค่าเดิม</div></section>

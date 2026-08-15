@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enum wire values unknown values และ JsonConverter</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-08 · Foundation</span><h1>Enum wire values unknown values และ JsonConverter</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>Enum บน wire เปลี่ยนได้:</strong> เลือก fail-fast, unknown sentinel หรือ raw-value preservationตามความเสี่ยงของ workflow ไม่ใช้คำตอบเดียวทุกหน้าจอ</div>
+<section><h2>1. Default enum</h2><p>json_serializableสร้าง enum mapจากชื่อ Dart โดย default เช่น <code>TaskStatus.working ↔ "working"</code></p></section>
+<section><h2>2. JsonValue</h2><p>ใช้ <code>@JsonValue('IN_PROGRESS')</code> เมื่อ wire valueต่างจากชื่อ Dart และให้ contract testป้องกันการ renameทำลาย API</p></section>
+<section><h2>3. Unknown</h2><p><code>unknownEnumValue</code> ช่วย forward compatibilityในหน้ารายงาน แต่ action-critical statusอาจต้อง rejectเพื่อไม่เปิดปุ่มผิด</p></section>
+<section><h2>4. Lab policy</h2><p>WmsTaskยัง reject statusใหม่ด้วย FormatException เพราะการเดาความหมาย cancelled/heldใน workflowปิดงานอาจไม่ปลอดภัย</p></section>
+<section><h2>5. JsonConverter</h2><p>สร้าง converterเมื่อ typeเดียวมี wire encodingซ้ำหลาย field เช่น WMS timestamp, decimal-as-string หรือ identifier format</p></section>
+<section><h2>6. Converter purity</h2><p>converterควร deterministicและไม่มี network/service dependency ทำให้ generatorเรียกง่ายและ unit testได้โดยตรง</p></section>
+<section><h2>7. Time/number</h2><p>กำหนด UTC/offsetและ decimal precisionชัด อย่าปล่อย DateTime.parse/double conversionเป็น business ruleโดยบังเอิญ</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">เพิ่ม enumใหม่ใน fixtureโดยไม่เพิ่ม Dart case แล้วตรวจว่า behaviorตรง policy: reject, map unknown หรือเก็บ raw value</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

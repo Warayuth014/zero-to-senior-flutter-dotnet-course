@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JsonKey names defaults required includeIfNull และ checked decoding</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-07 · Foundation</span><h1>JsonKey names defaults required includeIfNull และ checked decoding</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>JsonKey เป็น field-level contract:</strong> ใช้เมื่อชื่อ/เงื่อนไขเฉพาะ fieldต่างจาก policyกลาง และเขียน testทุก behaviorที่กระทบ compatibility</div>
+<section><h2>1. name</h2><p><code>@JsonKey(name: 'from_location')</code> map wire keyกับ Dart naming โดยไม่ทำให้ชื่อ domainตาม backend legacy</p></section>
+<section><h2>2. defaultValue</h2><p>defaultควรใช้เมื่อ contractบอกว่าหายเท่ากับค่านั้นจริง ไม่ใช้กลบ required fieldที่ backendลืมส่ง</p></section>
+<section><h2>3. required/disallowNull</h2><p>เปิด strict key/null checksสำหรับ contractสำคัญและดูชนิด exceptionที่ generatorสร้าง จากนั้น translateที่ repository boundary</p></section>
+<section><h2>4. includeIfNull</h2><p>การ omit nullกับส่ง <code>"field": null</code> มีความหมายต่างกันใน PATCH/บาง API กำหนด per fieldหรือ build policyอย่างชัด</p></section>
+<section><h2>5. include directions</h2><p><code>includeFromJson/includeToJson</code> เหมาะ server-only/local-only fields เช่น local UI flagไม่ควรถูกส่งกลับ API</p></section>
+<section><h2>6. checked</h2><p>checked decodingให้ error contextดีขึ้นแต่มี runtime overheadเล็กน้อย ประเมินจาก diagnosabilityและ boundary risk</p></section>
+<section><h2>7. Precedence</h2><p>field JsonKeyเหนือ class annotation และ class annotationเหนือ build.yaml ทีมต้องลด configซ้อนเพื่อ reviewง่าย</p></section>
+<section><h2>8. Exercise</h2><div class="success">สร้าง fixture missing/null/wrong-type/extra-key แล้วบันทึกว่า modelรับหรือ rejectแต่ละกรณีตาม API contract</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON factory toJson และ generated serializers</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-06 · Foundation</span><h1>JSON factory toJson และ generated serializers</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>JSON generation คือ syntax mapping:</strong> business validationและ API semanticsยังต้องอยู่รอบ generated parser</div>
+<section><h2>1. Factory hook</h2><pre class="code-vs"><code>factory WmsTask.fromJson(Map&lt;String, dynamic&gt; json) =&gt;<br>&nbsp;&nbsp;_$WmsTaskFromJson(_normalizeTaskJson(json));</code></pre></section>
+<section><h2>2. toJson</h2><p>เมื่อ Freezedเห็น fromJson factoryและมี json_serializable จะสร้าง <code>toJson</code>ให้ modelด้วย ใช้สำหรับ request/cache/logที่ redactแล้ว</p></section>
+<section><h2>3. Wire types</h2><p>JSON objectเข้า Dartเป็น <code>Map&lt;String,dynamic&gt;</code>; generator castตาม declared type จึงจับ number/string mismatchแทนการเรียก toStringแบบไม่ตั้งใจ</p></section>
+<section><h2>4. Normalization</h2><p>lab normalize trimและ status caseก่อน generated decode เพื่อรักษา contractเดิม แต่ productionควรถามก่อนว่า tolerant parsingซ่อน backend bugหรือไม่</p></section>
+<section><h2>5. Round trip</h2><p><code>fromJson(toJson(model)) == model</code> เป็น useful propertyแต่ไม่พิสูจน์ compatibilityกับ server ต้องมี fixtureจาก wireจริงด้วย</p></section>
+<section><h2>6. Direction</h2><p>response DTOกับ request DTOอาจคนละ shape อย่าฝืน classเดียวหาก server-generated fieldsและ writable fieldsต่างกัน</p></section>
+<section><h2>7. Errors</h2><p>แปลง low-level decode errorเป็น ApiExceptionที่มี path/correlationและไม่เปิด payloadลับให้ UI/log</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">เปิด <code>wms_task.g.dart</code> แล้ว trace enum decode/toJson map จาก wire keyถึง Dart fieldและกลับ</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

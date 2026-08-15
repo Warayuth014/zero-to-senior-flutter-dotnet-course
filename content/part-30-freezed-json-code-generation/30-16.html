@@ -1,0 +1,9 @@
+<div class="note"><strong>Final codegen lab:</strong> refactor modelที่ทุก labใช้อยู่และเพิ่ม unionจริง ทำให้ regressionsถูกตรวจทั่ว task, routing, stateและ offline tests</div>
+<section><h2>1. Source files</h2><p>ศึกษา <code>wms_task.dart</code>, <code>task_sync_state.dart</code> และ testsก่อนเปิด generated partsเพื่อเห็น intentกับผลลัพธ์แยกกัน</p></section>
+<section><h2>2. Generate</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion<br>dart run build_runner build<br>dart format lib test</code></pre></section>
+<section><h2>3. Verify</h2><pre class="code-vs"><code>flutter analyze --no-pub<br>flutter test --no-pub<br>flutter build web --no-pub</code></pre></section>
+<section><h2>4. Evidence</h2><p>WmsTaskยัง trim/reject empty/unknown status, encode canonical status, มี value equality/copyWith และ consumersเดิม compileโดยไม่เปลี่ยน constructor API</p></section>
+<section><h2>5. Union evidence</h2><p>TaskSyncStateใช้ Dart exhaustive patternsและ case-specific copyWithหลัง narrowing ทำให้เพิ่ม paused/conflictในอนาคตบังคับทบทวนทุก switch</p></section>
+<section><h2>6. Migration checklist</h2><p>ตรึง tests → เพิ่ม packages/parts → refactorทีละ model → generate → review output → analyze/test/build → ตรวจ lockfile → commit source+outputพร้อมกัน</p></section>
+<section><h2>7. Rubric</h2><ul><li>model/immutability 2</li><li>JSON/validation 3</li><li>union/pattern 2</li><li>build/review workflow 2</li><li>tests/security 1</li></ul></section>
+<section><h2>8. Next</h2><div class="success">Part 31 จะเชื่อม Flutterกับความสามารถ native เช่น permissions, camera/scanner, files, lifecycleและ platform channels โดยรักษา typed boundariesที่สร้างใน Partนี้</div></section>

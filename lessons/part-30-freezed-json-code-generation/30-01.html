@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code generation mental model และ trade-offs</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">30-01 · Foundation</span><h1>Code generation mental model และ trade-offs</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<div class="note"><strong>Code generation ลด boilerplate ไม่ได้แทนการออกแบบ:</strong> generator เขียนโค้ดตาม schema/annotations ที่เราให้ ถ้า contract ผิด generated code จะผิดอย่างสม่ำเสมอ</div>
+<section><h2>1. ปัญหาที่แก้</h2><p>model production ต้องมี constructor, equality, hashCode, copyWith, JSON และ union cases การเขียนมือซ้ำมากทำให้ fieldใหม่หลุดจากบาง method</p></section>
+<section><h2>2. Source of truth</h2><p>ไฟล์ annotated Dart เป็น source ส่วน <code>.freezed.dart</code>/<code>.g.dart</code> เป็นผล build ตรวจเข้าใจได้แต่ไม่แก้มือ</p></section>
+<section><h2>3. Compile-time feedback</h2><p>type/nullability/constructor mismatch ถูกจับตอน generate/analyze เร็วกว่ารอ dynamic map พังระหว่าง workflowจริง</p></section>
+<section><h2>4. ต้นทุน</h2><p>เพิ่ม packages, build time, generated diffs, migrationตาม major version และ onboardingเรื่อง annotations จึงไม่จำเป็นกับ classเล็กทุกตัว</p></section>
+<section><h2>5. Build pipeline</h2><pre class="code-vs"><code>annotated source → builders → generated parts<br>→ analyzer/compiler → tests → artifact</code></pre></section>
+<section><h2>6. ไม่ใช่ runtime reflection</h2><p>Freezed/json_serializable สร้าง Dart codeก่อน compile จึง tree-shake/type-checkได้และเปิดอ่าน implementationจริงได้</p></section>
+<section><h2>7. Lab target</h2><p>Partนี้ refactor <code>WmsTask</code> ตัวจริงโดยรักษา strict API validation และเพิ่ม <code>TaskSyncState</code> unionต่อจาก offline lab</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">ระบุให้ได้ว่า field/contractใดเป็น inputของ generator และ behaviorใดยังต้องเขียนเอง เช่น trim, business validation และ conflict policy</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../codegen/task_sync_state.dart';
 import '../features/tasks/task_store.dart';
 import '../features/tasks/wms_task.dart';
 import 'offline_database.dart';
@@ -62,8 +63,9 @@ class OfflineTaskScreen extends StatefulWidget {
 }
 
 class _OfflineTaskScreenState extends State<OfflineTaskScreen> {
-  bool _syncing = false;
-  String? _syncMessage;
+  TaskSyncState _syncState = const TaskSyncState.idle();
+
+  bool get _syncing => _syncState is SyncRunning;
 
   @override
   void initState() {
@@ -96,7 +98,7 @@ class _OfflineTaskScreenState extends State<OfflineTaskScreen> {
         }
         return Column(
           children: [
-            _OutboxStatus(database: widget.database, message: _syncMessage),
+            _OutboxStatus(database: widget.database, syncState: _syncState),
             if (widget.store.error case final error?)
               MaterialBanner(
                 content: Text('กำลังใช้ข้อมูล cache · $error'),
@@ -148,33 +150,47 @@ class _OfflineTaskScreenState extends State<OfflineTaskScreen> {
 
   Future<void> _complete(WmsTask task) async {
     await widget.store.complete(task);
-    if (!mounted) return;
-    setState(() => _syncMessage = '${task.id} อยู่ใน outbox รอซิงก์');
   }
 
   Future<void> _sync() async {
-    setState(() {
-      _syncing = true;
-      _syncMessage = null;
-    });
-    final count = await widget.repository.syncPending();
-    if (!mounted) return;
-    await widget.store.load();
-    if (!mounted) return;
-    setState(() {
-      _syncing = false;
-      _syncMessage = count == 0
-          ? 'ยังไม่มีคำสั่งที่ซิงก์สำเร็จ'
-          : 'ซิงก์สำเร็จ $count คำสั่ง';
-    });
+    setState(() => _syncState = const TaskSyncState.running(remaining: 0));
+    try {
+      final before = await widget.database.commandsToSync();
+      if (!mounted) return;
+      setState(
+        () => _syncState = TaskSyncState.running(remaining: before.length),
+      );
+      await widget.repository.syncPending();
+      if (!mounted) return;
+      await widget.store.load();
+      if (!mounted) return;
+      final pending = await widget.database.commandsToSync();
+      if (!mounted) return;
+      setState(
+        () => _syncState = pending.isEmpty
+            ? const TaskSyncState.idle()
+            : TaskSyncState.failed(
+                commandId: pending.first.commandId,
+                message: pending.first.lastError ?? 'รอลองใหม่',
+              ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _syncState = TaskSyncState.failed(
+          commandId: 'sync-engine',
+          message: error.toString(),
+        ),
+      );
+    }
   }
 }
 
 class _OutboxStatus extends StatelessWidget {
-  const _OutboxStatus({required this.database, required this.message});
+  const _OutboxStatus({required this.database, required this.syncState});
 
   final OfflineDatabase database;
-  final String? message;
+  final TaskSyncState syncState;
 
   @override
   Widget build(BuildContext context) => StreamBuilder<List<PendingCommand>>(
@@ -184,7 +200,7 @@ class _OutboxStatus extends StatelessWidget {
       return ListTile(
         leading: Icon(count == 0 ? Icons.cloud_done : Icons.cloud_upload),
         title: Text('Outbox รอซิงก์ $count คำสั่ง'),
-        subtitle: message == null ? null : Text(message!),
+        subtitle: Text(syncState.label),
       );
     },
   );
