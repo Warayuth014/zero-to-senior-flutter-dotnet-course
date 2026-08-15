@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Trace 1 action จาก UI ถึง .NET</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">25-02 · Real Codebase</span><h1>Trace 1 action จาก UI ถึง .NET</h1><p>Part 25: Onboarding &amp; Code Reading Playbook</p></header>
 <div class="note"><strong>Trace rule:</strong> เริ่มจาก user intentหนึ่งเหตุการณ์แล้วตามทั้งไปและกลับ: UI event → state command → HTTP → .NET → response/event → state commit → rebuild</div>
 <section><h2>1. ตั้ง trace question</h2><p>ใช้คำถามเฉพาะ เช่น “กด Complete TASK-001แล้วอะไรลบ card?” ไม่ใช้ “ระบบ taskทำงานอย่างไร” ระบุ input, expected server mutationและ observable UI outcome</p></section>
 <section><h2>2. หา UI event</h2><pre class="code-vs"><code>rg -n "เสร็จงาน|onPressed|onSubmitted|complete\(" lib</code></pre><p>จาก widgetอ่าน callback closureและ guard busy/validation อย่าหยุดที่ navigationหรือ helperแรก</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Trace responseกลับ</h2><p>JSON→DTO/domain parser→repository result/exception→store state→notify/setState→widget branch หาก SignalR/pollingแก้ snapshotภายหลังให้รวมใน diagramด้วย</p></section>
 <section><h2>7. Prove with evidence</h2><p>เพิ่ม breakpoint/log correlation IDหรือ fake testที่ assert request+state transition ห้าม log token/password เขียน sequenceสั้นพร้อม failure path 401/409/timeoutและใคร reconcile</p></section>
 <section><h2>8. Trace template</h2><div class="success">Intent / UI symbol / State owner / Repository / HTTP contract / .NET handler / Transaction authority / Response mapping / UI rebuild / Failure+race / Tests ให้กรอกครบก่อนแก้ behavior</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

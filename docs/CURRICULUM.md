@@ -78,6 +78,6 @@
 | 22 wms_absolute_mobile: Task, Dispatch, AGV & Picking | Authored + verified | 17/17 |
 | 23 Compare, Refactor & Senior Decisions | Authored + verified | 14/14 |
 | 24 Final Project: Production-style Mobile WMS | Authored + verified | 18/18 |
-| 25 | Scaffold/roadmap | 0/13 |
+| 25 Onboarding & Code Reading Playbook | Authored + verified | 13/13 |
 
-คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา
+คอร์สมี 391 lessons และเขียนเนื้อหาเชิงลึกครบทุกบทแล้ว โดย `authoredCount` ต้องเท่ากับ `lessonCount` และ verifier ต้องยืนยันว่าไม่มี scaffold เหลือ
