@@ -1,0 +1,9 @@
+<div class="note"><strong>StatefulShellRoute:</strong> แต่ละ branchมี Navigatorของตนเอง จึงรักษา stack/scroll/stateเมื่อตัดสลับ Home, TasksและSettingsเหมือนแอป production</div>
+<section><h2>1. indexedStack</h2><p>constructorสำเร็จรูปเก็บ branch widgetsใน IndexedStackและแสดง branchปัจจุบัน เหมาะ bottom navigationมาตรฐาน</p></section>
+<section><h2>2. Branch keys</h2><p>GlobalKeyแยก navigatorช่วย debug/parentNavigatorKey/restoration แต่สร้างครั้งเดียว ห้ามสร้างใหม่ใน build</p></section>
+<section><h2>3. navigationShell</h2><p>Shellวาง objectนี้เป็น bodyและอ่าน <code>currentIndex</code> จากนั้นเรียก <code>goBranch(index)</code> แทน context.go pathแบบ hard-code</p></section>
+<section><h2>4. Tap tabเดิม</h2><pre class="code-vs"><code>navigationShell.goBranch(index,<br>&nbsp;&nbsp;initialLocation: index == navigationShell.currentIndex);</code></pre><p>แตะแท็บเดิมกลับ root branchตาม patternที่กำหนด</p></section>
+<section><h2>5. Preserve stack</h2><p>เปิด TASK-001→Home→Tasksแล้วกลับ detailเดิม Routing testพิสูจน์ behaviorนี้ ไม่ใช่แค่คาดจาก IndexedStack</p></section>
+<section><h2>6. Memory trade-off</h2><p>หลาย branchเก็บ state/widgetมากขึ้น ใช้ preload/lazyอย่างเข้าใจและอย่าเริ่ม pollingทุก branchโดยไม่ดู visibility/lifecycle</p></section>
+<section><h2>7. Realtime subscriptions</h2><p>routeยัง mountedแต่ไม่ visible อาจยังรับ events Controllerควรมี policy pause/reconcileเมื่อกลับมา ไม่พึ่ง disposeอย่างเดียว</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">แยก “รักษา navigation stack” จาก “รักษา fresh data” StatefulShellRouteแก้เรื่องแรก ส่วน store/repository lifecycleต้องแก้เรื่องสอง</div></section>

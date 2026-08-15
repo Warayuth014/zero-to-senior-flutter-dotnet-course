@@ -1,0 +1,9 @@
+<div class="note"><strong>Query parameter:</strong> เหมาะ optional view state เช่น filter/search/sort/sourceที่เปลี่ยนแล้ว resourceหลักยังเดิมและควร share/bookmarkได้</div>
+<section><h2>1. Lab filter</h2><p><code>/tasks?status=waiting</code> ทำให้เปิดรายการที่ filterแล้วได้ทันที FilterChipใช้ goNamedแก้ queryแทน local stateลับ</p></section>
+<section><h2>2. Parse</h2><p>อ่าน <code>state.uri.queryParameters</code> แล้ว validate enum/range/default Unknown valueควร fallbackหรือแสดง invalid-linkอย่างตั้งใจ</p></section>
+<section><h2>3. Encoding</h2><p>ใช้ <code>Uri</code>/queryParametersเพื่อ encode space, Thaiและreserved characters ไม่ต่อ <code>?q=$text</code> เอง</p></section>
+<section><h2>4. Canonical defaults</h2><p>ถ้า status=allเท่ากับไม่มี query ให้ canonical URLตัด defaultออก ลด duplicate URLsและทำ shareง่าย</p></section>
+<section><h2>5. Multiple values</h2><p>ใช้ queryParametersAllเมื่อ filterหนึ่ง keyมีหลายค่าและกำหนด ordering/canonical formก่อนสร้าง cache key</p></section>
+<section><h2>6. Sensitive data</h2><p>ห้ามใส่ token/password/PIIใน queryเพราะปรากฏใน history, logs, screenshotsและreferrer ใช้ secure session/one-time codeตาม protocol</p></section>
+<section><h2>7. Update history</h2><p>searchทุก keystrokeอาจใช้ replace/debounceไม่ให้ browser backต้องย้อนตัวอักษรทีละตัว ส่วน filter explicitอาจใช้ goเพิ่ม historyได้</p></section>
+<section><h2>8. Test</h2><div class="success">Routing testเปิด <code>/tasks?status=waiting</code> แล้วเห็น TASK-001แต่ไม่เห็น working task เป็นหลักฐานว่า URLและ UI stateตรงกัน</div></section>

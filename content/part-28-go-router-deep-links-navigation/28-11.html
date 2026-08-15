@@ -1,0 +1,9 @@
+<div class="note"><strong>Root navigator:</strong> scannerเป็น child URLของ taskแต่ใช้ <code>parentNavigatorKey: root</code> จึงคลุม app bar/navigation barและ pop resultกลับ branch detailได้</div>
+<section><h2>1. Visual requirement</h2><p>กล้อง/scannerต้องใช้พื้นที่เต็มและไม่ให้ผู้ใช้สลับแท็บกลาง scan Root navigatorเหมาะกว่า branch navigator</p></section>
+<section><h2>2. Route config</h2><pre class="code-vs"><code>GoRoute(path: 'scan',<br>&nbsp;&nbsp;parentNavigatorKey: rootKey,<br>&nbsp;&nbsp;name: 'taskScan', ...)</code></pre></section>
+<section><h2>3. Push result</h2><p>Detail await <code>pushNamed&lt;String&gt;</code> Scanner <code>pop(result)</code> แล้ว callerตรวจ mountedก่อน SnackBar/เปลี่ยน state</p></section>
+<section><h2>4. Deep link scanner</h2><p>ต้องตัดสินว่า URL scannerเปิดตรงได้หรือควร redirect detailก่อน permission/context หากเปิดตรงต้องโหลด taskและจัด permissionเอง</p></section>
+<section><h2>5. Hardware lifecycle</h2><p>Camera/controllerเริ่มเมื่อ route activeและ disposeเมื่อ pop App lifecycle pause/resumeต้องหยุด resource Route packageไม่จัดการ hardwareให้</p></section>
+<section><h2>6. Cancel</h2><p>system backคืน null Callerต้องไม่ตีความเป็น scanว่างหรือส่ง API ควรแยก cancel, valid resultและerrorชัด</p></section>
+<section><h2>7. Test</h2><p>testตรวจ scannerเปิดแล้ว shell labelsหาย จากนั้นจำลอง scanและเห็น resultบน detail เป็นหลักฐาน navigator placement/result contract</p></section>
+<section><h2>8. Rule</h2><div class="success">ใช้ root navigatorตาม visual/lifecycle requirement ไม่ใช่เพื่อแก้ contextผิดแบบสุ่ม และเก็บ route hierarchyที่สื่อ domainเดิม</div></section>

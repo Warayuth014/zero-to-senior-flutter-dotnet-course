@@ -1,0 +1,9 @@
+<div class="note"><strong>Platform deep links:</strong> Route treeทำให้แอป parse URLได้ แต่ Android/iOSยังต้องพิสูจน์ความเป็นเจ้าของ domainและ OS configuration ส่วน web serverต้อง fallbackไป index.html</div>
+<section><h2>1. Web</h2><p>browserส่ง pathไป serverโดยตรง Production hostingต้อง rewrite unknown app pathsไป Flutter <code>index.html</code> แต่ asset/API pathsต้องไม่ถูก rewriteผิด</p></section>
+<section><h2>2. Android App Links</h2><p>กำหนด intent-filter scheme/host/pathและ host <code>assetlinks.json</code> ที่จับ package name/signing certificate fingerprint ทดสอบ release signatureด้วย adb</p></section>
+<section><h2>3. iOS Universal Links</h2><p>เพิ่ม Associated Domains entitlementและ host apple-app-site-associationที่ผูก Team/App ID ทดสอบบน deviceจริงเพราะ simulator/cacheต่างได้</p></section>
+<section><h2>4. Custom scheme</h2><p>เหมาะ fallback/internal integrationแต่ domain ownership/UX/securityด้อยกว่า verified HTTPS linksและอาจชนแอปอื่น</p></section>
+<section><h2>5. Cold vs warm</h2><p>ทดสอบ appปิดสนิท, backgroundและforegroundอยู่คนละ route Incoming linkต้องสร้าง/แทน stackตาม product contractโดยไม่ duplicate screen</p></section>
+<section><h2>6. Version/install</h2><p>asset associationถูก cacheและ certificateต่าง debug/release วาง runbookตรวจ domainไฟล์, signingและOS logs ไม่ debug Flutterอย่างเดียว</p></section>
+<section><h2>7. Security</h2><p>validate parameters, auth/authorizationและ one-time actions Deep linkเป็น untrusted external inputเหมือน request URL</p></section>
+<section><h2>8. Evidence</h2><div class="success">เก็บ adb/xcrun/browser commandsและผล cold/warm linksใน release checklist Screenshotหน้าเดียวไม่พิสูจน์ associationหรือ history behavior</div></section>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navigator เทียบกับ Router mental model</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">28-01 · Flutter UI</span><h1>Navigator เทียบกับ Router mental model</h1><p>Part 28: go_router, Router &amp; Deep Links</p></header>
+<div class="note"><strong>Navigation mental model:</strong> Navigatorจัด stackของ Route ส่วน Routerแปลงข้อมูลตำแหน่ง/URLและ app stateให้เป็น page stack ที่สอดคล้องกัน ทั้งสองทำงานร่วมกัน ไม่ใช่เลือกได้เพียงอย่างเดียว</div>
+<section><h2>1. Navigator 1.x</h2><p><code>push(MaterialPageRoute)</code> เหมาะ flowเฉพาะจุดและ dialog แต่เส้นทางไม่ได้เป็นข้อมูลกลาง จึง restore/deep link/browser historyยากเมื่อแอปมีหลาย stack</p></section>
+<section><h2>2. Router API</h2><p>RouterInformationParserอ่าน URL, RouterDelegateสร้าง pagesและ Navigator render stack Package <code>go_router</code> ครอบ plumbingนี้ด้วย route treeและ URL matching</p></section>
+<section><h2>3. Page-backed กับ pageless</h2><p>GoRouteสร้าง page-backed routesที่ deep-linkได้ ส่วน dialog/bottom sheetจาก imperative APIเป็น pagelessและอาจถูกถอดเมื่อ pageใต้ถูกแทนด้วย deep linkใหม่</p></section>
+<section><h2>4. URL คือ state</h2><p><code>/tasks/TASK-001?source=email</code> บอก resourceและ contextที่ serialize/share/restoreได้ ต่างจาก objectใน memoryที่หายเมื่อ processตาย</p></section>
+<section><h2>5. ใช้ Navigator ตอนไหน</h2><p>modalชั่วคราว, pickerหรือ flowที่ไม่ควร bookmarkยังใช้ push/showDialogได้ ส่วนหน้าหลัก/detail/searchที่ผู้ใช้เปิดตรงควรมี URL contract</p></section>
+<section><h2>6. หลาย Navigator</h2><p>bottom navigationมักต้อง stackแยกต่อแท็บ StatefulShellRouteสร้าง branch Navigatorsและรักษา stateเมื่อสลับแท็บ</p></section>
+<section><h2>7. Lab trace</h2><pre class="code-vs"><code>incoming URI → GoRouter redirect/match<br>→ StatefulShellRoute branch → Navigator pages<br>→ RoutingTaskDetailPage</code></pre></section>
+<section><h2>8. Checkpoint</h2><div class="success">จำแนกทุกหน้าของโปรเจกต์ว่าเป็น shareable pageหรือ transient modal ถ้าตอบไม่ได้ route treeจะสะท้อน widget treeแบบไร้ product contract</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

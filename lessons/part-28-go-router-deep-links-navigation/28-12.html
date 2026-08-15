@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auth redirect refreshListenable และ intended location</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">28-12 · Flutter UI</span><h1>Auth redirect refreshListenable และ intended location</h1><p>Part 28: go_router, Router &amp; Deep Links</p></header>
+<div class="note"><strong>Auth redirect:</strong> route guardต้อง reactiveต่อ session, เก็บ intended internal URLอย่างปลอดภัยและไม่แทน authorizationฝั่ง API</div>
+<section><h2>1. refreshListenable</h2><p>GoRouterฟัง RoutingSession เมื่อ signIn/signOut notify routerประเมิน redirectใหม่โดยไม่สร้าง router instance</p></section>
+<section><h2>2. Unauthenticated</h2><p>ถ้า locationไม่ใช่ loginให้สร้าง <code>/login?from=encoded-current-uri</code> เพื่อรักษา path/queryของ deep link</p></section>
+<section><h2>3. After login</h2><p>เมื่อ authenticatedและอยู่ login routerคืน intended locationหรือ /home Testเปิด email linkก่อน loginแล้วได้ Task detail/sourceเดิมหลัง signIn</p></section>
+<section><h2>4. Open redirect</h2><p><code>safeLocalLocation</code> ปฏิเสธ scheme, authority, <code>//host</code> และ login loop ห้าม redirectไป URLจาก queryโดยไม่ validateเพราะเป็น phishing/open redirect</p></section>
+<section><h2>5. Redirect loop</h2><p>loginต้อง return nullเมื่อยังไม่ authและ from=/loginต้องถูกตัดออก กำหนด redirectLimit/diagnosticsและ testsกรณี loop</p></section>
+<section><h2>6. Startup unknown</h2><p>production session bootstrapมี unknown/loading state อย่า redirect loginก่อนอ่าน secure tokenเสร็จเพราะหน้ากระพริบหรือ intended URLหาย ใช้ splash/bootstrap route</p></section>
+<section><h2>7. Permission</h2><p>route guardแสดง access deniedตาม roleได้แต่ APIยัง enforceทุก endpointและ deep linkที่ไม่มีสิทธิ์ต้องไม่รั่ว resource detail</p></section>
+<section><h2>8. Exercise</h2><div class="success">เพิ่ม session state unknown/anonymous/authenticatedและ test cold-start protected deep linkโดย secure sessionตอบช้า ต้องไม่แสดง protected contentหรือทิ้ง intended URI</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

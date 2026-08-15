@@ -47,3 +47,13 @@ flutter run --project-directory .\flutter_wms_companion -t lib/state_patterns_ma
 ```
 
 รุ่นที่ lab resolve และทดสอบแล้วคือ `provider 6.1.5+1`, `flutter_riverpod 3.3.2` และ `flutter_bloc 9.1.1` ให้ศึกษา ownership/rebuild/test seam จากโค้ดก่อนตัดสินใจเลือก package ไม่ควรติดตั้งทั้งสามใน production app โดยไม่มีเหตุผล
+
+## Routing & Deep Links (Part 28)
+
+เปิด entrypoint `go_router 17.5.0` ซึ่งมี login redirect, intended URL, nested branch navigation และ full-screen scanner:
+
+```powershell
+flutter run --project-directory .\flutter_wms_companion -t lib/routing_main.dart --dart-define=WMS_API_BASE_URL=http://localhost:5080
+```
+
+เริ่มแบบ login แล้วลอง deep link ใน Flutter Web เช่น `/tasks/TASK-001?source=email` หรือกำหนด `--dart-define=ROUTING_AUTHENTICATED=true` เพื่อข้ามหน้า login ใน lab เท่านั้น การเปิด URL ตรงบน web production ต้องตั้งค่า server rewrite ไป `index.html` และ mobile ต้องตั้ง Android App Links/iOS Universal Links เพิ่ม

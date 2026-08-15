@@ -1,0 +1,9 @@
+<div class="note"><strong>Composition:</strong> <code>MaterialApp.router</code> รับ routerConfig ส่วน GoRouterเป็น resourceที่มี listener/lifecycle จึงสร้างครั้งเดียวและ disposeเมื่อ app scopeจบ</div>
+<section><h2>1. Router constructor</h2><p><code>createRoutingLabRouter</code> รับ session, repositoryและ initialLocationอย่างเปิดเผย Route buildersจึงใช้ dependenciesจาก compositionแทน singleton</p></section>
+<section><h2>2. Stateful app owner</h2><p><code>RoutingLabApp</code> สร้าง GoRouterใน <code>initState</code> ไม่สร้างใน build มิฉะนั้น navigation stackอาจ resetทุก rebuild</p></section>
+<section><h2>3. Dispose</h2><p>Stateเรียก <code>router.dispose()</code> เพื่อลบ listeners โดยเฉพาะ refreshListenableและ browser/platform route information</p></section>
+<section><h2>4. MaterialApp.router</h2><pre class="code-vs"><code>MaterialApp.router(<br>&nbsp;&nbsp;routerConfig: router,<br>&nbsp;&nbsp;theme: theme,<br>)</code></pre><p>ไม่กำหนด home/routes/onGenerateRouteซ้ำเพราะ routerConfigเป็น source of truth</p></section>
+<section><h2>5. initialLocation</h2><p>ใช้สำหรับ lab/test/cold startปกติ แต่ incoming platform deep linkอาจมีสิทธิ์เหนือค่าเริ่มต้น อย่า hard-code homeจนกลืน deep link</p></section>
+<section><h2>6. Version pin</h2><p>Lab resolve <code>go_router 17.5.0</code> และ commit lockfile APIนี้เปลี่ยน majorหลายครั้งจึงอ่าน migration guideก่อน upgrade</p></section>
+<section><h2>7. Diagnostics</h2><p>เปิด <code>debugLogDiagnostics</code> ชั่วคราวเมื่อ debug route matching แต่ไม่พึ่ง log verboseใน productionและไม่ log queryที่มี secret</p></section>
+<section><h2>8. Review</h2><div class="success">Routerควรสร้างที่ composition rootและ route buildersควรบาง หาก builderยิง API/ประกอบ business stateมากให้แยก page/controllerออก</div></section>

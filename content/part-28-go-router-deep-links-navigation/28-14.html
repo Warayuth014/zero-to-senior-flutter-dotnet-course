@@ -1,0 +1,9 @@
+<div class="note"><strong>Back semantics:</strong> browser back, Android back, iOS gesture, branch stackและ unsaved workต้องมี behaviorสอดคล้อง ไม่ใช้ dialogดักทุก popโดยไม่เข้าใจ page-backed routes</div>
+<section><h2>1. canPop</h2><p>ตรวจ navigator/router stackก่อนแสดง custom back ปุ่ม rootควรออก/ส่ง backgroundตาม platformไม่วนไปหน้า arbitrary</p></section>
+<section><h2>2. PopScope</h2><p>ใช้สำหรับ formมี unsaved changesพร้อม <code>canPop</code>/callbackรุ่นปัจจุบัน แต่ page-backed routeเปลี่ยนจาก deep linkอาจถอด pageless routesด้วย ต้องทดสอบ package behavior</p></section>
+<section><h2>3. Confirm discard</h2><p>แยก navigation intentจากการตัดสินใจบันทึก draft ห้าม call popซ้ำจน loopและรองรับ system gestureที่เริ่มก่อน callbackบาง platform</p></section>
+<section><h2>4. Browser back</h2><p>ถ้า filterใช้ goทุก keystroke historyจะรก เลือก replace/debounceตาม UXและทดสอบ forwardด้วย</p></section>
+<section><h2>5. Branch back</h2><p>เมื่อ task detailอยู่ branch backควรกลับ task listก่อนออก app สลับ branchแล้วกลับมาต้อง preserve stackตาม StatefulShellRoute contract</p></section>
+<section><h2>6. Pageless cleanup</h2><p>dialogบน pageอาจหายเมื่อ incoming URLแทน page-backed stack นี่ถูกต้องได้แต่ side effects/listenersต้องไม่ค้าง</p></section>
+<section><h2>7. Scanner cancel</h2><p>backจาก scannerคืน nullและ detailยังอยู่ ไม่ควร logout/กลับ homeเพราะ scannerอยู่ root navigator</p></section>
+<section><h2>8. Test matrix</h2><div class="success">เขียนตาราง platform×location×operation×expected URL/visible page/data loss แล้วทดสอบ critical cellsจริง</div></section>
