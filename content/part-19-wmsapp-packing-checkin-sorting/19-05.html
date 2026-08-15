@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Auto-finalize packing</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">19-05 · Real Codebase</span><h1>Auto-finalize packing</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
 <div class="note"><strong>ไม่มีปุ่ม finalize แยก:</strong> backend auto-finalize pack เมื่อ scan part สุดท้ายทำให้ทุก detail DONE และ response เดียวบอก tracking กับการ release pallet</div>
 <section><h2>1. Batch local confirm</h2><p><code>_confirmCollectedPack</code> สร้าง readyParts: serial ต้องครบ remaining, non-serial ต้องมี qty&gt;0 แล้วเรียก <code>_confirmPart</code> ทีละรายการตามลำดับ</p></section>
 <section><h2>2. Sequential partial commit</h2><p>หาก part แรกสำเร็จแต่ part ที่สอง fail ธุรกรรมแรกถูก commit แล้ว นี่ไม่ใช่ atomic batch UI ต้องเก็บผลใหม่และแจ้งว่าอะไรสำเร็จ ไม่เสนอ retry ทั้งชุดโดยไม่ตรวจ state</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Duplicate finalize</h2><p>double tap/timeout อาจยิง scan ชิ้นสุดท้ายซ้ำ Endpoint ต้อง idempotent ด้วย operation key และ unique constraint; client ควร disable command และ query pack เมื่อผลไม่แน่นอน</p></section>
 <section><h2>7. Pack vs pallet completion</h2><p>pack DONE ไม่เท่ากับ pallet released เสมอ เพราะ pallet มีหลาย packs UI/metrics ต้องแยกสอง concept ไม่ใช้ status เดียวตัดสินนำ palletออก</p></section>
 <section><h2>8. Finalize tests</h2><div class="success">ทดสอบ one/multi-order pack, finalize ที่ part สุดท้าย, sequential second failure, duplicate request, tracking missing, pallet released true/false และ server/client clock ต่างกัน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sorting state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">19-10 · Real Codebase</span><h1>Sorting state machine</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
 <div class="note"><strong>Sorting dashboard เป็น state machine 10 stations:</strong> tap behavior เปลี่ยนตาม AVAILABLE/BUSY/DISABLED และ server events เปลี่ยน counters, capacity, queue และ assignment แบบ realtime</div>
 <section><h2>1. Dashboard state</h2><p>state มี stations list, completedCount, queuedCount และ loading โดย <code>getSortingDashboard</code> เป็น snapshot เริ่มต้น/refresh ส่วน SignalR เร่งการอัปเดตระหว่างเปิดหน้า</p></section>
 <section><h2>2. Station transitions</h2><pre class="code-vs"><code>AVAILABLE → BUSY → FULL/BUSY → clear → AVAILABLE
@@ -15,5 +9,3 @@ queued batch → assigned เมื่อ station ว่าง</code></pre><p>FU
 <section><h2>6. Clear</h2><p>clear station ยืนยันส่ง pallet ออกจาก station แล้ว POST clear เมื่อสำเร็จแจ้ง parent reloadและปิด sheet ต้องตรวจ station full/ready และ concurrent assignment ใน backend</p></section>
 <section><h2>7. Realtime reconciliation</h2><p>CounterUpdated patch station ใน listทันที; full/cleared/toggled/batchAssigned reloadทั้ง dashboard หาก responseเก่ากลับหลัง eventใหม่อาจทับ state จึงต้องมี generation/version guard</p></section>
 <section><h2>8. FSM tests</h2><div class="success">ทดสอบทุก status/tap, full capacity, toggle/clear conflict, eventผิดลำดับ/ซ้ำ, stationไม่พบ, queued→assigned และ REST stale response โดย stateสุดท้ายต้องตรง server versionล่าสุด</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

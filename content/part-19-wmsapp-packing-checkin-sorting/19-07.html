@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Check-in preview vs commit</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">19-07 · Real Codebase</span><h1>Check-in preview vs commit</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
 <div class="note"><strong>Preview แยก read decision จาก commit:</strong> scan Packing ID ครั้งแรกยังไม่เขียน DB แต่คืน slot/destination/items/progress เพื่อให้ operator ตรวจ ก่อนกด Check-IN จริง</div>
 <section><h2>1. Preview request</h2><pre class="code-vs"><code>POST /checkin/preview
 { "packingId": packingId }</code></pre><p>แม้ใช้ POST endpoint นี้ประกาศว่าไม่มี side effect จึงสามารถเรียกซ้ำเพื่อ refresh decision ได้</p></section>
@@ -16,5 +10,3 @@
 <section><h2>6. Preview race</h2><p>ระหว่าง preview กับ commit pack อาจถูกอีกเครื่อง check-in หรือ slot เปลี่ยน Backend ต้อง validate/assign atomically และตอบผล authoritative; client มี local duplicate guardแต่ห้ามพึ่ง guard นี้</p></section>
 <section><h2>7. Pending state</h2><p><code>_pendingPack</code> คือ draft พร้อมปุ่มยืนยัน; isAlreadyCheckedIn ปิดปุ่ม การสแกน carton ใหม่ขณะมี pending อาจแทน draft เดิม จึงควร confirm discard หรือ serialize workflow</p></section>
 <section><h2>8. Preview/commit tests</h2><div class="success">ทดสอบ new/existing slot, already checked-in, destination null, preview stale, two-device race, timeout after commit และ scan ใหม่ทับ pending โดย carton ต้องถูกบันทึกไม่เกินหนึ่งครั้ง</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

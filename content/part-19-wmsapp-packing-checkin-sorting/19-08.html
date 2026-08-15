@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Slot detail, complete และ dispatch</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">19-08 · Real Codebase</span><h1>Slot detail, complete และ dispatch</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
 <div class="note"><strong>Ready-to-complete เปิด command chain:</strong> scan carton สุดท้ายแล้ว UI เรียก complete ต่อ dispatch อัตโนมัติ แต่แต่ละขั้นอาจ fail แยกกันและต้องหยุด chain อย่างถูกต้อง</div>
 <section><h2>1. Slot detail</h2><p><code>GET /checkin/slot/{slotId}</code> คืน status, cartons, customerOrderId และ pipeline progress Slot detail เป็น authoritative snapshot หลัง commit</p></section>
 <section><h2>2. Carton records</h2><p>CheckInCartonItem มี packingId, trackingId, status, scannedAt, item/order counts รายการถูกแสดงซ้อนกันเพื่อเห็นสิ่งที่ check-in แล้วและเปิด delivery note mock</p></section>
@@ -15,5 +9,3 @@
 <section><h2>6. Current chain bug</h2><p><code>_autoCompleteSlot</code> แสดง error แต่ไม่คืน success/failure จากนั้น caller ยังเรียก dispatch ต่อ แม้ complete fail เช่นเดียวกับ dispatch failที่ workflow ยัง clear pending ควรให้แต่ละ commandคืน typed resultและหยุด chainเมื่อไม่สำเร็จ</p></section>
 <section><h2>7. Orchestration options</h2><p>ถ้า complete+dispatch ต้องสำเร็จร่วมกันให้ backend มี endpoint orchestration เดียว; ถ้าเป็นสองสถานะธุรกิจจริง UI ต้องแสดง READY ที่ retry dispatch ได้โดยไม่ complete ซ้ำ</p></section>
 <section><h2>8. Chain tests</h2><div class="success">ทดสอบ scan not-ready, complete fail, dispatch failหลัง complete, timeoutแต่ละขั้น, retryจาก READY และ duplicate commands โดย stateสุดท้ายห้าม SHIPPED เมื่อ completeไม่สำเร็จ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

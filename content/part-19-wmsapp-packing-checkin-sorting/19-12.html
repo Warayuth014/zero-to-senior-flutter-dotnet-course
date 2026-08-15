@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sorting SignalR service</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">19-12 · Real Codebase</span><h1>Sorting SignalR service</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
 <div class="note"><strong>Sorting SignalR เป็น invalidation + fast patch:</strong> มี 6 event channels แต่หน้าหลัก subscribe เพียงบางรายการ ดังนั้น event coverage ต้องตรวจคู่กับ dashboard counters</div>
 <section><h2>1. Hub lifecycle</h2><p><code>SortingSignalRService</code> เป็น singleton/ref-count ต่อ <code>/hubs/sorting</code> ด้วย automatic reconnect connect/disconnect ทำงานเหมือน Putaway hub</p></section>
 <section><h2>2. Event catalog</h2><pre class="code-vs"><code>StationCounterUpdated  StationFull
@@ -15,5 +9,3 @@ BatchQueued            BatchAssigned</code></pre><p>payload ถูก parse เ�
 <section><h2>6. Reconnect gaps</h2><p>connect exception ถูก log แต่ UIไม่รู้, automatic reconnectไม่มี refresh callback และไม่มี event replay ควร expose connection state แล้ว reload dashboardเมื่อ reconnected พร้อม periodic reconciliation</p></section>
 <section><h2>7. Event schema</h2><p>Map casts เช่น stationId as int อาจ failถ้า JSON decoderให้ num/string และ malformed eventเงียบ ควรมี typed event parser, schema version, correlation ID และ telemetry ของ rejected payload</p></section>
 <section><h2>8. Realtime tests</h2><div class="success">fake hub ทดสอบ BatchQueued counter, queued→assigned, duplicate/out-of-order, detail+main listeners, reconnect refresh, two screens ref-count และ eventระหว่าง REST loadโดย versionล่าสุดต้องชนะ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
