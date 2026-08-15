@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ApiService singleton และ base URL discovery</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">16-06 · Real Codebase</span><h1>ApiService singleton และ base URL discovery</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
 <div class="note"><strong>ApiService เป็น transport hub:</strong> factoryทุกครั้งคืน singletonเดียว มี private GET/POST/upload, shared headers, base URL discovery/cache และ JSON/error normalization ส่วน domain methodsอยู่ใน part extensions</div>
 <section><h2>1. Singleton</h2><pre class="code-vs"><code>static final ApiService _instance = ApiService._internal();
 factory ApiService() =&gt; _instance;
@@ -20,5 +14,3 @@ non-2xx      → error/detail/statusCode</code></pre><p>cast Mapอาจ throw�
 <section><h2>6. ApiResult</h2><p>เก็บ success/data/error/statusCodeและ helper <code>isNotFound</code> ลด exceptionใน UI แต่ success constructorfix statusCode=200แม้ responseจริงเป็น 201/204 จึงสูญเสีย metadataบางส่วน</p></section>
 <section><h2>7. URL helper risk</h2><p><code>resolveServerUrl</code>และ image helperใช้ <code>replaceAll('/api','')</code> ซึ่งเปราะหาก path/hostnameมีคำนี้ ควรเก็บ origin/API base/media baseเป็น Uri typedแทนตัด string</p></section>
 <section><h2>8. Refactor order</h2><div class="success">1) inject http.Client/base resolver 2) typed failures/status 3) auth/correlation 4) Uri composition 5) repository per domain 6) cancellation/idempotency โดย characterization testsล็อก request/responseเดิมก่อน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solution map ของ wmsapp</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">16-01 · Real Codebase</span><h1>Solution map ของ wmsapp</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
 <div class="note"><strong>เป้าหมาย Part นี้:</strong> อ่าน wmsapp แบบมีแผนที่ ไม่เริ่มจาก screen ใหญ่สุ่ม ๆ เราจะตามเส้น <code>main → HomeScreen → domain screen → ApiService extension → model → .NET</code> แล้วรู้ว่า state/side effect อยู่ชั้นใด</div>
 <section><h2>1. ภาพรวมขนาดจริง</h2><table><thead><tr><th>พื้นที่</th><th>ไฟล์ Dart</th><th>ประมาณบรรทัด</th></tr></thead><tbody><tr><td>screens</td><td>80</td><td>18,271</td></tr><tr><td>models</td><td>11</td><td>1,507</td></tr><tr><td>services</td><td>15</td><td>1,108</td></tr><tr><td>widgets/theme</td><td>3</td><td>1,033</td></tr></tbody></table><p>น้ำหนักอยู่ที่ screens จึงพบ business state และ API orchestration ใน StatefulWidget จำนวนมาก</p></section>
 <section><h2>2. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/
@@ -25,5 +19,3 @@
 <section><h2>6. State ownership ปัจจุบัน</h2><p>local controllers/loading/selected entity มักอยู่ใน State ของ screen, sessionอยู่ SharedPreferences + HomeScreen fields, base URLอยู่ prefs + static cache, realtime connectionอยู่ service singleton จึงต้องตาม lifecycleหลายตำแหน่งเมื่อ debug race/logout/switch server</p></section>
 <section><h2>7. Strengths และ risks</h2><p>ข้อดีคือชื่อโดเมนชัด, API/model แยกไฟล์, widget บาง flow ถูกแยกย่อยแล้ว ข้อเสี่ยงคือ singletonซ่อน dependency, mock login, giant screens, dynamic JSON และ testหลักของ wmsappยังไม่มี safety net</p></section>
 <section><h2>8. วิธีอ่าน</h2><div class="success">เริ่ม composition → เลือกหนึ่ง user action → จด stateก่อน/หลัง → ตาม methodถึง endpoint → เปิด DTO → ไล่ error/lifecycle → เขียน characterization test แล้วจึง refactor ห้ามอ่านทุกไฟล์เรียง alphabetically</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

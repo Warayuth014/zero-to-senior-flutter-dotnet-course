@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SettingsScreen + ApiConfigService</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">16-05 · Real Codebase</span><h1>SettingsScreen + ApiConfigService</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
 <div class="note"><strong>Connection flow มีสามไฟล์:</strong> <code>SettingsScreen</code>ดูแล form/UX, <code>ApiConfigService</code>เก็บ host/port/protocol และ <code>connection_probe.dart</code>ยิง <code>/api/health</code>เพื่อยืนยันว่าเป็น WMS API</div>
 <section><h2>1. Stored record</h2><pre class="code-vs"><code>({String? host, int port, String protocol})
 defaultPort = 5000
@@ -20,5 +14,3 @@ _probeActive();</code></pre><p>ถ้าลืม reset singletonยังใช
 <section><h2>6. Clear behavior</h2><p>clearสาม config keys → reset cache → resolverกลับ emulator/localhost → probeใหม่ ต่างจาก <code>AuthSessionService.clearSession()</code> ที่ clear prefsทั้งก้อนและอาจทำผลเดียวกันโดยไม่ตั้งใจ</p></section>
 <section><h2>7. Probe semantics</h2><p>validate URI, GET healthพร้อม timeout, ตรวจ status 2xxและ payload signature แยก timeout, TLS handshake, socketและ client error Probe successหมายถึง endpointตอบเป็น WMS ไม่ได้พิสูจน์ login/permissionทุกโดเมน</p></section>
 <section><h2>8. Refactor seam</h2><div class="success">ใช้ typed ConnectionProfile + repository, inject HTTP client/resolver, commit profileแบบ atomicหลัง probe, production policyบังคับ HTTPS และให้ endpoint switchหยุด session/SignalR/in-flight requestsอย่างชัดเจน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
