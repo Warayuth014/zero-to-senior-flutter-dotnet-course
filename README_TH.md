@@ -48,7 +48,8 @@
 - Part 21: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ครอบคลุม WarehouseStore/repository, receiving state machine, inventory mapping/search และ cycle count contract/modes/tests ของ wms_absolute_mobile
 - Part 22: เขียนเนื้อหาเฉพาะบทครบ 17/17 บท ครอบคลุม task models/API, manual scans, AGV/Forklift dispatch, withdraw, C1/C2 picking, C3 Store In, history, polling races และ tests ของ wms_absolute_mobile
 - Part 23: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท เปรียบเทียบ architecture สองโปรเจกต์ ครอบคลุม state/API/DI/model trade-offs, giant screen/God Store, race/security, test-first migration, review checklist และ ADR
-- Part 24–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 24: เขียนเนื้อหาเฉพาะบทครบ 18/18 บท เป็น Final Project แบบ production-style ตั้งแต่ scope/architecture, shell/config/auth, receiving/inventory/cycle count/task, SignalR/upload ไปจน tests, Android release และ production readiness
+- Part 25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 
