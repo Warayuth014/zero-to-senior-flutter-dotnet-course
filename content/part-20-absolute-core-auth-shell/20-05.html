@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AuthRepository และ login endpoint</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-05 · Real Codebase</span><h1>AuthRepository และ login endpoint</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/auth_repository.dart</code> — repository แปลง login use case ให้เป็น HTTP contract และเก็บ session ปัจจุบันใน memory</div>
 <section><h2>1. ทำไมไม่ยิง HTTP จาก LoginScreen</h2><p>หน้าจอควรดูแล input/loading/navigation ส่วน <code>AuthRepository</code> ดูแล endpoint, request field, response parsing และการผูก token กับ client เมื่อ backend เปลี่ยนชื่อ field หรือ route จึงแก้ที่ data boundary โดยไม่รื้อ widget</p></section>
 <section><h2>2. Contract ที่โค้ดใช้จริง</h2><pre class="code-vs"><code>POST /api/Authenticate/login   // absolute
@@ -19,5 +13,3 @@ response → token, expiration</code></pre><p>ตัวพิมพ์ใหญ�
 <section><h2>6. Error path</h2><p><code>ApiException</code> จาก client ถูกส่งต่อให้ LoginScreen แสดง inline error ส่วน parse error เช่น token หายหรือ expiration ผิดรูปควรถูกแปลงเป็น auth contract error ที่เข้าใจได้ ปัจจุบันต้องอ่าน implementation/test เพื่อยืนยันพฤติกรรม อย่า catch ทุกอย่างแล้วแสดง “รหัสผ่านผิด” เพราะ network และ backend schema error ต้องแก้ต่างกัน</p></section>
 <section><h2>7. Security review</h2><ul><li>password อยู่เฉพาะ request และห้าม log</li><li>HTTP profile ส่ง credential แบบ cleartext; production ควรบังคับ HTTPS</li><li>token อยู่ memory จึงหายเมื่อปิดแอป ซึ่งปลอดภัยกว่า plain preferences แต่ UX ต้อง login ใหม่</li><li>roles ยังว่าง จึงยังใช้ client-side authorization ไม่ได้</li><li>expiration ถูกเก็บแต่ยังไม่มี enforcement/refresh</li></ul></section>
 <section><h2>8. Contract test ที่ควรเขียน</h2><div class="success">ฉีด fake <code>ApiClient</code> หรือ mock transport แล้วพิสูจน์ว่า endpoint เป็น absolute, payload casing ถูก, success ตั้ง session/token ครั้งเดียว, failure ไม่แตะ session เดิม, logout ล้างสองแหล่ง และ response ที่ token/expiration หายถูกปฏิเสธอย่างชัดเจน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

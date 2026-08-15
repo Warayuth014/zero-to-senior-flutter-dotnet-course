@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ApiClient + ApiException</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-04 · Real Codebase</span><h1>ApiClient + ApiException</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/api_client.dart</code> — transport layer ที่รวม URL, JSON, timeout, Bearer token และการแปล HTTP error ไว้จุดเดียว</div>
 <section><h2>1. หน้าที่และขอบเขต</h2><p><code>ApiClient</code> ไม่ควรรู้ receiving หรือ task แต่รู้วิธีส่ง request ไป WMS: สร้าง URI, ตั้ง JSON headers, เติม Authorization, encode body, timeout, decode response และโยน <code>ApiException</code> ส่วน repository เป็นผู้รู้ endpoint กับ shape ของข้อมูล</p></section>
 <section><h2>2. Dependency injection ที่มีอยู่</h2><p>constructor รับ <code>http.Client</code> ได้ จึงใช้ mock client ใน unit test โดยไม่ยิง network จริง ถ้าไม่ส่งจะสร้าง client มาตรฐาน ข้อควรระวังคือ implementation ยังไม่มี public <code>close/dispose</code> ที่บอก ownership ชัด; เมื่อเพิ่ม streaming/connection pooling ควรกำหนดว่าใครปิด injected client และใครปิด owned client</p></section>
@@ -19,5 +13,3 @@
 <section><h2>6. Token เป็น mutable transport state</h2><p><code>authToken</code> ถูกตั้งหลัง login และล้างตอน logout ทำให้ทุก adapter ได้ header โดยอัตโนมัติ ความเรียบง่ายนี้แลกกับ coupling: request ที่กำลังวิ่งอาจใช้ token เก่า, เปลี่ยน server แล้วยังพก token และไม่มีกลไก serialize refresh token การขยาย production ควรใช้ request interceptor/token provider ที่อ่าน session snapshot อย่างมี policy</p></section>
 <section><h2>7. Failure modes ที่ต้องรู้</h2><ul><li><code>HandshakeException</code> และ certificate error ยังไม่ได้แปลเท่า probe</li><li><code>http.ClientException</code> หรือ invalid URI อาจหลุดเป็น raw error</li><li>JSON malformed/type cast error ไม่กลายเป็น domain-friendly contract error</li><li>มีเฉพาะ POST ใน client ปัจจุบัน; อย่าจำลอง GET ด้วย body</li><li>automatic retry ของ mutation อาจทำรายการซ้ำถ้าไม่มี idempotency key</li></ul></section>
 <section><h2>8. Test matrix</h2><div class="success">ใช้ mock client ยืนยัน URI/header/body สำหรับ absolute และ prefixed request, 2xx body ว่าง/object, 4xx ที่ใช้ key ข้อความทั้งสามแบบ, 500 non-JSON, timeout/socket, malformed success JSON และ token add/remove โดย test ต้องตรวจว่า error ไม่เผย token/password</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

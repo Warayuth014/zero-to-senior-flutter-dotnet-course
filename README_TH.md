@@ -44,7 +44,8 @@
 - Part 17: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม receiving PO/part/serial/pallet, pending recovery, unload sessions และ load-to-basket trace
 - Part 18: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท ครอบคลุม putaway stations/prework/SignalR และ picking ตั้งแต่ order, source/destination pallets จนส่งเข้า packing
 - Part 19: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ครอบคลุม packing state machine/auto-finalize, sorting REST+SignalR, check-in preview/commit/dispatch และ supervisor image upload
-- Part 20–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 20: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ครอบคลุม bootstrap, API client/auth session, language/theme, connection profiles/probe/settings และ WarehouseShell lifecycle ของ wms_absolute_mobile
+- Part 21–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

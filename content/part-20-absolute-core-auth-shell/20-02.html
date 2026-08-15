@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>main bootstrap และลำดับ async initialization</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-02 · Real Codebase</span><h1>main bootstrap และลำดับ async initialization</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/main.dart</code> — startup ordering เป็นส่วนหนึ่งของ correctness เพราะ request แรกต้องเห็นภาษาและ active server ที่โหลดแล้ว</div>
 <section><h2>1. ทำไม main ต้องเป็น async</h2><p><code>WidgetsFlutterBinding.ensureInitialized()</code> ต้องมาก่อนเรียก plugin เช่น shared preferences และ system UI จากนั้น code รอ <code>AppLanguageController.instance.load()</code> กับ <code>ConnectionController.instance.load()</code> ก่อน <code>runApp</code> ผลคือเฟรมแรกไม่กระพริบจาก English/default server ไปเป็นค่าที่บันทึก และ request แรกไม่วิ่งไป localhost โดยบังเอิญ</p></section>
 <section><h2>2. Startup pipeline</h2><pre class="code-vs"><code>WidgetsFlutterBinding.ensureInitialized()
@@ -17,5 +11,3 @@ runApp(WmsApp(auth: AuthRepository(client: ApiClient())))</code></pre><p>สอ�
 <section><h2>6. Edge-to-edge และ status area</h2><p>system status bar ถูกตั้ง transparent/สี icon ที่เหมาะสม และ <code>MaterialApp.builder</code> ห่อ child ด้วย <code>AnnotatedRegion</code>, แถบสีด้านบน และ <code>SafeArea</code> นี่ทำให้ login กับ shell ใช้นโยบาย platform chrome เดียวกัน ส่วน <code>PdaStatusBar</code> เป็น app bar ภายในแอป ไม่ใช่ system status bar—สองชั้นนี้มีหน้าที่คนละอย่าง</p></section>
 <section><h2>7. สิ่งที่ยังไม่มีใน bootstrap</h2><ul><li>restore token จาก secure storage และตรวจ expiration</li><li>global 401 handler หรือ refresh token</li><li>dependency container สำหรับสลับ fake/real implementations</li><li>startup error screen/telemetry เมื่อ initialization สำคัญล้มเหลว</li></ul><p>การสังเกตว่า “ยังไม่มี” สำคัญพอ ๆ กับอ่านสิ่งที่มี อย่าอนุมานจากชื่อ <code>AuthSession</code> ว่า session ถูก persist แล้ว</p></section>
 <section><h2>8. ทดสอบ startup อย่างไร</h2><div class="success">แยกฟังก์ชัน bootstrap ที่ inject preference adapters ได้ แล้วทดสอบว่า (1) connection load เสร็จก่อนสร้าง request (2) storage ล้มเหลวใช้ default ได้ (3) language ที่บันทึกถูกเลือกตั้งแต่เฟรมแรก และ (4) rebuild ภาษาไม่สร้าง <code>AuthRepository</code>/<code>ApiClient</code> ใหม่</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

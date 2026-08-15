@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WarehouseShell lifecycle</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-14 · Real Codebase</span><h1>WarehouseShell lifecycle</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/warehouse_shell.dart</code> และ <code>screens/home_view.dart</code> — shell เป็น composition/lifecycle boundary ของ session หลัง login ไม่ใช่เพียงกรอบ navigation</div>
 <section><h2>1. สร้าง store และ adapters</h2><p>ใน <code>initState</code> shell สร้าง <code>WarehouseStore</code> ด้วย username จาก session และ repositories <code>ReceivingApi</code>, <code>TasksApi</code>, <code>InventoryApi</code>, <code>CycleCountApi</code> ที่ใช้ auth clientตัวเดียว แล้วต่อ callbacksสำหรับ toast/flash นี่ทำให้ screenไม่ต้องรู้ tokenหรือสร้าง network dependencyเอง</p></section>
 <section><h2>2. Fire-and-forget อย่างตั้งใจ</h2><p><code>unawaited(store.loadAll())</code> เริ่มโหลดข้อมูล/badgesโดยไม่ blockเฟรมแรก และ <code>unawaited(ConnectionController.instance.refreshStatus())</code> probeตอนเข้า shell UIต้องรองรับ loading/errorภายใน store/controller เพราะ exceptionจาก fire-and-forgetห้ามหลุดเงียบ การใช้ <code>unawaited</code> เป็นการประกาศ lifecycle intent ไม่ใช่การละเลย error</p></section>
@@ -14,5 +8,3 @@ dispose:   removeObserver + cancel toast/flash timers + store.dispose</code></pr
 <section><h2>6. Operational feedback</h2><p>storeเรียก <code>onToast</code> และ <code>onFlash</code>; shellแสดง overlayชั่วคราวพร้อม haptic medium/heavyตาม success/error และ cancel timerเก่าก่อนเริ่มใหม่ ทำให้ scanติดกันไม่ปล่อย timerเก่ามาล้าง feedbackใหม่ ต้อง guard mountedใน callback timerและไม่ใช้สี/แรงสั่นเป็นข้อมูลช่องทางเดียว</p></section>
 <section><h2>7. Exit flow กับ logout คนละเรื่อง</h2><p>เมื่ออยู่ใน workflow headerมี Pause actionพร้อม confirm แล้วเรียก <code>store.exitFlow()</code> เพื่อกลับ listโดยรักษางานตาม domain ส่วน logoutล้าง authแล้ว replacementกลับ login ทั้งคู่ต้องไม่ใช้ navigator backแบบเดียวกัน เพราะ pauseยังอยู่ sessionเดิม แต่ logoutต้องทำลาย session scope</p></section>
 <section><h2>8. Lifecycle test</h2><div class="success">ฉีด fake store/repositories/probe แล้วทดสอบ loadครั้งเดียว, resume probe, paused/inactiveไม่ probe, disposeยกเลิก timers/observer/store, logout-loginไม่เพิ่ม listenerซ้ำ, child screen mapping/nav badges และ stale async resultไม่อัปเดต shellหลัง logout</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

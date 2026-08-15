@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solution map ของ wms_absolute_mobile</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-01 · Real Codebase</span><h1>Solution map ของ wms_absolute_mobile</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>เป้าหมาย Part 20:</strong> อ่านแกนกลางของ <code>wms_absolute_mobile</code> จากการเปิดแอปจนถึง shell หลัง login ให้เห็นว่า configuration, HTTP, session, connection profile และ UI lifecycle ส่งต่อ state กันอย่างไร ก่อนลงรายละเอียด workflow คลังใน Part 21–22</div>
 <section><h2>1. เริ่มอ่านจาก composition root</h2><p>เปิด <code>lib/main.dart</code> ก่อน เพราะไฟล์นี้ตอบว่า object ใดอยู่ยาวเท่าแอป: <code>AppLanguageController</code> และ <code>ConnectionController</code> เป็น singleton, ส่วน <code>ApiClient</code> ถูกสร้างหนึ่งตัวแล้วส่งเข้า <code>AuthRepository</code> จากนั้น repository เดิมถูกส่งต่อจาก <code>LoginScreen</code> ไป <code>WarehouseShell</code> จึงรักษา Bearer token ตัวเดียวกันไว้ได้</p><pre class="code-vs"><code>main
   ├─ load language + connection profiles
@@ -25,5 +19,3 @@
 <section><h2>6. เส้นทาง connection test แยกจาก business API</h2><p><code>ConnectionProbe</code> ใช้ client ของตัวเองยิง <code>/api/WMS/mobile_health</code> ไปยัง URL draft ได้ จึงกด Test ก่อน Save/Use ได้ และไม่ได้แนบ token โดยไม่จำเป็น มันไม่เชื่อแค่ HTTP 200 แต่ตรวจ JSON ว่า <code>service == "WMS"</code> และ <code>ok == true</code> เพราะ Blazor fallback อาจคืนหน้า HTML พร้อม 200 แม้ base path ผิด</p></section>
 <section><h2>7. Reading order ที่ลดการเดา</h2><ol><li><code>main.dart</code> เพื่อหา composition และ startup ordering</li><li><code>app_config.dart</code> → <code>connection_*.dart</code> เพื่อเข้าใจ URL</li><li><code>api_client.dart</code> → <code>auth_repository.dart</code> → <code>login_screen.dart</code> เพื่อ trace login</li><li><code>warehouse_shell.dart</code> เพื่อดู lifecycle และการประกอบ adapters/store</li><li>อ่าน test คู่กับ production file เพื่อจับ invariant ที่ comment ไม่ได้บอก</li></ol></section>
 <section><h2>8. แบบฝึก trace ก่อนลงลึก</h2><div class="success">วาด sequence diagram 2 เส้น: (A) เปิดแอป → โหลด profile → login → เข้า shell → โหลด badge และ (B) เปิด Connection Settings → ทดสอบ draft → Save &amp; Use → request ถัดไปใช้ URL ใหม่ ระบุ owner ของ state, await/unawaited, error boundary และจุดที่ token อาจไม่สอดคล้องกับ server ใหม่ให้ครบ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

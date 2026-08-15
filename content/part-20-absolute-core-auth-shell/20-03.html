@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AppConfig และ API roots</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-03 · Real Codebase</span><h1>AppConfig และ API roots</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/app_config.dart</code> — config ไม่ได้เก็บ active URL เป็นค่าคงที่ แต่ resolve ใหม่เมื่อ request ขอใช้</div>
 <section><h2>1. URL มีหลาย root</h2><p>โปรเจกต์มี base URL ของ server แล้วต่อ route ตาม contract: business API ส่วนใหญ่ใช้ prefix <code>/api/WMS</code>, login ใช้ absolute path <code>/api/Authenticate/login</code> และบางระบบอาจมี <code>/api/data</code> การรวมทุก endpoint ไว้ใต้ prefix เดียวจะสร้าง URL ผิดโดยเงียบ ๆ จึงต้องให้ call site ระบุชัดว่า path เป็น prefixed หรือ absolute</p></section>
 <section><h2>2. Precedence ของ base URL</h2><pre class="code-vs"><code>--dart-define=WMS_API_BASE_URL=...
@@ -17,5 +11,3 @@ http://localhost:6191</code></pre><p>compile-time override เหมาะกั
 <section><h2>6. เปลี่ยน server กระทบ session</h2><p>เพราะ token ยังอยู่ใน <code>ApiClient</code> เมื่อ active URL เปลี่ยน request จะส่ง token เดิมไป server ใหม่ นี่อาจได้ 401 หรือร้ายกว่านั้นคือส่ง credential ข้าม environment แนวทางปลอดภัยคือ profile switch สำเร็จแล้ว invalidate session, กลับ login และล้าง feature state เว้นแต่ระบบพิสูจน์ว่า issuer/audience เดียวกัน</p></section>
 <section><h2>7. Contract tests ที่ควรมี</h2><ul><li>override ชนะ active profile และ fallback</li><li>base path <code>/gateway/wms</code> ต่อกับ prefix ได้ครั้งเดียว</li><li>login ไม่ถูกเติม <code>/api/WMS</code></li><li>business endpoint ถูกเติม prefix</li><li>สลับ active profile แล้ว client เดิมสร้าง URI ใหม่</li><li>ค่าที่มี slash/space ผิดรูปถูก reject ก่อนถึง HTTP</li></ul></section>
 <section><h2>8. แบบฝึก .NET boundary</h2><div class="success">เขียนตาราง endpoint อย่างน้อย 5 รายการ โดยมี Flutter call, URI เต็ม, HTTP method, request DTO และ .NET route จากนั้นเพิ่ม test ที่จับกรณี login ถูกต่อ prefix ผิดและกรณี base path ทำให้ <code>/api/api</code> ซ้ำ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

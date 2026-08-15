@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ConnectionProbe และ health payload</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-12 · Real Codebase</span><h1>ConnectionProbe และ health payload</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/connection_probe.dart</code> — “server ตอบ” ไม่ได้แปลว่า “ตอบจาก WMS API ที่ถูกต้อง”</div>
 <section><h2>1. Probe ใช้ URL draft</h2><p><code>probeConnection(baseUrl)</code> รับ URLโดยตรงและสร้าง clientแยกจาก <code>ApiClient</code> จึงทดสอบสิ่งที่ผู้ใช้กำลังกรอกก่อน save/activate ได้ ไม่ต้องเปลี่ยน global active serverเพื่อทดลอง และไม่แนบ Bearer tokenไป health endpoint</p></section>
 <section><h2>2. Health URI</h2><pre class="code-vs"><code>{normalized baseUrl}/api/WMS/mobile_health</code></pre><p>ก่อนยิงต้อง parse URIและตรวจ scheme/host การปล่อย invalid addressถึง network layerทำให้ errorคลุมเครือกว่า field validation แต่ probeยังต้องป้องกันตัวเองเพราะอาจถูกเรียกจากที่อื่น</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Resource ownership</h2><p>หาก callerไม่ inject client probeจะสร้างและปิด clientเองหลังจบ วิธีนี้ป้องกัน socket resourceรั่วในการกด Testหลายครั้ง เมื่อ injectเพื่อ testต้องกำหนดให้ชัดว่า probeไม่ปิด resourceของ caller หรือใช้ wrapperที่ encode ownershipใน API</p></section>
 <section><h2>7. Race และ cancellation</h2><p>กด Testซ้ำหรือสลับ profileระหว่าง probeอาจทำให้ผลเก่ามาถึงทีหลัง settings/controllerต้องใช้ busy guard, generation token หรือ cancellable operation การ timeoutช่วยจำกัดเวลารอแต่ไม่รับประกันว่า stale completionจะไม่ commit UI state</p></section>
 <section><h2>8. Contract test สำคัญที่สุด</h2><div class="success">จำลอง response 200 JSONถูก, 200 HTMLจาก Blazor fallback, 200 JSON serviceผิด/ok false, 404/500, malformed JSON, timeout, TLS และ socket error ตรวจ URIรวม base path, elapsed/status และยืนยันว่า owned clientถูก closeโดยไม่ส่ง Authorization header</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

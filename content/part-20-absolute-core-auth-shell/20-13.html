@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ConnectionSettingsSheet</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-13 · Real Codebase</span><h1>ConnectionSettingsSheet</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/settings/connection_settings_sheet.dart</code> และ widget tests — bottom sheet นี้เป็น transactional editor ไม่ใช่ form ที่แก้ global stateทุกครั้งที่พิมพ์</div>
 <section><h2>1. Route-level bottom sheet</h2><p><code>showConnectionSettings(context)</code> เปิด modal bottom sheetเหนือ Scaffold จึงไม่บีบ body/bottom navigation และใช้ scroll/insetsรับ keyboardบนจอ 390×844 ได้ การวาง panelไว้ใน bodyจะเปลี่ยน layoutทั้ง shellและสร้าง overflowตอน keyboardเปิด</p></section>
 <section><h2>2. Draft state แยกจาก controller</h2><p>TextEditingControllers, editing ID, environment/protocol และ validation stateอยู่ใน sheet ระหว่างพิมพ์ <code>ConnectionController.active</code> ยังไม่เปลี่ยน จนกด save/apply จึง commit ช่วยให้ Cancel/Discardทำงานจริงและ requestปัจจุบันไม่สลับ hostทุก keystroke</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. Unsaved-change guard</h2><p>sheetเก็บ snapshotหลัง load/reset แล้วเทียบกับค่าปัจจุบัน เมื่อกด close/drag/backพร้อมการแก้ไขจึงถาม Discard หาก untouchedปิดทันที Guardต้องครอบทุก exit path ไม่ใช่เฉพาะปุ่ม X และหลัง saveสำเร็จต้องอัปเดต baseline ไม่ให้ถามทั้งที่ไม่มีงานค้าง</p></section>
 <section><h2>7. Tests ที่ยืนยัน UX contract</h2><p><code>connection_settings_sheet_test.dart</code> ตรวจ active profile/preview, live typing, overlayไม่ดัน bottom nav, invalid inline errors, schemeใน hostถูกปฏิเสธ, edit in place, newไม่ activate, discard guard, delete invariants และ keyboard layout นี่คือตัวอย่าง test behaviorแทน test private method</p></section>
 <section><h2>8. Production hardening</h2><div class="success">เพิ่ม generationกัน stale probe, แสดง persistence failure, invalidate sessionเมื่อ Save &amp; Useข้าม server, block duplicate actionระหว่าง busy, redact credentialใน URLถ้าอนาคตรองรับ และเขียน widget testสำหรับ build-pinned URL, rapid test, storage failureกับ system back gesture</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LoginScreen navigation</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-07 · Real Codebase</span><h1>LoginScreen navigation</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/login_screen.dart</code> — หน้าจอเป็น orchestrator ของ form state, async login และ route replacement ไม่ใช่เจ้าของ HTTP contract</div>
 <section><h2>1. Local UI state</h2><p>หน้า login ถือ controllers ของ employee/password, focus node ของ password, flag <code>_submitting</code>, password visibility และข้อความ error ทั้งหมดเป็น state อายุสั้นที่ควรตายเมื่อออกจากหน้า ส่วน token/session อยู่ repository เพราะต้องอยู่ต่อถึง shell</p></section>
 <section><h2>2. Submit pipeline</h2><pre class="code-vs"><code>guard duplicate submit
@@ -20,5 +14,3 @@
 <section><h2>6. Navigation semantics</h2><p><code>pushReplacement</code> แทน push ทำให้ Back จาก shell ไม่กลับไปหน้าที่มี password form และ login success เก่า ตอน logout shell ก็ replacement กลับ login ทำให้หนึ่ง session มี root route เดียว หากใช้ named/router ในอนาคตยังต้องรักษา invariant นี้</p></section>
 <section><h2>7. Error taxonomy ใน UI</h2><p>inline error เหมาะกับ credential/business failure ที่ผู้ใช้แก้ input ได้ ส่วน connection/certificate/server configuration ควรมีข้อความและ action เปิด settings ได้ อย่าแสดง stack trace หรือ response body ดิบ และอย่าแปลงทุก failure เป็น “username/password ผิด” เพราะจะพาผู้ใช้แก้จุดผิด</p></section>
 <section><h2>8. Widget tests</h2><div class="success">ทดสอบ validation, focus/submit จาก keyboard, loading disables controls, double tap ส่ง requestเดียว, success replacement, failure แสดง inline และ retry ได้, dispose ระหว่าง requestไม่ throw, toggle password, language rebuild และเปิด connection settings ได้โดยยังไม่ login</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

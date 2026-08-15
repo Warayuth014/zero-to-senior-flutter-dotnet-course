@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ConnectionProfile normalization</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-10 · Real Codebase</span><h1>ConnectionProfile normalization</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/connection_profile.dart</code> คู่กับ <code>test/connection_profile_test.dart</code> — model นี้เป็น anti-corruption layer ระหว่างข้อความที่ผู้ใช้กรอกกับ URL ที่ transport ใช้จริง</div>
 <section><h2>1. Profile เป็น typed configuration</h2><p>หนึ่ง profile มี id, name, environment, protocol, host, port, basePath, created/updated timestamps และคำนวณ <code>baseUrl</code> จากค่าที่ validate แล้ว การเก็บ URL stringก้อนเดียวจะจัดการแก้ port/protocol, duplicate, migration และแสดง field errorได้ยากกว่า</p></section>
 <section><h2>2. Normalize base path</h2><p>normalizer trim ช่องว่าง, ยุบ slash ซ้ำ, ให้ค่าว่างหรือ path ที่ขึ้นต้น slashและไม่มี slashท้าย ตัวอย่าง <code>///gateway//wms/</code> กลายเป็น <code>/gateway/wms</code> ก่อนต่อ route ทำให้ URL deterministic และ snapshotเทียบกันได้</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Build override</h2><p><code>resolveBaseUrl</code> ให้ <code>WMS_API_BASE_URL</code> จาก dart-defineชนะ active profile และ built-in fallback พร้อม flag <code>isBaseUrlPinnedByBuild</code> UI ควรใช้ flag นี้อธิบายว่า profileไม่ใช่ effective URL ห้ามปล่อย previewบอกอย่างหนึ่งแต่ requestไปอีกอย่าง</p></section>
 <section><h2>7. Tests บอก design intention</h2><p><code>connection_profile_test.dart</code> ครอบคลุม normalization, validation, corrupt snapshot, active fallback, config precedence, controller save/edit/delete/activate และ probe payload จึงทำหน้าที่เป็น executable specification เมื่อ refactor ให้รักษา behaviorตาม testsก่อนเปลี่ยน implementation</p></section>
 <section><h2>8. Property-oriented exercise</h2><div class="success">เพิ่มชุด input หลายรูปแบบแล้วพิสูจน์ว่า normalizeสองครั้งได้ผลเดิม, baseUrlไม่มี double slashหลัง scheme, portไม่หลุดช่วง, decodeข้อมูลเสียไม่ throw และ encode→decodeรักษา active profileหนึ่งเดียว จากนั้นเพิ่ม migration testสำหรับ snapshot versionถัดไป</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

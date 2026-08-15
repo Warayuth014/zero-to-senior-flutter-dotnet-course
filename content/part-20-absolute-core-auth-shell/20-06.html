@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AuthSession และ token lifecycle</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-06 · Real Codebase</span><h1>AuthSession และ token lifecycle</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/auth_session.dart</code> — model เล็ก แต่กำหนดขอบเขตความปลอดภัยของทั้งแอป</div>
 <section><h2>1. Session เก็บอะไร</h2><p><code>AuthSession</code> ประกอบด้วย token, username, roles และ expiration ที่อาจไม่มีค่า มันเป็น snapshot จากผล login ไม่ใช่ผู้ตัดสินว่าผู้ใช้ยัง authenticated อยู่ เพราะ validity ต้องพิจารณาเวลา, issuer/audience, server profile และผลตอบกลับ 401 ด้วย</p></section>
 <section><h2>2. Owner สองชั้น</h2><p><code>AuthRepository.session</code> เก็บข้อมูลสำหรับ UI ส่วน <code>ApiClient.authToken</code> เก็บค่าเพื่อสร้าง Authorization header ทั้งสองต้องสอดคล้องกันเสมอ หากเขียน token ก่อน parse session สำเร็จ หรือ logout ล้างเพียงจุดเดียว จะเกิด authenticated transport กับ unauthenticated UI หรือกลับกัน</p></section>
@@ -17,5 +11,3 @@ process killed → session lost → login again</code></pre><p>ไม่มี r
 <section><h2>6. Secure persistence ทางเลือก</h2><p>ถ้าต้องการจำ login อย่าใส่ token ใน <code>SharedPreferences</code> ใช้ platform secure storage, เก็บ refresh token ตาม policy, ผูก session กับ profile/issuer และ restore ก่อนเลือก home route การอ่าน storage ควร fail closed: decrypt/parse ไม่ได้ให้ล้างและกลับ login ไม่ใช้ token ที่ไม่ทราบที่มา</p></section>
 <section><h2>7. Server switch invariant</h2><p>session ควรบันทึก server identity หรือ profile ID ที่ออก token เมื่อ active profile เปลี่ยน ให้ล้าง sessionและ warehouse state ก่อนยิง request ไป host ใหม่ เว้นแต่มี explicit trust rule นี่แก้ทั้ง credential leakage และข้อมูลหน้าจอจากคลัง A ปะปนกับคลัง B</p></section>
 <section><h2>8. Session tests</h2><div class="success">สร้าง fake clock แล้วทดสอบ valid/near-expiry/expired, logout idempotent, restore ที่ corrupt, 401 พร้อมกันหลาย request, profile switch และ role parsing ยืนยันด้วยว่า token/password ไม่ปรากฏใน <code>toString</code>, logs หรือ error UI</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

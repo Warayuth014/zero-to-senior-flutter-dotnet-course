@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AppLanguageController</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-08 · Real Codebase</span><h1>AppLanguageController</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/app_language.dart</code> — singleton <code>ChangeNotifier</code> ที่แยกค่าภาษา runtime ออกจาก persistence</div>
 <section><h2>1. State model</h2><p>ภาษาเป็น enum English/Thai ไม่ใช่ free-form string จึงจำกัด state ที่เป็นไปได้ controller มี instance เดียว, default English และ key <code>app_language</code> สำหรับ preferences ส่วน getter code/locale ใช้สร้าง UI และ MaterialApp config</p></section>
 <section><h2>2. Load ก่อน runApp</h2><p><code>load()</code> อ่าน <code>SharedPreferencesAsync</code> แล้วแปลงค่าที่รู้จัก หาก plugin ไม่พร้อมใน test จะจับ <code>StateError</code> และใช้ default ต่อ การ await ก่อน runApp ป้องกัน first-frame language flash และทำให้ title/validator เริ่มด้วยภาษาเดียวกัน</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. ข้อจำกัดของ tr(en, th)</h2><p>ฟังก์ชันสอง string ใช้ง่ายและเหมาะกับแอปเล็ก แต่ตรวจ missing key/plural/placeholders ยาก และกระจายข้อความทั่ว codebase เมื่อโตควรย้ายไป ARB/gen-l10n หรือ typed catalog โดยรักษา domain-to-label mapping เดิมไว้</p></section>
 <section><h2>7. Concurrency และ testability</h2><p>การ toggle เร็วหลายครั้งทำ writes ตามลำดับ future ที่เรียก แต่ storage completionอาจไม่ใช่ intent ล่าสุดหาก adapter เปลี่ยนเป็น async ที่ช้าต่างกัน แนวทาง robust คือ serialize write หรือ version intent และ inject storage แทนจับ plugin errorใน production class โดยตรง</p></section>
 <section><h2>8. Test checklist</h2><div class="success">ทดสอบ default, restore en/th, unknown persisted value, notify ครั้งเดียวเมื่อค่าต่าง, ไม่ notify เมื่อค่าเดิม, persistence failureยังเปลี่ยน UI session, MaterialApp locale rebuild และ domain valueไม่ถูกแปลปะปนกับ label</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

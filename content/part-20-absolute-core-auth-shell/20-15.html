@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>User menu/status bar และ tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">20-15 · Real Codebase</span><h1>User menu/status bar และ tests</h1><p>Part 20: wms_absolute_mobile: Core, Auth &amp; Shell</p></header>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/ui/user_chip_menu.dart</code>, <code>lib/widgets/pda_status_bar.dart</code>, <code>test/user_menu_test.dart</code> — ปิด Part 20 ด้วยการ trace state จาก controllerไปสู่ UIและ tests</div>
 <section><h2>1. เมนูเดียวทั้ง shell</h2><p><code>UserChipMenu</code> ถูกวางใน headerของ <code>WarehouseShell</code> จุดเดียว ทุก operational screenจึงได้ user/connection/language/logout actionsเหมือนกันโดยไม่ copy widgetหรือ callback การรวมไว้ shellยังทำให้ session actionไม่ตกเป็นเจ้าของ feature screenใด screenหนึ่ง</p></section>
 <section><h2>2. Reactive connection chip</h2><p>widget ใช้ <code>ListenableBuilder</code> ฟัง <code>ConnectionController.instance</code> แล้วอ่าน active profile nameกับ status สี dotมาจาก mapping unknown/connecting/connected/disconnected ไม่ใช่ hard-coded green เมื่อ probe notify chipจึงเปลี่ยนโดยไม่ต้องให้ WarehouseStoreรู้ connection state</p></section>
@@ -16,5 +10,3 @@ UserMenuAction.logout     → confirmation → auth.logout → LoginScreen</code
 <section><h2>6. User Info เป็น live dialog</h2><p>dialogแสดง username, expiration และ active connection พร้อมปุ่มตรวจใหม่ เนื้อหาฟัง ConnectionController จึงอัปเดตผล probeใน dialogเดิม ไม่ต้องปิดเปิดใหม่ สิ่งนี้แสดง patternให้ modalที่มี async state: ownerอยู่นอก dialogและ dialog render snapshotล่าสุด</p></section>
 <section><h2>7. Tests ที่ล็อก invariant</h2><p><code>user_menu_test.dart</code> ยืนยันชื่อผู้ใช้/profileแสดงแต่ IPไม่กิน header, popupมีสี่ actionsและแสดง addressเต็ม, selectionส่ง enumแล้วปิด, tap outsideไม่เลือก, dotตามทุก controller statusด้วยสีที่ต่างกัน และ no-profileไม่ crash ส่วน settings testsครอบคลุม transactional editorจากบทก่อน</p></section>
 <section><h2>8. Part 20 capstone</h2><div class="success">Trace จากเปิดแอปจน logoutพร้อมหลักฐานไฟล์: startup load → effective URL → login contract → session/token → shell composition → connection resume probe → user menu/settings → profile switch policy → cleanup เขียนเพิ่มหนึ่ง integration testที่ loginด้วย fake transport, เข้า shell, เปลี่ยน statusทุกค่า, เปิดเมนู และ logoutโดยยืนยันว่า tokenกับ store lifecycleถูกล้างครบ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
