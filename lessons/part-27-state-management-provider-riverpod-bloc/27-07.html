@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riverpod AsyncNotifierProvider task implementation</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-07 · State &amp; Lifecycle</span><h1>Riverpod AsyncNotifierProvider task implementation</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>AsyncNotifier:</strong> ใช้เมื่อ node มี async initialization และมี public methods เปลี่ยน stateตาม user intent Riverpod แนะนำแนวนี้แทน legacy ChangeNotifierProvider สำหรับ scalable immutable state</div>
+<section><h2>1. Declaration</h2><pre class="code-vs"><code>final riverpodTaskProvider =<br>&nbsp;&nbsp;AsyncNotifierProvider&lt;RiverpodTaskController, TaskPatternState&gt;(<br>&nbsp;&nbsp;&nbsp;&nbsp;RiverpodTaskController.new,<br>&nbsp;&nbsp;);</code></pre></section>
+<section><h2>2. build</h2><p><code>build()</code> อ่าน repository แล้วคืน TaskPatternState Riverpod ห่อผลเป็น <code>AsyncLoading/AsyncData/AsyncError</code> ทำให้ initial async lifecycle typed โดยไม่ต้อง boolean แรกเอง</p></section>
+<section><h2>3. Public intents</h2><p><code>refresh</code> และ <code>complete</code> อยู่ notifier UI เรียกผ่าน <code>ref.read(provider.notifier)</code> ขณะที่ UI subscribe snapshot ผ่าน <code>ref.watch(provider)</code></p></section>
+<section><h2>4. state.requireValue</h2><p>action ใช้เมื่อ provider อยู่ data state หาก action อาจถูกเรียกระหว่าง initial loading ต้อง guard UI/ตรวจ AsyncValue ก่อน ไม่เรียก requireValue แบบสมมติทุกสถานะ</p></section>
+<section><h2>5. Immutable update</h2><p>ทุก transition assign <code>state = AsyncData(previous.copyWith(...))</code> Busy idsและ tasks เป็น unmodifiable snapshots ลดปัญหา mutate แล้ว listenerไม่รู้</p></section>
+<section><h2>6. Repository dependency</h2><p>controller อ่าน <code>taskRepositoryProvider</code> ไม่สร้าง RemoteTaskRepository เอง Test จึง override nodeเดียวและไม่ใช้ BuildContext/network</p></section>
+<section><h2>7. Code generation</h2><p>Riverpod รองรับ annotations/generator แต่ lab ใช้ manual declarationเพื่อเห็น typesก่อน Part code generation จะอธิบาย trade-off build_runner/generated files ภายหลัง</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">trace initial load: ProviderScope→AsyncNotifierProvider→build→repository→AsyncData→ConsumerWidget และ trace completeแยกต่างหากให้ได้</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

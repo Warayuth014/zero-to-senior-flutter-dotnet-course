@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ทำไมต้องมี state management package</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-01 · State &amp; Lifecycle</span><h1>ทำไมต้องมี state management package</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>เป้าหมาย Part 27:</strong> ไม่หาผู้ชนะตลอดกาล แต่ใช้ behavior เดียวกันวัดว่า package ใดทำให้ ownership, async workflow, rebuild และ test ของทีมชัดขึ้น</div>
+<section><h2>1. Flutter มี state อยู่แล้ว</h2><p><code>setState</code>, <code>ValueNotifier</code>, <code>ChangeNotifier</code> และ InheritedWidget เป็น primitives ที่เพียงพอ Package ไม่ได้ทำให้ business logic ถูกอัตโนมัติ แต่ช่วยกำหนดวิธีประกอบ dependency, subscribe state และจัด lifecycle ให้สม่ำเสมอ</p></section>
+<section><h2>2. เมื่อไร package เริ่มคุ้ม</h2><p>เมื่อ state ข้ามหลาย route, dependency graph โต, async states ซ้อน, ต้อง override ใน test หรือทีมต้องการ convention ร่วม การส่ง constructor ยาว/หา ancestor เองเริ่มมีต้นทุน Package ช่วยลด plumbing แต่เพิ่ม API และ migration cost</p></section>
+<section><h2>3. Behavior ที่ตรึงไว้</h2><p>ทั้งสามแบบโหลด task, refresh, complete ราย task, ป้องกัน command ซ้ำและ reconcile unknown outcome ผ่าน <code>TaskRepository</code> เดียวกัน ความต่างจึงอยู่ที่ state container/widget binding ไม่ใช่ endpoint คนละแบบ</p></section>
+<section><h2>4. ตัวเลือกใน lab</h2><ul><li>Provider + ChangeNotifier: mutable controller และ widget-tree scope</li><li>Riverpod AsyncNotifier: provider graph กับ AsyncValue</li><li>flutter_bloc + Cubit: immutable state stream และ explicit emit</li></ul></section>
+<section><h2>5. อย่าติดตั้งเพราะนิยม</h2><p>ถามว่าใคร own state, state อายุเท่าไร, side effect อยู่ไหน, test ต้องสร้างอะไร, failure path แสดงอย่างไร และทีม debug ได้หรือไม่ Popularity เป็น signal ด้าน ecosystem ไม่ใช่ architecture decision</p></section>
+<section><h2>6. Package ไม่แทน repository</h2><p>Provider/Riverpod/Bloc ไม่ควร decode JSON หรือรู้ HTTP status โดยตรง Controller รับ typed repository เพื่อให้เปลี่ยน state library โดย data contract เดิมไม่พัง</p></section>
+<section><h2>7. วิธีเปิด lab</h2><pre class="code-vs"><code>flutter run -t lib/state_patterns_main.dart<br>  --dart-define=WMS_API_BASE_URL=http://localhost:5080</code></pre><p>สามแท็บใช้ backend เดียวกัน จึง refresh ก่อนเปรียบเทียบหลัง mutation จากอีกแท็บ</p></section>
+<section><h2>8. Rubric</h2><div class="success">ให้คะแนน readability, ownership, async/race handling, rebuild precision, test isolation, tooling, team familiarity และ migration cost อย่างละหลักฐาน ห้ามให้คะแนนจากจำนวนบรรทัดอย่างเดียว</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

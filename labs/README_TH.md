@@ -37,3 +37,13 @@ dotnet build .\dotnet\WmsMobileApi\WmsMobileApi.csproj --no-restore
 ```
 
 เปิด API ก่อนแล้วเปิด Flutter จากนั้นลองกดปิด task เดิมซ้ำผ่าน HTTP client ด้วย `Idempotency-Key` เดิม ผลต้องสำเร็จและมี `replayed: true` โดยไม่เกิด side effect รอบสอง
+
+## State Management Comparison (Part 27)
+
+เปิด entrypoint เปรียบเทียบ Provider, Riverpod และ Cubit ซึ่งใช้ `TaskRepository` และ presentational list ชุดเดียวกัน:
+
+```powershell
+flutter run --project-directory .\flutter_wms_companion -t lib/state_patterns_main.dart --dart-define=WMS_API_BASE_URL=http://localhost:5080
+```
+
+รุ่นที่ lab resolve และทดสอบแล้วคือ `provider 6.1.5+1`, `flutter_riverpod 3.3.2` และ `flutter_bloc 9.1.1` ให้ศึกษา ownership/rebuild/test seam จากโค้ดก่อนตัดสินใจเลือก package ไม่ควรติดตั้งทั้งสามใน production app โดยไม่มีเหตุผล

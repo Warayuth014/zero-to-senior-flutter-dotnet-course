@@ -1,0 +1,9 @@
+<div class="note"><strong>Riverpod testing:</strong> ProviderContainer คือ runtime graph ที่สร้างใน testได้โดยไม่ pump widget และ overrides ทำให้แทน dependency เป็น fake แบบ type-safe</div>
+<section><h2>1. Arrange container</h2><pre class="code-vs"><code>final container = ProviderContainer(overrides: [<br>&nbsp;&nbsp;taskRepositoryProvider.overrideWithValue(fake),<br>]);<br>addTearDown(container.dispose);</code></pre><p>disposeทุก testเพื่อปิด providers/listenersและป้องกัน stateรั่วข้ามเคส</p></section>
+<section><h2>2. Await initial build</h2><p><code>await container.read(riverpodTaskProvider.future)</code> รอ AsyncNotifier buildจบอย่าง deterministic ไม่ใช้ delayหรือ poll loading flag</p></section>
+<section><h2>3. Act ผ่าน notifier</h2><p>เรียก <code>container.read(riverpodTaskProvider.notifier).complete(task)</code> แล้วอ่าน AsyncValueล่าสุด ตรวจ tasks/message/errorตาม behavior</p></section>
+<section><h2>4. Override boundary</h2><p>override repositoryไม่ใช่ controller เพื่อให้ testยังรัน orchestrationจริง หาก override providerที่กำลังทดสอบด้วยค่าคงที่จะไม่ได้พิสูจน์ logic</p></section>
+<section><h2>5. Container isolation</h2><p>สร้างสอง containersจาก declarationเดียวกันแล้ว stateแยก นี่ช่วย test tenant/profileหลายชุดและอธิบายว่าตัวแปร provider top-levelไม่ใช่ singleton state</p></section>
+<section><h2>6. Widget test</h2><p>ครอบ widgetด้วย ProviderScope(overrides: ...) แล้ว pump ConsumerWidget ใช้เฉพาะเมื่อทดสอบ rendering/listening ส่วน controller behaviorใช้ container testเร็วกว่า</p></section>
+<section><h2>7. Lifecycle test</h2><p>autoDispose providerอาจถูก disposeถ้าไม่มี listenerระหว่าง await ใน test ให้ listenหรืออ่าน futureตามเอกสาร และทดสอบ keepAlive policyเฉพาะจุดที่มีผลจริง</p></section>
+<section><h2>8. Checkpoint</h2><div class="success"><code>state_patterns_test.dart</code> พิสูจน์ load/completeโดยไม่ BuildContext ถ้า testต้องสร้าง MaterialAppเพื่อทดสอบ Notifier แสดงว่า UI concernรั่วเข้า controller</div></section>

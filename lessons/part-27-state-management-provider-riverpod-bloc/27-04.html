@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provider Consumer Selector และ rebuild control</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-04 · State &amp; Lifecycle</span><h1>Provider Consumer Selector และ rebuild control</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>Provider consumption:</strong> เลือก <code>read</code> สำหรับ event, <code>watch/Consumer</code> สำหรับ UI ที่ตาม state และ <code>select/Selector</code> เมื่อสนใจ projection เล็ก</div>
+<section><h2>1. read</h2><p><code>context.read&lt;TaskStore&gt;().complete(task)</code> ใช้ใน callback ไม่ subscribe rebuild ห้ามใช้ read เพื่อวาดค่าที่ต้องเปลี่ยน เพราะ UI จะค้าง snapshot เก่า</p></section>
+<section><h2>2. watch</h2><p><code>context.watch&lt;TaskStore&gt;()</code> ทำให้ widget build ใหม่เมื่อ notify เหมาะกับ widget ที่ใช้ state ส่วนใหญ่ แต่ placement กว้างอาจ rebuild subtree ใหญ่</p></section>
+<section><h2>3. Consumer</h2><p><code>Consumer&lt;TaskStore&gt;</code> จำกัด listener ไว้ใต้ widget ปัจจุบันและมี <code>child</code> สำหรับ subtree คงที่ Lab ใช้ Consumer ครอบ list behavior</p></section>
+<section><h2>4. Selector</h2><pre class="code-vs"><code>final count = context.select&lt;TaskStore, int&gt;(<br>&nbsp;&nbsp;(store) =&gt; store.tasks.length,<br>);</code></pre><p>header rebuild เมื่อ count เปลี่ยน ไม่ใช่ทุก progress/error แต่ selected value ต้องมี equality ที่เหมาะสม</p></section>
+<section><h2>5. Mutable collection trap</h2><p>ถ้า selector คืน list instance เดิมแล้ว mutate ภายใน equality อาจไม่เห็นการเปลี่ยน ใช้ immutable snapshot/projection เช่น length/id tuple แทน expose mutable collection</p></section>
+<section><h2>6. Measure</h2><p>อย่าใส่ Selector ทุกจุดก่อน profile ใช้ DevTools/rebuild logging หาจุดแพง บาง widget build เล็กๆ เร็วกว่าความซับซ้อนของ optimization</p></section>
+<section><h2>7. Side effect</h2><p>ไม่แสดง dialog/snackbar ใน build จาก error ทุกครั้งเพราะ rebuild ทำซ้ำ ควรมีกลไก event/consume message หรือ listener แยก Provider พื้นฐานต้องออกแบบเอง</p></section>
+<section><h2>8. Exercise</h2><div class="success">เพิ่ม widget แสดง busy count ด้วย <code>Selector</code> แล้ว instrument build counter พิสูจน์ว่า refresh ที่ไม่เปลี่ยน busy count ไม่ rebuild widget นี้</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

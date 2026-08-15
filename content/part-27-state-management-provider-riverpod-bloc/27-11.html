@@ -1,0 +1,9 @@
+<div class="note"><strong>Immutable TaskPatternState:</strong> snapshotเดียวถูกใช้โดย RiverpodและCubitเพื่อให้การเปรียบเทียบไม่ปนกับ modelคนละแบบ</div>
+<section><h2>1. State fields</h2><p><code>tasks</code>, <code>refreshing</code>, <code>busyTaskIds</code>, <code>error</code> และ <code>message</code> ครอบ read/action dimensionsโดยไม่เอา repository/clientเข้ามาใน state</p></section>
+<section><h2>2. Unmodifiable collections</h2><p>constructor/copyWithสร้าง read-only list/set ป้องกัน snapshotเก่าถูกแก้ย้อนหลัง ซึ่งทำให้ time-travel/debug/equalityเสียความหมาย</p></section>
+<section><h2>3. Nullable copyWith</h2><p>ใช้ sentinelแยก “ไม่เปลี่ยน error” จาก “ตั้ง errorเป็น null” เพราะ parameter <code>String? error</code> อย่างเดียวแยกสอง intentไม่ได้</p></section>
+<section><h2>4. Cubit load</h2><p>emit refreshing trueก่อน await แล้ว emit tasks/errorหลังจบ UIจึงวาดจาก stateอย่างเดียว ไม่มี hidden mutable booleanนอก stream</p></section>
+<section><h2>5. Cubit complete</h2><p>เพิ่ม busy id, ส่ง command, ลบ taskและปลด busyด้วย snapshotsใหม่ Known/unknown errorsเดิน pathต่างและ reconcileผ่าน repository</p></section>
+<section><h2>6. Equality</h2><p>Labไม่เพิ่ม Equatableเพราะ emit instanceใหม่ทุกครั้งและ testsตรวจ fields ระบบใหญ่ควรใช้ value equality/freezedเพื่อ BlocSelector/distinct/testsที่แม่น แต่ต้องเข้าใจ collection equality</p></section>
+<section><h2>7. State explosion</h2><p>อย่าสร้าง booleanทุก combinationจน invalid statesเกิดง่าย อาจใช้ sealed states/substatesสำหรับ workflowขั้นตอน หรือแยก resource stateจาก command stateตาม aggregate</p></section>
+<section><h2>8. Exercise</h2><div class="success">เขียน invariant: task idห้ามอยู่ busyถ้าไม่อยู่ tasks ยกเว้นช่วง reconciliation แล้วเพิ่ม assertion/test ตรวจทุก Cubit emission สำคัญ</div></section>

@@ -1,0 +1,9 @@
+<div class="note"><strong>AsyncValue ไม่พอทุกอย่าง:</strong> AsyncValue เหมาะกับ lifecycleของ resource แต่ per-task mutation, stale snapshotและ transient message ยังต้อง modelใน domain/UI stateอย่างตั้งใจ</div>
+<section><h2>1. Initial async</h2><p><code>asyncState.when(loading/error/data)</code> ทำสาม branchชัดสำหรับ buildแรก หาก errorมี retry ให้ invalidate providerหรือเรียก recovery methodตาม semantics</p></section>
+<section><h2>2. Refresh with data</h2><p>Lab เก็บ <code>TaskPatternState.refreshing</code> ภายใน AsyncData เพื่อรักษา listเดิมขณะ refresh ไม่เปลี่ยนทั้ง providerเป็น AsyncLoadingจนหน้ากระพริบ</p></section>
+<section><h2>3. Mutation state</h2><p><code>busyTaskIds</code> แยกราย taskเพราะ resourceทั้ง listยัง dataอยู่ การใช้ AsyncLoadingทั้ง listเมื่อ completeหนึ่งรายการจะล็อกงานอื่นและสื่อผิด</p></section>
+<section><h2>4. Known error</h2><p>HTTP failureที่รู้ผลเก็บ errorพร้อม snapshotเดิม UIแสดง banner ส่วน initial build errorที่ไม่มี snapshotใช้ AsyncErrorเต็ม node</p></section>
+<section><h2>5. Unknown outcome</h2><p>Notifier reload repositoryเพื่อ reconcileเหมือน TaskStore/Cubit Packageไม่เปลี่ยนกฎ distributed system; logicนี้ต้องเหมือนกันทุก implementation</p></section>
+<section><h2>6. Side effect message</h2><p>messageใน stateอาจถูกแสดงซ้ำเมื่อ widget resubscribe Productionควรใช้ <code>ref.listen</code> พร้อม event identity/consume policy หรือแสดง statusใน UIที่ idempotent</p></section>
+<section><h2>7. Retry policy</h2><p>Riverpod 3มี retry behaviorบางส่วน แต่ mutationธุรกิจต้องกำหนดเองและ replay keyเดิม อย่าเปิด generic automatic retryบน POSTเพียงเพราะ frameworkทำได้</p></section>
+<section><h2>8. Exercise</h2><div class="success">จำลอง refresh failขณะที่มี tasks ตรวจว่า listยังอยู่/error bannerขึ้น แล้วจำลอง initial build fail ตรวจว่าเข้า AsyncError ทั้งสองกรณีต้องมี recoveryต่างกัน</div></section>

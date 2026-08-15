@@ -1,0 +1,9 @@
+<div class="note"><strong>Trade-off matrix:</strong> ไม่มีคำตอบเดียวสำหรับทุกทีม แต่มีคำตอบที่อธิบายด้วย constraintsและ migration costได้</div>
+<section><h2>1. Provider</h2><p>จุดแข็งคือเล็ก, Flutter-native mental model, reuse ChangeNotifierเดิมและ ecosystemกว้าง จุดแลกคือ mutable state/notify granularityและ side-effect patternต้องออกแบบเอง</p></section>
+<section><h2>2. Riverpod</h2><p>จุดแข็งคือ graphไม่ผูก lookup typeกับ BuildContext, async/cache/override typedและ container tests จุดแลกคือ API surface/version evolutionและทีมต้องเข้าใจ provider lifecycle/invalidation</p></section>
+<section><h2>3. Cubit/Bloc</h2><p>จุดแข็งคือ explicit immutable transitions, stream tooling, Builder/Listener separationและ conventionทีมใหญ่ จุดแลกคือ types/boilerplateมากขึ้น โดย Bloc eventsไม่คุ้มทุก feature</p></section>
+<section><h2>4. เลือกตาม codebase</h2><p>แอป ChangeNotifierเดิมไม่ควร rewriteทั้งระบบเพื่อ trend เริ่ม Providerหรือคง injectionเดิมแล้วแก้ painจริง แอปใหม่ async graphหนักอาจเลือก Riverpod ทีมมี Bloc convention/observabilityอาจเลือก Cubit/Bloc</p></section>
+<section><h2>5. ห้ามผสมไร้ boundary</h2><p>migrationช่วงหนึ่งผสมได้ แต่กำหนด feature boundary/adapter/deadline ไม่ให้ widgetเดียวอ่านสาม containers เพราะ ownershipและdebug pathจะสับสน</p></section>
+<section><h2>6. Migration strategy</h2><ol><li>ตรึง behaviorด้วย tests</li><li>รักษา repository contract</li><li>ย้ายหนึ่ง vertical slice</li><li>วัด defects/rebuild/onboarding</li><li>ตัดสิน ADRก่อนขยาย</li></ol></section>
+<section><h2>7. Exit strategy</h2><p>Package choiceดีต้องเปลี่ยนออกได้โดย domain/repositoryไม่พัง หลีกเลี่ยง provider refs/BuildContext/Emitใน modelsและ data sources</p></section>
+<section><h2>8. ADR outcome</h2><div class="success">เขียน Decision, Context, Options, Consequences, Migration/Rollbackและ metrics ไม่ใช้ “นิยมกว่า” เป็นเหตุผลเดียว และทบทวนเมื่อ team/requirementsเปลี่ยน</div></section>

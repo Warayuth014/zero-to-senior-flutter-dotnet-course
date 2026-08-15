@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlocProvider Builder Selector Listener</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-12 · State &amp; Lifecycle</span><h1>BlocProvider Builder Selector Listener</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>flutter_bloc widgets:</strong> Providerสร้าง/ปิด Cubit, Builderวาด state, Selectorลด rebuild และ Listenerทำ one-off side effect แต่ละตัวมีหน้าที่ต่างกัน</div>
+<section><h2>1. BlocProvider</h2><pre class="code-vs"><code>BlocProvider(<br>&nbsp;&nbsp;create: (_) =&gt; TaskCubit(repository)..load(),<br>&nbsp;&nbsp;child: const BlocTaskBody(),<br>)</code></pre><p>scope own Cubitและ closeเมื่อถอดจาก tree</p></section>
+<section><h2>2. BlocBuilder</h2><p>builderต้อง pure วาด tasks/loading/errorจาก snapshot ไม่ยิง APIหรือแสดง dialog การ buildอาจเกิดหลายครั้งและไม่เท่ากับ eventครั้งเดียว</p></section>
+<section><h2>3. BlocSelector</h2><p>Labเลือก <code>state.tasks.length</code> สำหรับ header จึง rebuildเมื่อ countเปลี่ยน คล้าย Provider Selector/Riverpod select แนวคิด projectionเหมือนกัน</p></section>
+<section><h2>4. BlocListener</h2><p>ฟัง transition messageใหม่แล้วแสดง SnackBarด้วย <code>listenWhen</code> Side effectจึงไม่อยู่ builderและลดการแสดงซ้ำจาก unrelated state</p></section>
+<section><h2>5. BlocConsumer</h2><p>รวม Builder+Listenerได้แต่แยกสอง widgetมักอ่านหน้าที่ชัดกว่า ใช้ Consumerเมื่ออยู่จุดเดียวและ conditionsไม่ซับซ้อน</p></section>
+<section><h2>6. context.read/watch/select</h2><p>flutter_blocมี extensionsคล้าย Provider: readสำหรับ callback, watchทั้ง state, select projection แต่ BlocBuilder/Selectorทำ dependencyใน treeเห็นชัดกว่าใน widgetใหญ่</p></section>
+<section><h2>7. Nested scopes</h2><p>MultiBlocProviderลด nestingแต่ไม่เปลี่ยน ownership ถ้า reuse Cubitเดิมใช้ <code>BlocProvider.value</code> และเจ้าของเดิมต้อง closeเอง</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">ชี้ใน <code>bloc_task_panel.dart</code> ให้ได้ว่าบรรทัดใดสร้าง lifecycle, render list, render countและแสดง one-off feedback ถ้าทั้งหมดอยู่ Builderเดียว refactorก่อนเพิ่ม flow</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

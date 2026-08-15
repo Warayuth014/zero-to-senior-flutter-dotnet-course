@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provider dependency graph และ ProxyProvider</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-05 · State &amp; Lifecycle</span><h1>Provider dependency graph และ ProxyProvider</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>Dependency graph:</strong> MultiProvider ทำ nested providers อ่านง่ายขึ้น ส่วน ProxyProvider สร้าง dependency ที่เปลี่ยนตาม provider อื่น อย่าใช้เพื่อซ่อน graph ที่หมุนเป็นวง</div>
+<section><h2>1. MultiProvider</h2><pre class="code-vs"><code>MultiProvider(providers: [<br>&nbsp;&nbsp;Provider&lt;TaskRepository&gt;(create: buildRepository),<br>&nbsp;&nbsp;ChangeNotifierProvider&lt;TaskStore&gt;(create: buildStore),<br>], child: app)</code></pre><p>เป็น syntax flatten เท่านั้น scope/order ยังสำคัญเหมือน nesting</p></section>
+<section><h2>2. ProxyProvider</h2><p>เมื่อ repository ต้องเปลี่ยนตาม ConnectionProfile ใช้ ProxyProvider รับ profile/api แล้วสร้างหรือ update dependency ห้ามอ่าน profile ครั้งเดียวใน create แล้วหวังว่าจะเปลี่ยนตาม</p></section>
+<section><h2>3. Recreate หรือ update</h2><p>เปลี่ยน server ควร recreate client/repository/store และล้าง session มากกว่าดัด baseUrl ของ object ที่มี in-flight requests ต้องกำหนด disposal ของ graph เก่า</p></section>
+<section><h2>4. Cyclic dependency</h2><p>AuthStore ต้องใช้ ApiClient และ ApiClient ต้องอ่าน token ได้ แต่ไม่ควรให้ทั้งคู่ constructor อ้างกัน ใช้ token source interface/interceptor callback หรือ composition service ตัดวงจร</p></section>
+<section><h2>5. RepositoryProvider</h2><p>ใน flutter_bloc มี RepositoryProvider ทำหน้าที่คล้าย Provider สำหรับ dependency ที่ไม่ใช่ state controller แนวคิด graph/ownership เดียวกันแม้ชื่อ package ต่าง</p></section>
+<section><h2>6. Test override</h2><p>Provider widget test ครอบ subtree ด้วย <code>Provider.value</code> ของ fake repository/store แต่ controller unit test ยังควรสร้างตรงเพื่อ feedback เร็ว</p></section>
+<section><h2>7. Graph review</h2><p>วาด nodes และ arrows ของ config→client→repository→store→widget ทุก nodeต้องมี ownerและ disposal policy ถ้า graph อธิบายไม่ได้ MultiProvider ยาวกว่าย่อมแก้ไม่ได้</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">จำกัด package state management ไว้ composition/UI binding ส่วน repository interface ยังไม่ import package ใด ทำให้ graph เปลี่ยน framework โดย contract เดิมอยู่</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Provider ownership create เทียบกับ value</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">27-03 · State &amp; Lifecycle</span><h1>Provider ownership create เทียบกับ value</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<div class="note"><strong>Provider ownership:</strong> constructor <code>create</code> และ <code>.value</code> ไม่ได้ต่างแค่ syntax แต่บอกว่า Provider เป็นเจ้าของการ dispose object หรือเพียง expose object ที่มีเจ้าของอยู่แล้ว</div>
+<section><h2>1. สร้างใน scope</h2><pre class="code-vs"><code>ChangeNotifierProvider(<br>&nbsp;&nbsp;create: (_) =&gt; TaskStore(repository)..load(),<br>&nbsp;&nbsp;child: const ProviderTaskBody(),<br>)</code></pre><p>Provider สร้างหนึ่งครั้งแบบ lazy และ dispose เมื่อ scope ถูกถอด เหมาะกับ feature route ที่ state มีอายุเท่าหน้า</p></section>
+<section><h2>2. Expose instance เดิม</h2><p><code>ChangeNotifierProvider.value(value: existingStore)</code> ใช้เมื่อ parent เป็นเจ้าของ instance เช่น store อยู่ app scope ห้ามสร้าง object ใหม่ใน <code>.value</code> เพราะ lifecycle/disposal อาจผิด</p></section>
+<section><h2>3. Scope placement</h2><p>วางต่ำสุดที่ consumers ทั้งหมดเข้าถึงได้ Auth session อาจอยู่เหนือ Navigator ส่วน scan form stateอยู่ route เดียว การยกทุก provider ไป root ทำให้ state อยู่ยาวและ dependencies มองไม่เห็น</p></section>
+<section><h2>4. BuildContext timing</h2><p>context อ่านได้เฉพาะ provider ที่เป็น ancestor หากสร้าง Provider และอ่านด้วย context เดิมเหนือ child จะเกิด ProviderNotFound ใช้ builder/child context ที่อยู่ใต้ scope</p></section>
+<section><h2>5. Lazy creation</h2><p><code>create</code> ปกติ lazy จนมี consumer ถ้าต้องเริ่ม background subscriptionทันทีอาจใช้ <code>lazy:false</code> แต่ควรถามก่อนว่า side effect ควรเริ่มจาก UI scope จริงหรือ composition service</p></section>
+<section><h2>6. Route replacement</h2><p>เมื่อ logout/เปลี่ยน server ให้ถอด scope ที่ผูก session เพื่อ dispose stores และสร้าง dependency graph ใหม่ ไม่ใช่แก้ fields ของ singleton ทุกตัวด้วยมือ</p></section>
+<section><h2>7. Ownership test</h2><p>Widget test pump Provider panel, ตรวจ load แล้ว replace widget จาก tree จากนั้น ChangeNotifier ที่ Provider สร้างไม่ควรถูกใช้อีก สามารถ instrument dispose ใน controller สำคัญได้</p></section>
+<section><h2>8. Rule</h2><div class="success"><code>create</code> = scope owns; <code>.value</code> = someone else owns เขียน owner ใน composition code ให้ reviewerเห็น ไม่พึ่งความจำว่า object มาจากไหน</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -51,8 +51,9 @@
 - Part 24: เขียนเนื้อหาเฉพาะบทครบ 18/18 บท เป็น Final Project แบบ production-style ตั้งแต่ scope/architecture, shell/config/auth, receiving/inventory/cycle count/task, SignalR/upload ไปจน tests, Android release และ production readiness
 - Part 25: เขียนเนื้อหาเฉพาะบทครบ 13/13 บท เป็น onboarding/code-reading playbook ครอบคลุม trace, contract/state/lifecycle/network debugging, เพิ่ม endpoint/workflow, security/performance review, coverage, glossary และแบบประเมินพร้อมทำงานจริง
 - Part 26: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท พร้อม implementation จริงของ task vertical slice ครอบคลุม test seam, strict contract, idempotency, per-task busy, timeout reconciliation, PDA UX และ integration runbook
+- Part 27: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท พร้อม lab เปรียบเทียบ Provider, Riverpod และ BLoC/Cubit จาก TaskRepository เดียวกัน ครอบคลุม ownership, async state, rebuild, testing, package evaluation และ migration
 
-คอร์สเขียนเนื้อหาเฉพาะบทครบแล้ว 405/405 บท ไม่มีบท scaffold เหลือ
+คอร์สเขียนเนื้อหาเฉพาะบทครบแล้ว 420/420 บท ไม่มีบท scaffold เหลือ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 
