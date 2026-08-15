@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pattern matching และ switch expression</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-12 · Dart Core</span><h1>Pattern matching และ switch expression</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note">Pattern matching ไม่ใช่ switch syntax สวยขึ้นอย่างเดียว มันตรวจ shape, type และค่าพร้อม bind ตัวแปร จึงมีประโยชน์มากตรง JSON boundary และ workflow state</div>
+<section><h2>1. Switch expression กับ exhaustive cases</h2><pre class="code-vs"><code>String taskTypeLabel(TaskType type) =&gt; switch (type) {
+  TaskType.putaway =&gt; 'Putaway',
+  TaskType.retrieve =&gt; 'Retrieve',
+  TaskType.returning =&gt; 'Putaway',
+};</code></pre><p>expression คืนค่าโดยตรงและ compiler ตรวจ enum ครบ เหมาะกับ mapping ที่ไม่มี side effect ถ้าต้องทำหลาย statement ใช้ switch statement</p></section>
+<section><h2>2. OR pattern, wildcard และ guard</h2><pre class="code-vs"><code>String statusLabel(Object? raw) =&gt; switch (raw) {
+  'PENDING' || 0 =&gt; 'รอมอบหมาย',
+  final String s when s.trim().isEmpty =&gt; 'ไม่ระบุสถานะ',
+  final String s =&gt; s,
+  _ =&gt; 'UNKNOWN',
+};</code></pre><p><code>||</code> จับทางเลือก, <code>_</code> จับค่าใดก็ได้โดยไม่ bind และ <code>when</code> เพิ่มเงื่อนไขหลัง pattern match แล้ว ลำดับ case สำคัญ: case กว้างอยู่ก่อนจะบังกรณีแคบ</p></section>
+<section><h2>3. Object/List/Map pattern</h2><pre class="code-vs"><code>String parseLogin(Object? json) =&gt; switch (json) {
+  {'token': final String token} when token.isNotEmpty =&gt; token,
+  {'error': final String message} =&gt; throw ApiException(message),
+  _ =&gt; throw const FormatException('Invalid login payload'),
+};
+
+final [first, ...rest] = tasks;</code></pre><p>Map pattern ไม่ได้บังคับว่าห้ามมี key อื่น แต่บังคับ key ที่ระบุต้อง match Shape validation แบบนี้ลด cast ต่อกันหลายชั้น</p></section>
+<section><h2>4. if-case สำหรับทางเดียว</h2><pre class="code-vs"><code>if (payload case {'items': final List&lt;Object?&gt; rows}) {
+  // rows ถูก promotion แล้ว
+} else {
+  throw const FormatException('items is required');
+}</code></pre></section>
+<section><h2>5. ตัวอย่างจริง</h2><p><code>workflow_definitions.dart</code> ใช้ OR pattern รองรับ status ใหม่/legacy เช่น <code>'PENDING' || '0'</code>; <code>connection_profile.dart</code> ใช้ switch parse environment; <code>warehouse_shell.dart</code> ใช้ switch expression เลือก widget/title จาก state ปัจจุบัน</p></section>
+<section><h2>6. Pattern ไม่แทน validation ทั้งหมด</h2><p>Pattern ตรวจ shape/type ได้ แต่ rule อย่าง port 1–65535, quantity ไม่เกินคงเหลือ หรือ transition ถูกลำดับยังต้องตรวจ domain invariant อย่าให้ parser ที่ดูสวยผ่านค่าที่ semantic ผิด</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>เขียน parser ที่ยอมรับ quantity เป็น int หรือ numeric String แต่ปฏิเสธค่าติดลบ</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>int parseQuantity(Object? raw) =&gt; switch (raw) {
+  final int n when n &gt;= 0 =&gt; n,
+  final String s when int.tryParse(s) case final int n when n &gt;= 0 =&gt; n,
+  _ =&gt; throw const FormatException('Invalid quantity'),
+};</code></pre></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใส่ wildcard เพื่อให้ analyzer เงียบใน switch ของ enum/sealed state ถ้าค่าใหม่ควรบังคับให้ทุก UI ตัดสินใจ ให้รักษา exhaustive checking</div></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isolate และงานหนักนอก UI thread</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-17 · Dart Core</span><h1>Isolate และงานหนักนอก UI thread</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note">Flutter render UI บน main isolate งาน CPU ที่กินเวลานานทำให้ frame หลุด แม้ function จะประกาศ async การแยก isolate เหมาะกับ CPU-bound work ไม่ใช่ HTTP ที่ asynchronous อยู่แล้ว</div>
+<section><h2>1. CPU-bound กับ I/O-bound</h2><table><thead><tr><th>งาน</th><th>ตัวอย่าง</th><th>แนวทาง</th></tr></thead><tbody><tr><td>I/O-bound</td><td>HTTP, file wait, timer</td><td>Future/await ปกติ</td></tr><tr><td>CPU-bound</td><td>parse JSON ใหญ่มาก, คำนวณ/บีบอัดภาพ</td><td>วัดก่อน แล้วใช้ isolate/compute</td></tr></tbody></table><p>การย้าย request HTTP ไป isolate เพิ่ม complexity โดยแทบไม่ช่วย เพราะเวลาส่วนใหญ่คือรอ network</p></section>
+<section><h2>2. ใช้ compute สำหรับงานหนึ่งครั้ง</h2><pre class="code-vs"><code>List&lt;Task&gt; parseTasks(String body) {
+  final rows = jsonDecode(body) as List&lt;Object?&gt;;
+  return rows
+      .whereType&lt;Map&lt;String, dynamic&gt;&gt;()
+      .map(Task.fromJson)
+      .toList();
+}
+
+final tasks = await compute(parseTasks, response.body);</code></pre><p>callback ควรเป็น top-level/static และ input-output ต้องส่งข้าม isolate ได้ อย่าส่ง BuildContext, controller, open socket หรือ object ที่ผูก native resource</p></section>
+<section><h2>3. Message passing ไม่แชร์ memory</h2><p>แต่ละ isolate มี heap/event loop ของตัวเอง สื่อสารผ่าน message จึงลด shared-memory race แต่มีต้นทุน spawn/copy/transfer ข้อมูล งานเล็กหรือเรียกถี่อาจช้ากว่าทำตรง ๆ</p></section>
+<section><h2>4. Long-lived worker</h2><p>ถ้างานหนักเกิดต่อเนื่อง การ spawn ทุกครั้งแพง สามารถสร้าง isolate ยาวด้วย ReceivePort/SendPort แต่ต้องออกแบบ request id, error, shutdown และ queue เอง เริ่มจาก <code>compute</code> และ profiling ก่อน</p></section>
+<section><h2>5. ใช้กับ WMS เมื่อใด</h2><ul><li>payload inventory หลายหมื่นแถวและ profiling ยืนยัน parse ทำ UI กระตุก</li><li>ย่อ/ประมวลผลรูปก่อน multipart upload</li><li>import/export/คำนวณชุดใหญ่บนอุปกรณ์</li></ul><p>รายการ task/pallet ปกติไม่ควรรีบใส่ isolate แก้ pagination, lazy list และ payload size ก่อน</p></section>
+<section><h2>6. Web และ platform</h2><p>implementation ของ concurrency ต่างตาม platform จึงต้องวัดบน target จริง โดยเฉพาะ PDA รุ่นต่ำ อย่าอ้างผลจาก desktop อย่างเดียว และแยก platform API ออกจาก pure parsing function เพื่อ test ได้</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>หน้า inventory กระตุกหลัง response 5 MB จงเรียงขั้นตรวจและแก้</p><details><summary>แนวคำตอบ</summary><ol><li>ใช้ DevTools/profile build วัด network, decode, model mapping, setState และ list rendering</li><li>ลด payload/pagination ที่ API</li><li>ใช้ builder/lazy rendering</li><li>ถ้า decode/mapping ยังเป็น CPU bottleneck ค่อยย้าย pure parser ไป compute</li><li>วัด frame และ memory ซ้ำบน PDA</li></ol></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn"><code>async</code> ไม่ได้ย้ายงานไป background thread และ isolate ไม่สามารถแก้ widget rebuild มากเกินหรือ API payload ใหญ่โดยต้นเหตุได้</div></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

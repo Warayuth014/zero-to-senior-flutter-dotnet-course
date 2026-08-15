@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON, dynamic และ runtime cast</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-19 · Dart Core</span><h1>JSON, dynamic และ runtime cast</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note">หลัง <code>jsonDecode</code> ข้อมูลยังไม่ปลอดภัย: JSON ไม่มี class/enum/DateTime และ server อาจส่ง shape, casing หรือ null ต่างจากที่คิด Parser คือ firewall ระหว่าง dynamic world กับ typed app</div>
+<section><h2>1. Decode แล้วแปลงทันที</h2><pre class="code-vs"><code>Object? decoded = jsonDecode(response.body);
+if (decoded is! Map) {
+  throw const FormatException('Expected JSON object');
+}
+final map = Map&lt;String, dynamic&gt;.from(decoded);
+final task = Task.fromJson(map);</code></pre><p>อย่า cast <code>as Map&lt;String,dynamic&gt;</code> ก่อนตรวจ shape เพราะ cast error จะให้ข้อความระดับภาษาแทน contract error ที่ควบคุมได้</p></section>
+<section><h2>2. Parser ที่ทน type เล็กน้อยแต่ไม่กลืนข้อมูลเสีย</h2><pre class="code-vs"><code>int requiredInt(Map&lt;String, dynamic&gt; json, String key) {
+  final raw = json[key];
+  final value = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+  if (value == null) throw FormatException('$key must be an integer');
+  return value;
+}
+
+List&lt;Map&lt;String, dynamic&gt;&gt; objectRows(Object? raw) =&gt; switch (raw) {
+  final List rows =&gt; rows.whereType&lt;Map&gt;()
+      .map((row) =&gt; Map&lt;String, dynamic&gt;.from(row)).toList(),
+  _ =&gt; const [],
+};</code></pre><p>ต้องตัดสินใจว่า field/list ขาดคือ empty ที่ถูกต้องหรือ contract error อย่า default ทุกอย่างเป็น empty โดยไม่ดู domain</p></section>
+<section><h2>3. Casing และ .NET contract</h2><p>บาง endpoint อาจส่ง <code>totalCount</code> หรือ <code>TotalCount</code> ช่วง migration ให้ parser boundary รองรับทั้งคู่ชั่วคราวและมี contract test แต่ควรกำหนด canonical JSON policy ฝั่ง .NET แล้วลบ fallback เมื่อพร้อม ไม่กระจาย <code>json['x'] ?? json['X']</code> ใน widget</p></section>
+<section><h2>4. DateTime, number และ enum</h2><ul><li>ใช้ ISO-8601 พร้อม timezone contract; parse แล้วตัดสินใจ UTC/local ที่ boundary</li><li>JSON number อาจ decode เป็น int/double ตามรูป ต้อง normalize ตาม domain</li><li>status parse เป็น enum/unknown strategy ก่อนเข้า UI</li><li>ไม่ใช้ <code>toString()</code> กลบ object/list ที่ผิด shape</li></ul></section>
+<section><h2>5. ตัวอย่างจริงที่ควรเทียบ</h2><ul><li><code>ConnectionProfile.fromJson(Object? raw)</code> ตรวจ Map, id, host, port range และคืน null สำหรับ saved row ที่เสีย</li><li><code>cycle_count_api.dart</code> มี helper รองรับ camel/Pascal และ <code>whereType</code></li><li><code>wmsapp/api_service.dart</code> มีจุด <code>decoded as Map&lt;String,dynamic&gt;</code> หลังแยก List ซึ่งอาจ throw หาก body เป็น scalar—เป็นจุดที่ควร harden</li></ul></section>
+<section><h2>6. Contract test</h2><pre class="code-vs"><code>test('parses production task fixture', () {
+  final json = jsonDecode(fixture) as Map&lt;String, dynamic&gt;;
+  final task = Task.fromJson(json);
+  expect(task.id, 'TASK-001');
+  expect(task.status, TaskStatus.pending);
+});</code></pre><p>เก็บ fixture ที่ sanitize จาก response จริง และเพิ่มเคส missing/null/wrong type/legacy casing</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ parser ของ <code>{"items": [...], "totalCount": 12}</code> ที่ items บังคับเป็น object list และ totalCount รับ int/numeric string</p><details><summary>แนวคำตอบ</summary><p>ตรวจ root Map → ตรวจ items เป็น List → แปลงแต่ละ row ผ่าน <code>Task.fromJson</code> โดยระบุนโยบายว่าจะ fail ทั้ง page หรือข้าม bad row → parse count ด้วย helper → คืน typed <code>PagedResult&lt;Task&gt;</code> ไม่คืน Map</p></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn"><code>dynamic</code> ควรมีอายุสั้นที่สุด: decode → validate → typed model เมื่อ dynamic ไหลถึง build method runtime cast bug จะกลายเป็น UI crash ที่หาต้นเหตุยาก</div></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

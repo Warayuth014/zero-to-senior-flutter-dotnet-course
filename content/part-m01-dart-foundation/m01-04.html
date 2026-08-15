@@ -1,0 +1,34 @@
+<div class="note">Function ใน Dart เป็น object: เก็บในตัวแปร ส่งเป็น argument คืนจาก function และมี type ได้ นี่คือฐานของ callback ทุกปุ่ม, builder, listener และ repository fake ใน Flutter</div>
+<section><h2>1. รูปแบบ parameter</h2><pre class="code-vs"><code>String normalize(String raw) =&gt; raw.trim().toUpperCase();
+
+Future&lt;void&gt; submitScan({
+  required String barcode,
+  int quantity = 1,
+  String? serial,
+}) async { /* ... */ }
+
+submitScan(barcode: 'PAL-001', quantity: 2);</code></pre><p>Positional เหมาะกับค่าจำนวนน้อยที่ลำดับชัด Named parameter ทำ call site อ่านรู้เรื่องและลดการสลับค่า ใช้ <code>required</code> เมื่อไม่มี default ที่ถูกต้อง อย่าทำ required parameter เป็น nullable โดยไม่มีเหตุผล</p></section>
+<section><h2>2. Function type และ callback</h2><pre class="code-vs"><code>typedef ScanHandler = Future&lt;void&gt; Function(String barcode);
+
+class ScanButton extends StatelessWidget {
+  const ScanButton({super.key, required this.onScan});
+  final ScanHandler onScan;
+  // onPressed: () =&gt; onScan(controller.text)
+}</code></pre><p><code>VoidCallback</code> คือ <code>void Function()</code>, <code>ValueChanged&lt;T&gt;</code> คือ <code>void Function(T)</code> การระบุ signature ทำให้ parent/child ตกลง input-output กันโดยไม่รู้ implementation ของกันและกัน</p></section>
+<section><h2>3. ส่ง function ไม่ใช่เรียก function</h2><pre class="code-vs"><code>onPressed: submit,        // ส่ง tear-off ให้ Flutter เรียกภายหลัง
+onPressed: () =&gt; submit(code), // wrapper เมื่อมี argument
+// onPressed: submit(code),    // เรียกเดี๋ยวนี้และเอาผลลัพธ์ไปใส่: ผิด</code></pre><p>ถ้า callback คืน <code>Future&lt;void&gt;</code> แต่ API รับ <code>void Function()</code> Flutter จะไม่ await ให้อัตโนมัติ เจ้าของ action ต้องจัด loading, error และ duplicate tap เอง</p></section>
+<section><h2>4. Closure และค่าที่ capture</h2><pre class="code-vs"><code>for (final task in tasks) {
+  buttons.add(TaskButton(onTap: () =&gt; openTask(task.id)));
+}</code></pre><p>closure จำตัวแปรรอบข้างได้ สะดวกแต่ทำ dependency ซ่อนอยู่ ถ้า callback ใหญ่หรือจับ state หลายตัวให้ย้ายเป็น named method เพื่ออ่าน stack trace/test ง่ายขึ้น</p></section>
+<section><h2>5. ตัวอย่างจริง</h2><p><code>wmsapp/lib/services/signalr_service.dart</code> ประกาศ <code>typedef SignalRCallback = void Function(Map&lt;String, dynamic&gt; data)</code> แล้วเก็บ listener เป็น list ส่วน widget ในทั้งสองโปรเจกต์รับ <code>onTap</code>, <code>onChanged</code>, <code>onSubmitted</code> เพื่อส่ง event จาก child กลับ owner โดยไม่ให้ child รู้ business logic</p></section>
+<section><h2>6. แบบฝึกหัด</h2><p>เขียน function <code>validateQuantity</code> ที่รับ String และ optional max แล้วคืน String? สำหรับ Form validator จากนั้นส่งมันเป็น callback</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>String? validateQuantity(String? raw, {int? max}) {
+  final value = int.tryParse(raw?.trim() ?? '');
+  if (value == null || value &lt;= 0) return 'จำนวนไม่ถูกต้อง';
+  if (max != null &amp;&amp; value &gt; max) return 'เกินจำนวนคงเหลือ';
+  return null;
+}
+
+TextFormField(validator: (value) =&gt; validateQuantity(value, max: 10));</code></pre></details></section>
+<section><h2>7. จุดพลาด</h2><div class="warn">callback async ที่ throw อาจกลายเป็น unhandled error ถ้าผู้เรียกไม่ await/catch และอย่าประกาศ callback เป็น <code>Function</code> กว้าง ๆ เพราะเสียการตรวจจำนวน/type ของ argument</div></section>
+<section><h2>8. เช็กความเข้าใจ</h2><p>อ่าน callback แล้วตอบให้ได้: ใครเรียก, เรียกเมื่อไร, รับค่าอะไร, คืน Future ไหม, error ไปไหน และมีโอกาสถูกเรียกซ้ำหรือหลัง dispose หรือไม่</p></section>

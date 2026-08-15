@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream และ event-driven code</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-16 · Dart Core</span><h1>Stream และ event-driven code</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note"><code>Future</code> ให้ผลครั้งเดียว ส่วน <code>Stream</code> ให้เหตุการณ์ 0..หลายครั้งตามเวลา ทุก stream listener จึงต้องมีคำตอบเรื่อง subscribe, error, done และ cancel</div>
+<section><h2>1. สร้างและฟัง Stream</h2><pre class="code-vs"><code>Stream&lt;String&gt; normalizedScans(Stream&lt;String&gt; raw) async* {
+  await for (final value in raw) {
+    final code = value.trim().toUpperCase();
+    if (code.isNotEmpty) yield code;
+  }
+}
+
+late final StreamSubscription&lt;String&gt; subscription;
+subscription = normalizedScans(scanner.scans).listen(
+  onScan,
+  onError: onScannerError,
+);
+// await subscription.cancel(); เมื่อ owner จบ</code></pre></section>
+<section><h2>2. Single-subscription กับ broadcast</h2><p>single-subscription เหมาะกับลำดับข้อมูลที่ควรมี consumer เดียวและฟังย้อนหลังไม่ได้ ส่วน broadcast เหมาะกับ event ที่ผู้ฟังหลายรายเข้าร่วม/ออกได้ แต่คนมาทีหลังไม่เห็น event เก่า อย่าเปลี่ยนเป็น broadcast เพียงเพื่อแก้ “ถูกฟังสองครั้ง” โดยไม่เข้าใจ semantics</p></section>
+<section><h2>3. Controller และ ownership</h2><pre class="code-vs"><code>class FakeBarcodeSource implements BarcodeSource {
+  final _controller = StreamController&lt;String&gt;.broadcast();
+  @override Stream&lt;String&gt; get scans =&gt; _controller.stream;
+  void emit(String code) =&gt; _controller.add(code);
+  Future&lt;void&gt; dispose() =&gt; _controller.close();
+}</code></pre><p>ผู้สร้าง controller เป็นเจ้าของ close ส่วน subscriber เป็นเจ้าของ subscription/cancel การสลับหน้าจอโดยไม่ cancel ทำ callback ซ้ำและอาจแตะ State ที่ dispose แล้ว</p></section>
+<section><h2>4. Operators และ backpressure เชิงงาน</h2><p><code>map</code>, <code>where</code>, <code>distinct</code>, <code>asyncMap</code> ช่วยสร้าง pipeline แต่ scanner อาจส่งเร็วกว่าการเรียก API การใช้ <code>asyncMap</code> ไม่ได้แทน policy เสมอไป ต้องตัดสินใจว่าจะ queue, drop duplicate, ignore ระหว่าง busy หรือ cancel request เก่า</p></section>
+<section><h2>5. SignalR ใน wmsapp</h2><p><code>signalr_service.dart</code> ไม่ expose Dart Stream แต่เก็บ <code>List&lt;SignalRCallback&gt;</code> และ add/remove listener เอง Mental model ยังเหมือน stream: connection เป็น producer, screen subscribe ใน init, unsubscribe ใน dispose, event อาจซ้ำ/มาผิดลำดับ และ reconnect อาจทำ event หาย</p></section>
+<section><h2>6. StreamBuilder ใช้เมื่อใด</h2><p>ใช้เมื่อ UI derive จาก snapshot ของ stream โดยตรงและ lifecycle ผูกกับ widget ได้ แต่ business workflow ที่ต้อง merge event กับ command/state หลายชนิดควรให้ store/service subscribe แล้ว expose state ที่ตีความแล้ว ไม่ควรย้าย business rule ทั้งหมดเข้า builder</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ stream scan ให้ trim, ตัดค่าว่าง, กัน serial ซ้ำติดกัน และหยุดฟังเมื่อหน้าออก</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>subscription = scanner.scans
+    .map((x) =&gt; x.trim().toUpperCase())
+    .where((x) =&gt; x.isNotEmpty)
+    .distinct()
+    .listen(_submitScan);
+
+@override
+void dispose() {
+  subscription.cancel();
+  super.dispose();
+}</code></pre><p><code>distinct</code> กันเฉพาะค่าซ้ำติดกัน ถ้าต้องกันทั้ง session ต้องใช้ Set/domain rule</p></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn">อย่าคิดว่า realtime event คือ authoritative state เสมอ Event อาจหายช่วง disconnect ให้ refresh จาก HTTP เมื่อ reconnect หรือเมื่อ sequence ไม่แน่ใจ</div></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

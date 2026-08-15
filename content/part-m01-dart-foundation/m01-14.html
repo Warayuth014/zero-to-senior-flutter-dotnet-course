@@ -1,0 +1,27 @@
+<div class="note">Exception เหมาะกับ failure ที่ตัด flow ปกติ ส่วน Result ทำ failure เป็นข้อมูลที่ caller ต้องเปิดดู สองโปรเจกต์ใช้คนละแนวและเราต้องอ่านข้อแลกเปลี่ยนให้ออก</div>
+<section><h2>1. throw, catch, finally และ stack trace</h2><pre class="code-vs"><code>try {
+  final task = await repository.load(id);
+  show(task);
+} on ApiException catch (error, stackTrace) {
+  log(error.message, stackTrace: stackTrace);
+  showError(error.message);
+} finally {
+  setLoading(false);
+}</code></pre><p>จับเฉพาะ error ที่ชั้นนี้แปลงเป็นการตัดสินใจได้ <code>finally</code> เหมาะคืน loading/resource หาก rethrow ใช้ <code>rethrow</code> เพื่อรักษา stack เดิม ไม่ใช้ <code>throw error</code> โดยไม่จำเป็น</p></section>
+<section><h2>2. Typed exception</h2><pre class="code-vs"><code>class ApiException implements Exception {
+  const ApiException(this.message, {this.statusCode});
+  final String message;
+  final int? statusCode;
+}</code></pre><p><code>wms_absolute_mobile/core/api_client.dart</code> ใช้แนวนี้: client decode และ throw; repository ปล่อยหรือแปลง; screen/store catch ที่ boundary ของ user action ข้อดีคือ happy path ตรง ข้อเสียคือ caller ต้องรู้ว่า operation throw อะไร</p></section>
+<section><h2>3. Result type</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
+  ApiResult.success(this.data) : success = true, error = null;
+  ApiResult.error(this.error) : success = false, data = null;
+  final bool success;
+  final T? data;
+  final String? error;
+}</code></pre><p><code>wmsapp/services/api_service.dart</code> ใช้แนวนี้ ทุก call site ตรวจ <code>success</code> ข้อดีคือ failure เห็นใน return type ข้อเสียของโครง bool+nullable คือ compiler ยังยอมให้เขียน <code>data!</code> ผิด branch ได้ Sealed success/failure จะบังคับได้มากกว่า</p></section>
+<section><h2>4. Error boundary ตามชั้น</h2><ol><li>transport แยก timeout/socket/non-2xx/malformed body</li><li>repository แปลง payload เป็น domain หรือโยน contract error</li><li>store/action แปลง failure เป็น state และตัดสิน retry/rollback</li><li>widget แสดงข้อความ/action โดยไม่ parse exception string</li></ol><p>อย่า catch ทุกอย่างแล้วคืน list ว่าง เพราะผู้ใช้จะแยก “ไม่มีงาน” จาก “server ล่ม” ไม่ได้</p></section>
+<section><h2>5. ไม่เปิดข้อมูลลับ</h2><p>ข้อความ UI ควร actionable แต่ไม่แสดง token, password, SQL หรือ stack trace เก็บ technical context ใน log ที่เหมาะสมและ sanitize request header/body ก่อน log</p></section>
+<section><h2>6. แบบฝึกหัด</h2><p>ออกแบบ load tasks ให้แยก success-empty, 401, timeout และ malformed JSON แล้วบอกแต่ละกรณี UI ทำอะไร</p><details><summary>แนวคำตอบ</summary><ul><li>empty: แสดง empty state</li><li>401: clear session/ไป login</li><li>timeout: error พร้อม Retry โดยไม่ทำรายการซ้ำ</li><li>malformed: generic contract error + log correlation detail</li></ul></details></section>
+<section><h2>7. จุดพลาด</h2><div class="warn">อย่าผสม Result และ exception แบบไร้กติกาจน caller ต้องทั้งตรวจ bool และ try/catch เลือก policy ต่อ boundary แล้ว document ว่า failure ใดเป็น data และ failure ใด throw</div></section>
+<section><h2>8. สรุป</h2><p>Failure ที่ดีต้องรักษาสาเหตุ, มี owner ที่แปลงเป็น state, ไม่ถูกกลืนเป็นข้อมูลปกติ และไม่เปิดความลับต่อผู้ใช้</p></section>

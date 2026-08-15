@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantity input และ numeric validation</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">03-09 · Flutter UI</span><h1>Quantity input และ numeric validation</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<div class="note">รับ input จากผู้ใช้และเครื่องสแกนแบบ warehouse workflow พร้อมจัดการ focus และ lifecycle</div>
+<section><h2>1. เป้าหมายของบทนี้</h2><ul><li>อธิบาย <strong>Quantity input และ numeric validation</strong> ด้วยภาษาของตัวเองได้</li><li>ชี้ได้ว่าแนวคิดนี้อยู่ตรงไหนใน flow Flutter → .NET</li><li>ทดลองและตรวจผลได้ ไม่ใช่จำโค้ดอย่างเดียว</li></ul></section>
+<section><h2>2. Mental model</h2><p>Scanner warehouse ส่วนมากส่งอักขระเหมือน keyboard แล้วปิดด้วย Enter หน้าจอต้องคุม focus, normalize ค่า, ป้องกัน duplicate/submit ซ้ำ และคืน feedback เร็ว Controller กับ FocusNode เป็น resource ที่ต้อง dispose</p><p>หัวข้อนี้อยู่ในกลุ่ม <strong>Forms, Focus &amp; Barcode Scanner</strong> เมื่อเปิดโค้ดจริงให้ถามว่าใครเป็นเจ้าของข้อมูล ใครเปลี่ยนข้อมูล และ widget ใดต้อง rebuild หลังการเปลี่ยนนั้น</p><div class="note"><strong>มุม Flutter:</strong> จับหลักให้ได้ก่อน แล้วค่อยเทียบการใช้งานสองแบบในโปรเจกต์จริง</div></section>
+<section><h2>3. หาในโปรเจกต์จริง</h2><p>บทพื้นฐานนี้เตรียมแนวคิดสำหรับอ่านทั้ง <code>wmsapp</code> และ <code>wms_absolute_mobile</code> โดยบท Codebase Deep Dive จะระบุไฟล์จริงแบบรายไฟล์</p></section>
+<section><h2>4. วิธีไล่ทีละขั้น</h2><ol><li>เริ่มจาก event ของผู้ใช้ เช่น tap, submit หรือ scan</li><li>ตาม method ที่เปลี่ยน state หรือเรียก dependency</li><li>ถ้ามี I/O ให้เปิด request DTO, endpoint และ response model คู่กัน</li><li>กลับมาดูว่า state ใหม่ทำให้ widget ส่วนใด rebuild</li><li>เขียน test หรือ checklist เพื่อพิสูจน์ happy path และ error path</li></ol></section>
+<section><h2>5. ตัวอย่างโค้ด</h2><pre class="code-vs"><code>class WarehouseCard extends StatelessWidget {
+  const WarehouseCard({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Card(child: Padding(
+    padding: const EdgeInsets.all(16),
+    child: child,
+  ));
+}</code></pre></section>
+<section><h2>6. จุดที่พบบ่อยในงานจริง</h2><div class="warn">อย่าแก้ UI จากอาการอย่างเดียว ให้แยกก่อนว่าเป็น constraints, state, lifecycle หรือ data contract</div></section>
+<section><h2>7. Mini Exercise</h2><ol><li>ค้นหา <code>Quantity input และ numeric validation</code> หรือ symbol ที่เกี่ยวข้องในสอง reference apps</li><li>วาด flow สั้น ๆ จาก UI ไป data source แล้วกลับมา UI</li><li>เพิ่ม error case หนึ่งกรณีและอธิบายว่าผู้ใช้ควรเห็นอะไร</li></ol></section>
+<section><h2>8. Checklist</h2><ul><li>บอก owner ของ state ได้</li><li>แยก synchronous code กับ asynchronous side effect ได้</li><li>รู้ว่า dispose/cancel ตรงไหน</li><li>อธิบาย contract กับ .NET โดยไม่ต้องเดาจาก UI</li></ul></section>
+<section><h2>9. สรุปจำเร็ว</h2><div class="success"><strong>Quantity input และ numeric validation</strong> ต้องตอบได้ทั้ง “มันคืออะไร”, “อยู่ตรงไหนในโค้ด”, “พังแบบไหน” และ “ทดสอบอย่างไร”</div></section>
+</div><script src="../../assets/course.js"></script></body></html>

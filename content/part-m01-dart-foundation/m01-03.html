@@ -1,0 +1,26 @@
+<div class="note"><code>final</code> คุมการ assign reference, <code>const</code> สร้างค่าคงที่ตอน compile time และ <code>late</code> เลื่อนการกำหนดค่า ทั้งสามคำแก้คนละปัญหา</div>
+<section><h2>1. เปรียบเทียบให้ชัด</h2><table><thead><tr><th>คำ</th><th>กำหนดค่าเมื่อไร</th><th>กำหนดซ้ำ</th><th>ใช้เมื่อ</th></tr></thead><tbody><tr><td><code>final</code></td><td>runtime ได้</td><td>ไม่ได้</td><td>ค่าที่รู้หลังสร้าง object/เรียก function</td></tr><tr><td><code>const</code></td><td>compile time</td><td>ไม่ได้</td><td>literal/config/widget ที่คงที่จริง</td></tr><tr><td><code>late</code></td><td>ภายหลัง ก่อนอ่านครั้งแรก</td><td>ขึ้นกับมี final หรือไม่</td><td>lifecycle รับประกัน initialization แต่ constructor ทำไม่ได้</td></tr></tbody></table></section>
+<section><h2>2. final ไม่ได้ทำให้ object immutable</h2><pre class="code-vs"><code>final scans = &lt;String&gt;[];
+scans.add('PAL-001');   // ได้: list ยัง mutable
+// scans = [];          // ไม่ได้: reference assign ใหม่ไม่ได้
+
+const statuses = &lt;String&gt;['OPEN', 'DONE'];
+// statuses.add('HOLD'); // runtime error: const list แก้ไม่ได้</code></pre><p>ถ้าต้องการ immutable state ให้ class/collection ออกแบบไม่เปิด mutation ไม่ใช่ใส่ <code>final</code> ที่ field อย่างเดียว</p></section>
+<section><h2>3. const และ Flutter</h2><p><code>const Widget</code> บอกว่า configuration ชุดนี้สร้างได้ตั้งแต่ compile time และ reuse ได้เมื่อ parent rebuild แต่ห้ามไล่ใส่ const แบบไม่เข้าใจ: argument ทุกตัวต้องเป็น compile-time constant</p><pre class="code-vs"><code>const SizedBox(height: 12);
+const Color(0xFF0878F9);
+
+final title = serverResult.title;
+Text(title); // const ไม่ได้ เพราะ title รู้ตอน runtime</code></pre><p>ตัวอย่างจริงอยู่ใน <code>wms_absolute_mobile/lib/features/warehouse/ui/pda_colors.dart</code>: สีและ metric ที่ไม่เปลี่ยนเป็น <code>static const</code></p></section>
+<section><h2>4. late: สัญญาที่ compiler ตรวจเวลาไม่ได้</h2><pre class="code-vs"><code>class _WarehouseShellState extends State&lt;WarehouseShell&gt; {
+  late final WarehouseStore store;
+
+  @override
+  void initState() {
+    super.initState();
+    store = WarehouseStore(/* dependencies */);
+  }
+}</code></pre><p>แนวนี้ใช้จริงใน <code>warehouse_shell.dart</code> เพราะต้องสร้าง store ใน lifecycle ถ้าอ่านก่อน assign จะเกิด <code>LateInitializationError</code> ถ้าไม่มั่นใจว่าจะมีค่า ใช้ nullable แล้วจัดการ absence ตรง ๆ ดีกว่า</p></section>
+<section><h2>5. late lazy initialization</h2><p>initializer ของ <code>late final</code> จะรันเมื่อถูกอ่านครั้งแรก จึงใช้เลื่อนงานแพงได้ แต่ต้องระวัง side effect ที่เวลารันไม่ชัด:</p><pre class="code-vs"><code>late final config = loadConfig(); // loadConfig รันเมื่ออ่าน config ครั้งแรก</code></pre></section>
+<section><h2>6. Decision guide</h2><ol><li>รู้ค่าคงที่ตั้งแต่ compile time → <code>const</code></li><li>รู้ค่าครั้งเดียวตอน runtime → <code>final</code></li><li>lifecycle รับประกันว่าจะ assign ก่อนใช้ → <code>late final</code></li><li>อาจไม่มีค่าจริง → <code>T?</code></li><li>เปลี่ยนค่าเป็น state ตามเวลา → ตัวแปรปกติพร้อม owner ชัดเจน</li></ol></section>
+<section><h2>7. แบบฝึกหัด</h2><p>เลือกคำให้ base URL ที่ผู้ใช้แก้ได้, <code>http.Client</code> ที่ inject ใน constructor, สีแบรนด์, และ controller ที่สร้างใน <code>initState</code></p><details><summary>เฉลย</summary><p>base URL เป็น mutable state; client เป็น <code>final</code>; สีแบรนด์เป็น <code>static const</code>; controller เป็น <code>late final</code> หรือกำหนดที่ declaration แล้ว dispose ตาม lifecycle</p></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ <code>late</code> เพื่อหลบ null safety ทุกครั้ง มันย้าย error จาก compile time ไป runtime และทำให้ initialization order เป็นภาระของคนอ่าน</div></section>

@@ -1,0 +1,16 @@
+<div class="note">Analyzer, lints, formatter และ tests เป็น feedback loop ไม่ใช่งานเก็บกวาดท้ายโปรเจกต์ เป้าหมายคือทำให้ความผิดที่ตรวจอัตโนมัติได้ไม่ต้องรอ code review หรือ production</div>
+<section><h2>1. คำสั่งประจำวัน</h2><pre class="code-vs"><code>dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test</code></pre><p>ระหว่างพัฒนาใช้ <code>dart format .</code> เพื่อแก้รูปแบบ ก่อน commit ให้ analyze/test ผ่าน ถ้า repo มี generated code หรือ target เพิ่มให้ยึด script/CI ของ repo เป็นหลัก</p></section>
+<section><h2>2. analysis_options.yaml</h2><p>ไฟล์นี้ include rule set และปรับ lint/error severity ให้ทีม Lint ควรสะท้อน bug/maintainability ที่ทีมยอมทำตาม ไม่ใช่เปิดทุก rule แล้วกระจาย ignore ทั้ง repo เมื่อจำเป็นต้อง ignore ให้เล็กที่สุดและใส่เหตุผล</p><pre class="code-vs"><code>include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    avoid_print: true
+    unawaited_futures: true</code></pre></section>
+<section><h2>3. Checklist ระดับ declaration</h2><ul><li>public function มี type ชัด; ไม่ใช้ dynamic/Function กว้างโดยไม่จำเป็น</li><li>nullability สื่อ domain; ไม่มี <code>!</code> จากการเดา</li><li>final/const ใช้ตาม ownership และ immutability จริง</li><li>collection มี type และไม่ expose mutable state ข้าม owner</li><li>ชื่อบอก intent/domain ไม่ใช่ <code>data</code>, <code>temp2</code>, <code>doIt</code></li></ul></section>
+<section><h2>4. Checklist async/resource</h2><ul><li>Future ถูก await หรือประกาศ <code>unawaited</code> พร้อม error policy</li><li>Timer, StreamSubscription, controller, FocusNode และ observer ถูก dispose/cancel</li><li>ตรวจ mounted/context หลัง await เมื่อ owner คือ widget</li><li>กัน duplicate action และ stale response</li><li>ไม่ log password/token/PII</li></ul></section>
+<section><h2>5. Checklist boundary</h2><ul><li>HTTP timeout/non-2xx/malformed JSON แยกจาก empty success</li><li>dynamic ถูกกักใน parser และมี contract test</li><li>URI/query ใช้ API ของ Uri ไม่ต่อ string ที่ไม่ encode</li><li>status/date/timezone/null มีข้อตกลงกับ .NET</li><li>ข้อความ UI actionable ส่วน technical detail อยู่ log ที่ sanitize</li></ul></section>
+<section><h2>6. อ่าน warning เป็นหลักฐาน</h2><p>ตัวอย่าง <code>use_build_context_synchronously</code> ไม่ได้บอกให้ใส่ ignore แต่บอกว่ามี async gap และ context อาจหมดอายุ ต้องย้าย navigation ก่อน await, ตรวจ <code>context.mounted</code> หรือย้าย side effect ไป owner ที่อายุเหมาะสม</p></section>
+<section><h2>7. แบบฝึกหัดปิด Part</h2><p>เลือกไฟล์ Dart จริงหนึ่งไฟล์แล้ว review ด้วย checklist 5 มิติ: type/null, ownership/mutation, async/lifecycle, boundary/error, testability จากนั้นจัด finding เป็น Bug risk / Design debt / Style</p><details><summary>เกณฑ์ผ่าน</summary><p>ต้องชี้ symbol/บรรทัดและอธิบาย failure scenario ได้ ไม่ผ่านถ้ามีเพียง “ควร clean code”; เสนอ fix ที่เล็กและ test ที่พิสูจน์ behavior เดิมอย่างน้อยหนึ่งข้อ</p></details></section>
+<section><h2>8. Part -1 Exit Test</h2><div class="success"><p>พร้อมไป Part 0 เมื่อคุณทำได้ครบ:</p><ul><li>อ่าน signature ที่มี nullable/generic/Future ได้โดยไม่เดา</li><li>อธิบาย final/const/late และ collection mutation ได้</li><li>อ่าน class/interface/extension/record/switch จากสอง codebase ออก</li><li>trace JSON dynamic เข้าสู่ typed model และ failure ออกสู่ UI ได้</li><li>รัน format/analyze/test และแก้ต้นเหตุของ warning ได้</li></ul></div></section>

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Picking session และ source pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">18-11 · Real Codebase</span><h1>Picking session และ source pallet</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<div class="note">อ่าน station workflow, pallet movement และ picking หลายขั้นพร้อม SignalR</div>
+<section><h2>1. เป้าหมายของบทนี้</h2><ul><li>อธิบาย <strong>Picking session และ source pallet</strong> ด้วยภาษาของตัวเองได้</li><li>ชี้ได้ว่าแนวคิดนี้อยู่ตรงไหนใน flow Flutter → .NET</li><li>ทดลองและตรวจผลได้ ไม่ใช่จำโค้ดอย่างเดียว</li></ul></section>
+<section><h2>2. Mental model</h2><p>Login แลก credential กับ token จากนั้น client แนบ <code>Authorization: Bearer ...</code> ทุก request Session ต้องมีจุดเริ่ม/หมดอายุ/logout ชัดเจน และ token production ควรอยู่ secure storage ไม่ใช่ log หรือ plain preference</p><p>หัวข้อนี้อยู่ในกลุ่ม <strong>wmsapp: Putaway &amp; Picking</strong> เมื่อเปิดโค้ดจริงให้ถามว่าใครเป็นเจ้าของข้อมูล ใครเปลี่ยนข้อมูล และ widget ใดต้อง rebuild หลังการเปลี่ยนนั้น</p><div class="note"><strong>รอยต่อ .NET:</strong> บทนี้อธิบาย request/response และ endpoint ที่ Flutter ต้องรู้ ส่วน Controller → Service → EF Core/SQL ให้อ่านต่อในคอร์ส <code>zero-to-senior-dotnet8-course</code></div></section>
+<section><h2>3. หาในโปรเจกต์จริง</h2><ul><li><code>wmsapp:lib/screens/picking/picking_session/picking_session_screen.dart</code></li></ul></section>
+<section><h2>4. วิธีไล่ทีละขั้น</h2><ol><li>เริ่มจาก event ของผู้ใช้ เช่น tap, submit หรือ scan</li><li>ตาม method ที่เปลี่ยน state หรือเรียก dependency</li><li>ถ้ามี I/O ให้เปิด request DTO, endpoint และ response model คู่กัน</li><li>กลับมาดูว่า state ใหม่ทำให้ widget ส่วนใด rebuild</li><li>เขียน test หรือ checklist เพื่อพิสูจน์ happy path และ error path</li></ol></section>
+<section><h2>5. ตัวอย่างโค้ด</h2><pre class="code-vs"><code># เริ่มจากชื่อ action แล้วไล่ลงทีละชั้น
+rg -n "ชื่อเมธอด|ชื่อ endpoint|ชื่อ model" lib docs
+
+# เส้นทางที่ต้องตอบให้ได้
+Screen → State/Store → Repository/ApiService → JSON → .NET endpoint</code></pre></section>
+<section><h2>6. จุดที่พบบ่อยในงานจริง</h2><div class="warn">อย่าอ่านไฟล์ใหญ่จากบรรทัดแรกถึงท้ายโดยไม่มีคำถาม; เริ่มจาก user action แล้ว trace เฉพาะ state และ dependency ที่เกี่ยวข้อง</div></section>
+<section><h2>7. Mini Exercise</h2><ol><li>ค้นหา <code>Picking session และ source pallet</code> หรือ symbol ที่เกี่ยวข้องในสอง reference apps</li><li>วาด flow สั้น ๆ จาก UI ไป data source แล้วกลับมา UI</li><li>เพิ่ม error case หนึ่งกรณีและอธิบายว่าผู้ใช้ควรเห็นอะไร</li></ol></section>
+<section><h2>8. Checklist</h2><ul><li>บอก owner ของ state ได้</li><li>แยก synchronous code กับ asynchronous side effect ได้</li><li>รู้ว่า dispose/cancel ตรงไหน</li><li>อธิบาย contract กับ .NET โดยไม่ต้องเดาจาก UI</li></ul></section>
+<section><h2>9. สรุปจำเร็ว</h2><div class="success"><strong>Picking session และ source pallet</strong> ต้องตอบได้ทั้ง “มันคืออะไร”, “อยู่ตรงไหนในโค้ด”, “พังแบบไหน” และ “ทดสอบอย่างไร”</div></section>
+</div><script src="../../assets/course.js"></script></body></html>

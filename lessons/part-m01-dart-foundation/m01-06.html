@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class, constructor, getter และ encapsulation</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-06 · Dart Core</span><h1>Class, constructor, getter และ encapsulation</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note">Class ที่ดีไม่ได้เป็นแค่ถุงใส่ field แต่บังคับให้ object อยู่ในสถานะที่ถูกต้องตั้งแต่ constructor และเปิดเฉพาะ operation ที่รักษากติกาของโดเมน</div>
+<section><h2>1. Anatomy ของ class</h2><pre class="code-vs"><code>class ScanItem {
+  const ScanItem({
+    required this.barcode,
+    required this.quantity,
+  }) : assert(quantity &gt; 0);
+
+  final String barcode;
+  final int quantity;
+
+  bool get isPallet =&gt; barcode.startsWith('PAL-');
+
+  ScanItem copyWith({String? barcode, int? quantity}) =&gt; ScanItem(
+    barcode: barcode ?? this.barcode,
+    quantity: quantity ?? this.quantity,
+  );
+}</code></pre><p>constructor สร้าง invariant, field เก็บ state, getter คำนวณค่าที่ derive ได้ และ method เปลี่ยน/คืนผลตาม behavior ไม่ควรเก็บ <code>isPallet</code> ซ้ำเพราะคำนวณจาก barcode ได้</p></section>
+<section><h2>2. Constructor แบบต่าง ๆ</h2><ul><li><strong>Generative:</strong> สร้าง instance ใหม่ตามปกติ</li><li><strong>Named:</strong> เช่น <code>ApiResult.success</code>/<code>ApiResult.error</code> สื่อ intent ต่างกัน</li><li><strong>Factory:</strong> คืน subtype, cache/singleton หรือ parse ก่อนเลือก object ได้ แต่ไม่มี <code>this</code> สำหรับกำหนด field โดยตรง</li><li><strong>Const:</strong> สร้าง compile-time instance เมื่อ field และ argument รองรับ</li></ul><p><code>wmsapp/lib/services/api_service.dart</code> ใช้ factory constructor คืน singleton เดิม ส่วน model <code>ConnectionProfile</code> ใช้ const constructor และ static <code>fromJson</code> ที่คืน null เมื่อข้อมูลไม่น่าเชื่อถือ</p></section>
+<section><h2>3. Encapsulation และ privacy</h2><pre class="code-vs"><code>class Session {
+  String? _token;
+  bool get isSignedIn =&gt; _token != null;
+
+  void start(String token) {
+    if (token.isEmpty) throw ArgumentError.value(token, 'token');
+    _token = token;
+  }
+
+  void clear() =&gt; _token = null;
+}</code></pre><p>underscore ทำให้ชื่อ private ต่อ <em>library</em> ไม่ใช่ private ต่อ class อย่าง C# ดังนั้นไฟล์ที่เป็น <code>part</code> ของ library เดียวกันยังเห็นสมาชิก private กันได้</p></section>
+<section><h2>4. Getter ไม่ใช่ function ที่ควรมี side effect</h2><p>Getter ควรเร็วและคืน derived value เช่น <code>ConnectionProfile.baseUrl</code> ไม่ควรยิง HTTP, mutate state หรือ throw แบบคาดไม่ถึง เพราะ call site อ่านเหมือนการเข้าถึงข้อมูลธรรมดา งาน async ต้องเป็น method ที่คืน Future</p></section>
+<section><h2>5. Composition ก่อน inheritance</h2><p><code>WarehouseStore</code> มี receiving/tasks repositories เป็น field นี่คือ composition: store ใช้ capability โดยไม่ “เป็น” repository การสืบทอดเหมาะเมื่อ subtype เป็นชนิดเดียวกันจริงและต้องรักษาสัญญาของ base type</p></section>
+<section><h2>6. แบบฝึกหัด</h2><p>ออกแบบ <code>ConnectionProfile</code> ย่อส่วนที่ห้าม port นอก 1–65535 และคืน baseUrl โดยไม่ให้ caller ต่อ string เอง</p><details><summary>แนวคำตอบ</summary><p>validate ใน factory/named constructor แล้วเก็บ protocol, host, port เป็น final; ใช้ getter คำนวณ <code>${protocol.name}://$host:$port</code>; ไม่ expose setter เพื่อกัน object เข้าสถานะครึ่งถูกครึ่งผิด</p></details></section>
+<section><h2>7. จุดพลาด</h2><div class="warn">อย่าสร้าง model ที่ field ทุกตัว nullable เพียงเพราะ JSON อาจเสีย ให้ parser ปฏิเสธ payload ที่ขาดข้อมูลบังคับ แล้วคง domain object ให้ใช้งานง่ายและปลอดภัย</div></section>
+<section><h2>8. สรุป</h2><p>constructor กำหนด “เข้าได้อย่างไร”, private field กำหนด “ใครแตะได้”, method กำหนด “เปลี่ยนได้อย่างไร” และ getter อธิบายค่าที่ derive—นี่คือกำแพงกัน invalid state ชั้นแรก</p></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

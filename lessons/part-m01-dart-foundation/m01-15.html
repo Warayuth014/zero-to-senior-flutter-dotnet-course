@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Future, async และ await</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-15 · Dart Core</span><h1>Future, async และ await</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note"><code>Future&lt;T&gt;</code> คือผลลัพธ์หนึ่งค่าที่จะสำเร็จหรือผิดพลาดภายหลัง <code>await</code> หยุดเฉพาะ async function ปัจจุบัน ไม่ block UI isolate แต่โค้ดหลัง await จะรันต่อในอนาคตเมื่อโลกอาจเปลี่ยนแล้ว</div>
+<section><h2>1. async เปลี่ยน return type</h2><pre class="code-vs"><code>Future&lt;Task&gt; loadTask(String id) async {
+  final json = await client.get('/tasks/$id');
+  return Task.fromJson(json);
+}</code></pre><p>function async คืน Future ทันที แล้ว complete ด้วย Task หรือ error ภายหลัง Error ก่อน/หลัง await จะกลายเป็น failed Future ให้ caller await/catch</p></section>
+<section><h2>2. Sequential กับ concurrent</h2><pre class="code-vs"><code>// ต่อกัน: B ต้องรอ A
+final profile = await loadProfile();
+final tasks = await loadTasks(profile.siteId);
+
+// อิสระ: เริ่มทั้งคู่ก่อนรอ
+final results = await Future.wait([loadBadges(), loadAnnouncements()]);</code></pre><p>อย่าใช้ Future.wait กับ command ที่ต้องรักษาลำดับหรือมี side effect ชนกัน เช่น validate → confirm stock ต้องต่อกัน</p></section>
+<section><h2>3. Event loop และงาน CPU</h2><p>HTTP/timer ปล่อย event loop ไปทำ frame อื่นได้ จึงไม่ต้องใช้ isolate เพียงเพราะมี await แต่งาน parse/loop CPU หนักยังบล็อก UI แม้อยู่ใน async function—async ไม่สร้าง thread ใหม่</p></section>
+<section><h2>4. Fire-and-forget อย่างมีเจตนา</h2><pre class="code-vs"><code>unawaited(store.loadAll());</code></pre><p><code>warehouse_shell.dart</code> ใช้ <code>unawaited</code> เพื่อประกาศชัดว่าไม่รอ bootstrap ก่อน render แต่ method ที่ถูกปล่อยต้องจัด error ภายใน มิฉะนั้นเกิด unhandled async error อย่าละ await เงียบ ๆ</p></section>
+<section><h2>5. Lifecycle หลัง await</h2><pre class="code-vs"><code>final result = await repository.submit(code);
+if (!mounted) return;
+setState(() =&gt; message = result.message);</code></pre><p>ระหว่างรอผู้ใช้อาจ back ออกจากหน้า Context/State จึงหมดอายุ นอกจากนี้ response เก่าอาจกลับหลัง query ใหม่ ต้องมี request token/cancellation ในบท state</p></section>
+<section><h2>6. Timeout และ duplicate command</h2><p>Timeout หมายถึง client เลิกรอ ไม่ได้พิสูจน์ว่า server ไม่ทำงาน ถ้า retry command เช่น confirm pick อาจทำซ้ำ ต้องออกแบบ idempotency key/backend rule และ disable submit ระหว่าง request</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>เขียน submit ที่กันกดซ้ำ คืน loading ใน finally และไม่แตะ widget หลัง dispose</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>Future&lt;void&gt; submit() async {
+  if (_submitting) return;
+  setState(() =&gt; _submitting = true);
+  try {
+    final result = await repository.submit(controller.text.trim());
+    if (!mounted) return;
+    setState(() =&gt; _message = result.message);
+  } catch (e) {
+    if (mounted) setState(() =&gt; _message = readableError(e));
+  } finally {
+    if (mounted) setState(() =&gt; _submitting = false);
+  }
+}</code></pre></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn">await ไม่ทำให้ operation ถูกยกเลิกเมื่อ widget dispose และ async ไม่ทำให้งาน CPU หนักลื่นขึ้น ต้องออกแบบ lifecycle, stale response และ cancellation แยกต่างหาก</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

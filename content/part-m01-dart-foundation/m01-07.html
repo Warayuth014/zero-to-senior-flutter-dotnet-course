@@ -1,0 +1,24 @@
+<div class="note">Abstract/interface กำหนดสัญญา, inheritance reuse ความเป็นชนิดเดียวกัน และ mixin เติมพฤติกรรมหลาย class ได้ ทั้งสามอย่างหน้าตาคล้ายแต่แก้คนละปัญหา</div>
+<section><h2>1. Interface เพื่อสลับ implementation</h2><pre class="code-vs"><code>abstract interface class TasksRepository {
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();
+  Future&lt;void&gt; complete(String id);
+}
+
+class TasksApi implements TasksRepository { /* เรียก .NET */ }
+class FakeTasksRepository implements TasksRepository { /* ใช้ใน test */ }</code></pre><p><code>implements</code> รับเฉพาะ contract ต้อง implement สมาชิกเอง ไม่รับ implementation เดิม เหมาะกับ boundary ที่ production ใช้ network แต่ test ต้องควบคุมผล</p></section>
+<section><h2>2. Abstract class กับ extends</h2><p>abstract class มีทั้ง abstract member และ implementation/shared state ได้ ส่วน <code>extends</code> รับ implementation และมี superclass เดียว ตัวอย่างสำคัญใน Flutter คือ <code>StatefulWidget</code>/<code>State&lt;T&gt;</code>: framework กำหนด lifecycle และ subclass เติม <code>build</code>, <code>initState</code>, <code>dispose</code></p><div class="warn">ใช้ inheritance เพื่อความสัมพันธ์ “is-a” และรักษา Liskov contract ไม่ใช้เพียงเพราะอยากยืม method สองตัว</div></section>
+<section><h2>3. Mixin เติม capability</h2><pre class="code-vs"><code>class _WarehouseShellState extends State&lt;WarehouseShell&gt;
+    with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) { /* ... */ }
+}</code></pre><p>ตัวอย่างนี้อยู่ใน <code>wms_absolute_mobile/.../warehouse_shell.dart</code> State ยังเป็น State เหมือนเดิม แต่รับ capability สังเกต lifecycle ของแอป ต้อง add/remove observer ตาม lifecycle ด้วย—mixin ไม่ได้จัด ownership ให้อัตโนมัติ</p></section>
+<section><h2>4. Dart class มี implicit interface</h2><p>ทุก class สามารถถูก implements ได้ แม้ไม่ได้ประกาศ interface แยก แต่การสร้าง interface เฉพาะ use case มักชัดกว่า implement class ใหญ่ เพราะ consumer ไม่ควรผูกกับสมาชิกที่ไม่ใช้</p></section>
+<section><h2>5. ตัวอย่างจากสอง codebase</h2><ul><li><code>absolute/api/receiving_api.dart</code>, <code>inventory_api.dart</code>, <code>tasks_api.dart</code> แยก repository interface ทำ fake ได้</li><li><code>wmsapp</code> ใช้ singleton <code>ApiService</code> โดยตรงมากกว่า จึงสลับ dependency ใน unit test ยากกว่า</li><li>State class จำนวนมาก <code>extends State&lt;Screen&gt;</code> เพราะ framework contract ไม่ใช่ business inheritance</li></ul></section>
+<section><h2>6. Decision guide</h2><ol><li>ต้องสลับ API/fake → interface</li><li>ต้องแชร์ invariant/implementation และ subtype จริง → abstract base + extends</li><li>หลาย hierarchy ต้องมี capability เดียวกัน → mixin</li><li>แค่ต้องใช้ object อีกตัว → composition/injection</li></ol></section>
+<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ scanner ที่ production อ่าน hardware แต่ test คืนค่ากำหนดเอง</p><details><summary>เฉลย</summary><pre class="code-vs"><code>abstract interface class BarcodeSource {
+  Stream&lt;String&gt; get scans;
+}
+
+class HardwareBarcodeSource implements BarcodeSource { /* platform */ }
+class FakeBarcodeSource implements BarcodeSource { /* StreamController */ }</code></pre></details></section>
+<section><h2>8. เช็กความเข้าใจ</h2><p>เมื่อเห็น <code>extends</code>, <code>implements</code>, <code>with</code> ให้ถามตามลำดับ: รับ state/implementation อะไร, สัญญาอะไรที่ต้องทำให้ครบ และ lifecycle/resource ใหม่ใครเป็นเจ้าของ</p></section>

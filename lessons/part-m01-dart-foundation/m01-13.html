@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound null safety และ nullable flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">m01-13 · Dart Core</span><h1>Sound null safety และ nullable flow</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<div class="note">Sound null safety แยก “มีค่า T” จาก “อาจไม่มี T?” ตั้งแต่ type system เป้าหมายไม่ใช่กำจัด null แต่ทำให้ทุก absence ถูกออกแบบและตรวจใกล้จุดกำเนิด</div>
+<section><h2>1. เครื่องมือหลัก</h2><pre class="code-vs"><code>String? serial;
+final display = serial?.trim().isNotEmpty == true ? serial! : 'ไม่มี Serial';
+final quantity = int.tryParse(raw) ?? 0;
+
+void submit(String? barcode) {
+  if (barcode == null || barcode.trim().isEmpty) return;
+  print(barcode.toUpperCase()); // promoted เป็น String
+}</code></pre><ul><li><code>?.</code> เรียกเมื่อไม่ null</li><li><code>??</code> ใช้ fallback เมื่อ null</li><li><code>??=</code> assign เมื่อเดิม null</li><li><code>!</code> assertion ว่าไม่ null—ผิดแล้วพัง runtime</li></ul></section>
+<section><h2>2. Promotion และเหตุที่บางครั้ง promote ไม่ได้</h2><p>local final variable promote ได้ง่าย ส่วน mutable field อาจถูกเปลี่ยนระหว่างตรวจและใช้ โดยเฉพาะมี getter override/async boundary ให้ copy เป็น local:</p><pre class="code-vs"><code>final session = auth.session;
+if (session == null) return;
+useToken(session.token);</code></pre><p>นี่ชัดกว่ากระจาย <code>auth.session!</code> หลายจุดและบันทึก snapshot ที่กำลังใช้งาน</p></section>
+<section><h2>3. Nullable ไม่เท่ากับ error</h2><p><code>T?</code> เหมาะเมื่อ “ไม่พบ/ยังไม่มี” เป็นผลปกติ เช่น suggested pallet ไม่มี แต่ถ้าการขาดค่านั้นแปลว่า payload เสียหรือ request ล้มเหลว ให้คืน Result/throw typed exception ไม่ควรคืน null แล้วทำให้ caller เดาสาเหตุ</p></section>
+<section><h2>4. Required + nullable</h2><pre class="code-vs"><code>Widget buildRow({required String? subtitle}) { /* ... */ }</code></pre><p>ความหมายคือ caller ต้องตัดสินใจส่ง argument แต่ value อาจ null ใช้ได้เมื่อ “explicit absence” สำคัญ หากไม่มีเหตุผลมักควรเป็น <code>String subtitle</code> หรือ optional parameter ที่มี default</p></section>
+<section><h2>5. ตัวอย่างจริง</h2><ul><li><code>ConnectionProfile.fromJson(Object? raw)</code> คืน null เมื่อ saved row เสียเพื่อไม่ให้หนึ่งแถวทำลายทุก profile</li><li><code>AuthRepository.session?</code> แทนสถานะก่อน/หลัง login</li><li><code>ApiResult&lt;T&gt;</code> มี data? และ error? แต่ constructor พยายามรักษาว่าควรมีอย่างใดอย่างหนึ่ง—บท architecture จะปรับให้ type บังคับ invariant ได้แข็งขึ้น</li></ul></section>
+<section><h2>6. หลีกเลี่ยง null cascade</h2><p>ถ้า DTO ทุก field nullable แล้ว UI ต้อง <code>?. ?? ''</code> ทุกบรรทัด แปลว่า boundary ไม่ได้ทำงาน แยก required/optional ตาม contract, validate required fields ใน parser และใช้ default เฉพาะค่าที่ domain ยอมรับจริง</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>API คืน palletId ที่อาจไม่พบ ออกแบบ signature และ UI ทั้งกรณีไม่พบกับ payload ผิด</p><details><summary>แนวคำตอบ</summary><p><code>Future&lt;Pallet?&gt; findPallet(String id)</code> ใช้ null สำหรับ 404 ที่เป็นผลปกติ; malformed JSON/500 ให้ throw <code>ApiException</code> หรือคืน failure result UI จึงแยก “ไม่พบ pallet” จาก “ระบบผิดพลาด” ได้</p></details></section>
+<section><h2>8. จุดพลาด</h2><div class="warn"><code>!</code> ไม่ได้แก้ null มันเพียงสั่ง compiler ให้เชื่อเรา ใช้หลัง invariant ที่พิสูจน์ได้ใกล้ ๆ เท่านั้น ถ้าใช้เพราะ “น่าจะมี” ให้เปลี่ยน flow/type</div></section>
+
+
+</div><script src="../../assets/course.js"></script></body></html>

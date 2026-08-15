@@ -1,0 +1,40 @@
+# Zero to Senior Flutter + .NET
+
+คอร์ส Flutter/Dart ภาษาไทยสำหรับอ่านและพัฒนา Mobile WMS ที่เชื่อมกับ .NET API ได้จริง
+
+## เป้าหมาย
+
+- เรียน Flutter ตั้งแต่พื้นฐานจนอ่านโปรเจกต์ `wmsapp` และ `wms_absolute_mobile` ได้อย่างน้อย 90%
+- เข้าใจรอยต่อ Flutter → HTTP/JSON/JWT/SignalR → .NET API
+- ไม่สอน business logic ฝั่ง .NET ซ้ำทั้งหมด แต่ยก endpoint/DTO ที่จำเป็นและโยงไปคอร์ส `zero-to-senior-dotnet8-course`
+- มี coverage manifest ผูกไฟล์ Dart จริงทุกไฟล์เข้ากับบทเรียน
+
+## Baseline
+
+- Flutter 3.41.7 stable (SDK ในเครื่องวันที่เริ่มสร้างคอร์ส)
+- Dart 3.11.5
+- Reference apps:
+  - `C:\Users\User\Documents\GitHub\wms-app\wmsapp`
+  - `C:\Users\User\Desktop\wms_absolute_mobile`
+
+## เปิดคอร์ส
+
+เปิด `index.html` ด้วย browser แล้วเลือกบทเรียนจากเมนูด้านซ้าย Progress และ localStorage ใช้ namespace `zts_flutter_dotnet_` แยกจากคอร์สอื่น
+
+## สถานะเนื้อหา
+
+- Part -1: เขียนเนื้อหาเฉพาะบทครบ 20/20 บท พร้อมตัวอย่างจากสอง codebase แบบฝึกหัด และแนวคำตอบ
+- Part 0–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+
+ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
+
+## สร้างไฟล์ใหม่หลังแก้ Blueprint
+
+```powershell
+.\scripts\build-coverage.ps1
+.\scripts\build-course.ps1
+.\scripts\build-search-index.ps1
+.\scripts\verify-course.ps1
+```
+
+โฟลเดอร์ `lessons/`, `index.html`, `course-manifest.json`, `coverage-manifest.json` และ `assets/search-index.js` เป็นผลลัพธ์จากสคริปต์ ค่า `authored` ใน manifest แยกบทที่เขียนจริงจาก scaffold
