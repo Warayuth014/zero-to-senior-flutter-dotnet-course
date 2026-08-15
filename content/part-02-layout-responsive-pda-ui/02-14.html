@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>แก้ RenderFlex overflow อย่างเป็นระบบ</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">02-14 · Flutter UI</span><h1>แก้ RenderFlex overflow อย่างเป็นระบบ</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
 <div class="note">แถบเหลืองดำ RenderFlex overflow คือหลักฐานว่า child ต้องการ main-axis มากกว่าที่ Flex มี การแก้อย่างเป็นระบบคือหา constraint owner และ content priority ไม่ใช่สุ่มเพิ่ม Expanded/scroll/font เล็ก</div>
 <section><h2>1. อ่าน error ให้ครบ</h2><p>จด Flex direction, จำนวน pixels ที่ล้น, constraints และ nearest ancestor เปิด Inspector เลือก RenderFlex แล้วดู size ของลูก จุดที่เห็นแถบ overflow เป็นปลายเหตุ; root cause อาจอยู่ parent ที่บังคับ height/width ต่ำเกิน</p></section>
 <section><h2>2. Classification</h2><ul><li>Row + text ยาว: child ไม่มี bounded width</li><li>Column + content สูง: viewport ไม่มี scroll/flex policy</li><li>Fixed-height card + text scale: height assumption ผิด</li><li>Nested scroll + Expanded: main axis unbounded</li><li>Keyboard: available height ลดลงแต่หน้าไม่เลื่อน</li><li>Localization/data: fixture สั้นกว่าข้อมูลจริง</li></ul></section>
@@ -23,5 +17,3 @@ Row(children: [
 <section><h2>6. Regression matrix</h2><p>หลังแก้ทดสอบ width/height ก่อน-ตรง-หลัง breakpoint, landscape, keyboard เปิด, text scale 2.0, ภาษาไทย/อังกฤษ, long identifier, empty/error/loading และจำนวนสูงสุด เพิ่ม widget/golden test เฉพาะ layout contract สำคัญเพื่อกันกลับมา</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Home tile สูง 80 มี icon, title 2 บรรทัด, subtitle 2 บรรทัด และ chevron แล้วล้นล่าง แก้ตาม product priority อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ตรวจว่าความสูงถูกคำนวณจาก viewportจริง; ที่ tight breakpoint เปลี่ยน Column เป็น Row, รักษา icon/title/action, ลด/ซ่อน subtitle หรือให้ 1 บรรทัด, ลด decorative gaps และใช้ AutoSizeText ภายใน min อ่านได้ ไม่ครอบ tile ด้วย scroll view และไม่ลด touch target</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">ถ้าใส่ <code>ClipRect</code> แล้วแถบเหลืองหาย layout ยังผิด เพียงซ่อนภาพล้น ข้อมูล/ปุ่มอาจถูกตัดและ hit target ผิด ต้องแก้ constraint/content policy ก่อน clipping</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MediaQuery และ SafeArea</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">02-09 · Flutter UI</span><h1>MediaQuery และ SafeArea</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
 <div class="note"><code>MediaQuery</code> บอกคุณสมบัติของ view เช่น size, padding, viewInsets และ text scaling ส่วน <code>SafeArea</code> แปลง padding ที่หลบ system UI เป็น layout โดยสะดวก ทั้งคู่ไม่แทน constraints ของ parent</div>
 <section><h2>1. size ต่างจาก available constraints</h2><p><code>MediaQuery.sizeOf(context)</code> คือขนาด view/window แต่ widget อาจอยู่ครึ่งจอ, dialog หรือ split pane จึงควรใช้ LayoutBuilder เมื่อตัดสิน layout จากพื้นที่ที่ได้รับ ใช้ MediaQuery เมื่อสนใจคุณสมบัติทั้ง view เช่น keyboard/system padding</p></section>
 <section><h2>2. padding, viewPadding และ viewInsets</h2><ul><li><code>padding</code>: ส่วน view ที่ถูก system UI บัง ณ ตอนนั้น</li><li><code>viewPadding</code>: safe padding พื้นฐานไม่ลดตาม keyboard</li><li><code>viewInsets</code>: ส่วนถูกบังเต็ม เช่น on-screen keyboard</li></ul><p>Bottom sheet/form มักต้องสนใจ <code>viewInsets.bottom</code>; content เต็มจอต้องหลบ notch/navigation ด้วย SafeArea</p></section>
@@ -22,5 +16,3 @@ return AnimatedPadding(
 <section><h2>6. APIs ที่ rebuild แคบกว่า</h2><p>ใช้ <code>MediaQuery.sizeOf</code>, <code>paddingOf</code>, <code>viewInsetsOf</code> เมื่อสนใจ property เดียว แทน <code>MediaQuery.of</code> ทั้ง object เพื่อให้ dependency ชัดและลด rebuild จาก property อื่น รวมทั้งอ่าน textScaler/platformBrightness/highContrast เพื่อ accessibility ตาม use case</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Bottom action bar ถูก navigation gesture บัง แต่ body มี SafeArea อยู่แล้ว ควรแก้ที่ไหน?</p><details><summary>แนวคำตอบ</summary><p>ตรวจ tree ว่า action bar เป็น descendant ของ SafeArea หรือเป็น bottomNavigationBar/overlay คนละ subtree ถ้าอยู่นอกให้ครอบเฉพาะ action bar ด้วย SafeArea(top: false) หรือเพิ่ม padding จาก <code>MediaQuery.paddingOf(context).bottom</code> ที่ owner อย่าบวกทั้ง body และ bar ซ้ำ</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ MediaQuery width เป็น breakpoint ภายใน reusable card เพราะมันเห็นทั้งหน้าจอแม้ card อยู่ pane แคบ ใช้ LayoutBuilder ของ card/pane และใช้ MediaQuery เฉพาะ view-level concerns</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
