@@ -54,6 +54,7 @@
 |---|---|---:|
 | -1 Dart Foundation | Authored + verified | 20/20 |
 | 0 Setup, Tools & Project Anatomy | Authored + verified | 12/12 |
-| 1–25 | Scaffold/roadmap | 0/359 |
+| 1 Flutter Widget Mental Model | Authored + verified | 15/15 |
+| 2–25 | Scaffold/roadmap | 0/344 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา

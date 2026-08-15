@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Build ต้อง pure และไม่ควรยิง API ตรงไหน</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">01-09 · Flutter UI</span><h1>Build ต้อง pure และไม่ควรยิง API ตรงไหน</h1><p>Part 1: Flutter Widget Mental Model</p></header>
 <div class="note"><code>build()</code> ต้องเป็นการแปลง current configuration/state/context → widgets ที่ทำซ้ำได้ ปราศจาก side effect ที่ต้องเกิดครั้งเดียว เพราะ framework เรียก buildเมื่อไรก็ได้ตาม dependency/frame scheduling</div>
 <section><h2>1. สิ่งที่ทำใน buildได้</h2><ul><li>คำนวณ derived valuesเร็ว ๆ</li><li>เลือก widgetจาก enum/state</li><li>สร้าง callbacksที่เรียก commandภายหลัง</li><li>อ่าน Theme/MediaQuery/Localizations</li><li>ประกอบ widgets/collections</li></ul></section>
 <section><h2>2. สิ่งที่ไม่ควรทำ</h2><pre class="code-vs"><code>@override
@@ -19,5 +13,3 @@ Widget build(BuildContext context) {
 <section><h2>6. Derived work ที่แพง</h2><p>Filter/sort listใหญ่มากใน buildอาจ pureแต่ช้า ให้ derive/cachingใน state layerตาม input revisionหรือใช้ memoizationที่ correct ก่อน optimizeต้อง profile อย่า cache widget/contextแบบทำให้ข้อมูลเก่า</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>หน้า Task ต้องโหลดเมื่อ taskIdเปลี่ยน ออกแบบ lifecycleโดยไม่ยิงใน build</p><details><summary>เฉลย</summary><p>เริ่ม loadใน initStateจาก initial widget.taskId; ใน didUpdateWidgetเทียบ old/new idแล้ว loadใหม่/cancelหรือ generation token; set state/storeตามผล; buildแสดง snapshotเท่านั้น</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">การห่อ side effectด้วย <code>Future.microtask</code> หรือ post-frame callbackจาก buildไม่ได้ทำให้ถูก ถ้า buildซ้ำก็ scheduleซ้ำ ต้องมี owner/event/lifecycle invariantที่ชัด</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

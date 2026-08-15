@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Widget tree, Element tree และ RenderObject</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">01-03 · Flutter UI</span><h1>Widget tree, Element tree และ RenderObject</h1><p>Part 1: Flutter Widget Mental Model</p></header>
 <div class="note">Widget คือ immutable configuration, Element คือ instance/ตำแหน่งที่มี identity ใน tree และ RenderObject คือวัตถุ layout/paint/hit-test ของ render widgets การ build ใหม่จึงไม่เท่ากับสร้างทุกอย่างใหม่</div>
 <section><h2>1. สาม tree ที่ต้องแยก</h2><table><thead><tr><th>ชั้น</th><th>เก็บอะไร</th><th>เปลี่ยนเมื่อ</th></tr></thead><tbody><tr><td>Widget</td><td>configuration ชั่วคราว immutable</td><td>parent build คืน config ใหม่</td></tr><tr><td>Element</td><td>ตำแหน่ง, identity, lifecycle, inherited dependencies</td><td>mount/update/deactivate/unmount</td></tr><tr><td>RenderObject</td><td>constraints, size, paint, hit test</td><td>property/layout/paint ต้องอัปเดต</td></tr></tbody></table></section>
 <section><h2>2. Reconciliation</h2><p>เมื่อ parent build คืน widget ใหม่ Flutter เทียบ <code>runtimeType</code> และ <code>key</code> กับ widget เดิม ถ้าตรง Element เดิมถูก update และ State/RenderObject ที่เหมาะสมอยู่ต่อ ถ้าไม่ตรง subtree เดิมถูกถอดและ mount ใหม่</p><pre class="code-vs"><code>Old: Tile(key: ValueKey('receive'), badge: 2)
@@ -15,5 +9,3 @@ New: Tile(key: ValueKey('receive'), badge: 3)
 <section><h2>6. State อยู่กับ Element</h2><p>StatefulWidget object ถูกสร้างใหม่ได้บ่อย แต่ State อยู่กับ StatefulElement ตาม identity นี่คือเหตุผล reorder list โดยไม่มี key อาจทำ state ติดตำแหน่งแทน entity</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>Parent เปลี่ยน badge 2 → 3 แต่ Tile type/key เดิม อธิบายแต่ละ tree เกิดอะไร</p><details><summary>เฉลย</summary><p>สร้าง Tile widget config ใหม่; Element เดิม update เพราะ type/key ตรง; child widgets ที่ build คืนถูก reconcile; render object รับ property ใหม่และ mark layout/paint เฉพาะที่เกี่ยว ไม่ mount ทั้งแอปใหม่</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">อย่า optimize ด้วยการกลัว “สร้าง Widget object” ก่อนวัด ปกติ widgets เบา ปัญหามักเป็นงาน side effect ใน build, subtree dependency กว้าง, layout/paint แพง หรือ list/image ไม่ lazy</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
