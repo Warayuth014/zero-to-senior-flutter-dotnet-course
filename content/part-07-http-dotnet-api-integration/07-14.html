@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Retry เฉพาะงานที่ปลอดภัย</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">07-14 · Flutter + .NET</span><h1>Retry เฉพาะงานที่ปลอดภัย</h1><p>Part 7: HTTP + .NET API Integration</p></header>
 <div class="note"><strong>Retry ไม่ใช่ “ลองทุกอย่างอีกครั้ง”:</strong> retry เมื่อ failure ชั่วคราวและ operation ปลอดภัยต่อการทำซ้ำ หรือมี idempotency guarantee เท่านั้น</div>
 <section><h2>1. Safe candidates</h2><p>GET health/list/detail มัก retry ได้ ส่วน POST complete/receive/issue stock อาจทำซ้ำ side effect จึงห้าม auto-retry ถ้ายังไม่มี idempotency key</p></section>
 <section><h2>2. Retryable failure</h2><p>พิจารณา timeout ก่อน connect, SocketException, 408, 429 และบาง 5xx ตาม API policy ไม่ retry 400/401/403/404 แบบอัตโนมัติ</p></section>
@@ -17,5 +11,3 @@ await Future.delayed(delay);</code></pre><p>jitter ลดการยิงพ�
 <section><h2>6. Server load</h2><p>retry storm ทำ outage แย่ลง จึงควรมี backoff, jitter, circuit breaker ระดับระบบเมื่อจำเป็น และ telemetry แยก original request จาก retry attempt</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>POST complete timeout หลัง 8 วินาที จะ retry อัตโนมัติไหม?</p><details><summary>เฉลย</summary><p>ไม่ เว้นแต่ส่ง idempotency key เดิมและ serverรับประกัน dedupe; ทางเลือกคือ query command status ก่อน</p></details></section>
 <section><h2>8. กฎตัดสินใจ</h2><div class="warn">ถามสองข้อก่อน retry: “รู้ไหมว่า server ยังไม่ทำ?” และ “ทำซ้ำแล้วผลเท่าเดิมแน่ไหม?” ถ้าตอบไม่ได้ให้หยุดและ reconcile</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Decode success response</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">07-08 · Flutter + .NET</span><h1>Decode success response</h1><p>Part 7: HTTP + .NET API Integration</p></header>
 <div class="note"><strong>Decode สองชั้น:</strong> HTTP success เป็นเพียง transport success; body ยังต้องผ่าน JSON syntax, shape และ domain validation ก่อนเป็นข้อมูลที่ UI เชื่อถือได้</div>
 <section><h2>1. Success range</h2><p>โดยทั่วไป status 200–299 สำเร็จ แต่แต่ละ endpoint ต้องกำหนด expected status เช่น POST create อาจคืน 201 และ command ที่ไม่มี body อาจคืน 204</p></section>
 <section><h2>2. Decode UTF-8</h2><pre class="code-vs"><code>Object? decodeJson(http.Response response) {
@@ -21,5 +15,3 @@ return TaskDto.fromJson(raw);</code></pre></section>
 <section><h2>6. Content-Type guard</h2><p>ถ้า proxy คืน HTML พร้อม status 200 การเช็ก Content-Type และ shape จะจับได้เร็วกว่า error <code>type 'String' is not a subtype...</code> ที่ไม่บอกสาเหตุ</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>response 200 body เป็น <code>[]</code> แต่ endpoint สัญญาว่าคืน grid object ควรทำอะไร?</p><details><summary>เฉลย</summary><p>throw ContractException พร้อม endpoint/correlation ID; อย่าแปลงเป็น empty page เพราะซ่อน contract drift</p></details></section>
 <section><h2>8. Test matrix</h2><div class="success">ทดสอบ valid object/list, Thai UTF-8, empty 204, empty 200, malformed JSON, wrong top-level shape และ required field ผิดชนิด</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
