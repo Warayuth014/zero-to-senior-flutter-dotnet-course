@@ -40,35 +40,88 @@ class _TaskScreenState extends State<TaskScreen> {
     body: ListenableBuilder(
       listenable: widget.store,
       builder: (context, _) {
-        if (widget.store.loading && widget.store.tasks.isEmpty) {
+        if (widget.store.initialLoading) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (widget.store.error case final error?) {
+        if (widget.store.error case final error?
+            when widget.store.tasks.isEmpty) {
           return _ErrorView(message: error, onRetry: widget.store.load);
         }
         if (widget.store.tasks.isEmpty) {
           return const Center(child: Text('ไม่มีงานค้าง'));
         }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: widget.store.tasks.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final task = widget.store.tasks[index];
-            return _TaskCard(
-              task: task,
-              busy: widget.store.loading,
-              onComplete: () => widget.store.complete(task),
-            );
-          },
+        return Column(
+          children: [
+            if (widget.store.refreshing) const LinearProgressIndicator(),
+            if (widget.store.error case final error?)
+              MaterialBanner(
+                content: Text(error),
+                actions: [
+                  TextButton(
+                    onPressed: widget.store.load,
+                    child: const Text('โหลดใหม่'),
+                  ),
+                ],
+              ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: widget.store.load,
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: widget.store.tasks.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final task = widget.store.tasks[index];
+                    return _TaskCard(
+                      key: ValueKey(task.id),
+                      task: task,
+                      busy: widget.store.isBusy(task.id),
+                      onComplete: () => _confirmAndComplete(task),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
         );
       },
     ),
   );
+
+  Future<void> _confirmAndComplete(WmsTask task) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('ยืนยันปิด ${task.id}?'),
+        content: Text('${task.from} → ${task.to}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('ยืนยัน'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await widget.store.complete(task);
+    if (!mounted) return;
+    final message = widget.store.actionMessage;
+    if (message != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
 }
 
 class _TaskCard extends StatelessWidget {
   const _TaskCard({
+    super.key,
     required this.task,
     required this.busy,
     required this.onComplete,
@@ -79,13 +132,24 @@ class _TaskCard extends StatelessWidget {
   final VoidCallback onComplete;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: ListTile(
-      title: Text(task.id),
-      subtitle: Text('${task.from} → ${task.to}'),
-      trailing: FilledButton(
-        onPressed: busy ? null : onComplete,
-        child: const Text('เสร็จงาน'),
+  Widget build(BuildContext context) => Semantics(
+    label: 'งาน ${task.id} จาก ${task.from} ไป ${task.to}',
+    child: Card(
+      child: ListTile(
+        title: Text(task.id),
+        subtitle: Text('${task.from} → ${task.to} · ${task.status.name}'),
+        trailing: SizedBox(
+          width: 104,
+          child: FilledButton(
+            onPressed: busy ? null : onComplete,
+            child: busy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('เสร็จงาน'),
+          ),
+        ),
       ),
     ),
   );

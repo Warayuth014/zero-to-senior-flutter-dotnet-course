@@ -1,0 +1,9 @@
+<div class="note"><strong>PDA UX:</strong> หน้าจอ operational ต้องลด accidental mutation, สื่อ state ระหว่างรอ และยังใช้งานได้เมื่อข้อมูลเก่า/เครือข่ายไม่สมบูรณ์</div>
+<section><h2>1. Confirm intent</h2><p>กด “เสร็จงาน” เปิด dialog ที่ระบุ task และเส้นทางจาก→ไป ผู้ใช้ต้องเห็นสิ่งที่จะเปลี่ยน ไม่ใช้ dialog ทั่วไปว่า “ยืนยันหรือไม่” เพราะหลาย task หน้าตาคล้ายกัน</p></section>
+<section><h2>2. mounted หลัง await</h2><p>ทั้งรอ dialog และรอ complete อาจมี navigation/dispose จึงตรวจ <code>mounted</code> ก่อนใช้ context แสดง SnackBar ป้องกัน lifecycle exception</p></section>
+<section><h2>3. Loading หลายระดับ</h2><ul><li>initial: spinner กลางหน้า</li><li>refresh: linear progress เหนือ list เดิม</li><li>mutation: spinner ในปุ่ม task นั้น</li></ul><p>ภาพที่ต่างกันบอกชนิดงานและลดการเดาของผู้ใช้</p></section>
+<section><h2>4. Pull to refresh</h2><p><code>RefreshIndicator</code> ใช้ <code>AlwaysScrollableScrollPhysics</code> เพื่อ pull ได้แม้รายการสั้น แต่ยังมี app bar refresh สำหรับอุปกรณ์/ผู้ใช้ที่ gesture ไม่สะดวก</p></section>
+<section><h2>5. Error with data</h2><p>เมื่อมี cached snapshot อย่าแทนทั้งหน้าด้วย error แสดง MaterialBanner พร้อม reload และคง list ให้ดู แต่ mutation ที่อันตรายอาจต้อง disable หาก freshness เกิน threshold</p></section>
+<section><h2>6. Semantics และ touch target</h2><p>Card ใส่ semantics ที่อ่าน task/from/to และปุ่ม Material มี touch target มาตรฐาน บน PDA ถุงมือควรทดสอบขนาดจริง ไม่สรุปจาก desktop browser</p></section>
+<section><h2>7. Stable identity</h2><p><code>ValueKey(task.id)</code> ช่วย Flutter reconcile card ถูกตัวเมื่อรายการถูกลบ/เรียงใหม่ โดยเฉพาะเมื่อ card มี focus, animation หรือ local transient state</p></section>
+<section><h2>8. Widget test</h2><div class="success">Test ต้องพิสูจน์ว่าแตะปุ่มแล้วยังไม่ complete จนกดยืนยัน จากนั้น list ว่างและ SnackBar มี correlation ID นี่ทดสอบ behavior ที่ผู้ใช้เห็น ไม่ผูกกับ widget tree ภายในเกินจำเป็น</div></section>

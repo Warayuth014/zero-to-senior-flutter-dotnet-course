@@ -1,15 +1,28 @@
 import '../../core/api_client.dart';
+import '../../core/json_api.dart';
 import 'wms_task.dart';
+
+class TaskCompletion {
+  const TaskCompletion({
+    required this.id,
+    required this.alreadyCompleted,
+    required this.correlationId,
+  });
+
+  final String id;
+  final bool alreadyCompleted;
+  final String correlationId;
+}
 
 abstract interface class TaskRepository {
   Future<List<WmsTask>> fetchOpen();
-  Future<void> complete(String id);
+  Future<TaskCompletion> complete(String id, {required String commandId});
 }
 
 class RemoteTaskRepository implements TaskRepository {
   const RemoteTaskRepository(this.api);
 
-  final ApiClient api;
+  final JsonApi api;
 
   @override
   Future<List<WmsTask>> fetchOpen() async {
@@ -18,13 +31,44 @@ class RemoteTaskRepository implements TaskRepository {
     if (items is! List) {
       throw const ApiException('รูปแบบรายการ task ไม่ถูกต้อง');
     }
-    return items
-        .whereType<Map<String, dynamic>>()
-        .map(WmsTask.fromJson)
-        .toList(growable: false);
+    try {
+      return items
+          .map((item) {
+            if (item is! Map<String, dynamic>) {
+              throw const FormatException('task item ต้องเป็น object');
+            }
+            return WmsTask.fromJson(item);
+          })
+          .toList(growable: false);
+    } on FormatException catch (error) {
+      throw ApiException('รูปแบบ task จาก server ไม่ถูกต้อง: ${error.message}');
+    }
   }
 
   @override
-  Future<void> complete(String id) =>
-      api.postJson('/api/WMS/mobile_tasks/$id/complete', const {});
+  Future<TaskCompletion> complete(
+    String id, {
+    required String commandId,
+  }) async {
+    final json = await api.postJson(
+      '/api/WMS/mobile_tasks/$id/complete',
+      const {},
+      headers: {'Idempotency-Key': commandId},
+    );
+    final responseId = json['id']?.toString();
+    final alreadyCompleted = json['alreadyCompleted'];
+    final correlationId = json['correlationId']?.toString();
+    if (responseId == null ||
+        responseId != id ||
+        alreadyCompleted is! bool ||
+        correlationId == null ||
+        correlationId.isEmpty) {
+      throw const ApiException('รูปแบบผล complete task ไม่ถูกต้อง');
+    }
+    return TaskCompletion(
+      id: responseId,
+      alreadyCompleted: alreadyCompleted,
+      correlationId: correlationId,
+    );
+  }
 }

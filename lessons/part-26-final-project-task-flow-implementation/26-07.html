@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TaskStore single source of truth</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">26-07 · Project Lab</span><h1>TaskStore single source of truth</h1><p>Part 26: Final Project Implementation I: Production Task Flow</p></header>
+<div class="note"><strong>Single source of truth:</strong> widgets อ่าน snapshot จาก <code>TaskStore</code> และส่ง intent กลับ Store ไม่มี widget ใดถือสำเนา task list ของตัวเอง</div>
+<section><h2>1. Encapsulation</h2><p>Store เปลี่ยน fields เป็น private และเปิด <code>List.unmodifiable(_tasks)</code> เพื่อห้าม UI add/remove โดยไม่ผ่าน action ถ้า expose mutable list caller อาจเปลี่ยน state โดยไม่มี <code>notifyListeners</code></p></section>
+<section><h2>2. State dimensions</h2><ul><li><code>_tasks</code>: server snapshot ล่าสุดที่เชื่อถือ</li><li><code>_loading</code>: read operation</li><li><code>_busyTaskIds</code>: mutation ราย entity</li><li><code>_error</code>: ปัญหาที่ต้องให้ผู้ใช้ตัดสินใจ</li><li><code>_actionMessage</code>: feedback ของ action ล่าสุด</li></ul></section>
+<section><h2>3. Derived state</h2><pre class="code-vs"><code>bool get initialLoading =&gt; _loading &amp;&amp; _tasks.isEmpty;<br>bool get refreshing =&gt; _loading &amp;&amp; _tasks.isNotEmpty;</code></pre><p>ไม่เก็บ booleans ซ้ำที่อาจขัดกัน เช่น initialLoading และ refreshing เป็น true พร้อมกัน</p></section>
+<section><h2>4. Intent methods</h2><p><code>load</code> และ <code>complete</code> เป็น public commands ที่รักษา invariant ทั้งหมด Widget ไม่เรียก repository ตรงและไม่ลบรายการเองหลัง response</p></section>
+<section><h2>5. Immutable update</h2><p>หลัง complete สำเร็จ Store สร้าง list ใหม่ด้วย <code>where(...).toList()</code> ทำให้ listener เห็น snapshot ใหม่ชัด และหลีกเลี่ยงการ mutate collection ระหว่าง build</p></section>
+<section><h2>6. Error lifetime</h2><p>เริ่ม action ใหม่เคลียร์ error/action message ที่เกี่ยวข้อง แต่ timeout reconciliation อาจ preserve warning ระหว่าง reload ต้องกำหนดว่า message ใด transient และ message ใดต้องอยู่จนผู้ใช้รับรู้</p></section>
+<section><h2>7. เมื่อ Store ใหญ่ขึ้น</h2><p>ถ้าเพิ่ม filters, pagination, assignment, scan state จน change reasons มาก ให้แยก feature stores/immutable state ไม่ใช่ย้ายทุกอย่างเข้า God Store เพียงเพื่อมี SSOT เดียว</p></section>
+<section><h2>8. Review</h2><div class="success">ทุกการเปลี่ยน task list ต้องค้นเจอใน TaskStore เท่านั้น หากมี <code>setState</code> ลบ task ใน card หรือ screen แสดงว่าเกิด source of truth ที่สอง</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

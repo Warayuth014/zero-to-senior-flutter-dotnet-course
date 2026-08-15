@@ -6,7 +6,7 @@
 dotnet run --project .\dotnet\WmsMobileApi --urls http://0.0.0.0:5080
 ```
 
-มี endpoint สำหรับ health, โหลด task และ complete task โค้ดนี้ตั้งใจบางเพื่อให้เห็น API contract เท่านั้น ส่วน Controller/Service/EF Core/JWT เชิงลึกให้อ่านจากคอร์ส .NET เดิม
+มี endpoint สำหรับ health, โหลด task และ complete task คำสั่ง complete บังคับ `Idempotency-Key`, คืน `correlationId` และตอบซ้ำอย่างปลอดภัย โค้ดนี้ตั้งใจบางเพื่อให้เห็น API contract เท่านั้น ส่วน Controller/Service/EF Core/JWT เชิงลึกให้อ่านจากคอร์ส .NET เดิม
 
 ## 2. Flutter App
 
@@ -26,4 +26,14 @@ flutter run --project-directory .\flutter_wms_companion --dart-define=WMS_API_BA
 
 `TaskScreen → TaskStore → TaskRepository → ApiClient → .NET endpoint`
 
-มี loading/error/empty/success state, timeout/network error, JSON validation, dependency injection และ store unit test
+มี initial loading/refresh/action state แยกกัน, per-task duplicate guard, timeout reconciliation, strict JSON validation, dependency injection ผ่าน `JsonApi` และ unit/widget tests
+
+## ตรวจ checkpoint
+
+```powershell
+flutter analyze --no-pub --project-directory .\flutter_wms_companion
+flutter test --no-pub --project-directory .\flutter_wms_companion
+dotnet build .\dotnet\WmsMobileApi\WmsMobileApi.csproj --no-restore
+```
+
+เปิด API ก่อนแล้วเปิด Flutter จากนั้นลองกดปิด task เดิมซ้ำผ่าน HTTP client ด้วย `Idempotency-Key` เดิม ผลต้องสำเร็จและมี `replayed: true` โดยไม่เกิด side effect รอบสอง

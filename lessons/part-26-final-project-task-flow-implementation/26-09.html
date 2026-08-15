@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Per-task busy guard ป้องกัน command ซ้ำ</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">26-09 · Project Lab</span><h1>Per-task busy guard ป้องกัน command ซ้ำ</h1><p>Part 26: Final Project Implementation I: Production Task Flow</p></header>
+<div class="note"><strong>Per-entity busy:</strong> งาน TASK-001 กำลัง complete ไม่ควรล็อกปุ่มของ TASK-002 และไม่ควรเปิดให้ TASK-001 ส่ง command ซ้ำ</div>
+<section><h2>1. ปัญหา global loading</h2><p>boolean <code>loading</code> เดียวทำให้ refresh, initial read และทุก mutation ขัดกัน ผู้ใช้ปิดงานคนละรายการพร้อมกันไม่ได้ และ progress ที่ card บอกไม่ได้ว่ารายการใดกำลังทำ</p></section>
+<section><h2>2. Set ของ identity</h2><pre class="code-vs"><code>if (_busyTaskIds.contains(task.id)) return;<br>_busyTaskIds.add(task.id);<br>try { ... } finally {<br>&nbsp;&nbsp;_busyTaskIds.remove(task.id);<br>}</code></pre><p>Set ทำหน้าที่ทั้ง invariant และ state สำหรับ UI โดย key ต้องเป็น stable domain identity</p></section>
+<section><h2>3. Guard ต้องอยู่ Store</h2><p>ปุ่ม disabled เป็น UX แต่ event อาจมาจาก scanner, keyboard shortcut หรือสอง widget Guard เชิง correctness จึงต้องอยู่ action method ไม่ใช่แค่ปุ่ม</p></section>
+<section><h2>4. finally สำคัญ</h2><p>success, known error, unknown outcome หรือ parser error ต้องปลด busy เสมอ มิฉะนั้น task ติด disabled จน restart แต่ห้ามปลดก่อน reconciliation จบเพราะผู้ใช้อาจส่งซ้ำระหว่างตรวจสอบ</p></section>
+<section><h2>5. Parallel commands</h2><p>lab ยอม complete คนละ task พร้อมกัน Backend/ธุรกิจจริงอาจต้อง serialize ตาม pallet, order หรือ location ให้เปลี่ยน lock key เป็น aggregate identity ไม่จำเป็นต้องเป็น task id เสมอ</p></section>
+<section><h2>6. UI feedback</h2><p>card ที่ busy แสดง spinner ขนาดคงที่และ disable ปุ่มเฉพาะ card ทำให้ operator รู้ว่า intent ถูกบันทึกแล้ว โดยรายการอื่นไม่ถูกแช่แข็ง</p></section>
+<section><h2>7. Test double action</h2><p>ใช้ pending Completer ให้ request แรกค้าง เรียก <code>complete</code> ซ้ำ แล้ว assert repository ถูกเรียกหนึ่งครั้ง Test ต้องตรวจระหว่าง request ไม่ใช่หลัง request จบเร็วแล้ว</p></section>
+<section><h2>8. Senior question</h2><div class="success">ถ้า task สองตัวแตะ pallet เดียวกัน คุณจะใช้ busy key อะไร และ backend ป้องกัน conflict อย่างไร Client guard เป็นเพียงชั้นแรก ไม่แทน concurrency control ฝั่ง server</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

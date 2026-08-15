@@ -13,13 +13,24 @@ class WmsTask {
   final String to;
   final TaskStatus status;
 
-  factory WmsTask.fromJson(Map<String, dynamic> json) => WmsTask(
-    id: json['id']?.toString() ?? '',
-    from: json['from']?.toString() ?? '-',
-    to: json['to']?.toString() ?? '-',
-    status: TaskStatus.values.firstWhere(
-      (value) => value.name == json['status']?.toString().toLowerCase(),
-      orElse: () => TaskStatus.waiting,
-    ),
-  );
+  factory WmsTask.fromJson(Map<String, dynamic> json) {
+    String requiredText(String key) {
+      final value = json[key]?.toString().trim() ?? '';
+      if (value.isEmpty) throw FormatException('task.$key ต้องมีค่า');
+      return value;
+    }
+
+    final rawStatus = requiredText('status').toLowerCase();
+    final status = TaskStatus.values.where((value) => value.name == rawStatus);
+    if (status.isEmpty) {
+      throw FormatException('ไม่รู้จัก task.status: $rawStatus');
+    }
+
+    return WmsTask(
+      id: requiredText('id'),
+      from: requiredText('from'),
+      to: requiredText('to'),
+      status: status.single,
+    );
+  }
 }
