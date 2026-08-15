@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Logout และล้าง state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">08-08 · Auth Integration</span><h1>Logout และล้าง state</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
 <div class="note"><strong>Logout คือ security transition ทั้งระบบ:</strong> หยุดงาน, ล้าง credential และ user-scoped state, invalidate navigation แล้วค่อยกลับ login—not merely pop route</div>
 <section><h2>1. ลำดับที่ปลอดภัย</h2><ol><li>เปลี่ยน auth state เป็น signingOut และเพิ่ม generation</li><li>หยุด polling/timer/subscription</li><li>cancel หรือ ignore in-flight response</li><li>ล้าง feature/user caches</li><li>ลบ secure credential และ token ใน memory</li><li>แทน route stack ด้วย login</li></ol></section>
 <section><h2>2. API revoke</h2><p>ถ้ามี refresh token/server session ให้เรียก revoke แบบ best effort ตาม product policy แต่ local logout ต้องสำเร็จแม้ offline; server token อายุสั้นช่วยลดช่วงเสี่ยง</p></section>
@@ -16,5 +10,3 @@
 <section><h2>6. ของจริง</h2><p><code>AuthRepository.logout()</code> ในแอปจริงล้าง token/session memory ส่วน WarehouseShell reset route; production extension ต้องรวม persistence, timers และ feature storesด้วย</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>secure storage ลบ token ไม่สำเร็จควรอยู่ shell ต่อไหม?</p><details><summary>เฉลย</summary><p>ไม่ ให้ล้าง memory/route ทันทีและ retry secure deletion หรือ block restore ด้วย tombstone/version เพื่อไม่ฟื้น token เก่าโดยเงียบ</p></details></section>
 <section><h2>8. Exit checklist</h2><div class="success">Back กลับไม่ได้, request เก่าเปลี่ยน state ไม่ได้, token/log/cache ไม่มีข้อมูลผู้ใช้เดิม และเปิดแอปใหม่ไม่ restore session ที่ logout แล้ว</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

@@ -32,7 +32,8 @@
 - Part 5: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท ครอบคลุม navigation stack, modal, PopScope, application shell และ session cleanup
 - Part 6: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม DTO, JSON parsing, null/time/status/pagination และ contract tests
 - Part 7: เขียนเนื้อหาเฉพาะบทครบ 18/18 บท ครอบคลุม HTTP client, URL/device networking, ProblemDetails, grid, retry/idempotency และ integration lab
-- Part 8–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
+- Part 8: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท ครอบคลุม login, JWT session, secure persistence, 401/logout, permission และ server-bound session
+- Part 9–25: มีโครงหน้าและสารบัญเพื่อวางแผน coverage แต่ยังนับเป็น scaffold ไม่ใช่เนื้อหาที่เขียนเสร็จ
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

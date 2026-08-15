@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Startup bootstrap ก่อน request แรก</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">08-06 · Auth Integration</span><h1>Startup bootstrap ก่อน request แรก</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
 <div class="note"><strong>Bootstrap gate:</strong> ก่อน request แรกต้องโหลด connection profile และ auth session ให้เสร็จ มิฉะนั้น request อาจไป server default โดยไม่มี token แล้วเกิด 401 ที่ดูเหมือน logout</div>
 <section><h2>1. Startup states</h2><pre class="code-vs"><code>sealed class BootstrapState {}
 class Booting extends BootstrapState {}
@@ -22,5 +16,3 @@ class BootFailed extends BootstrapState { BootFailed(this.message); final String
 <section><h2>6. ของจริง</h2><p><code>wms_absolute_mobile/main.dart</code> เรียก <code>WidgetsFlutterBinding.ensureInitialized()</code> และรอ language/connection profile ก่อน <code>runApp</code>; Part นี้เพิ่ม session restore เข้า sequence เดียวกัน</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>ภาษาโหลดไม่ได้แต่ token/server ถูกต้อง ควร block app ทั้งหมดหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>ใช้ default locale และ log warning ได้ ส่วน connection/auth corruption ต้องเข้าสถานะ recoverable ที่ให้เลือก server/login ไม่ปล่อย feature request วิ่งผิด config</p></details></section>
 <section><h2>8. Acceptance</h2><div class="success">ไม่มี flash หน้า login ก่อน restore, ไม่มี request ก่อน ready, error retry ได้, logout ระหว่าง boot ปลอดภัย และ test ควบคุมลำดับด้วย fake dependencies</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

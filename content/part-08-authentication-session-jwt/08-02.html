@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AuthRepository แยกจาก LoginScreen</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">08-02 · Auth Integration</span><h1>AuthRepository แยกจาก LoginScreen</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
 <div class="note"><strong>AuthRepository เป็น boundary:</strong> LoginScreen จัด form/feedback; repository รู้ endpoint, DTO, session persistence และการผูก token กับ ApiClient</div>
 <section><h2>1. ปัญหาของ fat LoginScreen</h2><p>ถ้า widget ต่อ URL, encode password, parse token, เขียน storage และ navigate เอง จะทดสอบยากและ logic auth ซ้ำทุกหน้าที่ต้อง re-login</p></section>
 <section><h2>2. Interface</h2><pre class="code-vs"><code>abstract interface class AuthRepository {
@@ -25,5 +19,3 @@
 <section><h2>6. ของจริงและจุดต่อยอด</h2><p><code>wms_absolute_mobile</code> แยก repository แล้ว แต่ session ยังอยู่ memory และ repository ตั้ง <code>_api.authToken</code> โดยตรง ขั้นต่อไปคือ inject session/token store และ notifier เพื่อ restore/logout แบบทดสอบได้</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>เขียน fake repository ที่ login EMP001 สำเร็จและ user อื่น throw InvalidCredentials เพื่อทดสอบ LoginScreen โดยไม่เปิด server</p><details><summary>เฉลย</summary><p>fake ต้องบันทึก request เพื่อ assert trim/ไม่ submit ซ้ำ และ expose session หลังสำเร็จ</p></details></section>
 <section><h2>8. Review rule</h2><div class="warn">หากพบ <code>SharedPreferences.getInstance()</code>, <code>jsonDecode</code> หรือ Authorization header ใน LoginScreen ให้ย้ายออกไป boundary ที่รับผิดชอบ</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

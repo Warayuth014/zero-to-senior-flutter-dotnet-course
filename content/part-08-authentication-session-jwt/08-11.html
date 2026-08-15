@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>เปลี่ยน server แล้ว session ต้องทำอย่างไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">08-11 · Auth Integration</span><h1>เปลี่ยน server แล้ว session ต้องทำอย่างไร</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
 <div class="note"><strong>Session ผูกกับ security realm:</strong> token จาก Server A ห้ามถูกส่งไป Server B แม้ host ทั้งคู่เป็น WMS เพราะ issuer, audience, tenant และข้อมูลผู้ใช้คนละชุด</div>
 <section><h2>1. Threat</h2><p>ผู้ใช้ login production แล้วเปลี่ยน base URL เป็น dev ถ้า ApiClient ยังถือ token จะส่ง credential production ไป host ใหม่และอาจเปิดเผย tokenใน log/server ที่ไม่ควรเห็น</p></section>
 <section><h2>2. Server identity</h2><p>connection profile ควรมี stable server ID/realm จาก trusted health/auth metadata ไม่ใช้แค่ label ที่ผู้ใช้พิมพ์ และ session envelope เก็บ server ID ที่ออก token</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. ของจริง</h2><p>connection controller ใช้ ApiClient ตัวเดิมเพื่อรักษา tokenเมื่อปรับ setting แต่ productionต้องกำหนดชัดว่า setting ใดไม่เปลี่ยน realm และ setting ใดบังคับ logout</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนจาก <code>http://192.168.1.5:5000</code> เป็น HTTPS domain ที่ reverse proxy ไป serverเดิม ควรเก็บ sessionไหม?</p><details><summary>แนวคำตอบ</summary><p>ตัดสินจาก verified server/issuer identity และ migration policy ไม่ใช่ URL similarity; ค่าเริ่มต้นที่ปลอดภัยคือ clear แล้ว login ใหม่</p></details></section>
 <section><h2>8. Tests</h2><div class="success">switch A→B, switch ขณะ request, probe wrong service, switch offline, cancel switch และตรวจว่า Authorization ของ A ไม่เคยถึง B</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
