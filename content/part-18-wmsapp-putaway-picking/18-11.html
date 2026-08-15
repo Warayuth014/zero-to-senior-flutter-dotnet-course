@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Picking session และ source pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-11 · Real Codebase</span><h1>Picking session และ source pallet</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Picking session จริงอยู่ใน PickItemsScreen:</strong> <code>PickingSessionScreen</code> เป็น backward-compatible redirect ส่วน state machine 5 สถานะควบคุมวงจรหลาย source pallets</div>
 <section><h2>1. Compatibility route</h2><p>Home route เดิมเปิด <code>PickingSessionScreen</code> ซึ่งใช้ post-frame callback แล้ว <code>pushReplacement</code> ไป OrdersList การเก็บ redirect ลด breaking change แต่ควรถอดเมื่อ callers migrate ครบ</p></section>
 <section><h2>2. Five states</h2><pre class="code-vs"><code>scanSource ↔ pickView → scanDest → afterPick
@@ -15,5 +9,3 @@
 <section><h2>6. Back navigation</h2><p>PopScope อนุญาต pop เฉพาะ initial pickView; scanDest ย้อนกลับ pickView, returnSource ย้อนไป scanSource และ afterPick ไม่ทำอะไร ปิดทางย้อนที่อาจทำ command ซ้ำ แต่หลังสำเร็จควรมี exit path ที่ชัด</p></section>
 <section><h2>7. Error classification bug</h2><p>เมื่อ <code>assignPickStation</code> fail จาก scanSource โค้ดทุก error พาไป returnSource พร้อมข้อความ “ไม่มีสินค้าที่ต้อง Pick” แม้สาเหตุอาจเป็น network/401/500 ควร branch ตาม typed error และ return เฉพาะ domain outcome no-needed-items</p></section>
 <section><h2>8. Reducer refactor</h2><div class="success">กำหนด event SourceScanned, AssignmentLoaded, PartActivated, DestScanned, PickConfirmed, ReturnRequested และ state immutable พร้อม transition tests รวม invalid transitions เช่น confirm ซ้ำขณะ loading</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

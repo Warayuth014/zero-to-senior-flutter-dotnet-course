@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Send destination ไป packing</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-16 · Real Codebase</span><h1>Send destination ไป packing</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>ส่ง destination ไป PACK คือ handoff สุดท้าย:</strong> action นี้ปิดช่วง Picking และเปิดช่วง Packing จึงต้องอิง order readiness ไม่ใช่เพียงมี destPalletId</div>
 <section><h2>1. Send endpoint</h2><pre class="code-vs"><code>POST /picking/send-to-pack/{palletId}</code></pre><p><code>sendToPack</code> คืน dynamic map และ UI อ่าน message เมื่อสำเร็จ ควรมี typed response ที่ระบุ pallet status/location และ order handoff</p></section>
 <section><h2>2. Current UI behavior</h2><p>afterPick แสดงปุ่มส่ง PACK เมื่อ <code>_destPalletId != null</code> ทั้งกรณี order complete และยังมี remaining items ดังนั้น client ไม่ได้บังคับ readiness จาก <code>isPickOrderComplete</code></p></section>
@@ -16,5 +10,3 @@ destination pallet → send-to-pack → ZONE_PACK
 <section><h2>6. Observability</h2><p>log correlationId, pickOrderId, source/dest pallets, station, operator, item/serial counts และ outcome โดยไม่ log token Metrics สำคัญคือ pick cycle time, conflict/retry, shortage และ premature pack rejection</p></section>
 <section><h2>7. Refactor roadmap</h2><p>เพิ่ม typed station/picking DTO, line identity, immutable workflow controller, typed domain errors, unified return coordinator, request generation guard, idempotency key และ explicit pack readiness ตามลำดับความเสี่ยง</p></section>
 <section><h2>8. Capstone</h2><div class="success">สร้าง integration scenario order ที่ใช้ source 2 pallets และ destination เดิม: รอบแรก remaining, คืน source, รอบสอง complete, ส่ง PACK จากนั้นจำลอง timeout/duplicate/conflict และพิสูจน์ว่า inventory รวม, serial ownership และ order status ถูกต้องเพียงครั้งเดียว</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

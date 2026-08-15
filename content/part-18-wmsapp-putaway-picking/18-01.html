@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Putaway domain map</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-01 · Real Codebase</span><h1>Putaway domain map</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Part 18 คือการเคลื่อน inventory ผ่าน station:</strong> Putaway ส่ง pallet ไป ASRS/Prework/Replenish ส่วน Picking ดึงของจาก source pallet ไป destination pallet ทุกขั้นต้องรักษา pallet, order และ part identity ให้ตรงกัน</div>
 <section><h2>1. Putaway flow map</h2><pre class="code-vs"><code>station scan → pallet scan → inspect items
 → choose destination/wrapping → confirm
@@ -17,5 +11,3 @@
 <section><h2>6. Command vs event</h2><p><code>confirmPutaway</code>, <code>confirmPickV2</code>, <code>returnPallet</code> และ <code>sendToPack</code> เป็น command ที่อาจเปลี่ยนข้อมูล ส่วน StationDispatched/PalletArrived/PalletReturned เป็น notification ห้ามนำ event มา commit inventory ซ้ำใน client</p></section>
 <section><h2>7. Failure boundaries</h2><p>แยก validation reject, conflict, timeout ที่ไม่รู้ผล, transport failure และ event disconnect เพราะ retry policy ต่างกัน โดยเฉพาะ confirm/return ต้องมี idempotency key หรือ query สถานะก่อน retry</p></section>
 <section><h2>8. วิธีอ่าน Part นี้</h2><div class="success">ทุกบทให้ trace 5 ช่อง: user scan → local transition → API payload → backend result/event → UI reconciliation แล้วจด invariant อย่างน้อยหนึ่งข้อและ failure case อย่างน้อยสองกรณี</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

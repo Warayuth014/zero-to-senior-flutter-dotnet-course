@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Station sheet normal/dispatching state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-03 · Real Codebase</span><h1>Station sheet normal/dispatching state</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>StationSheet คือ command form:</strong> StationCard แสดง normal/dispatching state ส่วน sheet รับ pallet, ตรวจ station policy และสร้าง confirm command ที่สมบูรณ์</div>
 <section><h2>1. StationCard lifecycle</h2><p><code>AnimationController</code> เริ่ม repeat เมื่อ isDispatching และ <code>didUpdateWidget</code> start/stop/reset เมื่อสถานะเปลี่ยน ก่อน dispose controller เสมอ จึงไม่ทิ้ง ticker หลังออกหน้า</p></section>
 <section><h2>2. Normal vs dispatching</h2><p>normal content แสดง station, pallet/destination และ affordance; dispatching content เปลี่ยนสีเป็น danger พร้อมลูกศร animated และข้อความ AMR ตาม receive/send role ภาพเคลื่อนไหวเป็น presentation ไม่ใช่ timer ของงานจริง</p></section>
@@ -14,5 +8,3 @@
 <section><h2>6. Confirm transition</h2><p>dialog อธิบาย destination และ wrapping จากนั้น <code>confirmPutaway</code> ส่ง operatorId เมื่อสำเร็จ pop sheet แล้วให้ parent refresh ห้ามถือว่าปิด sheet เท่ากับ AMR ขนเสร็จ เพราะ dispatch/arrival เป็นสถานะถัดไป</p></section>
 <section><h2>7. Async lifecycle bug</h2><p>ในโค้ดจริงบางจุดเรียก <code>setState</code> หลัง await ก่อนตรวจ <code>mounted</code> เช่นปิด loading ใน scan/confirm หาก sheet ถูกปิดระหว่าง request อาจเกิด setState after dispose ควรตรวจ mounted ก่อน setState ทุกครั้ง</p></section>
 <section><h2>8. Refactor</h2><div class="success">สร้าง sealed state Loading/Ready/Submitting/Error และ inject PutawayRepository; ให้ StationPolicy คำนวณ allowed destinations/wrapping แยกจาก widget แล้วเขียน test policy โดยไม่ต้อง pump bottom sheet</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

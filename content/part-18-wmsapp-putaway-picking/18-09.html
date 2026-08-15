@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Picking orders list</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-09 · Real Codebase</span><h1>Picking orders list</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Orders list เป็น operational inbox:</strong> แสดง WAITING/PICKING และมี pallet routing panel แยกต่างหาก ผู้ใช้ต้องเห็นชัดว่า action ใดเปิด order และ action ใดส่ง pallet</div>
 <section><h2>1. Load orders</h2><p><code>getPickOrdersList()</code> อ่าน <code>/picking/orders-list</code> แล้วเก็บ <code>List&lt;PickOrderListItem&gt;</code> พร้อม loading overlay หาก fail แสดง dialog แต่รายการเก่าอาจยังอยู่ จึงควรบอกว่า stale</p></section>
 <section><h2>2. Status semantics</h2><p><code>PickOrderListItem</code> มี helper <code>isWaiting</code>/<code>isPicking</code> จาก String status รายการ WAITING เปิด dialog “รอ Robot” ส่วน PICKING จึงเปิด detail unknown status ควรมี behavior ที่ explicit</p></section>
@@ -17,5 +11,3 @@
 <section><h2>6. Preview is not reservation</h2><p>ระหว่าง preview กับ execute สถานะ pallet อาจเปลี่ยน จึงต้อง validate ซ้ำตอน POST และตอบ 409 หาก decision ไม่ใช้แล้ว UI ควร refresh preview ไม่ retry destination เก่าอัตโนมัติ</p></section>
 <section><h2>7. WAITING activation</h2><p>API มี <code>notifyArrival()</code> สำหรับ robot simulator เปลี่ยน WAITING→PICKING และ assign pallets แต่หน้ารายการปัจจุบันเพียงแจ้งให้รอ จึงต้องรู้ว่า activation มาจาก external process ไม่ใช่ tap card</p></section>
 <section><h2>8. List tests</h2><div class="success">ทดสอบ empty/error/stale, WAITING dialog, PICKING navigation+refresh, unknown status, preview denied, preview/execute conflict, cancel confirmation และ scanner focus คืนหลังทุก path</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

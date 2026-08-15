@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan destination flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-13 · Real Codebase</span><h1>Scan destination flow</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Destination pallet เป็น inventory owner หลัง confirm:</strong> ต้องไม่ใช่ source และอาจเป็น pallet เดิมของ order เพื่อรวมสินค้าหลาย source รอบ</div>
 <section><h2>1. Enter destination state</h2><p>เมื่อมีรายการ pick อย่างน้อยหนึ่งรายการและยังไม่มี dest, state เปลี่ยนเป็น scanDest, clear input แล้ว request focus หลัง frame หากมี <code>_destPalletId</code> จากรอบก่อนจะ confirm ต่อ pallet เดิมทันที</p></section>
 <section><h2>2. Suggested destination</h2><p><code>getSuggestedDestPallet()</code> รับ pickOrderId เพื่อหา pallet ที่เหมาะกับ order ปัจจุบัน</p><pre class="code-vs"><code>GET /picking/suggest-dest-pallets
@@ -14,5 +8,3 @@
 <section><h2>6. Stale suggestion</h2><p>ระหว่างแนะนำกับ confirm pallet ว่างอาจถูกอุปกรณ์อื่นจอง หรือ continued pallet อาจไป PACK แล้ว Backend ต้อง reserve/validate atomically และตอบ conflict ที่ทำให้ client reload suggestion</p></section>
 <section><h2>7. Persist across sources</h2><p>หลัง confirm destination ID ยังอยู่ เมื่อกลับ scan source รอบถัดไปจึงข้าม scanDest และเติม pallet เดิม แต่ต้องตรวจว่า order/pallet ยังเปิดรับและ capacity พอก่อนทุก confirm</p></section>
 <section><h2>8. Destination tests</h2><div class="success">ทดสอบ no suggestion, continued/new, refresh, source=dest, suggestion ถูกแย่ง, dest capacity เต็ม, order เปลี่ยน และการใช้ dest เดิมกับ source รอบสองโดย backend ยังเป็นผู้ตัดสินสุดท้าย</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

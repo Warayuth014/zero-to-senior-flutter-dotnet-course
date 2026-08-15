@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Confirm pick และ remaining items</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-14 · Real Codebase</span><h1>Confirm pick และ remaining items</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Confirm pick คือ inventory transaction:</strong> ยอดถูกหักจาก source และเพิ่มที่ destination พร้อมอัปเดต order จึงต้อง atomic, idempotent และตรวจ serial/quantity จากฐานข้อมูลล่าสุด</div>
 <section><h2>1. Build selected items</h2><p>วน palletItems แล้วใช้ serial count หรือ qty map; รายการที่ qty≤0 ถูกข้าม สำหรับ serial item ส่ง serialNumbers ที่เลือก ส่วน non-serial ส่ง empty list ให้ backendตรวจ <code>SerialRequire</code> เอง</p></section>
 <section><h2>2. Confirm payload</h2><pre class="code-vs"><code>POST /picking/confirm-pick
@@ -16,5 +10,3 @@
 <section><h2>6. After-pick state</h2><p>success banner แยก order complete กับรอบนี้สำเร็จ และ remaining card filter qty&gt;0 ผู้ใช้เลือกกลับ scan source หรือส่ง destination ไป PACK ข้อมูลนี้ควร reload authoritative order ก่อน action ถัดไป</p></section>
 <section><h2>7. Retry ambiguity</h2><p>timeout หลัง commit อาจทำให้ผู้ใช้กดยืนยันซ้ำ ต้องส่ง idempotency key/operationId และ backendคืน response เดิม หรือ client query operation/order state ก่อน retry</p></section>
 <section><h2>8. Confirm tests</h2><div class="success">ทดสอบ nonserial/serial/mixed, part หลาย lot, concurrent stock change, duplicate command, destination full, partial failure policy, source empty และ order complete โดย assert ยอด source+dest และ order เปลี่ยนสอดคล้องกัน</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

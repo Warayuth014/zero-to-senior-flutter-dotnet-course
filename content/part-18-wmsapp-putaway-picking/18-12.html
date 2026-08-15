@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Scan source flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-12 · Real Codebase</span><h1>Scan source flow</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>Source pallet กำหนดชุดสินค้าที่หยิบได้:</strong> assignment response คือ snapshot ที่ผูก station, source pallet และ order เข้าด้วยกัน ทุก part/serial ที่เลือกต้องอยู่ใน snapshot นี้</div>
 <section><h2>1. Source scan UI</h2><p><code>PickingScanSourceCard</code> รับ controller/focus/onScan จาก parent จึงเป็น stateless presentation scanner focus กลับมาหลัง transition ด้วย post-frame callback</p></section>
 <section><h2>2. Assign source command</h2><pre class="code-vs"><code>POST /picking/assign-station
@@ -15,5 +9,3 @@
 <section><h2>6. Serial guard</h2><p>serial ต้องไม่ซ้ำใน local list, อยู่ใน <code>availableSerials</code> ของ part และ count ไม่เกิน suggested qty ต่างจาก receiving flow ที่ validate server ต่อ scan; ที่นี่ server validation เกิดตอน confirm จึงมี conflict ช้ากว่า</p></section>
 <section><h2>7. Identity collision</h2><p>selection, <code>_pickedSerials</code> และ <code>_pickedQty</code> key ด้วย partId หาก source มี part เดียวกันหลาย lot/condition record จะชนกัน ควรใช้ lineId หรือ composite part+lot+condition ที่ backendรับรู้</p></section>
 <section><h2>8. Source tests</h2><div class="success">ทดสอบ wrong pallet/order, empty assignment, part หลาย lot, duplicate/unknown serial, suggested qty ศูนย์/เกิน, scan source ซ้ำ และ network failure โดยห้ามเปลี่ยนไป returnSource เมื่อเป็น transport error</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>

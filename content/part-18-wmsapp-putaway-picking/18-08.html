@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Putaway SignalR events</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">18-08 · Real Codebase</span><h1>Putaway SignalR events</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
 <div class="note"><strong>SignalR เป็น invalidation channel:</strong> event ทำให้หน้าจอรู้ว่าควร refresh ไม่ใช่แหล่งข้อมูลเดียว เพราะ reconnect อาจพลาด event และ event payload อาจมีเพียงบาง field</div>
 <section><h2>1. Singleton + ref count</h2><p><code>SignalRService</code> เป็น singleton; connect เพิ่ม <code>_refCount</code> และ disconnect ลด เมื่อถึงศูนย์จึง stop connection ทำให้ Putaway กับ Prework ใช้ hub เดียวพร้อมกันได้</p></section>
 <section><h2>2. Hub connection</h2><p>service resolve server URL แล้วต่อ <code>/hubs/putaway</code> ด้วย automatic reconnect จากนั้น register StationDispatched, PalletArrived, PalletReturned และ LabelingCompleted</p></section>
@@ -15,5 +9,3 @@
 <section><h2>6. Optimistic merge</h2><p>StationDispatched merge pallet/destination เพื่อแสดง busy ทันที จากนั้นโหลด REST ใหม่ ส่วน events อื่นใช้ refresh อย่างเดียว Pattern นี้ลด latency แต่ต้องมี request generation guard ไม่ให้ response เก่าทับ event ใหม่</p></section>
 <section><h2>7. Connection gaps</h2><p>connect catch แล้ว log แต่ไม่ส่ง connection state ให้ UI; automatic reconnect ไม่รับประกัน event replay จึงควร refresh เมื่อ reconnected, ทำ periodic reconciliation และแสดงสถานะ stale/offline</p></section>
 <section><h2>8. Realtime tests</h2><div class="success">fake stream แล้วทดสอบ event ซ้ำ/ผิดลำดับ/unknown station, disconnect-reconnect, สอง screens ref-count, listener remove, REST response เก่าหลัง event และ event ที่ payload ขาด field โดย state สุดท้ายต้องตรง snapshot ล่าสุด</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
