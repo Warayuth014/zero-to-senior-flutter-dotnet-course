@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Single source of truth</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">09-09 · Architecture</span><h1>Single source of truth</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
 <div class="note"><strong>Single source of truth (SSOT):</strong> ข้อมูลหนึ่งชนิดมี ownerหลักหนึ่งจุด ส่วนค่าที่เหลือ deriveหรือ snapshotตาม contract ไม่ copy mutable stateหลายที่แล้วหวังว่าจะ syncเอง</div>
 <section><h2>1. Choose owner</h2><p>Authenticated userอยู่ AuthStore, active serverอยู่ ConnectionController, receiving workflowอยู่ ReceivingStore และ server inventoryเป็น authoritative remote stateที่ repositoryโหลดเข้ามา</p></section>
 <section><h2>2. Derived state</h2><pre class="code-vs"><code>List&lt;Task&gt; get openTasks =&gt;
@@ -15,5 +9,3 @@ int get openCount =&gt; openTasks.length;</code></pre><p>ไม่เก็บ <
 <section><h2>6. Selection by ID</h2><p>เก็บ selectedTaskIdแทน copy Task object เมื่อ list refresh getterหา current objectจาก SSOT ลดรายละเอียดเก่าค้าง แต่ handle IDหายอย่างชัดเจน</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>HomeStoreกับTaskStoreถือ list tasksคนละชุด หลัง completeควรแก้อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>มี task ownerเดียว/shared query cache หรือทั้งสอง invalidate/reloadผ่าน repository policy; อย่า mutateสอง listด้วย codeซ้ำ</p></details></section>
 <section><h2>8. Review questions</h2><div class="success">ใครเป็น owner? ใครเปลี่ยนได้? derivedอะไรได้? refreshแล้ว selectionยังถูกไหม? logout/server switchล้าง scopeใด?</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
