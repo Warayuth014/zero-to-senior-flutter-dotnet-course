@@ -1,0 +1,9 @@
+<div class="note"><strong>Offline-first ไม่ใช่แค่ cache:</strong> ผู้ใช้ต้องอ่านและสั่งงานสำคัญต่อได้แม้ network หาย โดยระบบเก็บ intent ไว้แล้วปรับสถานะกับ server อย่างตรวจสอบได้ภายหลัง</div>
+<section><h2>1. Online-only problem</h2><p>โกดังมี Wi-Fi ขาดช่วงและ PDA สลับ access point หากทุกปุ่มรอ HTTP งานจริงจะหยุดทั้งที่ผู้ใช้สแกนและยืนยันถูกต้องแล้ว</p></section>
+<section><h2>2. Local-first read</h2><p>หน้าจออ่านจาก local database เป็นหลัก ส่วน network เติมข้อมูลใหม่เข้า database ทำให้ UI ไม่ต้องสลับ data source และเปิดซ้ำได้ทันที</p></section>
+<section><h2>3. Durable write</h2><p>คำสั่งปิดงานต้องบันทึกลง outbox ก่อนบอกผู้ใช้ว่าเก็บแล้ว การเก็บเฉพาะ Future/ตัวแปรจะหายเมื่อ OS ปิด process</p></section>
+<section><h2>4. Consistency</h2><p>offline-first ยอมรับ temporary inconsistency แต่ต้องกำหนด eventual consistency, retry, conflict และข้อความสถานะให้ชัด ไม่แกล้งแสดงว่า server สำเร็จแล้ว</p></section>
+<section><h2>5. State machine</h2><pre class="code-vs"><code>server task → cached task → pending command<br>→ syncing → acknowledged | retry | conflict</code></pre></section>
+<section><h2>6. Authority</h2><p>server ยังเป็น authority ของ business rule ส่วน local DB เป็น source of truth ของหน้าจอและ intent ที่ยังส่งไม่สำเร็จ</p></section>
+<section><h2>7. Lab scope</h2><p>Part นี้ใช้ <code>OfflineTaskRepository</code>, <code>OfflineDatabase</code> และ .NET idempotency endpoint จาก Part 26 เพื่อทำ vertical slice ที่รันและ test ได้</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">เขียน contract ให้ได้ว่าอะไรทำ offline ได้, UI เรียกสถานะนั้นว่าอะไร และจุดไหนต้องบังคับ online ก่อนเริ่มเขียนฐานข้อมูล</div></section>

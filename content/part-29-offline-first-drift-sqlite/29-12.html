@@ -1,0 +1,9 @@
+<div class="note"><strong>At-least-once delivery:</strong> client อาจส่งคำสั่งเดิมซ้ำหลัง timeout ดังนั้น correctness ต้องมาจาก stable idempotency key และผล replay ที่ serverจำได้</div>
+<section><h2>1. Stable command ID</h2><p>สร้าง ID ตอน user intent ถูก enqueue และเก็บใน DB ทุก retry ส่งค่าเดิมผ่าน <code>Idempotency-Key</code> ห้ามสร้างใน HTTP methodแต่ละรอบ</p></section>
+<section><h2>2. Outcome unknown</h2><p>timeout หลัง server commit ทำให้ clientไม่รู้ผล การ retry ID เดิมต้องคืนผลเดิมโดยไม่ทำ side effectซ้ำ ซึ่ง endpoint Part 26 รองรับ</p></section>
+<section><h2>3. Error classes</h2><p>retry network/408/429/5xx; หยุดหรือขอผู้ใช้แก้สำหรับ 400/403/409 ตาม contract และ refresh auth สำหรับ 401</p></section>
+<section><h2>4. Backoff</h2><pre class="code-vs"><code>delay = min(cap, base × 2^attempt) + random jitter</code></pre><p>ใช้ nextAttemptAt แบบ durable เพื่อไม่ยิงทันทีทุก app restart</p></section>
+<section><h2>5. Poison command</h2><p>หลัง threshold ให้ย้ายเป็น needsAttention/dead-letter พร้อมเหตุผลและ action ไม่ปล่อยรายการแรกบล็อก queue ตลอดไป</p></section>
+<section><h2>6. Rate limits</h2><p>เคารพ Retry-After และจำกัด concurrency ฝั่ง client การ reconnect ของอุปกรณ์จำนวนมากพร้อมกันอาจสร้าง thundering herd</p></section>
+<section><h2>7. Lab evidence</h2><p>test บังคับ remote fail แล้วตรวจ <code>attempts = 1</code>, lastError และ commandยังอยู่ อีก testยืนยันว่า replay ใช้ command IDเดิม</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">สร้างตาราง HTTP/error → retry/auth/conflict/drop/manual action และให้ product/backendรับรองก่อน production</div></section>

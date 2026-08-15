@@ -1,0 +1,9 @@
+<div class="note"><strong>เลือก storage ตาม shape และ guarantee:</strong> ไม่มี package เดียวเหมาะกับ preferences, token, relational data และไฟล์ขนาดใหญ่ทั้งหมด</div>
+<section><h2>1. Key-value</h2><p>ค่าธีม, onboarding flag และ preference เล็ก ๆ เหมาะกับ key-value แต่ไม่เหมาะกับ query task ตาม status/location หรือ update หลาย record แบบ atomic</p></section>
+<section><h2>2. Secure storage</h2><p>refresh token และ secret ใช้ OS-backed secure storage ไม่ใส่ plaintext ใน SQLite โดยอัตโนมัติ และไม่ใช้ secure storage เป็นฐานข้อมูลรายการจำนวนมาก</p></section>
+<section><h2>3. SQLite</h2><p>SQLite ให้ table, index, constraint, transaction และ SQL query จึงเหมาะ cached entities, outbox, search และความสัมพันธ์ที่ schema ชัด</p></section>
+<section><h2>4. Files</h2><p>รูป/PDFขนาดใหญ่ควรเก็บเป็นไฟล์แล้วบันทึก path/checksum/สถานะ upload ใน DB หลีกเลี่ยง BLOB ใหญ่ที่ทำให้ backup และ query หนัก</p></section>
+<section><h2>5. Drift</h2><p>Drift ครอบ SQLite ด้วย Dart API, type-safe queries, reactive streams และ migration hooks แต่ยังต้องเข้าใจ SQL/index/transaction เพื่อออกแบบถูก</p></section>
+<section><h2>6. Decision table</h2><pre class="code-vs"><code>preference → key-value<br>secret → secure storage<br>task/outbox → SQLite + Drift<br>photo → file + metadata row</code></pre></section>
+<section><h2>7. Avoid duplication</h2><p>อย่าเก็บ entity เดียวหลาย store โดยไม่มี ownership เพราะจะไม่รู้ว่าค่าใดล่าสุด กำหนด canonical local row และ derived UI state</p></section>
+<section><h2>8. Exercise</h2><div class="success">จัดหมวดข้อมูลในโปรเจกต์จริงเป็น preference, secret, relational row หรือ file พร้อม retention และผู้มีสิทธิ์อ่าน</div></section>

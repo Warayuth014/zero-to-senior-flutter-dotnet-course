@@ -1,0 +1,9 @@
+<div class="note"><strong>Read-through cache:</strong> remote refresh เขียน cache แล้วคืน local projection; ถ้า remote ล้มและ cache มีข้อมูล ผู้ใช้ยังทำงานต่อได้</div>
+<section><h2>1. Repository boundary</h2><p>UI เรียก <code>TaskRepository</code> เหมือนเดิมจึงไม่รู้รายละเอียด SQLite การเพิ่ม offline ไม่ทำให้ widget ผูกกับ query package</p></section>
+<section><h2>2. Refresh path</h2><pre class="code-vs"><code>fetchOpen → remote.fetchOpen<br>→ database.replaceFromServer<br>→ database.visibleTasks → UI</code></pre></section>
+<section><h2>3. Failure path</h2><p>เมื่อ remote throw จะคืน cache ถ้ามี หาก cache ว่างต้องส่ง error ขึ้น UI เพื่อไม่ทำให้ “ไม่มีงาน” ปลอมเป็น success</p></section>
+<section><h2>4. Merge rule</h2><p><code>replaceFromServer</code> ไม่ overwrite task ที่มี pending command มิฉะนั้น refresh จะทำงานที่ผู้ใช้เพิ่งปิด offline โผล่กลับมา</p></section>
+<section><h2>5. Snapshot deletion</h2><p>ถ้า endpoint รับประกันว่า response คือ snapshot เต็มจึงลบ local row ที่ไม่อยู่ remote ได้; pagination/delta feed ต้องใช้ cursor/tombstone rule อื่น</p></section>
+<section><h2>6. Staleness</h2><p>แสดง last synced/offline banner เมื่อข้อมูลอาจเก่า Business บางอย่างต้องปิดปุ่มหาก stale เกิน threshold ไม่ใช่ทุก action offline ได้</p></section>
+<section><h2>7. Error taxonomy</h2><p>แยก no network, auth expired, server validation และ corrupt cache เพราะ fallback เหมาะเฉพาะ failure ที่ cache ยังปลอดภัย</p></section>
+<section><h2>8. Test</h2><div class="success"><code>offline_repository_test.dart</code> โหลด remote หนึ่งครั้ง ปิด network แล้วพิสูจน์ว่า task เดิมยังคืนจาก local DB</div></section>

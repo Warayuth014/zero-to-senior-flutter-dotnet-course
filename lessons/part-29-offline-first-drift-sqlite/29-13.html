@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conflict resolution server version และ reconciliation</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">29-13 · State &amp; Lifecycle</span><h1>Conflict resolution server version และ reconciliation</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<div class="note"><strong>Conflict ไม่ใช่ network error:</strong> server และ device ต่างมีการเปลี่ยนที่ถูกต้องแต่ใช้พร้อมกันไม่ได้ ต้องใช้ business rule ตัดสิน ไม่ใช่ retry อัตโนมัติ</div>
+<section><h2>1. Detect</h2><p>ส่ง base rowVersion/ETag กับ command แล้ว serverตอบ 409/412 พร้อม current representation เมื่อ version ไม่ตรง</p></section>
+<section><h2>2. Last-write-wins</h2><p>ง่ายแต่เสี่ยงสูญข้อมูล ใช้ได้เฉพาะ fieldความเสี่ยงต่ำและมี server timestamp ที่เชื่อถือได้ ไม่ใช้เวลาบนอุปกรณ์เป็น authority</p></section>
+<section><h2>3. Server-wins</h2><p>ทิ้ง local changeแล้ว refresh เหมาะเมื่อ action ถูกยกเลิกโดย workflowใหม่ แต่ต้องแจ้งผู้ใช้ว่า intentไม่สำเร็จ</p></section>
+<section><h2>4. Client-wins</h2><p>ควรใช้เฉพาะ businessอนุญาต override และ APIตรวจ permission/versionอย่างชัด ไม่ใช่ส่ง forceทุก conflict</p></section>
+<section><h2>5. Merge</h2><p>field-level mergeเหมาะ entityที่แก้คนละ field ส่วน inventory quantityมักต้องเป็น domain command/ledger ไม่ mergeตัวเลขแบบทั่วไป</p></section>
+<section><h2>6. Task example</h2><p>ถ้า taskถูก operator A ปิดแล้ว B replay complete IDคนละตัว serverอาจตอบ already-completed พร้อม actor/time ให้ B reconcileแทน errorลอย ๆ</p></section>
+<section><h2>7. Conflict queue</h2><p>เก็บ local payload, server snapshot, reason และ resolution status เพื่อให้ผู้ใช้หรือ supervisorตัดสินและ audit ได้</p></section>
+<section><h2>8. Exercise</h2><div class="success">กำหนด conflict policy แยกต่อ command: complete task, move stock, cycle count และแก้หมายเหตุ เพราะความเสี่ยงไม่เท่ากัน</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

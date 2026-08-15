@@ -57,3 +57,24 @@ flutter run --project-directory .\flutter_wms_companion -t lib/routing_main.dart
 ```
 
 เริ่มแบบ login แล้วลอง deep link ใน Flutter Web เช่น `/tasks/TASK-001?source=email` หรือกำหนด `--dart-define=ROUTING_AUTHENTICATED=true` เพื่อข้ามหน้า login ใน lab เท่านั้น การเปิด URL ตรงบน web production ต้องตั้งค่า server rewrite ไป `index.html` และ mobile ต้องตั้ง Android App Links/iOS Universal Links เพิ่ม
+
+## Drift/SQLite Offline-first (Part 29)
+
+เปิด entrypoint ที่ใช้ local database เป็น source of truth และเก็บคำสั่งปิด task ใน transactional outbox ก่อน sync ไป .NET API:
+
+```powershell
+flutter run --project-directory .\flutter_wms_companion -t lib/offline_main.dart --dart-define=WMS_API_BASE_URL=http://localhost:5080
+```
+
+ลองโหลด task ขณะ API ทำงาน จากนั้นหยุด API แล้วปิด task รายการจะถูกซ่อนและ badge จะแสดง command รอ sync เมื่อเปิด API อีกครั้งให้กดปุ่ม sync; repository จะ replay `commandId` เดิมเพื่อใช้ idempotency contract ฝั่ง server
+
+เมื่อแก้ table หรือ annotation ให้สร้าง type-safe code ใหม่และรัน tests:
+
+```powershell
+Set-Location .\flutter_wms_companion
+dart run build_runner build
+flutter analyze --no-pub
+flutter test --no-pub
+```
+
+Lab ใช้ `drift 2.34.3`, `drift_flutter 0.3.1` และ SQLite ผ่าน dependency ที่ resolve ใน `pubspec.lock` สำหรับ Flutter Web ต้องติดตั้งไฟล์ SQLite WASM/worker ตามเอกสาร Drift และทดสอบ runtime จริงเพิ่มเติม ไม่ควรถือว่า web build ผ่านแล้ว asset พร้อมเสมอ

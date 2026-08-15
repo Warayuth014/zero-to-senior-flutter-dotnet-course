@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Type-safe generated code และ build workflow</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">29-05 · State &amp; Lifecycle</span><h1>Type-safe generated code และ build workflow</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<div class="note"><strong>Generated code เป็น compiler feedback:</strong> Drift แปลง schema เป็น row/companion/query types ช่วยจับชื่อ column และ nullability ตั้งแต่ build</div>
+<section><h2>1. part directive</h2><p><code>part 'offline_database.g.dart';</code> เชื่อม source กับ generator output ชื่อไฟล์ต้องตรงและ generated file ไม่ควรแก้ด้วยมือ</p></section>
+<section><h2>2. Annotation</h2><p><code>@DriftDatabase(tables: [...])</code> ระบุ schema ที่ database class เป็นเจ้าของ จากนั้น class extends generated <code>_$OfflineDatabase</code></p></section>
+<section><h2>3. Row class</h2><p><code>CachedTask</code> เป็น immutable row จากผล query ส่วน <code>CachedTasksCompanion</code> แทนค่าที่จะ insert/update และแยก absent จาก nullable</p></section>
+<section><h2>4. Value wrapper</h2><p>ตอน partial update ใช้ <code>Value(value)</code>; ถ้าไม่ส่ง field หมายถึงไม่แก้ ต่างจากส่ง null ซึ่งต้องเป็น nullable column</p></section>
+<section><h2>5. Build failures</h2><p>หาก generator แจ้ง duplicate name/type mismatch ให้แก้ schema source ไม่ patch ไฟล์ .g.dart แล้ว regenerate จน reproducible</p></section>
+<section><h2>6. Watch mode</h2><pre class="code-vs"><code>dart run build_runner watch</code></pre><p>เหมาะระหว่างแก้ schema ต่อเนื่อง แต่ CI ควรใช้ build ครั้งเดียวและตรวจว่า generated diff ว่าง</p></section>
+<section><h2>7. Review generated diff</h2><p>ไม่ต้องอ่านทุกบรรทัด แต่ตรวจ table/column/nullability/index และ migration impact เมื่อ generator เปลี่ยนมากผิดคาด</p></section>
+<section><h2>8. Checkpoint</h2><div class="success">ลบ output ใน branch ทดลองแล้ว generate ใหม่ ผลต้องเหมือนเดิมและ analyze ผ่าน จึงถือว่า build pipeline reproducible</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

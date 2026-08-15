@@ -1,0 +1,9 @@
+<div class="note"><strong>Schema คือ sync contract ฝั่งเครื่อง:</strong> ออกแบบให้ตอบได้ทั้ง “ผู้ใช้เห็นอะไร” และ “ยังมี intent ใดต้องส่ง”</div>
+<section><h2>1. CachedTasks</h2><p>lab เก็บ <code>id</code>, ต้นทาง, ปลายทาง, status, <code>cachedAt</code> และ <code>hiddenByCommand</code> แยกเวลาที่ cache รับข้อมูลจาก server ออกจาก local projection</p></section>
+<section><h2>2. PendingCommands</h2><p>outbox เก็บ <code>commandId</code>, <code>taskId</code>, kind, JSON payload, createdAt, attempts และ lastError เพื่อ replay/diagnose ได้หลัง restart</p></section>
+<section><h2>3. Primary keys</h2><p>task ID ป้องกัน cache ซ้ำ ส่วน command ID เป็น idempotency key เดิมตลอดทุก retry ห้ามสร้างใหม่ตอน sync</p></section>
+<section><h2>4. Constraints</h2><p>ใช้ NOT NULL/default/check/foreign key เท่าที่ domain รับประกัน Constraint ทำให้ข้อมูลเสียหยุดใกล้จุดเขียนกว่าปล่อยไป crash ใน UI</p></section>
+<section><h2>5. Indexes</h2><p>สร้าง index จาก query จริง เช่น status + location หรือ outbox createdAt ตรวจ query plan ก่อนเพิ่ม เพราะ index ทำให้ write และพื้นที่เพิ่ม</p></section>
+<section><h2>6. JSON payload</h2><p>payload ช่วยรองรับหลาย command แต่ควร version schema และ validate ตอนอ่าน ไม่พึ่ง dynamic map โดยไม่ตรวจชนิด</p></section>
+<section><h2>7. Server metadata</h2><p>ระบบจริงควรเก็บ ETag/rowVersion/server sequence/deleted tombstone เพื่อเปรียบเทียบเวอร์ชันและรับ deletion อย่างถูกต้อง</p></section>
+<section><h2>8. Exercise</h2><div class="success">วาด unique keys, indexes และ state transition ของ task/outbox ก่อนเพิ่ม column; ทุก column ต้องมีเหตุผลด้าน query, sync หรือ audit</div></section>

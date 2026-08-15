@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimistic UI pending state และ undo strategy</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">29-10 · State &amp; Lifecycle</span><h1>Optimistic UI pending state และ undo strategy</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<div class="note"><strong>Optimistic UI ต้องซื่อสัตย์:</strong> แยก “บันทึกในเครื่องแล้ว” จาก “server ยืนยันแล้ว” และให้ผู้ใช้เห็น pending/conflict เมื่อมีผลต่อการทำงาน</div>
+<section><h2>1. Immediate feedback</h2><p>เมื่อ outbox commit สำเร็จ task หายจากคิวงานทันที ทำให้ operator ทำงานถัดไปได้โดยไม่รอ latency</p></section>
+<section><h2>2. Pending indicator</h2><p>lab แสดงจำนวน command รอ sync บนหน้าจอ Production อาจมี badge/queue detail และ last sync เพื่อให้หัวหน้างานตรวจสอบได้</p></section>
+<section><h2>3. Language</h2><p>ใช้ข้อความ “บันทึกแล้ว รอซิงก์” ไม่ใช้ “ส่งสำเร็จ” ขณะยัง offline คำเล็ก ๆ ป้องกันความเข้าใจผิดทาง operation</p></section>
+<section><h2>4. Undo</h2><p>undo ก่อนส่งอาจลบ commandและคืน projectionใน transaction; หลัง serverรับแล้วต้องเป็น compensating command ไม่ลบประวัติย้อนหลังเฉย ๆ</p></section>
+<section><h2>5. Duplicate taps</h2><p>primary key command และ busy guard ลดคำสั่งซ้ำ แต่ command ID ต้องผูกกับ user intent เดียว หากผู้ใช้ตั้งใจทำ action ใหม่จึงสร้าง ID ใหม่</p></section>
+<section><h2>6. Permanent failure</h2><p>validation/permission failure ต้องเอางานกลับหรือแสดง conflict action พร้อมเหตุผล ไม่ retry ไปเรื่อยและซ่อน task ตลอดกาล</p></section>
+<section><h2>7. Accessibility</h2><p>pending/success/error ต้องสื่อด้วยข้อความและ semantics ไม่พึ่งสีหรือ icon อย่างเดียว โดยเฉพาะ PDA กลางแจ้งและผู้ใช้สวมถุงมือ</p></section>
+<section><h2>8. Exercise</h2><div class="success">ออกแบบ UI สำหรับ queued, syncing, synced, retrying และ rejected พร้อม action ที่ผู้ใช้ทำได้ในแต่ละ state</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>

@@ -1,0 +1,9 @@
+<div class="note"><strong>Sync engine เป็น state machine:</strong> connectivity เป็นเพียง trigger ให้ลอง ไม่ใช่หลักฐานว่า internet/API ใช้งานได้</div>
+<section><h2>1. Triggers</h2><p>ลอง sync ตอน app start/resume, หลัง enqueue, manual tap และเมื่อ network signalเปลี่ยน แต่ทุก trigger ต้องรวมเข้ากลไก single-flight เดียว</p></section>
+<section><h2>2. Connectivity caveat</h2><p>มี Wi-Fi ไม่ได้แปลว่า DNS/TLS/APIพร้อม จึงต้องตัดสินจาก request result และ health/auth contract ไม่ใช่ connectivity package อย่างเดียว</p></section>
+<section><h2>3. Single-flight</h2><p>ป้องกัน sync สองรอบอ่าน command เดียวพร้อมกันด้วย mutex/state flag หรือ database lease มิฉะนั้นเกิด duplicate request แม้ serverควร idempotent</p></section>
+<section><h2>4. Batch</h2><p>จำกัดจำนวนต่อรอบและ yield เพื่อไม่กิน battery/network ถ้า API รองรับ bulk ให้กำหนด partial-result contract ต่อ command</p></section>
+<section><h2>5. Dependencies</h2><p>create ก่อน update/delete ต้องรักษาลำดับหรือใช้ local-to-server ID mapping ระบุ dependency เพื่อไม่ส่ง child ก่อน parent</p></section>
+<section><h2>6. Background limits</h2><p>Android/iOS จำกัด background execution อย่าสัญญา sync ทันทีเมื่อ app ปิด ออกแบบ resume/manual sync และ server reconciliation รองรับ</p></section>
+<section><h2>7. Authentication</h2><p>401 ควรหยุด queue รอ refresh/login ไม่ mark ทุก command เป็น business failure และ tenant/user change ต้องแยกหรือ purgeข้อมูลตาม policy</p></section>
+<section><h2>8. Lab</h2><div class="success"><code>syncPending</code> เป็น loopแบบตั้งใจให้อ่านง่าย งานต่อยอดคือเพิ่ม single-flight, classification, scheduling และ status stream โดยรักษา repository tests</div></section>

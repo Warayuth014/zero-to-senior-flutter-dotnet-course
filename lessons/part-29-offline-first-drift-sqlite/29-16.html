@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="th">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>In-memory database tests และ final offline-first lab</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<body><div class="lesson">
+<header class="hero"><span class="badge">29-16 · State &amp; Lifecycle</span><h1>In-memory database tests และ final offline-first lab</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<div class="note"><strong>Final offline-first lab:</strong> พิสูจน์ behavior ผ่าน in-memory SQLite tests แล้วลอง process restart/network failure กับ APIจริง</div>
+<section><h2>1. Run API</h2><pre class="code-vs"><code>dotnet run --project .\labs\dotnet\WmsMobileApi<br>&nbsp;&nbsp;--urls http://0.0.0.0:5080</code></pre></section>
+<section><h2>2. Run app</h2><pre class="code-vs"><code>flutter run --project-directory .\labs\flutter_wms_companion<br>&nbsp;&nbsp;-t lib/offline_main.dart<br>&nbsp;&nbsp;--dart-define=WMS_API_BASE_URL=http://localhost:5080</code></pre></section>
+<section><h2>3. Scenario</h2><p>โหลด task, ตัด network/API, ปิด task, ปิด-เปิด app, ตรวจ outboxยังอยู่ จากนั้นต่อ APIและกด sync รายการต้องถูก acknowledgeโดยไม่ side effectซ้ำ</p></section>
+<section><h2>4. Automated proof</h2><p><code>offline_repository_test.dart</code> ใช้ <code>NativeDatabase.memory()</code> ตรวจ cache fallback, atomic enqueue, stable command ID และ retry metadataอย่างเร็ว</p></section>
+<section><h2>5. Required commands</h2><pre class="code-vs"><code>dart run build_runner build<br>flutter analyze --no-pub<br>flutter test --no-pub</code></pre></section>
+<section><h2>6. Production gaps</h2><p>ก่อนนำไปใช้เพิ่ม reactive list, scheduler/single-flight, backoff, auth pause, conflict UI, migrations, web assetsและplatform background policyตามบทก่อนหน้า</p></section>
+<section><h2>7. Rubric</h2><ul><li>durability/transaction 3</li><li>idempotency/sync 2</li><li>conflict/recovery 2</li><li>tests/migrations 2</li><li>UX/observability 1</li></ul></section>
+<section><h2>8. Next</h2><div class="success">เมื่อ local data pipelineแข็งแรงแล้ว Part 30 จะลด boilerplateและเพิ่ม model correctnessด้วย Freezed, json_serializable และ build_runner โดยอ่าน generated codeอย่างรู้เท่าทัน</div></section>
+
+</div><script src="../../assets/course.js"></script></body></html>
