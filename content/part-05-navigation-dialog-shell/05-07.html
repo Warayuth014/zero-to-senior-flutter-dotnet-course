@@ -1,9 +1,3 @@
-<!doctype html>
-<html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>รักษาหรือทิ้ง transient flow state</title><link rel="stylesheet" href="../../assets/course.css"></head>
-<body><div class="lesson">
-<header class="hero"><span class="badge">05-07 · Flutter UI</span><h1>รักษาหรือทิ้ง transient flow state</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
 <div class="note">Transient flow stateควรถูกทิ้งเมื่อผู้ใช้ยืนยันยกเลิก/จบ session แต่รักษาเมื่อเพียงเปิด dialog, สลับ presentation หรือ pause workflow กำหนด boundaryเป็น product policy ไม่ปล่อยตาม widgetบังเอิญ dispose</div>
 <section><h2>1. State categories</h2><ul><li>editing: controller/focus/expanded</li><li>workflow draft: scanned pallet, quantity, step</li><li>server state: task/status/receipt</li><li>session/app: user/config</li></ul><p>แต่ละชนิดมี reset/persistต่างกัน</p></section>
 <section><h2>2. Pause vs cancel</h2><p>Absolute confirm exitถาม “กลับ listและทำต่อภายหลัง” แล้ว store.exitFlowตาม policy หาก backend taskยัง activeต้องรักษา authoritative stateและ reloadเมื่อกลับ ไม่เก็บเพียง widget fieldsที่หาย</p></section>
@@ -13,5 +7,3 @@
 <section><h2>6. Navigationไม่ใช่ reset</h2><p>การ pop widgetอาจ dispose local resourcesแต่ shared storeยังอยู่ ต้องเรียก cancel/complete command explicitเมื่อ domainต้อง reset และไม่ resetเพียงเพราะ rebuild/switch orientation</p></section>
 <section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้เปิด quantity dialogแล้ว cancel ควรล้าง palletที่สแกนแล้วไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรโดยอัตโนมัติ Dialogเป็น editing substep; cancelคืน quantityเดิมและ focus workflow หากผู้ใช้ cancelทั้ง workflowจึงใช้ policyยืนยันและ reset draft/session generation</p></details></section>
 <section><h2>8. จุดพลาด</h2><div class="warn">อย่าเก็บ transient draftใน static/globalเพื่อ “กันหาย” โดยไม่มี user/session keyและ reset เพราะ logout/userใหม่อาจเห็นงานเก่า</div></section>
-
-</div><script src="../../assets/course.js"></script></body></html>
