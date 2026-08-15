@@ -4,18 +4,19 @@
 <title>PutawayScreen และ station grid</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-02 · Real Codebase</span><h1>PutawayScreen และ station grid</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Static station catalog</a></li><li><a href="#section-2">2. Runtime status map</a></li><li><a href="#section-3">3. Initial load</a></li><li><a href="#section-4">4. Scan station</a></li><li><a href="#section-5">5. Busy guard</a></li><li><a href="#section-6">6. Grid composition</a></li><li><a href="#section-7">7. Live updates</a></li><li><a href="#section-8">8. Widget tests</a></li></ol></nav>
 <div class="note"><strong>PutawayScreen เป็น live station board:</strong> grid ไม่ได้เป็นเพียงเมนู แต่สะท้อนว่าสถานีใดว่างหรือกำลัง dispatch จาก map ที่ key ด้วย stationId</div>
-<section><h2>1. Static station catalog</h2><p><code>_kStations</code> กำหนด STN-1, STN-2 และ STN-3 พร้อม label, สี และ icon ข้อมูลคงที่นี้คือ UI configuration ส่วน availability ต้องมาจาก backend</p></section>
-<section><h2>2. Runtime status map</h2><pre class="code-vs"><code>Map&lt;String, Map&lt;String, dynamic&gt;&gt; _stationStatus
+<section id="section-1"><h2>1. Static station catalog</h2><p><code>_kStations</code> กำหนด STN-1, STN-2 และ STN-3 พร้อม label, สี และ icon ข้อมูลคงที่นี้คือ UI configuration ส่วน availability ต้องมาจาก backend</p></section>
+<section id="section-2"><h2>2. Runtime status map</h2><pre class="code-vs"><code>Map&lt;String, Map&lt;String, dynamic&gt;&gt; _stationStatus
 
 stationStatus[stationId] = {
   palletId, destination, items
 };</code></pre><p>map ทำ lookup ต่อ card ได้เร็ว แต่ dynamic payload ทำให้ typo/type error ไปเกิด runtime ควรสร้าง typed StationStatus</p></section>
-<section><h2>3. Initial load</h2><p><code>getStationStatus()</code> คืนรายการแล้วแปลงเป็น map ด้วย <code>stationId</code> ถ้า request fail โค้ดปัจจุบันคง board เดิม/ว่างโดยไม่แสดง error จึงแยก “ไม่มีงาน” ออกจาก “โหลดสถานะไม่ได้” ไม่ได้</p></section>
-<section><h2>4. Scan station</h2><p>ค่าถูก trim และ uppercase แล้วค้นใน catalog หากไม่พบจะแสดง supported stations หากพบจึงเรียก <code>_openStationPopup</code> นี่เป็น local guard ก่อนทำ I/O</p></section>
-<section><h2>5. Busy guard</h2><p>ถ้า <code>_stationStatus[station.id]</code> มีค่า method จะ return และไม่เปิด sheet แม้ข้อความบน busy card เขียนว่า “กดดูรายละเอียด” จึงเกิด UX contract ไม่ตรงพฤติกรรม ควรเปิด read-only detail หรือเปลี่ยนข้อความ</p></section>
-<section><h2>6. Grid composition</h2><p><code>PutawayStationGrid</code> สร้าง Row ของ Expanded cards และกำหนด <code>isDispatching</code> จาก <code>containsKey</code> เหมาะกับ 3 สถานี แต่หน้าจอแคบมากอาจควรใช้ Wrap/GridView เพื่อรักษา tap target และข้อความ</p></section>
-<section><h2>7. Live updates</h2><p>StationDispatched merge pallet/destination ทันที แล้วเรียก REST reconcile ส่วน PalletArrived, PalletReturned และ LabelingCompleted โหลด snapshot ใหม่ทั้งหมด ทำให้ UI responsive แต่ยัง eventually consistent</p></section>
-<section><h2>8. Widget tests</h2><div class="success">ทดสอบ unknown station, lowercase normalization, empty/error/success status, busy tap, event ของ station ที่ไม่อยู่ใน catalog และ layout ที่ความกว้าง PDA โดย fake API/SignalR แทน singleton จริง</div></section>
+<section id="section-3"><h2>3. Initial load</h2><p><code>getStationStatus()</code> คืนรายการแล้วแปลงเป็น map ด้วย <code>stationId</code> ถ้า request fail โค้ดปัจจุบันคง board เดิม/ว่างโดยไม่แสดง error จึงแยก “ไม่มีงาน” ออกจาก “โหลดสถานะไม่ได้” ไม่ได้</p></section>
+<section id="section-4"><h2>4. Scan station</h2><p>ค่าถูก trim และ uppercase แล้วค้นใน catalog หากไม่พบจะแสดง supported stations หากพบจึงเรียก <code>_openStationPopup</code> นี่เป็น local guard ก่อนทำ I/O</p></section>
+<section id="section-5"><h2>5. Busy guard</h2><p>ถ้า <code>_stationStatus[station.id]</code> มีค่า method จะ return และไม่เปิด sheet แม้ข้อความบน busy card เขียนว่า “กดดูรายละเอียด” จึงเกิด UX contract ไม่ตรงพฤติกรรม ควรเปิด read-only detail หรือเปลี่ยนข้อความ</p></section>
+<section id="section-6"><h2>6. Grid composition</h2><p><code>PutawayStationGrid</code> สร้าง Row ของ Expanded cards และกำหนด <code>isDispatching</code> จาก <code>containsKey</code> เหมาะกับ 3 สถานี แต่หน้าจอแคบมากอาจควรใช้ Wrap/GridView เพื่อรักษา tap target และข้อความ</p></section>
+<section id="section-7"><h2>7. Live updates</h2><p>StationDispatched merge pallet/destination ทันที แล้วเรียก REST reconcile ส่วน PalletArrived, PalletReturned และ LabelingCompleted โหลด snapshot ใหม่ทั้งหมด ทำให้ UI responsive แต่ยัง eventually consistent</p></section>
+<section id="section-8"><h2>8. Widget tests</h2><div class="success">ทดสอบ unknown station, lowercase normalization, empty/error/success status, busy tap, event ของ station ที่ไม่อยู่ใน catalog และ layout ที่ความกว้าง PDA โดย fake API/SignalR แทน singleton จริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

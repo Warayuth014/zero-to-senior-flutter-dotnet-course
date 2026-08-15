@@ -4,21 +4,22 @@
 <title>End-to-end trace และ refactor points</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-14 · Real Codebase</span><h1>End-to-end trace และ refactor points</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. End-to-end receiving</a></li><li><a href="#section-2">2. End-to-end unload</a></li><li><a href="#section-3">3. End-to-end basket</a></li><li><a href="#section-4">4. Invariants</a></li><li><a href="#section-5">5. Refactor priorities</a></li><li><a href="#section-6">6. Observability</a></li><li><a href="#section-7">7. Test pyramid</a></li><li><a href="#section-8">8. Capstone</a></li></ol></nav>
 <div class="note"><strong>บทสรุป Part 17:</strong> Receiving และ Unload เป็น chain ของ inventory transitions ที่ต้องรักษา line identity, เชื่อ server หลัง mutation และออกแบบ partial failure/retry ตั้งแต่ต้น</div>
-<section><h2>1. End-to-end receiving</h2><pre class="code-vs"><code>scan PO → choose part/condition/lot
+<section id="section-1"><h2>1. End-to-end receiving</h2><pre class="code-vs"><code>scan PO → choose part/condition/lot
 → validate serial or qty → receive line
 → assign pallet → refresh PO
                   ↘ pending recovery</code></pre><p>จุดสำคัญคือ receipt สำเร็จแต่ pallet fail ได้ จึงต้องไป recovery โดยไม่รับซ้ำ</p></section>
-<section><h2>2. End-to-end unload</h2><pre class="code-vs"><code>scan pallet → open session → select line
+<section id="section-2"><h2>2. End-to-end unload</h2><pre class="code-vs"><code>scan pallet → open session → select line
 → validate serial/qty → confirm unload → reload session
 → all confirmed → return pallet</code></pre><p>reload หลังทุก confirm รองรับ line/version ที่ backend เปลี่ยน</p></section>
-<section><h2>3. End-to-end basket</h2><pre class="code-vs"><code>load unloaded inventory → scan part/choose lot
+<section id="section-3"><h2>3. End-to-end basket</h2><pre class="code-vs"><code>load unloaded inventory → scan part/choose lot
 → validate serial/qtyRemaining → scan basket
 → load → refresh unloaded inventory</code></pre><p>นี่คือธุรกรรมใหม่ ไม่ใช่ continuation state ใน widget เดิม</p></section>
-<section><h2>4. Invariants</h2><ul><li>lineId ระบุ lot/receipt/session line; partId ระบุชนิดสินค้า</li><li>serial ห้ามซ้ำและต้องอยู่ใน line ที่เลือก</li><li>qty ต้องอยู่ใน remaining ล่าสุด</li><li>mutation สำเร็จแล้วต้องไม่ถูก submit ซ้ำเพราะ UI retry</li></ul></section>
-<section><h2>5. Refactor priorities</h2><p>เริ่มจากแยก workflow controller ออกจาก widget, ทำ typed result สำหรับ partial success, เพิ่ม explicit serialRequire, ยกเลิก silent date fallback, ทำ cancellation/latest-request guard และรวม error mapping ไว้ที่ API layer</p></section>
-<section><h2>6. Observability</h2><p>ทุก request ควรมี correlation ID พร้อม operator, device, session, PO/pallet/line IDs และ result category โดยไม่ log token หรือข้อมูลลับ Metrics ที่ควรมีคือ retry rate, pending age, duplicate rejection และ unload duration</p></section>
-<section><h2>7. Test pyramid</h2><p>unit test parser/validator/reducer, widget test scanner focus/dialog/progress, API contract test กับ .NET fixture และ end-to-end test ตั้งแต่รับ PO จนเข้า basket เน้น timeout ambiguity, concurrency และ partial success มากกว่า happy path อย่างเดียว</p></section>
-<section><h2>8. Capstone</h2><div class="success">วาด sequence diagram จากโค้ดจริงหนึ่ง receiving line และหนึ่ง unload line จากนั้น refactor flow ใด flow หนึ่งให้มี immutable state + typed commands เพิ่ม idempotency key ฝั่ง API และเขียน test พิสูจน์ว่า retry หลัง timeout ไม่เพิ่ม inventory ซ้ำ</div></section>
+<section id="section-4"><h2>4. Invariants</h2><ul><li>lineId ระบุ lot/receipt/session line; partId ระบุชนิดสินค้า</li><li>serial ห้ามซ้ำและต้องอยู่ใน line ที่เลือก</li><li>qty ต้องอยู่ใน remaining ล่าสุด</li><li>mutation สำเร็จแล้วต้องไม่ถูก submit ซ้ำเพราะ UI retry</li></ul></section>
+<section id="section-5"><h2>5. Refactor priorities</h2><p>เริ่มจากแยก workflow controller ออกจาก widget, ทำ typed result สำหรับ partial success, เพิ่ม explicit serialRequire, ยกเลิก silent date fallback, ทำ cancellation/latest-request guard และรวม error mapping ไว้ที่ API layer</p></section>
+<section id="section-6"><h2>6. Observability</h2><p>ทุก request ควรมี correlation ID พร้อม operator, device, session, PO/pallet/line IDs และ result category โดยไม่ log token หรือข้อมูลลับ Metrics ที่ควรมีคือ retry rate, pending age, duplicate rejection และ unload duration</p></section>
+<section id="section-7"><h2>7. Test pyramid</h2><p>unit test parser/validator/reducer, widget test scanner focus/dialog/progress, API contract test กับ .NET fixture และ end-to-end test ตั้งแต่รับ PO จนเข้า basket เน้น timeout ambiguity, concurrency และ partial success มากกว่า happy path อย่างเดียว</p></section>
+<section id="section-8"><h2>8. Capstone</h2><div class="success">วาด sequence diagram จากโค้ดจริงหนึ่ง receiving line และหนึ่ง unload line จากนั้น refactor flow ใด flow หนึ่งให้มี immutable state + typed commands เพิ่ม idempotency key ฝั่ง API และเขียน test พิสูจน์ว่า retry หลัง timeout ไม่เพิ่ม inventory ซ้ำ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

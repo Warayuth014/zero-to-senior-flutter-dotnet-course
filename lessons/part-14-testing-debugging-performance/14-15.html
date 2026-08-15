@@ -4,17 +4,18 @@
 <title>วัด rebuild และแยก widget</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-15 · Testing</span><h1>วัด rebuild และแยก widget</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ทำไมทั้งหน้าถูก build</a></li><li><a href="#section-2">2. วัดก่อน</a></li><li><a href="#section-3">3. แยก ownership</a></li><li><a href="#section-4">4. const และ stable inputs</a></li><li><a href="#section-5">5. Selector และ equality</a></li><li><a href="#section-6">6. แยก widget เพื่ออะไร</a></li><li><a href="#section-7">7. RepaintBoundary</a></li><li><a href="#section-8">8. Regression guard</a></li></ol></nav>
 <div class="note"><strong>อย่า optimize จากความรู้สึก:</strong> เปิด rebuild tracking ใน profile/debug, ทำ interaction เดิม แล้วลดเฉพาะ subtree ที่ rebuild/paint แพงโดยยังรักษาความถูกต้อง</div>
-<section><h2>1. ทำไมทั้งหน้าถูก build</h2><p><code>setState</code> rebuild subtree ใต้ State; <code>ChangeNotifier.notifyListeners</code> ทำให้ listener ทุกตัว build ถ้า shell ฟัง Store ก้อนใหญ่ การเปลี่ยน progress จุดเดียวอาจ rebuild menu/list/image ทั้งหน้า</p></section>
-<section><h2>2. วัดก่อน</h2><p>ใช้ DevTools Track Widget Builds, performance timeline และ debug flags เฉพาะงานพัฒนา นับ build ระหว่างพิมพ์ scan, progress tick และ polling response แล้วดู frame time ไม่ใช่นับอย่างเดียว</p></section>
-<section><h2>3. แยก ownership</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;UploadProgress&gt;(
+<section id="section-1"><h2>1. ทำไมทั้งหน้าถูก build</h2><p><code>setState</code> rebuild subtree ใต้ State; <code>ChangeNotifier.notifyListeners</code> ทำให้ listener ทุกตัว build ถ้า shell ฟัง Store ก้อนใหญ่ การเปลี่ยน progress จุดเดียวอาจ rebuild menu/list/image ทั้งหน้า</p></section>
+<section id="section-2"><h2>2. วัดก่อน</h2><p>ใช้ DevTools Track Widget Builds, performance timeline และ debug flags เฉพาะงานพัฒนา นับ build ระหว่างพิมพ์ scan, progress tick และ polling response แล้วดู frame time ไม่ใช่นับอย่างเดียว</p></section>
+<section id="section-3"><h2>3. แยก ownership</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;UploadProgress&gt;(
   valueListenable: upload.progress,
   builder: (_, value, __) =&gt; ProgressBar(value),
 )</code></pre><p>ให้ progress widget ฟังเฉพาะ progress; list ฟัง immutable items; theme/session อยู่ระดับ shell ไม่รวมทุก state ใน notifier เดียวโดยไม่มี selector</p></section>
-<section><h2>4. const และ stable inputs</h2><p>ใช้ <code>const</code> กับ subtree คงที่, ส่ง immutable value และหลีกเลี่ยงสร้าง list/map/callback ใหม่โดยไม่จำเป็น แต่ const ไม่ช่วยหาก parent logic/selector แจ้งเปลี่ยนค่าจริงทุกครั้ง</p></section>
-<section><h2>5. Selector และ equality</h2><p>select เฉพาะ <code>taskCount</code>/<code>isLoading</code> แล้ว rebuild เมื่อ value เปลี่ยนด้วย equality ที่ถูกต้อง อย่า mutate list เดิมแล้วหวัง selector เห็น หรือสร้าง wrapper ใหม่ที่ equality เป็น identity ทุก notification</p></section>
-<section><h2>6. แยก widget เพื่ออะไร</h2><p>แยกเมื่อมี state/lifecycle/rebuild boundary หรือช่วยอ่าน/test ไม่แยกทุก Container เป็น class โดยไม่มีประโยชน์ ตรวจว่าการย้าย method ไม่ได้เปลี่ยน ownership FocusNode/Controller ผิดที่</p></section>
-<section><h2>7. RepaintBoundary</h2><p>ช่วยแยก paint ของ animation/complex card ที่ส่วนอื่นคงที่ แต่เพิ่ม layer/memory อย่าใส่ทุกแถวโดยไม่วัด ใช้ repaint rainbow/timeline เปรียบเทียบก่อนหลังบน device profile</p></section>
-<section><h2>8. Regression guard</h2><div class="success">มี widget test ยืนยัน behavior และ performance benchmark/integration trace สำหรับ hotspot ที่สำคัญ เก็บ scenario/device/profile เดิมเพื่อเปรียบเทียบ ไม่ใช้เวลา debug test เป็น production budget</div></section>
+<section id="section-4"><h2>4. const และ stable inputs</h2><p>ใช้ <code>const</code> กับ subtree คงที่, ส่ง immutable value และหลีกเลี่ยงสร้าง list/map/callback ใหม่โดยไม่จำเป็น แต่ const ไม่ช่วยหาก parent logic/selector แจ้งเปลี่ยนค่าจริงทุกครั้ง</p></section>
+<section id="section-5"><h2>5. Selector และ equality</h2><p>select เฉพาะ <code>taskCount</code>/<code>isLoading</code> แล้ว rebuild เมื่อ value เปลี่ยนด้วย equality ที่ถูกต้อง อย่า mutate list เดิมแล้วหวัง selector เห็น หรือสร้าง wrapper ใหม่ที่ equality เป็น identity ทุก notification</p></section>
+<section id="section-6"><h2>6. แยก widget เพื่ออะไร</h2><p>แยกเมื่อมี state/lifecycle/rebuild boundary หรือช่วยอ่าน/test ไม่แยกทุก Container เป็น class โดยไม่มีประโยชน์ ตรวจว่าการย้าย method ไม่ได้เปลี่ยน ownership FocusNode/Controller ผิดที่</p></section>
+<section id="section-7"><h2>7. RepaintBoundary</h2><p>ช่วยแยก paint ของ animation/complex card ที่ส่วนอื่นคงที่ แต่เพิ่ม layer/memory อย่าใส่ทุกแถวโดยไม่วัด ใช้ repaint rainbow/timeline เปรียบเทียบก่อนหลังบน device profile</p></section>
+<section id="section-8"><h2>8. Regression guard</h2><div class="success">มี widget test ยืนยัน behavior และ performance benchmark/integration trace สำหรับ hotspot ที่สำคัญ เก็บ scenario/device/profile เดิมเพื่อเปรียบเทียบ ไม่ใช้เวลา debug test เป็น production budget</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

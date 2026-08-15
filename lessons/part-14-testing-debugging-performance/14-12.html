@@ -4,24 +4,25 @@
 <title>Navigation test</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-12 · Testing</span><h1>Navigation test</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Observer บันทึก route</a></li><li><a href="#section-2">2. Assert UI ปลายทาง</a></li><li><a href="#section-3">3. Result จาก route</a></li><li><a href="#section-4">4. Back semantics</a></li><li><a href="#section-5">5. Replacement และ logout</a></li><li><a href="#section-6">6. Deep link/arguments</a></li><li><a href="#section-7">7. Bottom navigation</a></li><li><a href="#section-8">8. Navigation matrix</a></li></ol></nav>
 <div class="note"><strong>Navigation test มีสองชั้น:</strong> pure Store test พิสูจน์ business step/reset/resume ส่วน widget test พิสูจน์ว่า gesture/button ผูกกับ Navigator และแสดง route ถูกจริง</div>
-<section><h2>1. Observer บันทึก route</h2><pre class="code-vs"><code>class RecordingObserver extends NavigatorObserver {
+<section id="section-1"><h2>1. Observer บันทึก route</h2><pre class="code-vs"><code>class RecordingObserver extends NavigatorObserver {
   final pushed = &lt;Route&lt;dynamic&gt;&gt;[];
   void didPush(Route route, Route? previous) {
     pushed.add(route);
     super.didPush(route, previous);
   }
 }</code></pre></section>
-<section><h2>2. Assert UI ปลายทาง</h2><p>โดยมากการ tap แล้ว <code>pumpAndSettle</code> และหา title/key เฉพาะปลายทางแข็งแรงกว่า assert concrete Route class เพราะพิสูจน์ผลที่ผู้ใช้เห็นและยอมให้ refactor routing</p></section>
-<section><h2>3. Result จาก route</h2><pre class="code-vs"><code>await tester.tap(find.text('Choose pallet'));
+<section id="section-2"><h2>2. Assert UI ปลายทาง</h2><p>โดยมากการ tap แล้ว <code>pumpAndSettle</code> และหา title/key เฉพาะปลายทางแข็งแรงกว่า assert concrete Route class เพราะพิสูจน์ผลที่ผู้ใช้เห็นและยอมให้ refactor routing</p></section>
+<section id="section-3"><h2>3. Result จาก route</h2><pre class="code-vs"><code>await tester.tap(find.text('Choose pallet'));
 await tester.pumpAndSettle();
 await tester.tap(find.text('PLT-001'));
 await tester.pumpAndSettle();
 expect(find.text('Selected: PLT-001'), findsOneWidget);</code></pre></section>
-<section><h2>4. Back semantics</h2><p>ทดสอบ app-bar back, system back/<code>handlePopRoute</code> และ business Back แยกกัน หาก step &gt; 0 ต้องลด stepก่อน pop route ดังที่ flow_navigation_test ตรวจ Store; เมื่อมี unsaved draft ต้องถามตาม policy</p></section>
-<section><h2>5. Replacement และ logout</h2><p>หลัง login <code>pushReplacement</code> ต้องไม่ย้อนกลับ login; หลัง logout clear stack/session และ back ไม่เข้าหน้า protected ใช้ observer หรือ attempt pop แล้ว assert route ปัจจุบัน</p></section>
-<section><h2>6. Deep link/arguments</h2><p>test valid/invalid entity ID, missing argument และ unauthorized destination Router ต้องแสดง fallback/error ไม่ force unwrap แล้ว crash และ refresh state ที่จำเป็นก่อน render</p></section>
-<section><h2>7. Bottom navigation</h2><p>ทดสอบสลับแท็บแล้ว state ที่ควรคงยังอยู่ และ flow ที่ต้อง clear ถูก reset ตัวอย่างจริงวน destinations หลายค่าและยืนยัน receiving draft ถูกล้างเหมือนกันทุกแท็บ</p></section>
-<section><h2>8. Navigation matrix</h2><div class="success">push, pop, cancel, result, replacement, logout clear-stack, system back, deep link, tab switch และ async callback หลังออกจากหน้า โดยไม่มี duplicate route หรือ context หลัง unmount</div></section>
+<section id="section-4"><h2>4. Back semantics</h2><p>ทดสอบ app-bar back, system back/<code>handlePopRoute</code> และ business Back แยกกัน หาก step &gt; 0 ต้องลด stepก่อน pop route ดังที่ flow_navigation_test ตรวจ Store; เมื่อมี unsaved draft ต้องถามตาม policy</p></section>
+<section id="section-5"><h2>5. Replacement และ logout</h2><p>หลัง login <code>pushReplacement</code> ต้องไม่ย้อนกลับ login; หลัง logout clear stack/session และ back ไม่เข้าหน้า protected ใช้ observer หรือ attempt pop แล้ว assert route ปัจจุบัน</p></section>
+<section id="section-6"><h2>6. Deep link/arguments</h2><p>test valid/invalid entity ID, missing argument และ unauthorized destination Router ต้องแสดง fallback/error ไม่ force unwrap แล้ว crash และ refresh state ที่จำเป็นก่อน render</p></section>
+<section id="section-7"><h2>7. Bottom navigation</h2><p>ทดสอบสลับแท็บแล้ว state ที่ควรคงยังอยู่ และ flow ที่ต้อง clear ถูก reset ตัวอย่างจริงวน destinations หลายค่าและยืนยัน receiving draft ถูกล้างเหมือนกันทุกแท็บ</p></section>
+<section id="section-8"><h2>8. Navigation matrix</h2><div class="success">push, pop, cancel, result, replacement, logout clear-stack, system back, deep link, tab switch และ async callback หลังออกจากหน้า โดยไม่มี duplicate route หรือ context หลัง unmount</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

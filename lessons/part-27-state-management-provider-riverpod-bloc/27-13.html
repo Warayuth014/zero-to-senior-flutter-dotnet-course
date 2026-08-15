@@ -4,14 +4,15 @@
 <title>Cubit test และ event-driven Bloc เมื่อจำเป็น</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">27-13 · State &amp; Lifecycle</span><h1>Cubit test และ event-driven Bloc เมื่อจำเป็น</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Arrange</a></li><li><a href="#section-2">2. State assertions</a></li><li><a href="#section-3">3. Emission sequence</a></li><li><a href="#section-4">4. Concurrency</a></li><li><a href="#section-5">5. Observer</a></li><li><a href="#section-6">6. เมื่อใช้ Bloc events</a></li><li><a href="#section-7">7. Widget binding test</a></li><li><a href="#section-8">8. Exercise</a></li></ol></nav>
 <div class="note"><strong>Testing Cubit:</strong> Cubitเป็น Dart objectที่รับ repository จึง testโดยตรงได้ ไม่ต้อง pump widgetหรือใช้ packageเสริมเพื่อเริ่มต้น</div>
-<section><h2>1. Arrange</h2><p>สร้าง fake repositoryและ inject deterministic command id จากนั้นสร้าง TaskCubitและลงทะเบียน <code>close</code> ใน tearDown</p></section>
-<section><h2>2. State assertions</h2><p>await <code>load</code> ตรวจ loaded tasks เก็บ snapshot แล้ว await complete ตรวจ tasksว่าง/message correlation อย่าตรวจเฉพาะ call countเพราะ output stateคือ contractกับ UI</p></section>
-<section><h2>3. Emission sequence</h2><p>เมื่อ transitionสำคัญให้ subscribe <code>cubit.stream</code> หรือใช้ <code>bloc_test</code> ตรวจ sequence busy→success/error Labไม่เพิ่ม dependencyเพิ่มเพราะ testsปัจจุบันพอ แต่รู้เครื่องมือเมื่อ sequenceโต</p></section>
-<section><h2>4. Concurrency</h2><p>ใช้ Completerค้าง repository completeแล้วเรียก Cubitสองครั้ง ตรวจ callเดียวและ busy stateระหว่างรอ เช่นเดียวกับ TaskStore behaviorต้องไม่หายเมื่อเปลี่ยน package</p></section>
-<section><h2>5. Observer</h2><p>BlocObserverช่วย log transitions/errorsทั้งแอปแต่ต้อง redactข้อมูลและไม่แทน domain audit อย่า log token/barcode/serialโดยไม่ policy</p></section>
-<section><h2>6. เมื่อใช้ Bloc events</h2><p>test event→stateและ concurrency transformer เช่น droppableสำหรับ submitซ้ำ, restartableสำหรับ searchล่าสุด แต่ server idempotencyยังต้องมี</p></section>
-<section><h2>7. Widget binding test</h2><p>override BlocProviderด้วย fake Cubitหรือ real Cubit+fake repositoryเพื่อทดสอบ Builder/Listener แยกจาก controller tests ไม่จำเป็นต้องยิง .NETทุก widget test</p></section>
-<section><h2>8. Exercise</h2><div class="success">เพิ่ม test unknown outcomeให้ Cubit: fakeลบ taskแล้วโยน ApiException unknown จาก complete จากนั้น fetchว่าง ผลสุดท้ายต้องไม่มี errorและ messageบอก reconcileสำเร็จ</div></section>
+<section id="section-1"><h2>1. Arrange</h2><p>สร้าง fake repositoryและ inject deterministic command id จากนั้นสร้าง TaskCubitและลงทะเบียน <code>close</code> ใน tearDown</p></section>
+<section id="section-2"><h2>2. State assertions</h2><p>await <code>load</code> ตรวจ loaded tasks เก็บ snapshot แล้ว await complete ตรวจ tasksว่าง/message correlation อย่าตรวจเฉพาะ call countเพราะ output stateคือ contractกับ UI</p></section>
+<section id="section-3"><h2>3. Emission sequence</h2><p>เมื่อ transitionสำคัญให้ subscribe <code>cubit.stream</code> หรือใช้ <code>bloc_test</code> ตรวจ sequence busy→success/error Labไม่เพิ่ม dependencyเพิ่มเพราะ testsปัจจุบันพอ แต่รู้เครื่องมือเมื่อ sequenceโต</p></section>
+<section id="section-4"><h2>4. Concurrency</h2><p>ใช้ Completerค้าง repository completeแล้วเรียก Cubitสองครั้ง ตรวจ callเดียวและ busy stateระหว่างรอ เช่นเดียวกับ TaskStore behaviorต้องไม่หายเมื่อเปลี่ยน package</p></section>
+<section id="section-5"><h2>5. Observer</h2><p>BlocObserverช่วย log transitions/errorsทั้งแอปแต่ต้อง redactข้อมูลและไม่แทน domain audit อย่า log token/barcode/serialโดยไม่ policy</p></section>
+<section id="section-6"><h2>6. เมื่อใช้ Bloc events</h2><p>test event→stateและ concurrency transformer เช่น droppableสำหรับ submitซ้ำ, restartableสำหรับ searchล่าสุด แต่ server idempotencyยังต้องมี</p></section>
+<section id="section-7"><h2>7. Widget binding test</h2><p>override BlocProviderด้วย fake Cubitหรือ real Cubit+fake repositoryเพื่อทดสอบ Builder/Listener แยกจาก controller tests ไม่จำเป็นต้องยิง .NETทุก widget test</p></section>
+<section id="section-8"><h2>8. Exercise</h2><div class="success">เพิ่ม test unknown outcomeให้ Cubit: fakeลบ taskแล้วโยน ApiException unknown จาก complete จากนั้น fetchว่าง ผลสุดท้ายต้องไม่มี errorและ messageบอก reconcileสำเร็จ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,17 +4,18 @@
 <title>Platform/pubspec/assets ที่เกี่ยวข้อง</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-11 · Real Codebase</span><h1>Platform/pubspec/assets ที่เกี่ยวข้อง</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. SDK/dependencies</a></li><li><a href="#section-2">2. Assets/fonts</a></li><li><a href="#section-3">3. Launcher configuration</a></li><li><a href="#section-4">4. Android</a></li><li><a href="#section-5">5. iOS</a></li><li><a href="#section-6">6. Web/desktop boundary</a></li><li><a href="#section-7">7. Lock/build inputs</a></li><li><a href="#section-8">8. Platform checklist</a></li></ol></nav>
 <div class="note"><strong>โค้ด Dart ไม่ใช่ทั้งแอป:</strong> <code>pubspec.yaml</code>, assets/fonts/icons, Android/iOS manifests, Gradle/Xcodeและ generated plugin registrationกำหนดว่า feature compile/รันบน deviceได้จริงหรือไม่</div>
-<section><h2>1. SDK/dependencies</h2><p>pubspecกำหนด Dart <code>^3.9.2</code> และใช้ http, shared_preferences, intl, image_picker, material icons, signalr_netcore รวม Flutter localization ทุก packageเพิ่ม platform code, permissions, lifecycleและ supply-chain surface</p></section>
-<section><h2>2. Assets/fonts</h2><pre class="code-vs"><code>fonts/Sarabun-Regular.ttf
+<section id="section-1"><h2>1. SDK/dependencies</h2><p>pubspecกำหนด Dart <code>^3.9.2</code> และใช้ http, shared_preferences, intl, image_picker, material icons, signalr_netcore รวม Flutter localization ทุก packageเพิ่ม platform code, permissions, lifecycleและ supply-chain surface</p></section>
+<section id="section-2"><h2>2. Assets/fonts</h2><pre class="code-vs"><code>fonts/Sarabun-Regular.ttf
 fonts/Sarabun-Medium.ttf (500)
 fonts/Sarabun-Bold.ttf   (700)
 icons/icon-tks-square.png</code></pre><p>path/caseต้องตรงและ assetsถูก bundle; themeตั้ง fontFamily Sarabun</p></section>
-<section><h2>3. Launcher configuration</h2><p><code>flutter_launcher_icons</code>เปิด Android, ปิด iOSและใช้ icon TKS การแก้ YAMLต้องรัน generatorและ review generated mipmaps ไม่ใช่แก้ assetอย่างเดียว</p></section>
-<section><h2>4. Android</h2><p><code>android/app/build.gradle.kts</code>ยังใช้ <code>com.example.wmsapp</code>และ release debug signing; main manifestกำหนด label/icon/activityแต่ INTERNETอยู่ debug/profile ไม่ใช่ main ประเด็นนี้ Part 15จัดเป็น production blockers</p></section>
-<section><h2>5. iOS</h2><p><code>Info.plist</code>กำหนด display/bundle version/orientationsแต่ยังไม่มี camera/photo usage descriptionsที่ image pickerต้องใช้ และ iOS launcher generationปิด ต้องตรวจ signing/capabilities/ATSบน Mac/deviceจริง</p></section>
-<section><h2>6. Web/desktop boundary</h2><p><code>ApiService</code>import <code>dart:io</code>และ uploadรับ File แม้ resolverเช็ก kIsWeb จึงต้องตรวจ compile targetจริง ไม่ใช่เห็น web foldersแล้วสรุปรองรับทุก feature Conditional adapter/XFileช่วยแยก platform</p></section>
-<section><h2>7. Lock/build inputs</h2><p><code>pubspec.lock</code>, analysis options, Gradle wrapper, Podfileและ platform projectเป็น review surface Pin toolchainใน CIและ rebuild from clean checkoutเพื่อจับ native configที่เครื่อง devเคย cache</p></section>
-<section><h2>8. Platform checklist</h2><div class="success">dependency → Dart usage → plugin docs/version → manifest/plist permission → runtime deny path → release build/signing → device test ทุกครั้งที่เพิ่ม packageที่แตะ camera, storage, network, notificationหรือbackground</div></section>
+<section id="section-3"><h2>3. Launcher configuration</h2><p><code>flutter_launcher_icons</code>เปิด Android, ปิด iOSและใช้ icon TKS การแก้ YAMLต้องรัน generatorและ review generated mipmaps ไม่ใช่แก้ assetอย่างเดียว</p></section>
+<section id="section-4"><h2>4. Android</h2><p><code>android/app/build.gradle.kts</code>ยังใช้ <code>com.example.wmsapp</code>และ release debug signing; main manifestกำหนด label/icon/activityแต่ INTERNETอยู่ debug/profile ไม่ใช่ main ประเด็นนี้ Part 15จัดเป็น production blockers</p></section>
+<section id="section-5"><h2>5. iOS</h2><p><code>Info.plist</code>กำหนด display/bundle version/orientationsแต่ยังไม่มี camera/photo usage descriptionsที่ image pickerต้องใช้ และ iOS launcher generationปิด ต้องตรวจ signing/capabilities/ATSบน Mac/deviceจริง</p></section>
+<section id="section-6"><h2>6. Web/desktop boundary</h2><p><code>ApiService</code>import <code>dart:io</code>และ uploadรับ File แม้ resolverเช็ก kIsWeb จึงต้องตรวจ compile targetจริง ไม่ใช่เห็น web foldersแล้วสรุปรองรับทุก feature Conditional adapter/XFileช่วยแยก platform</p></section>
+<section id="section-7"><h2>7. Lock/build inputs</h2><p><code>pubspec.lock</code>, analysis options, Gradle wrapper, Podfileและ platform projectเป็น review surface Pin toolchainใน CIและ rebuild from clean checkoutเพื่อจับ native configที่เครื่อง devเคย cache</p></section>
+<section id="section-8"><h2>8. Platform checklist</h2><div class="success">dependency → Dart usage → plugin docs/version → manifest/plist permission → runtime deny path → release build/signing → device test ทุกครั้งที่เพิ่ม packageที่แตะ camera, storage, network, notificationหรือbackground</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

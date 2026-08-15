@@ -4,23 +4,24 @@
 <title>LoginScreen + AuthSessionService</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-04 · Real Codebase</span><h1>LoginScreen + AuthSessionService</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. UI state</a></li><li><a href="#section-2">2. Mock credentials</a></li><li><a href="#section-3">3. Persistence</a></li><li><a href="#section-4">4. Callback handshake</a></li><li><a href="#section-5">5. clearSession risk</a></li><li><a href="#section-6">6. Production shape</a></li><li><a href="#section-7">7. Authorization</a></li><li><a href="#section-8">8. Characterization tests</a></li></ol></nav>
 <div class="note"><strong>Login ปัจจุบันเป็น prototype:</strong> <code>LoginScreen</code> มีผู้ใช้ 3 คน hardcode, passwordทุกคนคือ <code>1234</code> และหน่วง 500 ms ไม่มี API/JWT จึงห้ามตีความว่าเป็น authentication production</div>
-<section><h2>1. UI state</h2><p>เก็บ selected user, password controller, obscure/loading/error และ animation controllerใน State พร้อม disposeถูกต้อง Flowคือ validate → loading → delay → compare password → save prefs → callback</p></section>
-<section><h2>2. Mock credentials</h2><pre class="code-vs"><code>final _users = [
+<section id="section-1"><h2>1. UI state</h2><p>เก็บ selected user, password controller, obscure/loading/error และ animation controllerใน State พร้อม disposeถูกต้อง Flowคือ validate → loading → delay → compare password → save prefs → callback</p></section>
+<section id="section-2"><h2>2. Mock credentials</h2><pre class="code-vs"><code>final _users = [
   {'userId': 'USR-001', 'role': 'OPERATOR'},
   {'userId': 'USR-003', 'role': 'SUPERVISOR'},
 ];
 if (_passController.text != '1234') ...</code></pre><p>ใช้ demoได้แต่ credentialอยู่ใน binaryและ roleเลือกจาก clientเอง</p></section>
-<section><h2>3. Persistence</h2><pre class="code-vs"><code>prefs.setString('userId', ...);
+<section id="section-3"><h2>3. Persistence</h2><pre class="code-vs"><code>prefs.setString('userId', ...);
 prefs.setString('fullName', ...);
 prefs.setString('role', ...);</code></pre><p><code>AuthSessionService.loadSession</code>อ่านสาม keyนี้และ <code>isLoggedIn</code>ดูเพียง userId ไม่ตรวจ expiry/token/server</p></section>
-<section><h2>4. Callback handshake</h2><p>HomeScreen push LoginScreenพร้อม <code>onLoginSuccess</code> ที่ pop route แล้ว reload prefs วิธีนี้มีสอง side effectsข้าม route หาก callbackเกิดหลัง disposeต้อง guard context และ typed route resultจะตามง่ายกว่า</p></section>
-<section><h2>5. clearSession risk</h2><p><code>prefs.clear()</code>ล้าง SharedPreferencesทั้งหมด รวม API host/protocol/portและ theme/settingsอื่นที่ใช้ storeเดียวกัน Logoutควร removeเฉพาะ session namespace ไม่ทำให้ endpointเปลี่ยนเงียบ ๆ</p></section>
-<section><h2>6. Production shape</h2><pre class="code-vs"><code>credentials → AuthRepository.login()
+<section id="section-4"><h2>4. Callback handshake</h2><p>HomeScreen push LoginScreenพร้อม <code>onLoginSuccess</code> ที่ pop route แล้ว reload prefs วิธีนี้มีสอง side effectsข้าม route หาก callbackเกิดหลัง disposeต้อง guard context และ typed route resultจะตามง่ายกว่า</p></section>
+<section id="section-5"><h2>5. clearSession risk</h2><p><code>prefs.clear()</code>ล้าง SharedPreferencesทั้งหมด รวม API host/protocol/portและ theme/settingsอื่นที่ใช้ storeเดียวกัน Logoutควร removeเฉพาะ session namespace ไม่ทำให้ endpointเปลี่ยนเงียบ ๆ</p></section>
+<section id="section-6"><h2>6. Production shape</h2><pre class="code-vs"><code>credentials → AuthRepository.login()
 → access/refresh token + claims + expiration
 → secure storage → authenticated ApiClient
 → 401 refresh-or-logout → clear scoped session</code></pre></section>
-<section><h2>7. Authorization</h2><p>roleใน clientใช้ซ่อนเมนูเพื่อ UXได้ แต่ .NETต้องตรวจ permissionทุก endpointและ derive claimsจาก signed token ห้ามเชื่อ role/userIdที่ request bodyหรือ SharedPreferencesส่งมา</p></section>
-<section><h2>8. Characterization tests</h2><div class="success">ก่อน refactorล็อก behavior: ไม่เลือก user, passwordว่าง/ผิด, success callbackครั้งเดียว, dispose animation, reload Homeและ logoutไม่ลบ server config จากนั้นแทน delay/mockด้วย repositoryทีละขั้น</div></section>
+<section id="section-7"><h2>7. Authorization</h2><p>roleใน clientใช้ซ่อนเมนูเพื่อ UXได้ แต่ .NETต้องตรวจ permissionทุก endpointและ derive claimsจาก signed token ห้ามเชื่อ role/userIdที่ request bodyหรือ SharedPreferencesส่งมา</p></section>
+<section id="section-8"><h2>8. Characterization tests</h2><div class="success">ก่อน refactorล็อก behavior: ไม่เลือก user, passwordว่าง/ผิด, success callbackครั้งเดียว, dispose animation, reload Homeและ logoutไม่ลบ server config จากนั้นแทน delay/mockด้วย repositoryทีละขั้น</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

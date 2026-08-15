@@ -4,25 +4,26 @@
 <title>Inject http.Client เพื่อทดสอบ</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-06 · Flutter + .NET</span><h1>Inject http.Client เพื่อทดสอบ</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Constructor injection</a></li><li><a href="#section-2">2. Ownership</a></li><li><a href="#section-3">3. MockClient</a></li><li><a href="#section-4">4. ทดสอบ request ด้วย</a></li><li><a href="#section-5">5. ทดสอบ failure table</a></li><li><a href="#section-6">6. ไฟล์จริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. หลักจำ</a></li></ol></nav>
 <div class="note"><strong>Dependency injection:</strong> รับ <code>http.Client</code> จากภายนอก ทำให้ production ใช้ client จริง แต่ test ควบคุม status/body/exception ได้โดยไม่เปิด server</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ApiClient {
+<section id="section-1"><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ApiClient {
   ApiClient({http.Client? client})
       : _client = client ?? http.Client(),
         _ownsClient = client == null;
   final http.Client _client;
   final bool _ownsClient;
 }</code></pre></section>
-<section><h2>2. Ownership</h2><p>ผู้สร้าง dependency เป็นผู้ dispose: ถ้า ApiClient สร้าง client เองจึง close เอง แต่ถ้ารับ shared client จาก composition root ต้องไม่ปิดแทนเจ้าของ</p></section>
-<section><h2>3. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
+<section id="section-2"><h2>2. Ownership</h2><p>ผู้สร้าง dependency เป็นผู้ dispose: ถ้า ApiClient สร้าง client เองจึง close เอง แต่ถ้ารับ shared client จาก composition root ต้องไม่ปิดแทนเจ้าของ</p></section>
+<section id="section-3"><h2>3. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
   expect(request.url.path, '/api/WMS/tasks');
   expect(request.headers['Authorization'], 'Bearer test-token');
   return http.Response('{"items":[],"totalCount":0}', 200);
 });
 final api = TasksApi(ApiClient(client: client));</code></pre></section>
-<section><h2>4. ทดสอบ request ด้วย</h2><p>อย่าตรวจแค่ model ที่คืนมา ให้ assert method, URL, encoded query, header และ JSON body ด้วย เพราะ bug integration จำนวนมากอยู่ฝั่ง request</p></section>
-<section><h2>5. ทดสอบ failure table</h2><ul><li>200 valid/invalid JSON</li><li>204 empty</li><li>400 ProblemDetails</li><li>401/403</li><li>500 HTML proxy page</li><li>timeout และ ClientException</li></ul></section>
-<section><h2>6. ไฟล์จริง</h2><p><code>wms_absolute_mobile/lib/core/api_client.dart</code> และ connection probe ของทั้งสองแอปรับ optional client อยู่แล้ว จึงเป็น seam สำหรับ test โดยไม่เปลี่ยน production behavior</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน test ที่พิสูจน์ว่า barcode <code>A&amp;B 01</code> ถูก encode ใน query และ server decode กลับค่าเดิม</p><details><summary>แนวคำตอบ</summary><p>ตรวจ <code>request.url.queryParameters['search']</code> ไม่ตรวจ raw URL string ซึ่งอ่าน percent encoding ยาก</p></details></section>
-<section><h2>8. หลักจำ</h2><div class="success">Inject ที่ I/O boundary, assert request + response mapping และไม่มี network จริงใน unit test</div></section>
+<section id="section-4"><h2>4. ทดสอบ request ด้วย</h2><p>อย่าตรวจแค่ model ที่คืนมา ให้ assert method, URL, encoded query, header และ JSON body ด้วย เพราะ bug integration จำนวนมากอยู่ฝั่ง request</p></section>
+<section id="section-5"><h2>5. ทดสอบ failure table</h2><ul><li>200 valid/invalid JSON</li><li>204 empty</li><li>400 ProblemDetails</li><li>401/403</li><li>500 HTML proxy page</li><li>timeout และ ClientException</li></ul></section>
+<section id="section-6"><h2>6. ไฟล์จริง</h2><p><code>wms_absolute_mobile/lib/core/api_client.dart</code> และ connection probe ของทั้งสองแอปรับ optional client อยู่แล้ว จึงเป็น seam สำหรับ test โดยไม่เปลี่ยน production behavior</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เขียน test ที่พิสูจน์ว่า barcode <code>A&amp;B 01</code> ถูก encode ใน query และ server decode กลับค่าเดิม</p><details><summary>แนวคำตอบ</summary><p>ตรวจ <code>request.url.queryParameters['search']</code> ไม่ตรวจ raw URL string ซึ่งอ่าน percent encoding ยาก</p></details></section>
+<section id="section-8"><h2>8. หลักจำ</h2><div class="success">Inject ที่ I/O boundary, assert request + response mapping และไม่มี network จริงใน unit test</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

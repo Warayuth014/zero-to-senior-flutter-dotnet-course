@@ -1,21 +1,18 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Debug/Profile/Release mode</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>Git และ GitHub สำหรับโปรเจกต์ Flutter</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">00-10 · Foundation</span><h1>Debug/Profile/Release mode</h1><p>Part 0: Setup, Tools &amp; Project Anatomy</p></header>
-<div class="note">Debug, profile และ release เป็น build/runtime modes คนละวัตถุประสงค์ ผล performance, assertions, service extensions และ optimization ต่างกัน จึงต้องเลือก mode ให้ตรงคำถาม</div>
-<section><h2>1. เปรียบเทียบสาม mode</h2><table><thead><tr><th>Mode</th><th>เด่น</th><th>ใช้เมื่อ</th></tr></thead><tbody><tr><td>Debug</td><td>assert, debugger, hot reload, diagnostics</td><td>พัฒนา/functional debugging</td></tr><tr><td>Profile</td><td>optimization ใกล้ release + profiling hooks</td><td>วัด frame/CPU/memory บนอุปกรณ์จริง</td></tr><tr><td>Release</td><td>optimization/deployment, diagnostics จำกัด</td><td>final behavior/build artifact</td></tr></tbody></table></section>
-<section><h2>2. คำสั่ง</h2><pre class="code-vs"><code>flutter run -d &lt;device&gt;                 # debug
-flutter run --profile -d &lt;device&gt;
-flutter run --release -d &lt;device&gt;
-flutter build apk --release
-flutter build appbundle --release</code></pre><p>target บางชนิด/platform มีข้อจำกัด mode ให้เชื่อ output ของ tooling รุ่นที่ pin และทดสอบบน production target</p></section>
-<section><h2>3. Assertions และค่าที่ไม่ควรพึ่ง</h2><p><code>assert</code> เหมาะจับ programmer invariant ระหว่างพัฒนา ไม่ใช้ validate barcode, auth หรือ API payload ที่ production ต้องป้องกัน เพราะ release อาจไม่รัน assertion Business validation ต้องเป็น code path ปกติ</p></section>
-<section><h2>4. Performance measurement</h2><p>Debug มี JIT/instrumentation และอาจช้ากว่าอย่างมาก อย่า optimize จากความรู้สึกใน debug ให้ reproduce บน physical target ด้วย profile, record timeline และเทียบก่อน/หลังด้วย workload เดิม</p></section>
-<section><h2>5. Environment ไม่ควรผูกกับ mode อัตโนมัติ</h2><p>Debug ไม่ได้แปลว่าต้องยิง test server และ release ไม่ได้แปลว่า production เสมอ ให้ environment/base URL เป็น config ที่ explicit เช่น dart-define/connection profile และแสดงให้ operator รู้ ป้องกัน release build ชี้ server ผิด</p></section>
-<section><h2>6. Mode-specific code</h2><p>Flutter มี flags เช่น debug/profile/release แต่ใช้ให้น้อยและกักไว้ใน diagnostics/config อย่ากระจาย branch behavior จน happy path ใน debug ต่างจาก release การ log sensitive data แม้อยู่ debug ก็ยังเสี่ยงเมื่อใช้เครื่องจริง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>อาการ list กระตุกเฉพาะ PDA และ API ชี้ผิด server ใน APK ควรตรวจด้วย mode/config ใด?</p><details><summary>เฉลย</summary><p>วัดกระตุกด้วย profile บน PDA จริงและ workload เดิม ส่วน server ผิดให้ตรวจ build/runtime configuration, dart-define/profile persistence และ URL ที่ resolve จริงใน release ไม่แก้ด้วย assert หรือ hardcodeตาม mode</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">“ผ่าน debug” ยังไม่พอสำหรับ permission, minification/tree shaking, signing, network security และ performance ต้องมี release smoke test บนอุปกรณ์เป้าหมายก่อนส่งงาน</div></section>
+<header class="hero"><span class="badge">00-10 · Foundation</span><h1>Git และ GitHub สำหรับโปรเจกต์ Flutter</h1><p>Part 0: Start Here: Setup &amp; First Flutter App</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Workflow พื้นฐาน</a></li><li><a href="#section-2">2. .gitignore</a></li><li><a href="#section-3">3. Commit เล็กและมีความหมาย</a></li><li><a href="#section-4">4. Branch</a></li><li><a href="#section-5">5. สิ่งที่ห้าม Commit</a></li><li><a href="#section-6">6. แบบฝึกหัด</a></li><li><a href="#section-7">7. สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: Beginner</span><span>เครื่องมือ: Git</span><span>เป้าหมาย: บันทึกงานแบบย้อนกลับได้</span></div>
+<div class="note"><strong>Git คือประวัติการเปลี่ยนแปลง:</strong> commitที่ดีช่วยทดลองและย้อนกลับได้ ส่วน GitHubคือที่เก็บ repositoryบน serverและใช้ทำงานร่วมกัน</div>
+<section id="section-1"><h2>1. Workflow พื้นฐาน</h2><pre class="code-vs"><code>git status<br>git add lib/main.dart<br>git diff --cached<br>git commit -m "feat: update first screen"<br>git push</code></pre><p>อ่าน status/diffก่อน commitทุกครั้งเพื่อไม่ส่ง secretหรือไฟล์ buildโดยไม่ตั้งใจ</p></section>
+<section id="section-2"><h2>2. .gitignore</h2><p>Flutterสร้างค่าเริ่มต้นให้แล้ว โดยทั่วไปไม่ commit <code>build</code>, <code>.dart_tool</code>, IDE cache และไฟล์ secret แต่ต้อง commit source, tests, pubspecและ lockfileของ application</p></section>
+<section id="section-3"><h2>3. Commit เล็กและมีความหมาย</h2><p>หนึ่ง commitควรตอบว่าเปลี่ยน behaviorอะไร ไม่รวม formatทั้ง projectกับ featureใหม่โดยไม่จำเป็น ชื่อเช่น <code>feat: add warehouse counter</code>อ่านง่ายกว่า <code>update</code></p></section>
+<section id="section-4"><h2>4. Branch</h2><pre class="code-vs"><code>git switch -c feature/warehouse-counter</code></pre><p>Branchแยกงานทดลองจาก branchหลัก แต่ไม่แทนการ commitสม่ำเสมอ</p></section>
+<section id="section-5"><h2>5. สิ่งที่ห้าม Commit</h2><ul><li>รหัสผ่าน, token, signing key</li><li>ไฟล์ environmentที่มี secret</li><li>build artifactsขนาดใหญ่</li><li>ไฟล์ของผู้ใช้หรือฐานข้อมูลจริง</li></ul><div class="warn">ลบ secretจาก commitล่าสุดไม่พอหาก pushแล้ว ต้อง revoke/rotateและจัดการ historyตามขั้นตอนทีม</div></section>
+<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>สร้าง branch แก้ title รัน test แล้วตรวจ diffก่อน commit</p><details class="answer"><summary>Checklist</summary><p>statusมีเฉพาะไฟล์ตั้งใจแก้, ไม่มี secret/build, messageอธิบายผลลัพธ์ และ pushไป branchที่ถูกต้อง</p></details></section>
+<section id="section-7"><h2>7. สรุป</h2><div class="success">วงรอบที่ปลอดภัยคือ status → diff → test → stage → ตรวจ staged diff → commit → push</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,9 +4,10 @@
 <title>Lab: Responsive warehouse home</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-15 · Flutter UI</span><h1>Lab: Responsive warehouse home</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Model และ layout policy</a></li><li><a href="#section-3">3. Page tree</a></li><li><a href="#section-4">4. Responsive grid implementation</a></li><li><a href="#section-5">5. Tile contract</a></li><li><a href="#section-6">6. Widget tests</a></li><li><a href="#section-7">7. เทียบกับโปรเจกต์จริง</a></li><li><a href="#section-8">8. Part 2 Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> สร้าง Responsive Warehouse Home จาก menu data ชุดเดียว ให้ PDA แคบ/เตี้ยและ tablet ใช้งานได้ รักษา touch target, ข้อมูลหลัก, scroll ownership และ widget identity พร้อมเทียบ design decision กับ Home ของสอง codebase</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>PDA 320×568 และ 400×800 แสดง operation หลัก 6 รายการโดยไม่ RenderFlex overflow</li><li>จอเตี้ยใช้ compact/tile แนวนอน; tablet เพิ่ม columns และจำกัด content width</li><li>เมนูเกิน first viewport เลื่อนได้ด้วย GridView เดียว</li><li>badge มี label/icon/สีและ semantics ไม่พึ่งสีอย่างเดียว</li><li>ชื่อยาว/text scale 2.0 ยังเข้าถึงข้อมูลเต็มได้</li><li>tap ส่ง menu ID กลับ owner ไม่เรียก API ใน tile</li></ul></section>
-<section><h2>2. Model และ layout policy</h2><pre class="code-vs"><code>typedef WarehouseMenu = ({
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>PDA 320×568 และ 400×800 แสดง operation หลัก 6 รายการโดยไม่ RenderFlex overflow</li><li>จอเตี้ยใช้ compact/tile แนวนอน; tablet เพิ่ม columns และจำกัด content width</li><li>เมนูเกิน first viewport เลื่อนได้ด้วย GridView เดียว</li><li>badge มี label/icon/สีและ semantics ไม่พึ่งสีอย่างเดียว</li><li>ชื่อยาว/text scale 2.0 ยังเข้าถึงข้อมูลเต็มได้</li><li>tap ส่ง menu ID กลับ owner ไม่เรียก API ใน tile</li></ul></section>
+<section id="section-2"><h2>2. Model และ layout policy</h2><pre class="code-vs"><code>typedef WarehouseMenu = ({
   String id,
   String title,
   String subtitle,
@@ -26,7 +27,7 @@ class WarehouseLayout {
     return WarehouseLayout(columns, compact, compact ? 8 : 12);
   }
 }</code></pre></section>
-<section><h2>3. Page tree</h2><pre class="code-vs"><code>SafeArea
+<section id="section-3"><h2>3. Page tree</h2><pre class="code-vs"><code>SafeArea
 └─ Center
    └─ ConstrainedBox(maxWidth: 1100)
       └─ LayoutBuilder
@@ -36,7 +37,7 @@ class WarehouseLayout {
             └─ Expanded
                └─ GridView.builder
                   └─ WarehouseMenuTile</code></pre><p>Center/ConstrainedBox กัน tablet กว้างเกินอ่าน LayoutBuilder เห็น constraint หลัง maxWidth แล้ว GridView เป็น scroll owner คนเดียว</p></section>
-<section><h2>4. Responsive grid implementation</h2><pre class="code-vs"><code>LayoutBuilder(builder: (context, c) {
+<section id="section-4"><h2>4. Responsive grid implementation</h2><pre class="code-vs"><code>LayoutBuilder(builder: (context, c) {
   final spec = WarehouseLayout.from(c);
   return Column(children: [
     WarehouseHeader(compact: spec.compact),
@@ -62,8 +63,8 @@ class WarehouseLayout {
     ),
   ]);
 })</code></pre></section>
-<section><h2>5. Tile contract</h2><p>เมื่อ compact ใช้ Row(icon → Expanded title/subtitle → chevron) เมื่อปกติใช้ Column; badge วางด้วย Stack แต่ยังอยู่ใน tile bounds; title มี maxLines 2, subtitle เป็น secondary; InkWell/Material ครอบพื้นที่เต็มและ Semantics อ่าน “รับสินค้าเข้า, งานค้าง 12, ปุ่ม”</p></section>
-<section><h2>6. Widget tests</h2><pre class="code-vs"><code>testWidgets('PDA uses two columns without overflow', (tester) async {
+<section id="section-5"><h2>5. Tile contract</h2><p>เมื่อ compact ใช้ Row(icon → Expanded title/subtitle → chevron) เมื่อปกติใช้ Column; badge วางด้วย Stack แต่ยังอยู่ใน tile bounds; title มี maxLines 2, subtitle เป็น secondary; InkWell/Material ครอบพื้นที่เต็มและ Semantics อ่าน “รับสินค้าเข้า, งานค้าง 12, ปุ่ม”</p></section>
+<section id="section-6"><h2>6. Widget tests</h2><pre class="code-vs"><code>testWidgets('PDA uses two columns without overflow', (tester) async {
   tester.view.physicalSize = const Size(320, 568);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -80,7 +81,7 @@ testWidgets('tap returns stable domain id', (tester) async {
   await tester.tap(find.byKey(const ValueKey('receive')));
   expect(selected, 'receive');
 });</code></pre><p>เพิ่มเคส 400×800, 900×700, height 649/650, text scale 2.0, ภาษาไทยยาว และ scroll ไปเมนูท้าย</p></section>
-<section><h2>7. เทียบกับโปรเจกต์จริง</h2><p>Absolute เหมาะกับ fixed PDA operations: 2 columns และคำนวณสามแถวจาก available height พร้อม tile เปลี่ยน composition รายใบ ส่วน wmsapp Home ใช้คู่ Row/Expanded ใน SingleChildScrollView อ่านง่ายสำหรับเมนูคงที่แต่ยังไม่ adapt columns จาก width Lab นี้เก็บข้อดีทั้งสอง: data-driven lazy grid + local constraints + component vocabulary</p></section>
-<section><h2>8. Part 2 Exit Test</h2><div class="success"><ul><li>อธิบาย constraints chain และหา unbounded axis ได้</li><li>เลือก Flex/scroll/list/grid/sliver ตาม ownership และขนาดข้อมูลได้</li><li>ใช้ SafeArea, MediaQuery และ LayoutBuilder ถูกระดับได้</li><li>ออกแบบ text/status/touch target สำหรับ PDA และ accessibility ได้</li><li>แก้ overflow ด้วย evidence และ regression matrix ได้</li><li>สร้าง/test Responsive Warehouse Home โดยไม่ผูก UI กับ API ได้</li></ul></div></section>
+<section id="section-7"><h2>7. เทียบกับโปรเจกต์จริง</h2><p>Absolute เหมาะกับ fixed PDA operations: 2 columns และคำนวณสามแถวจาก available height พร้อม tile เปลี่ยน composition รายใบ ส่วน wmsapp Home ใช้คู่ Row/Expanded ใน SingleChildScrollView อ่านง่ายสำหรับเมนูคงที่แต่ยังไม่ adapt columns จาก width Lab นี้เก็บข้อดีทั้งสอง: data-driven lazy grid + local constraints + component vocabulary</p></section>
+<section id="section-8"><h2>8. Part 2 Exit Test</h2><div class="success"><ul><li>อธิบาย constraints chain และหา unbounded axis ได้</li><li>เลือก Flex/scroll/list/grid/sliver ตาม ownership และขนาดข้อมูลได้</li><li>ใช้ SafeArea, MediaQuery และ LayoutBuilder ถูกระดับได้</li><li>ออกแบบ text/status/touch target สำหรับ PDA และ accessibility ได้</li><li>แก้ overflow ด้วย evidence และ regression matrix ได้</li><li>สร้าง/test Responsive Warehouse Home โดยไม่ผูก UI กับ API ได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

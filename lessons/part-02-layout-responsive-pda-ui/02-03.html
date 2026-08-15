@@ -4,22 +4,23 @@
 <title>Expanded, Flexible และ Spacer</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-03 · Flutter UI</span><h1>Expanded, Flexible และ Spacer</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Flex algorithm แบบใช้งานจริง</a></li><li><a href="#section-2">2. Expanded คือ tight flex</a></li><li><a href="#section-3">3. Flexible คือเพดาน ไม่จำเป็นต้องเต็ม</a></li><li><a href="#section-4">4. Spacer คือช่องว่างแบบ flex</a></li><li><a href="#section-5">5. ParentDataWidget rule</a></li><li><a href="#section-6">6. Expanded กับ scrollable</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>Expanded</code>, <code>Flexible</code> และ <code>Spacer</code> ใช้ได้เมื่อเป็นลูกโดยตรงของ Flex และแก้ปัญหา “แบ่งพื้นที่ที่ Flex มีอยู่” ไม่ใช่เครื่องมือกำหนดขนาดทั่วไป</div>
-<section><h2>1. Flex algorithm แบบใช้งานจริง</h2><ol><li>วัด non-flex children ก่อน</li><li>หักพื้นที่และ spacing ออกจาก main axis</li><li>แบ่งพื้นที่ที่เหลือตามค่า flex</li><li>วัด flex children ด้วยส่วนแบ่งนั้น</li><li>จัดตำแหน่งผลลัพธ์</li></ol><p>ดังนั้น overflow มักเกิดจาก non-flex children ใช้พื้นที่เกินก่อนถึงขั้นแบ่ง flex</p></section>
-<section><h2>2. Expanded คือ tight flex</h2><pre class="code-vs"><code>Row(children: [
+<section id="section-1"><h2>1. Flex algorithm แบบใช้งานจริง</h2><ol><li>วัด non-flex children ก่อน</li><li>หักพื้นที่และ spacing ออกจาก main axis</li><li>แบ่งพื้นที่ที่เหลือตามค่า flex</li><li>วัด flex children ด้วยส่วนแบ่งนั้น</li><li>จัดตำแหน่งผลลัพธ์</li></ol><p>ดังนั้น overflow มักเกิดจาก non-flex children ใช้พื้นที่เกินก่อนถึงขั้นแบ่ง flex</p></section>
+<section id="section-2"><h2>2. Expanded คือ tight flex</h2><pre class="code-vs"><code>Row(children: [
   Expanded(flex: 2, child: PickingPane()),
   const SizedBox(width: 8),
   Expanded(child: SummaryPane()),
 ])</code></pre><p>พื้นที่ที่เหลือแบ่ง 2:1 และแต่ละ child ต้องใช้ส่วนแบ่งเต็ม เหมาะกับ columns/panes ที่ต้องเติมพื้นที่</p></section>
-<section><h2>3. Flexible คือเพดาน ไม่จำเป็นต้องเต็ม</h2><pre class="code-vs"><code>Row(children: [
+<section id="section-3"><h2>3. Flexible คือเพดาน ไม่จำเป็นต้องเต็ม</h2><pre class="code-vs"><code>Row(children: [
   const Icon(Icons.warehouse),
   const SizedBox(width: 8),
   Flexible(child: Text(label, maxLines: 2)),
 ])</code></pre><p>ค่าเริ่มต้น <code>FlexFit.loose</code> ให้ child เล็กกว่าส่วนแบ่งได้ Absolute ใช้ Flexible กับ label ในปุ่ม PDA เพื่อให้ข้อความ wrap โดยไม่ผลัก icon/ขอบปุ่มออก</p></section>
-<section><h2>4. Spacer คือช่องว่างแบบ flex</h2><p><code>Spacer()</code> เทียบเท่า Expanded ที่มี SizedBox ว่าง ใช้ผลัก action ไปท้าย Row ได้ แต่ถ้ามี <code>MainAxisAlignment.spaceBetween/spaceAround</code> อยู่ Spacer จะกินพื้นที่ที่เหลือก่อน ทำให้ alignment นั้นแทบไม่มีผล</p></section>
-<section><h2>5. ParentDataWidget rule</h2><p>Expanded/Flexible เขียน ParentData ให้ RenderFlex จึงต้องมีเส้นทางจากมันถึง Row/Column/Flex ที่มีแต่ Stateless/Stateful wrappers ห้ามมี Container/Padding render widget คั่น เช่น <code>Padding(child: Expanded(...))</code> ผิด ให้สลับเป็น <code>Expanded(child: Padding(...))</code></p></section>
-<section><h2>6. Expanded กับ scrollable</h2><p>ใน Column ที่สูง bounded ให้ Expanded(ListView) ถูกต้อง แต่ใน Column ภายใน SingleChildScrollView main axis ไม่ bounded จึงเกิด “non-zero flex but incoming height constraints are unbounded” เลือกเอา scrollable ชั้นเดียว, ใช้ shrinkWrap เฉพาะรายการเล็ก หรือกำหนด bounded height ให้ช่วงนั้น</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แถว summary ต้องให้ label ใช้พื้นที่มากที่สุด, status กึ่งกลางไม่เกิน 100 และ value กว้างตามตัวเลข จะเขียนอย่างไร?</p><details><summary>เฉลย</summary><pre class="code-vs"><code>Row(children: [
+<section id="section-4"><h2>4. Spacer คือช่องว่างแบบ flex</h2><p><code>Spacer()</code> เทียบเท่า Expanded ที่มี SizedBox ว่าง ใช้ผลัก action ไปท้าย Row ได้ แต่ถ้ามี <code>MainAxisAlignment.spaceBetween/spaceAround</code> อยู่ Spacer จะกินพื้นที่ที่เหลือก่อน ทำให้ alignment นั้นแทบไม่มีผล</p></section>
+<section id="section-5"><h2>5. ParentDataWidget rule</h2><p>Expanded/Flexible เขียน ParentData ให้ RenderFlex จึงต้องมีเส้นทางจากมันถึง Row/Column/Flex ที่มีแต่ Stateless/Stateful wrappers ห้ามมี Container/Padding render widget คั่น เช่น <code>Padding(child: Expanded(...))</code> ผิด ให้สลับเป็น <code>Expanded(child: Padding(...))</code></p></section>
+<section id="section-6"><h2>6. Expanded กับ scrollable</h2><p>ใน Column ที่สูง bounded ให้ Expanded(ListView) ถูกต้อง แต่ใน Column ภายใน SingleChildScrollView main axis ไม่ bounded จึงเกิด “non-zero flex but incoming height constraints are unbounded” เลือกเอา scrollable ชั้นเดียว, ใช้ shrinkWrap เฉพาะรายการเล็ก หรือกำหนด bounded height ให้ช่วงนั้น</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แถว summary ต้องให้ label ใช้พื้นที่มากที่สุด, status กึ่งกลางไม่เกิน 100 และ value กว้างตามตัวเลข จะเขียนอย่างไร?</p><details><summary>เฉลย</summary><pre class="code-vs"><code>Row(children: [
   Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
   const SizedBox(width: 6),
   Flexible(child: ConstrainedBox(
@@ -29,6 +30,6 @@
   const SizedBox(width: 6),
   Text(value),
 ])</code></pre></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าครอบทุก child ด้วย Expanded เพื่อหยุด overflow เพราะจะทำให้ความหมายของขนาดหาย เช่น icon/button ถูกบังคับกว้างเท่ากับข้อความ ให้เลือกเฉพาะ child ที่เป็นเจ้าของพื้นที่ยืดหยุ่นและกำหนด priority อย่างตั้งใจ</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าครอบทุก child ด้วย Expanded เพื่อหยุด overflow เพราะจะทำให้ความหมายของขนาดหาย เช่น icon/button ถูกบังคับกว้างเท่ากับข้อความ ให้เลือกเฉพาะ child ที่เป็นเจ้าของพื้นที่ยืดหยุ่นและกำหนด priority อย่างตั้งใจ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

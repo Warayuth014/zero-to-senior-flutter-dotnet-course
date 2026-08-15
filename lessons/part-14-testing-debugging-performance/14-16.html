@@ -4,17 +4,18 @@
 <title>List performance และ image memory</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-16 · Testing</span><h1>List performance และ image memory</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Lazy list</a></li><li><a href="#section-2">2. itemExtent/prototype</a></li><li><a href="#section-3">3. Pagination และ search</a></li><li><a href="#section-4">4. Image memory</a></li><li><a href="#section-5">5. Future ต่อแถว</a></li><li><a href="#section-6">6. งาน CPU</a></li><li><a href="#section-7">7. Performance test</a></li><li><a href="#section-8">8. Correctness ระหว่าง optimize</a></li></ol></nav>
 <div class="note"><strong>รายการลื่นมาจากการทำงานเท่าที่มองเห็น:</strong> lazy build, stable identity, pagination, thumbnail decode ตามขนาด และไม่คำนวณหนักใน <code>itemBuilder</code></div>
-<section><h2>1. Lazy list</h2><pre class="code-vs"><code>ListView.builder(
+<section id="section-1"><h2>1. Lazy list</h2><pre class="code-vs"><code>ListView.builder(
   itemCount: items.length,
   itemBuilder: (_, index) =&gt; PartRow(
     key: ValueKey(items[index].id),
     part: items[index],
   ),
 )</code></pre><p>อย่าใช้ Column สร้าง 1,000 แถวพร้อมกัน และ key ต้องเป็น entity ID ไม่ใช่ index เมื่อ filter/reorder</p></section>
-<section><h2>2. itemExtent/prototype</h2><p>ถ้าแถวสูงคงที่ ระบุ <code>itemExtent</code>/<code>itemExtentBuilder</code> หรือ prototype เพื่อลด layout work แต่ห้ามบังคับเมื่อข้อความไทยหลายบรรทัดทำความสูงเปลี่ยนจนตัดข้อมูล</p></section>
-<section><h2>3. Pagination และ search</h2><p>debounce query, cancel/ignore stale response และโหลดหน้าถัดไปก่อนถึงท้ายเล็กน้อย กัน request ซ้ำด้วย single-flight; แสดง retry ต่อ page โดยไม่ทิ้งข้อมูลเดิมทั้งหมด</p></section>
-<section><h2>4. Image memory</h2><pre class="code-vs"><code>Image.network(
+<section id="section-2"><h2>2. itemExtent/prototype</h2><p>ถ้าแถวสูงคงที่ ระบุ <code>itemExtent</code>/<code>itemExtentBuilder</code> หรือ prototype เพื่อลด layout work แต่ห้ามบังคับเมื่อข้อความไทยหลายบรรทัดทำความสูงเปลี่ยนจนตัดข้อมูล</p></section>
+<section id="section-3"><h2>3. Pagination และ search</h2><p>debounce query, cancel/ignore stale response และโหลดหน้าถัดไปก่อนถึงท้ายเล็กน้อย กัน request ซ้ำด้วย single-flight; แสดง retry ต่อ page โดยไม่ทิ้งข้อมูลเดิมทั้งหมด</p></section>
+<section id="section-4"><h2>4. Image memory</h2><pre class="code-vs"><code>Image.network(
   url,
   width: 72,
   height: 72,
@@ -22,9 +23,9 @@
   cacheHeight: 144,
   fit: BoxFit.cover,
 )</code></pre><p>decoded RGBA ใหญ่กว่าไฟล์ JPEG มาก จึงต้องลด decode size และใช้ versioned URL/cache policy ตาม Part 13</p></section>
-<section><h2>5. Future ต่อแถว</h2><p>อย่าสร้าง Future resolve URL ใหม่ใน <code>itemBuilder/build</code> ทุก scroll/rebuild เก็บ resolved URI ใน model/repository cache หรือ State ที่ผูก key และแสดง error/loading เฉพาะ thumbnail</p></section>
-<section><h2>6. งาน CPU</h2><p>parse JSON ใหญ่, sort/filter ซับซ้อน และ image transform ไม่ควรบล็อก UI isolate ระหว่าง scroll วัดก่อนย้าย isolate เพราะ serialization/copy ก็มีต้นทุน และให้ server paginate/filter เมื่อ dataset ใหญ่จริง</p></section>
-<section><h2>7. Performance test</h2><p>สร้าง fixture 100/1,000 รายการ, scroll ด้วย gesture เดิมใน profile mode เก็บ missed frames, build/layout/raster time และ peak memory ทดสอบภาพ cache cold/warm และ device RAM ต่ำที่ใช้งานจริง</p></section>
-<section><h2>8. Correctness ระหว่าง optimize</h2><div class="success">หลังปรับต้องยังรักษา state ต่อ entity เมื่อ reorder, ไม่มีรูปผิดแถว, search ไม่โดน stale result, pagination ไม่ซ้ำ/ขาด และ accessibility/text scale ยังอ่านได้—ความลื่นที่ข้อมูลผิดไม่ใช่ optimization</div></section>
+<section id="section-5"><h2>5. Future ต่อแถว</h2><p>อย่าสร้าง Future resolve URL ใหม่ใน <code>itemBuilder/build</code> ทุก scroll/rebuild เก็บ resolved URI ใน model/repository cache หรือ State ที่ผูก key และแสดง error/loading เฉพาะ thumbnail</p></section>
+<section id="section-6"><h2>6. งาน CPU</h2><p>parse JSON ใหญ่, sort/filter ซับซ้อน และ image transform ไม่ควรบล็อก UI isolate ระหว่าง scroll วัดก่อนย้าย isolate เพราะ serialization/copy ก็มีต้นทุน และให้ server paginate/filter เมื่อ dataset ใหญ่จริง</p></section>
+<section id="section-7"><h2>7. Performance test</h2><p>สร้าง fixture 100/1,000 รายการ, scroll ด้วย gesture เดิมใน profile mode เก็บ missed frames, build/layout/raster time และ peak memory ทดสอบภาพ cache cold/warm และ device RAM ต่ำที่ใช้งานจริง</p></section>
+<section id="section-8"><h2>8. Correctness ระหว่าง optimize</h2><div class="success">หลังปรับต้องยังรักษา state ต่อ entity เมื่อ reorder, ไม่มีรูปผิดแถว, search ไม่โดน stale result, pagination ไม่ซ้ำ/ขาด และ accessibility/text scale ยังอ่านได้—ความลื่นที่ข้อมูลผิดไม่ใช่ optimization</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,17 +4,18 @@
 <title>Scan pallet/part และ progress</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-12 · Real Codebase</span><h1>Scan pallet/part และ progress</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Scan pallet</a></li><li><a href="#section-2">2. Build progress</a></li><li><a href="#section-3">3. Scan part</a></li><li><a href="#section-4">4. Serial item</a></li><li><a href="#section-5">5. Non-serial item</a></li><li><a href="#section-6">6. Confirm unload</a></li><li><a href="#section-7">7. Return pallet</a></li><li><a href="#section-8">8. Concurrency tests</a></li></ol></nav>
 <div class="note"><strong>Progress ต้องมาจาก line identity:</strong> จำนวน part card หรือจำนวนครั้งที่ scan ไม่เท่ากับจำนวนงานสำเร็จ ให้คำนวณจาก session items และ confirmed line IDs เท่านั้น</div>
-<section><h2>1. Scan pallet</h2><p>trim palletId, reject ค่าว่าง, lock ระหว่าง request แล้วเรียก <code>POST /unload/open-session</code> พร้อม operatorId หาก scan pallet ใหม่ต้องถามยืนยันเมื่อ session เดิมยังมีงาน pending</p></section>
-<section><h2>2. Build progress</h2><pre class="code-vs"><code>totalCount = session.items.length
+<section id="section-1"><h2>1. Scan pallet</h2><p>trim palletId, reject ค่าว่าง, lock ระหว่าง request แล้วเรียก <code>POST /unload/open-session</code> พร้อม operatorId หาก scan pallet ใหม่ต้องถามยืนยันเมื่อ session เดิมยังมีงาน pending</p></section>
+<section id="section-2"><h2>2. Build progress</h2><pre class="code-vs"><code>totalCount = session.items.length
 confirmedCount = items.where(
   (x) =&gt; status[x.lineId] == 'CONFIRMED'
 ).length
 allConfirmed = totalCount &gt; 0 &amp;&amp; confirmedCount == totalCount</code></pre><p>นิยาม empty session แยกจาก completed เพื่อไม่แสดงสำเร็จทั้งที่ไม่มีข้อมูล</p></section>
-<section><h2>3. Scan part</h2><p>ค้นหา item ที่ partId ตรงและยัง PENDING ถ้ามีหนึ่งรายการเลือกได้ทันที ถ้ามีหลาย lot ให้แสดงตัวเลือกที่มี lot, condition และ qty เพื่อยืนยัน identity ก่อนกรอกจำนวน/serial</p></section>
-<section><h2>4. Serial item</h2><p>serial ที่ scan ต้องอยู่ใน <code>item.serialNumbers</code>, ไม่ซ้ำใน local set และจำนวนต้องตรงยอดที่จะ unload การใช้ Set ช่วย duplicate lookup แต่ควรเก็บ List เพิ่มหากลำดับ scan มีความหมายต่อ audit/UI</p></section>
-<section><h2>5. Non-serial item</h2><p>parse qty แบบปลอดภัย ตรวจ finite/integer ตามหน่วยธุรกิจ, มากกว่า 0 และไม่เกินยอด line ปัจจุบัน ข้อความผิดควรระบุค่าที่รับได้ ไม่ใช่เพียง “invalid quantity”</p></section>
-<section><h2>6. Confirm unload</h2><pre class="code-vs"><code>POST /unload/confirm-unload
+<section id="section-3"><h2>3. Scan part</h2><p>ค้นหา item ที่ partId ตรงและยัง PENDING ถ้ามีหนึ่งรายการเลือกได้ทันที ถ้ามีหลาย lot ให้แสดงตัวเลือกที่มี lot, condition และ qty เพื่อยืนยัน identity ก่อนกรอกจำนวน/serial</p></section>
+<section id="section-4"><h2>4. Serial item</h2><p>serial ที่ scan ต้องอยู่ใน <code>item.serialNumbers</code>, ไม่ซ้ำใน local set และจำนวนต้องตรงยอดที่จะ unload การใช้ Set ช่วย duplicate lookup แต่ควรเก็บ List เพิ่มหากลำดับ scan มีความหมายต่อ audit/UI</p></section>
+<section id="section-5"><h2>5. Non-serial item</h2><p>parse qty แบบปลอดภัย ตรวจ finite/integer ตามหน่วยธุรกิจ, มากกว่า 0 และไม่เกินยอด line ปัจจุบัน ข้อความผิดควรระบุค่าที่รับได้ ไม่ใช่เพียง “invalid quantity”</p></section>
+<section id="section-6"><h2>6. Confirm unload</h2><pre class="code-vs"><code>POST /unload/confirm-unload
 {
   "sessionId": session.sessionId,
   "palletId": session.pallet.id,
@@ -24,7 +25,7 @@ allConfirmed = totalCount &gt; 0 &amp;&amp; confirmedCount == totalCount</code><
   "serialNumbers": serials,
   "qtyUnloaded": qty
 }</code></pre></section>
-<section><h2>7. Return pallet</h2><p><code>return-pallet-to-asis</code> เป็น transition ปิดงานที่มีผลต่อ inventory ต้องยืนยัน allConfirmed ตามกติกา, ป้องกันกดซ้ำ และใช้ผลจาก API เป็นหลัก การหน่วงเวลา 5 วินาทีใน UI ไม่ใช่หลักฐานว่า backend ทำงานเสร็จ ควรใช้ status/polling หรือ operation result</p></section>
-<section><h2>8. Concurrency tests</h2><div class="success">จำลองสองเครื่องเปิด pallet เดียวกัน, line ถูก confirm จากอีกเครื่อง, partial unload สร้าง line ใหม่, session หมดอายุ และ return pallet ชนกับ confirm โดยคาดหวัง conflict ที่ refresh แล้วทำต่อได้</div></section>
+<section id="section-7"><h2>7. Return pallet</h2><p><code>return-pallet-to-asis</code> เป็น transition ปิดงานที่มีผลต่อ inventory ต้องยืนยัน allConfirmed ตามกติกา, ป้องกันกดซ้ำ และใช้ผลจาก API เป็นหลัก การหน่วงเวลา 5 วินาทีใน UI ไม่ใช่หลักฐานว่า backend ทำงานเสร็จ ควรใช้ status/polling หรือ operation result</p></section>
+<section id="section-8"><h2>8. Concurrency tests</h2><div class="success">จำลองสองเครื่องเปิด pallet เดียวกัน, line ถูก confirm จากอีกเครื่อง, partial unload สร้าง line ใหม่, session หมดอายุ และ return pallet ชนกับ confirm โดยคาดหวัง conflict ที่ refresh แล้วทำต่อได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

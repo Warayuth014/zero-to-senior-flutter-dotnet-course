@@ -4,27 +4,28 @@
 <title>HomeScreen และเมนู workflow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-03 · Real Codebase</span><h1>HomeScreen และเมนู workflow</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Session state</a></li><li><a href="#section-2">2. Login gate</a></li><li><a href="#section-3">3. Workflow cards</a></li><li><a href="#section-4">4. Action cards</a></li><li><a href="#section-5">5. Navigation style</a></li><li><a href="#section-6">6. Role และ dev tools</a></li><li><a href="#section-7">7. Logout</a></li><li><a href="#section-8">8. Refactor seam</a></li></ol></nav>
 <div class="note"><strong>HomeScreen คือ shell + route catalog + session gate:</strong> ไฟล์เดียวโหลด session, เปิด login/settings/dev tools/logout และประกอบ workflow cards จึงเป็นจุดแรกสำหรับเข้าใจเส้นทางผู้ใช้ทั้งหมด</div>
-<section><h2>1. Session state</h2><pre class="code-vs"><code>String? _userId;
+<section id="section-1"><h2>1. Session state</h2><pre class="code-vs"><code>String? _userId;
 String? _fullName;
 String? _role;
 
 initState() → _loadUser() → AuthSessionService.loadSession()</code></pre><p>ระหว่าง async loadไม่มี explicit loading state จึงต้องระวัง UIแสดง guestชั่วคราว</p></section>
-<section><h2>2. Login gate</h2><pre class="code-vs"><code>Future&lt;bool&gt; _requireLogin() async {
+<section id="section-2"><h2>2. Login gate</h2><pre class="code-vs"><code>Future&lt;bool&gt; _requireLogin() async {
   if (_userId != null) return true;
   await _openLogin();
   return _userId != null;
 }</code></pre><p>card callbackต้องเรียก gateก่อน push route; นี่เป็น UI gate ไม่ใช่ server authorization</p></section>
-<section><h2>3. Workflow cards</h2><p><code>HomeFlowCard</code> เป็น gradient cardสำหรับ Receiving, Unload, Putaway, Prework, Picking, Packing, Check-in และ Sorting แต่ละ callbackส่ง <code>userId/fullName</code>ลง screen ผ่าน constructor</p></section>
-<section><h2>4. Action cards</h2><p><code>HomeActionCard</code> เป็น cardแนวนอนสำหรับ actionรอง แยกจาก flow cardช่วยลด build code แต่ route definitionsยังอยู่ HomeScreen ทำให้เพิ่ม workflowต้องแก้ imports + UI + callbackที่เดียวกัน</p></section>
-<section><h2>5. Navigation style</h2><pre class="code-vs"><code>Navigator.push(
+<section id="section-3"><h2>3. Workflow cards</h2><p><code>HomeFlowCard</code> เป็น gradient cardสำหรับ Receiving, Unload, Putaway, Prework, Picking, Packing, Check-in และ Sorting แต่ละ callbackส่ง <code>userId/fullName</code>ลง screen ผ่าน constructor</p></section>
+<section id="section-4"><h2>4. Action cards</h2><p><code>HomeActionCard</code> เป็น cardแนวนอนสำหรับ actionรอง แยกจาก flow cardช่วยลด build code แต่ route definitionsยังอยู่ HomeScreen ทำให้เพิ่ม workflowต้องแก้ imports + UI + callbackที่เดียวกัน</p></section>
+<section id="section-5"><h2>5. Navigation style</h2><pre class="code-vs"><code>Navigator.push(
   context,
   MaterialPageRoute(builder: (_) =&gt; ReceivingMenuScreen(
     userId: _userId!, fullName: _fullName!,
   )),
 );</code></pre><p>เครื่องหมาย !ปลอดภัยได้เพราะ gate แต่ compilerไม่รู้ invariant; session objectแบบ non-nullหลัง authจะชัดกว่า</p></section>
-<section><h2>6. Role และ dev tools</h2><p>roleแสดงใน badgeและ supervisor flowบางส่วน ส่วน long-press avatarเปิด Test Pick Order/Test Sorting menu ต้องไม่ shipเป็น hidden security boundary Productionควร compile/authorize dev toolsอย่างชัดเจน</p></section>
-<section><h2>7. Logout</h2><p>confirm → <code>clearSession()</code> → set fields null แต่ต้องตรวจ service singletons, SignalR, cached data และ in-flight requestsในทุกโดเมนด้วย เพราะการล้าง Home fieldsอย่างเดียวไม่เท่ากับ session boundaryสมบูรณ์</p></section>
-<section><h2>8. Refactor seam</h2><div class="success">สร้าง immutable SessionState + RouteDefinition list (label/icon/permission/builder), inject SessionController และให้ router/guardเป็นเจ้าของ auth จะลด callbacksซ้ำและทำ role/navigation testsได้</div></section>
+<section id="section-6"><h2>6. Role และ dev tools</h2><p>roleแสดงใน badgeและ supervisor flowบางส่วน ส่วน long-press avatarเปิด Test Pick Order/Test Sorting menu ต้องไม่ shipเป็น hidden security boundary Productionควร compile/authorize dev toolsอย่างชัดเจน</p></section>
+<section id="section-7"><h2>7. Logout</h2><p>confirm → <code>clearSession()</code> → set fields null แต่ต้องตรวจ service singletons, SignalR, cached data และ in-flight requestsในทุกโดเมนด้วย เพราะการล้าง Home fieldsอย่างเดียวไม่เท่ากับ session boundaryสมบูรณ์</p></section>
+<section id="section-8"><h2>8. Refactor seam</h2><div class="success">สร้าง immutable SessionState + RouteDefinition list (label/icon/permission/builder), inject SessionController และให้ router/guardเป็นเจ้าของ auth จะลด callbacksซ้ำและทำ role/navigation testsได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

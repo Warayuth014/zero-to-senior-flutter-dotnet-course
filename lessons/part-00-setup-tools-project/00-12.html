@@ -1,35 +1,19 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lab: เปิดและรันสองโปรเจกต์ WMS</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>Mini Project: Warehouse Counter App</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">00-12 · Foundation</span><h1>Lab: เปิดและรันสองโปรเจกต์ WMS</h1><p>Part 0: Setup, Tools &amp; Project Anatomy</p></header>
-<div class="note"><strong>Lab เป้าหมาย:</strong> เปิดสอง WMS โดยไม่หลง toolchain/generated files, พิสูจน์ startup path และรัน target อย่างน้อยหนึ่งตัว โดยไม่แก้หรือล้าง dirty worktree ของ reference apps</div>
-<section><h2>1. Preflight ก่อนแตะโปรเจกต์</h2><pre class="code-vs"><code>flutter --version
-flutter doctor -v
-git status --short
-flutter devices</code></pre><p>บันทึก dirty files ก่อน ทุกการเปลี่ยนใน reference app เป็นงานของเจ้าของ repo ห้าม reset/clean เพื่อทำ lab ถ้าจะทดลอง source ให้สร้าง branch/commit หรือใช้ companion lab ของคอร์ส</p></section>
-<section><h2>2. Lab A: wmsapp</h2><pre class="code-vs"><code>cd C:\Users\User\Documents\GitHub\wms-app\wmsapp
-flutter pub get
-flutter analyze
-flutter test
-flutter run -d windows</code></pre><p>ถ้า Windows target/plugin ไม่รองรับ ให้เลือก Android/Chrome ตาม capability ที่กำลังทดสอบ จุดอ่าน: <code>main.dart → WmsApp → HomeScreen</code>, themeProvider และ ApiService/base URL discovery</p></section>
-<section><h2>3. Lab B: wms_absolute_mobile</h2><pre class="code-vs"><code>cd C:\Users\User\Desktop\wms_absolute_mobile
-flutter pub get
-flutter analyze
-flutter test
-flutter run -d windows</code></pre><p>จุดอ่าน: <code>main()</code> await language/connection ก่อน runApp → สร้าง AuthRepository(ApiClient) → LoginScreen ต้องตอบได้ว่าเหตุใด connection load ต้องเสร็จก่อน request แรก</p></section>
-<section><h2>4. ทดสอบบน Android/PDA</h2><pre class="code-vs"><code>flutter devices
-flutter run -d &lt;android-device-id&gt; \
-  --dart-define=WMS_API_BASE_URL=http://&lt;server-ip&gt;:6191</code></pre><p>ใช้ config mechanism ที่โปรเจกต์รองรับจริง wmsapp มี settings/base discovery ส่วน absolute มี connection profiles และ optional dart-define override อย่า hardcode IP ลง source เพื่อให้ lab ผ่าน</p></section>
-<section><h2>5. บันทึกผลแบบมืออาชีพ</h2><table><thead><tr><th>หลักฐาน</th><th>ต้องบันทึก</th></tr></thead><tbody><tr><td>Environment</td><td>Flutter/Dart, target/device, OS/API</td></tr><tr><td>Commands</td><td>pub/analyze/test/run และ exit result</td></tr><tr><td>Startup map</td><td>main → root → first screen → injected dependencies</td></tr><tr><td>API</td><td>resolved base URL และ health/login result โดยไม่เปิด secret</td></tr><tr><td>Failure</td><td>ชั้น SDK/project/build/runtime/network</td></tr></tbody></table></section>
-<section><h2>6. Companion lab ที่แก้ได้ปลอดภัย</h2><p>คอร์สมี <code>labs/flutter_wms_companion</code> และ Minimal .NET API สำหรับทดลอง architecture <code>TaskScreen → TaskStore → TaskRepository → ApiClient → .NET endpoint</code> ใช้ที่นี่สำหรับแก้ code/test โดยไม่กระทบ reference apps</p><pre class="code-vs"><code>cd labs\flutter_wms_companion
-flutter analyze
-flutter test
-
-cd ..\dotnet\WmsMobileApi
-dotnet run</code></pre></section>
-<section><h2>7. แบบส่งงาน</h2><ol><li>ภาพ/ข้อความ doctor summary</li><li>startup diagram ของทั้งสองแอป</li><li>ตารางเปรียบเทียบ pubspec/dependency/structure</li><li>ผล analyze/test และ target ที่ run</li><li>หนึ่งปัญหาการเชื่อม API พร้อมหลักฐานว่าปัญหาอยู่ชั้นใด</li></ol><details><summary>เกณฑ์ผ่าน</summary><p>ต้องไม่แก้ generated output/ทิ้ง user changes, ต้อง trace bootstrap ได้จริง และอธิบาย localhost ต่างกันตาม target ได้ หาก backend ไม่พร้อมยังผ่านส่วน tooling ได้เมื่อบันทึก failure boundary ถูกต้อง</p></details></section>
-<section><h2>8. Part 0 Exit Test</h2><div class="success"><ul><li>เลือก SDK/device/mode และคำสั่งถูก</li><li>อ่าน pubspec, lockfile, analysis options และ root folders ออก</li><li>แยก source จาก generated/cache/secret ได้</li><li>ใช้ hot reload/restart/full restart ตรงเหตุ</li><li>เปิดสองโปรเจกต์โดยรู้ startup path ก่อนเข้า Part 1 เรื่อง Widget mental model</li></ul></div></section>
+<header class="hero"><span class="badge">00-12 · Foundation</span><h1>Mini Project: Warehouse Counter App</h1><p>Part 0: Start Here: Setup &amp; First Flutter App</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. หน้าจอที่ต้องการ</a></li><li><a href="#section-2">2. รัน Lab ที่เตรียมไว้</a></li><li><a href="#section-3">3. ทดลองตาม Scenario</a></li><li><a href="#section-4">4. อ่าน Code แค่สามจุด</a></li><li><a href="#section-5">5. Quality Check</a></li><li><a href="#section-6">6. แบบฝึกหัด</a></li><li><a href="#section-7">7. Definition of Done</a></li><li><a href="#section-8">8. สรุปและบทถัดไป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: Beginner</span><span>Mini Project แรก</span><span>ผลลัพธ์: Warehouse Counter</span></div>
+<div class="note"><strong>ประกอบสิ่งที่เรียน:</strong> รันแอป แก้ UI ใช้ Hot Reload, Analyzer, Debuggerและ Git โดยยังไม่ต้องเข้าใจ syntaxทุกบรรทัด Dart Foundationจะย้อนมาอธิบายทีละส่วน</div>
+<section id="section-1"><h2>1. หน้าจอที่ต้องการ</h2><p>แสดงชื่อ “Warehouse Counter”, จำนวนสินค้าที่นับได้ และปุ่มเพิ่ม/ล้าง เป้าหมายคือเห็น input → ค่าเปลี่ยน → UIเปลี่ยน</p></section>
+<section id="section-2"><h2>2. รัน Lab ที่เตรียมไว้</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion<br>flutter run -t lib/beginner_main.dart</code></pre><p>หากมีหลาย deviceให้เติม <code>-d &lt;device-id&gt;</code></p></section>
+<section id="section-3"><h2>3. ทดลองตาม Scenario</h2><ol><li>กด “เพิ่มสินค้า” สามครั้ง ต้องเห็น 3</li><li>กด “ล้างจำนวน” ต้องกลับ 0</li><li>แก้ชื่อคลังใน codeแล้ว Hot Reload</li><li>วาง breakpointตอนเพิ่มและดูค่า count</li></ol></section>
+<section id="section-4"><h2>4. อ่าน Code แค่สามจุด</h2><pre class="code-vs"><code>int count = 0;                     // ค่าปัจจุบัน<br>setState(() =&gt; count++);           // เปลี่ยนค่า<br>Text('$count รายการ');             // แสดงค่า</code></pre><p>ยังไม่ต้องจำ class/override/build เราจะอธิบาย variableและ functionใน Dart Foundation แล้วกลับมาอ่าน codeนี้ใหม่</p></section>
+<section id="section-5"><h2>5. Quality Check</h2><pre class="code-vs"><code>dart format lib test<br>flutter analyze --no-pub<br>flutter test --no-pub</code></pre><p>Labมี widget testตรวจการเพิ่มและล้างจำนวน ทำให้การแก้ครั้งต่อไปมี safety net</p></section>
+<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>เพิ่มปุ่ม “เพิ่ม 5” โดยเลียนแบบปุ่มเพิ่มหนึ่ง แล้วเพิ่ม testว่าจาก 0กลายเป็น 5</p><details class="answer"><summary>แนวคำตอบ</summary><pre class="code-vs"><code>onPressed: () =&gt; setState(() =&gt; count += 5)</code></pre><p>ใน testให้ tapปุ่มแล้ว <code>pump</code> ก่อนตรวจข้อความ <code>5 รายการ</code></p></details></section>
+<section id="section-7"><h2>7. Definition of Done</h2><ul><li>รันบน deviceของตัวเองได้</li><li>เพิ่มและล้างจำนวนได้</li><li>format/analyze/testผ่าน</li><li>commitเฉพาะไฟล์ที่ตั้งใจแก้</li><li>อธิบายได้ว่า inputใดทำให้ตัวเลขเปลี่ยน</li></ul></section>
+<section id="section-8"><h2>8. สรุปและบทถัดไป</h2><div class="success">คุณมี Flutter appแรกที่รันและทดสอบได้แล้ว ต่อไป Dart Foundationจะสอนว่า <code>int</code>, function, classและ asyncคืออะไรจากตัวอย่างเล็ก ก่อนกลับมาสร้าง UIที่ซับซ้อนขึ้น</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

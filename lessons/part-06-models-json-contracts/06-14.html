@@ -4,15 +4,16 @@
 <title>Lab: Model ชุด Inbound + Task</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-14 · Flutter + .NET</span><h1>Lab: Model ชุด Inbound + Task</h1><p>Part 6: Models, JSON &amp; API Contracts</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance</a></li><li><a href="#section-2">2. Wire shape</a></li><li><a href="#section-3">3. Dart DTO</a></li><li><a href="#section-4">4. Domain map</a></li><li><a href="#section-5">5. Inbound nesting</a></li><li><a href="#section-6">6. .NET side</a></li><li><a href="#section-7">7. Tests</a></li><li><a href="#section-8">8. Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> ออกแบบ InboundOrder/Detail และ Task page contract ตั้งแต่ .NET DTO → JSON fixture → Dart DTO → domain model พร้อม failure tests</div>
-<section><h2>1. Acceptance</h2><ul><li>typed request/responseแยกกัน</li><li>required/nullableชัด</li><li>number/date/status convertersกลาง</li><li>grid envelopeถูกต้อง</li><li>unknown statusปลอดภัย</li><li>fixturesทั้งดีและเสีย</li></ul></section>
-<section><h2>2. Wire shape</h2><pre class="code-vs"><code>{"items":[{"id":"T-1","qty":5.0,"status":"PENDING",
-"createdAt":"2026-08-15T03:00:00Z"}],"totalCount":1}</code></pre></section><section><h2>3. Dart DTO</h2><pre class="code-vs"><code>class TaskDto {
+<section id="section-1"><h2>1. Acceptance</h2><ul><li>typed request/responseแยกกัน</li><li>required/nullableชัด</li><li>number/date/status convertersกลาง</li><li>grid envelopeถูกต้อง</li><li>unknown statusปลอดภัย</li><li>fixturesทั้งดีและเสีย</li></ul></section>
+<section id="section-2"><h2>2. Wire shape</h2><pre class="code-vs"><code>{"items":[{"id":"T-1","qty":5.0,"status":"PENDING",
+"createdAt":"2026-08-15T03:00:00Z"}],"totalCount":1}</code></pre></section><section id="section-3"><h2>3. Dart DTO</h2><pre class="code-vs"><code>class TaskDto {
   TaskDto({required this.id, required this.qty, required this.status});
   factory TaskDto.fromJson(Map&lt;String,dynamic&gt; j) =&gt; TaskDto(
     id: requireString(j,'id'), qty: requireDouble(j,'qty'),
     status: requireString(j,'status'));
   final String id; final double qty; final String status;
-}</code></pre></section><section><h2>4. Domain map</h2><p>Validate id/qty, parse enum/time UTCและคืน immutable Task ไม่ส่ง raw statusเข้า UI</p></section><section><h2>5. Inbound nesting</h2><p>Orderมี details list; error pathต้องระบุ <code>items[0].details[2].productCode</code></p></section><section><h2>6. .NET side</h2><p>ใช้ nullable reference types, DateTimeOffset, decimal/doubleตามหน่วย, camelCase JSONและ DTO validation</p></section><section><h2>7. Tests</h2><p>ทดสอบ happy, empty, Pascal fallback, qty int/string, null optional, missing id, invalid date, unknown status, request toJsonและ totalCount</p></section><section><h2>8. Exit Test</h2><div class="success"><ul><li>แยก DTO/domain/UIได้</li><li>parse dynamicอย่างปลอดภัยได้</li><li>ออกแบบ null/time/casing/status/pagingได้</li><li>จับ contract driftด้วย fixturesได้</li></ul></div></section>
+}</code></pre></section><section id="section-4"><h2>4. Domain map</h2><p>Validate id/qty, parse enum/time UTCและคืน immutable Task ไม่ส่ง raw statusเข้า UI</p></section><section id="section-5"><h2>5. Inbound nesting</h2><p>Orderมี details list; error pathต้องระบุ <code>items[0].details[2].productCode</code></p></section><section id="section-6"><h2>6. .NET side</h2><p>ใช้ nullable reference types, DateTimeOffset, decimal/doubleตามหน่วย, camelCase JSONและ DTO validation</p></section><section id="section-7"><h2>7. Tests</h2><p>ทดสอบ happy, empty, Pascal fallback, qty int/string, null optional, missing id, invalid date, unknown status, request toJsonและ totalCount</p></section><section id="section-8"><h2>8. Exit Test</h2><div class="success"><ul><li>แยก DTO/domain/UIได้</li><li>parse dynamicอย่างปลอดภัยได้</li><li>ออกแบบ null/time/casing/status/pagingได้</li><li>จับ contract driftด้วย fixturesได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

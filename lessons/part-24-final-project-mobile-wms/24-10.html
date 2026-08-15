@@ -4,16 +4,17 @@
 <title>Receiving flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-10 · Project Lab</span><h1>Receiving flow</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State machine</a></li><li><a href="#section-2">2. Contracts</a></li><li><a href="#section-3">3. Scan normalization</a></li><li><a href="#section-4">4. Quantity/serial invariants</a></li><li><a href="#section-5">5. Async session guard</a></li><li><a href="#section-6">6. Success effects</a></li><li><a href="#section-7">7. Error UX</a></li><li><a href="#section-8">8. Flow tests</a></li></ol></nav>
 <div class="note"><strong>Receiving slice:</strong> สร้าง workflow scan order/part → validate pallet → quantity/serial → confirm โดย serverเป็น authorityและ UI resume/retryได้</div>
-<section><h2>1. State machine</h2><pre class="code-vs"><code>select order → select/scan line → scan pallet
+<section id="section-1"><h2>1. State machine</h2><pre class="code-vs"><code>select order → select/scan line → scan pallet
 → enter qty/serials → review → submit
 → success/history หรือ failureคง input</code></pre><p>เขียน transitions/guardsก่อน widgetsและแยก instructionจาก evidence scan</p></section>
-<section><h2>2. Contracts</h2><p>GET open orders/details, POST validate palletและ POST receiveที่รับ lineId, pallet, qty, serials, idempotency key/version Responseคืน receipt/remaining/status ไม่ให้ clientคำนวณ stockใหม่เอง</p></section>
-<section><h2>3. Scan normalization</h2><p>trim/caseตาม barcode policy, exact matchเมื่อมี expected, debounce duplicate scanและ focusกลับช่องถัดไป Mismatchไม่ล้างค่าทั้ง sessionและบอก expected/actionชัด</p></section>
-<section><h2>4. Quantity/serial invariants</h2><p>qtyมากกว่า 0ไม่เกิน remaining, serial count/uniquenessตรง qtyเมื่อ serial-controlled Backendตรวจซ้ำภายใต้ transactionเพราะ snapshotอาจ stale</p></section>
-<section><h2>5. Async session guard</h2><p>เปลี่ยน order/lineหรือออกหน้าเพิ่ม receiving generation Response validate/lookupเก่าห้ามเปิด sessionเดิมกลับ Submit disableต่อ sessionและ timeoutเป็น outcome unknownที่ต้อง query receiptก่อน retry</p></section>
-<section><h2>6. Success effects</h2><p>clearเฉพาะ committed inputs, refresh line/order, invalidate dashboard/inventory, แสดง receipt referenceและ audit user อย่า navigateออกก่อน store commit snapshotครบ</p></section>
-<section><h2>7. Error UX</h2><p>validation conflictคง scansให้แก้, unauthorizedออก session, networkให้ retry, palletถูกใช้/lineปิด reload current truthและ parse errorมี support reference ไม่โชว์ raw exception</p></section>
-<section><h2>8. Flow tests</h2><div class="success">scanผิด/ซ้ำ, qty/serial invalid, pallet validation race, duplicate submit, timeout-after-commit, lineถูกปิดจากอีกเครื่อง, logoutระหว่าง submitและ viewport/focusด้วย fake repositoryและ integration endpoint</div></section>
+<section id="section-2"><h2>2. Contracts</h2><p>GET open orders/details, POST validate palletและ POST receiveที่รับ lineId, pallet, qty, serials, idempotency key/version Responseคืน receipt/remaining/status ไม่ให้ clientคำนวณ stockใหม่เอง</p></section>
+<section id="section-3"><h2>3. Scan normalization</h2><p>trim/caseตาม barcode policy, exact matchเมื่อมี expected, debounce duplicate scanและ focusกลับช่องถัดไป Mismatchไม่ล้างค่าทั้ง sessionและบอก expected/actionชัด</p></section>
+<section id="section-4"><h2>4. Quantity/serial invariants</h2><p>qtyมากกว่า 0ไม่เกิน remaining, serial count/uniquenessตรง qtyเมื่อ serial-controlled Backendตรวจซ้ำภายใต้ transactionเพราะ snapshotอาจ stale</p></section>
+<section id="section-5"><h2>5. Async session guard</h2><p>เปลี่ยน order/lineหรือออกหน้าเพิ่ม receiving generation Response validate/lookupเก่าห้ามเปิด sessionเดิมกลับ Submit disableต่อ sessionและ timeoutเป็น outcome unknownที่ต้อง query receiptก่อน retry</p></section>
+<section id="section-6"><h2>6. Success effects</h2><p>clearเฉพาะ committed inputs, refresh line/order, invalidate dashboard/inventory, แสดง receipt referenceและ audit user อย่า navigateออกก่อน store commit snapshotครบ</p></section>
+<section id="section-7"><h2>7. Error UX</h2><p>validation conflictคง scansให้แก้, unauthorizedออก session, networkให้ retry, palletถูกใช้/lineปิด reload current truthและ parse errorมี support reference ไม่โชว์ raw exception</p></section>
+<section id="section-8"><h2>8. Flow tests</h2><div class="success">scanผิด/ซ้ำ, qty/serial invalid, pallet validation race, duplicate submit, timeout-after-commit, lineถูกปิดจากอีกเครื่อง, logoutระหว่าง submitและ viewport/focusด้วย fake repositoryและ integration endpoint</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,20 +4,21 @@
 <title>ทดสอบ JSON contract</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-05 · Testing</span><h1>ทดสอบ JSON contract</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Happy-path fixture</a></li><li><a href="#section-2">2. Missing, null และ wrong type</a></li><li><a href="#section-3">3. Unknown fields</a></li><li><a href="#section-4">4. Enum/status</a></li><li><a href="#section-5">5. Date/time</a></li><li><a href="#section-6">6. Round-trip ไม่พอ</a></li><li><a href="#section-7">7. Contract drift</a></li><li><a href="#section-8">8. Security cases</a></li></ol></nav>
 <div class="note"><strong>JSON test คือ executable contract:</strong> fixture ต้องสะท้อน payload .NET จริงทั้ง happy path และข้อมูลสกปรก ไม่ใช่สร้างเฉพาะ object ที่ parser รับได้แน่นอน</div>
-<section><h2>1. Happy-path fixture</h2><pre class="code-vs"><code>test('parses receiving line from API contract', () {
+<section id="section-1"><h2>1. Happy-path fixture</h2><pre class="code-vs"><code>test('parses receiving line from API contract', () {
   final json = fixture('receiving_line.json');
   final line = ReceivingLine.fromJson(jsonDecode(json));
   expect(line.partCode, 'P-001');
   expect(line.qty, 5);
 });</code></pre></section>
-<section><h2>2. Missing, null และ wrong type</h2><p>ทดสอบ required field หาย, nullable field เป็น null, number มาเป็น int/double/string ตาม contract จริง และ list/object ผิดชนิด Parser ต้อง fail แบบมี path หรือใช้ fallback ที่ตัดสินใจแล้ว ไม่ cast จน error คลุมเครือ</p></section>
-<section><h2>3. Unknown fields</h2><p>โดยทั่วไป client ควร ignore field ใหม่เพื่อ forward compatibility แต่ field สำคัญที่ rename/hide ต้องทำ contract versioning Test payload ที่มี extra field เพื่อกัน parser เข้มเกินเหตุ</p></section>
-<section><h2>4. Enum/status</h2><pre class="code-vs"><code>expect(TaskStatusCodec.parse('OPEN'), TaskStatus.open);
+<section id="section-2"><h2>2. Missing, null และ wrong type</h2><p>ทดสอบ required field หาย, nullable field เป็น null, number มาเป็น int/double/string ตาม contract จริง และ list/object ผิดชนิด Parser ต้อง fail แบบมี path หรือใช้ fallback ที่ตัดสินใจแล้ว ไม่ cast จน error คลุมเครือ</p></section>
+<section id="section-3"><h2>3. Unknown fields</h2><p>โดยทั่วไป client ควร ignore field ใหม่เพื่อ forward compatibility แต่ field สำคัญที่ rename/hide ต้องทำ contract versioning Test payload ที่มี extra field เพื่อกัน parser เข้มเกินเหตุ</p></section>
+<section id="section-4"><h2>4. Enum/status</h2><pre class="code-vs"><code>expect(TaskStatusCodec.parse('OPEN'), TaskStatus.open);
 expect(TaskStatusCodec.parse('new-server-value'), TaskStatus.unknown);</code></pre><p>unknown status ไม่ควร crash ทั้งรายการ แต่อาจต้อง block action และส่ง telemetry</p></section>
-<section><h2>5. Date/time</h2><p>ทดสอบ UTC <code>Z</code>, offset <code>+07:00</code>, fractional seconds และ invalid date ตกลงว่าชั้น model เก็บ UTC หรือ instant อย่างไร อย่าให้ timezone ของเครื่อง CI เปลี่ยน expected</p></section>
-<section><h2>6. Round-trip ไม่พอ</h2><p><code>fromJson(toJson(object))</code> อาจผ่านแม้ทั้งสองฝั่งสะกด key ผิดเหมือนกัน ต้องมี golden JSON ที่มาจาก OpenAPI/.NET integration response และ assert key outbound แยกต่างหาก</p></section>
-<section><h2>7. Contract drift</h2><p>เก็บ fixture พร้อม schema/version และให้ backend integration test serialize DTO เดียวกัน หรือ generate schema/OpenAPI snapshot ที่ review ได้ เมื่อ payload เปลี่ยน CI ฝั่งใดฝั่งหนึ่งต้องเตือนก่อน deploy</p></section>
-<section><h2>8. Security cases</h2><div class="success">เพิ่ม string ยาวมาก, Unicode/Thai, HTML-like text, null ใน list, duplicate IDs และเลขเกินช่วง การ parse ไม่ควรรัน code หรือเอาข้อความ server ไปเป็น trusted HTML/log โดยไม่กรอง</div></section>
+<section id="section-5"><h2>5. Date/time</h2><p>ทดสอบ UTC <code>Z</code>, offset <code>+07:00</code>, fractional seconds และ invalid date ตกลงว่าชั้น model เก็บ UTC หรือ instant อย่างไร อย่าให้ timezone ของเครื่อง CI เปลี่ยน expected</p></section>
+<section id="section-6"><h2>6. Round-trip ไม่พอ</h2><p><code>fromJson(toJson(object))</code> อาจผ่านแม้ทั้งสองฝั่งสะกด key ผิดเหมือนกัน ต้องมี golden JSON ที่มาจาก OpenAPI/.NET integration response และ assert key outbound แยกต่างหาก</p></section>
+<section id="section-7"><h2>7. Contract drift</h2><p>เก็บ fixture พร้อม schema/version และให้ backend integration test serialize DTO เดียวกัน หรือ generate schema/OpenAPI snapshot ที่ review ได้ เมื่อ payload เปลี่ยน CI ฝั่งใดฝั่งหนึ่งต้องเตือนก่อน deploy</p></section>
+<section id="section-8"><h2>8. Security cases</h2><div class="success">เพิ่ม string ยาวมาก, Unicode/Thai, HTML-like text, null ใน list, duplicate IDs และเลขเกินช่วง การ parse ไม่ควรรัน code หรือเอาข้อความ server ไปเป็น trusted HTML/log โดยไม่กรอง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

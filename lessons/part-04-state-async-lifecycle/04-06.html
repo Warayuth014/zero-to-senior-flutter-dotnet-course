@@ -4,8 +4,9 @@
 <title>ListenableBuilder เลือก rebuild เท่าที่จำเป็น</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-06 · State &amp; Lifecycle</span><h1>ListenableBuilder เลือก rebuild เท่าที่จำเป็น</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Builder พื้นฐาน</a></li><li><a href="#section-2">2. ขอบเขตจากโปรเจกต์จริง</a></li><li><a href="#section-3">3. child optimization</a></li><li><a href="#section-4">4. Rebuild ไม่เท่ากับ repaint</a></li><li><a href="#section-5">5. Selector concept</a></li><li><a href="#section-6">6. Side effect ไม่อยู่ builder</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>ListenableBuilder</code> rebuild builderเมื่อ notifierส่งสัญญาณ ขอบเขต builderควรครอบ consumersที่ต้องอ่าน snapshotเดียวกัน แต่ไม่ครอบ subtreeคงที่หรือ unrelated featureโดยไม่จำเป็น</div>
-<section><h2>1. Builder พื้นฐาน</h2><pre class="code-vs"><code>ListenableBuilder(
+<section id="section-1"><h2>1. Builder พื้นฐาน</h2><pre class="code-vs"><code>ListenableBuilder(
   listenable: store,
   child: const WarehouseLogo(),
   builder: (context, child) =&gt; Column(
@@ -16,12 +17,12 @@
     ],
   ),
 )</code></pre></section>
-<section><h2>2. ขอบเขตจากโปรเจกต์จริง</h2><p>Absolute shellแยก ListenableBuilderของ bodyและ bottom navigationแม้ฟัง storeเดียวกัน ทำ responsibilityชัด แต่ ChangeNotifier notifyยังเรียกทั้งสอง builder หากต้องลดกว่านั้นต้องแยก notifier/sliceหรือ selector ไม่ใช่แค่เพิ่ม nested builder</p></section>
-<section><h2>3. child optimization</h2><p>ส่ง subtreeที่ไม่ขึ้นกับ stateผ่าน childเพื่อสร้าง configurationครั้งเดียว เช่น logo/static frame แต่ถ้า childอ่าน notifierผ่าน global/contextก็ไม่คงจริงและอาจ stale ให้ dependency explicit</p></section>
-<section><h2>4. Rebuild ไม่เท่ากับ repaint</h2><p>Builderทำ buildใหม่แต่ Element/renderอาจ reuse การ optimizeต้อง profile DevToolsก่อน การแตก builderเล็กมากจำนวนมากเพิ่ม complexity ถ้า widgetราคาถูกและ notifyไม่ถี่อาจไม่คุ้ม</p></section>
-<section><h2>5. Selector concept</h2><p>เมื่อ consumerสนเพียง pendingCount ให้ listenค่า sliceที่มี equality เช่น ValueListenable/Selector หรือแยก TaskSummaryNotifier จาก TaskDetailNotifier Snapshotควร immutableเพื่อเทียบได้ ไม่ให้ mutable listเปลี่ยนแต่ referenceเดิม</p></section>
-<section><h2>6. Side effect ไม่อยู่ builder</h2><p>ห้าม showDialog, Navigator, sound หรือ APIใน builderเพราะ notify/buildซ้ำได้ ใช้ listener/effect channelที่ consume eventครั้งเดียว หรือ callbackจาก command owner ส่วน builder render stateเท่านั้น</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Connection dotเปลี่ยนทุก probeแต่ MaterialAppทั้งต้นไม้ rebuild ควรทำอย่างไร?</p><details><summary>เฉลย</summary><p>วาง ListenableBuilderเฉพาะ header dot/connection menuที่อ่าน controller ไม่ครอบ MaterialApp หาก base URL/profileกระทบ dependencyระดับ app ให้แยก config snapshotจาก status heartbeatเพื่อไม่ rebuildกว้างจาก dot</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">การวาง builderต่ำเกินจนแต่ละลูกอ่าน stateคนละช่วง notificationอาจเพิ่ม boilerplateและ snapshotไม่ atomic เลือก boundaryตาม consistencyและcost ไม่ใช่ “เล็กที่สุดเสมอ”</div></section>
+<section id="section-2"><h2>2. ขอบเขตจากโปรเจกต์จริง</h2><p>Absolute shellแยก ListenableBuilderของ bodyและ bottom navigationแม้ฟัง storeเดียวกัน ทำ responsibilityชัด แต่ ChangeNotifier notifyยังเรียกทั้งสอง builder หากต้องลดกว่านั้นต้องแยก notifier/sliceหรือ selector ไม่ใช่แค่เพิ่ม nested builder</p></section>
+<section id="section-3"><h2>3. child optimization</h2><p>ส่ง subtreeที่ไม่ขึ้นกับ stateผ่าน childเพื่อสร้าง configurationครั้งเดียว เช่น logo/static frame แต่ถ้า childอ่าน notifierผ่าน global/contextก็ไม่คงจริงและอาจ stale ให้ dependency explicit</p></section>
+<section id="section-4"><h2>4. Rebuild ไม่เท่ากับ repaint</h2><p>Builderทำ buildใหม่แต่ Element/renderอาจ reuse การ optimizeต้อง profile DevToolsก่อน การแตก builderเล็กมากจำนวนมากเพิ่ม complexity ถ้า widgetราคาถูกและ notifyไม่ถี่อาจไม่คุ้ม</p></section>
+<section id="section-5"><h2>5. Selector concept</h2><p>เมื่อ consumerสนเพียง pendingCount ให้ listenค่า sliceที่มี equality เช่น ValueListenable/Selector หรือแยก TaskSummaryNotifier จาก TaskDetailNotifier Snapshotควร immutableเพื่อเทียบได้ ไม่ให้ mutable listเปลี่ยนแต่ referenceเดิม</p></section>
+<section id="section-6"><h2>6. Side effect ไม่อยู่ builder</h2><p>ห้าม showDialog, Navigator, sound หรือ APIใน builderเพราะ notify/buildซ้ำได้ ใช้ listener/effect channelที่ consume eventครั้งเดียว หรือ callbackจาก command owner ส่วน builder render stateเท่านั้น</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection dotเปลี่ยนทุก probeแต่ MaterialAppทั้งต้นไม้ rebuild ควรทำอย่างไร?</p><details><summary>เฉลย</summary><p>วาง ListenableBuilderเฉพาะ header dot/connection menuที่อ่าน controller ไม่ครอบ MaterialApp หาก base URL/profileกระทบ dependencyระดับ app ให้แยก config snapshotจาก status heartbeatเพื่อไม่ rebuildกว้างจาก dot</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การวาง builderต่ำเกินจนแต่ละลูกอ่าน stateคนละช่วง notificationอาจเพิ่ม boilerplateและ snapshotไม่ atomic เลือก boundaryตาม consistencyและcost ไม่ใช่ “เล็กที่สุดเสมอ”</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

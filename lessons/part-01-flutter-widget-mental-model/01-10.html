@@ -4,18 +4,19 @@
 <title>const widget และ rebuild cost</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-10 · Flutter UI</span><h1>const widget และ rebuild cost</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ใช้เมื่อ argumentคงที่</a></li><li><a href="#section-2">2. ประโยชน์จริง</a></li><li><a href="#section-3">3. สิ่งที่ const ไม่ทำ</a></li><li><a href="#section-4">4. ตัวอย่างจริง</a></li><li><a href="#section-5">5. Rebuild scope สำคัญกว่า constจำนวน</a></li><li><a href="#section-6">6. Measure ก่อน optimize</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>const</code> widget สร้าง configuration คงที่และอาจ reuse instance ทำให้ framework short-circuit subtreeบางส่วนได้ แต่ไม่ใช่กำแพงห้าม parent build และไม่แก้ layout/paint/data workที่แพงโดยอัตโนมัติ</div>
-<section><h2>1. ใช้เมื่อ argumentคงที่</h2><pre class="code-vs"><code>const SizedBox(height: 12)
+<section id="section-1"><h2>1. ใช้เมื่อ argumentคงที่</h2><pre class="code-vs"><code>const SizedBox(height: 12)
 const Icon(Icons.refresh)
 const EdgeInsets.symmetric(horizontal: 16)
 
 Text(task.id) // runtime data จึงไม่ const</code></pre><p>constructorต้องประกาศ constและค่าทุก argumentอยู่ใน constant context</p></section>
-<section><h2>2. ประโยชน์จริง</h2><ul><li>สื่อว่าค่า/โครงนี้ไม่ขึ้นกับ stateปัจจุบัน</li><li>ลดการสร้าง config instanceซ้ำในบางกรณี</li><li>เมื่อ child widget instance identical frameworkอาจข้าม update subtree</li><li>analyzerช่วยแนะนำและจับสิ่งที่ควรคงที่</li></ul></section>
-<section><h2>3. สิ่งที่ const ไม่ทำ</h2><p>ถ้า const child depend on inherited Themeผ่าน buildของตน มันยัง rebuildเมื่อ dependencyเปลี่ยน; render objectยัง layout/paintเมื่อ constraints/propertyต้องเปลี่ยน; listใหญ่/image decode/API callไม่หายเพราะใส่ constรอบ icon</p></section>
-<section><h2>4. ตัวอย่างจริง</h2><p>สองแอปใช้ constกับ Colors, EdgeInsets, SizedBox, icons, delegatesและ WmsApp/Login widgetsที่ configคงที่ ส่วน HomeView Tilesบางส่วนไม่ constเพราะ badge, language text, store callbackและ responsive valuesเป็น runtime</p></section>
-<section><h2>5. Rebuild scope สำคัญกว่า constจำนวน</h2><p>Absolute shellมี ListenableBuilder bodyและ bottom navigationแยกกัน นี่ควบคุม dependency/rebuild scopeเชิงสถาปัตยกรรม ส่วน constเป็น micro optimization/clarityใน subtree อย่าสลับลำดับความสำคัญ</p></section>
-<section><h2>6. Measure ก่อน optimize</h2><p>ใช้ DevToolsดู frame/build profile ระบุ widgetที่ rebuildและงานแพง จากนั้นแยก builder/child, ย้าย state owner, lazy list, ลด parsing/image work แล้วค่อยตรวจ const/repaint boundary</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>const Text('WMS')</code> ยังอาจถูก layoutใหม่เมื่อหมุนจอ?</p><details><summary>เฉลย</summary><p>Widget configเดิมคงที่ แต่ parent constraints/layout treeเปลี่ยน RenderObjectจึงต้อง layoutตามขนาดใหม่ Constเกี่ยวกับ configuration identity ไม่ได้ freeze render geometry</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแตก widget/ใส่ constทุกจุดเพื่อคะแนน lintโดยไม่อ่าน dependency tree เป้าหมายคือ correctnessและขอบเขต rebuildชัด ไม่ใช่จำนวนคำ constสูงสุด</div></section>
+<section id="section-2"><h2>2. ประโยชน์จริง</h2><ul><li>สื่อว่าค่า/โครงนี้ไม่ขึ้นกับ stateปัจจุบัน</li><li>ลดการสร้าง config instanceซ้ำในบางกรณี</li><li>เมื่อ child widget instance identical frameworkอาจข้าม update subtree</li><li>analyzerช่วยแนะนำและจับสิ่งที่ควรคงที่</li></ul></section>
+<section id="section-3"><h2>3. สิ่งที่ const ไม่ทำ</h2><p>ถ้า const child depend on inherited Themeผ่าน buildของตน มันยัง rebuildเมื่อ dependencyเปลี่ยน; render objectยัง layout/paintเมื่อ constraints/propertyต้องเปลี่ยน; listใหญ่/image decode/API callไม่หายเพราะใส่ constรอบ icon</p></section>
+<section id="section-4"><h2>4. ตัวอย่างจริง</h2><p>สองแอปใช้ constกับ Colors, EdgeInsets, SizedBox, icons, delegatesและ WmsApp/Login widgetsที่ configคงที่ ส่วน HomeView Tilesบางส่วนไม่ constเพราะ badge, language text, store callbackและ responsive valuesเป็น runtime</p></section>
+<section id="section-5"><h2>5. Rebuild scope สำคัญกว่า constจำนวน</h2><p>Absolute shellมี ListenableBuilder bodyและ bottom navigationแยกกัน นี่ควบคุม dependency/rebuild scopeเชิงสถาปัตยกรรม ส่วน constเป็น micro optimization/clarityใน subtree อย่าสลับลำดับความสำคัญ</p></section>
+<section id="section-6"><h2>6. Measure ก่อน optimize</h2><p>ใช้ DevToolsดู frame/build profile ระบุ widgetที่ rebuildและงานแพง จากนั้นแยก builder/child, ย้าย state owner, lazy list, ลด parsing/image work แล้วค่อยตรวจ const/repaint boundary</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>const Text('WMS')</code> ยังอาจถูก layoutใหม่เมื่อหมุนจอ?</p><details><summary>เฉลย</summary><p>Widget configเดิมคงที่ แต่ parent constraints/layout treeเปลี่ยน RenderObjectจึงต้อง layoutตามขนาดใหม่ Constเกี่ยวกับ configuration identity ไม่ได้ freeze render geometry</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแตก widget/ใส่ constทุกจุดเพื่อคะแนน lintโดยไม่อ่าน dependency tree เป้าหมายคือ correctnessและขอบเขต rebuildชัด ไม่ใช่จำนวนคำ constสูงสุด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

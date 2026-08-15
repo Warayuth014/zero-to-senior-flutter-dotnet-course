@@ -4,20 +4,21 @@
 <title>Padding, Align, Center และ SizedBox</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-04 · Flutter UI</span><h1>Padding, Align, Center และ SizedBox</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Padding หักพื้นที่ก่อนส่งให้ลูก</a></li><li><a href="#section-2">2. Center คือ Align กลางแบบย่อ</a></li><li><a href="#section-3">3. SizedBox มีสามบทบาท</a></li><li><a href="#section-4">4. ConstrainedBox และข้อจำกัดที่ซ้อนกัน</a></li><li><a href="#section-5">5. FractionallySizedBox, AspectRatio, FittedBox</a></li><li><a href="#section-6">6. Spacing tokens ใน PDA</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Padding, Align, Center และ SizedBox เปลี่ยน constraints หรือการวางตำแหน่งคนละแบบ การอ่าน wrapper chain ทีละชั้นช่วยให้รู้ว่า spacing มาจากไหนและเหตุใด child จึงไม่เต็มพื้นที่</div>
-<section><h2>1. Padding หักพื้นที่ก่อนส่งให้ลูก</h2><pre class="code-vs"><code>Padding(
+<section id="section-1"><h2>1. Padding หักพื้นที่ก่อนส่งให้ลูก</h2><pre class="code-vs"><code>Padding(
   padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
   child: ScanPanel(),
 )</code></pre><p>ถ้า parent กว้าง 360 และ padding ซ้ายขวา 12 ลูกได้รับ maxWidth 336 จากนั้น Padding บวก inset กลับตอนรายงาน size การซ้อน Padding หลายชั้นจึงสะสมจริงและทำ PDA แคบเร็วกว่าที่คิด</p></section>
-<section><h2>2. Center คือ Align กลางแบบย่อ</h2><p>เมื่อมี bounded area, Align/Center สามารถกินพื้นที่ที่ parent อนุญาตแล้ววาง child ตาม alignment; หากแกนหนึ่ง unbounded มันหดตาม child ในแกนนั้น ใช้ <code>widthFactor/heightFactor</code> เมื่อต้องการให้ขนาดเป็นเท่าของ child แต่ระวังผลกับ constraint chain</p></section>
-<section><h2>3. SizedBox มีสามบทบาท</h2><ul><li>กำหนด tight width/height: ช่อง icon 48×48</li><li>สร้าง gap ที่มีความหมายคงที่</li><li><code>SizedBox.expand</code> ขอใช้ constraint สูงสุด</li></ul><p><code>SizedBox.shrink</code> ขอ 0 แต่ parent tight อาจยังบังคับใหญ่กว่า 0 ได้</p></section>
-<section><h2>4. ConstrainedBox และข้อจำกัดที่ซ้อนกัน</h2><pre class="code-vs"><code>ConstrainedBox(
+<section id="section-2"><h2>2. Center คือ Align กลางแบบย่อ</h2><p>เมื่อมี bounded area, Align/Center สามารถกินพื้นที่ที่ parent อนุญาตแล้ววาง child ตาม alignment; หากแกนหนึ่ง unbounded มันหดตาม child ในแกนนั้น ใช้ <code>widthFactor/heightFactor</code> เมื่อต้องการให้ขนาดเป็นเท่าของ child แต่ระวังผลกับ constraint chain</p></section>
+<section id="section-3"><h2>3. SizedBox มีสามบทบาท</h2><ul><li>กำหนด tight width/height: ช่อง icon 48×48</li><li>สร้าง gap ที่มีความหมายคงที่</li><li><code>SizedBox.expand</code> ขอใช้ constraint สูงสุด</li></ul><p><code>SizedBox.shrink</code> ขอ 0 แต่ parent tight อาจยังบังคับใหญ่กว่า 0 ได้</p></section>
+<section id="section-4"><h2>4. ConstrainedBox และข้อจำกัดที่ซ้อนกัน</h2><pre class="code-vs"><code>ConstrainedBox(
   constraints: const BoxConstraints(maxWidth: 560),
   child: LoginForm(),
 )</code></pre><p>ข้อจำกัดใหม่ถูก intersect กับของ parent ไม่ได้ override แบบ CSS ตัวอย่าง Login ของ Absolute ใช้ Center + ConstrainedBox ทำให้ฟอร์มไม่กว้างเกินบน tablet แต่ยังหดได้บน PDA</p></section>
-<section><h2>5. FractionallySizedBox, AspectRatio, FittedBox</h2><p>ใช้ FractionallySizedBox เมื่อขนาดเป็นสัดส่วนของพื้นที่ parent, AspectRatio เมื่ออัตราส่วนมีความหมาย เช่นภาพ/กล้อง, FittedBox เมื่อย่อ/ขยาย child ที่มีขนาดของตัวเอง เช่นตัวเลขใหญ่ในช่องจำกัด อย่าใช้ FittedBox ครอบ form หรือข้อความยาวทั้งหน้าเพราะ touch target/text scale จะผิดความหมาย</p></section>
-<section><h2>6. Spacing tokens ใน PDA</h2><p>รวมค่า radius, inset, control height และ gap ที่ใช้ซ้ำเป็น token เช่น <code>PdaMetrics</code> ทำให้ density สม่ำเสมอ แต่ breakpoint อาจเลือก token ชุด compact ได้ Absolute ใช้ inset 10/12 และ gap 8/10 ตาม maxHeight แทนลดทุกอย่างแบบสุ่ม</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ต้องการหน้าล็อกอินอยู่กลางจอ กว้างไม่เกิน 480 แต่เมื่อ keyboard ขึ้นต้องเลื่อนได้ จัด wrapper order อย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>SafeArea(
+<section id="section-5"><h2>5. FractionallySizedBox, AspectRatio, FittedBox</h2><p>ใช้ FractionallySizedBox เมื่อขนาดเป็นสัดส่วนของพื้นที่ parent, AspectRatio เมื่ออัตราส่วนมีความหมาย เช่นภาพ/กล้อง, FittedBox เมื่อย่อ/ขยาย child ที่มีขนาดของตัวเอง เช่นตัวเลขใหญ่ในช่องจำกัด อย่าใช้ FittedBox ครอบ form หรือข้อความยาวทั้งหน้าเพราะ touch target/text scale จะผิดความหมาย</p></section>
+<section id="section-6"><h2>6. Spacing tokens ใน PDA</h2><p>รวมค่า radius, inset, control height และ gap ที่ใช้ซ้ำเป็น token เช่น <code>PdaMetrics</code> ทำให้ density สม่ำเสมอ แต่ breakpoint อาจเลือก token ชุด compact ได้ Absolute ใช้ inset 10/12 และ gap 8/10 ตาม maxHeight แทนลดทุกอย่างแบบสุ่ม</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ต้องการหน้าล็อกอินอยู่กลางจอ กว้างไม่เกิน 480 แต่เมื่อ keyboard ขึ้นต้องเลื่อนได้ จัด wrapper order อย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>SafeArea(
   child: LayoutBuilder(builder: (_, c) =&gt;
     SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -31,6 +32,6 @@
     ),
   ),
 )</code></pre></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">เลข magic ที่คำนวณ <code>screenHeight - appBar - statusBar - keyboard - 37</code> เปราะต่อ platform และ text scale ให้พึ่ง constraints, SafeArea, Scaffold resize และ viewInsets ตามหน้าที่ก่อนคำนวณเอง</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">เลข magic ที่คำนวณ <code>screenHeight - appBar - statusBar - keyboard - 37</code> เปราะต่อ platform และ text scale ให้พึ่ง constraints, SafeArea, Scaffold resize และ viewInsets ตามหน้าที่ก่อนคำนวณเอง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

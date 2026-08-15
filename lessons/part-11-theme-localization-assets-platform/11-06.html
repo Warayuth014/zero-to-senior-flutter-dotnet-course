@@ -4,9 +4,10 @@
 <title>Locale และ Material delegates</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-06 · Flutter UI</span><h1>Locale และ Material delegates</h1><p>Part 11: Theme, Localization, Assets &amp; Platform UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Locale identity</a></li><li><a href="#section-2">2. Wiring</a></li><li><a href="#section-3">3. System vs explicit</a></li><li><a href="#section-4">4. Context timing</a></li><li><a href="#section-5">5. Directionality</a></li><li><a href="#section-6">6. Backend values</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Locale เป็น dataของแอป:</strong> MaterialAppรับ Locale, delegatesและ supported localesร่วมกัน ภาษาเปลี่ยนต้อง rebuildเหนือ Navigatorเพื่อให้ทุก routeเห็นค่าใหม่</div>
-<section><h2>1. Locale identity</h2><p><code>Locale('th')</code> กว้างกว่า <code>Locale('th','TH')</code> เลือกระดับที่ resourcesรองรับจริงและ normalize preferenceเป็น language code stable</p></section>
-<section><h2>2. Wiring</h2><pre class="code-vs"><code>ListenableBuilder(
+<section id="section-1"><h2>1. Locale identity</h2><p><code>Locale('th')</code> กว้างกว่า <code>Locale('th','TH')</code> เลือกระดับที่ resourcesรองรับจริงและ normalize preferenceเป็น language code stable</p></section>
+<section id="section-2"><h2>2. Wiring</h2><pre class="code-vs"><code>ListenableBuilder(
   listenable: languageController,
   builder: (_, __) =&gt; MaterialApp(
     locale: languageController.locale,
@@ -14,11 +15,11 @@
     localizationsDelegates: appDelegates,
   ),
 );</code></pre></section>
-<section><h2>3. System vs explicit</h2><p>ใช้ <code>Locale?</code> nullเพื่อ follow systemหรือ explicit user choiceและ persist mode/code หาก productต้องมี “ตามเครื่อง” อย่าเก็บเพียง th/enจนแยกไม่ได้</p></section>
-<section><h2>4. Context timing</h2><p><code>Localizations.localeOf(context)</code> ต้องใช้ contextใต้ MaterialApp ไม่อ่านใน mainก่อน delegatesพร้อม สำหรับ formatterสร้างตาม localeปัจจุบันไม่ cacheตลอด process</p></section>
-<section><h2>5. Directionality</h2><p>en/thเป็น LTRแต่ architectureควรใช้ EdgeInsetsDirectional/AlignmentDirectionalเมื่อรองรับ RTLในอนาคต ไม่ hardcode left/rightโดยไม่จำเป็น</p></section>
-<section><h2>6. Backend values</h2><p>แยก UI labelsที่ translateได้จาก codes/namesที่ serverเป็นเจ้าของ เช่น location codeต้อง verbatim ส่วน typed status mapเป็น localized labelได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนภาษาใน dialogแล้ว dialogเดิมไม่เปลี่ยนเพราะอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตรวจว่า MaterialApp rebuildจาก controllerและ dialog builderอ่าน localizationใน context ไม่จับ translated stringก่อนเปิดหรืออยู่นอก listener</p></details></section>
-<section><h2>8. Tests</h2><div class="success">explicit/system/fallback, runtime toggleบน nested routes/dialogs, persistenceและ formatterไม่ใช้ localeเก่า</div></section>
+<section id="section-3"><h2>3. System vs explicit</h2><p>ใช้ <code>Locale?</code> nullเพื่อ follow systemหรือ explicit user choiceและ persist mode/code หาก productต้องมี “ตามเครื่อง” อย่าเก็บเพียง th/enจนแยกไม่ได้</p></section>
+<section id="section-4"><h2>4. Context timing</h2><p><code>Localizations.localeOf(context)</code> ต้องใช้ contextใต้ MaterialApp ไม่อ่านใน mainก่อน delegatesพร้อม สำหรับ formatterสร้างตาม localeปัจจุบันไม่ cacheตลอด process</p></section>
+<section id="section-5"><h2>5. Directionality</h2><p>en/thเป็น LTRแต่ architectureควรใช้ EdgeInsetsDirectional/AlignmentDirectionalเมื่อรองรับ RTLในอนาคต ไม่ hardcode left/rightโดยไม่จำเป็น</p></section>
+<section id="section-6"><h2>6. Backend values</h2><p>แยก UI labelsที่ translateได้จาก codes/namesที่ serverเป็นเจ้าของ เช่น location codeต้อง verbatim ส่วน typed status mapเป็น localized labelได้</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนภาษาใน dialogแล้ว dialogเดิมไม่เปลี่ยนเพราะอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตรวจว่า MaterialApp rebuildจาก controllerและ dialog builderอ่าน localizationใน context ไม่จับ translated stringก่อนเปิดหรืออยู่นอก listener</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">explicit/system/fallback, runtime toggleบน nested routes/dialogs, persistenceและ formatterไม่ใช้ localeเก่า</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

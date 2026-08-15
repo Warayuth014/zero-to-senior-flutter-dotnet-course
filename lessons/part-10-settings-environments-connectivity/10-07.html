@@ -4,14 +4,15 @@
 <title>Validate URL ก่อนบันทึก</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-07 · Flutter + .NET</span><h1>Validate URL ก่อนบันทึก</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Raw form validation</a></li><li><a href="#section-2">2. Host rules</a></li><li><a href="#section-3">3. Port/path rules</a></li><li><a href="#section-4">4. Save vs Test</a></li><li><a href="#section-5">5. TLS</a></li><li><a href="#section-6">6. Duplicate names</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test table</a></li></ol></nav>
 <div class="note"><strong>Validate สองระดับ:</strong> syntaxก่อนบันทึกและ connectivity/identityด้วย probe การ probeไม่แทน validationและ server offlineไม่จำเป็นต้องห้าม saveเสมอไป</div>
-<section><h2>1. Raw form validation</h2><p>validate name, host, port text, protocolและ base pathก่อนสร้าง model เพราะ portยังอาจเป็น stringที่ parseไม่ได้ จึงแยก <code>ConnectionValidation</code> จาก Profile</p></section>
-<section><h2>2. Host rules</h2><ul><li>ไม่ว่าง/ไม่มี whitespace</li><li>ถ้า formแยก fieldห้ามมี scheme/path/port</li><li>รองรับ IP/DNSตาม product</li><li>reject credentials <code>user@host</code>, queryและfragment</li></ul></section>
-<section><h2>3. Port/path rules</h2><p>port 1–65535; base pathว่างหรือขึ้นต้น slashหลัง normalizeและห้าม <code>..</code>, query, fragmentหรือ API prefixที่ appเติมเอง</p></section>
-<section><h2>4. Save vs Test</h2><p>ปุ่ม Testใช้ draft URLโดยไม่เปลี่ยน active/persist ส่วน Saveอาจยอม offline profileพร้อม warningตาม operational need; Save & Useต้อง confirmหาก probeไม่ผ่าน</p></section>
-<section><h2>5. TLS</h2><p>HTTPS URL syntaxถูกไม่ได้แปล certificate trusted Probeต้องรายงาน TLS/certificateต่างจาก unreachable อย่าเพิ่ม global bypass certificateเพื่อให้ผ่าน</p></section>
-<section><h2>6. Duplicate names</h2><p>case-insensitive trim compareและเสนอ overwrite/save-copy/cancelโดยรักษา ID semantics ห้าม replace profileผิดตัวด้วย name collisionเงียบ ๆ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ใส่ host <code>http://10.0.0.5:5000/api</code> ในช่อง host ควร auto-splitไหม?</p><details><summary>แนวคำตอบ</summary><p>สำหรับ formแยก fieldควรแจ้ง actionable errorหรือนำเข้าอย่าง explicitพร้อม preview ไม่แก้เงียบจน base path/API prefixผิด</p></details></section>
-<section><h2>8. Test table</h2><div class="success">empty, schemeปน, slash/space, IPv4/DNS/IPv6, portขอบเขต, base path traversal, duplicate nameและ offline-but-save policy</div></section>
+<section id="section-1"><h2>1. Raw form validation</h2><p>validate name, host, port text, protocolและ base pathก่อนสร้าง model เพราะ portยังอาจเป็น stringที่ parseไม่ได้ จึงแยก <code>ConnectionValidation</code> จาก Profile</p></section>
+<section id="section-2"><h2>2. Host rules</h2><ul><li>ไม่ว่าง/ไม่มี whitespace</li><li>ถ้า formแยก fieldห้ามมี scheme/path/port</li><li>รองรับ IP/DNSตาม product</li><li>reject credentials <code>user@host</code>, queryและfragment</li></ul></section>
+<section id="section-3"><h2>3. Port/path rules</h2><p>port 1–65535; base pathว่างหรือขึ้นต้น slashหลัง normalizeและห้าม <code>..</code>, query, fragmentหรือ API prefixที่ appเติมเอง</p></section>
+<section id="section-4"><h2>4. Save vs Test</h2><p>ปุ่ม Testใช้ draft URLโดยไม่เปลี่ยน active/persist ส่วน Saveอาจยอม offline profileพร้อม warningตาม operational need; Save & Useต้อง confirmหาก probeไม่ผ่าน</p></section>
+<section id="section-5"><h2>5. TLS</h2><p>HTTPS URL syntaxถูกไม่ได้แปล certificate trusted Probeต้องรายงาน TLS/certificateต่างจาก unreachable อย่าเพิ่ม global bypass certificateเพื่อให้ผ่าน</p></section>
+<section id="section-6"><h2>6. Duplicate names</h2><p>case-insensitive trim compareและเสนอ overwrite/save-copy/cancelโดยรักษา ID semantics ห้าม replace profileผิดตัวด้วย name collisionเงียบ ๆ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ใส่ host <code>http://10.0.0.5:5000/api</code> ในช่อง host ควร auto-splitไหม?</p><details><summary>แนวคำตอบ</summary><p>สำหรับ formแยก fieldควรแจ้ง actionable errorหรือนำเข้าอย่าง explicitพร้อม preview ไม่แก้เงียบจน base path/API prefixผิด</p></details></section>
+<section id="section-8"><h2>8. Test table</h2><div class="success">empty, schemeปน, slash/space, IPv4/DNS/IPv6, portขอบเขต, base path traversal, duplicate nameและ offline-but-save policy</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

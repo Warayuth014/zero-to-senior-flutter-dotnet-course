@@ -4,24 +4,25 @@
 <title>ApiService เป็น data source</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-03 · Architecture</span><h1>ApiService เป็น data source</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Transport responsibilities</a></li><li><a href="#section-2">2. ไม่ควรทำ</a></li><li><a href="#section-3">3. Generic core</a></li><li><a href="#section-4">4. Feature data source</a></li><li><a href="#section-5">5. ของจริง</a></li><li><a href="#section-6">6. Singleton trade-off</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Contract</a></li></ol></nav>
 <div class="note"><strong>ApiService เป็น data source:</strong> รู้ HTTP mechanics และ wire format แต่ไม่ควรเป็น global owner ของทุก workflow/state/navigation</div>
-<section><h2>1. Transport responsibilities</h2><ul><li>ประกอบ base URL/path/query</li><li>แนบ headers/token</li><li>timeout/retry policyพื้นฐาน</li><li>decode JSON/status/ProblemDetails</li><li>redacted logging และ correlation</li></ul></section>
-<section><h2>2. ไม่ควรทำ</h2><p>ApiService ไม่ควรเลือกหน้าถัดไป, ถือ selected pallet, เปิด SnackBar, mutate widget list หรือกำหนดว่า operator ต้อง scan step ใดต่อ</p></section>
-<section><h2>3. Generic core</h2><pre class="code-vs"><code>abstract interface class JsonClient {
+<section id="section-1"><h2>1. Transport responsibilities</h2><ul><li>ประกอบ base URL/path/query</li><li>แนบ headers/token</li><li>timeout/retry policyพื้นฐาน</li><li>decode JSON/status/ProblemDetails</li><li>redacted logging และ correlation</li></ul></section>
+<section id="section-2"><h2>2. ไม่ควรทำ</h2><p>ApiService ไม่ควรเลือกหน้าถัดไป, ถือ selected pallet, เปิด SnackBar, mutate widget list หรือกำหนดว่า operator ต้อง scan step ใดต่อ</p></section>
+<section id="section-3"><h2>3. Generic core</h2><pre class="code-vs"><code>abstract interface class JsonClient {
   Future&lt;Map&lt;String, dynamic&gt;&gt; get(String path,
       {Map&lt;String, String&gt; query = const {}});
   Future&lt;Map&lt;String, dynamic&gt;&gt; post(
       String path, Map&lt;String, dynamic&gt; body);
 }</code></pre></section>
-<section><h2>4. Feature data source</h2><pre class="code-vs"><code>class ReceivingRemoteDataSource {
+<section id="section-4"><h2>4. Feature data source</h2><pre class="code-vs"><code>class ReceivingRemoteDataSource {
   ReceivingRemoteDataSource(this.client);
   final JsonClient client;
   Future&lt;ReceiptDto&gt; receive(ReceiveRequestDto request) async =&gt;
     ReceiptDto.fromJson(await client.post('/receiving/scan-part', request.toJson()));
 }</code></pre></section>
-<section><h2>5. ของจริง</h2><p><code>wmsapp/services/api_service.dart</code> รวม base resolution, GET/POST/upload และ ApiResult แล้ว domain extensionsเรียก private methods เป็นจุดเริ่มต้นที่ดีสำหรับแยก transport จาก endpoint-specific mapping</p></section>
-<section><h2>6. Singleton trade-off</h2><p>singleton สะดวกแต่ซ่อน dependency/global mutable base URL ทำให้ parallel testsและ multi-serverยาก Constructor injection ทำ lifetime และ fake ชัดกว่า; migrateได้โดยห่อ interface ก่อน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p><code>getPO</code> ควรอยู่ generic ApiClient หรือ Receiving data source?</p><details><summary>เฉลย</summary><p>Receiving data source/repository เพราะรู้ endpointและ PO DTO; generic clientควรรู้เพียง HTTP/JSON</p></details></section>
-<section><h2>8. Contract</h2><div class="warn">อย่าคืน <code>Map&lt;String,dynamic&gt;</code> ผ่าน data layerไปถึง UI ให้ parse/validateที่ boundaryและคืน typed DTO/domain result</div></section>
+<section id="section-5"><h2>5. ของจริง</h2><p><code>wmsapp/services/api_service.dart</code> รวม base resolution, GET/POST/upload และ ApiResult แล้ว domain extensionsเรียก private methods เป็นจุดเริ่มต้นที่ดีสำหรับแยก transport จาก endpoint-specific mapping</p></section>
+<section id="section-6"><h2>6. Singleton trade-off</h2><p>singleton สะดวกแต่ซ่อน dependency/global mutable base URL ทำให้ parallel testsและ multi-serverยาก Constructor injection ทำ lifetime และ fake ชัดกว่า; migrateได้โดยห่อ interface ก่อน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p><code>getPO</code> ควรอยู่ generic ApiClient หรือ Receiving data source?</p><details><summary>เฉลย</summary><p>Receiving data source/repository เพราะรู้ endpointและ PO DTO; generic clientควรรู้เพียง HTTP/JSON</p></details></section>
+<section id="section-8"><h2>8. Contract</h2><div class="warn">อย่าคืน <code>Map&lt;String,dynamic&gt;</code> ผ่าน data layerไปถึง UI ให้ parse/validateที่ boundaryและคืน typed DTO/domain result</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

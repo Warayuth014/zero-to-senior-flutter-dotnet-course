@@ -4,22 +4,23 @@
 <title>Quantity input และ numeric validation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-09 · Flutter UI</span><h1>Quantity input และ numeric validation</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Integer parsing</a></li><li><a href="#section-2">2. Input formatter เป็น UX ชั้นแรก</a></li><li><a href="#section-3">3. Range และ remaining</a></li><li><a href="#section-4">4. Decimal และหน่วย</a></li><li><a href="#section-5">5. Stepper + manual edit</a></li><li><a href="#section-6">6. Leading zero และ empty state</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Quantity เป็นจำนวนเชิงโดเมน ไม่ใช่ข้อความ ขั้นตอนคือรับ String → parseอย่างปลอดภัย → validate min/max/precision → สร้าง numeric value แล้วให้ backendตรวจ invariantล่าสุดอีกครั้ง</div>
-<section><h2>1. Integer parsing</h2><pre class="code-vs"><code>int? parseQuantity(String raw) {
+<section id="section-1"><h2>1. Integer parsing</h2><pre class="code-vs"><code>int? parseQuantity(String raw) {
   final value = int.tryParse(raw.trim());
   if (value == null || value &lt;= 0) return null;
   return value;
 }</code></pre><p>ใช้ tryParse ไม่ให้ FormatExceptionหลุดถึง UI และอย่าแปลง invalidเป็น 0 เพราะ 0อาจมีความหมายต่างกัน</p></section>
-<section><h2>2. Input formatter เป็น UX ชั้นแรก</h2><pre class="code-vs"><code>TextFormField(
+<section id="section-2"><h2>2. Input formatter เป็น UX ชั้นแรก</h2><pre class="code-vs"><code>TextFormField(
   keyboardType: TextInputType.number,
   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
   validator: (raw) =&gt; validateQty(raw, remaining: remaining),
 )</code></pre><p>Formatterลดความผิดพลาดแต่ paste/hardware/logicยังต้อง parse+validate และต้อง import <code>package:flutter/services.dart</code></p></section>
-<section><h2>3. Range และ remaining</h2><p>Validate <code>min ≤ qty ≤ remaining</code> จาก snapshotปัจจุบัน แต่ serverอาจเปลี่ยน stockพร้อมกันจึงต้องตรวจซ้ำ UIควรแสดง “เหลือ 7” ใกล้ field และเมื่อ Conflictให้ refresh/reconcileไม่กล่าวโทษผู้ใช้</p></section>
-<section><h2>4. Decimal และหน่วย</h2><p>ถ้าหน่วยอนุญาตทศนิยม อย่าใช้ doubleกับค่าที่ต้องแม่นตรงโดยไม่กำหนด scale ใช้ decimal package/จำนวนหน่วยย่อย integer/contractเดียวกับ .NET ระบุ locale decimal separator และ rounding policy ห้าม parse <code>1,5</code> แบบเดาสุ่ม</p></section>
-<section><h2>5. Stepper + manual edit</h2><p>Absolute quantity selector มีปุ่มลด/เพิ่มพร้อม min/max และ dialogกรอกเลข ปุ่มเหมาะกับปรับเล็กน้อย manualเหมาะกับจำนวนมาก แต่ผลจากทั้งสองทางต้องวิ่งผ่าน validator/commandเดียว ไม่ให้ onSetรับนอกช่วงเพราะ dialog parseได้อย่างเดียว</p></section>
-<section><h2>6. Leading zero และ empty state</h2><p>Quantity <code>005</code> parseเป็น 5ได้ แต่ UIอาจ normalizeแสดง “5” หลัง submit ขณะ fieldว่างไม่ควรเท่ากับ 0 แยก null/not entered จาก zero และกำหนดว่า zeroห้ามหรือใช้ clear operation</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>remaining=12 ผู้ใช้ส่ง “ 013 ”, “1.5”, “abc”, “” และ “05” ผลควรเป็นอะไรสำหรับ integer piece?</p><details><summary>เฉลย</summary><p>013→13แต่ rejectเกิน remaining; 1.5→parse fail; abc→parse fail; empty→required; 05→5และผ่าน ทั้งหมดต้องมีข้อความเฉพาะและไม่ยิง APIจน local validationผ่าน</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ controller text เป็นจำนวนระหว่าง business calculationทุกจุด Parseครั้งเดียวเป็น int/decimal typed value แล้วส่งต่อ มิฉะนั้น trim/invalid/rangeจะกระจายและได้ผลต่างกันระหว่างหน้าจอ</div></section>
+<section id="section-3"><h2>3. Range และ remaining</h2><p>Validate <code>min ≤ qty ≤ remaining</code> จาก snapshotปัจจุบัน แต่ serverอาจเปลี่ยน stockพร้อมกันจึงต้องตรวจซ้ำ UIควรแสดง “เหลือ 7” ใกล้ field และเมื่อ Conflictให้ refresh/reconcileไม่กล่าวโทษผู้ใช้</p></section>
+<section id="section-4"><h2>4. Decimal และหน่วย</h2><p>ถ้าหน่วยอนุญาตทศนิยม อย่าใช้ doubleกับค่าที่ต้องแม่นตรงโดยไม่กำหนด scale ใช้ decimal package/จำนวนหน่วยย่อย integer/contractเดียวกับ .NET ระบุ locale decimal separator และ rounding policy ห้าม parse <code>1,5</code> แบบเดาสุ่ม</p></section>
+<section id="section-5"><h2>5. Stepper + manual edit</h2><p>Absolute quantity selector มีปุ่มลด/เพิ่มพร้อม min/max และ dialogกรอกเลข ปุ่มเหมาะกับปรับเล็กน้อย manualเหมาะกับจำนวนมาก แต่ผลจากทั้งสองทางต้องวิ่งผ่าน validator/commandเดียว ไม่ให้ onSetรับนอกช่วงเพราะ dialog parseได้อย่างเดียว</p></section>
+<section id="section-6"><h2>6. Leading zero และ empty state</h2><p>Quantity <code>005</code> parseเป็น 5ได้ แต่ UIอาจ normalizeแสดง “5” หลัง submit ขณะ fieldว่างไม่ควรเท่ากับ 0 แยก null/not entered จาก zero และกำหนดว่า zeroห้ามหรือใช้ clear operation</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>remaining=12 ผู้ใช้ส่ง “ 013 ”, “1.5”, “abc”, “” และ “05” ผลควรเป็นอะไรสำหรับ integer piece?</p><details><summary>เฉลย</summary><p>013→13แต่ rejectเกิน remaining; 1.5→parse fail; abc→parse fail; empty→required; 05→5และผ่าน ทั้งหมดต้องมีข้อความเฉพาะและไม่ยิง APIจน local validationผ่าน</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ controller text เป็นจำนวนระหว่าง business calculationทุกจุด Parseครั้งเดียวเป็น int/decimal typed value แล้วส่งต่อ มิฉะนั้น trim/invalid/rangeจะกระจายและได้ผลต่างกันระหว่างหน้าจอ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,15 +4,16 @@
 <title>ValueNotifier สำหรับ state เล็ก</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-04 · State &amp; Lifecycle</span><h1>ValueNotifier สำหรับ state เล็ก</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ตัวอย่าง ThemeMode</a></li><li><a href="#section-2">2. ValueListenableBuilder</a></li><li><a href="#section-3">3. Immutable value</a></li><li><a href="#section-4">4. เมื่อโตเกิน ValueNotifier</a></li><li><a href="#section-5">5. Ownership/dispose</a></li><li><a href="#section-6">6. ValueNotifier vs setState</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>ValueNotifier&lt;T&gt;</code> เหมาะกับ stateหนึ่งค่าที่มี equalityชัดและ commandไม่ซับซ้อน มัน notifyเมื่อกำหนด <code>value</code> ใหม่ที่ไม่เท่าค่าเดิม ไม่ตรวจ mutationภายใน mutable object</div>
-<section><h2>1. ตัวอย่าง ThemeMode</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
+<section id="section-1"><h2>1. ตัวอย่าง ThemeMode</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
   ThemeController() : super(ThemeMode.system);
 
   void toggle() {
     value = value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
   }
 }</code></pre><p>wmsapp rootใช้ ValueListenableBuilderกับ ThemeModeทำให้ APIอ่านง่ายกว่า ChangeNotifierที่ต้อง getterเพิ่ม</p></section>
-<section><h2>2. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
+<section id="section-2"><h2>2. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
   valueListenable: themeController,
   builder: (_, mode, child) =&gt; MaterialApp(
     themeMode: mode,
@@ -20,11 +21,11 @@
   ),
   child: const HomeScreen(),
 )</code></pre><p>childคงที่ไม่ถูกสร้างซ้ำเพราะไม่ขึ้นกับ mode</p></section>
-<section><h2>3. Immutable value</h2><p><code>ValueNotifier&lt;List&lt;Task&gt;&gt;</code> แล้ว <code>value.add(task)</code> จะไม่ notifyเพราะ setterไม่ถูกเรียก ให้ assign listใหม่ <code>value = [...value, task]</code> หรือใช้ storeที่ encapsulate mutationและ notifyชัด</p></section>
-<section><h2>4. เมื่อโตเกิน ValueNotifier</h2><p>ถ้ามี loading/error/dataหลาย field, async commands/invariantsหรือหลาย slices เปลี่ยนพร้อมกัน ใช้ immutable state objectใน ValueNotifierได้ระยะหนึ่ง หรือ ChangeNotifier/controllerแบบ explicit อย่าสร้าง ValueNotifierสิบตัวโดยไม่มี atomic update policy</p></section>
-<section><h2>5. Ownership/dispose</h2><p>Notifierที่ widgetสร้างต้อง dispose; singleton/app ownerอยู่ตลอด appไม่ให้ builder dispose แทน Constructorรับ ValueListenableช่วย testด้วย fake notifierและไม่ผูก implementation</p></section>
-<section><h2>6. ValueNotifier vs setState</h2><p>setStateเหมาะ stateภายใน widgetเดียว ValueNotifierเหมาะเมื่อค่าเดียวแชร์หลาย widgets/แยก ownerหรืออยาก expose listenable contract ทั้งคู่ไม่ใช่ persistence/repository เลือกจาก ownershipไม่ใช่กระแส package</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Connection statusมี unknown/connecting/connected/disconnectedและ last error/profileหลายค่า ใช้ ValueNotifierค่าเดียวดีไหม?</p><details><summary>เฉลย</summary><p>ถ้ารวมเป็น immutable ConnectionState snapshotเดียวและ transitionsไม่ซับซ้อนใช้ได้ แต่โปรเจกต์จริงมี profiles, active ID, persistence, resultและ commandsหลายตัว ChangeNotifier controllerเหมาะกว่า โดย expose gettersไม่ให้แก้ listตรง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าพึ่ง mutationภายในค่าเดิมแล้วเรียก <code>notifyListeners</code> เพราะ ValueNotifierไม่ได้ exposeให้เรียกจากภายนอกอย่างตั้งใจ ใช้ immutable replacementหรือ subclass/storeที่ contractชัด</div></section>
+<section id="section-3"><h2>3. Immutable value</h2><p><code>ValueNotifier&lt;List&lt;Task&gt;&gt;</code> แล้ว <code>value.add(task)</code> จะไม่ notifyเพราะ setterไม่ถูกเรียก ให้ assign listใหม่ <code>value = [...value, task]</code> หรือใช้ storeที่ encapsulate mutationและ notifyชัด</p></section>
+<section id="section-4"><h2>4. เมื่อโตเกิน ValueNotifier</h2><p>ถ้ามี loading/error/dataหลาย field, async commands/invariantsหรือหลาย slices เปลี่ยนพร้อมกัน ใช้ immutable state objectใน ValueNotifierได้ระยะหนึ่ง หรือ ChangeNotifier/controllerแบบ explicit อย่าสร้าง ValueNotifierสิบตัวโดยไม่มี atomic update policy</p></section>
+<section id="section-5"><h2>5. Ownership/dispose</h2><p>Notifierที่ widgetสร้างต้อง dispose; singleton/app ownerอยู่ตลอด appไม่ให้ builder dispose แทน Constructorรับ ValueListenableช่วย testด้วย fake notifierและไม่ผูก implementation</p></section>
+<section id="section-6"><h2>6. ValueNotifier vs setState</h2><p>setStateเหมาะ stateภายใน widgetเดียว ValueNotifierเหมาะเมื่อค่าเดียวแชร์หลาย widgets/แยก ownerหรืออยาก expose listenable contract ทั้งคู่ไม่ใช่ persistence/repository เลือกจาก ownershipไม่ใช่กระแส package</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection statusมี unknown/connecting/connected/disconnectedและ last error/profileหลายค่า ใช้ ValueNotifierค่าเดียวดีไหม?</p><details><summary>เฉลย</summary><p>ถ้ารวมเป็น immutable ConnectionState snapshotเดียวและ transitionsไม่ซับซ้อนใช้ได้ แต่โปรเจกต์จริงมี profiles, active ID, persistence, resultและ commandsหลายตัว ChangeNotifier controllerเหมาะกว่า โดย expose gettersไม่ให้แก้ listตรง</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าพึ่ง mutationภายในค่าเดิมแล้วเรียก <code>notifyListeners</code> เพราะ ValueNotifierไม่ได้ exposeให้เรียกจากภายนอกอย่างตั้งใจ ใช้ immutable replacementหรือ subclass/storeที่ contractชัด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

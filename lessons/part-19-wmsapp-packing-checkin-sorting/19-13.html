@@ -4,15 +4,16 @@
 <title>Supervisor part image + upload</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-13 · Real Codebase</span><h1>Supervisor part image + upload</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Parts list</a></li><li><a href="#section-2">2. Search state issue</a></li><li><a href="#section-3">3. Choose source</a></li><li><a href="#section-4">4. Multipart upload</a></li><li><a href="#section-5">5. Server security</a></li><li><a href="#section-6">6. URL construction</a></li><li><a href="#section-7">7. Refresh/cache</a></li><li><a href="#section-8">8. Upload tests</a></li></ol></nav>
 <div class="note"><strong>Part image เป็น supervisor workflow:</strong> โหลด/search สินค้า, เลือกกล้องหรือ gallery, ลดขนาดภาพ แล้วส่ง multipart พร้อม partId ก่อน reload URL จาก server</div>
-<section><h2>1. Parts list</h2><p><code>getAllParts()</code> อ่าน <code>/upload/parts</code> เป็น dynamic maps แล้วเก็บ all/filtered lists Search match partId, itemDesc และ brand แบบ lowercase</p></section>
-<section><h2>2. Search state issue</h2><p><code>_loadParts</code> เรียก <code>_filterParts()</code> ภายใน setState และ filter เรียก setState อีกชั้น เป็น nested state mutationที่อ่านยาก ควรคำนวณ filtered listก่อนแล้ว setStateครั้งเดียว</p></section>
-<section><h2>3. Choose source</h2><p>bottom sheet คืน ImageSource.camera/gallery; cancel หยุด flow หลัง pick ใช้ maxWidth/maxHeight 1024 และ quality 85 เพื่อลด upload แต่ยังต้องตรวจ byte size/MIME หลังได้ไฟล์</p></section>
-<section><h2>4. Multipart upload</h2><pre class="code-vs"><code>POST /upload/part-image
+<section id="section-1"><h2>1. Parts list</h2><p><code>getAllParts()</code> อ่าน <code>/upload/parts</code> เป็น dynamic maps แล้วเก็บ all/filtered lists Search match partId, itemDesc และ brand แบบ lowercase</p></section>
+<section id="section-2"><h2>2. Search state issue</h2><p><code>_loadParts</code> เรียก <code>_filterParts()</code> ภายใน setState และ filter เรียก setState อีกชั้น เป็น nested state mutationที่อ่านยาก ควรคำนวณ filtered listก่อนแล้ว setStateครั้งเดียว</p></section>
+<section id="section-3"><h2>3. Choose source</h2><p>bottom sheet คืน ImageSource.camera/gallery; cancel หยุด flow หลัง pick ใช้ maxWidth/maxHeight 1024 และ quality 85 เพื่อลด upload แต่ยังต้องตรวจ byte size/MIME หลังได้ไฟล์</p></section>
+<section id="section-4"><h2>4. Multipart upload</h2><pre class="code-vs"><code>POST /upload/part-image
 multipart file + field partId</code></pre><p>API รับ <code>dart:io File</code> จึงผูกกับ mobile/desktop และไม่รองรับ web โดยตรง</p></section>
-<section><h2>5. Server security</h2><p>.NET ต้องตรวจสิทธิ์ supervisor, part exists, MIME/magic bytes, size/dimensions, decode/re-encode, filename/storage path และ malware policy ห้ามเชื่อ extension หรือ client compression</p></section>
-<section><h2>6. URL construction</h2><p><code>getImageFullUrl</code> ตัดทุกข้อความ <code>/api</code> ด้วย replaceAllแล้วต่อ relative path ซึ่งเสี่ยงเมื่อ URL/path มีคำนี้ที่อื่น ควรใช้ Uri resolve กับ configured origin/CDN URL</p></section>
-<section><h2>7. Refresh/cache</h2><p>หลัง upload success โหลด parts ใหม่ แต่ image cache อาจยังแสดงรูปเก่าที่ URL เดิม ควรให้ serverคืน versioned URL/etag หรือ evict cache เฉพาะ assetนั้น</p></section>
-<section><h2>8. Upload tests</h2><div class="success">ทดสอบ cancel, permission denied, oversized/non-image/corrupt, network timeout, unauthorized, part deleted, cache refresh และ disposeระหว่าง picker/upload โดยห้าม setStateหลัง dispose</div></section>
+<section id="section-5"><h2>5. Server security</h2><p>.NET ต้องตรวจสิทธิ์ supervisor, part exists, MIME/magic bytes, size/dimensions, decode/re-encode, filename/storage path และ malware policy ห้ามเชื่อ extension หรือ client compression</p></section>
+<section id="section-6"><h2>6. URL construction</h2><p><code>getImageFullUrl</code> ตัดทุกข้อความ <code>/api</code> ด้วย replaceAllแล้วต่อ relative path ซึ่งเสี่ยงเมื่อ URL/path มีคำนี้ที่อื่น ควรใช้ Uri resolve กับ configured origin/CDN URL</p></section>
+<section id="section-7"><h2>7. Refresh/cache</h2><p>หลัง upload success โหลด parts ใหม่ แต่ image cache อาจยังแสดงรูปเก่าที่ URL เดิม ควรให้ serverคืน versioned URL/etag หรือ evict cache เฉพาะ assetนั้น</p></section>
+<section id="section-8"><h2>8. Upload tests</h2><div class="success">ทดสอบ cancel, permission denied, oversized/non-image/corrupt, network timeout, unauthorized, part deleted, cache refresh และ disposeระหว่าง picker/upload โดยห้าม setStateหลัง dispose</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

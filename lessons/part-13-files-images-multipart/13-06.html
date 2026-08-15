@@ -4,12 +4,13 @@
 <title>FutureBuilder สำหรับ thumbnail</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-06 · Files &amp; Platform</span><h1>FutureBuilder สำหรับ thumbnail</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ปัญหาที่พบบ่อย</a></li><li><a href="#section-2">2. เก็บ Future ใน State</a></li><li><a href="#section-3">3. ครบทุก snapshot state</a></li><li><a href="#section-4">4. FutureBuilder ไม่จำเป็นเสมอ</a></li><li><a href="#section-5">5. List identity</a></li><li><a href="#section-6">6. Retry เฉพาะที่</a></li><li><a href="#section-7">7. ป้องกัน stale result</a></li><li><a href="#section-8">8. Widget tests</a></li></ol></nav>
 <div class="note"><strong>FutureBuilder ไม่ได้ cache Future:</strong> ถ้าสร้าง future ใหม่ใน <code>build()</code> ทุก rebuild จะเริ่ม resolve URL หรือโหลด metadata ซ้ำ และอาจกระพริบกลับไป loading</div>
-<section><h2>1. ปัญหาที่พบบ่อย</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
+<section id="section-1"><h2>1. ปัญหาที่พบบ่อย</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
   future: api.getImageFullUrl(relativePath), // สร้างทุก build
   builder: ...,
 )</code></pre><p>parent rebuild จาก search, theme หรือ progress ก็เรียก async งานเดิมอีกครั้ง แม้ network image จะ cache bytes ได้ แต่ future และ state transition ยังเกิดซ้ำ</p></section>
-<section><h2>2. เก็บ Future ใน State</h2><pre class="code-vs"><code>late Future&lt;Uri&gt; _imageUri;
+<section id="section-2"><h2>2. เก็บ Future ใน State</h2><pre class="code-vs"><code>late Future&lt;Uri&gt; _imageUri;
 
 @override
 void initState() {
@@ -24,19 +25,19 @@ void didUpdateWidget(covariant PartThumbnail old) {
     _imageUri = repository.resolveImage(widget.relativePath);
   }
 }</code></pre></section>
-<section><h2>3. ครบทุก snapshot state</h2><pre class="code-vs"><code>if (snapshot.connectionState != ConnectionState.done) {
+<section id="section-3"><h2>3. ครบทุก snapshot state</h2><pre class="code-vs"><code>if (snapshot.connectionState != ConnectionState.done) {
   return const ThumbnailSkeleton();
 }
 if (snapshot.hasError) return const BrokenThumbnail();
 final uri = snapshot.data;
 if (uri == null) return const EmptyThumbnail();
 return Image.network(uri.toString(), fit: BoxFit.cover);</code></pre></section>
-<section><h2>4. FutureBuilder ไม่จำเป็นเสมอ</h2><p>หากการ resolve เป็น pure synchronous operation ให้คืน <code>Uri</code> ทันที ไม่ต้องสร้าง Future ถ้า base URL มาจาก settings async ให้ load settings ครั้งเดียวใน repository/store แล้วส่ง media base ลงมา ลด nested async widget</p></section>
-<section><h2>5. List identity</h2><p>thumbnail ใน list ควรมี <code>ValueKey(partId)</code> เพื่อไม่ให้ State ของแถวหนึ่งย้ายไปอีกแถวหลัง filter/reorder และ image cache key ต้องรวม URL/version จริง ไม่ใช่เพียงตำแหน่ง index</p></section>
-<section><h2>6. Retry เฉพาะที่</h2><pre class="code-vs"><code>void retry() => setState(() {
+<section id="section-4"><h2>4. FutureBuilder ไม่จำเป็นเสมอ</h2><p>หากการ resolve เป็น pure synchronous operation ให้คืน <code>Uri</code> ทันที ไม่ต้องสร้าง Future ถ้า base URL มาจาก settings async ให้ load settings ครั้งเดียวใน repository/store แล้วส่ง media base ลงมา ลด nested async widget</p></section>
+<section id="section-5"><h2>5. List identity</h2><p>thumbnail ใน list ควรมี <code>ValueKey(partId)</code> เพื่อไม่ให้ State ของแถวหนึ่งย้ายไปอีกแถวหลัง filter/reorder และ image cache key ต้องรวม URL/version จริง ไม่ใช่เพียงตำแหน่ง index</p></section>
+<section id="section-6"><h2>6. Retry เฉพาะที่</h2><pre class="code-vs"><code>void retry() => setState(() {
   _imageUri = widget.repository.resolveImage(widget.relativePath);
 });</code></pre><p>แสดง retry ที่ thumbnail โดยไม่ reload ทั้งรายการ แยก error resolve URL ออกจาก error ดาวน์โหลดรูป เพื่อให้ log และข้อความตรงสาเหตุ</p></section>
-<section><h2>7. ป้องกัน stale result</h2><p><code>FutureBuilder</code> จับกับ future ล่าสุด แต่หากเราเขียน callback/setState เองต้องใช้ request generation หรือเปรียบเทียบ partId/path ก่อน apply ผล เพื่อไม่ให้รูปของ query เก่าทับรายการใหม่หลังผู้ใช้ค้นหาเร็ว</p></section>
-<section><h2>8. Widget tests</h2><div class="success">ทดสอบ loading → image, empty, malformed URL, resolve failure, network error, retry, เปลี่ยน relativePath และ parent rebuild หลายครั้ง โดย assert ว่า repository ถูกเรียกครั้งเดียวต่อ path</div></section>
+<section id="section-7"><h2>7. ป้องกัน stale result</h2><p><code>FutureBuilder</code> จับกับ future ล่าสุด แต่หากเราเขียน callback/setState เองต้องใช้ request generation หรือเปรียบเทียบ partId/path ก่อน apply ผล เพื่อไม่ให้รูปของ query เก่าทับรายการใหม่หลังผู้ใช้ค้นหาเร็ว</p></section>
+<section id="section-8"><h2>8. Widget tests</h2><div class="success">ทดสอบ loading → image, empty, malformed URL, resolve failure, network error, retry, เปลี่ยน relativePath และ parent rebuild หลายครั้ง โดย assert ว่า repository ถูกเรียกครั้งเดียวต่อ path</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

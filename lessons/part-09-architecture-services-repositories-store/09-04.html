@@ -4,24 +4,25 @@
 <title>Dart part + API extension แยกโดเมน</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-04 · Architecture</span><h1>Dart part + API extension แยกโดเมน</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. โครงของจริง</a></li><li><a href="#section-2">2. ข้อดี</a></li><li><a href="#section-3">3. ข้อจำกัด</a></li><li><a href="#section-4">4. Extension resolution</a></li><li><a href="#section-5">5. เมื่อเหมาะ</a></li><li><a href="#section-6">6. ทางย้ายต่อ</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. หลักจำ</a></li></ol></nav>
 <div class="note"><strong>Dart part + extension:</strong> แบ่ง implementationของ libraryเดียวเป็นไฟล์ตามโดเมน ทำให้ extension เข้าถึงสมาชิก private ได้ แต่ยังเป็น ApiService type/lifetime เดียวกัน</div>
-<section><h2>1. โครงของจริง</h2><pre class="code-vs"><code>// api_service.dart
+<section id="section-1"><h2>1. โครงของจริง</h2><pre class="code-vs"><code>// api_service.dart
 part 'api/receiving_api.dart';
 part 'api/picking_api.dart';
 
 // api/receiving_api.dart
 part of '../api_service.dart';
 extension ReceivingApi on ApiService { /* getPO, scanReceiptPart */ }</code></pre></section>
-<section><h2>2. ข้อดี</h2><p>ลดไฟล์หลัก, group endpointตาม feature, reuse private <code>_get/_post</code> และ migrationจาก God serviceทำได้โดยไม่เปลี่ยน call sitesมาก</p></section>
-<section><h2>3. ข้อจำกัด</h2><p>ทุก part เป็น libraryเดียว จึงมี importsรวม, private boundaryไม่แยกจริง, inject/mockingราย featureยาก และ extensionเพิ่ม interface stateไม่ได้</p></section>
-<section><h2>4. Extension resolution</h2><p>Extension methodถูกเลือกแบบ staticจาก import/type ไม่ใช่ virtual dispatch จึงไม่ใช่ replacementของ repository interfaceสำหรับ polymorphic fake</p></section>
-<section><h2>5. เมื่อเหมาะ</h2><p>เหมาะกับ codebaseขนาดกลางที่ transportเดียวและต้องจัดกลุ่ม endpointเร็ว โดยยังไม่ต้อง local cacheหรือ implementationหลายแบบ</p></section>
-<section><h2>6. ทางย้ายต่อ</h2><pre class="code-vs"><code>class ReceivingApi implements ReceivingRepository {
+<section id="section-2"><h2>2. ข้อดี</h2><p>ลดไฟล์หลัก, group endpointตาม feature, reuse private <code>_get/_post</code> และ migrationจาก God serviceทำได้โดยไม่เปลี่ยน call sitesมาก</p></section>
+<section id="section-3"><h2>3. ข้อจำกัด</h2><p>ทุก part เป็น libraryเดียว จึงมี importsรวม, private boundaryไม่แยกจริง, inject/mockingราย featureยาก และ extensionเพิ่ม interface stateไม่ได้</p></section>
+<section id="section-4"><h2>4. Extension resolution</h2><p>Extension methodถูกเลือกแบบ staticจาก import/type ไม่ใช่ virtual dispatch จึงไม่ใช่ replacementของ repository interfaceสำหรับ polymorphic fake</p></section>
+<section id="section-5"><h2>5. เมื่อเหมาะ</h2><p>เหมาะกับ codebaseขนาดกลางที่ transportเดียวและต้องจัดกลุ่ม endpointเร็ว โดยยังไม่ต้อง local cacheหรือ implementationหลายแบบ</p></section>
+<section id="section-6"><h2>6. ทางย้ายต่อ</h2><pre class="code-vs"><code>class ReceivingApi implements ReceivingRepository {
   ReceivingApi(this.client);
   final JsonClient client;
   // ย้าย methods ทีละตัวจาก extension
 }</code></pre><p>คง facadeเดิมชั่วคราวเพื่อไม่ break screens</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ต้อง fake เฉพาะ Receivingแต่ใช้ Pickingจริงใน test ควรคง extensionหรือแยก class?</p><details><summary>เฉลย</summary><p>แยก ReceivingRepository/class ทำ injectionราย feature; extensionบน singletonไม่ให้ seamที่ตรงความต้องการ</p></details></section>
-<section><h2>8. หลักจำ</h2><div class="success"><code>part</code> แบ่งไฟล์ ไม่ได้แบ่ง architecture boundary; ใช้เพื่อ organization แล้วเพิ่ม interfaceเมื่อมีเหตุผลด้าน test/implementation</div></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ต้อง fake เฉพาะ Receivingแต่ใช้ Pickingจริงใน test ควรคง extensionหรือแยก class?</p><details><summary>เฉลย</summary><p>แยก ReceivingRepository/class ทำ injectionราย feature; extensionบน singletonไม่ให้ seamที่ตรงความต้องการ</p></details></section>
+<section id="section-8"><h2>8. หลักจำ</h2><div class="success"><code>part</code> แบ่งไฟล์ ไม่ได้แบ่ง architecture boundary; ใช้เพื่อ organization แล้วเพิ่ม interfaceเมื่อมีเหตุผลด้าน test/implementation</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

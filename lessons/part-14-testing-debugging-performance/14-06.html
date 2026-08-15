@@ -4,25 +4,26 @@
 <title>ทดสอบ ChangeNotifier store</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-06 · Testing</span><h1>ทดสอบ ChangeNotifier store</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ตัวอย่าง WarehouseStore</a></li><li><a href="#section-2">2. สังเกต notifications</a></li><li><a href="#section-3">3. Loading transition</a></li><li><a href="#section-4">4. Error และข้อมูลเดิม</a></li><li><a href="#section-5">5. Async race</a></li><li><a href="#section-6">6. Dispose</a></li><li><a href="#section-7">7. Business navigation state</a></li><li><a href="#section-8">8. Store test matrix</a></li></ol></nav>
 <div class="note"><strong>ทดสอบ Store ผ่าน state ที่สังเกตได้:</strong> ให้ fake repository ควบคุม I/O แล้ว assert loading/data/error, notification และ race behavior ไม่เรียก private method หรือพึ่ง widget</div>
-<section><h2>1. ตัวอย่าง WarehouseStore</h2><p><code>wms_absolute_mobile</code> inject receiving/tasks/inventory/cycle-count repositories เข้า <code>WarehouseStore extends ChangeNotifier</code> ทำให้ <code>flow_navigation_test.dart</code> เปิด line, advance, back และตรวจการล้าง state ได้ใน pure test</p></section>
-<section><h2>2. สังเกต notifications</h2><pre class="code-vs"><code>var notifications = 0;
+<section id="section-1"><h2>1. ตัวอย่าง WarehouseStore</h2><p><code>wms_absolute_mobile</code> inject receiving/tasks/inventory/cycle-count repositories เข้า <code>WarehouseStore extends ChangeNotifier</code> ทำให้ <code>flow_navigation_test.dart</code> เปิด line, advance, back และตรวจการล้าง state ได้ใน pure test</p></section>
+<section id="section-2"><h2>2. สังเกต notifications</h2><pre class="code-vs"><code>var notifications = 0;
 store.addListener(() =&gt; notifications++);
 await store.load();
 expect(store.loading, isFalse);
 expect(store.items, hasLength(2));
 expect(notifications, greaterThanOrEqualTo(2));</code></pre><p>อย่าล็อกจำนวน exact หาก contract ไม่กำหนด เพราะ batch/refactor อาจลด notification โดย behavior เท่าเดิม</p></section>
-<section><h2>3. Loading transition</h2><pre class="code-vs"><code>final pending = Completer&lt;List&lt;Task&gt;&gt;();
+<section id="section-3"><h2>3. Loading transition</h2><pre class="code-vs"><code>final pending = Completer&lt;List&lt;Task&gt;&gt;();
 repo.nextFetch = pending.future;
 final operation = store.load();
 expect(store.loading, isTrue);
 pending.complete([task]);
 await operation;
 expect(store.loading, isFalse);</code></pre></section>
-<section><h2>4. Error และข้อมูลเดิม</h2><p>กำหนด policy ว่า refresh ล้มแล้วคงข้อมูลเดิมพร้อม banner หรือ clear list Test ต้องยืนยันทั้ง error type, loading reset และ state เดิม ไม่เพียง expect ว่า future throw</p></section>
-<section><h2>5. Async race</h2><p>สร้าง Completer สองตัว: request B เริ่มทีหลังแต่จบก่อน แล้ว A จบทีหลัง ตรวจว่า generation/cancel logic ไม่ให้ A ทับ B นี่จับ bug ที่ happy-path test ไม่เห็น</p></section>
-<section><h2>6. Dispose</h2><p>ใช้ <code>addTearDown(store.dispose)</code> ทุก test และพิสูจน์ timer/subscription ถูกหยุด ห้าม notify หลัง dispose Store ที่เริ่ม polling ใน constructor ทำ test ยาก—แยก <code>start()</code> หรือ inject scheduler</p></section>
-<section><h2>7. Business navigation state</h2><p>ตัวอย่างจริงตรวจว่า Back ลด step ก่อน, exit เก็บ resumable draft และ bottom navigation ล้าง receiving state นี่คือ logic ที่เหมาะกับ Store test เพราะไม่ต้อง render UI แต่ครอบคลุม workflow สำคัญ</p></section>
-<section><h2>8. Store test matrix</h2><div class="success">initial, success, empty, failure, retry, double-submit, stale response, dispose mid-flight, navigation reset/resume และ notification หลังทุก public command โดย fixture แต่ละ test แยกขาดจากกัน</div></section>
+<section id="section-4"><h2>4. Error และข้อมูลเดิม</h2><p>กำหนด policy ว่า refresh ล้มแล้วคงข้อมูลเดิมพร้อม banner หรือ clear list Test ต้องยืนยันทั้ง error type, loading reset และ state เดิม ไม่เพียง expect ว่า future throw</p></section>
+<section id="section-5"><h2>5. Async race</h2><p>สร้าง Completer สองตัว: request B เริ่มทีหลังแต่จบก่อน แล้ว A จบทีหลัง ตรวจว่า generation/cancel logic ไม่ให้ A ทับ B นี่จับ bug ที่ happy-path test ไม่เห็น</p></section>
+<section id="section-6"><h2>6. Dispose</h2><p>ใช้ <code>addTearDown(store.dispose)</code> ทุก test และพิสูจน์ timer/subscription ถูกหยุด ห้าม notify หลัง dispose Store ที่เริ่ม polling ใน constructor ทำ test ยาก—แยก <code>start()</code> หรือ inject scheduler</p></section>
+<section id="section-7"><h2>7. Business navigation state</h2><p>ตัวอย่างจริงตรวจว่า Back ลด step ก่อน, exit เก็บ resumable draft และ bottom navigation ล้าง receiving state นี่คือ logic ที่เหมาะกับ Store test เพราะไม่ต้อง render UI แต่ครอบคลุม workflow สำคัญ</p></section>
+<section id="section-8"><h2>8. Store test matrix</h2><div class="success">initial, success, empty, failure, retry, double-submit, stale response, dispose mid-flight, navigation reset/resume และ notification หลังทุก public command โดย fixture แต่ละ test แยกขาดจากกัน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

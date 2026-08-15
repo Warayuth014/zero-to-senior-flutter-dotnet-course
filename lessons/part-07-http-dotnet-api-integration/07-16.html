@@ -4,19 +4,20 @@
 <title>Health endpoint และ connection probe</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-16 · Flutter + .NET</span><h1>Health endpoint และ connection probe</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Endpoint contract</a></li><li><a href="#section-2">2. Probe flow</a></li><li><a href="#section-3">3. ของจริงสองแอป</a></li><li><a href="#section-4">4. Liveness vs readiness</a></li><li><a href="#section-5">5. ก่อน login</a></li><li><a href="#section-6">6. Result สำหรับ UI</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Operational rule</a></li></ol></nav>
 <div class="note"><strong>Health probe ต้องพิสูจน์ identity:</strong> การได้ HTTP 200 ไม่พอ เพราะ proxy, captive portal หรือ service คนละตัวอาจตอบพอร์ตเดียวกัน</div>
-<section><h2>1. Endpoint contract</h2><pre class="code-vs"><code>{
+<section id="section-1"><h2>1. Endpoint contract</h2><pre class="code-vs"><code>{
   "service": "wms-mobile-api",
   "status": "healthy",
   "version": "1.4.2",
   "serverTime": "2026-08-15T03:00:00Z"
 }</code></pre></section>
-<section><h2>2. Probe flow</h2><p>parse base URL → GET anonymous health route → timeout สั้น → ตรวจ expected status → decode JSON → ตรวจ service marker/status → คืน typed ConnectionProbeResult</p></section>
-<section><h2>3. ของจริงสองแอป</h2><p><code>wmsapp/lib/services/connection_probe.dart</code> ยิง <code>/api/health</code>; อีกแอปใช้ <code>/api/WMS/mobile_health</code> และตรวจ payload เพื่อไม่ให้ HTML 200 หลอกว่าเชื่อมสำเร็จ</p></section>
-<section><h2>4. Liveness vs readiness</h2><p>Liveness บอก process ยังอยู่ ส่วน readiness บอก dependency สำคัญพร้อมรับงาน เช่น DB/queue การตั้งค่าหน้า app ควรรู้ว่าจะเช็กแบบใดและอย่าให้ query หนักเกินไป</p></section>
-<section><h2>5. ก่อน login</h2><p>route สำหรับตรวจ connection profile ควร anonymous และไม่คืนข้อมูลลับ หาก health ต้อง auth ผู้ใช้จะแยก URL ผิดจาก token ผิดไม่ได้</p></section>
-<section><h2>6. Result สำหรับ UI</h2><p>แยก invalid URL, timeout, unreachable, wrong service, unhealthy, HTTP error และ success พร้อม latency/version เพื่อช่วย support</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>GET health ได้ 200 body เป็นหน้า login HTML ควรแสดง connected ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้องตรวจ JSON service marker; รายงานว่า endpoint ไม่ใช่ WMS API หรือ proxy/config ผิด</p></details></section>
-<section><h2>8. Operational rule</h2><div class="warn">Health endpoint ไม่ควรเปิด stack trace, connection string หรือรายละเอียด infrastructure แก่ anonymous caller</div></section>
+<section id="section-2"><h2>2. Probe flow</h2><p>parse base URL → GET anonymous health route → timeout สั้น → ตรวจ expected status → decode JSON → ตรวจ service marker/status → คืน typed ConnectionProbeResult</p></section>
+<section id="section-3"><h2>3. ของจริงสองแอป</h2><p><code>wmsapp/lib/services/connection_probe.dart</code> ยิง <code>/api/health</code>; อีกแอปใช้ <code>/api/WMS/mobile_health</code> และตรวจ payload เพื่อไม่ให้ HTML 200 หลอกว่าเชื่อมสำเร็จ</p></section>
+<section id="section-4"><h2>4. Liveness vs readiness</h2><p>Liveness บอก process ยังอยู่ ส่วน readiness บอก dependency สำคัญพร้อมรับงาน เช่น DB/queue การตั้งค่าหน้า app ควรรู้ว่าจะเช็กแบบใดและอย่าให้ query หนักเกินไป</p></section>
+<section id="section-5"><h2>5. ก่อน login</h2><p>route สำหรับตรวจ connection profile ควร anonymous และไม่คืนข้อมูลลับ หาก health ต้อง auth ผู้ใช้จะแยก URL ผิดจาก token ผิดไม่ได้</p></section>
+<section id="section-6"><h2>6. Result สำหรับ UI</h2><p>แยก invalid URL, timeout, unreachable, wrong service, unhealthy, HTTP error และ success พร้อม latency/version เพื่อช่วย support</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>GET health ได้ 200 body เป็นหน้า login HTML ควรแสดง connected ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้องตรวจ JSON service marker; รายงานว่า endpoint ไม่ใช่ WMS API หรือ proxy/config ผิด</p></details></section>
+<section id="section-8"><h2>8. Operational rule</h2><div class="warn">Health endpoint ไม่ควรเปิด stack trace, connection string หรือรายละเอียด infrastructure แก่ anonymous caller</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

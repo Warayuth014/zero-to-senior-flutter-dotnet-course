@@ -4,14 +4,15 @@
 <title>Network status บน application shell</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-12 · Flutter + .NET</span><h1>Network status บน application shell</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. States</a></li><li><a href="#section-2">2. UI</a></li><li><a href="#section-3">3. Refresh triggers</a></li><li><a href="#section-4">4. Avoid probe storms</a></li><li><a href="#section-5">5. Request feedback</a></li><li><a href="#section-6">6. Active parity</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Shell network status เป็น observed state—not guarantee:</strong> แสดงผล probeล่าสุดและเวลา ไม่สรุปว่าทุก requestถัดไปสำเร็จ</div>
-<section><h2>1. States</h2><ul><li>unknown: ยังไม่ตรวจ</li><li>checking: กำลัง probe</li><li>online: WMS markerถูก ณ เวลาหนึ่ง</li><li>offline: typed failureพร้อม message</li><li>stale: ผลเก่าเกิน threshold</li></ul></section>
-<section><h2>2. UI</h2><p>ใช้ dot+icon+text/tooltip เช่น “WMS online · 12s ago” และ tapเปิดรายละเอียด server resolved URL, environment, latency, versionและปุ่ม retry</p></section>
-<section><h2>3. Refresh triggers</h2><p>startupหลัง profiles load, app resume, active profile change, user retryและ periodic intervalที่เหมาะสม หยุด timerเมื่อ disposed/backgroundตาม policy</p></section>
-<section><h2>4. Avoid probe storms</h2><p>single-flight/debounce refreshและไม่ให้ทุก widgetสร้าง timerเอง Shell/controllerเป็น ownerเดียว ใช้ backoffเมื่อ offlineเพื่อไม่เพิ่ม load/battery</p></section>
-<section><h2>5. Request feedback</h2><p>ApiClient failureอาจ mark status suspect/offlineและ schedule probe แต่ 400/403ไม่ใช่ connectivity failure; success requestอาจ update last-seenโดยไม่แทน identity probeทั้งหมด</p></section>
-<section><h2>6. Active parity</h2><p>Status cardต้องแสดง resolved URLจริงรวม dart-define override ไม่ใช่ selected profileที่ถูก override และเมื่อ switchให้ phaseกลับ unknown/checkingทันที</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>dotเขียวจาก 5 นาทีที่แล้วแต่ requestล่าสุด timeoutควรทำอะไร?</p><details><summary>เฉลย</summary><p>mark stale/suspectหรือ offlineตาม policyและ probeใหม่ แสดง timestampเพื่อไม่ทำให้ operatorเชื่อว่า greenเป็น guaranteeปัจจุบัน</p></details></section>
-<section><h2>8. Tests</h2><div class="success">state rendering, stale timeด้วย fake clock, resume, timer dispose, profile switch, overlapping refreshและ non-network API errorไม่ทำ dotแดง</div></section>
+<section id="section-1"><h2>1. States</h2><ul><li>unknown: ยังไม่ตรวจ</li><li>checking: กำลัง probe</li><li>online: WMS markerถูก ณ เวลาหนึ่ง</li><li>offline: typed failureพร้อม message</li><li>stale: ผลเก่าเกิน threshold</li></ul></section>
+<section id="section-2"><h2>2. UI</h2><p>ใช้ dot+icon+text/tooltip เช่น “WMS online · 12s ago” และ tapเปิดรายละเอียด server resolved URL, environment, latency, versionและปุ่ม retry</p></section>
+<section id="section-3"><h2>3. Refresh triggers</h2><p>startupหลัง profiles load, app resume, active profile change, user retryและ periodic intervalที่เหมาะสม หยุด timerเมื่อ disposed/backgroundตาม policy</p></section>
+<section id="section-4"><h2>4. Avoid probe storms</h2><p>single-flight/debounce refreshและไม่ให้ทุก widgetสร้าง timerเอง Shell/controllerเป็น ownerเดียว ใช้ backoffเมื่อ offlineเพื่อไม่เพิ่ม load/battery</p></section>
+<section id="section-5"><h2>5. Request feedback</h2><p>ApiClient failureอาจ mark status suspect/offlineและ schedule probe แต่ 400/403ไม่ใช่ connectivity failure; success requestอาจ update last-seenโดยไม่แทน identity probeทั้งหมด</p></section>
+<section id="section-6"><h2>6. Active parity</h2><p>Status cardต้องแสดง resolved URLจริงรวม dart-define override ไม่ใช่ selected profileที่ถูก override และเมื่อ switchให้ phaseกลับ unknown/checkingทันที</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>dotเขียวจาก 5 นาทีที่แล้วแต่ requestล่าสุด timeoutควรทำอะไร?</p><details><summary>เฉลย</summary><p>mark stale/suspectหรือ offlineตาม policyและ probeใหม่ แสดง timestampเพื่อไม่ทำให้ operatorเชื่อว่า greenเป็น guaranteeปัจจุบัน</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">state rendering, stale timeด้วย fake clock, resume, timer dispose, profile switch, overlapping refreshและ non-network API errorไม่ทำ dotแดง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

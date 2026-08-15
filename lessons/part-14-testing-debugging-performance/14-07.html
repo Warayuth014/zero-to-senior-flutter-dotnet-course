@@ -4,26 +4,27 @@
 <title>WidgetTester pumpWidget</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-07 · Testing</span><h1>WidgetTester pumpWidget</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Minimal harness</a></li><li><a href="#section-2">2. pump คือ frame เดียว</a></li><li><a href="#section-3">3. กำหนด viewport PDA</a></li><li><a href="#section-4">4. Inject fake ก่อน pump</a></li><li><a href="#section-5">5. Async initialization</a></li><li><a href="#section-6">6. Exceptions</a></li><li><a href="#section-7">7. Unmount ก่อน dispose</a></li><li><a href="#section-8">8. Test scope</a></li></ol></nav>
 <div class="note"><strong><code>pumpWidget</code> สร้างโลกของ test:</strong> ห่อ widget ด้วย MaterialApp, theme, localization และ dependencies เท่าที่ production screen ต้องใช้ แต่ไม่จำเป็นต้องเปิดทั้งแอปทุก test</div>
-<section><h2>1. Minimal harness</h2><pre class="code-vs"><code>Future&lt;void&gt; pumpScreen(
+<section id="section-1"><h2>1. Minimal harness</h2><pre class="code-vs"><code>Future&lt;void&gt; pumpScreen(
   WidgetTester tester, Widget child,
 ) =&gt; tester.pumpWidget(
   MaterialApp(home: Scaffold(body: child)),
 );</code></pre><p><code>MaterialApp</code> ให้ Navigator/Theme/MediaQuery ส่วน Scaffold ให้ snackbar/sheet context หาก test ล้มเพราะ provider หาย ให้ inject fake ตาม composition ของ screen</p></section>
-<section><h2>2. pump คือ frame เดียว</h2><p><code>pumpWidget</code> attach tree แล้ว schedule frame; <code>pump()</code> เดินอีก frame/microtask; <code>pump(duration)</code> ขยับ fake clock ตามเวลา อย่าสมมติว่า async/animation ทั้งหมดเสร็จหลัง pump ครั้งเดียว</p></section>
-<section><h2>3. กำหนด viewport PDA</h2><pre class="code-vs"><code>tester.view.devicePixelRatio = 1;
+<section id="section-2"><h2>2. pump คือ frame เดียว</h2><p><code>pumpWidget</code> attach tree แล้ว schedule frame; <code>pump()</code> เดินอีก frame/microtask; <code>pump(duration)</code> ขยับ fake clock ตามเวลา อย่าสมมติว่า async/animation ทั้งหมดเสร็จหลัง pump ครั้งเดียว</p></section>
+<section id="section-3"><h2>3. กำหนด viewport PDA</h2><pre class="code-vs"><code>tester.view.devicePixelRatio = 1;
 tester.view.physicalSize = const Size(390, 560);
 addTearDown(tester.view.reset);</code></pre><p><code>scanner_layout_test.dart</code> ใช้วิธีนี้พิสูจน์ scan input อยู่กับที่เมื่อรายการ scroll ต้อง reset view ไม่ให้ test ถัดไปปน</p></section>
-<section><h2>4. Inject fake ก่อน pump</h2><pre class="code-vs"><code>final repo = FakeReceivingRepository(openOrders: [order]);
+<section id="section-4"><h2>4. Inject fake ก่อน pump</h2><pre class="code-vs"><code>final repo = FakeReceivingRepository(openOrders: [order]);
 final store = createTestStore(receivingRepository: repo);
 addTearDown(store.dispose);
 await tester.pumpWidget(
   MaterialApp(home: ReceiveView(store: store)),
 );</code></pre></section>
-<section><h2>5. Async initialization</h2><p>ถ้า screen load ใน <code>initState</code> ให้ pump ครั้งแรกแล้ว assert loading จากนั้น complete fake future และ pump อีกครั้งเพื่อ assert data การใช้ fake ที่คืนทันทีอย่างเดียวจะไม่พิสูจน์ loading state</p></section>
-<section><h2>6. Exceptions</h2><pre class="code-vs"><code>expect(tester.takeException(), isNull);</code></pre><p>ใช้หลัง layout/interaction เพื่อจับ overflow หรือ setState-after-dispose แต่หากคาด exception ให้ดึงและ assert ทันที ไม่ปล่อย exception ค้างไปทำ test framework fail แบบหาเหตุยาก</p></section>
-<section><h2>7. Unmount ก่อน dispose</h2><pre class="code-vs"><code>await tester.pumpWidget(const SizedBox.shrink());
+<section id="section-5"><h2>5. Async initialization</h2><p>ถ้า screen load ใน <code>initState</code> ให้ pump ครั้งแรกแล้ว assert loading จากนั้น complete fake future และ pump อีกครั้งเพื่อ assert data การใช้ fake ที่คืนทันทีอย่างเดียวจะไม่พิสูจน์ loading state</p></section>
+<section id="section-6"><h2>6. Exceptions</h2><pre class="code-vs"><code>expect(tester.takeException(), isNull);</code></pre><p>ใช้หลัง layout/interaction เพื่อจับ overflow หรือ setState-after-dispose แต่หากคาด exception ให้ดึงและ assert ทันที ไม่ปล่อย exception ค้างไปทำ test framework fail แบบหาเหตุยาก</p></section>
+<section id="section-7"><h2>7. Unmount ก่อน dispose</h2><pre class="code-vs"><code>await tester.pumpWidget(const SizedBox.shrink());
 store.dispose();</code></pre><p>เหมาะเมื่อ widget ยัง listen store อยู่ ให้ tree ถอด listener ก่อน dispose หรือให้ test harness เป็น owner lifecycle แบบเดียวกับ production</p></section>
-<section><h2>8. Test scope</h2><div class="success">หนึ่ง widget test ควรพิสูจน์ behavior เด่น 1 เรื่อง ใช้ helper ลด setup แต่เก็บ intent ไว้ใน test และไม่ pump app ทั้งระบบหาก screen เดี่ยวให้คำตอบได้</div></section>
+<section id="section-8"><h2>8. Test scope</h2><div class="success">หนึ่ง widget test ควรพิสูจน์ behavior เด่น 1 เรื่อง ใช้ helper ลด setup แต่เก็บ intent ไว้ใน test และไม่ pump app ทั้งระบบหาก screen เดี่ยวให้คำตอบได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

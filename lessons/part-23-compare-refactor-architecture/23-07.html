@@ -4,19 +4,20 @@
 <title>Giant screen และ widget extraction</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">23-07 · Architecture</span><h1>Giant screen และ widget extraction</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Giant screenพังอย่างไร</a></li><li><a href="#section-2">2. เริ่มจาก pure widget</a></li><li><a href="#section-3">3. Extract dialog/sheetพร้อม lifecycle</a></li><li><a href="#section-4">4. อย่าแตกเป็น private methodsอย่างเดียว</a></li><li><a href="#section-5">5. ต่อด้วย feature controller</a></li><li><a href="#section-6">6. Preserve behavior</a></li><li><a href="#section-7">7. Folder by feature</a></li><li><a href="#section-8">8. Exit criteria</a></li></ol></nav>
 <div class="note"><strong>หลักฐาน:</strong> wmsappมี Packing 2,290, Receiving scan 1,832 และ Picking 1,686 บรรทัด; absoluteก็มี OpsViewกว่า 2,300 บรรทัด การแยกต้องตาม cohesion ไม่ใช่เลขบรรทัดล้วน</div>
-<section><h2>1. Giant screenพังอย่างไร</h2><p>build method, controllers, async commands, dialogsและsub-flowsอยู่ไฟล์เดียว ทำให้ review diffชนกัน, lifecycleยาก, testต้อง setupทั้งหน้าและแก้ส่วนหนึ่งกระทบอีกส่วน แต่การยาวไม่ได้พิสูจน์ bugด้วยตัวเอง</p></section>
-<section><h2>2. เริ่มจาก pure widget</h2><p>ดึงส่วน renderที่รับ immutable data+callbacksออกก่อน เช่น summary, product row, scan cardและhistory panel ไม่ย้าย state ไม่เปลี่ยน behavior จึงเป็น seamความเสี่ยงต่ำและช่วยให้ parent buildอ่านเป็นโครง flow</p></section>
-<section><h2>3. Extract dialog/sheetพร้อม lifecycle</h2><p>componentที่มี controller/focusควรเป็น StatefulWidgetของตัวเองและ dispose resourceที่ตนสร้าง หากรับ controllerจาก parentต้องประกาศ ownershipชัดเหมือน Pda widgetsของ absoluteที่ disposeเฉพาะ internal controller</p></section>
-<section><h2>4. อย่าแตกเป็น private methodsอย่างเดียว</h2><p><code>Widget _buildX()</code>ลดความยาวแต่ยัง rebuildพร้อม parentและเข้าถึง stateทุกตัว Component classสร้าง explicit inputs, key/test boundaryและลด accidental couplingได้จริง</p></section>
-<section><h2>5. ต่อด้วย feature controller</h2><p>หลัง presentation seamsชัด ค่อยย้าย scan validation/API transitionออกจาก Stateเป็น controllerที่ทดสอบได้ ลำดับนี้ทำให้รู้ว่า stateใด localและ stateใด domain ไม่สร้าง mega view-modelจากการย้ายทุก fieldพร้อมกัน</p></section>
-<section><h2>6. Preserve behavior</h2><p>ก่อน extractionล็อก scanner focus, keyboard Enter, scroll owner, loading disable, dialog dismissalและ navigation resultด้วย widget tests Golden screenshotอย่างเดียวจับ side effectsไม่ได้</p></section>
-<section><h2>7. Folder by feature</h2><pre class="code-vs"><code>packing/
+<section id="section-1"><h2>1. Giant screenพังอย่างไร</h2><p>build method, controllers, async commands, dialogsและsub-flowsอยู่ไฟล์เดียว ทำให้ review diffชนกัน, lifecycleยาก, testต้อง setupทั้งหน้าและแก้ส่วนหนึ่งกระทบอีกส่วน แต่การยาวไม่ได้พิสูจน์ bugด้วยตัวเอง</p></section>
+<section id="section-2"><h2>2. เริ่มจาก pure widget</h2><p>ดึงส่วน renderที่รับ immutable data+callbacksออกก่อน เช่น summary, product row, scan cardและhistory panel ไม่ย้าย state ไม่เปลี่ยน behavior จึงเป็น seamความเสี่ยงต่ำและช่วยให้ parent buildอ่านเป็นโครง flow</p></section>
+<section id="section-3"><h2>3. Extract dialog/sheetพร้อม lifecycle</h2><p>componentที่มี controller/focusควรเป็น StatefulWidgetของตัวเองและ dispose resourceที่ตนสร้าง หากรับ controllerจาก parentต้องประกาศ ownershipชัดเหมือน Pda widgetsของ absoluteที่ disposeเฉพาะ internal controller</p></section>
+<section id="section-4"><h2>4. อย่าแตกเป็น private methodsอย่างเดียว</h2><p><code>Widget _buildX()</code>ลดความยาวแต่ยัง rebuildพร้อม parentและเข้าถึง stateทุกตัว Component classสร้าง explicit inputs, key/test boundaryและลด accidental couplingได้จริง</p></section>
+<section id="section-5"><h2>5. ต่อด้วย feature controller</h2><p>หลัง presentation seamsชัด ค่อยย้าย scan validation/API transitionออกจาก Stateเป็น controllerที่ทดสอบได้ ลำดับนี้ทำให้รู้ว่า stateใด localและ stateใด domain ไม่สร้าง mega view-modelจากการย้ายทุก fieldพร้อมกัน</p></section>
+<section id="section-6"><h2>6. Preserve behavior</h2><p>ก่อน extractionล็อก scanner focus, keyboard Enter, scroll owner, loading disable, dialog dismissalและ navigation resultด้วย widget tests Golden screenshotอย่างเดียวจับ side effectsไม่ได้</p></section>
+<section id="section-7"><h2>7. Folder by feature</h2><pre class="code-vs"><code>packing/
   packing_screen.dart       // composition
   packing_controller.dart   // transitions
   widgets/...
   dialogs/...
   packing_repository.dart</code></pre><p>co-locateสิ่งที่เปลี่ยนด้วยกัน ไม่สร้าง global widgets dumpใหม่</p></section>
-<section><h2>8. Exit criteria</h2><div class="success">หยุดเมื่อ parentอ่าน flowได้, extracted componentมี inputsแคบ, ownershipชัดและ testsผ่าน ไม่ตั้งเป้าไฟล์ต่ำกว่า Nบรรทัดเพราะอาจสร้าง 30ไฟล์ที่ตามยากกว่าเดิม</div></section>
+<section id="section-8"><h2>8. Exit criteria</h2><div class="success">หยุดเมื่อ parentอ่าน flowได้, extracted componentมี inputsแคบ, ownershipชัดและ testsผ่าน ไม่ตั้งเป้าไฟล์ต่ำกว่า Nบรรทัดเพราะอาจสร้าง 30ไฟล์ที่ตามยากกว่าเดิม</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

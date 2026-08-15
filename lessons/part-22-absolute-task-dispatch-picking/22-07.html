@@ -4,19 +4,20 @@
 <title>Manual task scan state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">22-07 · Real Codebase</span><h1>Manual task scan state machine</h1><p>Part 22: wms_absolute_mobile: Task, Dispatch, AGV &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. รับงานก่อนเริ่มวิ่ง step</a></li><li><a href="#section-2">2. View render จาก runSteps</a></li><li><a href="#section-3">3. Expected barcode</a></li><li><a href="#section-4">4. Instruction step ไม่ใช่ scan step</a></li><li><a href="#section-5">5. Location picker เป็นตัวช่วย ไม่ใช่ bypass</a></li><li><a href="#section-6">6. Back และ bottom navigation</a></li><li><a href="#section-7">7. Runtime state ไม่ใช่ durable state</a></li><li><a href="#section-8">8. State-machine tests</a></li></ol></nav>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>TaskRunView</code>, <code>WarehouseStore.openTask</code> และ <code>taskScan</code> — manual task เป็น state machine ที่ขับด้วย metadata</div>
-<section><h2>1. รับงานก่อนเริ่มวิ่ง step</h2><p>taskที่ HANDLE/dispatched เมื่อเปิดจะเปลี่ยนเป็น inProgressและเริ่ม step 0 ส่วน taskที่ทำค้างเก็บ stepเดิมไว้ การเข้า detailจึงไม่ควร resetงานทุกครั้ง และ navigation stateต้องถือ active taskให้กลับมาทำต่อได้</p></section>
-<section><h2>2. View render จาก runSteps</h2><p>TaskRunViewเลือก <code>runSteps[task.type]</code> แล้วแสดง FlowStepsกับ panelตาม key ทำให้ putaway/retrieve/returningใช้ shellเดียวกัน แต่แต่ละ flowมีจำนวนและชนิด inputต่างกัน</p></section>
-<section><h2>3. Expected barcode</h2><pre class="code-vs"><code>StepDef.expect
+<section id="section-1"><h2>1. รับงานก่อนเริ่มวิ่ง step</h2><p>taskที่ HANDLE/dispatched เมื่อเปิดจะเปลี่ยนเป็น inProgressและเริ่ม step 0 ส่วน taskที่ทำค้างเก็บ stepเดิมไว้ การเข้า detailจึงไม่ควร resetงานทุกครั้ง และ navigation stateต้องถือ active taskให้กลับมาทำต่อได้</p></section>
+<section id="section-2"><h2>2. View render จาก runSteps</h2><p>TaskRunViewเลือก <code>runSteps[task.type]</code> แล้วแสดง FlowStepsกับ panelตาม key ทำให้ putaway/retrieve/returningใช้ shellเดียวกัน แต่แต่ละ flowมีจำนวนและชนิด inputต่างกัน</p></section>
+<section id="section-3"><h2>3. Expected barcode</h2><pre class="code-vs"><code>StepDef.expect
 → task.barcodeFor(expect)
 → normalize(trim + uppercase)
 → compare exact
 → success: step++
 → mismatch: error, stepเดิม</code></pre><p>destinationใช้ scanned codeบันทึกไว้ใน taskเพื่อส่ง completeMoveภายหลัง</p></section>
-<section><h2>4. Instruction step ไม่ใช่ scan step</h2><p>detail, suggestและdeliverเป็นคำแนะนำ/confirmation จึงใช้ปุ่ม Next ขณะที่ scanpallet, scanlocและscandestต้องรับหลักฐานหน้างาน อย่าทำ Nextข้าม scanเพื่อความสะดวก เพราะจะทำลาย traceability</p></section>
-<section><h2>5. Location picker เป็นตัวช่วย ไม่ใช่ bypass</h2><p>putawayโหลด free locationsมาให้ค้นและแตะเติมช่องได้ แต่ยังเข้าทาง confirmเดียวกับการสแกน รายการ scrollแยกจาก scannerเพื่อรักษาปุ่ม/ช่อง inputให้เห็นบน PDAจอเล็ก</p></section>
-<section><h2>6. Back และ bottom navigation</h2><p>ออกจากหน้า runไม่ควรลบ runtime step งาน manualต้องกลับมา resumeได้ Flow navigation testตรวจทั้ง pause/resume, backและ bottom navigation เพื่อกัน regressionที่เปลี่ยน tabแล้ว active taskหาย</p></section>
-<section><h2>7. Runtime state ไม่ใช่ durable state</h2><p>stepและ scanned destinationอยู่ใน memoryและถูก preserveตอน reload แต่ปิดแอป/refresh browserแล้วยังหาย ถ้าธุรกิจต้อง resumeข้าม session ควร persist checkpointฝั่ง serverหรือ local storeที่ผูก user+task version พร้อมตรวจ task statusใหม่</p></section>
-<section><h2>8. State-machine tests</h2><div class="success">ทดสอบทุก transition, barcodeผิด, scanซ้ำ, free-location stale, navigation resume, reloadระหว่าง stepและ taskถูก cancelจากอุปกรณ์อื่น ห้าม assertเพียงหน้าจอสุดท้ายเพราะ bugมักเกิดที่ transitionกลางทาง</div></section>
+<section id="section-4"><h2>4. Instruction step ไม่ใช่ scan step</h2><p>detail, suggestและdeliverเป็นคำแนะนำ/confirmation จึงใช้ปุ่ม Next ขณะที่ scanpallet, scanlocและscandestต้องรับหลักฐานหน้างาน อย่าทำ Nextข้าม scanเพื่อความสะดวก เพราะจะทำลาย traceability</p></section>
+<section id="section-5"><h2>5. Location picker เป็นตัวช่วย ไม่ใช่ bypass</h2><p>putawayโหลด free locationsมาให้ค้นและแตะเติมช่องได้ แต่ยังเข้าทาง confirmเดียวกับการสแกน รายการ scrollแยกจาก scannerเพื่อรักษาปุ่ม/ช่อง inputให้เห็นบน PDAจอเล็ก</p></section>
+<section id="section-6"><h2>6. Back และ bottom navigation</h2><p>ออกจากหน้า runไม่ควรลบ runtime step งาน manualต้องกลับมา resumeได้ Flow navigation testตรวจทั้ง pause/resume, backและ bottom navigation เพื่อกัน regressionที่เปลี่ยน tabแล้ว active taskหาย</p></section>
+<section id="section-7"><h2>7. Runtime state ไม่ใช่ durable state</h2><p>stepและ scanned destinationอยู่ใน memoryและถูก preserveตอน reload แต่ปิดแอป/refresh browserแล้วยังหาย ถ้าธุรกิจต้อง resumeข้าม session ควร persist checkpointฝั่ง serverหรือ local storeที่ผูก user+task version พร้อมตรวจ task statusใหม่</p></section>
+<section id="section-8"><h2>8. State-machine tests</h2><div class="success">ทดสอบทุก transition, barcodeผิด, scanซ้ำ, free-location stale, navigation resume, reloadระหว่าง stepและ taskถูก cancelจากอุปกรณ์อื่น ห้าม assertเพียงหน้าจอสุดท้ายเพราะ bugมักเกิดที่ transitionกลางทาง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

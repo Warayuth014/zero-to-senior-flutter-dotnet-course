@@ -4,21 +4,22 @@
 <title>SettingsScreen + ApiConfigService</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-05 · Real Codebase</span><h1>SettingsScreen + ApiConfigService</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Stored record</a></li><li><a href="#section-2">2. Form validation</a></li><li><a href="#section-3">3. Load sequence</a></li><li><a href="#section-4">4. Test before save</a></li><li><a href="#section-5">5. Save invalidates cache</a></li><li><a href="#section-6">6. Clear behavior</a></li><li><a href="#section-7">7. Probe semantics</a></li><li><a href="#section-8">8. Refactor seam</a></li></ol></nav>
 <div class="note"><strong>Connection flow มีสามไฟล์:</strong> <code>SettingsScreen</code>ดูแล form/UX, <code>ApiConfigService</code>เก็บ host/port/protocol และ <code>connection_probe.dart</code>ยิง <code>/api/health</code>เพื่อยืนยันว่าเป็น WMS API</div>
-<section><h2>1. Stored record</h2><pre class="code-vs"><code>({String? host, int port, String protocol})
+<section id="section-1"><h2>1. Stored record</h2><pre class="code-vs"><code>({String? host, int port, String protocol})
 defaultPort = 5000
 defaultProtocol = 'http'</code></pre><p>ใช้ SharedPreferencesสาม key ไม่มี base path/profileหลายชุด</p></section>
-<section><h2>2. Form validation</h2><p><code>validateHost</code>ห้าม scheme, space, colon, slash เพราะ protocol/portแยกช่อง; <code>validatePort</code>รับ 1–65535 Validationเป็น pure functionsจึง unit testง่าย</p></section>
-<section><h2>3. Load sequence</h2><pre class="code-vs"><code>load config → fill controllers
+<section id="section-2"><h2>2. Form validation</h2><p><code>validateHost</code>ห้าม scheme, space, colon, slash เพราะ protocol/portแยกช่อง; <code>validatePort</code>รับ 1–65535 Validationเป็น pure functionsจึง unit testง่าย</p></section>
+<section id="section-3"><h2>3. Load sequence</h2><pre class="code-vs"><code>load config → fill controllers
 → ApiService.resolveServerUrl()
 → render active URL → _probeActive()</code></pre><p>มี mounted guardหลัง awaitและแยก loading/testing/saving/probing flags</p></section>
-<section><h2>4. Test before save</h2><p><code>_testConnection</code>ประกอบ URLจากค่าร่างแล้วยิง probeโดยไม่เปลี่ยน active config แสดง success/warning snackbar ช่วยป้องกัน saveค่าที่พิมพ์ผิดแต่ผู้ใช้ยังเลือก saveได้ตาม flow</p></section>
-<section><h2>5. Save invalidates cache</h2><pre class="code-vs"><code>await config.save(...);
+<section id="section-4"><h2>4. Test before save</h2><p><code>_testConnection</code>ประกอบ URLจากค่าร่างแล้วยิง probeโดยไม่เปลี่ยน active config แสดง success/warning snackbar ช่วยป้องกัน saveค่าที่พิมพ์ผิดแต่ผู้ใช้ยังเลือก saveได้ตาม flow</p></section>
+<section id="section-5"><h2>5. Save invalidates cache</h2><pre class="code-vs"><code>await config.save(...);
 ApiService.resetBaseUrl();
 final active = await ApiService.resolveServerUrl();
 _probeActive();</code></pre><p>ถ้าลืม reset singletonยังใช้ serverเก่า นี่คือ couplingสำคัญที่ต้องจำ</p></section>
-<section><h2>6. Clear behavior</h2><p>clearสาม config keys → reset cache → resolverกลับ emulator/localhost → probeใหม่ ต่างจาก <code>AuthSessionService.clearSession()</code> ที่ clear prefsทั้งก้อนและอาจทำผลเดียวกันโดยไม่ตั้งใจ</p></section>
-<section><h2>7. Probe semantics</h2><p>validate URI, GET healthพร้อม timeout, ตรวจ status 2xxและ payload signature แยก timeout, TLS handshake, socketและ client error Probe successหมายถึง endpointตอบเป็น WMS ไม่ได้พิสูจน์ login/permissionทุกโดเมน</p></section>
-<section><h2>8. Refactor seam</h2><div class="success">ใช้ typed ConnectionProfile + repository, inject HTTP client/resolver, commit profileแบบ atomicหลัง probe, production policyบังคับ HTTPS และให้ endpoint switchหยุด session/SignalR/in-flight requestsอย่างชัดเจน</div></section>
+<section id="section-6"><h2>6. Clear behavior</h2><p>clearสาม config keys → reset cache → resolverกลับ emulator/localhost → probeใหม่ ต่างจาก <code>AuthSessionService.clearSession()</code> ที่ clear prefsทั้งก้อนและอาจทำผลเดียวกันโดยไม่ตั้งใจ</p></section>
+<section id="section-7"><h2>7. Probe semantics</h2><p>validate URI, GET healthพร้อม timeout, ตรวจ status 2xxและ payload signature แยก timeout, TLS handshake, socketและ client error Probe successหมายถึง endpointตอบเป็น WMS ไม่ได้พิสูจน์ login/permissionทุกโดเมน</p></section>
+<section id="section-8"><h2>8. Refactor seam</h2><div class="success">ใช้ typed ConnectionProfile + repository, inject HTTP client/resolver, commit profileแบบ atomicหลัง probe, production policyบังคับ HTTPS และให้ endpoint switchหยุด session/SignalR/in-flight requestsอย่างชัดเจน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,16 +4,17 @@
 <title>Return source pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-15 · Real Codebase</span><h1>Return source pallet</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Return API</a></li><li><a href="#section-2">2. Preview model</a></li><li><a href="#section-3">3. Orders-list flow</a></li><li><a href="#section-4">4. Pick-flow fallback</a></li><li><a href="#section-5">5. Unify decision</a></li><li><a href="#section-6">6. Source result flags</a></li><li><a href="#section-7">7. Concurrency/idempotency</a></li><li><a href="#section-8">8. Return tests</a></li></ol></nav>
 <div class="note"><strong>Return pallet มีสอง entry points:</strong> orders list ใช้ preview ก่อนส่ง ส่วน PickItemsScreen เสนอ ASRS/ZONE_PACK ทันทีเมื่อ assign source ไม่สำเร็จ ความต่างนี้ต้องอธิบายและทำ policy ให้เป็นหนึ่งเดียว</div>
-<section><h2>1. Return API</h2><pre class="code-vs"><code>GET  /picking/return-pallet-preview/{palletId}
+<section id="section-1"><h2>1. Return API</h2><pre class="code-vs"><code>GET  /picking/return-pallet-preview/{palletId}
 POST /picking/return-pallet
 { palletId, destination? }</code></pre><p>ถ้าไม่ส่ง destination backend เลือก ZONE_PACK สำหรับ PACKED มิฉะนั้น ASRS</p></section>
-<section><h2>2. Preview model</h2><p><code>ReturnPalletPreview</code> มี currentStatus/location, canReturn, destination และ reason จึงเป็น typed decision จาก server ก่อน mutation ไม่ใช่แค่ข้อมูลแสดงผล</p></section>
-<section><h2>3. Orders-list flow</h2><p>scan → preview → deny หรือ confirm destination ที่ serverแนะนำ → execute → clear/focus เป็น flow ปลอดภัยเพราะ operator เห็นเหตุผลและ routing ก่อน commit</p></section>
-<section><h2>4. Pick-flow fallback</h2><p>เมื่อ assign source fail โค้ด set returnPalletId และเปิดสองปุ่ม ASRS/ZONE_PACK โดยไม่ preview ทั้งยังตีความทุก error ว่าไม่มีของที่ต้อง pick จึงเสี่ยง routing pallet หลัง network/auth failure</p></section>
-<section><h2>5. Unify decision</h2><p>สร้าง ReturnPalletCoordinator ที่เรียก preview, แสดง destination ที่อนุญาต และ execute ด้วย version/token จาก preview ใช้ร่วมทั้งสองหน้า ห้ามให้ widget เดา policy จากข้อความ error</p></section>
-<section><h2>6. Source result flags</h2><p>หลัง confirm response มี sourcePalletEmpty/sourcePickDone ซึ่งควรช่วยตัดสินว่า source ต้อง return หรือใช้ต่อ แต่ UI ปัจจุบันไม่ได้ branch ด้วย flags เหล่านี้ ควรออกแบบ transition ตาม domain outcome</p></section>
-<section><h2>7. Concurrency/idempotency</h2><p>return ชนกับ pick/robot dispatch ได้ Backend ต้อง lock/version pallet, reject stale preview และทำ retry key ให้ safe Client ต้อง refresh location/status หลัง 409 หรือ timeout</p></section>
-<section><h2>8. Return tests</h2><div class="success">ทดสอบ AVAILABLE/PICKING/PACKED, canReturn false, auto-route, explicit destination, preview stale, timeout after commit, assign transport error และสองเครื่อง return พร้อมกัน โดยมีเพียงหนึ่ง transition สำเร็จ</div></section>
+<section id="section-2"><h2>2. Preview model</h2><p><code>ReturnPalletPreview</code> มี currentStatus/location, canReturn, destination และ reason จึงเป็น typed decision จาก server ก่อน mutation ไม่ใช่แค่ข้อมูลแสดงผล</p></section>
+<section id="section-3"><h2>3. Orders-list flow</h2><p>scan → preview → deny หรือ confirm destination ที่ serverแนะนำ → execute → clear/focus เป็น flow ปลอดภัยเพราะ operator เห็นเหตุผลและ routing ก่อน commit</p></section>
+<section id="section-4"><h2>4. Pick-flow fallback</h2><p>เมื่อ assign source fail โค้ด set returnPalletId และเปิดสองปุ่ม ASRS/ZONE_PACK โดยไม่ preview ทั้งยังตีความทุก error ว่าไม่มีของที่ต้อง pick จึงเสี่ยง routing pallet หลัง network/auth failure</p></section>
+<section id="section-5"><h2>5. Unify decision</h2><p>สร้าง ReturnPalletCoordinator ที่เรียก preview, แสดง destination ที่อนุญาต และ execute ด้วย version/token จาก preview ใช้ร่วมทั้งสองหน้า ห้ามให้ widget เดา policy จากข้อความ error</p></section>
+<section id="section-6"><h2>6. Source result flags</h2><p>หลัง confirm response มี sourcePalletEmpty/sourcePickDone ซึ่งควรช่วยตัดสินว่า source ต้อง return หรือใช้ต่อ แต่ UI ปัจจุบันไม่ได้ branch ด้วย flags เหล่านี้ ควรออกแบบ transition ตาม domain outcome</p></section>
+<section id="section-7"><h2>7. Concurrency/idempotency</h2><p>return ชนกับ pick/robot dispatch ได้ Backend ต้อง lock/version pallet, reject stale preview และทำ retry key ให้ safe Client ต้อง refresh location/status หลัง 409 หรือ timeout</p></section>
+<section id="section-8"><h2>8. Return tests</h2><div class="success">ทดสอบ AVAILABLE/PICKING/PACKED, canReturn false, auto-route, explicit destination, preview stale, timeout after commit, assign transport error และสองเครื่อง return พร้อมกัน โดยมีเพียงหนึ่ง transition สำเร็จ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

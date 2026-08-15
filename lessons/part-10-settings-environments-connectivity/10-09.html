@@ -4,18 +4,19 @@
 <title>Health probe ที่ตรวจ payload ไม่ใช่แค่ 200</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-09 · Flutter + .NET</span><h1>Health probe ที่ตรวจ payload ไม่ใช่แค่ 200</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Expected payload</a></li><li><a href="#section-2">2. Probe steps</a></li><li><a href="#section-3">3. Result taxonomy</a></li><li><a href="#section-4">4. Request parity</a></li><li><a href="#section-5">5. Anonymous/minimal</a></li><li><a href="#section-6">6. Connectivity ≠ internet</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Contract tests</a></li></ol></nav>
 <div class="note"><strong>Health probe ที่ดีพิสูจน์ WMS API identity:</strong> HTTP 200อย่างเดียวบอกเพียงว่ามีบางอย่างตอบ URL ไม่ได้บอกว่า route/server/payloadถูก</div>
-<section><h2>1. Expected payload</h2><pre class="code-vs"><code>{
+<section id="section-1"><h2>1. Expected payload</h2><pre class="code-vs"><code>{
   "service": "wms-mobile-api",
   "status": "healthy",
   "version": "1.4.2"
 }</code></pre><p>ตรวจ service markerและ statusแบบ typed ไม่เช็กเพียง bodyไม่ว่าง</p></section>
-<section><h2>2. Probe steps</h2><ol><li>parse/validate draft base URL</li><li>สร้าง health URIด้วย base path</li><li>GET anonymousพร้อม timeoutสั้น</li><li>ตรวจ status/content-type</li><li>decode JSONและ marker</li><li>คืน typed result + latency</li></ol></section>
-<section><h2>3. Result taxonomy</h2><p>invalidAddress, timeout, unreachable, tlsFailure, httpFailure, wrongService, unhealthyและ healthy ช่วย settings UIให้คำแนะนำตรงสาเหตุ</p></section>
-<section><h2>4. Request parity</h2><p>Probeต้องใช้ resolverและ base pathเดียวกับ ApiClient ของจริงมีสอง health routeต่างกันตาม backend: <code>/api/health</code> และ <code>/api/WMS/mobile_health</code></p></section>
-<section><h2>5. Anonymous/minimal</h2><p>connection testก่อน loginควร anonymousและไม่เปิด DB details/secret ใช้ readiness dependencyเท่าที่จำเป็นและไม่ queryหนักทุก shell poll</p></section>
-<section><h2>6. Connectivity ≠ internet</h2><p>WMS intranetอาจ onlineทั้งที่ไม่มี internet ตรวจ endpointเป้าหมาย ไม่ใช้ connectivity packageหรือ pingเป็นคำตอบสุดท้าย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ได้ 200 JSON <code>{"status":"ok"}</code> จาก serviceอื่นควรขึ้นเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ถ้าไม่มี expected WMS service marker ให้ wrongServiceและแนะนำตรวจ base path/server</p></details></section>
-<section><h2>8. Contract tests</h2><div class="success">healthy/unhealthy marker, HTML 200, wrong JSON 200, 404/500, timeout/socket/TLS, Thai messageและ base path</div></section>
+<section id="section-2"><h2>2. Probe steps</h2><ol><li>parse/validate draft base URL</li><li>สร้าง health URIด้วย base path</li><li>GET anonymousพร้อม timeoutสั้น</li><li>ตรวจ status/content-type</li><li>decode JSONและ marker</li><li>คืน typed result + latency</li></ol></section>
+<section id="section-3"><h2>3. Result taxonomy</h2><p>invalidAddress, timeout, unreachable, tlsFailure, httpFailure, wrongService, unhealthyและ healthy ช่วย settings UIให้คำแนะนำตรงสาเหตุ</p></section>
+<section id="section-4"><h2>4. Request parity</h2><p>Probeต้องใช้ resolverและ base pathเดียวกับ ApiClient ของจริงมีสอง health routeต่างกันตาม backend: <code>/api/health</code> และ <code>/api/WMS/mobile_health</code></p></section>
+<section id="section-5"><h2>5. Anonymous/minimal</h2><p>connection testก่อน loginควร anonymousและไม่เปิด DB details/secret ใช้ readiness dependencyเท่าที่จำเป็นและไม่ queryหนักทุก shell poll</p></section>
+<section id="section-6"><h2>6. Connectivity ≠ internet</h2><p>WMS intranetอาจ onlineทั้งที่ไม่มี internet ตรวจ endpointเป้าหมาย ไม่ใช้ connectivity packageหรือ pingเป็นคำตอบสุดท้าย</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ได้ 200 JSON <code>{"status":"ok"}</code> จาก serviceอื่นควรขึ้นเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ถ้าไม่มี expected WMS service marker ให้ wrongServiceและแนะนำตรวจ base path/server</p></details></section>
+<section id="section-8"><h2>8. Contract tests</h2><div class="success">healthy/unhealthy marker, HTML 200, wrong JSON 200, 404/500, timeout/socket/TLS, Thai messageและ base path</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

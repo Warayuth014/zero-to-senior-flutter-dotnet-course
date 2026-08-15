@@ -4,15 +4,16 @@
 <title>Token expiration และ 401</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-07 · Auth Integration</span><h1>Token expiration และ 401</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Proactive check</a></li><li><a href="#section-2">2. Reactive 401</a></li><li><a href="#section-3">3. Single-flight refresh</a></li><li><a href="#section-4">4. 401 vs 403</a></li><li><a href="#section-5">5. Command uncertainty</a></li><li><a href="#section-6">6. User experience</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test matrix</a></li></ol></nav>
 <div class="note"><strong>Expiration กับ 401 เป็นคนละสัญญาณ:</strong> client รู้เวลา expiry ล่วงหน้าได้ แต่ server ยังอาจ 401 เพราะ revoke, signing key, issuer/audience หรือ clock policy</div>
-<section><h2>1. Proactive check</h2><pre class="code-vs"><code>bool shouldRefresh(DateTime now) =&gt;
+<section id="section-1"><h2>1. Proactive check</h2><pre class="code-vs"><code>bool shouldRefresh(DateTime now) =&gt;
     !now.isBefore(session.expiresAt.subtract(const Duration(minutes: 1)));</code></pre><p>ถ้าไม่มี refresh-token contract ให้ proactive check พา login ใหม่ ไม่สร้าง refresh เอง</p></section>
-<section><h2>2. Reactive 401</h2><p>ApiClient แจ้ง AuthCoordinator เมื่อ authenticated request ได้ 401 แต่ไม่ควร logout จาก 401 ของ login endpoint หรือ anonymous probe และต้องป้องกันหลาย request trigger logout/dialog ซ้ำ</p></section>
-<section><h2>3. Single-flight refresh</h2><p>ถ้ามี refresh token ให้ request พร้อมกันรอ refresh Future เดียว เมื่อสำเร็จ retry request ที่ปลอดภัยตาม policy; เมื่อ refresh ล้มให้ clear session ครั้งเดียว</p></section>
-<section><h2>4. 401 vs 403</h2><p>401 ทำให้ credential invalid จึงอาจยุติ session ส่วน 403 session ยัง validแต่ไม่มี permission ห้าม logout อัตโนมัติและห้าม refresh วน</p></section>
-<section><h2>5. Command uncertainty</h2><p>401 มักเกิดก่อน endpoint ทำ business logic แต่ proxy/middleware custom อาจต่างกัน Command retry หลัง refresh ต้องพิจารณา idempotency เช่นเดียวกับ timeout</p></section>
-<section><h2>6. User experience</h2><p>เก็บ intended destination ได้เฉพาะข้อมูลไม่ลับแล้วพา login จากนั้นให้ผู้ใช้เริ่ม command ใหม่ อย่าเก็บ password หรือ replay mutation ที่ยังไม่แน่ชัดโดยอัตโนมัติ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>สาม API ได้ 401 พร้อมกันควรเกิดอะไร?</p><details><summary>เฉลย</summary><p>refresh/logout transition เดียว, clear session ครั้งเดียว, cancel/ignore responses ด้วย generation และแสดง login หนึ่งครั้ง ไม่เปิดสาม dialog</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">expired ก่อนยิง, 401 หนึ่ง/หลาย request, 403, refresh success/fail, logout ระหว่าง refresh และ command ที่ห้าม retry</div></section>
+<section id="section-2"><h2>2. Reactive 401</h2><p>ApiClient แจ้ง AuthCoordinator เมื่อ authenticated request ได้ 401 แต่ไม่ควร logout จาก 401 ของ login endpoint หรือ anonymous probe และต้องป้องกันหลาย request trigger logout/dialog ซ้ำ</p></section>
+<section id="section-3"><h2>3. Single-flight refresh</h2><p>ถ้ามี refresh token ให้ request พร้อมกันรอ refresh Future เดียว เมื่อสำเร็จ retry request ที่ปลอดภัยตาม policy; เมื่อ refresh ล้มให้ clear session ครั้งเดียว</p></section>
+<section id="section-4"><h2>4. 401 vs 403</h2><p>401 ทำให้ credential invalid จึงอาจยุติ session ส่วน 403 session ยัง validแต่ไม่มี permission ห้าม logout อัตโนมัติและห้าม refresh วน</p></section>
+<section id="section-5"><h2>5. Command uncertainty</h2><p>401 มักเกิดก่อน endpoint ทำ business logic แต่ proxy/middleware custom อาจต่างกัน Command retry หลัง refresh ต้องพิจารณา idempotency เช่นเดียวกับ timeout</p></section>
+<section id="section-6"><h2>6. User experience</h2><p>เก็บ intended destination ได้เฉพาะข้อมูลไม่ลับแล้วพา login จากนั้นให้ผู้ใช้เริ่ม command ใหม่ อย่าเก็บ password หรือ replay mutation ที่ยังไม่แน่ชัดโดยอัตโนมัติ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>สาม API ได้ 401 พร้อมกันควรเกิดอะไร?</p><details><summary>เฉลย</summary><p>refresh/logout transition เดียว, clear session ครั้งเดียว, cancel/ignore responses ด้วย generation และแสดง login หนึ่งครั้ง ไม่เปิดสาม dialog</p></details></section>
+<section id="section-8"><h2>8. Test matrix</h2><div class="success">expired ก่อนยิง, 401 หนึ่ง/หลาย request, 403, refresh success/fail, logout ระหว่าง refresh และ command ที่ห้าม retry</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

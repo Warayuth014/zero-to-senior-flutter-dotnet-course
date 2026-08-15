@@ -4,19 +4,20 @@
 <title>Unidirectional data flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-10 · Architecture</span><h1>Unidirectional data flow</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Flow</a></li><li><a href="#section-2">2. Intent not mutation</a></li><li><a href="#section-3">3. State machine</a></li><li><a href="#section-4">4. Async sequence</a></li><li><a href="#section-5">5. One-shot effects</a></li><li><a href="#section-6">6. Debuggability</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test style</a></li></ol></nav>
 <div class="note"><strong>Unidirectional data flow:</strong> UI ส่ง intentลงไป, actionเรียก dependency, resultเปลี่ยน state, UIอ่าน stateกลับมาเป็นวงเดียวที่ตามและทดสอบได้</div>
-<section><h2>1. Flow</h2><pre class="code-vs"><code>User event → Store action → Repository → Result
+<section id="section-1"><h2>1. Flow</h2><pre class="code-vs"><code>User event → Store action → Repository → Result
      UI ← render(state) ← New immutable state</code></pre></section>
-<section><h2>2. Intent not mutation</h2><p>ใช้ <code>store.confirmQuantity(value)</code> แทน <code>store.qty = value; store.step++</code> ใน widget เพื่อให้ Storeตรวจ invariantและ transition atomically</p></section>
-<section><h2>3. State machine</h2><pre class="code-vs"><code>sealed class ReceiveState {}
+<section id="section-2"><h2>2. Intent not mutation</h2><p>ใช้ <code>store.confirmQuantity(value)</code> แทน <code>store.qty = value; store.step++</code> ใน widget เพื่อให้ Storeตรวจ invariantและ transition atomically</p></section>
+<section id="section-3"><h2>3. State machine</h2><pre class="code-vs"><code>sealed class ReceiveState {}
 class AwaitingPallet extends ReceiveState {}
 class AwaitingPart extends ReceiveState { /* pallet */ }
 class Confirming extends ReceiveState { /* draft */ }
 class Submitted extends ReceiveState { /* receipt */ }</code></pre><p>ลด boolean combinationsที่เป็นไปไม่ได้</p></section>
-<section><h2>4. Async sequence</h2><p>Actionประกาศ loadingก่อน await แล้ว success/failureหลัง awaitโดยมี generation/idempotency guard UIไม่ต้องเดาว่า requestกำลังวิ่งจาก local variable</p></section>
-<section><h2>5. One-shot effects</h2><p>navigation/toast/hapticอาจเป็น typed effectที่ UI consumeครั้งเดียว แยกจาก persistent state เพื่อ rebuildไม่ replay effect</p></section>
-<section><h2>6. Debuggability</h2><p>log action name + previous state type + next state type + elapsedโดยไม่ log secret/payload ทำ timelineว่า flowพังที่ transitionใด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Scanner callbackเรียก APIแล้ว Navigator.popเองมีปัญหาอะไร?</p><details><summary>เฉลย</summary><p>callbackผูก transport/navigationและ raceง่าย ให้ส่ง scan intent→Store state/effect→UI navigateเมื่อ transitionสำเร็จและ mounted</p></details></section>
-<section><h2>8. Test style</h2><div class="success">Given initial state + fake repository, When action, Then assert ordered states/effectsและ exact command—ไม่ต้อง inspect private widgets</div></section>
+<section id="section-4"><h2>4. Async sequence</h2><p>Actionประกาศ loadingก่อน await แล้ว success/failureหลัง awaitโดยมี generation/idempotency guard UIไม่ต้องเดาว่า requestกำลังวิ่งจาก local variable</p></section>
+<section id="section-5"><h2>5. One-shot effects</h2><p>navigation/toast/hapticอาจเป็น typed effectที่ UI consumeครั้งเดียว แยกจาก persistent state เพื่อ rebuildไม่ replay effect</p></section>
+<section id="section-6"><h2>6. Debuggability</h2><p>log action name + previous state type + next state type + elapsedโดยไม่ log secret/payload ทำ timelineว่า flowพังที่ transitionใด</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Scanner callbackเรียก APIแล้ว Navigator.popเองมีปัญหาอะไร?</p><details><summary>เฉลย</summary><p>callbackผูก transport/navigationและ raceง่าย ให้ส่ง scan intent→Store state/effect→UI navigateเมื่อ transitionสำเร็จและ mounted</p></details></section>
+<section id="section-8"><h2>8. Test style</h2><div class="success">Given initial state + fake repository, When action, Then assert ordered states/effectsและ exact command—ไม่ต้อง inspect private widgets</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

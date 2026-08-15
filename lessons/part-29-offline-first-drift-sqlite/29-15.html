@@ -4,14 +4,15 @@
 <title>Security encryption retention performance และ observability</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">29-15 · State &amp; Lifecycle</span><h1>Security encryption retention performance และ observability</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Sensitive data</a></li><li><a href="#section-2">2. Keys</a></li><li><a href="#section-3">3. Retention</a></li><li><a href="#section-4">4. Performance</a></li><li><a href="#section-5">5. Maintenance</a></li><li><a href="#section-6">6. Observability</a></li><li><a href="#section-7">7. Diagnostics</a></li><li><a href="#section-8">8. Checkpoint</a></li></ol></nav>
 <div class="note"><strong>Production database checklist:</strong> correctness มาก่อน แล้วจึง security, retention, performance และ observability ที่วัดได้</div>
-<section><h2>1. Sensitive data</h2><p>ลด PIIที่ cache, redact log และ purgeตาม logout/tenant policy SQLiteปกติไม่ใช่ encryption guarantee ต้องทำ threat modelก่อนเลือก encryption</p></section>
-<section><h2>2. Keys</h2><p>ถ้าใช้ encrypted DB กุญแจต้องอยู่ secure keystore/keychain ไม่ hard-codeหรือเก็บข้าง database และต้องวาง key rotation/recovery</p></section>
-<section><h2>3. Retention</h2><p>กำหนด TTL/cleanupสำหรับ completed cache, acknowledged audit, error payloadและไฟล์แนบ แต่ห้ามลบ pending commandเพียงเพราะเก่าโดยไม่ escalate</p></section>
-<section><h2>4. Performance</h2><p>วัด query latency, row count, DB size, write transaction และ frame time ใช้ pagination/index/batchตามหลักฐาน ไม่ optimizeจากความรู้สึก</p></section>
-<section><h2>5. Maintenance</h2><p>เข้าใจ WAL/checkpoint/vacuumตาม executorและplatform ทดสอบพื้นที่เต็มและ disk I/O failure เพื่อให้ errorไม่กลายเป็น data lossเงียบ</p></section>
-<section><h2>6. Observability</h2><p>เก็บ metric queue depth, oldest command age, sync success/failure class, conflict countและmigration duration โดยไม่ส่ง secret/payloadเกินจำเป็น</p></section>
-<section><h2>7. Diagnostics</h2><p>support screenควรแสดง schema/app version, last syncและsafe identifiers พร้อม exportแบบ redact ไม่ให้ผู้ใช้ส่ง databaseจริงผ่านแชต</p></section>
-<section><h2>8. Checkpoint</h2><div class="success">ตั้ง alert เมื่อ oldest pending ageเกิน SLA ไม่ใช่ดูแค่ว่า app crashหรือไม่ เพราะ syncอาจเสียแบบเงียบได้</div></section>
+<section id="section-1"><h2>1. Sensitive data</h2><p>ลด PIIที่ cache, redact log และ purgeตาม logout/tenant policy SQLiteปกติไม่ใช่ encryption guarantee ต้องทำ threat modelก่อนเลือก encryption</p></section>
+<section id="section-2"><h2>2. Keys</h2><p>ถ้าใช้ encrypted DB กุญแจต้องอยู่ secure keystore/keychain ไม่ hard-codeหรือเก็บข้าง database และต้องวาง key rotation/recovery</p></section>
+<section id="section-3"><h2>3. Retention</h2><p>กำหนด TTL/cleanupสำหรับ completed cache, acknowledged audit, error payloadและไฟล์แนบ แต่ห้ามลบ pending commandเพียงเพราะเก่าโดยไม่ escalate</p></section>
+<section id="section-4"><h2>4. Performance</h2><p>วัด query latency, row count, DB size, write transaction และ frame time ใช้ pagination/index/batchตามหลักฐาน ไม่ optimizeจากความรู้สึก</p></section>
+<section id="section-5"><h2>5. Maintenance</h2><p>เข้าใจ WAL/checkpoint/vacuumตาม executorและplatform ทดสอบพื้นที่เต็มและ disk I/O failure เพื่อให้ errorไม่กลายเป็น data lossเงียบ</p></section>
+<section id="section-6"><h2>6. Observability</h2><p>เก็บ metric queue depth, oldest command age, sync success/failure class, conflict countและmigration duration โดยไม่ส่ง secret/payloadเกินจำเป็น</p></section>
+<section id="section-7"><h2>7. Diagnostics</h2><p>support screenควรแสดง schema/app version, last syncและsafe identifiers พร้อม exportแบบ redact ไม่ให้ผู้ใช้ส่ง databaseจริงผ่านแชต</p></section>
+<section id="section-8"><h2>8. Checkpoint</h2><div class="success">ตั้ง alert เมื่อ oldest pending ageเกิน SLA ไม่ใช่ดูแค่ว่า app crashหรือไม่ เพราะ syncอาจเสียแบบเงียบได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

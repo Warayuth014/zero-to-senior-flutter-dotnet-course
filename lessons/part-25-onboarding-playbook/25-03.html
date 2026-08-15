@@ -4,17 +4,18 @@
 <title>หา API contract mismatch</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">25-03 · Real Codebase</span><h1>หา API contract mismatch</h1><p>Part 25: Onboarding &amp; Code Reading Playbook</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Capture raw facts</a></li><li><a href="#section-2">2. URL mismatch</a></li><li><a href="#section-3">3. Request mismatch</a></li><li><a href="#section-4">4. Response mismatch</a></li><li><a href="#section-5">5. Status semantics</a></li><li><a href="#section-6">6. Minimal contract test</a></li><li><a href="#section-7">7. Decide owner of fix</a></li><li><a href="#section-8">8. Done criteria</a></li></ol></nav>
 <div class="note"><strong>อาการ contract mismatch:</strong> HTTP 200แต่ parseพัง, fieldว่าง, statusผิด action, 400/415, endpoint not foundหรือ appแสดง zeroทั้งที่ serverมีข้อมูล</div>
-<section><h2>1. Capture raw facts</h2><p>เก็บ method+URL+status+headersที่ไม่ sensitive+request/response bodyจาก dev environmentและ traceId เปรียบเทียบ curl/.httpกับ Flutter request อย่าเริ่มแก้ parserจากข้อความ UIที่แปลแล้ว</p></section>
-<section><h2>2. URL mismatch</h2><p>ตรวจ scheme/host/port/base path/API prefix, slashซ้ำ, query encodingและ Android emulator 10.0.2.2 404ชี้ routeผิด, connection refusedไม่ใช่ JSON bug, CORSมักกระทบ webไม่ใช่ native</p></section>
-<section><h2>3. Request mismatch</h2><p>เทียบ JSON property casing/type/nullability, Content-Type, multipart field name, auth headerและ enum numeric/stringกับ .NET request DTO/model binding 400 ProblemDetails errorsควรชี้ field ไม่ hard-code retry</p></section>
-<section><h2>4. Response mismatch</h2><p>ตรวจ object vs list/envelope, <code>items</code> casing, number int/double/string, null/missing, timestamp zoneและ pagination total Absolute shared endpointsมี casingหลายแบบ; normalizeใน adapterพร้อม testsไม่กระจาย fallbackตาม widgets</p></section>
-<section><h2>5. Status semantics</h2><p>wire enumใหม่อาจถูก client mapเป็น executing/availableผิด คง Unknown(raw)และปิด mutationจนเข้าใจ contract Labelแปลไม่ใช่ keyสำหรับ logic</p></section>
-<section><h2>6. Minimal contract test</h2><pre class="code-vs"><code>final json = fixture('captured-response.json');
+<section id="section-1"><h2>1. Capture raw facts</h2><p>เก็บ method+URL+status+headersที่ไม่ sensitive+request/response bodyจาก dev environmentและ traceId เปรียบเทียบ curl/.httpกับ Flutter request อย่าเริ่มแก้ parserจากข้อความ UIที่แปลแล้ว</p></section>
+<section id="section-2"><h2>2. URL mismatch</h2><p>ตรวจ scheme/host/port/base path/API prefix, slashซ้ำ, query encodingและ Android emulator 10.0.2.2 404ชี้ routeผิด, connection refusedไม่ใช่ JSON bug, CORSมักกระทบ webไม่ใช่ native</p></section>
+<section id="section-3"><h2>3. Request mismatch</h2><p>เทียบ JSON property casing/type/nullability, Content-Type, multipart field name, auth headerและ enum numeric/stringกับ .NET request DTO/model binding 400 ProblemDetails errorsควรชี้ field ไม่ hard-code retry</p></section>
+<section id="section-4"><h2>4. Response mismatch</h2><p>ตรวจ object vs list/envelope, <code>items</code> casing, number int/double/string, null/missing, timestamp zoneและ pagination total Absolute shared endpointsมี casingหลายแบบ; normalizeใน adapterพร้อม testsไม่กระจาย fallbackตาม widgets</p></section>
+<section id="section-5"><h2>5. Status semantics</h2><p>wire enumใหม่อาจถูก client mapเป็น executing/availableผิด คง Unknown(raw)และปิด mutationจนเข้าใจ contract Labelแปลไม่ใช่ keyสำหรับ logic</p></section>
+<section id="section-6"><h2>6. Minimal contract test</h2><pre class="code-vs"><code>final json = fixture('captured-response.json');
 final model = Dto.fromJson(json);
 expect(model.id, '...');
 expect(model.status, UnknownStatus('NEW'));</code></pre><p>เพิ่ม request serialization testคู่กัน</p></section>
-<section><h2>7. Decide owner of fix</h2><p>backendผิด published contractให้แก้ serverแบบ backward compatible; client assumptionผิดให้แก้ parser; contractกำกวมให้ version/documentก่อน อย่าเพิ่ม <code>dynamic</code>/catch-allเพื่อทำให้ errorหาย</p></section>
-<section><h2>8. Done criteria</h2><div class="success">มี captured fixtureที่ redactแล้ว, root causeระดับ field/route/status, regression contract test, compatibility impactต่อ clientเก่าและ deploy orderที่ชัดเจน</div></section>
+<section id="section-7"><h2>7. Decide owner of fix</h2><p>backendผิด published contractให้แก้ serverแบบ backward compatible; client assumptionผิดให้แก้ parser; contractกำกวมให้ version/documentก่อน อย่าเพิ่ม <code>dynamic</code>/catch-allเพื่อทำให้ errorหาย</p></section>
+<section id="section-8"><h2>8. Done criteria</h2><div class="success">มี captured fixtureที่ redactแล้ว, root causeระดับ field/route/status, regression contract test, compatibility impactต่อ clientเก่าและ deploy orderที่ชัดเจน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

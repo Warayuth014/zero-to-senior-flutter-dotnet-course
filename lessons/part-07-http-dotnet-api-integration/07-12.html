@@ -4,23 +4,24 @@
 <title>BootstrapBlazor grid endpoint</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-12 · Flutter + .NET</span><h1>BootstrapBlazor grid endpoint</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Response contract</a></li><li><a href="#section-2">2. Grid DTO</a></li><li><a href="#section-3">3. Casing compatibility</a></li><li><a href="#section-4">4. Request shape</a></li><li><a href="#section-5">5. Load all อย่างระวัง</a></li><li><a href="#section-6">6. Empty vs failure</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test</a></li></ol></nav>
 <div class="note"><strong>BootstrapBlazor grid:</strong> endpoint รายการมักคืน envelope <code>{items, totalCount}</code> และรับ query สำหรับ page/search/sort/filter ไม่ใช่ JSON list เปล่า</div>
-<section><h2>1. Response contract</h2><pre class="code-vs"><code>{
+<section id="section-1"><h2>1. Response contract</h2><pre class="code-vs"><code>{
   "items": [{"taskId":"T-1","status":"OPEN"}],
   "totalCount": 137
 }</code></pre><p><code>items.length</code> คือจำนวนหน้าปัจจุบัน ส่วน totalCount คือผลทั้งหมดหลัง filter</p></section>
-<section><h2>2. Grid DTO</h2><pre class="code-vs"><code>typedef GridPage&lt;T&gt; = ({List&lt;T&gt; items, int totalCount});
+<section id="section-2"><h2>2. Grid DTO</h2><pre class="code-vs"><code>typedef GridPage&lt;T&gt; = ({List&lt;T&gt; items, int totalCount});
 
 GridPage&lt;TaskDto&gt; parseTaskPage(Map&lt;String, dynamic&gt; json) {
   final rows = requireList(json, 'items');
   return (items: rows.map(TaskDto.fromObject).toList(),
           totalCount: requireInt(json, 'totalCount'));
 }</code></pre></section>
-<section><h2>3. Casing compatibility</h2><p>ของจริงใน <code>api/tasks_api.dart</code> รองรับทั้ง <code>totalCount</code> และ <code>TotalCount</code> ระหว่าง migration แต่ควร normalize จุดเดียวและมีแผนถอด fallback</p></section>
-<section><h2>4. Request shape</h2><p>ตรวจว่า endpoint รับ page/pageSize, offset/limit หรือ Bootstrap query model เพราะเลข page อาจเริ่มที่ 1 หรือ 0 และ sort expression อาจมีรูปแบบเฉพาะ</p></section>
-<section><h2>5. Load all อย่างระวัง</h2><p>หาก workflow ต้องโหลดทุกหน้า ให้ loop พร้อม maximum pages, cancellation, stable sort และ dedupe ด้วย ID เพื่อป้องกันข้อมูลเปลี่ยนระหว่าง paging หรือ server totalCount ผิด</p></section>
-<section><h2>6. Empty vs failure</h2><p><code>items=[] totalCount=0</code> คือ success empty; wrong shape, missing items หรือ 500 ไม่ใช่ empty และต้องแสดง error state</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้าแรกมี 20 รายการ total 45 ต้อง request กี่หน้าที่ pageSize 20?</p><details><summary>เฉลย</summary><p>3 หน้า โดยหยุดเมื่อ loaded ≥ totalCount หรือหน้าสั้นกว่า pageSize ตาม contract; ป้องกัน duplicate ID ระหว่างหน้า</p></details></section>
-<section><h2>8. Test</h2><div class="success">fixture ต้องครอบคลุม camel/Pascal casing, empty, totalCount มากกว่า items, field ผิดชนิด และหน้าซ้ำ</div></section>
+<section id="section-3"><h2>3. Casing compatibility</h2><p>ของจริงใน <code>api/tasks_api.dart</code> รองรับทั้ง <code>totalCount</code> และ <code>TotalCount</code> ระหว่าง migration แต่ควร normalize จุดเดียวและมีแผนถอด fallback</p></section>
+<section id="section-4"><h2>4. Request shape</h2><p>ตรวจว่า endpoint รับ page/pageSize, offset/limit หรือ Bootstrap query model เพราะเลข page อาจเริ่มที่ 1 หรือ 0 และ sort expression อาจมีรูปแบบเฉพาะ</p></section>
+<section id="section-5"><h2>5. Load all อย่างระวัง</h2><p>หาก workflow ต้องโหลดทุกหน้า ให้ loop พร้อม maximum pages, cancellation, stable sort และ dedupe ด้วย ID เพื่อป้องกันข้อมูลเปลี่ยนระหว่าง paging หรือ server totalCount ผิด</p></section>
+<section id="section-6"><h2>6. Empty vs failure</h2><p><code>items=[] totalCount=0</code> คือ success empty; wrong shape, missing items หรือ 500 ไม่ใช่ empty และต้องแสดง error state</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้าแรกมี 20 รายการ total 45 ต้อง request กี่หน้าที่ pageSize 20?</p><details><summary>เฉลย</summary><p>3 หน้า โดยหยุดเมื่อ loaded ≥ totalCount หรือหน้าสั้นกว่า pageSize ตาม contract; ป้องกัน duplicate ID ระหว่างหน้า</p></details></section>
+<section id="section-8"><h2>8. Test</h2><div class="success">fixture ต้องครอบคลุม camel/Pascal casing, empty, totalCount มากกว่า items, field ผิดชนิด และหน้าซ้ำ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

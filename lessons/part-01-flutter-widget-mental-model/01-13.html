@@ -4,8 +4,9 @@
 <title>ListenableBuilder และ ValueListenableBuilder</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-13 · Flutter UI</span><h1>ListenableBuilder และ ValueListenableBuilder</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ValueListenableBuilder</a></li><li><a href="#section-2">2. ListenableBuilder</a></li><li><a href="#section-3">3. Rebuild scope</a></li><li><a href="#section-4">4. child optimization</a></li><li><a href="#section-5">5. Notify เป็น contract</a></li><li><a href="#section-6">6. Ownership/dispose</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>ListenableBuilder</code> rebuild subtreeเมื่อ Listenable notify; <code>ValueListenableBuilder&lt;T&gt;</code> ส่ง current valueเข้า builderและรองรับ childคงที่ ทั้งสองเป็นสะพานจาก mutable notifierสู่ declarative widget tree</div>
-<section><h2>1. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
+<section id="section-1"><h2>1. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
   valueListenable: themeProvider,
   builder: (context, mode, child) =&gt; MaterialApp(
     themeMode: mode,
@@ -13,15 +14,15 @@
   ),
   child: const HomeScreen(),
 )</code></pre><p>wmsapp rootใช้ ThemeProviderที่ extends ValueNotifier ทำให้ builderได้ typed valueโดยไม่อ่าน globalซ้ำ</p></section>
-<section><h2>2. ListenableBuilder</h2><pre class="code-vs"><code>ListenableBuilder(
+<section id="section-2"><h2>2. ListenableBuilder</h2><pre class="code-vs"><code>ListenableBuilder(
   listenable: store,
   builder: (context, child) =&gt; WarehouseBody(store: store),
 )</code></pre><p>เหมาะ ChangeNotifier/หลาย fields Builderอ่าน snapshotจาก object Absoluteใช้กับ language controller, WarehouseStore, ConnectionController</p></section>
-<section><h2>3. Rebuild scope</h2><p>วาง builderต่ำสุดที่ครอบทุก consumerแต่ไม่ครอบของคงที่ Absolute shellแยก bodyกับ bottom navigation listeners แม้ฟัง storeเดียวกัน เพื่อชัดว่าแต่ละ subtree renderอะไร ส่วน app-wide languageอยู่เหนือ MaterialAppเพราะ localeกระทบทั้งแอป</p></section>
-<section><h2>4. child optimization</h2><p>ถ้า subtreeไม่ขึ้นกับ listenableให้สร้างครั้งเดียวใน <code>child</code> แล้วส่งเข้า builder ลดการ rebuild config แต่ต้องแน่ใจว่า childไม่อ่าน stateนั้นทาง context/global มิฉะนั้น optimizationผิดความหมาย</p></section>
-<section><h2>5. Notify เป็น contract</h2><p>Mutationใน ChangeNotifierต้องรักษา invariantแล้วเรียก notifyListenersหนึ่งครั้งที่เหมาะ Public mutable fieldsที่ UIแก้เองอาจลืม notify ให้ expose getters/commands และ batch updateก่อน notify</p></section>
-<section><h2>6. Ownership/dispose</h2><p>Builderเพิ่ม/ถอด listenerตาม element lifecycle แต่ไม่ได้ dispose listenableให้ Listenables singleton/app ownerอยู่ต่อ ส่วน storeที่ shellสร้างต้อง shell.dispose ดังโค้ดจริง ห้ามคิดว่า builderจัดการ resourceทั้งหมด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Connection statusเปลี่ยนเฉพาะจุดสีบน header ควรวาง builderตรงไหน?</p><details><summary>เฉลย</summary><p>ครอบ status indicator/ส่วน headerที่ dependเท่านั้น ไม่ครอบ MaterialAppหรือทั้ง workflow screen หาก language/themeไม่เกี่ยว ใช้ Listenable/ValueListenableเฉพาะ connection controllerและ childคงที่รอบข้าง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Nested buildersจำนวนมากไม่จำเป็นอาจ rebuildซ้ำและซ่อน dependency ให้รวม listenablesหรือสร้าง view model snapshotเมื่อหลายค่าต้องเปลี่ยน atomically แต่อย่า notifyทั้ง God Storeทุก eventแล้วหวัง constช่วย</div></section>
+<section id="section-3"><h2>3. Rebuild scope</h2><p>วาง builderต่ำสุดที่ครอบทุก consumerแต่ไม่ครอบของคงที่ Absolute shellแยก bodyกับ bottom navigation listeners แม้ฟัง storeเดียวกัน เพื่อชัดว่าแต่ละ subtree renderอะไร ส่วน app-wide languageอยู่เหนือ MaterialAppเพราะ localeกระทบทั้งแอป</p></section>
+<section id="section-4"><h2>4. child optimization</h2><p>ถ้า subtreeไม่ขึ้นกับ listenableให้สร้างครั้งเดียวใน <code>child</code> แล้วส่งเข้า builder ลดการ rebuild config แต่ต้องแน่ใจว่า childไม่อ่าน stateนั้นทาง context/global มิฉะนั้น optimizationผิดความหมาย</p></section>
+<section id="section-5"><h2>5. Notify เป็น contract</h2><p>Mutationใน ChangeNotifierต้องรักษา invariantแล้วเรียก notifyListenersหนึ่งครั้งที่เหมาะ Public mutable fieldsที่ UIแก้เองอาจลืม notify ให้ expose getters/commands และ batch updateก่อน notify</p></section>
+<section id="section-6"><h2>6. Ownership/dispose</h2><p>Builderเพิ่ม/ถอด listenerตาม element lifecycle แต่ไม่ได้ dispose listenableให้ Listenables singleton/app ownerอยู่ต่อ ส่วน storeที่ shellสร้างต้อง shell.dispose ดังโค้ดจริง ห้ามคิดว่า builderจัดการ resourceทั้งหมด</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection statusเปลี่ยนเฉพาะจุดสีบน header ควรวาง builderตรงไหน?</p><details><summary>เฉลย</summary><p>ครอบ status indicator/ส่วน headerที่ dependเท่านั้น ไม่ครอบ MaterialAppหรือทั้ง workflow screen หาก language/themeไม่เกี่ยว ใช้ Listenable/ValueListenableเฉพาะ connection controllerและ childคงที่รอบข้าง</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Nested buildersจำนวนมากไม่จำเป็นอาจ rebuildซ้ำและซ่อน dependency ให้รวม listenablesหรือสร้าง view model snapshotเมื่อหลายค่าต้องเปลี่ยน atomically แต่อย่า notifyทั้ง God Storeทุก eventแล้วหวัง constช่วย</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

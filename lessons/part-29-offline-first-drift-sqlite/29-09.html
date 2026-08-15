@@ -4,14 +4,15 @@
 <title>Transactional outbox และ atomic optimistic update</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">29-09 · State &amp; Lifecycle</span><h1>Transactional outbox และ atomic optimistic update</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Dual-write failure</a></li><li><a href="#section-2">2. Atomic enqueue</a></li><li><a href="#section-3">3. Command envelope</a></li><li><a href="#section-4">4. Ordering</a></li><li><a href="#section-5">5. Acknowledge</a></li><li><a href="#section-6">6. Inbox alternative</a></li><li><a href="#section-7">7. Audit</a></li><li><a href="#section-8">8. Test</a></li></ol></nav>
 <div class="note"><strong>Transactional outbox:</strong> local entity change และ command ที่ต้องส่ง server ต้อง commit ใน transaction เดียว ไม่เช่นนั้น crash ตรงกลางจะสร้าง state ที่กู้ไม่ได้</div>
-<section><h2>1. Dual-write failure</h2><p>ถ้าซ่อน task แล้ว app ตายก่อนเขียน queue งานจะหายจากจอแต่ไม่มี command; ถ้าเขียน queue ก่อนแล้วซ่อนไม่สำเร็จผู้ใช้อาจกดซ้ำ</p></section>
-<section><h2>2. Atomic enqueue</h2><p><code>enqueueComplete</code> insert <code>PendingCommands</code> และ update <code>CachedTasks.hiddenByCommand</code> ภายใน Drift transaction เดียว</p></section>
-<section><h2>3. Command envelope</h2><p>เก็บ stable ID, kind, entity ID, versioned payload, actor/tenant และเวลาสร้าง สิ่งที่ sync ต้องการต้องอยู่ durable ไม่พึ่ง session memory</p></section>
-<section><h2>4. Ordering</h2><p>lab replay ตาม createdAt แต่ระบบจริงอาจต้อง order ต่อ entity/aggregate และอนุญาต parallel ข้าม entity เพื่อไม่ให้ command ช้าบล็อกทั้ง queue</p></section>
-<section><h2>5. Acknowledge</h2><p>หลัง server ยืนยันจึง transaction ลบ command และปรับ/delete local projection ถ้า app ตายก่อน acknowledge การ replay ต้องปลอดภัยด้วย idempotency</p></section>
-<section><h2>6. Inbox alternative</h2><p>ถ้ารับ server events ซ้ำ ให้มี inbox/event ID deduplication ฝั่ง clientเช่นกัน Outbox แก้ outgoing intent ไม่ได้แก้ inbound duplicate ทั้งหมด</p></section>
-<section><h2>7. Audit</h2><p>command history สำคัญอาจย้ายไป audit table แทนลบทันที พร้อม retention/PII policy ไม่ใช้ debug log เป็นหลักฐานเดียว</p></section>
-<section><h2>8. Test</h2><div class="success">test ต้องอ่านทั้ง visible tasks และ pending commands หลัง enqueue เพื่อพิสูจน์สองผลลัพธ์ของ transaction ไม่ใช่ตรวจ UI อย่างเดียว</div></section>
+<section id="section-1"><h2>1. Dual-write failure</h2><p>ถ้าซ่อน task แล้ว app ตายก่อนเขียน queue งานจะหายจากจอแต่ไม่มี command; ถ้าเขียน queue ก่อนแล้วซ่อนไม่สำเร็จผู้ใช้อาจกดซ้ำ</p></section>
+<section id="section-2"><h2>2. Atomic enqueue</h2><p><code>enqueueComplete</code> insert <code>PendingCommands</code> และ update <code>CachedTasks.hiddenByCommand</code> ภายใน Drift transaction เดียว</p></section>
+<section id="section-3"><h2>3. Command envelope</h2><p>เก็บ stable ID, kind, entity ID, versioned payload, actor/tenant และเวลาสร้าง สิ่งที่ sync ต้องการต้องอยู่ durable ไม่พึ่ง session memory</p></section>
+<section id="section-4"><h2>4. Ordering</h2><p>lab replay ตาม createdAt แต่ระบบจริงอาจต้อง order ต่อ entity/aggregate และอนุญาต parallel ข้าม entity เพื่อไม่ให้ command ช้าบล็อกทั้ง queue</p></section>
+<section id="section-5"><h2>5. Acknowledge</h2><p>หลัง server ยืนยันจึง transaction ลบ command และปรับ/delete local projection ถ้า app ตายก่อน acknowledge การ replay ต้องปลอดภัยด้วย idempotency</p></section>
+<section id="section-6"><h2>6. Inbox alternative</h2><p>ถ้ารับ server events ซ้ำ ให้มี inbox/event ID deduplication ฝั่ง clientเช่นกัน Outbox แก้ outgoing intent ไม่ได้แก้ inbound duplicate ทั้งหมด</p></section>
+<section id="section-7"><h2>7. Audit</h2><p>command history สำคัญอาจย้ายไป audit table แทนลบทันที พร้อม retention/PII policy ไม่ใช้ debug log เป็นหลักฐานเดียว</p></section>
+<section id="section-8"><h2>8. Test</h2><div class="success">test ต้องอ่านทั้ง visible tasks และ pending commands หลัง enqueue เพื่อพิสูจน์สองผลลัพธ์ของ transaction ไม่ใช่ตรวจ UI อย่างเดียว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

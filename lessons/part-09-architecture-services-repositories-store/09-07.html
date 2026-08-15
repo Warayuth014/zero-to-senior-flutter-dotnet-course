@@ -4,15 +4,16 @@
 <title>Store/ViewModel ด้วย ChangeNotifier</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-07 · Architecture</span><h1>Store/ViewModel ด้วย ChangeNotifier</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State object</a></li><li><a href="#section-2">2. Action</a></li><li><a href="#section-3">3. Notify once per meaningful transition</a></li><li><a href="#section-4">4. Lifecycle</a></li><li><a href="#section-5">5. UI effects</a></li><li><a href="#section-6">6. Selective rebuild</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Store tests</a></li></ol></nav>
 <div class="note"><strong>Store/ViewModel:</strong> ownerของ screen/feature stateและ actions ใช้ <code>ChangeNotifier</code> เพื่อประกาศการเปลี่ยน แต่ state transitionต้องถูกต้องแม้ไม่มี widget</div>
-<section><h2>1. State object</h2><pre class="code-vs"><code>class ReceivingState {
+<section id="section-1"><h2>1. State object</h2><pre class="code-vs"><code>class ReceivingState {
   const ReceivingState({this.order, this.loading = false, this.error});
   final InboundOrder? order;
   final bool loading;
   final Failure? error;
   ReceivingState copyWith(/* fields */) =&gt; /* immutable copy */;
 }</code></pre></section>
-<section><h2>2. Action</h2><pre class="code-vs"><code>Future&lt;void&gt; loadOrder(String code) async {
+<section id="section-2"><h2>2. Action</h2><pre class="code-vs"><code>Future&lt;void&gt; loadOrder(String code) async {
   final request = ++_generation;
   _set(state.copyWith(loading: true, error: null));
   try {
@@ -23,11 +24,11 @@
     if (request == _generation) _set(ReceivingState(error: e));
   }
 }</code></pre></section>
-<section><h2>3. Notify once per meaningful transition</h2><p>ใช้ private <code>_set</code> เปลี่ยน state+notify ไม่ expose mutable listให้ widgetแก้ และ batch synchronous mutationsก่อน notifyเพื่อลด intermediate invalid states</p></section>
-<section><h2>4. Lifecycle</h2><p>Storeที่สร้าง Timer/listenerต้อง dispose/cancel; owner route/shellเป็นผู้ disposeตาม lifetime ห้าม singleton storeถือ transient flowตลอดแอปโดยไม่ reset</p></section>
-<section><h2>5. UI effects</h2><p>หลีกเลี่ยง callback <code>onToast</code> ฝังใน Storeถ้าทำให้ test/lifetimeซับซ้อน ใช้ typed effect queue/operation resultหรือ UI map stateเป็น feedbackตาม architectureทีม</p></section>
-<section><h2>6. Selective rebuild</h2><p>แยก storesหรือใช้ selectors/listenableเฉพาะส่วนเมื่อ stateใหญ่ ไม่แก้ performanceด้วยการหยุด notifyจน UI stale</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>load Aแล้ว load B, response Aกลับหลัง B ต้องแสดงอะไร?</p><details><summary>เฉลย</summary><p>แสดง B; generation tokenของ Aไม่ตรงจึง ignore และไม่ overwrite loading/errorของ B</p></details></section>
-<section><h2>8. Store tests</h2><div class="success">assert state sequence loading→ready/error, duplicate guard, stale response, dispose timer และ repository commandโดยไม่ pump widget</div></section>
+<section id="section-3"><h2>3. Notify once per meaningful transition</h2><p>ใช้ private <code>_set</code> เปลี่ยน state+notify ไม่ expose mutable listให้ widgetแก้ และ batch synchronous mutationsก่อน notifyเพื่อลด intermediate invalid states</p></section>
+<section id="section-4"><h2>4. Lifecycle</h2><p>Storeที่สร้าง Timer/listenerต้อง dispose/cancel; owner route/shellเป็นผู้ disposeตาม lifetime ห้าม singleton storeถือ transient flowตลอดแอปโดยไม่ reset</p></section>
+<section id="section-5"><h2>5. UI effects</h2><p>หลีกเลี่ยง callback <code>onToast</code> ฝังใน Storeถ้าทำให้ test/lifetimeซับซ้อน ใช้ typed effect queue/operation resultหรือ UI map stateเป็น feedbackตาม architectureทีม</p></section>
+<section id="section-6"><h2>6. Selective rebuild</h2><p>แยก storesหรือใช้ selectors/listenableเฉพาะส่วนเมื่อ stateใหญ่ ไม่แก้ performanceด้วยการหยุด notifyจน UI stale</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>load Aแล้ว load B, response Aกลับหลัง B ต้องแสดงอะไร?</p><details><summary>เฉลย</summary><p>แสดง B; generation tokenของ Aไม่ตรงจึง ignore และไม่ overwrite loading/errorของ B</p></details></section>
+<section id="section-8"><h2>8. Store tests</h2><div class="success">assert state sequence loading→ready/error, duplicate guard, stale response, dispose timer และ repository commandโดยไม่ pump widget</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

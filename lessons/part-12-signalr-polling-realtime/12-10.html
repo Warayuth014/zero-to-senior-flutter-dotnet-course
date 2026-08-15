@@ -4,20 +4,21 @@
 <title>Event ชนกับ HTTP refresh</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-10 · Realtime</span><h1>Event ชนกับ HTTP refresh</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Race timeline</a></li><li><a href="#section-2">2. Entity version</a></li><li><a href="#section-3">3. Snapshot version</a></li><li><a href="#section-4">4. Invalidation pattern</a></li><li><a href="#section-5">5. Optimistic command</a></li><li><a href="#section-6">6. Multiple devices</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Race tests</a></li></ol></nav>
 <div class="note"><strong>Event กับ HTTP refreshอาจชนกัน:</strong> response snapshotเก่าที่เริ่มก่อน eventสามารถกลับมาทีหลังแล้ว overwrite stateใหม่ ต้องมี version/generation/reducer—notอาศัยเวลามาถึง</div>
-<section><h2>1. Race timeline</h2><pre class="code-vs"><code>t1 GET tasks เริ่ม (snapshot version 10)
+<section id="section-1"><h2>1. Race timeline</h2><pre class="code-vs"><code>t1 GET tasks เริ่ม (snapshot version 10)
 t2 SignalR task T → COMPLETED version 11
 t3 GET v10 กลับมาและเขียน T = OPEN  ← ย้อนเวลา</code></pre></section>
-<section><h2>2. Entity version</h2><pre class="code-vs"><code>void apply(TaskChanged event) {
+<section id="section-2"><h2>2. Entity version</h2><pre class="code-vs"><code>void apply(TaskChanged event) {
   final current = tasks[event.taskId];
   if (current != null &amp;&amp; event.version &lt;= current.version) return;
   tasks[event.taskId] = current!.apply(event);
 }</code></pre></section>
-<section><h2>3. Snapshot version</h2><p>APIควรคืน asOfVersion/updatedAtหรือ ETag ถ้าไม่มี Storeใช้ request generationและ event queue: eventsที่มาระหว่าง loadถูก replayหลัง snapshot</p></section>
-<section><h2>4. Invalidation pattern</h2><p>ง่ายและปลอดภัย: eventไม่ patch detailแต่ debounce <code>refresh()</code> หลาย eventsเป็นหนึ่ง GET พร้อม single-flightและ trailing refreshหาก eventมาระหว่าง load</p></section>
-<section><h2>5. Optimistic command</h2><p>eventอาจ echo commandของเครื่องเอง ใช้ command/event IDและ version dedupe ไม่แสดง successสองครั้งหรือ rollback optimistic stateจาก eventเก่า</p></section>
-<section><h2>6. Multiple devices</h2><p>serverเป็น authority; conflict eventควรยุติ local flowหรือ refresh entityและแจ้งผู้ใช้ ไม่ assumeว่า event orderจากหลาย producersคงที่ทั่วระบบถ้า contractไม่รับประกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ไม่มี versionใน eventเลยควร patch stateละเอียดไหม?</p><details><summary>แนวคำตอบ</summary><p>ใช้ eventเป็น invalidationและ debounce authoritative HTTP refreshปลอดภัยกว่า พร้อมเสนอเพิ่ม eventId/versionใน contract</p></details></section>
-<section><h2>8. Race tests</h2><div class="success">HTTP before/event after/response last, event burst, event during refresh, duplicate/out-of-order eventและ optimistic echo</div></section>
+<section id="section-3"><h2>3. Snapshot version</h2><p>APIควรคืน asOfVersion/updatedAtหรือ ETag ถ้าไม่มี Storeใช้ request generationและ event queue: eventsที่มาระหว่าง loadถูก replayหลัง snapshot</p></section>
+<section id="section-4"><h2>4. Invalidation pattern</h2><p>ง่ายและปลอดภัย: eventไม่ patch detailแต่ debounce <code>refresh()</code> หลาย eventsเป็นหนึ่ง GET พร้อม single-flightและ trailing refreshหาก eventมาระหว่าง load</p></section>
+<section id="section-5"><h2>5. Optimistic command</h2><p>eventอาจ echo commandของเครื่องเอง ใช้ command/event IDและ version dedupe ไม่แสดง successสองครั้งหรือ rollback optimistic stateจาก eventเก่า</p></section>
+<section id="section-6"><h2>6. Multiple devices</h2><p>serverเป็น authority; conflict eventควรยุติ local flowหรือ refresh entityและแจ้งผู้ใช้ ไม่ assumeว่า event orderจากหลาย producersคงที่ทั่วระบบถ้า contractไม่รับประกัน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ไม่มี versionใน eventเลยควร patch stateละเอียดไหม?</p><details><summary>แนวคำตอบ</summary><p>ใช้ eventเป็น invalidationและ debounce authoritative HTTP refreshปลอดภัยกว่า พร้อมเสนอเพิ่ม eventId/versionใน contract</p></details></section>
+<section id="section-8"><h2>8. Race tests</h2><div class="success">HTTP before/event after/response last, event burst, event during refresh, duplicate/out-of-order eventและ optimistic echo</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

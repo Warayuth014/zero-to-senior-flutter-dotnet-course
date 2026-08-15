@@ -4,16 +4,17 @@
 <title>Scan source flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-12 · Real Codebase</span><h1>Scan source flow</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Source scan UI</a></li><li><a href="#section-2">2. Assign source command</a></li><li><a href="#section-3">3. Assignment snapshot</a></li><li><a href="#section-4">4. Part activation</a></li><li><a href="#section-5">5. Non-serial quantity</a></li><li><a href="#section-6">6. Serial guard</a></li><li><a href="#section-7">7. Identity collision</a></li><li><a href="#section-8">8. Source tests</a></li></ol></nav>
 <div class="note"><strong>Source pallet กำหนดชุดสินค้าที่หยิบได้:</strong> assignment response คือ snapshot ที่ผูก station, source pallet และ order เข้าด้วยกัน ทุก part/serial ที่เลือกต้องอยู่ใน snapshot นี้</div>
-<section><h2>1. Source scan UI</h2><p><code>PickingScanSourceCard</code> รับ controller/focus/onScan จาก parent จึงเป็น stateless presentation scanner focus กลับมาหลัง transition ด้วย post-frame callback</p></section>
-<section><h2>2. Assign source command</h2><pre class="code-vs"><code>POST /picking/assign-station
+<section id="section-1"><h2>1. Source scan UI</h2><p><code>PickingScanSourceCard</code> รับ controller/focus/onScan จาก parent จึงเป็น stateless presentation scanner focus กลับมาหลัง transition ด้วย post-frame callback</p></section>
+<section id="section-2"><h2>2. Assign source command</h2><pre class="code-vs"><code>POST /picking/assign-station
 { "palletId": sourcePalletId,
   "pickOrderId": pickOrderId }</code></pre><p>response คืน station และรายการบน pallet พร้อมจำนวนแนะนำที่จะ pick</p></section>
-<section><h2>3. Assignment snapshot</h2><p><code>PickItemOnPallet</code> มี partId, lotNumber, qtyOnPallet, qtyToPickSuggested, condition, serialRequire และ availableSerials Client ใช้กำหนด input mode และเพดาน local</p></section>
-<section><h2>4. Part activation</h2><p>scan part ต้องตรง item ใน assignment แล้ว selection เป็น single-select; serial item โฟกัส serial field ส่วน non-serial เติมค่าเริ่มต้นเป็น suggested remaining และโฟกัส qty</p></section>
-<section><h2>5. Non-serial quantity</h2><p><code>_addQty</code> รับ int มากกว่า 0 และไม่เกิน qtyToPickSuggested แล้วเก็บใน map Backend ยังต้องตรวจ stock/order remaining ล่าสุด เพราะ local snapshot อาจ stale</p></section>
-<section><h2>6. Serial guard</h2><p>serial ต้องไม่ซ้ำใน local list, อยู่ใน <code>availableSerials</code> ของ part และ count ไม่เกิน suggested qty ต่างจาก receiving flow ที่ validate server ต่อ scan; ที่นี่ server validation เกิดตอน confirm จึงมี conflict ช้ากว่า</p></section>
-<section><h2>7. Identity collision</h2><p>selection, <code>_pickedSerials</code> และ <code>_pickedQty</code> key ด้วย partId หาก source มี part เดียวกันหลาย lot/condition record จะชนกัน ควรใช้ lineId หรือ composite part+lot+condition ที่ backendรับรู้</p></section>
-<section><h2>8. Source tests</h2><div class="success">ทดสอบ wrong pallet/order, empty assignment, part หลาย lot, duplicate/unknown serial, suggested qty ศูนย์/เกิน, scan source ซ้ำ และ network failure โดยห้ามเปลี่ยนไป returnSource เมื่อเป็น transport error</div></section>
+<section id="section-3"><h2>3. Assignment snapshot</h2><p><code>PickItemOnPallet</code> มี partId, lotNumber, qtyOnPallet, qtyToPickSuggested, condition, serialRequire และ availableSerials Client ใช้กำหนด input mode และเพดาน local</p></section>
+<section id="section-4"><h2>4. Part activation</h2><p>scan part ต้องตรง item ใน assignment แล้ว selection เป็น single-select; serial item โฟกัส serial field ส่วน non-serial เติมค่าเริ่มต้นเป็น suggested remaining และโฟกัส qty</p></section>
+<section id="section-5"><h2>5. Non-serial quantity</h2><p><code>_addQty</code> รับ int มากกว่า 0 และไม่เกิน qtyToPickSuggested แล้วเก็บใน map Backend ยังต้องตรวจ stock/order remaining ล่าสุด เพราะ local snapshot อาจ stale</p></section>
+<section id="section-6"><h2>6. Serial guard</h2><p>serial ต้องไม่ซ้ำใน local list, อยู่ใน <code>availableSerials</code> ของ part และ count ไม่เกิน suggested qty ต่างจาก receiving flow ที่ validate server ต่อ scan; ที่นี่ server validation เกิดตอน confirm จึงมี conflict ช้ากว่า</p></section>
+<section id="section-7"><h2>7. Identity collision</h2><p>selection, <code>_pickedSerials</code> และ <code>_pickedQty</code> key ด้วย partId หาก source มี part เดียวกันหลาย lot/condition record จะชนกัน ควรใช้ lineId หรือ composite part+lot+condition ที่ backendรับรู้</p></section>
+<section id="section-8"><h2>8. Source tests</h2><div class="success">ทดสอบ wrong pallet/order, empty assignment, part หลาย lot, duplicate/unknown serial, suggested qty ศูนย์/เกิน, scan source ซ้ำ และ network failure โดยห้ามเปลี่ยนไป returnSource เมื่อเป็น transport error</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

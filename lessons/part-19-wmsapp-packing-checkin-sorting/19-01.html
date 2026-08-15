@@ -4,18 +4,19 @@
 <title>Packing domain/state map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-01 · Real Codebase</span><h1>Packing domain/state map</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. End-to-end map</a></li><li><a href="#section-2">2. Packing identities</a></li><li><a href="#section-3">3. Packing state machine</a></li><li><a href="#section-4">4. Check-in state</a></li><li><a href="#section-5">5. Sorting station states</a></li><li><a href="#section-6">6. Sources of truth</a></li><li><a href="#section-7">7. Cross-stage invariants</a></li><li><a href="#section-8">8. Trace exercise</a></li></ol></nav>
 <div class="note"><strong>Outbound ปลายทางเป็น pipeline:</strong> Picking ย้ายของเข้า destination pallet, Packing ยืนยันของใน carton, Sorting จัดเข้า station และ Check-in รวม carton ลง slot ก่อน dispatch ทุกช่วงมี identity/status ของตนเอง</div>
-<section><h2>1. End-to-end map</h2><pre class="code-vs"><code>picked pallet → Packing → carton/packingId
+<section id="section-1"><h2>1. End-to-end map</h2><pre class="code-vs"><code>picked pallet → Packing → carton/packingId
 → Sorting station/batch → Check-in slot
 → complete → dispatch/shipped</code></pre><p>แต่ละลูกศรเป็น server transaction ไม่ใช่แค่เปลี่ยนหน้าจอ</p></section>
-<section><h2>2. Packing identities</h2><p>palletId ครอบหลาย pack, packingId ครอบหลาย pick orders และ pickOrderId ครอบ parts การเปิดหน้าจอจึงไล่ pallet → pack → order → part ตามลำดับ ห้ามสลับ identity ระหว่างระดับ</p></section>
-<section><h2>3. Packing state machine</h2><pre class="code-vs"><code>scanPallet → packList → orderList → orderParts
+<section id="section-2"><h2>2. Packing identities</h2><p>palletId ครอบหลาย pack, packingId ครอบหลาย pick orders และ pickOrderId ครอบ parts การเปิดหน้าจอจึงไล่ pallet → pack → order → part ตามลำดับ ห้ามสลับ identity ระหว่างระดับ</p></section>
+<section id="section-3"><h2>3. Packing state machine</h2><pre class="code-vs"><code>scanPallet → packList → orderList → orderParts
                     ↘ one order ────────┘
 orderParts → success</code></pre><p>เมื่อ pack มี order เดียว UI ข้าม orderList ได้</p></section>
-<section><h2>4. Check-in state</h2><p>ไม่มี enum แต่ state เกิดจาก <code>_pendingPack</code>, <code>_slotDetail</code> และ <code>_deliveryNotePack</code> ทำให้หลาย combination เป็นไปได้ ควรนิยาม Previewing/ReadyToCommit/Committed เป็น typed state</p></section>
-<section><h2>5. Sorting station states</h2><p>แต่ละ station เป็น AVAILABLE, BUSY หรือ DISABLED และ BUSY อาจ full Dashboard มี completed/queued counters แยกจาก station list จึงต้อง reconcile ทั้งระดับ global และราย station</p></section>
-<section><h2>6. Sources of truth</h2><p>Packing/Check-in refresh ผ่าน REST หลัง mutation ส่วน Sorting รับ SignalR เพื่อ update เร็วแล้ว reload REST ในหลาย event Snapshot ล่าสุดจาก backend ต้องชนะ local animation/derived state</p></section>
-<section><h2>7. Cross-stage invariants</h2><ul><li>Pack ก่อน sorting/check-in</li><li>serial อยู่ได้หนึ่ง location</li><li>slot complete ก่อน dispatch</li><li>station disabled ไม่รับ batch ใหม่</li><li>retry ห้ามเพิ่ม qty/carton ซ้ำ</li></ul></section>
-<section><h2>8. Trace exercise</h2><div class="success">เลือก packingId หนึ่งค่าแล้วจด pallet, orders, parts/serials, sorting station, slot และ final status ทุกช่วง พร้อม endpoint, operator และ idempotency boundary ของแต่ละ mutation</div></section>
+<section id="section-4"><h2>4. Check-in state</h2><p>ไม่มี enum แต่ state เกิดจาก <code>_pendingPack</code>, <code>_slotDetail</code> และ <code>_deliveryNotePack</code> ทำให้หลาย combination เป็นไปได้ ควรนิยาม Previewing/ReadyToCommit/Committed เป็น typed state</p></section>
+<section id="section-5"><h2>5. Sorting station states</h2><p>แต่ละ station เป็น AVAILABLE, BUSY หรือ DISABLED และ BUSY อาจ full Dashboard มี completed/queued counters แยกจาก station list จึงต้อง reconcile ทั้งระดับ global และราย station</p></section>
+<section id="section-6"><h2>6. Sources of truth</h2><p>Packing/Check-in refresh ผ่าน REST หลัง mutation ส่วน Sorting รับ SignalR เพื่อ update เร็วแล้ว reload REST ในหลาย event Snapshot ล่าสุดจาก backend ต้องชนะ local animation/derived state</p></section>
+<section id="section-7"><h2>7. Cross-stage invariants</h2><ul><li>Pack ก่อน sorting/check-in</li><li>serial อยู่ได้หนึ่ง location</li><li>slot complete ก่อน dispatch</li><li>station disabled ไม่รับ batch ใหม่</li><li>retry ห้ามเพิ่ม qty/carton ซ้ำ</li></ul></section>
+<section id="section-8"><h2>8. Trace exercise</h2><div class="success">เลือก packingId หนึ่งค่าแล้วจด pallet, orders, parts/serials, sorting station, slot และ final status ทุกช่วง พร้อม endpoint, operator และ idempotency boundary ของแต่ละ mutation</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

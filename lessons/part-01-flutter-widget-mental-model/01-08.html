@@ -4,22 +4,23 @@
 <title>Key, identity และการรักษา state</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-08 · Flutter UI</span><h1>Key, identity และการรักษา state</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Key ประเภทใช้งานหลัก</a></li><li><a href="#section-2">2. List reorder bug</a></li><li><a href="#section-3">3. ตัวอย่างสลับ screen</a></li><li><a href="#section-4">4. ValueKey ใน dashboard/test</a></li><li><a href="#section-5">5. GlobalKey สำหรับ Form</a></li><li><a href="#section-6">6. Key ไม่แก้ state ownership</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Key ช่วย parent จับคู่ widget configuration ใหม่กับ Element เดิมใน sibling list: identity = runtimeType + key เมื่อไม่มี key Flutterจับตาม type/ตำแหน่ง จึงสำคัญตอน reorder/insert/animation/test</div>
-<section><h2>1. Key ประเภทใช้งานหลัก</h2><ul><li><code>ValueKey(id)</code>: identity จากค่าธุรกิจที่ stable</li><li><code>ObjectKey(object)</code>: identity จาก object/equality</li><li><code>UniqueKey()</code>: ใหม่เสมอ—บังคับ state ใหม่</li><li><code>GlobalKey</code>: unique ทั้ง tree และเข้าถึง State/context เช่น Form</li></ul></section>
-<section><h2>2. List reorder bug</h2><pre class="code-vs"><code>for (final task in tasks)
+<section id="section-1"><h2>1. Key ประเภทใช้งานหลัก</h2><ul><li><code>ValueKey(id)</code>: identity จากค่าธุรกิจที่ stable</li><li><code>ObjectKey(object)</code>: identity จาก object/equality</li><li><code>UniqueKey()</code>: ใหม่เสมอ—บังคับ state ใหม่</li><li><code>GlobalKey</code>: unique ทั้ง tree และเข้าถึง State/context เช่น Form</li></ul></section>
+<section id="section-2"><h2>2. List reorder bug</h2><pre class="code-vs"><code>for (final task in tasks)
   TaskRow(key: ValueKey(task.id), task: task)</code></pre><p>เมื่อ sort/insert Flutter ย้าย Element/State ตาม task id หากไม่ key state ของ TextField/expandอาจติด index เดิมและไปอยู่ taskอื่น Key ต้อง uniqueเฉพาะ siblings และ stableข้าม rebuild</p></section>
-<section><h2>3. ตัวอย่างสลับ screen</h2><pre class="code-vs"><code>AnimatedSwitcher(
+<section id="section-3"><h2>3. ตัวอย่างสลับ screen</h2><pre class="code-vs"><code>AnimatedSwitcher(
   child: KeyedSubtree(
     key: ValueKey(store.screen),
     child: buildCurrentScreen(),
   ),
 )</code></pre><p>Absolute shell ใช้แบบนี้เพื่อบอก AnimatedSwitcher ว่า screen nameใหม่เป็น child คนละ identity แม้ wrapper/typeคล้ายกัน จึง transitionถูกและ stateเก่าถูกจัด lifecycleตาม intent</p></section>
-<section><h2>4. ValueKey ใน dashboard/test</h2><p>HomeView key AutoSizeText ตาม title/mode และ tests หา controls ด้วย ValueKey เช่น connection URL preview/scanner inputs ข้อดีคือ selector stableกว่าหาข้อความที่เปลี่ยนตามภาษา แต่ production identity key กับ test hookควรตั้งชื่อมีความหมาย</p></section>
-<section><h2>5. GlobalKey สำหรับ Form</h2><pre class="code-vs"><code>final formKey = GlobalKey&lt;FormState&gt;();
+<section id="section-4"><h2>4. ValueKey ใน dashboard/test</h2><p>HomeView key AutoSizeText ตาม title/mode และ tests หา controls ด้วย ValueKey เช่น connection URL preview/scanner inputs ข้อดีคือ selector stableกว่าหาข้อความที่เปลี่ยนตามภาษา แต่ production identity key กับ test hookควรตั้งชื่อมีความหมาย</p></section>
+<section id="section-5"><h2>5. GlobalKey สำหรับ Form</h2><pre class="code-vs"><code>final formKey = GlobalKey&lt;FormState&gt;();
 Form(key: formKey, child: ...);
 formKey.currentState?.validate();</code></pre><p>LoginScreen absolute ใช้เพื่อสั่ง FormState validate เพราะ operationเกี่ยวกับ subtree stateจริง อย่าสร้าง GlobalKey ใน build—จะใหม่ทุกครั้งและทิ้ง state</p></section>
-<section><h2>6. Key ไม่แก้ state ownership</h2><p>ถ้าข้อมูลผิดเพราะ list mutation/store race การใส่ UniqueKeyอาจดูเหมือนแก้เพราะ remountทุกอย่าง แต่ซ่อน bugและเสีย focus/scroll/network lifecycle ต้องแก้ identityเฉพาะกรณีที่ Element matchingผิดจริง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>รายการ serial reorderได้และแต่ละ rowมี TextField quantity เลือก keyใดและเพราะอะไร?</p><details><summary>เฉลย</summary><p><code>ValueKey(serial.id หรือ normalizedSerial)</code> ที่ unique/stable เพื่อให้ field stateตาม entity ไม่ตาม index ไม่ใช้ UniqueKeyเพราะจะ resetทุก rebuild และไม่ใช้ indexเพราะ reorderแล้ว identityผิด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Key มีผลเฉพาะการจับคู่ใน parent/sibling level ที่วางไว้ ใส่ key ลึกเกินจุด reorderไม่ช่วย และ keyซ้ำใน siblingsทำให้ assertion/error</div></section>
+<section id="section-6"><h2>6. Key ไม่แก้ state ownership</h2><p>ถ้าข้อมูลผิดเพราะ list mutation/store race การใส่ UniqueKeyอาจดูเหมือนแก้เพราะ remountทุกอย่าง แต่ซ่อน bugและเสีย focus/scroll/network lifecycle ต้องแก้ identityเฉพาะกรณีที่ Element matchingผิดจริง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>รายการ serial reorderได้และแต่ละ rowมี TextField quantity เลือก keyใดและเพราะอะไร?</p><details><summary>เฉลย</summary><p><code>ValueKey(serial.id หรือ normalizedSerial)</code> ที่ unique/stable เพื่อให้ field stateตาม entity ไม่ตาม index ไม่ใช้ UniqueKeyเพราะจะ resetทุก rebuild และไม่ใช้ indexเพราะ reorderแล้ว identityผิด</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Key มีผลเฉพาะการจับคู่ใน parent/sibling level ที่วางไว้ ใส่ key ลึกเกินจุด reorderไม่ช่วย และ keyซ้ำใน siblingsทำให้ assertion/error</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

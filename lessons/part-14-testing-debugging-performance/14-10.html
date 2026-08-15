@@ -4,19 +4,20 @@
 <title>pumpAndSettle กับ animation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-10 · Testing</span><h1>pumpAndSettle กับ animation</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. pump แบบตั้งใจ</a></li><li><a href="#section-2">2. เมื่อไรใช้ pumpAndSettle</a></li><li><a href="#section-3">3. Infinite animation</a></li><li><a href="#section-4">4. จำนวน pumps เป็นสัญญาณ</a></li><li><a href="#section-5">5. AnimationController lifecycle</a></li><li><a href="#section-6">6. Reduced motion</a></li><li><a href="#section-7">7. Time budget</a></li><li><a href="#section-8">8. Debug เมื่อ settle timeout</a></li></ol></nav>
 <div class="note"><strong><code>pumpAndSettle</code> ไม่ใช่ยาวิเศษ:</strong> มัน pump จนไม่มี scheduled frame ถ้ามี spinner/timer/animation วนไม่สิ้นสุด test จะ timeout และอาจซ่อนจำนวน frame ที่ผิดปกติ</div>
-<section><h2>1. pump แบบตั้งใจ</h2><pre class="code-vs"><code>await tester.tap(button);
+<section id="section-1"><h2>1. pump แบบตั้งใจ</h2><pre class="code-vs"><code>await tester.tap(button);
 await tester.pump(); // เริ่ม animation/state
 expect(find.byType(CircularProgressIndicator), findsOneWidget);
 response.complete(result);
 await tester.pump(); // apply future result</code></pre><p>ควบคุม frame ทำให้ทดสอบ intermediate state ได้</p></section>
-<section><h2>2. เมื่อไรใช้ pumpAndSettle</h2><p>เหมาะหลัง Navigator push/pop, dialog/sheet transition หรือ finite animation ที่เราต้องการ final UI ตัวอย่าง flow จริงใช้หลังเปิด scanner dialogและ submit แล้วรอทุก transition จบ</p></section>
-<section><h2>3. Infinite animation</h2><p><code>CircularProgressIndicator</code>, repeating controller หรือ polling อาจ schedule frame ต่อเนื่อง ให้ complete fake future ก่อน settle หรือ pump duration ที่ต้องการแล้ว assert loading โดยไม่ settle</p></section>
-<section><h2>4. จำนวน pumps เป็นสัญญาณ</h2><pre class="code-vs"><code>final frames = await tester.pumpAndSettle();
+<section id="section-2"><h2>2. เมื่อไรใช้ pumpAndSettle</h2><p>เหมาะหลัง Navigator push/pop, dialog/sheet transition หรือ finite animation ที่เราต้องการ final UI ตัวอย่าง flow จริงใช้หลังเปิด scanner dialogและ submit แล้วรอทุก transition จบ</p></section>
+<section id="section-3"><h2>3. Infinite animation</h2><p><code>CircularProgressIndicator</code>, repeating controller หรือ polling อาจ schedule frame ต่อเนื่อง ให้ complete fake future ก่อน settle หรือ pump duration ที่ต้องการแล้ว assert loading โดยไม่ settle</p></section>
+<section id="section-4"><h2>4. จำนวน pumps เป็นสัญญาณ</h2><pre class="code-vs"><code>final frames = await tester.pumpAndSettle();
 expect(frames, lessThan(10));</code></pre><p>ใช้เมื่อจำนวน transition เป็น contract เชิง performance จริง มิฉะนั้น exact count เปราะตาม theme/platform</p></section>
-<section><h2>5. AnimationController lifecycle</h2><p>test unmount ขณะ animation ทำงานแล้ว pump ต่อ ตรวจไม่มี ticker leak/<code>setState() called after dispose</code> และ controller ถูก dispose ใช้ <code>addTearDown</code> กับ controller ที่ test เป็นผู้สร้าง</p></section>
-<section><h2>6. Reduced motion</h2><p>ถ้าแอปรองรับ accessibility animation disabled ให้ทดสอบทั้ง normal และ disableAnimations โดย behavior/route result เหมือนกัน ไม่ผูก action กับ animation completion อย่างเดียว</p></section>
-<section><h2>7. Time budget</h2><p><code>pump(const Duration(seconds: 5))</code> ขยับ fake time ไม่ได้ sleep จริง จึงใช้ทดสอบ timeout/debounce ได้เร็ว แต่ async I/O ที่อยู่นอก fake clock ยังต้องควบคุมด้วย Completer/fake scheduler</p></section>
-<section><h2>8. Debug เมื่อ settle timeout</h2><div class="success">หา ticker/timer ที่ยังทำงาน, future ที่ fake ไม่ complete, animation repeat และ pending route; เปลี่ยนเป็น pump ทีละช่วงพร้อม assert แทนการเพิ่ม timeout แบบเดาสุ่ม</div></section>
+<section id="section-5"><h2>5. AnimationController lifecycle</h2><p>test unmount ขณะ animation ทำงานแล้ว pump ต่อ ตรวจไม่มี ticker leak/<code>setState() called after dispose</code> และ controller ถูก dispose ใช้ <code>addTearDown</code> กับ controller ที่ test เป็นผู้สร้าง</p></section>
+<section id="section-6"><h2>6. Reduced motion</h2><p>ถ้าแอปรองรับ accessibility animation disabled ให้ทดสอบทั้ง normal และ disableAnimations โดย behavior/route result เหมือนกัน ไม่ผูก action กับ animation completion อย่างเดียว</p></section>
+<section id="section-7"><h2>7. Time budget</h2><p><code>pump(const Duration(seconds: 5))</code> ขยับ fake time ไม่ได้ sleep จริง จึงใช้ทดสอบ timeout/debounce ได้เร็ว แต่ async I/O ที่อยู่นอก fake clock ยังต้องควบคุมด้วย Completer/fake scheduler</p></section>
+<section id="section-8"><h2>8. Debug เมื่อ settle timeout</h2><div class="success">หา ticker/timer ที่ยังทำงาน, future ที่ fake ไม่ complete, animation repeat และ pending route; เปลี่ยนเป็น pump ทีละช่วงพร้อม assert แทนการเพิ่ม timeout แบบเดาสุ่ม</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,17 +4,18 @@
 <title>Inventory + search/filter</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-11 · Project Lab</span><h1>Inventory + search/filter</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Query contract</a></li><li><a href="#section-2">2. Search fields</a></li><li><a href="#section-3">3. Debounce/cancellation</a></li><li><a href="#section-4">4. Pagination</a></li><li><a href="#section-5">5. Inventory model</a></li><li><a href="#section-6">6. Refresh/invalidation</a></li><li><a href="#section-7">7. UX states</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Inventory slice:</strong> read-heavy featureต้องค้นได้เร็ว, paginate, แสดง stale/errorตรงไปตรงมาและไม่โหลด stockทั้งหมดมา filterใน memoryเมื่อข้อมูลโต</div>
-<section><h2>1. Query contract</h2><pre class="code-vs"><code>GET /api/WMS/mobile_inventory
+<section id="section-1"><h2>1. Query contract</h2><pre class="code-vs"><code>GET /api/WMS/mobile_inventory
 ?q=entity&amp;status=stored&amp;location=A-01
 &amp;page=1&amp;pageSize=50
 → { items, totalCount, page, pageSize, generatedAt }</code></pre></section>
-<section><h2>2. Search fields</h2><p>serverค้น pallet, product code/name, lot, serialและlocationตาม requirement ระบุ case/diacritic behaviorและ queryขั้นต่ำ หาก scan barcode exactให้ prioritize exact result</p></section>
-<section><h2>3. Debounce/cancellation</h2><p>typing debounceสั้นและ latest-wins generation; scan submitทันที Queryใหม่ reset pageแต่ responseหน้าเก่าห้าม append Filter state canonicalเพื่อ deep link/restoreได้</p></section>
-<section><h2>4. Pagination</h2><p>โหลดหน้าถัดไปก่อนถึงท้าย, single-flightต่อ page, dedup stable item IDและหยุดเมื่อ itemsครบ totalCount Errorหน้าแรกกับ load-more errorมี UIต่างกัน</p></section>
-<section><h2>5. Inventory model</h2><p>แสดง pallet/product/location/status/onHand/reserved/available/unit/updatedAt พร้อม status unknown fail-safe Quantityใช้ decimalตาม domain ไม่ cast intโดยเดา</p></section>
-<section><h2>6. Refresh/invalidation</h2><p>pull refreshรักษา query/filterและแทน snapshot หลัง receiving/cycle/dispatch mark staleหรือ refreshเมื่อกลับหน้า ไม่ optimisticแก้ stockหาก command outcomeไม่แน่นอน</p></section>
-<section><h2>7. UX states</h2><p>แยก no inventory, no search results, loading, stale dataและ server error Fixed scan/search barเหนือ scroll list, filtersมี clear countและ long textไม่ดัน quantitiesหาย</p></section>
-<section><h2>8. Tests</h2><div class="success">query encoding, exact scan, debounce, out-of-order, filter reset, pagination/dedup/load-more fail, decimal/unknown status, large result performanceและ invalidationหลัง mutation</div></section>
+<section id="section-2"><h2>2. Search fields</h2><p>serverค้น pallet, product code/name, lot, serialและlocationตาม requirement ระบุ case/diacritic behaviorและ queryขั้นต่ำ หาก scan barcode exactให้ prioritize exact result</p></section>
+<section id="section-3"><h2>3. Debounce/cancellation</h2><p>typing debounceสั้นและ latest-wins generation; scan submitทันที Queryใหม่ reset pageแต่ responseหน้าเก่าห้าม append Filter state canonicalเพื่อ deep link/restoreได้</p></section>
+<section id="section-4"><h2>4. Pagination</h2><p>โหลดหน้าถัดไปก่อนถึงท้าย, single-flightต่อ page, dedup stable item IDและหยุดเมื่อ itemsครบ totalCount Errorหน้าแรกกับ load-more errorมี UIต่างกัน</p></section>
+<section id="section-5"><h2>5. Inventory model</h2><p>แสดง pallet/product/location/status/onHand/reserved/available/unit/updatedAt พร้อม status unknown fail-safe Quantityใช้ decimalตาม domain ไม่ cast intโดยเดา</p></section>
+<section id="section-6"><h2>6. Refresh/invalidation</h2><p>pull refreshรักษา query/filterและแทน snapshot หลัง receiving/cycle/dispatch mark staleหรือ refreshเมื่อกลับหน้า ไม่ optimisticแก้ stockหาก command outcomeไม่แน่นอน</p></section>
+<section id="section-7"><h2>7. UX states</h2><p>แยก no inventory, no search results, loading, stale dataและ server error Fixed scan/search barเหนือ scroll list, filtersมี clear countและ long textไม่ดัน quantitiesหาย</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">query encoding, exact scan, debounce, out-of-order, filter reset, pagination/dedup/load-more fail, decimal/unknown status, large result performanceและ invalidationหลัง mutation</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

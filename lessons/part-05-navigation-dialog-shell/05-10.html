@@ -4,17 +4,18 @@
 <title>SnackBar, toast และ flash feedback</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-10 · Flutter UI</span><h1>SnackBar, toast และ flash feedback</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ScaffoldMessenger</a></li><li><a href="#section-2">2. Queue policy</a></li><li><a href="#section-3">3. Absolute feedback</a></li><li><a href="#section-4">4. One-shot event</a></li><li><a href="#section-5">5. Accessibility</a></li><li><a href="#section-6">6. Context safety</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">SnackBar/toast/flash เป็น transient feedback ไม่ใช่ durable state เลือกช่องทางตามความสำคัญและความเร็ว: scanผลทันทีใช้ flash/haptic+status, actionทั่วไปใช้ SnackBar, errorที่ต้องตัดสินใช้ panel/dialog</div>
-<section><h2>1. ScaffoldMessenger</h2><pre class="code-vs"><code>final messenger = ScaffoldMessenger.of(context);
+<section id="section-1"><h2>1. ScaffoldMessenger</h2><pre class="code-vs"><code>final messenger = ScaffoldMessenger.of(context);
 messenger
   ..hideCurrentSnackBar()
   ..showSnackBar(const SnackBar(content: Text('บันทึกแล้ว')));</code></pre><p>Messengerทำให้ SnackBarอยู่ข้าม Scaffold routeบางกรณีได้ แต่ contextต้องอยู่ใต้ messenger</p></section>
-<section><h2>2. Queue policy</h2><p>scanถี่ไม่ควร queue SnackBarสิบอัน ใช้ replaceable status/flash ส่วน errorสำคัญอาจ queue/history แยก latest transientจาก audit log</p></section>
-<section><h2>3. Absolute feedback</h2><p>Shellรับ onToast/onFlashจาก store, timerยกเลิกของเดิมก่อนตั้งใหม่, flashเขียว/แดง+hapticและ cancel timersใน dispose ทำให้ feedbackครอบทุก screenใน shell</p></section>
-<section><h2>4. One-shot event</h2><p>อย่าเก็บ message persistentใน stateจน rebuild/navigationเล่นซ้ำ ใช้ event ID/consume callbackหรือ clear timerอย่างมี owner</p></section>
-<section><h2>5. Accessibility</h2><p>สีไม่พอ ต้อง text/icon/semantics live regionตามความเหมาะสม durationอ่านทันและมีทางดู errorเต็ม ไม่ flashรุนแรงเมื่อ reduce motion</p></section>
-<section><h2>6. Context safety</h2><p>หลัง awaitตรวจ mounted ใช้ <code>ScaffoldMessenger.maybeOf</code>ใน reusable sheetเมื่ออาจไม่มี messenger และไม่ให้ storeถือ context</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แจ้ง duplicate scanอย่างไรโดยไม่ขัด throughput?</p><details><summary>เฉลย</summary><p>amber/red flash+haptic pattern+status textแทน modal, ไม่เพิ่ม count, คืน focusเดิม และมี recent scans/historyถ้าต้องตรวจ ไม่ queue SnackBarทุกครั้ง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแสดง successก่อน server commit และอย่าใช้ toastเป็นแหล่งเดียวของข้อมูลที่ต้องย้อนดู เพราะหายตามเวลา</div></section>
+<section id="section-2"><h2>2. Queue policy</h2><p>scanถี่ไม่ควร queue SnackBarสิบอัน ใช้ replaceable status/flash ส่วน errorสำคัญอาจ queue/history แยก latest transientจาก audit log</p></section>
+<section id="section-3"><h2>3. Absolute feedback</h2><p>Shellรับ onToast/onFlashจาก store, timerยกเลิกของเดิมก่อนตั้งใหม่, flashเขียว/แดง+hapticและ cancel timersใน dispose ทำให้ feedbackครอบทุก screenใน shell</p></section>
+<section id="section-4"><h2>4. One-shot event</h2><p>อย่าเก็บ message persistentใน stateจน rebuild/navigationเล่นซ้ำ ใช้ event ID/consume callbackหรือ clear timerอย่างมี owner</p></section>
+<section id="section-5"><h2>5. Accessibility</h2><p>สีไม่พอ ต้อง text/icon/semantics live regionตามความเหมาะสม durationอ่านทันและมีทางดู errorเต็ม ไม่ flashรุนแรงเมื่อ reduce motion</p></section>
+<section id="section-6"><h2>6. Context safety</h2><p>หลัง awaitตรวจ mounted ใช้ <code>ScaffoldMessenger.maybeOf</code>ใน reusable sheetเมื่ออาจไม่มี messenger และไม่ให้ storeถือ context</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แจ้ง duplicate scanอย่างไรโดยไม่ขัด throughput?</p><details><summary>เฉลย</summary><p>amber/red flash+haptic pattern+status textแทน modal, ไม่เพิ่ม count, คืน focusเดิม และมี recent scans/historyถ้าต้องตรวจ ไม่ queue SnackBarทุกครั้ง</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแสดง successก่อน server commit และอย่าใช้ toastเป็นแหล่งเดียวของข้อมูลที่ต้องย้อนดู เพราะหายตามเวลา</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

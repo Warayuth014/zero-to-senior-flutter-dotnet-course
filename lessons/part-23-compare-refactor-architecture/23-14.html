@@ -4,9 +4,10 @@
 <title>Architecture decision record</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">23-14 · Architecture</span><h1>Architecture decision record</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. เมื่อใดควรเขียน</a></li><li><a href="#section-2">2. โครงขั้นต่ำ</a></li><li><a href="#section-3">3. Context ต้องเฉพาะระบบ</a></li><li><a href="#section-4">4. ตัวอย่าง decision</a></li><li><a href="#section-5">5. Consequences ซื่อสัตย์</a></li><li><a href="#section-6">6. Status lifecycle</a></li><li><a href="#section-7">7. Validation</a></li><li><a href="#section-8">8. Capstone Part 23</a></li></ol></nav>
 <div class="note"><strong>ADR:</strong> บันทึกว่าเลือกอะไรเพราะ constraintใด ไม่ใช่เอกสารสวยหลังตัดสินใจแล้ว Partนี้จบด้วย ADRที่ทำให้ทีมอนาคตไม่ย้อน debateโดยไร้บริบท</div>
-<section><h2>1. เมื่อใดควรเขียน</h2><p>เขียนเมื่อ decisionมีผลข้าม feature/ทีม, revertแพงหรือมี trade-offจริง เช่น Result vs exception, repository boundary, store split, token persistenceและ polling strategy ไม่ต้องเขียน ADRสำหรับ rename widgetเล็กๆ</p></section>
-<section><h2>2. โครงขั้นต่ำ</h2><pre class="code-vs"><code>Title / Status / Date
+<section id="section-1"><h2>1. เมื่อใดควรเขียน</h2><p>เขียนเมื่อ decisionมีผลข้าม feature/ทีม, revertแพงหรือมี trade-offจริง เช่น Result vs exception, repository boundary, store split, token persistenceและ polling strategy ไม่ต้องเขียน ADRสำหรับ rename widgetเล็กๆ</p></section>
+<section id="section-2"><h2>2. โครงขั้นต่ำ</h2><pre class="code-vs"><code>Title / Status / Date
 Context & constraints
 Decision
 Alternatives considered
@@ -14,11 +15,11 @@ Consequences (+/-)
 Migration / rollback
 Validation metrics
 Links</code></pre></section>
-<section><h2>3. Context ต้องเฉพาะระบบ</h2><p>ระบุว่า wmsappมี giant screens/testน้อย, absoluteมี repository seamsแต่ God Store, PDAอาจ offline, .NET contract deployแยกและ mutationsเสี่ยงซ้ำ ไม่เขียนเพียง “clean architecture scales better”</p></section>
-<section><h2>4. ตัวอย่าง decision</h2><p>“Adopt feature stores incrementally behind WarehouseStore façade; keep local UI state in widgets; repositories remain domain boundaries” พร้อมเหตุผลเรื่อง shared snapshot, fake testsและ deployทีละ feature</p></section>
-<section><h2>5. Consequences ซื่อสัตย์</h2><p>ข้อดี: dependencies/test/lifetimeชัด ข้อเสีย: wiring/adapters/filesเพิ่ม, transition periodมีสอง APIและทีมต้องเรียนรู้ ระบุ operational cost ไม่ขาย decisionเหมือนไม่มี downside</p></section>
-<section><h2>6. Status lifecycle</h2><p>ใช้ Proposed→Accepted→Superseded/Deprecated ไม่แก้ ADRเก่าให้เหมือนประวัติไม่เคยเกิด สร้าง ADRใหม่ supersedeและ linkกลับเพื่อรักษาเหตุผลตามเวลา</p></section>
-<section><h2>7. Validation</h2><p>ผูก decisionกับ metrics/tests เช่น duplicate mutations, stale-response incidents, store test duration, direct ApiService call sitesและ crash-free sessions พร้อมวันที่ทบทวน มิฉะนั้น ADRเป็น opinion archive</p></section>
-<section><h2>8. Capstone Part 23</h2><div class="success">เขียน ADRหนึ่งฉบับเลือก migrationของ flowจริง ระบุ alternativeอย่างน้อยสองแบบ, security/race/test impact, rolloutและrollback ผู้เรียนต้องอธิบายได้ว่าทำไม architectureใหม่เหมาะ constraintนี้—not เพราะเป็น patternยอดนิยม</div></section>
+<section id="section-3"><h2>3. Context ต้องเฉพาะระบบ</h2><p>ระบุว่า wmsappมี giant screens/testน้อย, absoluteมี repository seamsแต่ God Store, PDAอาจ offline, .NET contract deployแยกและ mutationsเสี่ยงซ้ำ ไม่เขียนเพียง “clean architecture scales better”</p></section>
+<section id="section-4"><h2>4. ตัวอย่าง decision</h2><p>“Adopt feature stores incrementally behind WarehouseStore façade; keep local UI state in widgets; repositories remain domain boundaries” พร้อมเหตุผลเรื่อง shared snapshot, fake testsและ deployทีละ feature</p></section>
+<section id="section-5"><h2>5. Consequences ซื่อสัตย์</h2><p>ข้อดี: dependencies/test/lifetimeชัด ข้อเสีย: wiring/adapters/filesเพิ่ม, transition periodมีสอง APIและทีมต้องเรียนรู้ ระบุ operational cost ไม่ขาย decisionเหมือนไม่มี downside</p></section>
+<section id="section-6"><h2>6. Status lifecycle</h2><p>ใช้ Proposed→Accepted→Superseded/Deprecated ไม่แก้ ADRเก่าให้เหมือนประวัติไม่เคยเกิด สร้าง ADRใหม่ supersedeและ linkกลับเพื่อรักษาเหตุผลตามเวลา</p></section>
+<section id="section-7"><h2>7. Validation</h2><p>ผูก decisionกับ metrics/tests เช่น duplicate mutations, stale-response incidents, store test duration, direct ApiService call sitesและ crash-free sessions พร้อมวันที่ทบทวน มิฉะนั้น ADRเป็น opinion archive</p></section>
+<section id="section-8"><h2>8. Capstone Part 23</h2><div class="success">เขียน ADRหนึ่งฉบับเลือก migrationของ flowจริง ระบุ alternativeอย่างน้อยสองแบบ, security/race/test impact, rolloutและrollback ผู้เรียนต้องอธิบายได้ว่าทำไม architectureใหม่เหมาะ constraintนี้—not เพราะเป็น patternยอดนิยม</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

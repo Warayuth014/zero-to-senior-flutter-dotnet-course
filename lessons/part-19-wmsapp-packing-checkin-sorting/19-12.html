@@ -4,16 +4,17 @@
 <title>Sorting SignalR service</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-12 · Real Codebase</span><h1>Sorting SignalR service</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Hub lifecycle</a></li><li><a href="#section-2">2. Event catalog</a></li><li><a href="#section-3">3. Main subscriptions</a></li><li><a href="#section-4">4. Fast counter patch</a></li><li><a href="#section-5">5. Detail subscriptions</a></li><li><a href="#section-6">6. Reconnect gaps</a></li><li><a href="#section-7">7. Event schema</a></li><li><a href="#section-8">8. Realtime tests</a></li></ol></nav>
 <div class="note"><strong>Sorting SignalR เป็น invalidation + fast patch:</strong> มี 6 event channels แต่หน้าหลัก subscribe เพียงบางรายการ ดังนั้น event coverage ต้องตรวจคู่กับ dashboard counters</div>
-<section><h2>1. Hub lifecycle</h2><p><code>SortingSignalRService</code> เป็น singleton/ref-count ต่อ <code>/hubs/sorting</code> ด้วย automatic reconnect connect/disconnect ทำงานเหมือน Putaway hub</p></section>
-<section><h2>2. Event catalog</h2><pre class="code-vs"><code>StationCounterUpdated  StationFull
+<section id="section-1"><h2>1. Hub lifecycle</h2><p><code>SortingSignalRService</code> เป็น singleton/ref-count ต่อ <code>/hubs/sorting</code> ด้วย automatic reconnect connect/disconnect ทำงานเหมือน Putaway hub</p></section>
+<section id="section-2"><h2>2. Event catalog</h2><pre class="code-vs"><code>StationCounterUpdated  StationFull
 StationCleared         StationToggled
 BatchQueued            BatchAssigned</code></pre><p>payload ถูก parse เป็น Map แล้ว broadcast ไป copy ของ listener list</p></section>
-<section><h2>3. Main subscriptions</h2><p>SortingScreen ฟัง counter/full/cleared/toggled/batchAssigned แต่ไม่ได้ฟัง <code>BatchQueued</code> ดังนั้น queuedCount อาจไม่เปลี่ยนจนมี eventอื่นหรือ manual refresh เป็น coverage gap ที่ควรแก้</p></section>
-<section><h2>4. Fast counter patch</h2><p>CounterUpdated หา stationIdแล้ว copyWith current/total/full/pallet/status BUSY ลด latency แต่ไม่อัปเดต global completed/queued จึงยังต้องมี aggregate eventหรือ REST reconcile</p></section>
-<section><h2>5. Detail subscriptions</h2><p>StationDetailSheet ฟัง counter/full เฉพาะ stationเดียวและเรียก GET detail ใหม่ มันไม่ connect/ref-countเองแต่พึ่ง parent screen connectionที่ยังอยู่หลัง bottom sheet</p></section>
-<section><h2>6. Reconnect gaps</h2><p>connect exception ถูก log แต่ UIไม่รู้, automatic reconnectไม่มี refresh callback และไม่มี event replay ควร expose connection state แล้ว reload dashboardเมื่อ reconnected พร้อม periodic reconciliation</p></section>
-<section><h2>7. Event schema</h2><p>Map casts เช่น stationId as int อาจ failถ้า JSON decoderให้ num/string และ malformed eventเงียบ ควรมี typed event parser, schema version, correlation ID และ telemetry ของ rejected payload</p></section>
-<section><h2>8. Realtime tests</h2><div class="success">fake hub ทดสอบ BatchQueued counter, queued→assigned, duplicate/out-of-order, detail+main listeners, reconnect refresh, two screens ref-count และ eventระหว่าง REST loadโดย versionล่าสุดต้องชนะ</div></section>
+<section id="section-3"><h2>3. Main subscriptions</h2><p>SortingScreen ฟัง counter/full/cleared/toggled/batchAssigned แต่ไม่ได้ฟัง <code>BatchQueued</code> ดังนั้น queuedCount อาจไม่เปลี่ยนจนมี eventอื่นหรือ manual refresh เป็น coverage gap ที่ควรแก้</p></section>
+<section id="section-4"><h2>4. Fast counter patch</h2><p>CounterUpdated หา stationIdแล้ว copyWith current/total/full/pallet/status BUSY ลด latency แต่ไม่อัปเดต global completed/queued จึงยังต้องมี aggregate eventหรือ REST reconcile</p></section>
+<section id="section-5"><h2>5. Detail subscriptions</h2><p>StationDetailSheet ฟัง counter/full เฉพาะ stationเดียวและเรียก GET detail ใหม่ มันไม่ connect/ref-countเองแต่พึ่ง parent screen connectionที่ยังอยู่หลัง bottom sheet</p></section>
+<section id="section-6"><h2>6. Reconnect gaps</h2><p>connect exception ถูก log แต่ UIไม่รู้, automatic reconnectไม่มี refresh callback และไม่มี event replay ควร expose connection state แล้ว reload dashboardเมื่อ reconnected พร้อม periodic reconciliation</p></section>
+<section id="section-7"><h2>7. Event schema</h2><p>Map casts เช่น stationId as int อาจ failถ้า JSON decoderให้ num/string และ malformed eventเงียบ ควรมี typed event parser, schema version, correlation ID และ telemetry ของ rejected payload</p></section>
+<section id="section-8"><h2>8. Realtime tests</h2><div class="success">fake hub ทดสอบ BatchQueued counter, queued→assigned, duplicate/out-of-order, detail+main listeners, reconnect refresh, two screens ref-count และ eventระหว่าง REST loadโดย versionล่าสุดต้องชนะ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

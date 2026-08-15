@@ -4,18 +4,19 @@
 <title>common_widgets.dart design system</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-09 · Real Codebase</span><h1>common_widgets.dart design system</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Widget inventory</a></li><li><a href="#section-2">2. ScanTextField</a></li><li><a href="#section-3">3. Buttons</a></li><li><a href="#section-4">4. LoadingOverlay</a></li><li><a href="#section-5">5. Dialog helpers</a></li><li><a href="#section-6">6. Theme dependency</a></li><li><a href="#section-7">7. File size refactor</a></li><li><a href="#section-8">8. Design-system tests</a></li></ol></nav>
 <div class="note"><strong><code>common_widgets.dart</code> คือ design system แบบไฟล์เดียว:</strong> มี AppBar, cards, scan input, buttons, badges, info rows, loading overlay, dialogs/snackbars, section headerและ empty state รวมประมาณ 700 บรรทัด</div>
-<section><h2>1. Widget inventory</h2><pre class="code-vs"><code>WmsAppBar, WmsCard, ScanTextField,
+<section id="section-1"><h2>1. Widget inventory</h2><pre class="code-vs"><code>WmsAppBar, WmsCard, ScanTextField,
 Primary/Danger/WarningButton, StatusBadge,
 InfoRow, LoadingOverlay, SectionHeader, EmptyState</code></pre><p>นอกจากนี้มี top-level dialog/snackbar helpers</p></section>
-<section><h2>2. ScanTextField</h2><p>รับ controller/focus/onSubmittedและ presentation options เป็น shared seamของ scanner UX เวลาปรับ autofocus/suffix/keyboard actionต้องทดสอบทุก flowที่ใช้ ไม่ให้ widgetแอบถือ business duplicate logic</p></section>
-<section><h2>3. Buttons</h2><p>semantic variantsกำหนดสี/icon/loading/disabled patternให้เหมือนกัน แต่ callbackยังเป็นเจ้าของ screen ป้องกัน double-submitต้องเกิดทั้ง UI disableและ command idempotency ไม่พึ่ง buttonอย่างเดียว</p></section>
-<section><h2>4. LoadingOverlay</h2><p>วาง spinner/messageทับ child ช่วยรักษา contextเดิม แต่ถ้าครอบทั้ง screenจะบล็อก scanner/navigationทุก operation ควรเลือกระดับ overlayตาม state ownerและ semantics accessibility</p></section>
-<section><h2>5. Dialog helpers</h2><pre class="code-vs"><code>showConfirmDialog(...) → Future&lt;bool&gt;
+<section id="section-2"><h2>2. ScanTextField</h2><p>รับ controller/focus/onSubmittedและ presentation options เป็น shared seamของ scanner UX เวลาปรับ autofocus/suffix/keyboard actionต้องทดสอบทุก flowที่ใช้ ไม่ให้ widgetแอบถือ business duplicate logic</p></section>
+<section id="section-3"><h2>3. Buttons</h2><p>semantic variantsกำหนดสี/icon/loading/disabled patternให้เหมือนกัน แต่ callbackยังเป็นเจ้าของ screen ป้องกัน double-submitต้องเกิดทั้ง UI disableและ command idempotency ไม่พึ่ง buttonอย่างเดียว</p></section>
+<section id="section-4"><h2>4. LoadingOverlay</h2><p>วาง spinner/messageทับ child ช่วยรักษา contextเดิม แต่ถ้าครอบทั้ง screenจะบล็อก scanner/navigationทุก operation ควรเลือกระดับ overlayตาม state ownerและ semantics accessibility</p></section>
+<section id="section-5"><h2>5. Dialog helpers</h2><pre class="code-vs"><code>showConfirmDialog(...) → Future&lt;bool&gt;
 showErrorDialog(...)   → Future&lt;void&gt;
 showSuccessSnackbar / showWarningSnackbar</code></pre><p>confirmแปลง nullจาก barrier/backเป็น false เป็น contractที่ callersอาศัย</p></section>
-<section><h2>6. Theme dependency</h2><p>widgetsเรียก <code>AppTheme.textPrimary(context)</code>และ semantic colors จึงรองรับ dark modeดีกว่า screenที่ใช้ legacy static colors HapticFeedbackใน snackbarเป็น platform side effectที่ widget testsต้องห่อ/ยอมรับ</p></section>
-<section><h2>7. File size refactor</h2><p>แยกตาม primitive/feedback/layoutเมื่อทีมแก้ชนกันหรือ test/importช้า แต่คง barrel exportเพื่อ migration ไม่ย้าย business screen widgetsเข้าคลัง commonเพียงเพราะใช้สองครั้งถ้า semanticsต่างโดเมน</p></section>
-<section><h2>8. Design-system tests</h2><div class="success">light/dark, text scale, Thaiยาว, narrow PDA, loading/disabled, focus/submit, dialog cancel/backและ semantics labels การทดสอบ primitivesชุดเล็กช่วยลด regressionข้าม 80 screens</div></section>
+<section id="section-6"><h2>6. Theme dependency</h2><p>widgetsเรียก <code>AppTheme.textPrimary(context)</code>และ semantic colors จึงรองรับ dark modeดีกว่า screenที่ใช้ legacy static colors HapticFeedbackใน snackbarเป็น platform side effectที่ widget testsต้องห่อ/ยอมรับ</p></section>
+<section id="section-7"><h2>7. File size refactor</h2><p>แยกตาม primitive/feedback/layoutเมื่อทีมแก้ชนกันหรือ test/importช้า แต่คง barrel exportเพื่อ migration ไม่ย้าย business screen widgetsเข้าคลัง commonเพียงเพราะใช้สองครั้งถ้า semanticsต่างโดเมน</p></section>
+<section id="section-8"><h2>8. Design-system tests</h2><div class="success">light/dark, text scale, Thaiยาว, narrow PDA, loading/disabled, focus/submit, dialog cancel/backและ semantics labels การทดสอบ primitivesชุดเล็กช่วยลด regressionข้าม 80 screens</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

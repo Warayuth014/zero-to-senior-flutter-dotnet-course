@@ -4,9 +4,10 @@
 <title>Domain layerควรมีเมื่อไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-12 · Architecture</span><h1>Domain layerควรมีเมื่อไร</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Signals ว่าควรมี</a></li><li><a href="#section-2">2. Entity/value object</a></li><li><a href="#section-3">3. Domain service</a></li><li><a href="#section-4">4. Application vs domain</a></li><li><a href="#section-5">5. เมื่อไม่ต้องมี</a></li><li><a href="#section-6">6. Backend authority</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Cost check</a></li></ol></nav>
 <div class="note"><strong>Domain layerมีเมื่อกฎคุ้มค่า:</strong> เพิ่มเมื่อมี invariants/calculation/workflow languageที่ต้องเป็นอิสระจาก Flutter/API ไม่ใช่เพราะทุก projectต้องมีสี่ชั้น</div>
-<section><h2>1. Signals ว่าควรมี</h2><ul><li>กฎเดียวใช้หลายหน้าหรือหลาย data source</li><li>workflow transitionซับซ้อน</li><li>ต้อง test business rulesจำนวนมาก</li><li>DTO shapeไม่ตรงคำศัพท์ใน app</li><li>offline/reconciliationต้องรักษา invariants</li></ul></section>
-<section><h2>2. Entity/value object</h2><pre class="code-vs"><code>final class Quantity {
+<section id="section-1"><h2>1. Signals ว่าควรมี</h2><ul><li>กฎเดียวใช้หลายหน้าหรือหลาย data source</li><li>workflow transitionซับซ้อน</li><li>ต้อง test business rulesจำนวนมาก</li><li>DTO shapeไม่ตรงคำศัพท์ใน app</li><li>offline/reconciliationต้องรักษา invariants</li></ul></section>
+<section id="section-2"><h2>2. Entity/value object</h2><pre class="code-vs"><code>final class Quantity {
   Quantity._(this.value);
   final double value;
   static Quantity create(double value) {
@@ -14,11 +15,11 @@
     return Quantity._(value);
   }
 }</code></pre></section>
-<section><h2>3. Domain service</h2><p>ใช้เมื่อ ruleข้ามหลาย entitiesและไม่มี ownerธรรมชาติ เช่น allocation policy แต่อย่าเรียก class wrapperทุก methodว่า Serviceโดยไม่มี domain logic</p></section>
-<section><h2>4. Application vs domain</h2><p>Domainตัดสิน “quantity valid/transition allowed”; applicationจัด “เรียก repository, loading, retry, user session”; infrastructureส่ง HTTP</p></section>
-<section><h2>5. เมื่อไม่ต้องมี</h2><p>หน้า read-only mappingตรง APIและไม่มี rule อาจใช้ DTO→ViewStateผ่าน repositoryได้ ชั้นเพิ่มโดยไม่มี logicทำ navigationยากและ boilerplateสูง</p></section>
-<section><h2>6. Backend authority</h2><p>Flutter domain validationช่วย UX/offlineแต่ .NETยังต้อง enforce invariantเพราะ clientถูกแก้/ข้อมูลแข่งขันได้ ให้ share contract/testsไม่ copy logicแบบหลง divergence</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>สี statusควรอยู่ domain entityไหม?</p><details><summary>เฉลย</summary><p>ไม่ สีเป็น presentation mapping; domainเก็บ typed statusและ allowed transitions ส่วน UI map theme/icon/color</p></details></section>
-<section><h2>8. Cost check</h2><div class="success">ก่อนเพิ่ม layer ระบุ rule, consumer, testและ change pressureที่ได้ประโยชน์ หากตอบไม่ได้ให้เริ่มเรียบง่ายและรักษา boundaryไว้ก่อน</div></section>
+<section id="section-3"><h2>3. Domain service</h2><p>ใช้เมื่อ ruleข้ามหลาย entitiesและไม่มี ownerธรรมชาติ เช่น allocation policy แต่อย่าเรียก class wrapperทุก methodว่า Serviceโดยไม่มี domain logic</p></section>
+<section id="section-4"><h2>4. Application vs domain</h2><p>Domainตัดสิน “quantity valid/transition allowed”; applicationจัด “เรียก repository, loading, retry, user session”; infrastructureส่ง HTTP</p></section>
+<section id="section-5"><h2>5. เมื่อไม่ต้องมี</h2><p>หน้า read-only mappingตรง APIและไม่มี rule อาจใช้ DTO→ViewStateผ่าน repositoryได้ ชั้นเพิ่มโดยไม่มี logicทำ navigationยากและ boilerplateสูง</p></section>
+<section id="section-6"><h2>6. Backend authority</h2><p>Flutter domain validationช่วย UX/offlineแต่ .NETยังต้อง enforce invariantเพราะ clientถูกแก้/ข้อมูลแข่งขันได้ ให้ share contract/testsไม่ copy logicแบบหลง divergence</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>สี statusควรอยู่ domain entityไหม?</p><details><summary>เฉลย</summary><p>ไม่ สีเป็น presentation mapping; domainเก็บ typed statusและ allowed transitions ส่วน UI map theme/icon/color</p></details></section>
+<section id="section-8"><h2>8. Cost check</h2><div class="success">ก่อนเพิ่ม layer ระบุ rule, consumer, testและ change pressureที่ได้ประโยชน์ หากตอบไม่ได้ให้เริ่มเรียบง่ายและรักษา boundaryไว้ก่อน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

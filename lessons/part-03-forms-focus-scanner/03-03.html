@@ -4,8 +4,9 @@
 <title>Form, GlobalKey และ validator</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-03 · Flutter UI</span><h1>Form, GlobalKey และ validator</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Form + GlobalKey</a></li><li><a href="#section-2">2. Validator contract</a></li><li><a href="#section-3">3. Pure validation</a></li><li><a href="#section-4">4. autovalidateMode</a></li><li><a href="#section-5">5. Validation หลายระดับ</a></li><li><a href="#section-6">6. reset และ pending data</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>Form</code> รวม field validation/save/reset ภายใต้ FormState แต่ validation ฝั่ง client มีหน้าที่ให้ feedback เร็ว ไม่แทนกฎธุรกิจและ authorization ที่ backend ต้องตรวจซ้ำ</div>
-<section><h2>1. Form + GlobalKey</h2><pre class="code-vs"><code>final _formKey = GlobalKey&lt;FormState&gt;();
+<section id="section-1"><h2>1. Form + GlobalKey</h2><pre class="code-vs"><code>final _formKey = GlobalKey&lt;FormState&gt;();
 
 Form(
   key: _formKey,
@@ -16,17 +17,17 @@ Form(
 )
 
 if (!(_formKey.currentState?.validate() ?? false)) return;</code></pre><p>Key เป็น identity/handle เข้าถึง FormState ต้องสร้างครั้งเดียวใน State ไม่สร้างใน build</p></section>
-<section><h2>2. Validator contract</h2><p>คืน <code>null</code> เมื่อผ่าน หรือข้อความ error เมื่อไม่ผ่าน Validator ควร synchronous, deterministic และไม่แก้ controller/state ห้ามยิง API ใน validator เพราะอาจถูกเรียกหลายครั้งและทำ UX ช้า แยก remote validation ไป action/state machine</p></section>
-<section><h2>3. Pure validation</h2><pre class="code-vs"><code>String? validatePallet(String? raw) {
+<section id="section-2"><h2>2. Validator contract</h2><p>คืน <code>null</code> เมื่อผ่าน หรือข้อความ error เมื่อไม่ผ่าน Validator ควร synchronous, deterministic และไม่แก้ controller/state ห้ามยิง API ใน validator เพราะอาจถูกเรียกหลายครั้งและทำ UX ช้า แยก remote validation ไป action/state machine</p></section>
+<section id="section-3"><h2>3. Pure validation</h2><pre class="code-vs"><code>String? validatePallet(String? raw) {
   final value = raw?.trim() ?? '';
   if (value.isEmpty) return 'กรุณาสแกน Pallet';
   if (value.length &gt; 64) return 'รหัสยาวเกินกำหนด';
   return null;
 }</code></pre><p>แยก function pure ทำ unit test ได้ และใช้ raw/normalized policyเดียวกับ submit เพื่อไม่ให้ validator ผ่านแต่ actionตีความต่างกัน</p></section>
-<section><h2>4. autovalidateMode</h2><p>หน้าคลังไม่ควรแสดง error ก่อนผู้ใช้เริ่ม ใช้ disabled จนกด submit หรือ <code>onUserInteraction</code> หลัง interaction สำหรับ scanner ที่ submit ด้วย Enter มัก validate ตอน event แล้วแสดง status banner; Form เหมาะเมื่อหลายช่องต้องผ่านพร้อมกัน</p></section>
-<section><h2>5. Validation หลายระดับ</h2><ol><li>Parsing/shape: ว่าง, ตัวเลข, ความยาว</li><li>Local domain: quantity ≤ remaining, serial ไม่ซ้ำใน session</li><li>Remote domain: pallet มีจริง, location ว่าง, task ยัง active</li><li>Server commit: concurrency/auth/invariant ล่าสุด</li></ol><p>UI ต้องแยกข้อความและ retry behavior ของแต่ละระดับ</p></section>
-<section><h2>6. reset และ pending data</h2><p><code>FormState.reset</code> reset field state/initialValue แต่ controller ที่กำหนดเองอาจต้อง clear/restore explicit อย่าล้าง pending scan ที่ valid แล้วเมื่อ remote step ถัดไป fail กำหนด transaction boundary ว่า reset input, preview และ committed state ต่างกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Quantity ต้องเป็น 1–remaining และ pallet ต้องมีจริงใน server อะไรอยู่ validator?</p><details><summary>เฉลย</summary><p>parse + range 1–remaining อยู่ pure validator/local domain; การมีอยู่ของ pallet เป็น async validation ใน submit state โดย disable duplicate submit และแสดง loading/error Backend ยังตรวจ quantity/stock/pallet ซ้ำตอน commit</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">GlobalKey ไม่ใช่ global variable อย่าแชร์ Form key หนึ่งอันข้ามหลาย Form/route และอย่าใช้เพื่อข้าม architecture ทุกอย่าง ใช้ callback/controller/state owner ตามปกติ; key มีไว้ระบุ FormState เฉพาะ subtree นั้น</div></section>
+<section id="section-4"><h2>4. autovalidateMode</h2><p>หน้าคลังไม่ควรแสดง error ก่อนผู้ใช้เริ่ม ใช้ disabled จนกด submit หรือ <code>onUserInteraction</code> หลัง interaction สำหรับ scanner ที่ submit ด้วย Enter มัก validate ตอน event แล้วแสดง status banner; Form เหมาะเมื่อหลายช่องต้องผ่านพร้อมกัน</p></section>
+<section id="section-5"><h2>5. Validation หลายระดับ</h2><ol><li>Parsing/shape: ว่าง, ตัวเลข, ความยาว</li><li>Local domain: quantity ≤ remaining, serial ไม่ซ้ำใน session</li><li>Remote domain: pallet มีจริง, location ว่าง, task ยัง active</li><li>Server commit: concurrency/auth/invariant ล่าสุด</li></ol><p>UI ต้องแยกข้อความและ retry behavior ของแต่ละระดับ</p></section>
+<section id="section-6"><h2>6. reset และ pending data</h2><p><code>FormState.reset</code> reset field state/initialValue แต่ controller ที่กำหนดเองอาจต้อง clear/restore explicit อย่าล้าง pending scan ที่ valid แล้วเมื่อ remote step ถัดไป fail กำหนด transaction boundary ว่า reset input, preview และ committed state ต่างกัน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Quantity ต้องเป็น 1–remaining และ pallet ต้องมีจริงใน server อะไรอยู่ validator?</p><details><summary>เฉลย</summary><p>parse + range 1–remaining อยู่ pure validator/local domain; การมีอยู่ของ pallet เป็น async validation ใน submit state โดย disable duplicate submit และแสดง loading/error Backend ยังตรวจ quantity/stock/pallet ซ้ำตอน commit</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">GlobalKey ไม่ใช่ global variable อย่าแชร์ Form key หนึ่งอันข้ามหลาย Form/route และอย่าใช้เพื่อข้าม architecture ทุกอย่าง ใช้ callback/controller/state owner ตามปกติ; key มีไว้ระบุ FormState เฉพาะ subtree นั้น</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

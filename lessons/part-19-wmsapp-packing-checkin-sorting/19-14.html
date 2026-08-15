@@ -4,16 +4,17 @@
 <title>Refactor giant screen อย่างปลอดภัย</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-14 · Real Codebase</span><h1>Refactor giant screen อย่างปลอดภัย</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Freeze behavior</a></li><li><a href="#section-2">2. Extract pure policy</a></li><li><a href="#section-3">3. Introduce typed state</a></li><li><a href="#section-4">4. Move commands</a></li><li><a href="#section-5">5. Split widgets</a></li><li><a href="#section-6">6. Fix one boundary at a time</a></li><li><a href="#section-7">7. Add concurrency controls</a></li><li><a href="#section-8">8. Definition of done</a></li></ol></nav>
 <div class="note"><strong>Refactor giant screen ด้วย characterization tests:</strong> เป้าหมายไม่ใช่ทำไฟล์สั้นทันที แต่แยก business transitions ออกจาก rendering โดยรักษาพฤติกรรม scanner, partial commit และ navigation เดิม</div>
-<section><h2>1. Freeze behavior</h2><p>เขียน tests รอบ scan/open/back, serial/qty validation, auto-finalize, preview/commit, complete/dispatch และ SignalR ก่อนย้ายโค้ด บันทึกพฤติกรรมที่เป็น bug แยกจาก behaviorที่ต้องรักษา</p></section>
-<section><h2>2. Extract pure policy</h2><p>ย้าย readyParts, remaining/allDone, station tap decision, pipeline progress และ validation เป็น pure functions/value objects ก่อน เพราะเสี่ยงต่ำและ unit testง่าย</p></section>
-<section><h2>3. Introduce typed state</h2><pre class="code-vs"><code>sealed class PackingState {}
+<section id="section-1"><h2>1. Freeze behavior</h2><p>เขียน tests รอบ scan/open/back, serial/qty validation, auto-finalize, preview/commit, complete/dispatch และ SignalR ก่อนย้ายโค้ด บันทึกพฤติกรรมที่เป็น bug แยกจาก behaviorที่ต้องรักษา</p></section>
+<section id="section-2"><h2>2. Extract pure policy</h2><p>ย้าย readyParts, remaining/allDone, station tap decision, pipeline progress และ validation เป็น pure functions/value objects ก่อน เพราะเสี่ยงต่ำและ unit testง่าย</p></section>
+<section id="section-3"><h2>3. Introduce typed state</h2><pre class="code-vs"><code>sealed class PackingState {}
 ScanPallet | PackList | OrderList
 | OrderParts | Submitting | Success | Failure</code></pre><p>รวม dataที่จำเป็นในแต่ละ stateแทน nullable fieldsหลายตัว</p></section>
-<section><h2>4. Move commands</h2><p>สร้าง controller/store รับ repository interfaces และคืน typed effects เช่น ShowError/RequestFocus/Navigate อย่าให้ controllerถือ BuildContext หรือ TextEditingController</p></section>
-<section><h2>5. Split widgets</h2><p>แยก page ต่อ state, scanner card, part list, serial editor, success panel โดยรับ immutable data/callback อย่าย้าย logicซ้ำไปหลาย widgetเพียงเพื่อให้ไฟล์หลักสั้น</p></section>
-<section><h2>6. Fix one boundary at a time</h2><p>เริ่ม packing hierarchy → part draft → submit จากนั้น check-in orchestration และ sorting realtime แต่ละ PRต้อง build/testและเทียบ payloadเดิม หลีกเลี่ยง rewriteทั้ง 3 screensพร้อมกัน</p></section>
-<section><h2>7. Add concurrency controls</h2><p>repository/controllerควรมี request generation/cancellation, command lock, idempotency key และ authoritative refreshหลัง mutation UI loadingหนึ่ง booleanไม่พอเมื่อมีหลาย requestชนกัน</p></section>
-<section><h2>8. Definition of done</h2><div class="success">ไฟล์ widgetไม่มี API parsing/business transition, state combinationsผิดกฎหมายสร้างไม่ได้, all commandsมี typed error/retry policy, scanner focusมี widget tests และ payload/contract testsผ่านเหมือนก่อน refactor</div></section>
+<section id="section-4"><h2>4. Move commands</h2><p>สร้าง controller/store รับ repository interfaces และคืน typed effects เช่น ShowError/RequestFocus/Navigate อย่าให้ controllerถือ BuildContext หรือ TextEditingController</p></section>
+<section id="section-5"><h2>5. Split widgets</h2><p>แยก page ต่อ state, scanner card, part list, serial editor, success panel โดยรับ immutable data/callback อย่าย้าย logicซ้ำไปหลาย widgetเพียงเพื่อให้ไฟล์หลักสั้น</p></section>
+<section id="section-6"><h2>6. Fix one boundary at a time</h2><p>เริ่ม packing hierarchy → part draft → submit จากนั้น check-in orchestration และ sorting realtime แต่ละ PRต้อง build/testและเทียบ payloadเดิม หลีกเลี่ยง rewriteทั้ง 3 screensพร้อมกัน</p></section>
+<section id="section-7"><h2>7. Add concurrency controls</h2><p>repository/controllerควรมี request generation/cancellation, command lock, idempotency key และ authoritative refreshหลัง mutation UI loadingหนึ่ง booleanไม่พอเมื่อมีหลาย requestชนกัน</p></section>
+<section id="section-8"><h2>8. Definition of done</h2><div class="success">ไฟล์ widgetไม่มี API parsing/business transition, state combinationsผิดกฎหมายสร้างไม่ได้, all commandsมี typed error/retry policy, scanner focusมี widget tests และ payload/contract testsผ่านเหมือนก่อน refactor</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

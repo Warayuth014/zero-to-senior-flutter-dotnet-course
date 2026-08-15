@@ -4,17 +4,18 @@
 <title>Packing models + API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-06 · Real Codebase</span><h1>Packing models + API</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. API surface</a></li><li><a href="#section-2">2. Pallet models</a></li><li><a href="#section-3">3. Pack models</a></li><li><a href="#section-4">4. Order model</a></li><li><a href="#section-5">5. Part model</a></li><li><a href="#section-6">6. Parser pitfalls</a></li><li><a href="#section-7">7. URL and errors</a></li><li><a href="#section-8">8. Contract tests</a></li></ol></nav>
 <div class="note"><strong>Packing models คือสาม snapshots:</strong> pallet-level เลือก pack, pack-level เลือก order และ order-level ทำ part scan Response จาก mutation ยังบอกผล finalize ของ pack ด้วย</div>
-<section><h2>1. API surface</h2><pre class="code-vs"><code>GET  /packing/pallet/{palletId}
+<section id="section-1"><h2>1. API surface</h2><pre class="code-vs"><code>GET  /packing/pallet/{palletId}
 GET  /packing/pack/{packingId}
 GET  /packing/pack/{packingId}/order/{pickOrderId}
 POST /packing/scan-part</code></pre></section>
-<section><h2>2. Pallet models</h2><p>PackingPalletResponse มี status/location/packs; PackingSummary มี orderCount/orderDoneCount และ <code>isDone</code> ที่ true เมื่อ status DONE หรือ doneCount≥count</p></section>
-<section><h2>3. Pack models</h2><p>PackingDetailResponse มี tracking/completedAt/orders และถือว่า done จาก status เท่านั้น ส่วน PackingOrderSummary บอก part progress ต่อ pick order</p></section>
-<section><h2>4. Order model</h2><p>PackingOrderResponse มี parts, status, packFinalized, trackingId, palletReleased ทำให้ response ของ scan เป็นทั้ง updated order snapshot และ domain event summary</p></section>
-<section><h2>5. Part model</h2><p>PackingPartItem คำนวณ <code>isDone</code> เมื่อ scannedQty≥requiredQty และ remaining ด้วย clamp มี serialRequire/availableSerials แต่ไม่มี lineId/lot/condition จึงจำกัดกรณี part ซ้ำ</p></section>
-<section><h2>6. Parser pitfalls</h2><p>required lists/fields cast ตรงและ invalid dates fallback now อาจ crash หรือซ่อน contract error ควร validate shape, nullable, unknown status และรายงาน malformed payload แบบสังเกตได้</p></section>
-<section><h2>7. URL and errors</h2><p>IDs ถูกต่อใน path โดยไม่ encode และทุก endpointรักษา statusCode ผ่าน ApiResult ควรใช้ Uri path segments พร้อม typed ProblemDetails เพื่อแยก conflict/not-found/auth/timeout</p></section>
-<section><h2>8. Contract tests</h2><div class="success">สร้าง fixtures ทุกระดับ รวม empty/malformed lists, unknown status, invalid dates, serial/nonserial, auto-finalize และ pallet release แล้ว round-trip กับ .NET DTO serialization</div></section>
+<section id="section-2"><h2>2. Pallet models</h2><p>PackingPalletResponse มี status/location/packs; PackingSummary มี orderCount/orderDoneCount และ <code>isDone</code> ที่ true เมื่อ status DONE หรือ doneCount≥count</p></section>
+<section id="section-3"><h2>3. Pack models</h2><p>PackingDetailResponse มี tracking/completedAt/orders และถือว่า done จาก status เท่านั้น ส่วน PackingOrderSummary บอก part progress ต่อ pick order</p></section>
+<section id="section-4"><h2>4. Order model</h2><p>PackingOrderResponse มี parts, status, packFinalized, trackingId, palletReleased ทำให้ response ของ scan เป็นทั้ง updated order snapshot และ domain event summary</p></section>
+<section id="section-5"><h2>5. Part model</h2><p>PackingPartItem คำนวณ <code>isDone</code> เมื่อ scannedQty≥requiredQty และ remaining ด้วย clamp มี serialRequire/availableSerials แต่ไม่มี lineId/lot/condition จึงจำกัดกรณี part ซ้ำ</p></section>
+<section id="section-6"><h2>6. Parser pitfalls</h2><p>required lists/fields cast ตรงและ invalid dates fallback now อาจ crash หรือซ่อน contract error ควร validate shape, nullable, unknown status และรายงาน malformed payload แบบสังเกตได้</p></section>
+<section id="section-7"><h2>7. URL and errors</h2><p>IDs ถูกต่อใน path โดยไม่ encode และทุก endpointรักษา statusCode ผ่าน ApiResult ควรใช้ Uri path segments พร้อม typed ProblemDetails เพื่อแยก conflict/not-found/auth/timeout</p></section>
+<section id="section-8"><h2>8. Contract tests</h2><div class="success">สร้าง fixtures ทุกระดับ รวม empty/malformed lists, unknown status, invalid dates, serial/nonserial, auto-finalize และ pallet release แล้ว round-trip กับ .NET DTO serialization</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,9 +4,10 @@
 <title>เส้นทาง Flutter → ApiClient → .NET → DB → UI</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-01 · Flutter + .NET</span><h1>เส้นทาง Flutter → ApiClient → .NET → DB → UI</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. อย่าเริ่มอ่านที่ HTTP</a></li><li><a href="#section-2">2. เส้นทางไปและกลับ</a></li><li><a href="#section-3">3. Boundary แต่ละชั้น</a></li><li><a href="#section-4">4. ไฟล์จริง</a></li><li><a href="#section-5">5. ตัวอย่าง orchestration</a></li><li><a href="#section-6">6. แบ่งความรับผิดชอบ</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Checklist</a></li></ol></nav>
 <div class="note"><strong>ภาพใหญ่:</strong> ผู้ใช้แตะหรือสแกน → Store/Service สร้าง request → ApiClient ส่ง HTTP → .NET endpoint ทำงานกับ service/DB → JSON กลับมาเป็น model/state → UI rebuild</div>
-<section><h2>1. อย่าเริ่มอ่านที่ HTTP</h2><p>เริ่มจากเหตุการณ์ของผู้ใช้และผลลัพธ์ที่หน้าจอต้องแสดง แล้วจึงตาม call chain ลงไป วิธีนี้ทำให้รู้ว่า request มีไว้ตอบโจทย์ workflow ใด ไม่หลงอยู่ใน utility code</p></section>
-<section><h2>2. เส้นทางไปและกลับ</h2><pre class="code-vs"><code>ScanScreen
+<section id="section-1"><h2>1. อย่าเริ่มอ่านที่ HTTP</h2><p>เริ่มจากเหตุการณ์ของผู้ใช้และผลลัพธ์ที่หน้าจอต้องแสดง แล้วจึงตาม call chain ลงไป วิธีนี้ทำให้รู้ว่า request มีไว้ตอบโจทย์ workflow ใด ไม่หลงอยู่ใน utility code</p></section>
+<section id="section-2"><h2>2. เส้นทางไปและกลับ</h2><pre class="code-vs"><code>ScanScreen
   → TaskStore.submit(barcode)
   → TasksApi.complete(request)
   → ApiClient.post('/tasks/complete')
@@ -14,9 +15,9 @@
   ← HTTP status + JSON
   ← TaskDto → Task domain model
   ← AsyncState.success/error → widget rebuild</code></pre></section>
-<section><h2>3. Boundary แต่ละชั้น</h2><ul><li>Widget รับ input และ render state</li><li>Store คุม loading/race/workflow</li><li>API class รู้ endpoint และ DTO</li><li>ApiClient รู้ HTTP, header, timeout และ decode</li><li>.NET รับ/validate DTO และคืน contract</li></ul></section>
-<section><h2>4. ไฟล์จริง</h2><p>ดู <code>wmsapp/lib/services/api_service.dart</code> และ <code>wms_absolute_mobile/lib/core/api_client.dart</code> เป็น transport boundary จากนั้นดู API ราย feature เช่น <code>api/tasks_api.dart</code> เพื่อเห็น endpoint-specific mapping</p></section>
-<section><h2>5. ตัวอย่าง orchestration</h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+<section id="section-3"><h2>3. Boundary แต่ละชั้น</h2><ul><li>Widget รับ input และ render state</li><li>Store คุม loading/race/workflow</li><li>API class รู้ endpoint และ DTO</li><li>ApiClient รู้ HTTP, header, timeout และ decode</li><li>.NET รับ/validate DTO และคืน contract</li></ul></section>
+<section id="section-4"><h2>4. ไฟล์จริง</h2><p>ดู <code>wmsapp/lib/services/api_service.dart</code> และ <code>wms_absolute_mobile/lib/core/api_client.dart</code> เป็น transport boundary จากนั้นดู API ราย feature เช่น <code>api/tasks_api.dart</code> เพื่อเห็น endpoint-specific mapping</p></section>
+<section id="section-5"><h2>5. ตัวอย่าง orchestration</h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
   state = const TaskState.loading(); notifyListeners();
   try {
     final page = await api.fetchTasks();
@@ -26,8 +27,8 @@
   }
   notifyListeners();
 }</code></pre></section>
-<section><h2>6. แบ่งความรับผิดชอบ</h2><p>อย่าให้ widget ต่อ URL, อ่าน status code และ cast JSON เอง เพราะจะทดสอบยากและ error policy กระจายหลายหน้า ส่วน business logic ภายใน .NET เรียนละเอียดในคอร์ส backend; บทนี้เน้น contract ที่ Flutter ต้องพึ่งพา</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือกปุ่มหนึ่งในแอป วาดลูกศรไป-กลับครบทุกชั้น พร้อมเขียน input, output และ failure ของแต่ละ boundary</p><details><summary>แนวคำตอบ</summary><p>เส้นทางต้องจบกลับที่ state ของ UI และแยก network failure ออกจาก contract/business failure</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">ตอบให้ได้ว่าใครสร้าง DTO, ใครส่ง HTTP, ใคร parse JSON, ใครถือ loading/error และ endpoint ใดเป็นเจ้าของ contract</div></section>
+<section id="section-6"><h2>6. แบ่งความรับผิดชอบ</h2><p>อย่าให้ widget ต่อ URL, อ่าน status code และ cast JSON เอง เพราะจะทดสอบยากและ error policy กระจายหลายหน้า ส่วน business logic ภายใน .NET เรียนละเอียดในคอร์ส backend; บทนี้เน้น contract ที่ Flutter ต้องพึ่งพา</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เลือกปุ่มหนึ่งในแอป วาดลูกศรไป-กลับครบทุกชั้น พร้อมเขียน input, output และ failure ของแต่ละ boundary</p><details><summary>แนวคำตอบ</summary><p>เส้นทางต้องจบกลับที่ state ของ UI และแยก network failure ออกจาก contract/business failure</p></details></section>
+<section id="section-8"><h2>8. Checklist</h2><div class="success">ตอบให้ได้ว่าใครสร้าง DTO, ใครส่ง HTTP, ใคร parse JSON, ใครถือ loading/error และ endpoint ใดเป็นเจ้าของ contract</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

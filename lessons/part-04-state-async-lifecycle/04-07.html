@@ -4,8 +4,9 @@
 <title>Loading/Error/Empty/Success state</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-07 · State &amp; Lifecycle</span><h1>Loading/Error/Empty/Success state</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Sealed state</a></li><li><a href="#section-2">2. Empty เป็น Data</a></li><li><a href="#section-3">3. Initial load vs refresh</a></li><li><a href="#section-4">4. Partial failure</a></li><li><a href="#section-5">5. Retry semantics</a></li><li><a href="#section-6">6. Render exhaustive</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Loading/Error/Empty/Success เป็นสถานะคนละความหมาย ไม่ควรอนุมานทั้งหมดจาก listว่างและ boolเดียว เพราะ emptyอาจเป็นผลสำเร็จ, errorอาจยังมี stale data และ refreshไม่ควรแทนหน้าเดิมด้วย spinnerเต็มจอ</div>
-<section><h2>1. Sealed state</h2><pre class="code-vs"><code>sealed class LoadState&lt;T&gt; { const LoadState(); }
+<section id="section-1"><h2>1. Sealed state</h2><pre class="code-vs"><code>sealed class LoadState&lt;T&gt; { const LoadState(); }
 class Initial&lt;T&gt; extends LoadState&lt;T&gt; { const Initial(); }
 class Loading&lt;T&gt; extends LoadState&lt;T&gt; { const Loading(); }
 class Data&lt;T&gt; extends LoadState&lt;T&gt; {
@@ -16,18 +17,18 @@ class Failure&lt;T&gt; extends LoadState&lt;T&gt; {
   const Failure(this.message, {this.previous});
   final String message; final T? previous;
 }</code></pre></section>
-<section><h2>2. Empty เป็น Data</h2><p>โหลดสำเร็จได้ listว่างคือ empty stateที่มีคำอธิบาย/action เช่น “ยังไม่มีงาน” ไม่ใช่ errorหรือ loading Skeleton/spinnerต้องใช้เมื่อ requestยังไม่จบเท่านั้น</p></section>
-<section><h2>3. Initial load vs refresh</h2><p>Initialไม่มี dataจึงแสดง skeleton/full progress; refreshมี dataเดิมควรรักษารายการและแสดง indicatorเล็ก ป้องกันหน้ากระพริบทุก polling Absoluteหลาย loaderคง listเดิมระหว่าง fetchและ notifyเมื่อผลมา แต่ควรมี per-resource refreshing/errorชัดเมื่อ UXต้องการ</p></section>
-<section><h2>4. Partial failure</h2><p>Dashboardโหลด tasks, inventory, summaryพร้อมกัน ถ้า summary informational failไม่ควรบล็อก tasks WarehouseStoreจับ error summaryแล้วเงียบเพื่อให้หน้าใช้ได้ แต่ productionควรมี logging/telemetry แยก stateต่อ resourceแทน global errorก้อนเดียว</p></section>
-<section><h2>5. Retry semantics</h2><p>Error stateบอก retryableหรือไม่ และ retry commandต้องรักษา input/context 401→login, 409→refresh/reconcile, timeout→retryได้, validation→แก้ input อย่าแสดงปุ่ม Retryเดียวทุกชนิด</p></section>
-<section><h2>6. Render exhaustive</h2><pre class="code-vs"><code>return switch (state) {
+<section id="section-2"><h2>2. Empty เป็น Data</h2><p>โหลดสำเร็จได้ listว่างคือ empty stateที่มีคำอธิบาย/action เช่น “ยังไม่มีงาน” ไม่ใช่ errorหรือ loading Skeleton/spinnerต้องใช้เมื่อ requestยังไม่จบเท่านั้น</p></section>
+<section id="section-3"><h2>3. Initial load vs refresh</h2><p>Initialไม่มี dataจึงแสดง skeleton/full progress; refreshมี dataเดิมควรรักษารายการและแสดง indicatorเล็ก ป้องกันหน้ากระพริบทุก polling Absoluteหลาย loaderคง listเดิมระหว่าง fetchและ notifyเมื่อผลมา แต่ควรมี per-resource refreshing/errorชัดเมื่อ UXต้องการ</p></section>
+<section id="section-4"><h2>4. Partial failure</h2><p>Dashboardโหลด tasks, inventory, summaryพร้อมกัน ถ้า summary informational failไม่ควรบล็อก tasks WarehouseStoreจับ error summaryแล้วเงียบเพื่อให้หน้าใช้ได้ แต่ productionควรมี logging/telemetry แยก stateต่อ resourceแทน global errorก้อนเดียว</p></section>
+<section id="section-5"><h2>5. Retry semantics</h2><p>Error stateบอก retryableหรือไม่ และ retry commandต้องรักษา input/context 401→login, 409→refresh/reconcile, timeout→retryได้, validation→แก้ input อย่าแสดงปุ่ม Retryเดียวทุกชนิด</p></section>
+<section id="section-6"><h2>6. Render exhaustive</h2><pre class="code-vs"><code>return switch (state) {
   Initial() || Loading() =&gt; const TaskSkeleton(),
   Data(value: final tasks) when tasks.isEmpty =&gt; const EmptyTasks(),
   Data(value: final tasks) =&gt; TaskList(tasks: tasks),
   Failure(:final message, previous: null) =&gt; ErrorPanel(message),
   Failure(:final previous) =&gt; TaskListWithError(previous!),
 };</code></pre></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Pollingครั้งใหม่ failแต่มี tasksจากครั้งก่อน ควรล้าง listไหม?</p><details><summary>เฉลย</summary><p>โดยทั่วไปเก็บ stale dataพร้อม timestamp/error bannerและ retry ไม่ล้างจน emptyเพราะทำงานต่อไม่ได้ แต่ actionที่ต้องข้อมูลสดอาจ disableและระบุ offline/stale ตามความเสี่ยง Domain policyต้องบอกอายุที่ยอมรับได้</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn"><code>if (items.isEmpty) CircularProgressIndicator()</code> จะ spinตลอดเมื่อ serverตอบ empty ต้องมี statusแยกจาก data และ test empty successโดยตรง</div></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Pollingครั้งใหม่ failแต่มี tasksจากครั้งก่อน ควรล้าง listไหม?</p><details><summary>เฉลย</summary><p>โดยทั่วไปเก็บ stale dataพร้อม timestamp/error bannerและ retry ไม่ล้างจน emptyเพราะทำงานต่อไม่ได้ แต่ actionที่ต้องข้อมูลสดอาจ disableและระบุ offline/stale ตามความเสี่ยง Domain policyต้องบอกอายุที่ยอมรับได้</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>if (items.isEmpty) CircularProgressIndicator()</code> จะ spinตลอดเมื่อ serverตอบ empty ต้องมี statusแยกจาก data และ test empty successโดยตรง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,19 +4,20 @@
 <title>Sorting models + API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-11 · Real Codebase</span><h1>Sorting models + API</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Operational endpoints</a></li><li><a href="#section-2">2. Dashboard model</a></li><li><a href="#section-3">3. Station view</a></li><li><a href="#section-4">4. Station detail</a></li><li><a href="#section-5">5. Test endpoints</a></li><li><a href="#section-6">6. Queue semantics</a></li><li><a href="#section-7">7. Parser/error debt</a></li><li><a href="#section-8">8. API tests</a></li></ol></nav>
 <div class="note"><strong>Sorting API แยก operations กับ test simulator:</strong> dashboard/station/toggle/clear เป็นงานจริง ส่วน available packs/create batch อยู่ใต้ test routes และไม่ควรเปิดใน production โดยไม่มี authorization</div>
-<section><h2>1. Operational endpoints</h2><pre class="code-vs"><code>GET  /sorting/stations
+<section id="section-1"><h2>1. Operational endpoints</h2><pre class="code-vs"><code>GET  /sorting/stations
 GET  /sorting/stations/{stationId}
 POST /sorting/stations/toggle
 POST /sorting/stations/clear</code></pre></section>
-<section><h2>2. Dashboard model</h2><p><code>SortingDashboardData</code> มี stations, completedCount และ queuedCount Count เป็น server aggregate ไม่ควรคำนวณ completed/queued จาก 10 cards เพราะ queue อยู่นอก station</p></section>
-<section><h2>3. Station view</h2><p><code>SortingStationView</code> มี stationId, enabled, status, pallet/capacity/full/disableReason และ copyWith สำหรับ realtime patch แต่ nullable parametersทำให้ set palletId กลับ null ไม่ได้ชัด ควรใช้ sentinel/copy API ที่รองรับ clear</p></section>
-<section><h2>4. Station detail</h2><p>detail เพิ่ม cartons และ pendingCount; carton มี packingId, owner, weightGram, itemCount, sortedAt และ sequenceNo สำหรับตรวจลำดับ/น้ำหนักใน station</p></section>
-<section><h2>5. Test endpoints</h2><pre class="code-vs"><code>GET  /sorting/test/available-packs
+<section id="section-2"><h2>2. Dashboard model</h2><p><code>SortingDashboardData</code> มี stations, completedCount และ queuedCount Count เป็น server aggregate ไม่ควรคำนวณ completed/queued จาก 10 cards เพราะ queue อยู่นอก station</p></section>
+<section id="section-3"><h2>3. Station view</h2><p><code>SortingStationView</code> มี stationId, enabled, status, pallet/capacity/full/disableReason และ copyWith สำหรับ realtime patch แต่ nullable parametersทำให้ set palletId กลับ null ไม่ได้ชัด ควรใช้ sentinel/copy API ที่รองรับ clear</p></section>
+<section id="section-4"><h2>4. Station detail</h2><p>detail เพิ่ม cartons และ pendingCount; carton มี packingId, owner, weightGram, itemCount, sortedAt และ sequenceNo สำหรับตรวจลำดับ/น้ำหนักใน station</p></section>
+<section id="section-5"><h2>5. Test endpoints</h2><pre class="code-vs"><code>GET  /sorting/test/available-packs
 POST /sorting/test/create-batch
 { operatorId, packingIds }</code></pre><p>response batch เป็น ASSIGNED พร้อม stationId หรือ QUEUED</p></section>
-<section><h2>6. Queue semantics</h2><p><code>CreateSortingBatchResponse.isQueued</code> derive จาก outcome String Batch size ต้องตรง packing IDs ที่ accepted และ partial reject policyต้อง explicitเพื่อไม่ให้ packหาย/ซ้ำใน queue</p></section>
-<section><h2>7. Parser/error debt</h2><p>invalid times fallback now, statuses/outcomes เป็น String และ toggle/clear ยังคืน dynamic map ควรใช้ enum+typed result+server time/version และคง statusCode/problem details ทุก endpoint</p></section>
-<section><h2>8. API tests</h2><div class="success">ทดสอบ 10 stations, disabled/full, carton sequence, ASSIGNED/QUEUED, duplicate packing IDs, no station, clear/toggle conflict และ production policyที่ปิด test routes</div></section>
+<section id="section-6"><h2>6. Queue semantics</h2><p><code>CreateSortingBatchResponse.isQueued</code> derive จาก outcome String Batch size ต้องตรง packing IDs ที่ accepted และ partial reject policyต้อง explicitเพื่อไม่ให้ packหาย/ซ้ำใน queue</p></section>
+<section id="section-7"><h2>7. Parser/error debt</h2><p>invalid times fallback now, statuses/outcomes เป็น String และ toggle/clear ยังคืน dynamic map ควรใช้ enum+typed result+server time/version และคง statusCode/problem details ทุก endpoint</p></section>
+<section id="section-8"><h2>8. API tests</h2><div class="success">ทดสอบ 10 stations, disabled/full, carton sequence, ASSIGNED/QUEUED, duplicate packing IDs, no station, clear/toggle conflict และ production policyที่ปิด test routes</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

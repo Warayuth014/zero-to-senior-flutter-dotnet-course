@@ -4,20 +4,21 @@
 <title>Bearer token ใน ApiClient</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-04 · Auth Integration</span><h1>Bearer token ใน ApiClient</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Token provider</a></li><li><a href="#section-2">2. Anonymous request</a></li><li><a href="#section-3">3. Shared client</a></li><li><a href="#section-4">4. Header correctness</a></li><li><a href="#section-5">5. Concurrent logout</a></li><li><a href="#section-6">6. Redaction</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Checklist</a></li></ol></nav>
 <div class="note"><strong>Bearer attachment จุดเดียว:</strong> ทุก authenticated request อ่าน access token ล่าสุดจาก SessionStore ตอนส่ง ไม่ copy token ไป feature APIs หลายแห่ง</div>
-<section><h2>1. Token provider</h2><pre class="code-vs"><code>typedef AccessTokenProvider = String? Function();
+<section id="section-1"><h2>1. Token provider</h2><pre class="code-vs"><code>typedef AccessTokenProvider = String? Function();
 
 Map&lt;String, String&gt; buildHeaders() =&gt; {
   'Accept': 'application/json',
   if (tokenProvider() case final token?)
     'Authorization': 'Bearer $token',
 };</code></pre></section>
-<section><h2>2. Anonymous request</h2><p>login และ health probe ต้องไม่แนบ token เก่าหรือ expired โดยบังเอิญ API client จึงควรรองรับ explicit auth policy เช่น required/optional/none แทน boolean ที่ความหมายกำกวม</p></section>
-<section><h2>3. Shared client</h2><p>ของจริงตั้ง <code>ApiClient.authToken</code> หลัง login และ feature APIs ใช้ client เดียวกัน การสร้าง ApiClient ใหม่ในแต่ละหน้าอาจทำ token หายและ config ไม่ตรงกัน</p></section>
-<section><h2>4. Header correctness</h2><p>รูปแบบคือ <code>Authorization: Bearer &lt;token&gt;</code> มีช่องว่างหนึ่งครั้ง ไม่เติม quote และไม่ส่ง token ใน query string เพราะ URL มักถูก log/cache/history</p></section>
-<section><h2>5. Concurrent logout</h2><p>request ที่เริ่มก่อน logout อาจกลับมาทีหลัง ต้องมี session generation/identity guard ไม่ให้ response เก่าฟื้น state ของผู้ใช้ที่ออกจากระบบแล้ว</p></section>
-<section><h2>6. Redaction</h2><p>HTTP logger ต้องลบ Authorization แบบ case-insensitive ทั้ง success/error/retry และ tests ต้อง assert ว่า token marker ไม่ปรากฏใน log</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หลัง refresh token สำเร็จ feature API ควรเปลี่ยนอะไร?</p><details><summary>เฉลย</summary><p>อัปเดต SessionStore atomically; request ใหม่อ่าน token ล่าสุดเอง ไม่ต้องวนแก้ repository ทุกตัว ส่วน request เดิมต้องจบตาม generation policy</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">token source เดียว, anonymous route ชัด, client lifecycle เดียว, ไม่มี token ใน URL/log และ session generation ป้องกัน stale response</div></section>
+<section id="section-2"><h2>2. Anonymous request</h2><p>login และ health probe ต้องไม่แนบ token เก่าหรือ expired โดยบังเอิญ API client จึงควรรองรับ explicit auth policy เช่น required/optional/none แทน boolean ที่ความหมายกำกวม</p></section>
+<section id="section-3"><h2>3. Shared client</h2><p>ของจริงตั้ง <code>ApiClient.authToken</code> หลัง login และ feature APIs ใช้ client เดียวกัน การสร้าง ApiClient ใหม่ในแต่ละหน้าอาจทำ token หายและ config ไม่ตรงกัน</p></section>
+<section id="section-4"><h2>4. Header correctness</h2><p>รูปแบบคือ <code>Authorization: Bearer &lt;token&gt;</code> มีช่องว่างหนึ่งครั้ง ไม่เติม quote และไม่ส่ง token ใน query string เพราะ URL มักถูก log/cache/history</p></section>
+<section id="section-5"><h2>5. Concurrent logout</h2><p>request ที่เริ่มก่อน logout อาจกลับมาทีหลัง ต้องมี session generation/identity guard ไม่ให้ response เก่าฟื้น state ของผู้ใช้ที่ออกจากระบบแล้ว</p></section>
+<section id="section-6"><h2>6. Redaction</h2><p>HTTP logger ต้องลบ Authorization แบบ case-insensitive ทั้ง success/error/retry และ tests ต้อง assert ว่า token marker ไม่ปรากฏใน log</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หลัง refresh token สำเร็จ feature API ควรเปลี่ยนอะไร?</p><details><summary>เฉลย</summary><p>อัปเดต SessionStore atomically; request ใหม่อ่าน token ล่าสุดเอง ไม่ต้องวนแก้ repository ทุกตัว ส่วน request เดิมต้องจบตาม generation policy</p></details></section>
+<section id="section-8"><h2>8. Checklist</h2><div class="success">token source เดียว, anonymous route ชัด, client lifecycle เดียว, ไม่มี token ใน URL/log และ session generation ป้องกัน stale response</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

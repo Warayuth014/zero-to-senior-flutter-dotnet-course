@@ -4,18 +4,19 @@
 <title>ScanPartScreen state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-05 · Real Codebase</span><h1>ScanPartScreen state machine</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State clusters</a></li><li><a href="#section-2">2. Initialize/resume</a></li><li><a href="#section-3">3. Resolve Part</a></li><li><a href="#section-4">4. Two input branches</a></li><li><a href="#section-5">5. Pallet memory</a></li><li><a href="#section-6">6. Submit outcomes</a></li><li><a href="#section-7">7. Timer/lifecycle</a></li><li><a href="#section-8">8. Refactor seam</a></li></ol></nav>
 <div class="note"><strong>ScanPartScreen คือ state machine แม้ยังเขียนเป็น fields:</strong> ต้องอ่านเป็น phases—idle → resolving line/lot → scanning serialหรือ qty → choosing pallet → submitting → assigned/pending/auto-closed</div>
-<section><h2>1. State clusters</h2><p>controllers/focus 3 กลุ่ม Part/Serial/Pallet, current PO, scanning item, serial list/manual qty, last pallet memory, assigned lines, resumed pending lines, loadingและ timed scan status หาก fieldใดไม่ resetตาม transitionจะข้ามข้อมูลระหว่าง item</p></section>
-<section><h2>2. Initialize/resume</h2><p><code>_currentPo = widget.po</code>และ copy <code>po.pendingLines</code>เข้า resumed list ทำให้กลับมาแก้ pallet assignmentจาก receiptเดิมได้โดยไม่ submitรับซ้ำ</p></section>
-<section><h2>3. Resolve Part</h2><pre class="code-vs"><code>getPartLines(partId)
+<section id="section-1"><h2>1. State clusters</h2><p>controllers/focus 3 กลุ่ม Part/Serial/Pallet, current PO, scanning item, serial list/manual qty, last pallet memory, assigned lines, resumed pending lines, loadingและ timed scan status หาก fieldใดไม่ resetตาม transitionจะข้ามข้อมูลระหว่าง item</p></section>
+<section id="section-2"><h2>2. Initialize/resume</h2><p><code>_currentPo = widget.po</code>และ copy <code>po.pendingLines</code>เข้า resumed list ทำให้กลับมาแก้ pallet assignmentจาก receiptเดิมได้โดยไม่ submitรับซ้ำ</p></section>
+<section id="section-3"><h2>3. Resolve Part</h2><pre class="code-vs"><code>getPartLines(partId)
 → filter line.poId == currentPo.poId
 → choose condition if many
 → choose lot if many
 → resolve POItem by lot.id</code></pre></section>
-<section><h2>4. Two input branches</h2><p>ถ้า <code>serialRequire</code> focus serialและ qtyมาจากจำนวน serial; ถ้าไม่ requireแสดง manual qty editorพร้อม +/- และ clamp 0..remaining ทั้งคู่รวมกลับที่ <code>_confirmPart</code></p></section>
-<section><h2>5. Pallet memory</h2><p><code>_lastPalletId/_lastPalletType</code>ช่วย default palletถัดไปและรวม assigned summary แต่ต้อง clearเมื่อ typeขัด, assignmentล้ม, POเปลี่ยนหรือ userยกเลิก เพื่อไม่ส่ง palletเก่าโดยไม่ตั้งใจ</p></section>
-<section><h2>6. Submit outcomes</h2><p>ReceiptLineResponseอาจ normal success, OVER warning, <code>palletError</code>ให้เข้ารายการ pending หรือ <code>autoClosed</code>แสดง dialog/ปิด flow Outcomeเหล่านี้ควรเป็น sealed resultแทน flagsที่ผสมกันได้หลายแบบ</p></section>
-<section><h2>7. Timer/lifecycle</h2><p>scan statusมี Timer 5sและ ScrollController animateไป serialที่เกี่ยว ต้อง cancel timer/dispose controllers/focus/scrollและ mounted guard post-frame callbacks ป้องกัน leak/setStateหลังออกหน้า</p></section>
-<section><h2>8. Refactor seam</h2><div class="success">สร้าง ReceivingFlowState + reducer/commands, ScanValidator, PalletAssignmentPolicyและ repository แล้วให้ widgetถือเฉพาะ controllers/focus การแยก phaseชัดจะกำจัด state combinationที่เป็นไปไม่ได้</div></section>
+<section id="section-4"><h2>4. Two input branches</h2><p>ถ้า <code>serialRequire</code> focus serialและ qtyมาจากจำนวน serial; ถ้าไม่ requireแสดง manual qty editorพร้อม +/- และ clamp 0..remaining ทั้งคู่รวมกลับที่ <code>_confirmPart</code></p></section>
+<section id="section-5"><h2>5. Pallet memory</h2><p><code>_lastPalletId/_lastPalletType</code>ช่วย default palletถัดไปและรวม assigned summary แต่ต้อง clearเมื่อ typeขัด, assignmentล้ม, POเปลี่ยนหรือ userยกเลิก เพื่อไม่ส่ง palletเก่าโดยไม่ตั้งใจ</p></section>
+<section id="section-6"><h2>6. Submit outcomes</h2><p>ReceiptLineResponseอาจ normal success, OVER warning, <code>palletError</code>ให้เข้ารายการ pending หรือ <code>autoClosed</code>แสดง dialog/ปิด flow Outcomeเหล่านี้ควรเป็น sealed resultแทน flagsที่ผสมกันได้หลายแบบ</p></section>
+<section id="section-7"><h2>7. Timer/lifecycle</h2><p>scan statusมี Timer 5sและ ScrollController animateไป serialที่เกี่ยว ต้อง cancel timer/dispose controllers/focus/scrollและ mounted guard post-frame callbacks ป้องกัน leak/setStateหลังออกหน้า</p></section>
+<section id="section-8"><h2>8. Refactor seam</h2><div class="success">สร้าง ReceivingFlowState + reducer/commands, ScanValidator, PalletAssignmentPolicyและ repository แล้วให้ widgetถือเฉพาะ controllers/focus การแยก phaseชัดจะกำจัด state combinationที่เป็นไปไม่ได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

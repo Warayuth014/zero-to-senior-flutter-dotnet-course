@@ -4,14 +4,15 @@
 <title>Upload timeout/progress/error</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-08 · Files &amp; Platform</span><h1>Upload timeout/progress/error</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State ของ upload</a></li><li><a href="#section-2">2. Timeout เป็นหลายช่วง</a></li><li><a href="#section-3">3. นับ progress จาก stream</a></li><li><a href="#section-4">4. Throttle UI update</a></li><li><a href="#section-5">5. Cancellation</a></li><li><a href="#section-6">6. Retry policy</a></li><li><a href="#section-7">7. UX บน network แย่</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Timeout ไม่ได้พิสูจน์ว่า upload ล้ม:</strong> server อาจบันทึกสำเร็จแล้วแต่ response กลับไม่ถึง client จึงต้องออกแบบ retry/idempotency และ reconcile ผลจาก server</div>
-<section><h2>1. State ของ upload</h2><pre class="code-vs"><code>sealed class UploadState {}
+<section id="section-1"><h2>1. State ของ upload</h2><pre class="code-vs"><code>sealed class UploadState {}
 class UploadIdle extends UploadState {}
 class UploadRunning extends UploadState { final double? progress; }
 class UploadSucceeded extends UploadState { final PartImage image; }
 class UploadFailed extends UploadState { final UploadFailure failure; }</code></pre><p>progress เป็น null ได้เมื่อ content length ไม่ทราบ และ failure ควรแยก cancelled, timeout, offline, rejected, unauthorized และ server error</p></section>
-<section><h2>2. Timeout เป็นหลายช่วง</h2><p>connect timeout, send timeout และ response timeout มีความหมายต่างกัน <code>request.send().timeout(30s)</code> ครอบเวลารอ future แต่ไม่ได้อธิบายผู้ใช้ว่า byte ถูกส่งไปเท่าไร ตั้งค่าตามขนาดสูงสุดและ network จริงของคลัง ไม่ใช้เลขเดียวกับ GET ทุกชนิด</p></section>
-<section><h2>3. นับ progress จาก stream</h2><pre class="code-vs"><code>Stream&lt;List&lt;int&gt;&gt; countBytes(
+<section id="section-2"><h2>2. Timeout เป็นหลายช่วง</h2><p>connect timeout, send timeout และ response timeout มีความหมายต่างกัน <code>request.send().timeout(30s)</code> ครอบเวลารอ future แต่ไม่ได้อธิบายผู้ใช้ว่า byte ถูกส่งไปเท่าไร ตั้งค่าตามขนาดสูงสุดและ network จริงของคลัง ไม่ใช้เลขเดียวกับ GET ทุกชนิด</p></section>
+<section id="section-3"><h2>3. นับ progress จาก stream</h2><pre class="code-vs"><code>Stream&lt;List&lt;int&gt;&gt; countBytes(
   Stream&lt;List&lt;int&gt;&gt; source, int total, void Function(double) onProgress,
 ) async* {
   var sent = 0;
@@ -21,10 +22,10 @@ class UploadFailed extends UploadState { final UploadFailure failure; }</code></
     yield chunk;
   }
 }</code></pre><p>HTTP package พื้นฐานอาจต้องสร้าง streamed request/adapter เพื่อเห็น upload progress เลือก library ตามความจำเป็นและห่อไว้หลัง interface</p></section>
-<section><h2>4. Throttle UI update</h2><p>อย่า <code>notifyListeners()</code> ทุก chunk; อัปเดตเมื่อเพิ่มอย่างน้อย 1% หรือทุก 100–200 ms ลด rebuild และให้ screen subscribe เฉพาะ upload item นั้น progress 100% หมายถึงส่ง bytes ครบ ยังต้องรอ server validate/save</p></section>
-<section><h2>5. Cancellation</h2><p>ปุ่ม Cancel ต้องยกเลิก stream/request จริง ไม่ใช่แค่ซ่อน spinner หลัง cancel ห้ามแสดง success จาก future เก่า ใช้ operation token/generation และให้ .NET รับ <code>CancellationToken</code> แต่ยังต้อง cleanup temp file เมื่อ client disconnect</p></section>
-<section><h2>6. Retry policy</h2><p>retry อัตโนมัติเฉพาะ error ชั่วคราวและเมื่อมี upload ID ที่ server dedupe ได้; 400/401/403/413/415 ไม่ retry แบบเดิม ส่วน timeout หลังส่งครบให้ query สถานะด้วย upload ID ก่อนส่งไฟล์ใหม่</p></section>
-<section><h2>7. UX บน network แย่</h2><p>แสดงชื่อ part, thumbnail, bytes/เปอร์เซ็นต์, ปุ่ม cancel/retry และเก็บหน้าจอใช้งานส่วนอื่นได้ตาม business rule หากออกจากหน้า ให้ store/repository เป็น owner งาน ไม่ให้ widget dispose แล้วงานกลายเป็น zombie</p></section>
-<section><h2>8. Tests</h2><div class="success">จำลอง progress chunks, timeout ก่อนส่ง/หลังส่งครบ, cancel กลางทาง, offline, 413, token หมดอายุ, response เสียรูป, retry key ซ้ำ และ widget ถูก dispose โดยต้องไม่มี setState-after-dispose หรือ success หลอก</div></section>
+<section id="section-4"><h2>4. Throttle UI update</h2><p>อย่า <code>notifyListeners()</code> ทุก chunk; อัปเดตเมื่อเพิ่มอย่างน้อย 1% หรือทุก 100–200 ms ลด rebuild และให้ screen subscribe เฉพาะ upload item นั้น progress 100% หมายถึงส่ง bytes ครบ ยังต้องรอ server validate/save</p></section>
+<section id="section-5"><h2>5. Cancellation</h2><p>ปุ่ม Cancel ต้องยกเลิก stream/request จริง ไม่ใช่แค่ซ่อน spinner หลัง cancel ห้ามแสดง success จาก future เก่า ใช้ operation token/generation และให้ .NET รับ <code>CancellationToken</code> แต่ยังต้อง cleanup temp file เมื่อ client disconnect</p></section>
+<section id="section-6"><h2>6. Retry policy</h2><p>retry อัตโนมัติเฉพาะ error ชั่วคราวและเมื่อมี upload ID ที่ server dedupe ได้; 400/401/403/413/415 ไม่ retry แบบเดิม ส่วน timeout หลังส่งครบให้ query สถานะด้วย upload ID ก่อนส่งไฟล์ใหม่</p></section>
+<section id="section-7"><h2>7. UX บน network แย่</h2><p>แสดงชื่อ part, thumbnail, bytes/เปอร์เซ็นต์, ปุ่ม cancel/retry และเก็บหน้าจอใช้งานส่วนอื่นได้ตาม business rule หากออกจากหน้า ให้ store/repository เป็น owner งาน ไม่ให้ widget dispose แล้วงานกลายเป็น zombie</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">จำลอง progress chunks, timeout ก่อนส่ง/หลังส่งครบ, cancel กลางทาง, offline, 413, token หมดอายุ, response เสียรูป, retry key ซ้ำ และ widget ถูก dispose โดยต้องไม่มี setState-after-dispose หรือ success หลอก</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

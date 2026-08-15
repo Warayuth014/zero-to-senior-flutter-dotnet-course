@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Enum และ enhanced enum</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>Generic และ type constraint</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-09 · Dart Core</span><h1>Enum และ enhanced enum</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-09 · Dart Core</span><h1>Generic และ type constraint</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Enum พื้นฐานและ enhanced enum</a></li><li><a href="#section-2">2. Enum ทำให้ switch ตรวจครบ</a></li><li><a href="#section-3">3. แยก wire value จาก enum</a></li><li><a href="#section-4">4. ตัวอย่างจริง</a></li><li><a href="#section-5">5. เมื่อไม่ควรใช้ enum</a></li><li><a href="#section-6">6. แบบฝึกหัด</a></li><li><a href="#section-7">7. จุดพลาด</a></li><li><a href="#section-8">8. สรุป</a></li></ol></nav>
 <div class="note">Enum ทำให้ชุดสถานะปิดและตรวจครบได้ เหมาะกับ workflow/state ที่มีจำนวนกรณีชัด ดีกว่า string กระจายทั่วแอปซึ่งสะกดผิดได้และไม่มี exhaustive checking</div>
-<section><h2>1. Enum พื้นฐานและ enhanced enum</h2><pre class="code-vs"><code>enum ScanPhase {
+<section id="section-1"><h2>1. Enum พื้นฐานและ enhanced enum</h2><pre class="code-vs"><code>enum ScanPhase {
   idle('รอสแกน'),
   validating('กำลังตรวจสอบ'),
   confirmed('สำเร็จ'),
@@ -16,13 +17,13 @@
 
   bool get canSubmit =&gt; this == idle || this == failed;
 }</code></pre><p>Enhanced enum มี field, constructor, getter/method ได้ แต่ instance เป็นค่าคงที่ตามรายการที่ประกาศ</p></section>
-<section><h2>2. Enum ทำให้ switch ตรวจครบ</h2><pre class="code-vs"><code>Color phaseColor(ScanPhase phase) =&gt; switch (phase) {
+<section id="section-2"><h2>2. Enum ทำให้ switch ตรวจครบ</h2><pre class="code-vs"><code>Color phaseColor(ScanPhase phase) =&gt; switch (phase) {
   ScanPhase.idle =&gt; Colors.grey,
   ScanPhase.validating =&gt; Colors.blue,
   ScanPhase.confirmed =&gt; Colors.green,
   ScanPhase.failed =&gt; Colors.red,
 };</code></pre><p>เมื่อเพิ่ม phase ใหม่ analyzer ชี้ตำแหน่ง switch ที่ยังไม่รองรับ ถ้าใส่ wildcard <code>_</code> ทั้งที่ทุก case ควรชัด คุณจะเสียประโยชน์นี้</p></section>
-<section><h2>3. แยก wire value จาก enum</h2><p>.NET อาจส่ง <code>"PENDING"</code>, เลข <code>0</code> หรือ legacy value อย่ากระจายการเปรียบเทียบใน UI ให้ parse ที่ boundary:</p><pre class="code-vs"><code>enum TaskStatus { pending, inProgress, completed, unknown }
+<section id="section-3"><h2>3. แยก wire value จาก enum</h2><p>.NET อาจส่ง <code>"PENDING"</code>, เลข <code>0</code> หรือ legacy value อย่ากระจายการเปรียบเทียบใน UI ให้ parse ที่ boundary:</p><pre class="code-vs"><code>enum TaskStatus { pending, inProgress, completed, unknown }
 
 TaskStatus parseTaskStatus(Object? raw) =&gt; switch (raw?.toString().toUpperCase()) {
   'PENDING' || '0' =&gt; TaskStatus.pending,
@@ -30,10 +31,10 @@ TaskStatus parseTaskStatus(Object? raw) =&gt; switch (raw?.toString().toUpperCas
   'COMPLETE' || '4' =&gt; TaskStatus.completed,
   _ =&gt; TaskStatus.unknown,
 };</code></pre></section>
-<section><h2>4. ตัวอย่างจริง</h2><ul><li><code>workflow_definitions.dart</code> มี <code>TaskType</code>, <code>TaskStatus</code>, <code>DispatchMode</code> และ map step ตาม TaskType</li><li><code>connection_profile.dart</code> มี protocol/environment/status พร้อม parse และ label</li><li><code>wmsapp/packing_screen.dart</code> ใช้ private <code>_PackState</code> เป็น state machine ของหน้าจอ</li></ul></section>
-<section><h2>5. เมื่อไม่ควรใช้ enum</h2><p>ถ้าค่าถูกเพิ่มจาก server ได้โดยไม่ release แอป หรือเป็นข้อมูลอิสระจำนวนมาก enum จะทำให้ client เก่าไม่รู้จัก ต้องมี <code>unknown</code>/raw fallback หรือใช้ model/config ที่ server ขับเคลื่อนแทน</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>เปลี่ยน bool <code>isLoading</code> + <code>hasError</code> + <code>isDone</code> เป็น enum และอธิบายว่าป้องกัน state ใด</p><details><summary>เฉลย</summary><p><code>LoadState { initial, loading, success, empty, failure }</code> ป้องกันค่าขัดกันเช่น loading=true พร้อม done=true และบังคับ UI render หนึ่งสถานะต่อครั้ง อาจเก็บ data/error แยกหรือใช้ sealed state ในบท architecture</p></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn"><code>enum.name</code> เป็น contract ได้เฉพาะเมื่อ client/server ตกลงและรับผลกระทบจากการ rename แล้ว ถ้าเป็น external contract ให้ mapping ชัดเจนและมี test fixture</div></section>
-<section><h2>8. สรุป</h2><p>ใช้ enum เมื่อ domain มี finite states, parse ที่ boundary, switch แบบ exhaustive และตัดสินใจ unknown strategy ก่อน deploy กับ server ที่เปลี่ยนได้</p></section>
+<section id="section-4"><h2>4. ตัวอย่างจริง</h2><ul><li><code>workflow_definitions.dart</code> มี <code>TaskType</code>, <code>TaskStatus</code>, <code>DispatchMode</code> และ map step ตาม TaskType</li><li><code>connection_profile.dart</code> มี protocol/environment/status พร้อม parse และ label</li><li><code>wmsapp/packing_screen.dart</code> ใช้ private <code>_PackState</code> เป็น state machine ของหน้าจอ</li></ul></section>
+<section id="section-5"><h2>5. เมื่อไม่ควรใช้ enum</h2><p>ถ้าค่าถูกเพิ่มจาก server ได้โดยไม่ release แอป หรือเป็นข้อมูลอิสระจำนวนมาก enum จะทำให้ client เก่าไม่รู้จัก ต้องมี <code>unknown</code>/raw fallback หรือใช้ model/config ที่ server ขับเคลื่อนแทน</p></section>
+<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>เปลี่ยน bool <code>isLoading</code> + <code>hasError</code> + <code>isDone</code> เป็น enum และอธิบายว่าป้องกัน state ใด</p><details><summary>เฉลย</summary><p><code>LoadState { initial, loading, success, empty, failure }</code> ป้องกันค่าขัดกันเช่น loading=true พร้อม done=true และบังคับ UI render หนึ่งสถานะต่อครั้ง อาจเก็บ data/error แยกหรือใช้ sealed state ในบท architecture</p></details></section>
+<section id="section-7"><h2>7. จุดพลาด</h2><div class="warn"><code>enum.name</code> เป็น contract ได้เฉพาะเมื่อ client/server ตกลงและรับผลกระทบจากการ rename แล้ว ถ้าเป็น external contract ให้ mapping ชัดเจนและมี test fixture</div></section>
+<section id="section-8"><h2>8. สรุป</h2><p>ใช้ enum เมื่อ domain มี finite states, parse ที่ boundary, switch แบบ exhaustive และตัดสินใจ unknown strategy ก่อน deploy กับ server ที่เปลี่ยนได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

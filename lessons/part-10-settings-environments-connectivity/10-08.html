@@ -4,25 +4,26 @@
 <title>ConnectionController lifecycle</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-08 · Flutter + .NET</span><h1>ConnectionController lifecycle</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State</a></li><li><a href="#section-2">2. Startup</a></li><li><a href="#section-3">3. Commands</a></li><li><a href="#section-4">4. Probe generation</a></li><li><a href="#section-5">5. Dependency direction</a></li><li><a href="#section-6">6. Client lifetime</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>ConnectionController เป็น lifecycle owner:</strong> โหลด/persist profiles, active selection, resolved statusและ notify UI โดยไม่ import AppConfigย้อนกลับจน dependency cycle</div>
-<section><h2>1. State</h2><pre class="code-vs"><code>enum ConnectionPhase { unknown, checking, online, offline }
+<section id="section-1"><h2>1. State</h2><pre class="code-vs"><code>enum ConnectionPhase { unknown, checking, online, offline }
 
 class ConnectionController extends ChangeNotifier {
   List&lt;ConnectionProfile&gt; get profiles =&gt; List.unmodifiable(_profiles);
   ConnectionProfile? get active =&gt; /* by id */;
   ConnectionTestResult? lastResult;
 }</code></pre></section>
-<section><h2>2. Startup</h2><p><code>load()</code> ต้องเสร็จก่อน requestแรก: decode/migrate/seed → resolve active → notify/ready แล้ว auth restoreจึง bindกับ serverถูกตัว</p></section>
-<section><h2>3. Commands</h2><p>แยก <code>saveAsNew</code>, <code>saveEdits</code>, <code>select</code>, <code>delete</code>, <code>refreshStatus</code> เพื่อ invariants/testsชัด ไม่ expose mutable listหรือ activeId setter</p></section>
-<section><h2>4. Probe generation</h2><pre class="code-vs"><code>final generation = ++_probeGeneration;
+<section id="section-2"><h2>2. Startup</h2><p><code>load()</code> ต้องเสร็จก่อน requestแรก: decode/migrate/seed → resolve active → notify/ready แล้ว auth restoreจึง bindกับ serverถูกตัว</p></section>
+<section id="section-3"><h2>3. Commands</h2><p>แยก <code>saveAsNew</code>, <code>saveEdits</code>, <code>select</code>, <code>delete</code>, <code>refreshStatus</code> เพื่อ invariants/testsชัด ไม่ expose mutable listหรือ activeId setter</p></section>
+<section id="section-4"><h2>4. Probe generation</h2><pre class="code-vs"><code>final generation = ++_probeGeneration;
 _phase = ConnectionPhase.checking; notifyListeners();
 final result = await probe(resolvedUrl);
 if (generation != _probeGeneration) return;
 lastResult = result; _phase = result.ok ? online : offline;
 notifyListeners();</code></pre></section>
-<section><h2>5. Dependency direction</h2><p>AppConfigอ่าน <code>activeBaseUrl</code> จาก controller/resolver แต่ controllerไม่ import AppConfigเพื่อไม่เกิดวงจร ของจริงเขียน commentกำกับ boundaryนี้ไว้ชัด</p></section>
-<section><h2>6. Client lifetime</h2><p>ApiClientตัวเดียวอาจอยู่ทั้ง sessionแต่ base URL resolveจาก controllerทุก requestหรือถูก invalidateเมื่อ profileเปลี่ยน Bearer tokenต้องถูก clearตาม Part 8 realm policy</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>probe Aเริ่ม แล้วผู้ใช้เลือก Bก่อน Aตอบ status dotควรแสดงอะไร?</p><details><summary>เฉลย</summary><p>เฉพาะผล B; generationของ Aเก่าและถูก ignore ห้าม Aเปลี่ยน statusของ active B</p></details></section>
-<section><h2>8. Tests</h2><div class="success">first-run seed, migration, CRUD, active invariants, persistence failure, overlapping probes, pinned buildและ server switch callbacks</div></section>
+<section id="section-5"><h2>5. Dependency direction</h2><p>AppConfigอ่าน <code>activeBaseUrl</code> จาก controller/resolver แต่ controllerไม่ import AppConfigเพื่อไม่เกิดวงจร ของจริงเขียน commentกำกับ boundaryนี้ไว้ชัด</p></section>
+<section id="section-6"><h2>6. Client lifetime</h2><p>ApiClientตัวเดียวอาจอยู่ทั้ง sessionแต่ base URL resolveจาก controllerทุก requestหรือถูก invalidateเมื่อ profileเปลี่ยน Bearer tokenต้องถูก clearตาม Part 8 realm policy</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>probe Aเริ่ม แล้วผู้ใช้เลือก Bก่อน Aตอบ status dotควรแสดงอะไร?</p><details><summary>เฉลย</summary><p>เฉพาะผล B; generationของ Aเก่าและถูก ignore ห้าม Aเปลี่ยน statusของ active B</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">first-run seed, migration, CRUD, active invariants, persistence failure, overlapping probes, pinned buildและ server switch callbacks</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

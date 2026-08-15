@@ -4,24 +4,25 @@
 <title>mounted หลัง await</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-13 · Flutter UI</span><h1>mounted หลัง await</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State.mounted</a></li><li><a href="#section-2">2. context.mounted</a></li><li><a href="#section-3">3. ตัวอย่างจริง</a></li><li><a href="#section-4">4. mounted ไม่รับประกัน resultยัง relevant</a></li><li><a href="#section-5">5. finally และ cleanup</a></li><li><a href="#section-6">6. Async context across dialog/navigation</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">หลัง <code>await</code> เวลาและโลกเปลี่ยนได้: routeอาจปิด, Stateอาจ dispose, taskอาจเปลี่ยน และ responseเก่าอาจกลับทีหลัง ต้องตรวจทั้ง lifecycle และความสดของ operationก่อนใช้ context/setState</div>
-<section><h2>1. State.mounted</h2><pre class="code-vs"><code>final result = await repository.preview(code);
+<section id="section-1"><h2>1. State.mounted</h2><pre class="code-vs"><code>final result = await repository.preview(code);
 if (!mounted) return;
 setState(() =&gt; _preview = result);
 ScaffoldMessenger.of(context).showSnackBar(/* ... */);</code></pre><p><code>mounted</code> trueเมื่อ Stateยังผูก Element ใช้ใน State methodก่อน setState/contextหลัง async gap</p></section>
-<section><h2>2. context.mounted</h2><pre class="code-vs"><code>onPressed: () async {
+<section id="section-2"><h2>2. context.mounted</h2><pre class="code-vs"><code>onPressed: () async {
   final ok = await confirm(context);
   if (!context.mounted || ok != true) return;
   Navigator.of(context).pop();
 }</code></pre><p>เหมาะ callback/local BuildContext ที่ไม่จำเป็นต้องอ้าง State โดย contextที่ตรวจควรเป็นตัวเดียวกับที่จะใช้</p></section>
-<section><h2>3. ตัวอย่างจริง</h2><p>CheckIn ของ wmsapp ตรวจ <code>if (!mounted) return</code> หลัง preview API และหลัง destination dialogก่อน setState/open slot Absolute ScanBox await onScanแล้วคืน focusเฉพาะ mounted รูปแบบนี้ป้องกัน “setState called after dispose” และ FocusNodeใช้หลังปิดหน้า</p></section>
-<section><h2>4. mounted ไม่รับประกัน resultยัง relevant</h2><p>หน้าอาจยัง mountedแต่ผู้ใช้เปลี่ยน taskหรือยิง requestใหม่ ใช้ generation ID/current entity check:</p><pre class="code-vs"><code>final requestId = ++_requestId;
+<section id="section-3"><h2>3. ตัวอย่างจริง</h2><p>CheckIn ของ wmsapp ตรวจ <code>if (!mounted) return</code> หลัง preview API และหลัง destination dialogก่อน setState/open slot Absolute ScanBox await onScanแล้วคืน focusเฉพาะ mounted รูปแบบนี้ป้องกัน “setState called after dispose” และ FocusNodeใช้หลังปิดหน้า</p></section>
+<section id="section-4"><h2>4. mounted ไม่รับประกัน resultยัง relevant</h2><p>หน้าอาจยัง mountedแต่ผู้ใช้เปลี่ยน taskหรือยิง requestใหม่ ใช้ generation ID/current entity check:</p><pre class="code-vs"><code>final requestId = ++_requestId;
 final result = await repository.load(code);
 if (!mounted || requestId != _requestId) return;
 setState(() =&gt; _result = result);</code></pre></section>
-<section><h2>5. finally และ cleanup</h2><p>ใช้ mountedเพื่อ UI update ไม่ใช่ข้าม cleanupทั้งหมด Busy/resourceใน storeต้องปลดใน finallyแม้ widgetหาย หาก busyอยู่ใน Stateและ Stateตายแล้วไม่ต้อง setState แต่ network/client operationอาจยังต้อง closeตาม owner</p></section>
-<section><h2>6. Async context across dialog/navigation</h2><p>หลัง await dialogอาจมี navigationอื่นเกิดขึ้น ตรวจ mountedและ current stateก่อน commit/เปิด route อย่าเก็บ dialogContextไปใช้หลัง dialogถูก pop Contextมีความหมายตาม Element lifetimeไม่ใช่ global handle</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Request A สำหรับ pallet Aช้า ผู้ใช้เปลี่ยนเป็น Bและ request Bเสร็จก่อน A หน้าไม่ถูก dispose mountedยัง true จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>เก็บ request generationหรือ expected pallet ID แล้ว apply responseเมื่อยังตรง current state ยกเลิก Aถ้า clientรองรับ และให้ repository/cacheแยก keyตาม pallet Mountedอย่างเดียวกัน crashแต่ไม่กัน stale data</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">การเติม <code>if (!mounted) return</code> ทุกบรรทัดไม่แก้ architecture ถ้างานควรอยู่ต่อหลังหน้าปิดให้ย้ายไป store/service ownerและให้ UI subscribe state ส่วนงานเฉพาะหน้าเท่านั้นที่หยุด applyเมื่อ unmounted</div></section>
+<section id="section-5"><h2>5. finally และ cleanup</h2><p>ใช้ mountedเพื่อ UI update ไม่ใช่ข้าม cleanupทั้งหมด Busy/resourceใน storeต้องปลดใน finallyแม้ widgetหาย หาก busyอยู่ใน Stateและ Stateตายแล้วไม่ต้อง setState แต่ network/client operationอาจยังต้อง closeตาม owner</p></section>
+<section id="section-6"><h2>6. Async context across dialog/navigation</h2><p>หลัง await dialogอาจมี navigationอื่นเกิดขึ้น ตรวจ mountedและ current stateก่อน commit/เปิด route อย่าเก็บ dialogContextไปใช้หลัง dialogถูก pop Contextมีความหมายตาม Element lifetimeไม่ใช่ global handle</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Request A สำหรับ pallet Aช้า ผู้ใช้เปลี่ยนเป็น Bและ request Bเสร็จก่อน A หน้าไม่ถูก dispose mountedยัง true จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>เก็บ request generationหรือ expected pallet ID แล้ว apply responseเมื่อยังตรง current state ยกเลิก Aถ้า clientรองรับ และให้ repository/cacheแยก keyตาม pallet Mountedอย่างเดียวกัน crashแต่ไม่กัน stale data</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การเติม <code>if (!mounted) return</code> ทุกบรรทัดไม่แก้ architecture ถ้างานควรอยู่ต่อหลังหน้าปิดให้ย้ายไป store/service ownerและให้ UI subscribe state ส่วนงานเฉพาะหน้าเท่านั้นที่หยุด applyเมื่อ unmounted</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

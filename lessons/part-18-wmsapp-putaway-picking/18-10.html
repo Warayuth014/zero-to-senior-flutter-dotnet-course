@@ -4,16 +4,17 @@
 <title>Picking order detail</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-10 · Real Codebase</span><h1>Picking order detail</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Model topology</a></li><li><a href="#section-2">2. List item model</a></li><li><a href="#section-3">3. Pallet status</a></li><li><a href="#section-4">4. Order part totals</a></li><li><a href="#section-5">5. Scan membership guard</a></li><li><a href="#section-6">6. Assign response</a></li><li><a href="#section-7">7. Parser risks</a></li><li><a href="#section-8">8. Detail tests</a></li></ol></nav>
 <div class="note"><strong>Order detail เชื่อม demand กับ source pallets:</strong> ต้องแยกยอดระดับ order, ยอดที่ allocate บนแต่ละ pallet และยอดที่หยิบแล้ว ไม่เช่นนั้น progress จะดูถูกแต่ inventory ผิด</div>
-<section><h2>1. Model topology</h2><pre class="code-vs"><code>PickOrderDetailFull
+<section id="section-1"><h2>1. Model topology</h2><pre class="code-vs"><code>PickOrderDetailFull
 ├─ pallets[] → pallet parts[]
 └─ parts[]   → required/reserved/remaining</code></pre><p>สองมุมมองตอบคนละคำถาม: ของอยู่ที่ pallet ใด และ order ยังต้องการ part เท่าไร</p></section>
-<section><h2>2. List item model</h2><p><code>PickOrderListItem</code> เป็น summary สำหรับหน้าแรก ส่วน <code>PickOrderDetailFull</code> มีข้อมูลเต็ม อย่าใช้ summary ต่อในหน้าทำงานเพราะอาจ stale และไม่มี line detail</p></section>
-<section><h2>3. Pallet status</h2><p><code>PickOrderPalletInfo</code> มี palletStatus, stationId/name, partCount, totalQty และ parts โดย part status เป็น PENDING/PARTIAL/PICKED UI ใช้แสดงตำแหน่งและ progress ก่อน scan</p></section>
-<section><h2>4. Order part totals</h2><p><code>PickOrderPartInfo</code> แยก requiredQty, reservedQty และ remainingQty คำว่า reserved ไม่เท่ากับ picked; UI และ backend ต้องนิยามว่าการยกเลิก/คืน pallet ปลด reservation เมื่อใด</p></section>
-<section><h2>5. Scan membership guard</h2><p>detail screen ตรวจ local ว่า palletId อยู่ใน <code>detail.pallets</code> ก่อนเรียก assign ลด request ผิด แต่ server ต้องตรวจ order membership/version ซ้ำเพราะ snapshot อาจเปลี่ยน</p></section>
-<section><h2>6. Assign response</h2><p><code>AssignPickStationResponse</code> คืน station, source pallet, pick order, palletItems และ pickOrderItems เป็น working snapshot สำหรับ PickItemsScreen จึงเป็น boundary เริ่ม picking session ใน client</p></section>
-<section><h2>7. Parser risks</h2><p>วันที่ผิด fallback เป็น now และหลาย required field cast ตรง; unknown status ถูกเก็บ String การ fallback วันที่ทำให้ order เก่าดูใหม่ ควรใช้ nullable/parse failure และ typed enum ที่รองรับ unknown</p></section>
-<section><h2>8. Detail tests</h2><div class="success">fixture order หลาย pallets, part ซ้ำหลาย pallet, partial/picked, station null, invalid date และ concurrent unassignment; widget test ต้องพิสูจน์ local reject, server conflict และ refresh หลังกลับจาก PickItemsScreen</div></section>
+<section id="section-2"><h2>2. List item model</h2><p><code>PickOrderListItem</code> เป็น summary สำหรับหน้าแรก ส่วน <code>PickOrderDetailFull</code> มีข้อมูลเต็ม อย่าใช้ summary ต่อในหน้าทำงานเพราะอาจ stale และไม่มี line detail</p></section>
+<section id="section-3"><h2>3. Pallet status</h2><p><code>PickOrderPalletInfo</code> มี palletStatus, stationId/name, partCount, totalQty และ parts โดย part status เป็น PENDING/PARTIAL/PICKED UI ใช้แสดงตำแหน่งและ progress ก่อน scan</p></section>
+<section id="section-4"><h2>4. Order part totals</h2><p><code>PickOrderPartInfo</code> แยก requiredQty, reservedQty และ remainingQty คำว่า reserved ไม่เท่ากับ picked; UI และ backend ต้องนิยามว่าการยกเลิก/คืน pallet ปลด reservation เมื่อใด</p></section>
+<section id="section-5"><h2>5. Scan membership guard</h2><p>detail screen ตรวจ local ว่า palletId อยู่ใน <code>detail.pallets</code> ก่อนเรียก assign ลด request ผิด แต่ server ต้องตรวจ order membership/version ซ้ำเพราะ snapshot อาจเปลี่ยน</p></section>
+<section id="section-6"><h2>6. Assign response</h2><p><code>AssignPickStationResponse</code> คืน station, source pallet, pick order, palletItems และ pickOrderItems เป็น working snapshot สำหรับ PickItemsScreen จึงเป็น boundary เริ่ม picking session ใน client</p></section>
+<section id="section-7"><h2>7. Parser risks</h2><p>วันที่ผิด fallback เป็น now และหลาย required field cast ตรง; unknown status ถูกเก็บ String การ fallback วันที่ทำให้ order เก่าดูใหม่ ควรใช้ nullable/parse failure และ typed enum ที่รองรับ unknown</p></section>
+<section id="section-8"><h2>8. Detail tests</h2><div class="success">fixture order หลาย pallets, part ซ้ำหลาย pallet, partial/picked, station null, invalid date และ concurrent unassignment; widget test ต้องพิสูจน์ local reject, server conflict และ refresh หลังกลับจาก PickItemsScreen</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

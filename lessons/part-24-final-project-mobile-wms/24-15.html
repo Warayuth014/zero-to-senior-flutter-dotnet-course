@@ -4,18 +4,19 @@
 <title>Part image upload</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-15 · Project Lab</span><h1>Part image upload</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Use case</a></li><li><a href="#section-2">2. Cross-platform file</a></li><li><a href="#section-3">3. Validation/compression</a></li><li><a href="#section-4">4. Multipart contract</a></li><li><a href="#section-5">5. Progress/cancel</a></li><li><a href="#section-6">6. Security</a></li><li><a href="#section-7">7. UX</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Attachment slice:</strong> เลือก/ถ่ายรูป part, validate/compress, multipart uploadและแสดง progress/result โดยรองรับ Android/Web file representationต่างกัน</div>
-<section><h2>1. Use case</h2><p>Supervisorแนบรูปกับ product/part IDเพื่อ identification/audit กำหนด MIME, max size/dimensions,จำนวน,permissionและ retentionก่อนเขียน picker ไม่อัปโหลด arbitrary fileจาก clientโดย backendไม่ตรวจ</p></section>
-<section><h2>2. Cross-platform file</h2><p>ใช้ XFile/bytes abstraction; mobileอาจมี pathแต่ webไม่มี ห้าม import <code>dart:io</code>ใน code path webโดยไม่มี conditional implementation Repositoryรับ UploadFile(name,mime,bytes/stream,length)</p></section>
-<section><h2>3. Validation/compression</h2><p>ตรวจ type/sizeและ decode image, resize/compressนอก UI threadเมื่อหนัก, preserve orientationตาม policyและไม่พึ่ง extensionอย่างเดียว Backendตรวจ MIME magic bytesซ้ำ</p></section>
-<section><h2>4. Multipart contract</h2><pre class="code-vs"><code>POST /api/WMS/mobile_parts/{partId}/image
+<section id="section-1"><h2>1. Use case</h2><p>Supervisorแนบรูปกับ product/part IDเพื่อ identification/audit กำหนด MIME, max size/dimensions,จำนวน,permissionและ retentionก่อนเขียน picker ไม่อัปโหลด arbitrary fileจาก clientโดย backendไม่ตรวจ</p></section>
+<section id="section-2"><h2>2. Cross-platform file</h2><p>ใช้ XFile/bytes abstraction; mobileอาจมี pathแต่ webไม่มี ห้าม import <code>dart:io</code>ใน code path webโดยไม่มี conditional implementation Repositoryรับ UploadFile(name,mime,bytes/stream,length)</p></section>
+<section id="section-3"><h2>3. Validation/compression</h2><p>ตรวจ type/sizeและ decode image, resize/compressนอก UI threadเมื่อหนัก, preserve orientationตาม policyและไม่พึ่ง extensionอย่างเดียว Backendตรวจ MIME magic bytesซ้ำ</p></section>
+<section id="section-4"><h2>4. Multipart contract</h2><pre class="code-vs"><code>POST /api/WMS/mobile_parts/{partId}/image
 Authorization: Bearer ...
 Idempotency-Key: ...
 multipart: file + optional metadata
 → { imageId, url, uploadedAt }</code></pre></section>
-<section><h2>5. Progress/cancel</h2><p>http MultipartRequestพื้นฐานอาจไม่ให้ progressสะดวก ใช้ streamed request/clientที่ track bytesหาก requirementมี Cancelหยุด client uploadแต่ backendต้อง cleanup partialและ client reconcileว่าบันทึกแล้วหรือยัง</p></section>
-<section><h2>6. Security</h2><p>backend authorize supervisor, sanitize filename, randomize storage key, limit body, scan content, serveด้วย safe Content-Typeและไม่เก็บ public URLถ้าข้อมูล sensitive Flutterไม่ log bytes/token/local path</p></section>
-<section><h2>7. UX</h2><p>preview, replace/removeก่อน submit, progress, retryและ success thumbnail Failureคง selectionเมื่อปลอดภัย Permission deniedอธิบายวิธีแก้และ app resumeหลัง settingsต้อง recheck</p></section>
-<section><h2>8. Tests</h2><div class="success">valid/oversize/wrong MIME/corrupt image, Android path vs web bytes, auth denied, progress/cancel, timeout-after-commit, duplicate keyและ server filename attackด้วย repository/endpoint integration tests</div></section>
+<section id="section-5"><h2>5. Progress/cancel</h2><p>http MultipartRequestพื้นฐานอาจไม่ให้ progressสะดวก ใช้ streamed request/clientที่ track bytesหาก requirementมี Cancelหยุด client uploadแต่ backendต้อง cleanup partialและ client reconcileว่าบันทึกแล้วหรือยัง</p></section>
+<section id="section-6"><h2>6. Security</h2><p>backend authorize supervisor, sanitize filename, randomize storage key, limit body, scan content, serveด้วย safe Content-Typeและไม่เก็บ public URLถ้าข้อมูล sensitive Flutterไม่ log bytes/token/local path</p></section>
+<section id="section-7"><h2>7. UX</h2><p>preview, replace/removeก่อน submit, progress, retryและ success thumbnail Failureคง selectionเมื่อปลอดภัย Permission deniedอธิบายวิธีแก้และ app resumeหลัง settingsต้อง recheck</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">valid/oversize/wrong MIME/corrupt image, Android path vs web bytes, auth denied, progress/cancel, timeout-after-commit, duplicate keyและ server filename attackด้วย repository/endpoint integration tests</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,15 +4,16 @@
 <title>Row, Column และ Main/CrossAxis</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-02 · Flutter UI</span><h1>Row, Column และ Main/CrossAxis</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. แผนที่แกน</a></li><li><a href="#section-2">2. Row สำหรับข้อมูลหนึ่งบรรทัด</a></li><li><a href="#section-3">3. Column สำหรับโครงหน้าจอ</a></li><li><a href="#section-4">4. mainAxisSize และพื้นที่ขั้นต่ำ</a></li><li><a href="#section-5">5. Baseline และข้อความหลายภาษา</a></li><li><a href="#section-6">6. จากสอง WMS</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>Row</code> และ <code>Column</code> คือ Flex คนละทิศ: main axis อยู่ตามทิศวางลูก ส่วน cross axis ตั้งฉากกัน การอ่าน layout ให้เริ่มจากทิศ ไม่เริ่มจากชื่อ property</div>
-<section><h2>1. แผนที่แกน</h2><table><thead><tr><th>Widget</th><th>Main axis</th><th>Cross axis</th></tr></thead><tbody><tr><td>Row</td><td>ซ้าย→ขวา (ตาม text direction)</td><td>บน→ล่าง</td></tr><tr><td>Column</td><td>บน→ล่าง</td><td>ซ้าย→ขวา</td></tr></tbody></table><p><code>MainAxisAlignment</code> แจกพื้นที่ตามแนววางลูก; <code>CrossAxisAlignment</code> จัดลูกข้ามแนว การตั้ง stretch ต้องมี cross-axis constraint ที่ชัดเจน</p></section>
-<section><h2>2. Row สำหรับข้อมูลหนึ่งบรรทัด</h2><pre class="code-vs"><code>Row(children: [
+<section id="section-1"><h2>1. แผนที่แกน</h2><table><thead><tr><th>Widget</th><th>Main axis</th><th>Cross axis</th></tr></thead><tbody><tr><td>Row</td><td>ซ้าย→ขวา (ตาม text direction)</td><td>บน→ล่าง</td></tr><tr><td>Column</td><td>บน→ล่าง</td><td>ซ้าย→ขวา</td></tr></tbody></table><p><code>MainAxisAlignment</code> แจกพื้นที่ตามแนววางลูก; <code>CrossAxisAlignment</code> จัดลูกข้ามแนว การตั้ง stretch ต้องมี cross-axis constraint ที่ชัดเจน</p></section>
+<section id="section-2"><h2>2. Row สำหรับข้อมูลหนึ่งบรรทัด</h2><pre class="code-vs"><code>Row(children: [
   const Icon(Icons.inventory_2),
   const SizedBox(width: 8),
   Expanded(child: Text(partName, overflow: TextOverflow.ellipsis)),
   Text(quantity.toString()),
 ])</code></pre><p>ข้อความกลางรับพื้นที่ที่เหลือผ่าน Expanded จึงเป็นผู้ยอมตัดก่อน quantity สำคัญทางขวา นี่คือการกำหนด priority ไม่ใช่แค่ตกแต่ง</p></section>
-<section><h2>3. Column สำหรับโครงหน้าจอ</h2><pre class="code-vs"><code>Column(
+<section id="section-3"><h2>3. Column สำหรับโครงหน้าจอ</h2><pre class="code-vs"><code>Column(
   crossAxisAlignment: CrossAxisAlignment.stretch,
   children: [
     const ScanHeader(),
@@ -20,10 +21,10 @@
     const ConfirmButton(),
   ],
 )</code></pre><p>Header และปุ่มใช้ intrinsic/fixed height; list เป็น flex child กินพื้นที่ที่เหลือ CrossAxis stretch ทำให้ลูกที่ยอมรับ constraint เต็มความกว้าง</p></section>
-<section><h2>4. mainAxisSize และพื้นที่ขั้นต่ำ</h2><p><code>MainAxisSize.max</code> พยายามใช้ main-axis สูงสุดที่ bounded; <code>min</code> หดเท่าผลรวมลูก เหมาะกับ dialog/card แต่ถ้า parent ส่ง main-axis tight ค่า min ไม่สามารถฝ่าฝืน constraint ได้ อย่าสับสนว่า min ทำให้ widget เล็กเสมอ</p></section>
-<section><h2>5. Baseline และข้อความหลายภาษา</h2><p>การจัด <code>CrossAxisAlignment.center</code> ไม่เท่ากับ baseline ของตัวอักษร ถ้าต้องจัด text ต่าง font size บนฐานเดียว ใช้ baseline พร้อม <code>textBaseline</code> แต่ UI ไทย/อังกฤษหลายบรรทัดมักปลอดภัยกว่าด้วย start + explicit line height และทดสอบข้อความจริง</p></section>
-<section><h2>6. จากสอง WMS</h2><p>wmsapp ใช้ Row + Expanded เป็นคู่การ์ดหน้า Home ทำให้แต่ละใบกว้างเท่ากัน แต่ชื่อยาวอาจทำความสูงไม่เท่ากันจึงครอบ <code>IntrinsicHeight</code> ซึ่งมี cost เพิ่ม ส่วน Absolute ใช้ Row ใน summary โดยซ่อน status เมื่อ <code>narrow</code> และให้ label เป็น Expanded เพื่อรักษาค่าตัวเลขทางขวา</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Header มีชื่อคลังยาว, connection chip และปุ่ม logout บน PDA กว้าง 320 ควรกำหนดลำดับการยอมเสียพื้นที่อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ให้ชื่อคลังอยู่ Expanded + maxLines 1 + ellipsis, chip จำกัดขนาด/ใช้ icon เมื่อ narrow, logout มี touch target คงที่ ใช้ SizedBox gap ที่ชัด ไม่ใช้ <code>spaceBetween</code> เป็นตัวแก้ชื่อยาวเพราะมันไม่จำกัด child</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn"><code>mainAxisAlignment: spaceBetween</code> ไม่ได้ป้องกัน overflow มันแจกเฉพาะพื้นที่ “ที่เหลือหลังวัดลูก” ถ้าผลรวมลูกใหญ่กว่า Row ก็ยังล้น ต้องทำให้ child ที่ยืดหยุ่นได้รับ bounded width ด้วย Expanded/Flexible</div></section>
+<section id="section-4"><h2>4. mainAxisSize และพื้นที่ขั้นต่ำ</h2><p><code>MainAxisSize.max</code> พยายามใช้ main-axis สูงสุดที่ bounded; <code>min</code> หดเท่าผลรวมลูก เหมาะกับ dialog/card แต่ถ้า parent ส่ง main-axis tight ค่า min ไม่สามารถฝ่าฝืน constraint ได้ อย่าสับสนว่า min ทำให้ widget เล็กเสมอ</p></section>
+<section id="section-5"><h2>5. Baseline และข้อความหลายภาษา</h2><p>การจัด <code>CrossAxisAlignment.center</code> ไม่เท่ากับ baseline ของตัวอักษร ถ้าต้องจัด text ต่าง font size บนฐานเดียว ใช้ baseline พร้อม <code>textBaseline</code> แต่ UI ไทย/อังกฤษหลายบรรทัดมักปลอดภัยกว่าด้วย start + explicit line height และทดสอบข้อความจริง</p></section>
+<section id="section-6"><h2>6. จากสอง WMS</h2><p>wmsapp ใช้ Row + Expanded เป็นคู่การ์ดหน้า Home ทำให้แต่ละใบกว้างเท่ากัน แต่ชื่อยาวอาจทำความสูงไม่เท่ากันจึงครอบ <code>IntrinsicHeight</code> ซึ่งมี cost เพิ่ม ส่วน Absolute ใช้ Row ใน summary โดยซ่อน status เมื่อ <code>narrow</code> และให้ label เป็น Expanded เพื่อรักษาค่าตัวเลขทางขวา</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Header มีชื่อคลังยาว, connection chip และปุ่ม logout บน PDA กว้าง 320 ควรกำหนดลำดับการยอมเสียพื้นที่อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ให้ชื่อคลังอยู่ Expanded + maxLines 1 + ellipsis, chip จำกัดขนาด/ใช้ icon เมื่อ narrow, logout มี touch target คงที่ ใช้ SizedBox gap ที่ชัด ไม่ใช้ <code>spaceBetween</code> เป็นตัวแก้ชื่อยาวเพราะมันไม่จำกัด child</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>mainAxisAlignment: spaceBetween</code> ไม่ได้ป้องกัน overflow มันแจกเฉพาะพื้นที่ “ที่เหลือหลังวัดลูก” ถ้าผลรวมลูกใหญ่กว่า Row ก็ยังล้น ต้องทำให้ child ที่ยืดหยุ่นได้รับ bounded width ด้วย Expanded/Flexible</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

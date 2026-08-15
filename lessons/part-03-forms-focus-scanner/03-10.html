@@ -4,8 +4,9 @@
 <title>Dialog ยืนยันก่อน commit</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-10 · Flutter UI</span><h1>Dialog ยืนยันก่อน commit</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Typed dialog result</a></li><li><a href="#section-2">2. Preview before commit</a></li><li><a href="#section-3">3. Context ของ dialog</a></li><li><a href="#section-4">4. Focus และ scanner ระหว่าง dialog</a></li><li><a href="#section-5">5. Double confirmation ไม่แทน transaction</a></li><li><a href="#section-6">6. Dialog ใช้เมื่อไร</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Dialog ยืนยันควรใช้กับ actionที่ย้อนคืนยากหรือมีผลกว้าง ไม่ใช่ทุก scan มิฉะนั้นทำลาย throughput และผู้ใช้จะกดตกลงโดยไม่อ่าน Confirmationต้องสรุปสิ่งที่จะ commit และคืน typed resultให้ owner</div>
-<section><h2>1. Typed dialog result</h2><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(
+<section id="section-1"><h2>1. Typed dialog result</h2><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(
   context: context,
   barrierDismissible: false,
   builder: (dialogContext) =&gt; AlertDialog(
@@ -24,12 +25,12 @@
   ),
 );
 if (confirmed != true || !mounted) return;</code></pre></section>
-<section><h2>2. Preview before commit</h2><p>Flow CheckIn ของ wmsapp scan→preview API→destination dialog→pending pack แล้วจึงมี action commit การแยก preview/commitช่วยตรวจ pallet/location/quantityก่อน mutation และ dialogแสดงข้อมูลจาก serverไม่ใช่เดาจาก barcodeอย่างเดียว</p></section>
-<section><h2>3. Context ของ dialog</h2><p>ใช้ <code>dialogContext</code> pop dialog ไม่ pop routeหลัก หลัง awaitตรวจ mounted/context.mountedก่อนใช้ owner context Dialog builderอาจอยู่คนละ navigatorเมื่อ nested navigator จึงกำหนด <code>useRootNavigator</code> ตาม architectureหากจำเป็น</p></section>
-<section><h2>4. Focus และ scanner ระหว่าง dialog</h2><p>ปิด/lock scannerก่อนเปิด dialog ไม่ให้ Enterจาก triggerเดิมกดยืนยันโดยไม่ตั้งใจ กำหนด focusเริ่มที่ safe actionสำหรับ destructive command และหลัง dialogปิดคืน focusตาม current workflow state</p></section>
-<section><h2>5. Double confirmation ไม่แทน transaction</h2><p>ผู้ใช้ยืนยันแล้ว serverยังต้องตรวจ authorization, concurrency, stock และ idempotency หาก network timeoutห้ามเปิด dialogใหม่แล้ว commitซ้ำทันที ต้อง query/retryด้วย operation keyหรือแสดงสถานะไม่แน่ชัดให้ reconcile</p></section>
-<section><h2>6. Dialog ใช้เมื่อไร</h2><ul><li>ควรใช้: delete, close task, moveผิดปลายทางแล้วกระทบ stock, bulk commit</li><li>อาจไม่ใช้: scan serialทีละชิ้นที่ undoได้และมี feedbackชัด</li><li>ใช้ review screenแทน: transactionหลายรายการ/ต้องตรวจรายละเอียดมาก</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้สแกน serial 50 ชิ้น ควรถามยืนยันทุกชิ้นหรือจุดไหน?</p><details><summary>แนวคำตอบ</summary><p>validate/feedbackแต่ละ serialทันทีและให้ undo; ยืนยันครั้งเดียวตอน commit batchโดยสรุป part, expected/scanned count, pallet/destination และรายการผิดปกติ ลด modal fatigueแต่ยังมี controlก่อน mutationสำคัญ</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าให้ปุ่มยืนยันและยกเลิกชื่อกำกวม เช่น “OK/No” ใช้คำกริยาตรง action, แยก destructive style, รองรับ back/barrierตามความเสี่ยง และอย่าปิด dialogพร้อมยิง APIโดยไม่มี loading/duplicate guard</div></section>
+<section id="section-2"><h2>2. Preview before commit</h2><p>Flow CheckIn ของ wmsapp scan→preview API→destination dialog→pending pack แล้วจึงมี action commit การแยก preview/commitช่วยตรวจ pallet/location/quantityก่อน mutation และ dialogแสดงข้อมูลจาก serverไม่ใช่เดาจาก barcodeอย่างเดียว</p></section>
+<section id="section-3"><h2>3. Context ของ dialog</h2><p>ใช้ <code>dialogContext</code> pop dialog ไม่ pop routeหลัก หลัง awaitตรวจ mounted/context.mountedก่อนใช้ owner context Dialog builderอาจอยู่คนละ navigatorเมื่อ nested navigator จึงกำหนด <code>useRootNavigator</code> ตาม architectureหากจำเป็น</p></section>
+<section id="section-4"><h2>4. Focus และ scanner ระหว่าง dialog</h2><p>ปิด/lock scannerก่อนเปิด dialog ไม่ให้ Enterจาก triggerเดิมกดยืนยันโดยไม่ตั้งใจ กำหนด focusเริ่มที่ safe actionสำหรับ destructive command และหลัง dialogปิดคืน focusตาม current workflow state</p></section>
+<section id="section-5"><h2>5. Double confirmation ไม่แทน transaction</h2><p>ผู้ใช้ยืนยันแล้ว serverยังต้องตรวจ authorization, concurrency, stock และ idempotency หาก network timeoutห้ามเปิด dialogใหม่แล้ว commitซ้ำทันที ต้อง query/retryด้วย operation keyหรือแสดงสถานะไม่แน่ชัดให้ reconcile</p></section>
+<section id="section-6"><h2>6. Dialog ใช้เมื่อไร</h2><ul><li>ควรใช้: delete, close task, moveผิดปลายทางแล้วกระทบ stock, bulk commit</li><li>อาจไม่ใช้: scan serialทีละชิ้นที่ undoได้และมี feedbackชัด</li><li>ใช้ review screenแทน: transactionหลายรายการ/ต้องตรวจรายละเอียดมาก</li></ul></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้สแกน serial 50 ชิ้น ควรถามยืนยันทุกชิ้นหรือจุดไหน?</p><details><summary>แนวคำตอบ</summary><p>validate/feedbackแต่ละ serialทันทีและให้ undo; ยืนยันครั้งเดียวตอน commit batchโดยสรุป part, expected/scanned count, pallet/destination และรายการผิดปกติ ลด modal fatigueแต่ยังมี controlก่อน mutationสำคัญ</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าให้ปุ่มยืนยันและยกเลิกชื่อกำกวม เช่น “OK/No” ใช้คำกริยาตรง action, แยก destructive style, รองรับ back/barrierตามความเสี่ยง และอย่าปิด dialogพร้อมยิง APIโดยไม่มี loading/duplicate guard</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

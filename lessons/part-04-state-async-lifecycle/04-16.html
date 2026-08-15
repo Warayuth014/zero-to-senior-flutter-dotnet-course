@@ -4,9 +4,10 @@
 <title>Lab: Store ที่ทดสอบได้</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-16 · State &amp; Lifecycle</span><h1>Lab: Store ที่ทดสอบได้</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Dependencies</a></li><li><a href="#section-3">3. Immutable snapshot</a></li><li><a href="#section-4">4. Load + generation</a></li><li><a href="#section-5">5. Idempotent confirm</a></li><li><a href="#section-6">6. Lifecycle/polling</a></li><li><a href="#section-7">7. Tests</a></li><li><a href="#section-8">8. Part 4 Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> สร้าง WarehouseTaskStore ที่ testได้โดยแยก repository/clock/ID generator, ใช้ immutable load state, generation token, polling lifecycle และ idempotent confirm แล้วพิสูจน์ transitionsด้วย fake repository + Completer</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>UIอ่าน immutable snapshotและเรียก commandsเท่านั้น</li><li>loadแยก initial/loading/data/error/refreshing</li><li>responseเก่าไม่ทับ queryใหม่</li><li>pollไม่ overlapและหยุดเมื่อ background/dispose</li><li>confirmซ้ำเรียก repositoryครั้งเดียว</li><li>timeout retryใช้ operation IDเดิมและ reconcileได้</li><li>ไม่มี BuildContextใน store</li></ul></section>
-<section><h2>2. Dependencies</h2><pre class="code-vs"><code>abstract interface class TaskRepository {
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>UIอ่าน immutable snapshotและเรียก commandsเท่านั้น</li><li>loadแยก initial/loading/data/error/refreshing</li><li>responseเก่าไม่ทับ queryใหม่</li><li>pollไม่ overlapและหยุดเมื่อ background/dispose</li><li>confirmซ้ำเรียก repositoryครั้งเดียว</li><li>timeout retryใช้ operation IDเดิมและ reconcileได้</li><li>ไม่มี BuildContextใน store</li></ul></section>
+<section id="section-2"><h2>2. Dependencies</h2><pre class="code-vs"><code>abstract interface class TaskRepository {
   Future&lt;List&lt;Task&gt;&gt; fetchOpen();
   Future&lt;Receipt&gt; confirm(String taskId, {required String operationId});
 }
@@ -16,7 +17,7 @@ abstract interface class Cancelable { void cancel(); }
 abstract interface class PollScheduler {
   Cancelable schedulePeriodic(Duration interval, void Function() tick);
 }</code></pre><p>Production adaptersใช้ HTTP/Timer/UUID; testsใช้ fake deterministic</p></section>
-<section><h2>3. Immutable snapshot</h2><pre class="code-vs"><code>enum LoadPhase { initial, loading, data, failure }
+<section id="section-3"><h2>3. Immutable snapshot</h2><pre class="code-vs"><code>enum LoadPhase { initial, loading, data, failure }
 
 class TaskSnapshot {
   const TaskSnapshot({
@@ -32,7 +33,7 @@ class TaskSnapshot {
   final String? error;
   final String? pendingOperationId;
 }</code></pre><p>ใน implementationใช้ copyWithที่แยก “ไม่เปลี่ยน” กับ “ตั้ง null” หรือ sealed statesเพื่อเลี่ยง nullable ambiguity</p></section>
-<section><h2>4. Load + generation</h2><pre class="code-vs"><code>int _generation = 0;
+<section id="section-4"><h2>4. Load + generation</h2><pre class="code-vs"><code>int _generation = 0;
 Future&lt;void&gt; load({bool refresh = false}) async {
   final token = ++_generation;
   _emit(snapshot.loading(refresh: refresh));
@@ -45,7 +46,7 @@ Future&lt;void&gt; load({bool refresh = false}) async {
     _emit(snapshot.failure(mapError(e), keepData: true));
   }
 }</code></pre></section>
-<section><h2>5. Idempotent confirm</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm(String taskId) async {
+<section id="section-5"><h2>5. Idempotent confirm</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm(String taskId) async {
   if (_confirmingTaskId != null) return;
   final operationId = _pendingId ?? ids.next();
   _confirmingTaskId = taskId;
@@ -62,8 +63,8 @@ Future&lt;void&gt; load({bool refresh = false}) async {
     _publishIfAlive();
   }
 }</code></pre></section>
-<section><h2>6. Lifecycle/polling</h2><p><code>startPolling</code> cancel handleเก่าก่อน schedule; tickเรียก load(refresh:true)เมื่อไม่ loading; <code>pause</code> cancel; <code>resume</code> loadทันทีแล้ว start; disposeเพิ่ม generation, cancel pollและ super.dispose UI WidgetsBindingObserverแปลง app lifecycleเป็น pause/resume commands</p></section>
-<section><h2>7. Tests</h2><pre class="code-vs"><code>test('stale load cannot replace latest data', () async {
+<section id="section-6"><h2>6. Lifecycle/polling</h2><p><code>startPolling</code> cancel handleเก่าก่อน schedule; tickเรียก load(refresh:true)เมื่อไม่ loading; <code>pause</code> cancel; <code>resume</code> loadทันทีแล้ว start; disposeเพิ่ม generation, cancel pollและ super.dispose UI WidgetsBindingObserverแปลง app lifecycleเป็น pause/resume commands</p></section>
+<section id="section-7"><h2>7. Tests</h2><pre class="code-vs"><code>test('stale load cannot replace latest data', () async {
   final first = Completer&lt;List&lt;Task&gt;&gt;();
   final second = Completer&lt;List&lt;Task&gt;&gt;();
   repo.enqueue(first.future);
@@ -77,6 +78,6 @@ Future&lt;void&gt; load({bool refresh = false}) async {
 
   expect(store.snapshot.tasks, [taskB]);
 });</code></pre><p>เพิ่ม tests loading→data/empty/error, refreshเก็บ stale data, no overlap polling, pause/dispose, double confirmหนึ่ง call, timeout retry keyเดิมและ repository error cleanup</p></section>
-<section><h2>8. Part 4 Exit Test</h2><div class="success"><ul><li>เลือก setState/ValueNotifier/ChangeNotifierตาม ownershipได้</li><li>ไม่เก็บ derived stateซ้ำและรักษา invariantsได้</li><li>model loading/error/empty/successและ partial refreshได้</li><li>จัด async cleanup, mounted, stale responseและ pollingได้</li><li>ออกแบบ optimistic/idempotent/FSMตามความเสี่ยงได้</li><li>สร้าง storeที่ dependency-injectedและ test raceด้วย Completerได้</li></ul></div></section>
+<section id="section-8"><h2>8. Part 4 Exit Test</h2><div class="success"><ul><li>เลือก setState/ValueNotifier/ChangeNotifierตาม ownershipได้</li><li>ไม่เก็บ derived stateซ้ำและรักษา invariantsได้</li><li>model loading/error/empty/successและ partial refreshได้</li><li>จัด async cleanup, mounted, stale responseและ pollingได้</li><li>ออกแบบ optimistic/idempotent/FSMตามความเสี่ยงได้</li><li>สร้าง storeที่ dependency-injectedและ test raceด้วย Completerได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

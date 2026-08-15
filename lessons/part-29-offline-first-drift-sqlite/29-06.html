@@ -4,14 +4,15 @@
 <title>Database lifecycle executor isolate และ transaction</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">29-06 · State &amp; Lifecycle</span><h1>Database lifecycle executor isolate และ transaction</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Composition root</a></li><li><a href="#section-2">2. Single instance</a></li><li><a href="#section-3">3. Executor</a></li><li><a href="#section-4">4. Isolate</a></li><li><a href="#section-5">5. Transaction</a></li><li><a href="#section-6">6. Do not await network inside</a></li><li><a href="#section-7">7. Close</a></li><li><a href="#section-8">8. Checkpoint</a></li></ol></nav>
 <div class="note"><strong>Database มี lifecycle:</strong> เปิดหนึ่ง instance ต่อ scope, ทำงานหนักนอก UI isolate และปิด connection เมื่อ owner จบ</div>
-<section><h2>1. Composition root</h2><p><code>offline_main.dart</code> สร้าง database → remote repository → offline repository → store แล้วส่งลง widget tree ทำให้ ownership อ่านตามลำดับได้</p></section>
-<section><h2>2. Single instance</h2><p>อย่าสร้าง database ใหม่ทุก build เพราะเกิดหลาย connection, stream รั่ว และ order ของ write ยากควบคุม ให้ DI/container เป็น owner</p></section>
-<section><h2>3. Executor</h2><p>Drift แยก database API จาก QueryExecutor จึงใช้ file DB ใน app และ <code>NativeDatabase.memory()</code> ใน tests ได้โดย logic เดิม</p></section>
-<section><h2>4. Isolate</h2><p>query/serialization ใหญ่ทำให้ frame กระตุกได้ ใช้ executor/isolate ที่ library แนะนำและวัด DevTools ก่อน optimize</p></section>
-<section><h2>5. Transaction</h2><p>transaction ทำให้หลาย write สำเร็จทั้งหมดหรือ rollback ทั้งหมด และ query ภายในต้อง await ให้เสร็จก่อน callback จบ</p></section>
-<section><h2>6. Do not await network inside</h2><p>อย่าถือ SQLite transaction ขณะรอ HTTP เพราะ lock นาน ให้ commit intent ก่อน ส่ง network แล้วเปิด transaction สั้นสำหรับ acknowledge</p></section>
-<section><h2>7. Close</h2><p><code>OfflineWmsApp.dispose</code> ปิด store และ database เพื่อคืน stream/connection; production app scope อาจอยู่ตลอด process</p></section>
-<section><h2>8. Checkpoint</h2><div class="success">trace owner ของ database ตั้งแต่ main ถึง dispose และตรวจว่า repository/widget ไม่แอบเปิด connection ของตัวเอง</div></section>
+<section id="section-1"><h2>1. Composition root</h2><p><code>offline_main.dart</code> สร้าง database → remote repository → offline repository → store แล้วส่งลง widget tree ทำให้ ownership อ่านตามลำดับได้</p></section>
+<section id="section-2"><h2>2. Single instance</h2><p>อย่าสร้าง database ใหม่ทุก build เพราะเกิดหลาย connection, stream รั่ว และ order ของ write ยากควบคุม ให้ DI/container เป็น owner</p></section>
+<section id="section-3"><h2>3. Executor</h2><p>Drift แยก database API จาก QueryExecutor จึงใช้ file DB ใน app และ <code>NativeDatabase.memory()</code> ใน tests ได้โดย logic เดิม</p></section>
+<section id="section-4"><h2>4. Isolate</h2><p>query/serialization ใหญ่ทำให้ frame กระตุกได้ ใช้ executor/isolate ที่ library แนะนำและวัด DevTools ก่อน optimize</p></section>
+<section id="section-5"><h2>5. Transaction</h2><p>transaction ทำให้หลาย write สำเร็จทั้งหมดหรือ rollback ทั้งหมด และ query ภายในต้อง await ให้เสร็จก่อน callback จบ</p></section>
+<section id="section-6"><h2>6. Do not await network inside</h2><p>อย่าถือ SQLite transaction ขณะรอ HTTP เพราะ lock นาน ให้ commit intent ก่อน ส่ง network แล้วเปิด transaction สั้นสำหรับ acknowledge</p></section>
+<section id="section-7"><h2>7. Close</h2><p><code>OfflineWmsApp.dispose</code> ปิด store และ database เพื่อคืน stream/connection; production app scope อาจอยู่ตลอด process</p></section>
+<section id="section-8"><h2>8. Checkpoint</h2><div class="success">trace owner ของ database ตั้งแต่ main ถึง dispose และตรวจว่า repository/widget ไม่แอบเปิด connection ของตัวเอง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

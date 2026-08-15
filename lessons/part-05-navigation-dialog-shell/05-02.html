@@ -4,8 +4,9 @@
 <title>MaterialPageRoute และส่ง dependency</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-02 · Flutter UI</span><h1>MaterialPageRoute และส่ง dependency</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Constructor injection</a></li><li><a href="#section-2">2. ส่ง ID หรือ object</a></li><li><a href="#section-3">3. Builder context</a></li><li><a href="#section-4">4. Dependency lifetime</a></li><li><a href="#section-5">5. RouteSettings</a></li><li><a href="#section-6">6. Testability</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>MaterialPageRoute</code> สร้าง route transitionแบบ Materialและ builderสร้าง pageเมื่อ routeต้องใช้ Dependencyควรถูกส่งแบบ typed constructorจาก composition owner ไม่ให้ screenค้น global singletonเองทุกอย่าง</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>Navigator.push(
+<section id="section-1"><h2>1. Constructor injection</h2><pre class="code-vs"><code>Navigator.push(
   context,
   MaterialPageRoute(
     builder: (_) =&gt; PickItemsScreen(
@@ -15,12 +16,12 @@
     ),
   ),
 );</code></pre></section>
-<section><h2>2. ส่ง ID หรือ object</h2><p>ส่ง immutable snapshotเมื่อ pageใช้ข้อมูล ณ จุดเปิดและไม่ต้องสด; ส่ง IDแล้วให้ feature owner/repositoryโหลดเมื่อ authorityอาจเปลี่ยน อย่าส่ง mutable entityแล้วทั้งสองหน้าแก้คนละทาง</p></section>
-<section><h2>3. Builder context</h2><p>underscore contextใน builderอยู่ใต้ routeใหม่ ใช้สร้าง pageได้ แต่ callbackก่อน pushยังใช้ source context อย่า capture dialog contextไปใช้หลัง modalปิด</p></section>
-<section><h2>4. Dependency lifetime</h2><p>ถ้า routeสร้าง controller/store ให้ route/page dispose; shared auth/repositoryมาจาก app ownerไม่ disposeใน page Absolute Loginส่ง AuthRepositoryเข้า WarehouseShellและ shellสร้าง WarehouseStoreจาก repositories</p></section>
-<section><h2>5. RouteSettings</h2><p>กำหนด name/argumentsสำหรับ analytics/debug/restorationได้ แต่ typed constructorยังปลอดภัยกว่า Map dynamic เมื่อ appโตใช้ Router/declarative routesภายหลังโดยรักษา dependency boundaryเดิม</p></section>
-<section><h2>6. Testability</h2><p>Screenรับ interfaceทำ widget testด้วย fake repository ไม่ต้องตั้ง global HTTP client Navigation testใช้ NavigatorObserverหรือ pump routeแล้ว assert UI/result</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Settingsต้องใช้ ConnectionController sharedและ draft local ควรส่งอะไร?</p><details><summary>เฉลย</summary><p>ส่ง controller interface/shared ownerเข้า route; sheetสร้าง immutable draft/controllers localและ disposeตน เมื่อ saveจึงเรียก controller command ไม่แก้ shared profilesระหว่างพิมพ์</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าส่ง BuildContextเป็น dependencyให้ repository/store และอย่าสร้าง ApiClientใหม่ทุก routeจน config/session/cacheต่างกัน ให้ composition rootกำหนด lifetime</div></section>
+<section id="section-2"><h2>2. ส่ง ID หรือ object</h2><p>ส่ง immutable snapshotเมื่อ pageใช้ข้อมูล ณ จุดเปิดและไม่ต้องสด; ส่ง IDแล้วให้ feature owner/repositoryโหลดเมื่อ authorityอาจเปลี่ยน อย่าส่ง mutable entityแล้วทั้งสองหน้าแก้คนละทาง</p></section>
+<section id="section-3"><h2>3. Builder context</h2><p>underscore contextใน builderอยู่ใต้ routeใหม่ ใช้สร้าง pageได้ แต่ callbackก่อน pushยังใช้ source context อย่า capture dialog contextไปใช้หลัง modalปิด</p></section>
+<section id="section-4"><h2>4. Dependency lifetime</h2><p>ถ้า routeสร้าง controller/store ให้ route/page dispose; shared auth/repositoryมาจาก app ownerไม่ disposeใน page Absolute Loginส่ง AuthRepositoryเข้า WarehouseShellและ shellสร้าง WarehouseStoreจาก repositories</p></section>
+<section id="section-5"><h2>5. RouteSettings</h2><p>กำหนด name/argumentsสำหรับ analytics/debug/restorationได้ แต่ typed constructorยังปลอดภัยกว่า Map dynamic เมื่อ appโตใช้ Router/declarative routesภายหลังโดยรักษา dependency boundaryเดิม</p></section>
+<section id="section-6"><h2>6. Testability</h2><p>Screenรับ interfaceทำ widget testด้วย fake repository ไม่ต้องตั้ง global HTTP client Navigation testใช้ NavigatorObserverหรือ pump routeแล้ว assert UI/result</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Settingsต้องใช้ ConnectionController sharedและ draft local ควรส่งอะไร?</p><details><summary>เฉลย</summary><p>ส่ง controller interface/shared ownerเข้า route; sheetสร้าง immutable draft/controllers localและ disposeตน เมื่อ saveจึงเรียก controller command ไม่แก้ shared profilesระหว่างพิมพ์</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าส่ง BuildContextเป็น dependencyให้ repository/store และอย่าสร้าง ApiClientใหม่ทุก routeจน config/session/cacheต่างกัน ให้ composition rootกำหนด lifetime</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

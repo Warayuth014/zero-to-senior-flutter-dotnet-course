@@ -4,8 +4,9 @@
 <title>ป้องกัน submit ซ้ำระหว่าง API call</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-08 · Flutter UI</span><h1>ป้องกัน submit ซ้ำระหว่าง API call</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Guard ก่อนงาน async</a></li><li><a href="#section-2">2. ปิดทุก trigger</a></li><li><a href="#section-3">3. Snapshot ก่อน clear</a></li><li><a href="#section-4">4. try/catch/finally</a></li><li><a href="#section-5">5. Cancel กับ ignore stale result</a></li><li><a href="#section-6">6. Optimistic vs pessimistic</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">การป้องกัน submitซ้ำต้องทำที่ command boundary ก่อน await แล้วสะท้อนใน UI พร้อม <code>try/finally</code> ไม่ใช่แค่ทำปุ่มเป็นสีเทา เพราะ Enter/scanner/callbackอื่นยังเรียก methodได้</div>
-<section><h2>1. Guard ก่อนงาน async</h2><pre class="code-vs"><code>Future&lt;void&gt; submitScan() async {
+<section id="section-1"><h2>1. Guard ก่อนงาน async</h2><pre class="code-vs"><code>Future&lt;void&gt; submitScan() async {
   if (_busy) return;
   final code = normalize(controller.text);
   if (code.isEmpty) return;
@@ -19,12 +20,12 @@
     if (mounted) setState(() =&gt; _busy = false);
   }
 }</code></pre></section>
-<section><h2>2. ปิดทุก trigger</h2><p>TextField <code>enabled: !busy</code>, ปุ่ม <code>onPressed: busy ? null : submit</code> และ command guardเป็นชั้นสุดท้าย Absolute ScanBox ปิด fieldตอน busy และแสดง progress label แต่ ownerยังต้อง guard callback เพราะ busy propอาจอัปเดตหลัง eventสองอันเข้าคิวใกล้กัน</p></section>
-<section><h2>3. Snapshot ก่อน clear</h2><p>อ่าน raw/canonicalใส่ local variableก่อน await จากนั้นเลือก clearทันทีเพื่อรับรู้ว่า requestรับแล้ว หรือ clearหลัง successเพื่อให้แก้/retryง่าย Absolute clearก่อน awaitแล้วคืน focusภายหลัง; wmsappบาง flow clearเมื่อ error/success Designต้องบอกผู้ใช้ codeที่กำลัง validateหากช่องถูกล้าง</p></section>
-<section><h2>4. try/catch/finally</h2><p>Network exceptionต้องไม่ทิ้ง busy=true ใช้ finallyปลด lock และแปลง exceptionเป็น UI state ตรวจ mountedก่อน setState/context แต่ resource/domain storeอาจต้อง completeแม้ widgetหาย จึงวาง async ownershipให้ถูกระดับ</p></section>
-<section><h2>5. Cancel กับ ignore stale result</h2><p>HTTP Futureทั่วไปอาจยกเลิกไม่ได้ เมื่อเปลี่ยน task/routeให้ใช้ request generation/token เปรียบเทียบก่อน apply result หรือ cancellationที่ clientรองรับ Busy lockกันเฉพาะ concurrent commandของ stateเดียว ไม่กัน responseเก่าทับ taskใหม่</p></section>
-<section><h2>6. Optimistic vs pessimistic</h2><p>Warehouse commitที่กระทบ stockมัก pessimistic: รอ serverยืนยันก่อนเพิ่ม committed count อาจแสดง pending rowเพื่อความเร็ว แต่ต้อง reconcile/rollbackเมื่อ fail อย่าแสดง “สำเร็จ” จากการกดก่อน HTTP result</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ยิง scannerและแตะปุ่มส่งเกือบพร้อมกัน ทำไม disabled buttonอย่างเดียวอาจไม่พอ?</p><details><summary>เฉลย</summary><p>ทั้งสอง callbackอาจถูกเรียกก่อน frame rebuildให้ disabled จึงต้องตรวจ/set busy synchronouslyที่ต้น commandใน event loopเดียว จากนั้น UI disableทุก trigger และ backendใช้ idempotency/constraintอีกชั้น</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ถ้า return หลัง <code>await</code> เพราะ <code>!mounted</code> ก่อนปลด busyโดยไม่มี finally state ownerอื่นอาจค้าง งาน cleanupต้องอยู่ finally; UI updateจึงค่อยตรวจ mounted</div></section>
+<section id="section-2"><h2>2. ปิดทุก trigger</h2><p>TextField <code>enabled: !busy</code>, ปุ่ม <code>onPressed: busy ? null : submit</code> และ command guardเป็นชั้นสุดท้าย Absolute ScanBox ปิด fieldตอน busy และแสดง progress label แต่ ownerยังต้อง guard callback เพราะ busy propอาจอัปเดตหลัง eventสองอันเข้าคิวใกล้กัน</p></section>
+<section id="section-3"><h2>3. Snapshot ก่อน clear</h2><p>อ่าน raw/canonicalใส่ local variableก่อน await จากนั้นเลือก clearทันทีเพื่อรับรู้ว่า requestรับแล้ว หรือ clearหลัง successเพื่อให้แก้/retryง่าย Absolute clearก่อน awaitแล้วคืน focusภายหลัง; wmsappบาง flow clearเมื่อ error/success Designต้องบอกผู้ใช้ codeที่กำลัง validateหากช่องถูกล้าง</p></section>
+<section id="section-4"><h2>4. try/catch/finally</h2><p>Network exceptionต้องไม่ทิ้ง busy=true ใช้ finallyปลด lock และแปลง exceptionเป็น UI state ตรวจ mountedก่อน setState/context แต่ resource/domain storeอาจต้อง completeแม้ widgetหาย จึงวาง async ownershipให้ถูกระดับ</p></section>
+<section id="section-5"><h2>5. Cancel กับ ignore stale result</h2><p>HTTP Futureทั่วไปอาจยกเลิกไม่ได้ เมื่อเปลี่ยน task/routeให้ใช้ request generation/token เปรียบเทียบก่อน apply result หรือ cancellationที่ clientรองรับ Busy lockกันเฉพาะ concurrent commandของ stateเดียว ไม่กัน responseเก่าทับ taskใหม่</p></section>
+<section id="section-6"><h2>6. Optimistic vs pessimistic</h2><p>Warehouse commitที่กระทบ stockมัก pessimistic: รอ serverยืนยันก่อนเพิ่ม committed count อาจแสดง pending rowเพื่อความเร็ว แต่ต้อง reconcile/rollbackเมื่อ fail อย่าแสดง “สำเร็จ” จากการกดก่อน HTTP result</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ยิง scannerและแตะปุ่มส่งเกือบพร้อมกัน ทำไม disabled buttonอย่างเดียวอาจไม่พอ?</p><details><summary>เฉลย</summary><p>ทั้งสอง callbackอาจถูกเรียกก่อน frame rebuildให้ disabled จึงต้องตรวจ/set busy synchronouslyที่ต้น commandใน event loopเดียว จากนั้น UI disableทุก trigger และ backendใช้ idempotency/constraintอีกชั้น</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ถ้า return หลัง <code>await</code> เพราะ <code>!mounted</code> ก่อนปลด busyโดยไม่มี finally state ownerอื่นอาจค้าง งาน cleanupต้องอยู่ finally; UI updateจึงค่อยตรวจ mounted</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

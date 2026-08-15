@@ -4,20 +4,21 @@
 <title>SharedPreferences แบบ typed key</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-01 · Flutter + .NET</span><h1>SharedPreferences แบบ typed key</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Wrapper</a></li><li><a href="#section-2">2. Type-safe access</a></li><li><a href="#section-3">3. Namespace</a></li><li><a href="#section-4">4. Defaults</a></li><li><a href="#section-5">5. Failure policy</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Typed preference key:</strong> รวมชื่อ key, type, default, migration และ ownershipไว้จุดเดียว ลด typo/collision และป้องกัน <code>prefs.clear()</code> ลบข้อมูลข้าม feature</div>
-<section><h2>1. Wrapper</h2><pre class="code-vs"><code>final class PreferenceKey&lt;T&gt; {
+<section id="section-1"><h2>1. Wrapper</h2><pre class="code-vs"><code>final class PreferenceKey&lt;T&gt; {
   const PreferenceKey(this.name, this.defaultValue);
   final String name;
   final T defaultValue;
 }
 const localeKey = PreferenceKey&lt;String&gt;('app.v1.locale', 'th');
 const serverPortKey = PreferenceKey&lt;int&gt;('connection.v1.port', 5000);</code></pre></section>
-<section><h2>2. Type-safe access</h2><p>สร้าง SettingsStore/adapter ที่รู้ว่า Stringใช้ <code>getString</code>, intใช้ <code>getInt</code> และแปลง missing/wrong typeเป็น defaultหรือ migration ไม่ให้ทุก widget castเอง</p></section>
-<section><h2>3. Namespace</h2><p>ใช้ prefixตาม feature/schema เช่น <code>connection.v1.profiles</code>, <code>auth.v1...</code> เพื่อค้นหาและ selective deleteได้ หลีกเลี่ยง keyกว้างอย่าง <code>host</code>/<code>status</code></p></section>
-<section><h2>4. Defaults</h2><p>defaultควรอยู่ source of truthเดียวกับ config model ไม่ซ้ำใน form, controllerและApiClient มิฉะนั้น reset/load/first-runให้คนละ port</p></section>
-<section><h2>5. Failure policy</h2><p>SharedPreferences pluginอาจ unavailableใน widget testหรือ writeล้ม ควรแยก persistence failureจาก in-memory settingและตัดสินว่าใช้ชั่วคราวได้หรือ block save</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp/ApiConfigService</code> ใช้ key host/port/protocolและ typed get/setแล้ว ส่วน connection controllerอีกแอปบันทึก JSON envelopeเพื่อรองรับหลาย profile</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>logoutควรเรียก <code>prefs.clear()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ลบเฉพาะ auth/user-scoped keys; server profiles, themeและlanguageมี ownerคนละส่วนและอาจต้องคงไว้</p></details></section>
-<section><h2>8. Tests</h2><div class="success">missing key, wrong type, default, write failure, migration, selective deleteและ namespaceไม่ชนกัน</div></section>
+<section id="section-2"><h2>2. Type-safe access</h2><p>สร้าง SettingsStore/adapter ที่รู้ว่า Stringใช้ <code>getString</code>, intใช้ <code>getInt</code> และแปลง missing/wrong typeเป็น defaultหรือ migration ไม่ให้ทุก widget castเอง</p></section>
+<section id="section-3"><h2>3. Namespace</h2><p>ใช้ prefixตาม feature/schema เช่น <code>connection.v1.profiles</code>, <code>auth.v1...</code> เพื่อค้นหาและ selective deleteได้ หลีกเลี่ยง keyกว้างอย่าง <code>host</code>/<code>status</code></p></section>
+<section id="section-4"><h2>4. Defaults</h2><p>defaultควรอยู่ source of truthเดียวกับ config model ไม่ซ้ำใน form, controllerและApiClient มิฉะนั้น reset/load/first-runให้คนละ port</p></section>
+<section id="section-5"><h2>5. Failure policy</h2><p>SharedPreferences pluginอาจ unavailableใน widget testหรือ writeล้ม ควรแยก persistence failureจาก in-memory settingและตัดสินว่าใช้ชั่วคราวได้หรือ block save</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p><code>wmsapp/ApiConfigService</code> ใช้ key host/port/protocolและ typed get/setแล้ว ส่วน connection controllerอีกแอปบันทึก JSON envelopeเพื่อรองรับหลาย profile</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>logoutควรเรียก <code>prefs.clear()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ลบเฉพาะ auth/user-scoped keys; server profiles, themeและlanguageมี ownerคนละส่วนและอาจต้องคงไว้</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">missing key, wrong type, default, write failure, migration, selective deleteและ namespaceไม่ชนกัน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

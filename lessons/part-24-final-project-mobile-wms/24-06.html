@@ -4,18 +4,19 @@
 <title>JWT login/session</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-06 · Project Lab</span><h1>JWT login/session</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Login contract</a></li><li><a href="#section-2">2. AuthRepository</a></li><li><a href="#section-3">3. Session state machine</a></li><li><a href="#section-4">4. Persistence choice</a></li><li><a href="#section-5">5. Authorization</a></li><li><a href="#section-6">6. Logout transaction</a></li><li><a href="#section-7">7. Concurrent 401</a></li><li><a href="#section-8">8. Acceptance tests</a></li></ol></nav>
 <div class="note"><strong>เป้าหมาย session:</strong> loginกับ .NET, แนบ JWTทุก protected call, handle expiration/401และล้าง stateตอน logout โดยไม่สอน Identity internalsซ้ำคอร์ส backend</div>
-<section><h2>1. Login contract</h2><pre class="code-vs"><code>POST /api/Authenticate/login
+<section id="section-1"><h2>1. Login contract</h2><pre class="code-vs"><code>POST /api/Authenticate/login
 { "Username": employeeId, "Password": password }
 → { "token": "...", "expiration": "...Z" }</code></pre><p>productionควรคืน user/roles/refresh policyจาก serverหรืออ่าน verified JWT claimsอย่างปลอดภัย</p></section>
-<section><h2>2. AuthRepository</h2><p>repository map wire responseเป็น AuthSession, ตั้ง tokenใน session providerและคืน typed failures Widgetไม่ parse JWTหรือเขียน preferencesเอง Password controllerถูก clear/disposeและไม่ logค่า</p></section>
-<section><h2>3. Session state machine</h2><pre class="code-vs"><code>checking → anonymous → authenticating → authenticated
+<section id="section-2"><h2>2. AuthRepository</h2><p>repository map wire responseเป็น AuthSession, ตั้ง tokenใน session providerและคืน typed failures Widgetไม่ parse JWTหรือเขียน preferencesเอง Password controllerถูก clear/disposeและไม่ logค่า</p></section>
+<section id="section-3"><h2>3. Session state machine</h2><pre class="code-vs"><code>checking → anonymous → authenticating → authenticated
                          ↘ rejected/error
 authenticated → expired/revoked → anonymous</code></pre><p>cold startต้องมี splash/checking ไม่ flash protected homeก่อนรู้ session</p></section>
-<section><h2>4. Persistence choice</h2><p>เริ่ม memory-onlyเพื่อ threat surfaceต่ำ หาก requirementต้อง remember loginใช้ secure storageบน Androidและ document web behavior Token expiry/revocationยังต้องตรวจ server; encryption at restไม่ทำให้ stolen live tokenปลอดภัย</p></section>
-<section><h2>5. Authorization</h2><p>roles/permissionsช่วยซ่อนเมนูและอธิบาย UI แต่ .NETต้อง enforceทุก endpoint Client-supplied usernameใน commandเป็น audit hintไม่ได้เป็น identity; backendอ่าน authenticated claims</p></section>
-<section><h2>6. Logout transaction</h2><p>cancel timers/SignalR, invalidate async generations, clear token, feature storesและsensitive cache แล้ว navigate login การ clear SharedPreferencesทั้งหมดอาจลบ connection/languageจึงแยก namespaces</p></section>
-<section><h2>7. Concurrent 401</h2><p>หลาย requestsอาจได้ 401พร้อมกัน Session coordinatorต้อง single-flight logout/refreshและไม่เปิด dialogซ้ำ Commandที่กำลังรอห้าม commit stateหลัง session generationเปลี่ยน</p></section>
-<section><h2>8. Acceptance tests</h2><div class="success">valid/invalid login, malformed token response, double submit, expiration, concurrent 401, logoutระหว่าง request, app restartและ role denied พร้อม integration testว่า protected .NET endpointปฏิเสธ requestไม่มี token</div></section>
+<section id="section-4"><h2>4. Persistence choice</h2><p>เริ่ม memory-onlyเพื่อ threat surfaceต่ำ หาก requirementต้อง remember loginใช้ secure storageบน Androidและ document web behavior Token expiry/revocationยังต้องตรวจ server; encryption at restไม่ทำให้ stolen live tokenปลอดภัย</p></section>
+<section id="section-5"><h2>5. Authorization</h2><p>roles/permissionsช่วยซ่อนเมนูและอธิบาย UI แต่ .NETต้อง enforceทุก endpoint Client-supplied usernameใน commandเป็น audit hintไม่ได้เป็น identity; backendอ่าน authenticated claims</p></section>
+<section id="section-6"><h2>6. Logout transaction</h2><p>cancel timers/SignalR, invalidate async generations, clear token, feature storesและsensitive cache แล้ว navigate login การ clear SharedPreferencesทั้งหมดอาจลบ connection/languageจึงแยก namespaces</p></section>
+<section id="section-7"><h2>7. Concurrent 401</h2><p>หลาย requestsอาจได้ 401พร้อมกัน Session coordinatorต้อง single-flight logout/refreshและไม่เปิด dialogซ้ำ Commandที่กำลังรอห้าม commit stateหลัง session generationเปลี่ยน</p></section>
+<section id="section-8"><h2>8. Acceptance tests</h2><div class="success">valid/invalid login, malformed token response, double submit, expiration, concurrent 401, logoutระหว่าง request, app restartและ role denied พร้อม integration testว่า protected .NET endpointปฏิเสธ requestไม่มี token</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

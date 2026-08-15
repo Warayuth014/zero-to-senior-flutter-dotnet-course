@@ -4,8 +4,9 @@
 <title>Logging โดยไม่รั่ว token</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-17 · Flutter + .NET</span><h1>Logging โดยไม่รั่ว token</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Structured event</a></li><li><a href="#section-2">2. อย่า log raw URL เสมอ</a></li><li><a href="#section-3">3. Redaction</a></li><li><a href="#section-4">4. Request/response body</a></li><li><a href="#section-5">5. Timing</a></li><li><a href="#section-6">6. Flutter กับ .NET</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test</a></li></ol></nav>
 <div class="note"><strong>Log เพื่อ debug flow โดยไม่รั่วความลับ:</strong> เก็บ method, route template, status, elapsed, attempt และ correlation ID; redact token/PII/business payload</div>
-<section><h2>1. Structured event</h2><pre class="code-vs"><code>{
+<section id="section-1"><h2>1. Structured event</h2><pre class="code-vs"><code>{
   "event":"http.completed",
   "method":"POST",
   "route":"/api/WMS/tasks/{id}/complete",
@@ -14,12 +15,12 @@
   "traceId":"00-abcd",
   "attempt":1
 }</code></pre></section>
-<section><h2>2. อย่า log raw URL เสมอ</h2><p>query อาจมี barcode, username หรือ search text ให้ log route template และ allowlist query ที่ปลอดภัย หรือ hash identifier เมื่อจำเป็นต้อง correlate</p></section>
-<section><h2>3. Redaction</h2><p>case-insensitive redact headers เช่น Authorization, Cookie, Set-Cookie, API-Key และ redact JSON fields เช่น password/token ก่อน serialize—ไม่ redact หลังเขียน log แล้ว</p></section>
-<section><h2>4. Request/response body</h2><p>ปิดเป็นค่าเริ่มต้นใน production; debug เฉพาะ endpoint allowlist, จำกัดขนาด และ scrub field หาก error body เป็น HTML ให้เก็บ content-type/length ไม่เก็บทั้งหน้า</p></section>
-<section><h2>5. Timing</h2><p>ใช้ stopwatch รอบทุก attempt และแยก logical operation ID จาก retry attempt เพื่อวิเคราะห์ latency/timeout โดยไม่สับสนว่าเป็นหลายคำสั่ง</p></section>
-<section><h2>6. Flutter กับ .NET</h2><p>ส่ง trace/correlation header แล้วให้ .NET scope log ต่อ ID เดียวกัน ทำให้ตามจาก device → endpoint → service ได้ โดย server เป็นแหล่ง log หลักของ exception ภายใน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือก field จาก request complete-task ว่าอะไร log ได้ตรง ๆ, hash, หรือห้าม log</p><details><summary>แนวคำตอบ</summary><p>method/status/elapsed log ได้; task ID อาจ hash; token/password ห้าม; quantity/barcode พิจารณา classification และ operational need</p></details></section>
-<section><h2>8. Test</h2><div class="success">เขียน test ส่ง token/secret marker ผ่าน headers/body/error แล้ว assert ว่า marker ไม่ปรากฏใน log sink แม้ request ล้มเหลว</div></section>
+<section id="section-2"><h2>2. อย่า log raw URL เสมอ</h2><p>query อาจมี barcode, username หรือ search text ให้ log route template และ allowlist query ที่ปลอดภัย หรือ hash identifier เมื่อจำเป็นต้อง correlate</p></section>
+<section id="section-3"><h2>3. Redaction</h2><p>case-insensitive redact headers เช่น Authorization, Cookie, Set-Cookie, API-Key และ redact JSON fields เช่น password/token ก่อน serialize—ไม่ redact หลังเขียน log แล้ว</p></section>
+<section id="section-4"><h2>4. Request/response body</h2><p>ปิดเป็นค่าเริ่มต้นใน production; debug เฉพาะ endpoint allowlist, จำกัดขนาด และ scrub field หาก error body เป็น HTML ให้เก็บ content-type/length ไม่เก็บทั้งหน้า</p></section>
+<section id="section-5"><h2>5. Timing</h2><p>ใช้ stopwatch รอบทุก attempt และแยก logical operation ID จาก retry attempt เพื่อวิเคราะห์ latency/timeout โดยไม่สับสนว่าเป็นหลายคำสั่ง</p></section>
+<section id="section-6"><h2>6. Flutter กับ .NET</h2><p>ส่ง trace/correlation header แล้วให้ .NET scope log ต่อ ID เดียวกัน ทำให้ตามจาก device → endpoint → service ได้ โดย server เป็นแหล่ง log หลักของ exception ภายใน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เลือก field จาก request complete-task ว่าอะไร log ได้ตรง ๆ, hash, หรือห้าม log</p><details><summary>แนวคำตอบ</summary><p>method/status/elapsed log ได้; task ID อาจ hash; token/password ห้าม; quantity/barcode พิจารณา classification และ operational need</p></details></section>
+<section id="section-8"><h2>8. Test</h2><div class="success">เขียน test ส่ง token/secret marker ผ่าน headers/body/error แล้ว assert ว่า marker ไม่ปรากฏใน log sink แม้ request ล้มเหลว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

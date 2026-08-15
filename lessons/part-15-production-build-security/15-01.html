@@ -4,19 +4,20 @@
 <title>Debug/Profile/Release ต่างกันอย่างไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">15-01 · Production</span><h1>Debug/Profile/Release ต่างกันอย่างไร</h1><p>Part 15: Production Build, Security &amp; Resilience</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Debug</a></li><li><a href="#section-2">2. Profile</a></li><li><a href="#section-3">3. Release</a></li><li><a href="#section-4">4. เช็ก mode ในโค้ด</a></li><li><a href="#section-5">5. Environment แบบ typed</a></li><li><a href="#section-6">6. Flavors</a></li><li><a href="#section-7">7. Matrix ที่ต้องทดสอบ</a></li><li><a href="#section-8">8. Gate</a></li></ol></nav>
 <div class="note"><strong>Build mode ไม่ใช่ environment:</strong> debug/profile/release ควบคุม compiler, assertions และเครื่องมือวัด ส่วน dev/staging/prod คือ endpoint/configuration ต้องออกแบบแยกกันและห้ามให้ release ชี้ production โดยอาศัยชื่อ mode อย่างเดียว</div>
-<section><h2>1. Debug</h2><p>มี assertions, service extensions, debugger/hot reload และ optimization ไม่เต็ม เหมาะพัฒนาและ widget tests แต่เวลา frame/ขนาดไฟล์ไม่แทน production อย่าส่ง debug APK ให้ผู้ใช้จริงเพราะเซ็นด้วย debug key และเปิด surface สำหรับพัฒนา</p></section>
-<section><h2>2. Profile</h2><p>คงเครื่องมือ profiling สำคัญและ optimize ใกล้ release ใช้วัด jank/CPU/memory บนอุปกรณ์จริง ไม่มี hot reload แบบ debug พฤติกรรมบาง platform ต่างกัน จึงต้อง reproduce performance ใน profile ไม่ใช่ debug</p></section>
-<section><h2>3. Release</h2><p>ปิด assertions/service extensions ส่วนใหญ่และ optimize/AOT ตาม platform ต้องทดสอบ login, scanner, network, image, deep link และ error handling ใน artifact ที่เซ็นจริง เพราะ code ที่อยู่หลัง <code>assert</code> จะไม่ทำงาน</p></section>
-<section><h2>4. เช็ก mode ในโค้ด</h2><pre class="code-vs"><code>if (kDebugMode) { debugPrint('diagnostic only'); }
+<section id="section-1"><h2>1. Debug</h2><p>มี assertions, service extensions, debugger/hot reload และ optimization ไม่เต็ม เหมาะพัฒนาและ widget tests แต่เวลา frame/ขนาดไฟล์ไม่แทน production อย่าส่ง debug APK ให้ผู้ใช้จริงเพราะเซ็นด้วย debug key และเปิด surface สำหรับพัฒนา</p></section>
+<section id="section-2"><h2>2. Profile</h2><p>คงเครื่องมือ profiling สำคัญและ optimize ใกล้ release ใช้วัด jank/CPU/memory บนอุปกรณ์จริง ไม่มี hot reload แบบ debug พฤติกรรมบาง platform ต่างกัน จึงต้อง reproduce performance ใน profile ไม่ใช่ debug</p></section>
+<section id="section-3"><h2>3. Release</h2><p>ปิด assertions/service extensions ส่วนใหญ่และ optimize/AOT ตาม platform ต้องทดสอบ login, scanner, network, image, deep link และ error handling ใน artifact ที่เซ็นจริง เพราะ code ที่อยู่หลัง <code>assert</code> จะไม่ทำงาน</p></section>
+<section id="section-4"><h2>4. เช็ก mode ในโค้ด</h2><pre class="code-vs"><code>if (kDebugMode) { debugPrint('diagnostic only'); }
 if (kProfileMode) { /* optional profiling marker */ }
 if (kReleaseMode) { /* never use to choose secrets */ }</code></pre><p>อย่าใช้ flag นี้ตัด authorization หรือ certificate validation</p></section>
-<section><h2>5. Environment แบบ typed</h2><pre class="code-vs"><code>const environment = String.fromEnvironment('APP_ENV');
+<section id="section-5"><h2>5. Environment แบบ typed</h2><pre class="code-vs"><code>const environment = String.fromEnvironment('APP_ENV');
 const apiBase = String.fromEnvironment('WMS_API_BASE_URL');
 
 // validate scheme/host and fail closed at startup</code></pre><p><code>--dart-define</code> เหมาะกับ public build config ไม่ใช่ความลับ เพราะค่าถูกฝังใน binary และดึงดูได้</p></section>
-<section><h2>6. Flavors</h2><p>ใช้ flavors/schemes เมื่อ dev/staging/prod ต้องมี application ID, display name, icon, signing หรือ entitlements ต่างกัน ให้เห็นชัดว่าแอปทดสอบไม่ใช่ production และติดตั้งคู่กันได้</p></section>
-<section><h2>7. Matrix ที่ต้องทดสอบ</h2><table><thead><tr><th>Artifact</th><th>Endpoint</th><th>จุดประสงค์</th></tr></thead><tbody><tr><td>debug-dev</td><td>local</td><td>พัฒนา</td></tr><tr><td>profile-stage</td><td>staging</td><td>วัด performance</td></tr><tr><td>release-stage</td><td>staging</td><td>release rehearsal</td></tr><tr><td>release-prod</td><td>production</td><td>แจกจริง</td></tr></tbody></table></section>
-<section><h2>8. Gate</h2><div class="success">CI ต้องบันทึก Flutter/Dart commit, mode, flavor, version, build number, Git SHA และ endpoint class โดยไม่เผย token พร้อม smoke test artifact เดียวกับที่จะส่ง ไม่ rebuild ใหม่หลังอนุมัติ</div></section>
+<section id="section-6"><h2>6. Flavors</h2><p>ใช้ flavors/schemes เมื่อ dev/staging/prod ต้องมี application ID, display name, icon, signing หรือ entitlements ต่างกัน ให้เห็นชัดว่าแอปทดสอบไม่ใช่ production และติดตั้งคู่กันได้</p></section>
+<section id="section-7"><h2>7. Matrix ที่ต้องทดสอบ</h2><table><thead><tr><th>Artifact</th><th>Endpoint</th><th>จุดประสงค์</th></tr></thead><tbody><tr><td>debug-dev</td><td>local</td><td>พัฒนา</td></tr><tr><td>profile-stage</td><td>staging</td><td>วัด performance</td></tr><tr><td>release-stage</td><td>staging</td><td>release rehearsal</td></tr><tr><td>release-prod</td><td>production</td><td>แจกจริง</td></tr></tbody></table></section>
+<section id="section-8"><h2>8. Gate</h2><div class="success">CI ต้องบันทึก Flutter/Dart commit, mode, flavor, version, build number, Git SHA และ endpoint class โดยไม่เผย token พร้อม smoke test artifact เดียวกับที่จะส่ง ไม่ rebuild ใหม่หลังอนุมัติ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

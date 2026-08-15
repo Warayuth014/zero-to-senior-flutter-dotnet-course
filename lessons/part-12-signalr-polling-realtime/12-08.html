@@ -4,20 +4,21 @@
 <title>Unsubscribe และ dispose</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-08 · Realtime</span><h1>Unsubscribe และ dispose</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Correct order</a></li><li><a href="#section-2">2. Why unsubscribe first</a></li><li><a href="#section-3">3. Async dispose</a></li><li><a href="#section-4">4. mounted is last guard</a></li><li><a href="#section-5">5. App lifecycle observer</a></li><li><a href="#section-6">6. Ref-count balance</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Leak tests</a></li></ol></nav>
 <div class="note"><strong>Disposeต้องยกเลิกทั้ง listenerและทรัพยากร:</strong> remove/cancel subscriptionก่อน release connection lease, cancel timer/debounceและ invalidate async generation</div>
-<section><h2>1. Correct order</h2><pre class="code-vs"><code>@override
+<section id="section-1"><h2>1. Correct order</h2><pre class="code-vs"><code>@override
 void dispose() {
   _subscription.cancel();
   _debounce?.cancel();
   store.releaseRealtimeLease();
   super.dispose();
 }</code></pre></section>
-<section><h2>2. Why unsubscribe first</h2><p>ระหว่าง async stop connectionอาจยังส่ง event ถ้าปล่อย leaseก่อน remove listener disposed widgetอาจถูก callbackและ setState after dispose</p></section>
-<section><h2>3. Async dispose</h2><p>Flutter disposeเป็น voidจึงเรียก stopแบบ unawaitedผ่าน owner/serviceที่ idempotentและจับ errorเอง ห้าม async disposeที่ frameworkไม่รอ</p></section>
-<section><h2>4. mounted is last guard</h2><p><code>if (!mounted) return</code> ป้องกัน crashแต่ไม่แก้ listener leak เพราะ callbackยังเก็บ Stateใน memoryและทำ parse/networkซ้ำ ต้อง unsubscribeจริง</p></section>
-<section><h2>5. App lifecycle observer</h2><p>ถ้า add <code>WidgetsBinding.instance.addObserver(this)</code> ต้อง removeObserverใน disposeและหยุด/ลด pollingตอน pausedตาม policy</p></section>
-<section><h2>6. Ref-count balance</h2><p>connect/releaseทุก consumerต้องสมดุลแม้ connect failหรือ initถูกเรียกซ้ำ Lease objectที่ cancelครั้งเดียวปลอดภัยกว่าตัวเลข refCountที่ callerจัดเอง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้าหลักกับ bottom sheetใช้ connectionเดียวกัน sheetปิดควร stop hubไหม?</p><details><summary>เฉลย</summary><p>ยกเลิก listener/leaseของ sheet; connectionหยุดเฉพาะเมื่อ owner/leaseสุดท้ายหมด ไม่ stopจนหน้าหลักขาด realtime</p></details></section>
-<section><h2>8. Leak tests</h2><div class="success">push/popซ้ำ, open/close sheet, connect failure, cancelสองครั้ง, eventระหว่าง stopและตรวจ listener/ref countกลับ baseline</div></section>
+<section id="section-2"><h2>2. Why unsubscribe first</h2><p>ระหว่าง async stop connectionอาจยังส่ง event ถ้าปล่อย leaseก่อน remove listener disposed widgetอาจถูก callbackและ setState after dispose</p></section>
+<section id="section-3"><h2>3. Async dispose</h2><p>Flutter disposeเป็น voidจึงเรียก stopแบบ unawaitedผ่าน owner/serviceที่ idempotentและจับ errorเอง ห้าม async disposeที่ frameworkไม่รอ</p></section>
+<section id="section-4"><h2>4. mounted is last guard</h2><p><code>if (!mounted) return</code> ป้องกัน crashแต่ไม่แก้ listener leak เพราะ callbackยังเก็บ Stateใน memoryและทำ parse/networkซ้ำ ต้อง unsubscribeจริง</p></section>
+<section id="section-5"><h2>5. App lifecycle observer</h2><p>ถ้า add <code>WidgetsBinding.instance.addObserver(this)</code> ต้อง removeObserverใน disposeและหยุด/ลด pollingตอน pausedตาม policy</p></section>
+<section id="section-6"><h2>6. Ref-count balance</h2><p>connect/releaseทุก consumerต้องสมดุลแม้ connect failหรือ initถูกเรียกซ้ำ Lease objectที่ cancelครั้งเดียวปลอดภัยกว่าตัวเลข refCountที่ callerจัดเอง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้าหลักกับ bottom sheetใช้ connectionเดียวกัน sheetปิดควร stop hubไหม?</p><details><summary>เฉลย</summary><p>ยกเลิก listener/leaseของ sheet; connectionหยุดเฉพาะเมื่อ owner/leaseสุดท้ายหมด ไม่ stopจนหน้าหลักขาด realtime</p></details></section>
+<section id="section-8"><h2>8. Leak tests</h2><div class="success">push/popซ้ำ, open/close sheet, connect failure, cancelสองครั้ง, eventระหว่าง stopและตรวจ listener/ref countกลับ baseline</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

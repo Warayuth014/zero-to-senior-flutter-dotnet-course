@@ -3,26 +3,27 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Library, import, part และ privacy</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-18 · Dart Core</span><h1>Library, import, part และ privacy</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-18 · Dart Core</span><h1>Library, import, part และ privacy</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Import ที่อ่านง่าย</a></li><li><a href="#section-2">2. Underscore private ต่อ library</a></li><li><a href="#section-3">3. part/part of ใน wmsapp</a></li><li><a href="#section-4">4. Export และ public API</a></li><li><a href="#section-5">5. Dependency direction</a></li><li><a href="#section-6">6. Generated files</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Library คือหน่วย visibility ของ Dart; file มักเป็น library หนึ่งหน่วย, <code>import</code> ใช้ library อื่น, <code>part</code> รวมหลายไฟล์เป็น library เดียว จึงมีผลต่อ underscore privacy โดยตรง</div>
-<section><h2>1. Import ที่อ่านง่าย</h2><pre class="code-vs"><code>import 'dart:async';
+<section id="section-1"><h2>1. Import ที่อ่านง่าย</h2><pre class="code-vs"><code>import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/connection_profile.dart' show ConnectionStatus;
 import 'package:http/http.dart' as http;</code></pre><p>ใช้ relative import ภายใน feature ตาม convention ของ repo, package import สำหรับ package, alias เมื่อชื่อชนหรือช่วยสื่อ namespace และ <code>show/hide</code> เมื่อต้องจำกัด surface ที่มองเห็น</p></section>
-<section><h2>2. Underscore private ต่อ library</h2><pre class="code-vs"><code>class ApiClient {
+<section id="section-2"><h2>2. Underscore private ต่อ library</h2><pre class="code-vs"><code>class ApiClient {
   Map&lt;String, dynamic&gt; _decode(Response response) { /* ... */ }
 }</code></pre><p>ไฟล์ library อื่นเรียก <code>_decode</code> ไม่ได้ แต่ทุก part ของ library เดียวกันเห็นได้ นี่ต่างจาก C# private ซึ่งผูกกับ type</p></section>
-<section><h2>3. part/part of ใน wmsapp</h2><pre class="code-vs"><code>// services/api_service.dart
+<section id="section-3"><h2>3. part/part of ใน wmsapp</h2><pre class="code-vs"><code>// services/api_service.dart
 part 'api/receiving_api.dart';
 part 'api/picking_api.dart';
 
 // services/api/picking_api.dart
 part of '../api_service.dart';
 extension PickingApi on ApiService { /* เรียก _get ได้ */ }</code></pre><p>ข้อดีคือแบ่งไฟล์แต่แชร์ private transport ข้อเสียคือ part ไม่ได้เป็น library อิสระ, import ของ part มาจาก parent และ coupling สูง เวลาย้ายไฟล์/ทดสอบแยกต้องเข้าใจหน่วย library นี้</p></section>
-<section><h2>4. Export และ public API</h2><p>package สามารถมี barrel library ที่ <code>export</code> model/interface ที่ต้องการเปิด แต่การ export ทุกไฟล์ทำให้ dependency มองไม่เห็นและชื่อชนง่าย สำหรับแอป feature-first มัก import interface/model ที่ใช้ตรง ๆ ชัดกว่า barrel ใหญ่</p></section>
-<section><h2>5. Dependency direction</h2><p>ถ้า core import feature UI กลับขึ้นมา หรือ model import screen แสดงว่าทิศทางผิด Library/import graph ควรไหลจาก presentation → domain/data abstraction และ implementation → abstraction ตาม architecture ที่เลือก โดยไม่เกิด cycle</p></section>
-<section><h2>6. Generated files</h2><p>แพ็กเกจ codegen มักใช้ <code>part 'model.g.dart'</code> เพื่อให้ generated code เข้าถึง private member ตาม convention ห้ามแก้ generated part ตรง ๆ ให้แก้ source/annotation แล้ว generate ใหม่</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>PickingApi</code> เรียก <code>ApiService._get</code> ได้ แต่ repository ใน absolute เรียก private method ของ ApiClient คนละไฟล์ไม่ได้?</p><details><summary>เฉลย</summary><p>PickingApi เป็น part ของ library <code>api_service.dart</code> เดียวกัน จึงแชร์ privacy ส่วนไฟล์ปกติใน absolute เป็นคนละ library และต้องเรียก public method ของ ApiClient นี่เป็น design boundary ที่ compiler บังคับ</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ part เพียงเพื่อหลบ private แล้วเข้าถึงทุกอย่าง มันขยายขอบเขต coupling; หากอีกไฟล์เป็น component จริงควรออกแบบ public/interface API ที่เล็กและชัด</div></section>
+<section id="section-4"><h2>4. Export และ public API</h2><p>package สามารถมี barrel library ที่ <code>export</code> model/interface ที่ต้องการเปิด แต่การ export ทุกไฟล์ทำให้ dependency มองไม่เห็นและชื่อชนง่าย สำหรับแอป feature-first มัก import interface/model ที่ใช้ตรง ๆ ชัดกว่า barrel ใหญ่</p></section>
+<section id="section-5"><h2>5. Dependency direction</h2><p>ถ้า core import feature UI กลับขึ้นมา หรือ model import screen แสดงว่าทิศทางผิด Library/import graph ควรไหลจาก presentation → domain/data abstraction และ implementation → abstraction ตาม architecture ที่เลือก โดยไม่เกิด cycle</p></section>
+<section id="section-6"><h2>6. Generated files</h2><p>แพ็กเกจ codegen มักใช้ <code>part 'model.g.dart'</code> เพื่อให้ generated code เข้าถึง private member ตาม convention ห้ามแก้ generated part ตรง ๆ ให้แก้ source/annotation แล้ว generate ใหม่</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>PickingApi</code> เรียก <code>ApiService._get</code> ได้ แต่ repository ใน absolute เรียก private method ของ ApiClient คนละไฟล์ไม่ได้?</p><details><summary>เฉลย</summary><p>PickingApi เป็น part ของ library <code>api_service.dart</code> เดียวกัน จึงแชร์ privacy ส่วนไฟล์ปกติใน absolute เป็นคนละ library และต้องเรียก public method ของ ApiClient นี่เป็น design boundary ที่ compiler บังคับ</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ part เพียงเพื่อหลบ private แล้วเข้าถึงทุกอย่าง มันขยายขอบเขต coupling; หากอีกไฟล์เป็น component จริงควรออกแบบ public/interface API ที่เล็กและชัด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

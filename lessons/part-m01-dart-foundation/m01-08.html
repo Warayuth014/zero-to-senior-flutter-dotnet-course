@@ -1,11 +1,12 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Generic และ type constraint</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>Abstract class, interface, inheritance และ mixin</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-08 · Dart Core</span><h1>Generic และ type constraint</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-08 · Dart Core</span><h1>Abstract class, interface, inheritance และ mixin</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Type parameter สื่ออะไร</a></li><li><a href="#section-2">2. Generic function</a></li><li><a href="#section-3">3. Constraint</a></li><li><a href="#section-4">4. Variance ที่ต้องรู้พอใช้งาน</a></li><li><a href="#section-5">5. Generic ใน Flutter</a></li><li><a href="#section-6">6. เมื่อ generic มากเกินไป</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Generic เก็บความสัมพันธ์ของ type ระหว่าง input และ output เช่น <code>Future&lt;Task&gt;</code>, <code>List&lt;Task&gt;</code>, <code>ApiResult&lt;Task&gt;</code> ดีกว่าคืน Object/dynamic แล้วให้ caller เดา</div>
-<section><h2>1. Type parameter สื่ออะไร</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
+<section id="section-1"><h2>1. Type parameter สื่ออะไร</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
   const ApiResult.success(this.data) : error = null;
   const ApiResult.failure(this.error) : data = null;
   final T? data;
@@ -13,24 +14,24 @@
 }
 
 Future&lt;ApiResult&lt;List&lt;WmsTask&gt;&gt;&gt; loadTasks() async { /* ... */ }</code></pre><p>จาก signature คนอ่านรู้ทันทีว่า async, อาจสำเร็จ/ล้มเหลว และ success data เป็นรายการ Task โดยไม่เปิด body</p></section>
-<section><h2>2. Generic function</h2><pre class="code-vs"><code>T? firstWhereOrNull&lt;T&gt;(Iterable&lt;T&gt; items, bool Function(T) test) {
+<section id="section-2"><h2>2. Generic function</h2><pre class="code-vs"><code>T? firstWhereOrNull&lt;T&gt;(Iterable&lt;T&gt; items, bool Function(T) test) {
   for (final item in items) {
     if (test(item)) return item;
   }
   return null;
 }</code></pre><p>นี่ใกล้กับ helper <code>_firstOrNull&lt;T&gt;</code> ใน <code>warehouse_store.dart</code> ความสัมพันธ์สำคัญคือชนิดที่รับเข้าและคืนออกเป็น T เดียวกัน</p></section>
-<section><h2>3. Constraint</h2><pre class="code-vs"><code>abstract interface class Entity { String get id; }
+<section id="section-3"><h2>3. Constraint</h2><pre class="code-vs"><code>abstract interface class Entity { String get id; }
 
 T? byId&lt;T extends Entity&gt;(Iterable&lt;T&gt; items, String id) =&gt;
     firstWhereOrNull(items, (item) =&gt; item.id == id);</code></pre><p><code>extends Entity</code> ทำให้ body เรียก <code>item.id</code> ได้โดยไม่ cast และยังรักษา subtype จริงไว้ในค่าที่คืน</p></section>
-<section><h2>4. Variance ที่ต้องรู้พอใช้งาน</h2><p><code>List&lt;Dog&gt;</code> ไม่ควรถูกใช้เป็น list ที่เพิ่ม Animal ใดก็ได้ มิฉะนั้นอาจใส่ Cat ลง list ของ Dog Dart มี runtime checks บางกรณี แต่หลักปฏิบัติคืออย่า cast collection เพื่อฝืน type ให้ map/copy ไปชนิดเป้าหมายอย่างชัดเจน</p></section>
-<section><h2>5. Generic ใน Flutter</h2><ul><li><code>State&lt;WarehouseShell&gt;</code> ทำให้ <code>widget</code> มีชนิด WarehouseShell</li><li><code>ValueNotifier&lt;ThemeMode&gt;</code> จำกัด value เป็น ThemeMode</li><li><code>FutureBuilder&lt;Task&gt;</code> ทำให้ snapshot data เป็น Task?</li><li>helper <code>_segmented&lt;T&gt;</code> ใน connection settings รับ <code>Map&lt;T,String&gt;</code> และ <code>ValueChanged&lt;T&gt;</code> โดยรักษาชนิด choice</li></ul></section>
-<section><h2>6. เมื่อ generic มากเกินไป</h2><p>ถ้า type parameter ไม่สร้างความสัมพันธ์ที่มีประโยชน์ หรือมี parameter 4–5 ตัวจน call site อ่านไม่ออก อาจเหมาะกับ class/domain type เฉพาะมากกว่า Generic เป็นเครื่องมือรักษา type ไม่ใช่เป้าหมายของ abstraction</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน cache ที่เก็บ model ตาม id โดยไม่เสีย type และกำหนด constraint ว่าทุก model ต้องมี id</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>class EntityCache&lt;T extends Entity&gt; {
+<section id="section-4"><h2>4. Variance ที่ต้องรู้พอใช้งาน</h2><p><code>List&lt;Dog&gt;</code> ไม่ควรถูกใช้เป็น list ที่เพิ่ม Animal ใดก็ได้ มิฉะนั้นอาจใส่ Cat ลง list ของ Dog Dart มี runtime checks บางกรณี แต่หลักปฏิบัติคืออย่า cast collection เพื่อฝืน type ให้ map/copy ไปชนิดเป้าหมายอย่างชัดเจน</p></section>
+<section id="section-5"><h2>5. Generic ใน Flutter</h2><ul><li><code>State&lt;WarehouseShell&gt;</code> ทำให้ <code>widget</code> มีชนิด WarehouseShell</li><li><code>ValueNotifier&lt;ThemeMode&gt;</code> จำกัด value เป็น ThemeMode</li><li><code>FutureBuilder&lt;Task&gt;</code> ทำให้ snapshot data เป็น Task?</li><li>helper <code>_segmented&lt;T&gt;</code> ใน connection settings รับ <code>Map&lt;T,String&gt;</code> และ <code>ValueChanged&lt;T&gt;</code> โดยรักษาชนิด choice</li></ul></section>
+<section id="section-6"><h2>6. เมื่อ generic มากเกินไป</h2><p>ถ้า type parameter ไม่สร้างความสัมพันธ์ที่มีประโยชน์ หรือมี parameter 4–5 ตัวจน call site อ่านไม่ออก อาจเหมาะกับ class/domain type เฉพาะมากกว่า Generic เป็นเครื่องมือรักษา type ไม่ใช่เป้าหมายของ abstraction</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เขียน cache ที่เก็บ model ตาม id โดยไม่เสีย type และกำหนด constraint ว่าทุก model ต้องมี id</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>class EntityCache&lt;T extends Entity&gt; {
   final Map&lt;String, T&gt; _items = {};
   T? get(String id) =&gt; _items[id];
   void put(T item) =&gt; _items[item.id] = item;
 }</code></pre></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ generic mismatch ด้วย <code>as dynamic</code>; ตรวจว่าความสัมพันธ์ type ผิดที่ declaration, parser หรือ collection transformation แล้วแก้ต้นทาง</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ generic mismatch ด้วย <code>as dynamic</code>; ตรวจว่าความสัมพันธ์ type ผิดที่ declaration, parser หรือ collection transformation แล้วแก้ต้นทาง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

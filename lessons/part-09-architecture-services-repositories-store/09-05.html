@@ -4,18 +4,19 @@
 <title>Repository interface</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-05 · Architecture</span><h1>Repository interface</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Interface example</a></li><li><a href="#section-2">2. Naming by intent</a></li><li><a href="#section-3">3. Contract boundary</a></li><li><a href="#section-4">4. Interface ไม่ต้องมีทุก class</a></li><li><a href="#section-5">5. Narrow interfaces</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Testability</a></li></ol></nav>
 <div class="note"><strong>Repository interface ใช้ภาษาของ caller:</strong> ซ่อนว่า dataมาจาก HTTP/cacheและคืน domain result ไม่ expose URL, responseหรือ JSON</div>
-<section><h2>1. Interface example</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
+<section id="section-1"><h2>1. Interface example</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
   Future&lt;InboundOrder&gt; findOrder(String orderNo);
   Future&lt;Receipt&gt; receive(ReceiveCommand command);
   Future&lt;List&lt;PendingPalletLine&gt;&gt; pendingPalletLines();
 }</code></pre></section>
-<section><h2>2. Naming by intent</h2><p><code>receive(command)</code> ดีกว่า <code>postScanPart(map)</code> เพราะ callerไม่ต้องรู้ transportและ interfaceยังคงเดิมเมื่อ endpointเปลี่ยน</p></section>
-<section><h2>3. Contract boundary</h2><p>กำหนด nullability, ordering, paginationและ failuresใน interface/docs เช่น not-foundเป็น nullหรือ typed exception ต้องเลือกแบบเดียว ไม่คืน nullสำหรับ offlineด้วย</p></section>
-<section><h2>4. Interface ไม่ต้องมีทุก class</h2><p>สร้างเมื่อมี consumerต้องการ abstraction, fake, remote/local variantsหรือ boundaryทีม ไม่สร้าง <code>IThing</code> ที่มี implementationเดียวและไม่มี test seamเพียงตามพิธี</p></section>
-<section><h2>5. Narrow interfaces</h2><p>Store รับเฉพาะ repositoryของ feature ไม่รับ GodRepository 50 methods ทำ dependencyชัดและ fakeเล็ก ใช้ Interface Segregationตาม use casesจริง</p></section>
-<section><h2>6. ของจริง</h2><p><code>TasksRepository</code>, <code>ReceivingRepository</code>, <code>InventoryRepository</code> และ <code>CycleCountRepository</code> ใน <code>wms_absolute_mobile</code> ทำให้ WarehouseStoreไม่ import package http</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>repositoryควรมี method <code>Future&lt;http.Response&gt; getTasks()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ เพราะรั่ว infrastructure type ให้คืน <code>List&lt;WmsTask&gt;</code> หรือ <code>TaskPage</code> และ translate failure</p></details></section>
-<section><h2>8. Testability</h2><div class="success">Fake repositoryเก็บ commandsและกำหนด result/failureได้ ทำให้ Store testsพิสูจน์ workflowโดยไม่มี JSON/network</div></section>
+<section id="section-2"><h2>2. Naming by intent</h2><p><code>receive(command)</code> ดีกว่า <code>postScanPart(map)</code> เพราะ callerไม่ต้องรู้ transportและ interfaceยังคงเดิมเมื่อ endpointเปลี่ยน</p></section>
+<section id="section-3"><h2>3. Contract boundary</h2><p>กำหนด nullability, ordering, paginationและ failuresใน interface/docs เช่น not-foundเป็น nullหรือ typed exception ต้องเลือกแบบเดียว ไม่คืน nullสำหรับ offlineด้วย</p></section>
+<section id="section-4"><h2>4. Interface ไม่ต้องมีทุก class</h2><p>สร้างเมื่อมี consumerต้องการ abstraction, fake, remote/local variantsหรือ boundaryทีม ไม่สร้าง <code>IThing</code> ที่มี implementationเดียวและไม่มี test seamเพียงตามพิธี</p></section>
+<section id="section-5"><h2>5. Narrow interfaces</h2><p>Store รับเฉพาะ repositoryของ feature ไม่รับ GodRepository 50 methods ทำ dependencyชัดและ fakeเล็ก ใช้ Interface Segregationตาม use casesจริง</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p><code>TasksRepository</code>, <code>ReceivingRepository</code>, <code>InventoryRepository</code> และ <code>CycleCountRepository</code> ใน <code>wms_absolute_mobile</code> ทำให้ WarehouseStoreไม่ import package http</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>repositoryควรมี method <code>Future&lt;http.Response&gt; getTasks()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ เพราะรั่ว infrastructure type ให้คืน <code>List&lt;WmsTask&gt;</code> หรือ <code>TaskPage</code> และ translate failure</p></details></section>
+<section id="section-8"><h2>8. Testability</h2><div class="success">Fake repositoryเก็บ commandsและกำหนด result/failureได้ ทำให้ Store testsพิสูจน์ workflowโดยไม่มี JSON/network</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

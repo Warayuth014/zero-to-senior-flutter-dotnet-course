@@ -4,19 +4,20 @@
 <title>Singleton connection หลายหน้าจอ</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-09 · Realtime</span><h1>Singleton connection หลายหน้าจอ</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Why one connection</a></li><li><a href="#section-2">2. Lease model</a></li><li><a href="#section-3">3. Ref-count pitfalls</a></li><li><a href="#section-4">4. Session boundary</a></li><li><a href="#section-5">5. Per-feature channels</a></li><li><a href="#section-6">6. Testing seam</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Invariants</a></li></ol></nav>
 <div class="note"><strong>Singleton connectionแชร์ transport ไม่แชร์ UI state:</strong> service app/session-scopedถือ hubและ subscriptions แต่แต่ละ Storeถือ feature state/filtersของตน</div>
-<section><h2>1. Why one connection</h2><p>ลด sockets/auth/reconnect stormsและรับ eventsร่วม แต่ singleton globalทำ tests/server switchยากถ้าไม่มี interface/reset/lifecycleชัด</p></section>
-<section><h2>2. Lease model</h2><pre class="code-vs"><code>RealtimeLease acquire() {
+<section id="section-1"><h2>1. Why one connection</h2><p>ลด sockets/auth/reconnect stormsและรับ eventsร่วม แต่ singleton globalทำ tests/server switchยากถ้าไม่มี interface/reset/lifecycleชัด</p></section>
+<section id="section-2"><h2>2. Lease model</h2><pre class="code-vs"><code>RealtimeLease acquire() {
   final id = ++_nextLease;
   _leases.add(id);
   unawaited(_ensureConnected());
   return Lease(() =&gt; _release(id));
 }</code></pre><p>release idempotentและ stopเมื่อไม่มี leasesตาม keep-alive policy</p></section>
-<section><h2>3. Ref-count pitfalls</h2><p>เพิ่ม countทุก <code>connect()</code> แม้ callerเดิมเรียกซ้ำ, connect throwแต่ countค้าง, disconnectเกินศูนย์และ nested sheetฟังโดยไม่ acquireทำ connectionหยุดผิดเวลา</p></section>
-<section><h2>4. Session boundary</h2><p>singletonต้อง resetเมื่อ logout/token/server realmเปลี่ยน: stop, clear handlers/groups/queued events, increment generationและห้าม reconnectด้วย tokenเดิม</p></section>
-<section><h2>5. Per-feature channels</h2><p>แยก Task/Sorting/Putaway facadeได้แม้ใช้ underlying connectionเดียว เพื่อ typed event contractsและไม่ให้ screenเห็น listenersทุกโดเมน</p></section>
-<section><h2>6. Testing seam</h2><p>inject <code>RealtimeClient</code> interface/fakeแทนเรียก singleton constructorใน Store; composition rootใช้ shared production instance</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ควรเปิด hubตั้งแต่ loginตลอด sessionหรือเฉพาะ screen?</p><details><summary>แนวคำตอบ</summary><p>ขึ้นกับ events/latency/battery ถ้า badgeทั้ง shellต้องสดอาจ session-scoped; ถ้า featureเฉพาะใช้ leasesและหยุดเมื่อไม่มี consumer</p></details></section>
-<section><h2>8. Invariants</h2><div class="success">หนึ่ง active realm/connection, lease/subscription idempotent, UI stateไม่อยู่ singleton, logout resetครบและ fakeทดสอบได้</div></section>
+<section id="section-3"><h2>3. Ref-count pitfalls</h2><p>เพิ่ม countทุก <code>connect()</code> แม้ callerเดิมเรียกซ้ำ, connect throwแต่ countค้าง, disconnectเกินศูนย์และ nested sheetฟังโดยไม่ acquireทำ connectionหยุดผิดเวลา</p></section>
+<section id="section-4"><h2>4. Session boundary</h2><p>singletonต้อง resetเมื่อ logout/token/server realmเปลี่ยน: stop, clear handlers/groups/queued events, increment generationและห้าม reconnectด้วย tokenเดิม</p></section>
+<section id="section-5"><h2>5. Per-feature channels</h2><p>แยก Task/Sorting/Putaway facadeได้แม้ใช้ underlying connectionเดียว เพื่อ typed event contractsและไม่ให้ screenเห็น listenersทุกโดเมน</p></section>
+<section id="section-6"><h2>6. Testing seam</h2><p>inject <code>RealtimeClient</code> interface/fakeแทนเรียก singleton constructorใน Store; composition rootใช้ shared production instance</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ควรเปิด hubตั้งแต่ loginตลอด sessionหรือเฉพาะ screen?</p><details><summary>แนวคำตอบ</summary><p>ขึ้นกับ events/latency/battery ถ้า badgeทั้ง shellต้องสดอาจ session-scoped; ถ้า featureเฉพาะใช้ leasesและหยุดเมื่อไม่มี consumer</p></details></section>
+<section id="section-8"><h2>8. Invariants</h2><div class="success">หนึ่ง active realm/connection, lease/subscription idempotent, UI stateไม่อยู่ singleton, logout resetครบและ fakeทดสอบได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

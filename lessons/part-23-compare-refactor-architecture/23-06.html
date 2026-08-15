@@ -4,18 +4,19 @@
 <title>Dynamic JSON เทียบกับ typed model</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">23-06 · Architecture</span><h1>Dynamic JSON เทียบกับ typed model</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Dynamicจำเป็นตรง wire</a></li><li><a href="#section-2">2. Typed model value</a></li><li><a href="#section-3">3. Typed ไม่แปลว่าปลอดภัยอัตโนมัติ</a></li><li><a href="#section-4">4. แยก DTO กับ domainเมื่อจำเป็น</a></li><li><a href="#section-5">5. Unknown values</a></li><li><a href="#section-6">6. Contract test</a></li><li><a href="#section-7">7. Code generation trade-off</a></li><li><a href="#section-8">8. Boundary rule</a></li></ol></nav>
 <div class="note"><strong>ข้อเท็จจริง:</strong> ทั้งสองแอปมี typed modelsจำนวนมาก แต่ transport/adaptersยังเริ่มจาก <code>Map&lt;String,dynamic&gt;</code>; ประเด็นคือหยุด dynamicที่ boundary ไม่ใช่ห้าม JSON dynamicทั้งหมด</div>
-<section><h2>1. Dynamicจำเป็นตรง wire</h2><p><code>jsonDecode</code>ให้ dynamicและ backendบาง endpoint casing/shapeไม่สม่ำเสมอ Adapterต้องตรวจ runtimeก่อนแปลง แต่ Mapไม่ควรไหลถึง widgetหรือ storeเพราะ typo/castจะพังช้าใน production</p></section>
-<section><h2>2. Typed model value</h2><p>wmsapp receiving/picking/packing modelsและ absolute inbound/task/inventory modelsให้ compilerช่วยเรื่อง field/nullabilityและรวม fromJson logic สิ่งนี้ลด knowledgeของ JSON keysที่กระจายตาม screens</p></section>
-<section><h2>3. Typed ไม่แปลว่าปลอดภัยอัตโนมัติ</h2><p><code>json['token'] as String</code>, direct int castsและ list castsยัง throwเมื่อ contractเปลี่ยน ต้องตัดสิน field required/optional, coercionที่ยอมรับ, unknown enumและ error messageที่บอก pathได้</p></section>
-<section><h2>4. แยก DTO กับ domainเมื่อจำเป็น</h2><p>API DTOอาจมี nullable/casing/legacy statuses ส่วน domain modelต้องรักษา invariant ใช้ mapperแปลง <code>TaskDto → WmsTask</code>เมื่อ wire shapeไม่ตรงภาษาธุรกิจ ไม่ต้อง duplicate modelถ้ารูปร่างตรงและเสถียร</p></section>
-<section><h2>5. Unknown values</h2><p>server deployก่อน clientได้ Enum parserต้องมี unknown/raw valueและ UI fail-soft ไม่ map statusใหม่เป็น executing/availableโดยปริยายหากอาจเปิด actionผิด ความปลอดภัยของ warehouseสำคัญกว่า cardสวย</p></section>
-<section><h2>6. Contract test</h2><pre class="code-vs"><code>fixtureจริง/anonymous → DTO parser
+<section id="section-1"><h2>1. Dynamicจำเป็นตรง wire</h2><p><code>jsonDecode</code>ให้ dynamicและ backendบาง endpoint casing/shapeไม่สม่ำเสมอ Adapterต้องตรวจ runtimeก่อนแปลง แต่ Mapไม่ควรไหลถึง widgetหรือ storeเพราะ typo/castจะพังช้าใน production</p></section>
+<section id="section-2"><h2>2. Typed model value</h2><p>wmsapp receiving/picking/packing modelsและ absolute inbound/task/inventory modelsให้ compilerช่วยเรื่อง field/nullabilityและรวม fromJson logic สิ่งนี้ลด knowledgeของ JSON keysที่กระจายตาม screens</p></section>
+<section id="section-3"><h2>3. Typed ไม่แปลว่าปลอดภัยอัตโนมัติ</h2><p><code>json['token'] as String</code>, direct int castsและ list castsยัง throwเมื่อ contractเปลี่ยน ต้องตัดสิน field required/optional, coercionที่ยอมรับ, unknown enumและ error messageที่บอก pathได้</p></section>
+<section id="section-4"><h2>4. แยก DTO กับ domainเมื่อจำเป็น</h2><p>API DTOอาจมี nullable/casing/legacy statuses ส่วน domain modelต้องรักษา invariant ใช้ mapperแปลง <code>TaskDto → WmsTask</code>เมื่อ wire shapeไม่ตรงภาษาธุรกิจ ไม่ต้อง duplicate modelถ้ารูปร่างตรงและเสถียร</p></section>
+<section id="section-5"><h2>5. Unknown values</h2><p>server deployก่อน clientได้ Enum parserต้องมี unknown/raw valueและ UI fail-soft ไม่ map statusใหม่เป็น executing/availableโดยปริยายหากอาจเปิด actionผิด ความปลอดภัยของ warehouseสำคัญกว่า cardสวย</p></section>
+<section id="section-6"><h2>6. Contract test</h2><pre class="code-vs"><code>fixtureจริง/anonymous → DTO parser
 missing required → typed ParseFailure
 optional absent → documented default
 unknown enum → Unknown(raw)
 serialize command → exact .NET property names</code></pre></section>
-<section><h2>7. Code generation trade-off</h2><p>freezed/json_serializableลด boilerplateและเพิ่ม equality/copyWith แต่มี generated files/build_runner cost Manual parserเหมาะ modelน้อยหรือ contractแปลก ไม่ควร migrateทั้ง repoเพียงเพื่อ style consistencyโดยไม่มี test benefit</p></section>
-<section><h2>8. Boundary rule</h2><div class="success">อนุญาต dynamicภายใน decode adapterช่วงสั้นๆ แล้วคืน typed success/failureออกมา Searchหา <code>Map&lt;String,dynamic&gt;</code>ใน widgets/storesเพื่อจัดลำดับ refactorจาก mutation-critical flowsก่อน</div></section>
+<section id="section-7"><h2>7. Code generation trade-off</h2><p>freezed/json_serializableลด boilerplateและเพิ่ม equality/copyWith แต่มี generated files/build_runner cost Manual parserเหมาะ modelน้อยหรือ contractแปลก ไม่ควร migrateทั้ง repoเพียงเพื่อ style consistencyโดยไม่มี test benefit</p></section>
+<section id="section-8"><h2>8. Boundary rule</h2><div class="success">อนุญาต dynamicภายใน decode adapterช่วงสั้นๆ แล้วคืน typed success/failureออกมา Searchหา <code>Map&lt;String,dynamic&gt;</code>ใน widgets/storesเพื่อจัดลำดับ refactorจาก mutation-critical flowsก่อน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

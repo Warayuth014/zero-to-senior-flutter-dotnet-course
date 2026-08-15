@@ -8,6 +8,12 @@ $manifestPath = Join-Path $ProjectRoot 'course-manifest.json'
 $lessonsRoot = Join-Path $ProjectRoot 'lessons'
 $contentRoot = Join-Path $ProjectRoot 'content'
 $blueprint = Get-Content -LiteralPath $blueprintPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$courseParts = @($blueprint.parts | Sort-Object @{ Expression = {
+  $number = [int]$_.number
+  if ($number -eq 0) { return -1000 }
+  if ($number -lt 0) { return -999 }
+  return $number
+} })
 $coveragePath = Join-Path $ProjectRoot 'coverage-manifest.json'
 $coverage = if (Test-Path -LiteralPath $coveragePath) {
   [object[]](Get-Content -LiteralPath $coveragePath -Raw -Encoding UTF8 | ConvertFrom-Json)
@@ -28,6 +34,40 @@ function LessonId([int]$partNumber, [int]$topicNumber) {
 function PartFolder([object]$part) {
   if ([int]$part.number -lt 0) { return 'part-m01-{0}' -f $part.slug }
   return 'part-{0:D2}-{1}' -f [int]$part.number, $part.slug
+}
+
+function PartLabel([int]$partNumber) {
+  if ($partNumber -lt 0) { return 'Dart Foundation' }
+  return "Part $partNumber"
+}
+
+function LessonNumberLabel([int]$partNumber, [int]$topicNumber) {
+  if ($partNumber -lt 0) { return 'D{0}.{1}' -f ([math]::Abs($partNumber)), $topicNumber }
+  return '{0}.{1}' -f $partNumber, $topicNumber
+}
+
+function AddLessonToc([string]$body) {
+  if ($body -match 'class="toc"') { return $body }
+  $items = New-Object System.Collections.Generic.List[string]
+  $pattern = '<section(?<attrs>[^>]*)>\s*<h2>(?<title>.*?)</h2>'
+  $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+    param($match)
+    $sectionNumber = $items.Count + 1
+    $attrs = [string]$match.Groups['attrs'].Value
+    $idMatch = [regex]::Match($attrs, '\bid="(?<id>[^"]+)"')
+    $id = if ($idMatch.Success) { $idMatch.Groups['id'].Value } else { "section-$sectionNumber" }
+    $plainTitle = HtmlEncode ([Net.WebUtility]::HtmlDecode(
+        [regex]::Replace($match.Groups['title'].Value, '<[^>]+>', '')
+      ))
+    $encodedId = HtmlEncode $id
+    $items.Add("<li><a href=`"#$encodedId`">$plainTitle</a></li>")
+    $sectionStart = if ($idMatch.Success) { "<section$attrs>" } else { "<section$attrs id=`"$id`">" }
+    return "$sectionStart<h2>$($match.Groups['title'].Value)</h2>"
+  }
+  $enhanced = [regex]::Replace($body, $pattern, $evaluator, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if ($items.Count -lt 2) { return $enhanced }
+  $toc = '<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol>{0}</ol></nav>' -f ($items -join '')
+  return "$toc`n$enhanced"
 }
 
 function KindLabel([string]$kind) {
@@ -214,7 +254,7 @@ function Pitfalls([string]$kind) {
 }
 
 $allLessons = New-Object System.Collections.Generic.List[object]
-foreach ($part in $blueprint.parts) {
+foreach ($part in $courseParts) {
   $folderName = PartFolder $part
   $folder = Join-Path $lessonsRoot $folderName
   New-Item -ItemType Directory -Path $folder -Force | Out-Null
@@ -229,7 +269,7 @@ foreach ($part in $blueprint.parts) {
       part = [int]$part.number
       number = $topicNumber
       title = [string]$topic
-      partTitle = "Part $($part.number): $($part.title)"
+      partTitle = "$(PartLabel ([int]$part.number)): $($part.title)"
       kind = [string]$part.kind
       path = $path
       contentPath = $contentPath
@@ -239,7 +279,7 @@ foreach ($part in $blueprint.parts) {
 }
 
 foreach ($lesson in $allLessons) {
-  $part = $blueprint.parts | Where-Object { [int]$_.number -eq [int]$lesson.part } | Select-Object -First 1
+  $part = $courseParts | Where-Object { [int]$_.number -eq [int]$lesson.part } | Select-Object -First 1
   $refs = @($coverage | Where-Object lessonId -eq $lesson.id)
   $referenceHtml = if ($refs.Count) {
     '<ul>' + (($refs | ForEach-Object { '<li><code>{0}:{1}</code></li>' -f (HtmlEncode $_.project), (HtmlEncode $_.path) }) -join '') + '</ul>'
@@ -268,6 +308,7 @@ foreach ($lesson in $allLessons) {
 <section><h2>9. สรุปจำเร็ว</h2><div class="success"><strong>$(HtmlEncode $lesson.title)</strong> ต้องตอบได้ทั้ง “มันคืออะไร”, “อยู่ตรงไหนในโค้ด”, “พังแบบไหน” และ “ทดสอบอย่างไร”</div></section>
 "@
   }
+  $lessonBody = AddLessonToc $lessonBody
   $html = @"
 <!doctype html>
 <html lang="th">
@@ -282,7 +323,7 @@ $lessonBody
   [System.IO.File]::WriteAllText($absolutePath, $html, $utf8)
 }
 
-$partsManifest = foreach ($part in $blueprint.parts) {
+$partsManifest = foreach ($part in $courseParts) {
   [pscustomobject]@{
     number = [int]$part.number
     title = [string]$part.title
@@ -302,10 +343,12 @@ $manifest = [pscustomobject]@{
 [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), $utf8)
 
 $details = foreach ($part in $partsManifest) {
+  $partLabel = PartLabel ([int]$part.number)
   $rows = foreach ($lesson in $part.topics) {
-    '<a class="row" href="{0}" target="frame" data-id="{1}" data-title="{2}" data-part="Part {3}: {4}"><input class="ck" type="checkbox" data-id="{1}"><span class="rtitle">{3}.{5} {2}</span><span>›</span></a>' -f (HtmlEncode $lesson.path), (HtmlEncode $lesson.id), (HtmlEncode $lesson.title), $part.number, (HtmlEncode $part.title), $lesson.number
+    $numberLabel = LessonNumberLabel ([int]$part.number) ([int]$lesson.number)
+    '<a class="row" href="{0}" target="frame" data-id="{1}" data-title="{2}" data-part="{3}: {4}"><input class="ck" type="checkbox" data-id="{1}"><span class="rtitle">{5} {2}</span><span>›</span></a>' -f (HtmlEncode $lesson.path), (HtmlEncode $lesson.id), (HtmlEncode $lesson.title), (HtmlEncode $partLabel), (HtmlEncode $part.title), (HtmlEncode $numberLabel)
   }
-  '<details class="part"><summary>Part {0}: {1} <small>{2} lessons</small></summary><div class="list">{3}</div></details>' -f $part.number, (HtmlEncode $part.title), $part.topics.Count, ($rows -join '')
+  '<details class="part"><summary>{0}: {1} <small>{2} lessons</small></summary><div class="list">{3}</div></details>' -f (HtmlEncode $partLabel), (HtmlEncode $part.title), $part.topics.Count, ($rows -join '')
 }
 
 $indexHtml = @"

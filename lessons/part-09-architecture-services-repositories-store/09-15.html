@@ -4,19 +4,20 @@
 <title>แตก God Store แบบไม่ทำ flow พัง</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-15 · Architecture</span><h1>แตก God Store แบบไม่ทำ flow พัง</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Evidence จากของจริง</a></li><li><a href="#section-2">2. Map clusters</a></li><li><a href="#section-3">3. Extract fa&#231;ade-compatible slice</a></li><li><a href="#section-4">4. Split timers by owner</a></li><li><a href="#section-5">5. Cross-slice events</a></li><li><a href="#section-6">6. Preserve SSOT</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Safety plan</a></li></ol></nav>
 <div class="note"><strong>แตก God Storeตาม cohesive state + lifetime:</strong> ไม่ใช่แบ่งทุก 300 บรรทัด แต่แยก Receiving, Tasks, Inventory, CycleCountที่มี dependenciesและ workflowของตัวเอง</div>
-<section><h2>1. Evidence จากของจริง</h2><p><code>WarehouseStore</code> ประมาณ 1,684 บรรทัด ถือ repositoriesสี่ชุด, timer, receiving/tasks/picking/cycle count/navigationและ UI callbacks ทำให้ทุก feature share notify/lifetimeและแก้ไฟล์เดียวกัน</p></section>
-<section><h2>2. Map clusters</h2><p>สร้างตาราง field→methods→repository→widgets→timer แล้วหากลุ่มที่แทบไม่ cross-reference เช่น CycleCount state/methodsสามารถเป็น sliceแรก</p></section>
-<section><h2>3. Extract façade-compatible slice</h2><pre class="code-vs"><code>class CycleCountStore extends ChangeNotifier {
+<section id="section-1"><h2>1. Evidence จากของจริง</h2><p><code>WarehouseStore</code> ประมาณ 1,684 บรรทัด ถือ repositoriesสี่ชุด, timer, receiving/tasks/picking/cycle count/navigationและ UI callbacks ทำให้ทุก feature share notify/lifetimeและแก้ไฟล์เดียวกัน</p></section>
+<section id="section-2"><h2>2. Map clusters</h2><p>สร้างตาราง field→methods→repository→widgets→timer แล้วหากลุ่มที่แทบไม่ cross-reference เช่น CycleCount state/methodsสามารถเป็น sliceแรก</p></section>
+<section id="section-3"><h2>3. Extract façade-compatible slice</h2><pre class="code-vs"><code>class CycleCountStore extends ChangeNotifier {
   CycleCountStore(this.repository);
   final CycleCountRepository repository;
   CycleCountState state = const CycleCountIdle();
   Future&lt;void&gt; load(String pallet) async { /* ... */ }
 }</code></pre><p>God Store delegateชั่วคราวเพื่อคง call sites</p></section>
-<section><h2>4. Split timers by owner</h2><p>task pollingอยู่ TasksStoreและเริ่ม/หยุดตาม screen/app lifecycle ไม่ให้ WarehouseStore constructorเริ่ม timerแม้ userยังไม่เปิด feature</p></section>
-<section><h2>5. Cross-slice events</h2><p>หลัง receiving successต้อง refresh tasks ใช้ coordinatorเรียกสอง storesหรือ typed domain eventที่ explicit อย่าให้ stores importกันวงกลม</p></section>
-<section><h2>6. Preserve SSOT</h2><p>ระหว่าง migrationอย่า copy listทั้ง God Storeและslice ให้ delegate getter/actionไป ownerใหม่จน consumerย้ายครบแล้วค่อยลบของเดิม</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ควรแตก NavigationStoreก่อนหรือ CycleCountStoreก่อน?</p><details><summary>แนวคำตอบ</summary><p>เลือก cluster dependencyน้อย/มี tests/ขอบเขตชัด เช่น CycleCount; navigationอาจพัวพันทุก flowและควรแยกหลังเข้าใจ state ownership</p></details></section>
-<section><h2>8. Safety plan</h2><div class="success">characterization tests → extract state/action → delegate façade → migrate widgets → remove duplicate → analyze/testทุก commit; ไม่ rewrite God Storeครั้งเดียว</div></section>
+<section id="section-4"><h2>4. Split timers by owner</h2><p>task pollingอยู่ TasksStoreและเริ่ม/หยุดตาม screen/app lifecycle ไม่ให้ WarehouseStore constructorเริ่ม timerแม้ userยังไม่เปิด feature</p></section>
+<section id="section-5"><h2>5. Cross-slice events</h2><p>หลัง receiving successต้อง refresh tasks ใช้ coordinatorเรียกสอง storesหรือ typed domain eventที่ explicit อย่าให้ stores importกันวงกลม</p></section>
+<section id="section-6"><h2>6. Preserve SSOT</h2><p>ระหว่าง migrationอย่า copy listทั้ง God Storeและslice ให้ delegate getter/actionไป ownerใหม่จน consumerย้ายครบแล้วค่อยลบของเดิม</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ควรแตก NavigationStoreก่อนหรือ CycleCountStoreก่อน?</p><details><summary>แนวคำตอบ</summary><p>เลือก cluster dependencyน้อย/มี tests/ขอบเขตชัด เช่น CycleCount; navigationอาจพัวพันทุก flowและควรแยกหลังเข้าใจ state ownership</p></details></section>
+<section id="section-8"><h2>8. Safety plan</h2><div class="success">characterization tests → extract state/action → delegate façade → migrate widgets → remove duplicate → analyze/testทุก commit; ไม่ rewrite God Storeครั้งเดียว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

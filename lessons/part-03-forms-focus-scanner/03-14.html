@@ -4,9 +4,10 @@
 <title>Lab: Scan → Validate → Confirm state machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-14 · Flutter UI</span><h1>Lab: Scan → Validate → Confirm state machine</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. State model</a></li><li><a href="#section-3">3. Transition map</a></li><li><a href="#section-4">4. Controller command</a></li><li><a href="#section-5">5. UI + focus effects</a></li><li><a href="#section-6">6. Commit และ idempotency</a></li><li><a href="#section-7">7. Tests ที่ต้องมี</a></li><li><a href="#section-8">8. Part 3 Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> สร้าง Scan → Normalize → Validate → Preview → Confirm → Commit เป็น state machine ที่ testได้ โดย UIรับ raw text/focusและ render state ส่วน controller/use caseถือ transition, duplicate policy และ async concurrency</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>Enterและปุ่ม submitใช้ commandเดียว</li><li>canonical pallet trim+uppercase; serialรักษา caseตาม policy</li><li>busyป้องกัน requestซ้ำและ fieldถูก disable</li><li>previewไม่เท่ากับ commit ต้อง confirmก่อน mutation</li><li>error/duplicate/network uncertainมี stateและ feedbackต่างกัน</li><li>หลังทุก recoverable outcome focusกลับช่องที่ถูกตาม state</li><li>backend commitรับ operation ID/idempotency key</li></ul></section>
-<section><h2>2. State model</h2><pre class="code-vs"><code>sealed class ScanState { const ScanState(); }
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>Enterและปุ่ม submitใช้ commandเดียว</li><li>canonical pallet trim+uppercase; serialรักษา caseตาม policy</li><li>busyป้องกัน requestซ้ำและ fieldถูก disable</li><li>previewไม่เท่ากับ commit ต้อง confirmก่อน mutation</li><li>error/duplicate/network uncertainมี stateและ feedbackต่างกัน</li><li>หลังทุก recoverable outcome focusกลับช่องที่ถูกตาม state</li><li>backend commitรับ operation ID/idempotency key</li></ul></section>
+<section id="section-2"><h2>2. State model</h2><pre class="code-vs"><code>sealed class ScanState { const ScanState(); }
 class AwaitingScan extends ScanState { const AwaitingScan(); }
 class Validating extends ScanState {
   const Validating(this.code); final String code;
@@ -24,14 +25,14 @@ class Failed extends ScanState {
   const Failed(this.message, {required this.retryable});
   final String message; final bool retryable;
 }</code></pre></section>
-<section><h2>3. Transition map</h2><pre class="code-vs"><code>AwaitingScan --submit valid---&gt; Validating
+<section id="section-3"><h2>3. Transition map</h2><pre class="code-vs"><code>AwaitingScan --submit valid---&gt; Validating
 Validating  --preview ok-----&gt; Review
 Validating  --reject/error--&gt; Failed --ack/retry--&gt; AwaitingScan
 Review      --cancel--------&gt; AwaitingScan
 Review      --confirm------&gt; Committing
 Committing  --success------&gt; Succeeded --next--&gt; AwaitingScan
 Committing  --conflict-----&gt; Failed/Reconcile</code></pre><p>กำหนด eventที่อนุญาตต่อ state ป้องกัน Enterระหว่าง Reviewหรือ commitซ้ำ</p></section>
-<section><h2>4. Controller command</h2><pre class="code-vs"><code>Future&lt;void&gt; submitRaw(String raw) async {
+<section id="section-4"><h2>4. Controller command</h2><pre class="code-vs"><code>Future&lt;void&gt; submitRaw(String raw) async {
   if (state is! AwaitingScan) return;
   final code = normalizePallet(raw);
   final error = validatePallet(code);
@@ -47,8 +48,8 @@ Committing  --conflict-----&gt; Failed/Reconcile</code></pre><p>กำหนด 
     emit(Failed(mapError(e), retryable: true));
   }
 }</code></pre><p>UIไม่ยิง APIใน build/widget field และ controllerตรวจ current stateกัน stale response</p></section>
-<section><h2>5. UI + focus effects</h2><p>Awaiting/Failedแสดง ScanBox enabled; Validating/Committingแสดง busy; Reviewแสดง summary+confirm; Succeededแสดง receipt/next ใช้ listenerแยก one-shot effectsจาก render state: accepted haptic, error flash, dialogหรือ focus request post-frame อย่าเล่นเสียงใน build</p></section>
-<section><h2>6. Commit และ idempotency</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
+<section id="section-5"><h2>5. UI + focus effects</h2><p>Awaiting/Failedแสดง ScanBox enabled; Validating/Committingแสดง busy; Reviewแสดง summary+confirm; Succeededแสดง receipt/next ใช้ listenerแยก one-shot effectsจาก render state: accepted haptic, error flash, dialogหรือ focus request post-frame อย่าเล่นเสียงใน build</p></section>
+<section id="section-6"><h2>6. Commit และ idempotency</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
   final review = state;
   if (review is! Review) return;
   final operationId = uuid.v4();
@@ -62,7 +63,7 @@ Committing  --conflict-----&gt; Failed/Reconcile</code></pre><p>กำหนด 
     emit(Failed(e.message, retryable: false));
   }
 }</code></pre><p>Retry requestเดิมต้อง reuse operationId; เริ่ม business operationใหม่จึงสร้าง IDใหม่</p></section>
-<section><h2>7. Tests ที่ต้องมี</h2><pre class="code-vs"><code>test('second submit is ignored while validating', () async {
+<section id="section-7"><h2>7. Tests ที่ต้องมี</h2><pre class="code-vs"><code>test('second submit is ignored while validating', () async {
   final pending = Completer&lt;ScanPreview&gt;();
   repo.previewResult = pending.future;
 
@@ -72,6 +73,6 @@ Committing  --conflict-----&gt; Failed/Reconcile</code></pre><p>กำหนด 
   expect(repo.previewCalls, ['P-001']);
   expect(controller.state, isA&lt;Validating&gt;());
 });</code></pre><p>เพิ่ม normalize, empty, duplicate serial, preview reject, cancel review, commit success/conflict/timeout, stale response, unmount/focus และ widget testว่า Enterกับปุ่มส่ง commandเดียวกัน</p></section>
-<section><h2>8. Part 3 Exit Test</h2><div class="success"><ul><li>จัด ownership/controller/focus lifecycleได้</li><li>แยก raw, canonical, parsed และ domain validationได้</li><li>อธิบาย keyboard wedge/profile/terminatorได้</li><li>ป้องกัน debounce/duplicate/concurrent submitถูกระดับได้</li><li>จัด confirm, feedback, mounted และ stale resultได้</li><li>สร้างและทดสอบ scan state machineที่เชื่อม .NET APIอย่างปลอดภัยได้</li></ul></div></section>
+<section id="section-8"><h2>8. Part 3 Exit Test</h2><div class="success"><ul><li>จัด ownership/controller/focus lifecycleได้</li><li>แยก raw, canonical, parsed และ domain validationได้</li><li>อธิบาย keyboard wedge/profile/terminatorได้</li><li>ป้องกัน debounce/duplicate/concurrent submitถูกระดับได้</li><li>จัด confirm, feedback, mounted และ stale resultได้</li><li>สร้างและทดสอบ scan state machineที่เชื่อม .NET APIอย่างปลอดภัยได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

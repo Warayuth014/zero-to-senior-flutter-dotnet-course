@@ -4,22 +4,23 @@
 <title>Lab: Task status realtime</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-12 · Realtime</span><h1>Lab: Task status realtime</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Server event</a></li><li><a href="#section-3">3. Flutter reducer</a></li><li><a href="#section-4">4. Sync algorithm</a></li><li><a href="#section-5">5. Test matrix</a></li><li><a href="#section-6">6. Observability</a></li><li><a href="#section-7">7. Device drill</a></li><li><a href="#section-8">8. Exit test</a></li></ol></nav>
 <div class="note"><strong>Lab ปิด Part 12:</strong> ทำ Task status realtimeจาก .NET Hubถึง Flutter Store พร้อม typed event, version dedupe, reconnect reconciliationและ fallback pollingที่ไม่ overlap</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>.NET broadcastหลัง commitไป warehouse group</li><li>eventมี eventId/taskId/status/version/occurredAt</li><li>Flutter parse dynamicที่ boundary</li><li>subscription/lease cancelได้และไม่รั่ว</li><li>duplicate/out-of-orderถูก ignore</li><li>reconnectโหลด snapshotก่อน synchronized</li><li>fallback pollingมี backoffและ lifecycle guard</li></ul></section>
-<section><h2>2. Server event</h2><pre class="code-vs"><code>await hub.Clients.Group($"wh:{warehouseId}").SendAsync(
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>.NET broadcastหลัง commitไป warehouse group</li><li>eventมี eventId/taskId/status/version/occurredAt</li><li>Flutter parse dynamicที่ boundary</li><li>subscription/lease cancelได้และไม่รั่ว</li><li>duplicate/out-of-orderถูก ignore</li><li>reconnectโหลด snapshotก่อน synchronized</li><li>fallback pollingมี backoffและ lifecycle guard</li></ul></section>
+<section id="section-2"><h2>2. Server event</h2><pre class="code-vs"><code>await hub.Clients.Group($"wh:{warehouseId}").SendAsync(
   "TaskStatusChanged",
   new TaskStatusChanged(eventId, task.Id, task.Status,
     task.Version, DateTimeOffset.UtcNow), ct);</code></pre></section>
-<section><h2>3. Flutter reducer</h2><pre class="code-vs"><code>void onRealtime(TaskStatusChanged event) {
+<section id="section-3"><h2>3. Flutter reducer</h2><pre class="code-vs"><code>void onRealtime(TaskStatusChanged event) {
   if (event.sessionGeneration != sessionGeneration) return;
   final current = state.byId[event.taskId];
   if (current != null &amp;&amp; event.version &lt;= current.version) return;
   state = state.apply(event); notifyListeners();
 }</code></pre></section>
-<section><h2>4. Sync algorithm</h2><ol><li>subscribe/register handlers</li><li>connect + join group</li><li>GET task snapshot/version</li><li>replay newer queued events</li><li>mark synchronized/stop fallback</li><li>on disconnect mark stale/start fallback</li></ol></section>
-<section><h2>5. Test matrix</h2><p>valid/malformed event, duplicate/versionย้อน, eventระหว่าง GET, reconnectหลัง 30s, HTTP failขณะ hub connected, logout/server switch, two screens leasesและ dispose event</p></section>
-<section><h2>6. Observability</h2><p>log connection state, reconnect attempt, event name/version, refresh cause, lagจาก occurredAtและ last syncโดย redact token/task payloadที่อ่อนไหว</p></section>
-<section><h2>7. Device drill</h2><p>เปิดสองเครื่องเปลี่ยน task, toggle Wi-Fi, background/resume, restart serverและยิง event burst ตรวจ UIสุดท้ายตรง API snapshotโดยไม่มี duplicate toast/request storm</p></section>
-<section><h2>8. Exit test</h2><div class="success">เมื่อจบต้องเลือก polling/push/hybridได้ อธิบาย reconnectไม่เท่ากับ recover data และพิสูจน์ว่า listener/timerไม่รั่ว, stateไม่ย้อนและ Flutter/.NET realtime contractทนต่อ networkจริง</div></section>
+<section id="section-4"><h2>4. Sync algorithm</h2><ol><li>subscribe/register handlers</li><li>connect + join group</li><li>GET task snapshot/version</li><li>replay newer queued events</li><li>mark synchronized/stop fallback</li><li>on disconnect mark stale/start fallback</li></ol></section>
+<section id="section-5"><h2>5. Test matrix</h2><p>valid/malformed event, duplicate/versionย้อน, eventระหว่าง GET, reconnectหลัง 30s, HTTP failขณะ hub connected, logout/server switch, two screens leasesและ dispose event</p></section>
+<section id="section-6"><h2>6. Observability</h2><p>log connection state, reconnect attempt, event name/version, refresh cause, lagจาก occurredAtและ last syncโดย redact token/task payloadที่อ่อนไหว</p></section>
+<section id="section-7"><h2>7. Device drill</h2><p>เปิดสองเครื่องเปลี่ยน task, toggle Wi-Fi, background/resume, restart serverและยิง event burst ตรวจ UIสุดท้ายตรง API snapshotโดยไม่มี duplicate toast/request storm</p></section>
+<section id="section-8"><h2>8. Exit test</h2><div class="success">เมื่อจบต้องเลือก polling/push/hybridได้ อธิบาย reconnectไม่เท่ากับ recover data และพิสูจน์ว่า listener/timerไม่รั่ว, stateไม่ย้อนและ Flutter/.NET realtime contractทนต่อ networkจริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

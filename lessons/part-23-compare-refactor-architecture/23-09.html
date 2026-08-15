@@ -4,18 +4,19 @@
 <title>Race condition/cancellation strategy</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">23-09 · Architecture</span><h1>Race condition/cancellation strategy</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Race taxonomy</a></li><li><a href="#section-2">2. mountedแก้เพียง lifecycle</a></li><li><a href="#section-3">3. Generation token</a></li><li><a href="#section-4">4. Single-flight และ exhaust</a></li><li><a href="#section-5">5. Cancellation</a></li><li><a href="#section-6">6. Response version</a></li><li><a href="#section-7">7. Test deterministic</a></li><li><a href="#section-8">8. Strategy matrix</a></li></ol></nav>
 <div class="note"><strong>ปัญหาจริง:</strong> mounted guardป้องกัน setStateหลัง dispose แต่ไม่ป้องกัน responseเก่าทับ stateใหม่; absoluteมี receive-session generationบาง flowแต่ pollingบางเส้นยัง overlapได้</div>
-<section><h2>1. Race taxonomy</h2><ul><li>lifecycle: widget/storeถูก dispose</li><li>identity: ผู้ใช้สแกน palletใหม่ก่อนผลเก่ากลับ</li><li>ordering: requestเก่าจบหลัง requestใหม่</li><li>duplication: tap/scanส่ง commandซ้ำ</li><li>uncertainty: timeoutหลัง server commit</li></ul></section>
-<section><h2>2. mountedแก้เพียง lifecycle</h2><p>wmsappตรวจ mountedหลายจุดซึ่งจำเป็น แต่ถ้าหน้ายัง mountedและ inputเปลี่ยน ผล requestเก่ายัง commitได้ ต้อง snapshot identityหรือ generationก่อน awaitแล้วตรวจอีกครั้ง</p></section>
-<section><h2>3. Generation token</h2><pre class="code-vs"><code>final generation = ++_generation;
+<section id="section-1"><h2>1. Race taxonomy</h2><ul><li>lifecycle: widget/storeถูก dispose</li><li>identity: ผู้ใช้สแกน palletใหม่ก่อนผลเก่ากลับ</li><li>ordering: requestเก่าจบหลัง requestใหม่</li><li>duplication: tap/scanส่ง commandซ้ำ</li><li>uncertainty: timeoutหลัง server commit</li></ul></section>
+<section id="section-2"><h2>2. mountedแก้เพียง lifecycle</h2><p>wmsappตรวจ mountedหลายจุดซึ่งจำเป็น แต่ถ้าหน้ายัง mountedและ inputเปลี่ยน ผล requestเก่ายัง commitได้ ต้อง snapshot identityหรือ generationก่อน awaitแล้วตรวจอีกครั้ง</p></section>
+<section id="section-3"><h2>3. Generation token</h2><pre class="code-vs"><code>final generation = ++_generation;
 final key = currentPallet;
 final result = await repository.lookup(key);
 if (_disposed || generation != _generation || key != currentPallet) return;
 commit(result);</code></pre><p>เหมาะกับ latest-wins lookupและ receive session</p></section>
-<section><h2>4. Single-flight และ exhaust</h2><p>commandที่ห้ามซ้ำใช้ in-flight key/disableและ ignoreเหตุการณ์ใหม่จนจบ ต่างจาก searchที่ควร latest-wins ส่วน pollingใช้ single-flightพร้อม pending refresh flagเพื่อไม่ให้ command-triggered reloadถูก guardกลืน</p></section>
-<section><h2>5. Cancellation</h2><p><code>Future</code>ทั่วไป cancelไม่ได้ การ cancel subscription/timer/http clientอาจหยุด resourceแต่ server commandอาจเดินต่อ Generationจึงยังต้องกัน commit local และ mutation endpointต้อง idempotent/reconcile</p></section>
-<section><h2>6. Response version</h2><p>client generationกันลำดับภายใน process แต่หลาย operatorต้องใช้ server version/ETag/current status compare-and-set เช่น STAGED→DISPATCHED ผู้แพ้ reload current truth ไม่ retryโดยเดา</p></section>
-<section><h2>7. Test deterministic</h2><p>ใช้ controllable Completersให้ request Bจบก่อน A, fake clockขยับ timerและ simulate timeout-after-commit Assertว่า latest identityชนะ, duplicate commandหนึ่งครั้งและ disposeไม่ notify</p></section>
-<section><h2>8. Strategy matrix</h2><div class="success">เลือก semanticsต่อ operation: search=latest wins, submit=exhaust+idempotency, refresh=single-flight/coalesce, stream=subscription cancel+reconcile อย่าใช้ boolean loadingเดียวแก้ทุก race</div></section>
+<section id="section-4"><h2>4. Single-flight และ exhaust</h2><p>commandที่ห้ามซ้ำใช้ in-flight key/disableและ ignoreเหตุการณ์ใหม่จนจบ ต่างจาก searchที่ควร latest-wins ส่วน pollingใช้ single-flightพร้อม pending refresh flagเพื่อไม่ให้ command-triggered reloadถูก guardกลืน</p></section>
+<section id="section-5"><h2>5. Cancellation</h2><p><code>Future</code>ทั่วไป cancelไม่ได้ การ cancel subscription/timer/http clientอาจหยุด resourceแต่ server commandอาจเดินต่อ Generationจึงยังต้องกัน commit local และ mutation endpointต้อง idempotent/reconcile</p></section>
+<section id="section-6"><h2>6. Response version</h2><p>client generationกันลำดับภายใน process แต่หลาย operatorต้องใช้ server version/ETag/current status compare-and-set เช่น STAGED→DISPATCHED ผู้แพ้ reload current truth ไม่ retryโดยเดา</p></section>
+<section id="section-7"><h2>7. Test deterministic</h2><p>ใช้ controllable Completersให้ request Bจบก่อน A, fake clockขยับ timerและ simulate timeout-after-commit Assertว่า latest identityชนะ, duplicate commandหนึ่งครั้งและ disposeไม่ notify</p></section>
+<section id="section-8"><h2>8. Strategy matrix</h2><div class="success">เลือก semanticsต่อ operation: search=latest wins, submit=exhaust+idempotency, refresh=single-flight/coalesce, stream=subscription cancel+reconcile อย่าใช้ boolean loadingเดียวแก้ทุก race</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

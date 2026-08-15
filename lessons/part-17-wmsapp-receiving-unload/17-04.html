@@ -4,15 +4,16 @@
 <title>PO info และ step indicator</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-04 · Real Codebase</span><h1>PO info และ step indicator</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. POResponse</a></li><li><a href="#section-2">2. POItem</a></li><li><a href="#section-3">3. PoInfoCard</a></li><li><a href="#section-4">4. PoItemsList</a></li><li><a href="#section-5">5. Step indicator</a></li><li><a href="#section-6">6. Status logic</a></li><li><a href="#section-7">7. Snapshot freshness</a></li><li><a href="#section-8">8. Contract tests</a></li></ol></nav>
 <div class="note"><strong>PO preview คือ decision context:</strong> ผู้ใช้ต้องเห็น supplier, status และยอด ordered/received/remainingต่อ line ก่อนเริ่มรับ แต่ข้อมูลนี้ยังเป็น snapshotและ serverต้อง revalidateตอน command</div>
-<section><h2>1. POResponse</h2><p>เก็บ poId, supplierId/name, status, createdAt, itemsและ pendingLines โดย parser fallbackวันที่ invalidเป็น <code>DateTime.now()</code> ซึ่งทำให้ข้อมูลเสียดูเหมือนปัจจุบัน ควร fail/nullableพร้อม diagnostics</p></section>
-<section><h2>2. POItem</h2><p>identity <code>id</code>ทำหน้าที่ line/lot ID, มี part/owner/brand/description/image, serialRequire, qtyสามค่า, status, condition, lotNumber/expiredDate</p></section>
-<section><h2>3. PoInfoCard</h2><p>สรุป header document/supplier/status/date ช่วยแยกเอกสารก่อน scan ใช้ status badge/color presentation แต่ไม่ควร encode business transitionจากสี</p></section>
-<section><h2>4. PoItemsList</h2><p>renderรายการและ quantity progressต่อ item จุดตรวจคือ listยาวต้อง lazy/scrollเหมาะกับ PDA, stable keyด้วย item.idและ thumbnailไม่ resolve futureซ้ำทุก rebuild</p></section>
-<section><h2>5. Step indicator</h2><p><code>PoStepIndicator</code>ประกอบ dots/linesเพื่อสื่อขั้น PO → Part → Pallet เป็น static contextในหน้า Scan PO ไม่ใช่ state machine source of truth อย่าใช้ตำแหน่ง visualกำหนด allowed command</p></section>
-<section><h2>6. Status logic</h2><pre class="code-vs"><code>if (po.status != 'RECEIVED') show Start;
+<section id="section-1"><h2>1. POResponse</h2><p>เก็บ poId, supplierId/name, status, createdAt, itemsและ pendingLines โดย parser fallbackวันที่ invalidเป็น <code>DateTime.now()</code> ซึ่งทำให้ข้อมูลเสียดูเหมือนปัจจุบัน ควร fail/nullableพร้อม diagnostics</p></section>
+<section id="section-2"><h2>2. POItem</h2><p>identity <code>id</code>ทำหน้าที่ line/lot ID, มี part/owner/brand/description/image, serialRequire, qtyสามค่า, status, condition, lotNumber/expiredDate</p></section>
+<section id="section-3"><h2>3. PoInfoCard</h2><p>สรุป header document/supplier/status/date ช่วยแยกเอกสารก่อน scan ใช้ status badge/color presentation แต่ไม่ควร encode business transitionจากสี</p></section>
+<section id="section-4"><h2>4. PoItemsList</h2><p>renderรายการและ quantity progressต่อ item จุดตรวจคือ listยาวต้อง lazy/scrollเหมาะกับ PDA, stable keyด้วย item.idและ thumbnailไม่ resolve futureซ้ำทุก rebuild</p></section>
+<section id="section-5"><h2>5. Step indicator</h2><p><code>PoStepIndicator</code>ประกอบ dots/linesเพื่อสื่อขั้น PO → Part → Pallet เป็น static contextในหน้า Scan PO ไม่ใช่ state machine source of truth อย่าใช้ตำแหน่ง visualกำหนด allowed command</p></section>
+<section id="section-6"><h2>6. Status logic</h2><pre class="code-vs"><code>if (po.status != 'RECEIVED') show Start;
 else show completed banner;</code></pre><p>unknown/lowercase/new statusจะเปิด Startโดย default เสี่ยงกว่า enum/allowed-setแบบ fail closed</p></section>
-<section><h2>7. Snapshot freshness</h2><p>หลัง ScanPart routeกลับ reload PO แต่ระหว่างเปิดหน้าคนอุปกรณ์อื่นอาจรับ lineเดียวกัน Serverต้อง check remaining/versionและตอบ conflict; UI refresh/แจ้งผู้ใช้แทนถือ snapshotเป็น lock</p></section>
-<section><h2>8. Contract tests</h2><div class="success">itemsว่าง/หลาย lot, qty partial/complete/over, serial/non-serial, pendingLines, unknown status, invalid date, null image/lotและ Thai text พร้อม snapshotจาก .NETจริง</div></section>
+<section id="section-7"><h2>7. Snapshot freshness</h2><p>หลัง ScanPart routeกลับ reload PO แต่ระหว่างเปิดหน้าคนอุปกรณ์อื่นอาจรับ lineเดียวกัน Serverต้อง check remaining/versionและตอบ conflict; UI refresh/แจ้งผู้ใช้แทนถือ snapshotเป็น lock</p></section>
+<section id="section-8"><h2>8. Contract tests</h2><div class="success">itemsว่าง/หลาย lot, qty partial/complete/over, serial/non-serial, pendingLines, unknown status, invalid date, null image/lotและ Thai text พร้อม snapshotจาก .NETจริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

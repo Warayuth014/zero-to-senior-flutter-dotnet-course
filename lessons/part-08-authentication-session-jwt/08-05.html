@@ -4,19 +4,20 @@
 <title>จำ session หลังปิดแอป</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-05 · Auth Integration</span><h1>จำ session หลังปิดแอป</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Persistence choices</a></li><li><a href="#section-2">2. Stored envelope</a></li><li><a href="#section-3">3. Atomic save</a></li><li><a href="#section-4">4. Restore validation</a></li><li><a href="#section-5">5. Corrupt/migrated data</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test matrix</a></li></ol></nav>
 <div class="note"><strong>Remember session คือ restore credential ไม่ใช่จำหน้า UI:</strong> เก็บเฉพาะข้อมูลที่ต้องใช้ยืนยันตัวตน แล้ว rebuild user/session state จาก storage อย่างปลอดภัยตอนเปิดแอป</div>
-<section><h2>1. Persistence choices</h2><p>access/refresh token เป็น secret ควรอยู่ secure storage ของ platform; username, locale หรือ active server profileที่ไม่ลับอาจอยู่ SharedPreferences ตาม data classification</p></section>
-<section><h2>2. Stored envelope</h2><pre class="code-vs"><code>{
+<section id="section-1"><h2>1. Persistence choices</h2><p>access/refresh token เป็น secret ควรอยู่ secure storage ของ platform; username, locale หรือ active server profileที่ไม่ลับอาจอยู่ SharedPreferences ตาม data classification</p></section>
+<section id="section-2"><h2>2. Stored envelope</h2><pre class="code-vs"><code>{
   "schemaVersion": 1,
   "serverId": "warehouse-prod",
   "username": "EMP001",
   "expiresAt": "2026-08-15T10:00:00Z"
 }</code></pre><p>เก็บ token ด้วย secure key แยกหรือตาม abstraction และ bind session กับ server</p></section>
-<section><h2>3. Atomic save</h2><p>อย่าให้ memory session authenticated ก่อน token persist สำเร็จหาก product ต้อง remember login กำหนด policy เมื่อ secure storage เขียนไม่ได้: session ชั่วคราวหรือ fail login พร้อมข้อความที่ชัด</p></section>
-<section><h2>4. Restore validation</h2><ol><li>อ่าน storage และ schema</li><li>ตรวจ server binding</li><li>ตรวจ expiration/required fields</li><li>ตั้ง token ใน client</li><li>อาจเรียก profile/me เพื่อยืนยันกับ server</li><li>ค่อยประกาศ authenticated</li></ol></section>
-<section><h2>5. Corrupt/migrated data</h2><p>parse failure ไม่ควร crash splash screen ให้ลบเฉพาะ auth keys ที่เสียและกลับ login พร้อม telemetry ไม่ใช้ <code>prefs.clear()</code> เพราะอาจลบ theme/server settings ที่ไม่เกี่ยวข้อง</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp/AuthSessionService</code> โหลด userId/fullName/role จาก preferences แต่ไม่มี bearer token นี่คือ remembered demo identity ไม่ใช่ server-authenticated session</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แอปเปิดแล้วพบ token expired แต่ยังมี username ควรเข้า shell ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ให้ล้าง credential/auth state และไป login โดยอาจ prefill username ที่จัดเป็น non-secret ได้</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">ไม่มีข้อมูล, valid, expired, corrupt JSON, schema เก่า, secure storage error, server mismatch และ logout หลัง restore</div></section>
+<section id="section-3"><h2>3. Atomic save</h2><p>อย่าให้ memory session authenticated ก่อน token persist สำเร็จหาก product ต้อง remember login กำหนด policy เมื่อ secure storage เขียนไม่ได้: session ชั่วคราวหรือ fail login พร้อมข้อความที่ชัด</p></section>
+<section id="section-4"><h2>4. Restore validation</h2><ol><li>อ่าน storage และ schema</li><li>ตรวจ server binding</li><li>ตรวจ expiration/required fields</li><li>ตั้ง token ใน client</li><li>อาจเรียก profile/me เพื่อยืนยันกับ server</li><li>ค่อยประกาศ authenticated</li></ol></section>
+<section id="section-5"><h2>5. Corrupt/migrated data</h2><p>parse failure ไม่ควร crash splash screen ให้ลบเฉพาะ auth keys ที่เสียและกลับ login พร้อม telemetry ไม่ใช้ <code>prefs.clear()</code> เพราะอาจลบ theme/server settings ที่ไม่เกี่ยวข้อง</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p><code>wmsapp/AuthSessionService</code> โหลด userId/fullName/role จาก preferences แต่ไม่มี bearer token นี่คือ remembered demo identity ไม่ใช่ server-authenticated session</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แอปเปิดแล้วพบ token expired แต่ยังมี username ควรเข้า shell ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ให้ล้าง credential/auth state และไป login โดยอาจ prefill username ที่จัดเป็น non-secret ได้</p></details></section>
+<section id="section-8"><h2>8. Test matrix</h2><div class="success">ไม่มีข้อมูล, valid, expired, corrupt JSON, schema เก่า, secure storage error, server mismatch และ logout หลัง restore</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

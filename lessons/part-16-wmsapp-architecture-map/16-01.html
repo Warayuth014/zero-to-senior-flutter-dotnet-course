@@ -4,26 +4,27 @@
 <title>Solution map ของ wmsapp</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-01 · Real Codebase</span><h1>Solution map ของ wmsapp</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ภาพรวมขนาดจริง</a></li><li><a href="#section-2">2. โครงโฟลเดอร์</a></li><li><a href="#section-3">3. Runtime path</a></li><li><a href="#section-4">4. Domain boundaries</a></li><li><a href="#section-5">5. Shared core</a></li><li><a href="#section-6">6. State ownership ปัจจุบัน</a></li><li><a href="#section-7">7. Strengths และ risks</a></li><li><a href="#section-8">8. วิธีอ่าน</a></li></ol></nav>
 <div class="note"><strong>เป้าหมาย Part นี้:</strong> อ่าน wmsapp แบบมีแผนที่ ไม่เริ่มจาก screen ใหญ่สุ่ม ๆ เราจะตามเส้น <code>main → HomeScreen → domain screen → ApiService extension → model → .NET</code> แล้วรู้ว่า state/side effect อยู่ชั้นใด</div>
-<section><h2>1. ภาพรวมขนาดจริง</h2><table><thead><tr><th>พื้นที่</th><th>ไฟล์ Dart</th><th>ประมาณบรรทัด</th></tr></thead><tbody><tr><td>screens</td><td>80</td><td>18,271</td></tr><tr><td>models</td><td>11</td><td>1,507</td></tr><tr><td>services</td><td>15</td><td>1,108</td></tr><tr><td>widgets/theme</td><td>3</td><td>1,033</td></tr></tbody></table><p>น้ำหนักอยู่ที่ screens จึงพบ business state และ API orchestration ใน StatefulWidget จำนวนมาก</p></section>
-<section><h2>2. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/
+<section id="section-1"><h2>1. ภาพรวมขนาดจริง</h2><table><thead><tr><th>พื้นที่</th><th>ไฟล์ Dart</th><th>ประมาณบรรทัด</th></tr></thead><tbody><tr><td>screens</td><td>80</td><td>18,271</td></tr><tr><td>models</td><td>11</td><td>1,507</td></tr><tr><td>services</td><td>15</td><td>1,108</td></tr><tr><td>widgets/theme</td><td>3</td><td>1,033</td></tr></tbody></table><p>น้ำหนักอยู่ที่ screens จึงพบ business state และ API orchestration ใน StatefulWidget จำนวนมาก</p></section>
+<section id="section-2"><h2>2. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/
 ├─ main.dart
 ├─ theme/theme.dart
 ├─ widgets/
 ├─ services/          // transport, config, session, SignalR
 ├─ models/            // DTO แยกโดเมน
 └─ screens/           // receiving, unload, putaway, picking...</code></pre></section>
-<section><h2>3. Runtime path</h2><pre class="code-vs"><code>WmsApp
+<section id="section-3"><h2>3. Runtime path</h2><pre class="code-vs"><code>WmsApp
   → HomeScreen
     → require login
       → domain menu/screen
         → ApiService().domainMethod()
           → _get/_post/_uploadFile
             → ApiResult&lt;T&gt; → setState → widget tree</code></pre></section>
-<section><h2>4. Domain boundaries</h2><p>Receiving/Unload เป็น inbound, Putaway เคลื่อนเข้า storage, Picking/Packing/Check-in/Sorting เป็น outbound, Basket เป็นปลาย unload และ Upload เป็น supervisor image แต่ boundary ปัจจุบันเป็นโฟลเดอร์/extension มากกว่า repository/store ที่บังคับทางสถาปัตยกรรม</p></section>
-<section><h2>5. Shared core</h2><p><code>theme.dart</code>, <code>common_widgets.dart</code>, <code>ApiService</code>, <code>ApiConfigService</code>, <code>AuthSessionService</code> และ SignalR singletons ถูกใช้ข้ามโดเมน การเปลี่ยนไฟล์เหล่านี้มี blast radius สูง ต้องหา usages และเพิ่ม regression tests ก่อน</p></section>
-<section><h2>6. State ownership ปัจจุบัน</h2><p>local controllers/loading/selected entity มักอยู่ใน State ของ screen, sessionอยู่ SharedPreferences + HomeScreen fields, base URLอยู่ prefs + static cache, realtime connectionอยู่ service singleton จึงต้องตาม lifecycleหลายตำแหน่งเมื่อ debug race/logout/switch server</p></section>
-<section><h2>7. Strengths และ risks</h2><p>ข้อดีคือชื่อโดเมนชัด, API/model แยกไฟล์, widget บาง flow ถูกแยกย่อยแล้ว ข้อเสี่ยงคือ singletonซ่อน dependency, mock login, giant screens, dynamic JSON และ testหลักของ wmsappยังไม่มี safety net</p></section>
-<section><h2>8. วิธีอ่าน</h2><div class="success">เริ่ม composition → เลือกหนึ่ง user action → จด stateก่อน/หลัง → ตาม methodถึง endpoint → เปิด DTO → ไล่ error/lifecycle → เขียน characterization test แล้วจึง refactor ห้ามอ่านทุกไฟล์เรียง alphabetically</div></section>
+<section id="section-4"><h2>4. Domain boundaries</h2><p>Receiving/Unload เป็น inbound, Putaway เคลื่อนเข้า storage, Picking/Packing/Check-in/Sorting เป็น outbound, Basket เป็นปลาย unload และ Upload เป็น supervisor image แต่ boundary ปัจจุบันเป็นโฟลเดอร์/extension มากกว่า repository/store ที่บังคับทางสถาปัตยกรรม</p></section>
+<section id="section-5"><h2>5. Shared core</h2><p><code>theme.dart</code>, <code>common_widgets.dart</code>, <code>ApiService</code>, <code>ApiConfigService</code>, <code>AuthSessionService</code> และ SignalR singletons ถูกใช้ข้ามโดเมน การเปลี่ยนไฟล์เหล่านี้มี blast radius สูง ต้องหา usages และเพิ่ม regression tests ก่อน</p></section>
+<section id="section-6"><h2>6. State ownership ปัจจุบัน</h2><p>local controllers/loading/selected entity มักอยู่ใน State ของ screen, sessionอยู่ SharedPreferences + HomeScreen fields, base URLอยู่ prefs + static cache, realtime connectionอยู่ service singleton จึงต้องตาม lifecycleหลายตำแหน่งเมื่อ debug race/logout/switch server</p></section>
+<section id="section-7"><h2>7. Strengths และ risks</h2><p>ข้อดีคือชื่อโดเมนชัด, API/model แยกไฟล์, widget บาง flow ถูกแยกย่อยแล้ว ข้อเสี่ยงคือ singletonซ่อน dependency, mock login, giant screens, dynamic JSON และ testหลักของ wmsappยังไม่มี safety net</p></section>
+<section id="section-8"><h2>8. วิธีอ่าน</h2><div class="success">เริ่ม composition → เลือกหนึ่ง user action → จด stateก่อน/หลัง → ตาม methodถึง endpoint → เปิด DTO → ไล่ error/lifecycle → เขียน characterization test แล้วจึง refactor ห้ามอ่านทุกไฟล์เรียง alphabetically</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

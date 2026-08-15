@@ -4,21 +4,22 @@
 <title>ApiService singleton และ base URL discovery</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-06 · Real Codebase</span><h1>ApiService singleton และ base URL discovery</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Singleton</a></li><li><a href="#section-2">2. Base candidates</a></li><li><a href="#section-3">3. Discovery caveat</a></li><li><a href="#section-4">4. Transport methods</a></li><li><a href="#section-5">5. Response normalization</a></li><li><a href="#section-6">6. ApiResult</a></li><li><a href="#section-7">7. URL helper risk</a></li><li><a href="#section-8">8. Refactor order</a></li></ol></nav>
 <div class="note"><strong>ApiService เป็น transport hub:</strong> factoryทุกครั้งคืน singletonเดียว มี private GET/POST/upload, shared headers, base URL discovery/cache และ JSON/error normalization ส่วน domain methodsอยู่ใน part extensions</div>
-<section><h2>1. Singleton</h2><pre class="code-vs"><code>static final ApiService _instance = ApiService._internal();
+<section id="section-1"><h2>1. Singleton</h2><pre class="code-vs"><code>static final ApiService _instance = ApiService._internal();
 factory ApiService() =&gt; _instance;
 ApiService._internal();</code></pre><p>เรียกง่ายจากทุก screenแต่ inject fake client/base/authยากและ mutable stateแชร์ทั้ง app/tests</p></section>
-<section><h2>2. Base candidates</h2><pre class="code-vs"><code>custom setting
+<section id="section-2"><h2>2. Base candidates</h2><pre class="code-vs"><code>custom setting
 → Android emulator http://10.0.2.2:5000
 → other platforms http://localhost:5000</code></pre><p>ลอง <code>Socket.connect</code> 1 วินาทีทีละ candidateแล้ว cache <code>$base/api</code></p></section>
-<section><h2>3. Discovery caveat</h2><p>TCP portเปิดไม่ได้แปลว่าเป็น WMS APIและ sequential probeเพิ่ม startup latency Resolverจับ errorทั้งหมดเงียบแล้ว fallback candidateแรก Requestจริงจึงเป็นผู้แสดง error ส่วน Settings health probeตรวจ identityลึกกว่า</p></section>
-<section><h2>4. Transport methods</h2><p><code>_get/_post</code>ใช้ top-level http functions, JSON headerและ timeout 10s; <code>_uploadFile</code>ใช้ MultipartRequest timeout 30s ไม่มี injected client/auth/cancellation/retry</p></section>
-<section><h2>5. Response normalization</h2><pre class="code-vs"><code>decoded List → {'items': decoded}
+<section id="section-3"><h2>3. Discovery caveat</h2><p>TCP portเปิดไม่ได้แปลว่าเป็น WMS APIและ sequential probeเพิ่ม startup latency Resolverจับ errorทั้งหมดเงียบแล้ว fallback candidateแรก Requestจริงจึงเป็นผู้แสดง error ส่วน Settings health probeตรวจ identityลึกกว่า</p></section>
+<section id="section-4"><h2>4. Transport methods</h2><p><code>_get/_post</code>ใช้ top-level http functions, JSON headerและ timeout 10s; <code>_uploadFile</code>ใช้ MultipartRequest timeout 30s ไม่มี injected client/auth/cancellation/retry</p></section>
+<section id="section-5"><h2>5. Response normalization</h2><pre class="code-vs"><code>decoded List → {'items': decoded}
 decoded Map  → Map&lt;String, dynamic&gt;
 2xx          → ApiResult.success(body)
 non-2xx      → error/detail/statusCode</code></pre><p>cast Mapอาจ throwหาก JSONเป็น scalar/nullและถูก catchใน caller transport</p></section>
-<section><h2>6. ApiResult</h2><p>เก็บ success/data/error/statusCodeและ helper <code>isNotFound</code> ลด exceptionใน UI แต่ success constructorfix statusCode=200แม้ responseจริงเป็น 201/204 จึงสูญเสีย metadataบางส่วน</p></section>
-<section><h2>7. URL helper risk</h2><p><code>resolveServerUrl</code>และ image helperใช้ <code>replaceAll('/api','')</code> ซึ่งเปราะหาก path/hostnameมีคำนี้ ควรเก็บ origin/API base/media baseเป็น Uri typedแทนตัด string</p></section>
-<section><h2>8. Refactor order</h2><div class="success">1) inject http.Client/base resolver 2) typed failures/status 3) auth/correlation 4) Uri composition 5) repository per domain 6) cancellation/idempotency โดย characterization testsล็อก request/responseเดิมก่อน</div></section>
+<section id="section-6"><h2>6. ApiResult</h2><p>เก็บ success/data/error/statusCodeและ helper <code>isNotFound</code> ลด exceptionใน UI แต่ success constructorfix statusCode=200แม้ responseจริงเป็น 201/204 จึงสูญเสีย metadataบางส่วน</p></section>
+<section id="section-7"><h2>7. URL helper risk</h2><p><code>resolveServerUrl</code>และ image helperใช้ <code>replaceAll('/api','')</code> ซึ่งเปราะหาก path/hostnameมีคำนี้ ควรเก็บ origin/API base/media baseเป็น Uri typedแทนตัด string</p></section>
+<section id="section-8"><h2>8. Refactor order</h2><div class="success">1) inject http.Client/base resolver 2) typed failures/status 3) auth/correlation 4) Uri composition 5) repository per domain 6) cancellation/idempotency โดย characterization testsล็อก request/responseเดิมก่อน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

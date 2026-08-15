@@ -4,8 +4,9 @@
 <title>Subscribe ใน initState</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-07 · Realtime</span><h1>Subscribe ใน initState</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Widget pattern</a></li><li><a href="#section-2">2. Stable callback identity</a></li><li><a href="#section-3">3. Dependency changes</a></li><li><a href="#section-4">4. Initial snapshot race</a></li><li><a href="#section-5">5. Handler responsibility</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Widget tests</a></li></ol></nav>
 <div class="note"><strong>Subscribeตาม owner lifetime:</strong> StatefulWidgetลงทะเบียน handler referenceใน <code>initState</code> เมื่อ dependencyคงที่ หรือย้าย subscriptionไป route-scoped Storeเพื่อให้ UIไม่ parse/merge eventเอง</div>
-<section><h2>1. Widget pattern</h2><pre class="code-vs"><code>late final RealtimeSubscription _subscription;
+<section id="section-1"><h2>1. Widget pattern</h2><pre class="code-vs"><code>late final RealtimeSubscription _subscription;
 
 @override
 void initState() {
@@ -14,12 +15,12 @@ void initState() {
   unawaited(realtime.ensureConnected());
   unawaited(store.refresh());
 }</code></pre></section>
-<section><h2>2. Stable callback identity</h2><p>method tear-off <code>_onEvent</code> เป็น referenceที่ใช้ยกเลิกได้ หลีกเลี่ยง anonymous closureคนละ instanceใน add/remove</p></section>
-<section><h2>3. Dependency changes</h2><p>ถ้า realtime serviceมาจาก widget/providerและเปลี่ยนได้ ใช้ <code>didUpdateWidget</code> unsubscribeตัวเก่าแล้ว subscribeตัวใหม่ ไม่ addซ้ำทุก build/didChangeDependencies</p></section>
-<section><h2>4. Initial snapshot race</h2><p>register eventก่อน HTTP loadอาจรับ eventระหว่าง snapshot วิธีปลอดภัยคือใช้ version/sequence: load snapshot versionแล้ว applyเฉพาะ eventใหม่หรือ refreshอีกครั้งหลัง connection synchronized</p></section>
-<section><h2>5. Handler responsibility</h2><p>handlerตรวจ relevanceแล้วส่ง intentไป Store เช่น <code>store.onRealtimeEvent(event)</code> ไม่เปิด dialog/navigationหรือ setStateหลาย fieldจาก raw map</p></section>
-<section><h2>6. ของจริง</h2><p>Putaway/Sorting screensใน <code>wmsapp</code> add listenersใน initState, connectและโหลด HTTP snapshot เป็น patternที่ดีแต่ต้องวาง reconciliation/versionเพิ่มเมื่อ production event orderingสำคัญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>subscriptionขึ้นกับ warehouseIdที่เปลี่ยนใน routeเดิมควรทำที่ไหน?</p><details><summary>เฉลย</summary><p>didUpdateWidgetหรือ Store action unsubscribe group/handlerเดิม, update generation, joinใหม่และ refresh snapshot</p></details></section>
-<section><h2>8. Widget tests</h2><div class="success">subscribeครั้งเดียว, initial refresh, event relevant/irrelevant, dependency change, eventหลัง unmountและ connect failureไม่ crash</div></section>
+<section id="section-2"><h2>2. Stable callback identity</h2><p>method tear-off <code>_onEvent</code> เป็น referenceที่ใช้ยกเลิกได้ หลีกเลี่ยง anonymous closureคนละ instanceใน add/remove</p></section>
+<section id="section-3"><h2>3. Dependency changes</h2><p>ถ้า realtime serviceมาจาก widget/providerและเปลี่ยนได้ ใช้ <code>didUpdateWidget</code> unsubscribeตัวเก่าแล้ว subscribeตัวใหม่ ไม่ addซ้ำทุก build/didChangeDependencies</p></section>
+<section id="section-4"><h2>4. Initial snapshot race</h2><p>register eventก่อน HTTP loadอาจรับ eventระหว่าง snapshot วิธีปลอดภัยคือใช้ version/sequence: load snapshot versionแล้ว applyเฉพาะ eventใหม่หรือ refreshอีกครั้งหลัง connection synchronized</p></section>
+<section id="section-5"><h2>5. Handler responsibility</h2><p>handlerตรวจ relevanceแล้วส่ง intentไป Store เช่น <code>store.onRealtimeEvent(event)</code> ไม่เปิด dialog/navigationหรือ setStateหลาย fieldจาก raw map</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p>Putaway/Sorting screensใน <code>wmsapp</code> add listenersใน initState, connectและโหลด HTTP snapshot เป็น patternที่ดีแต่ต้องวาง reconciliation/versionเพิ่มเมื่อ production event orderingสำคัญ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>subscriptionขึ้นกับ warehouseIdที่เปลี่ยนใน routeเดิมควรทำที่ไหน?</p><details><summary>เฉลย</summary><p>didUpdateWidgetหรือ Store action unsubscribe group/handlerเดิม, update generation, joinใหม่และ refresh snapshot</p></details></section>
+<section id="section-8"><h2>8. Widget tests</h2><div class="success">subscribeครั้งเดียว, initial refresh, event relevant/irrelevant, dependency change, eventหลัง unmountและ connect failureไม่ crash</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

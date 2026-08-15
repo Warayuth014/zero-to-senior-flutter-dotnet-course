@@ -4,9 +4,10 @@
 <title>Timeout, SocketException และ network error</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-07 · Flutter + .NET</span><h1>Timeout, SocketException และ network error</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Exception map</a></li><li><a href="#section-2">2. Timeout รอบ operation</a></li><li><a href="#section-3">3. Connect vs response timeout</a></li><li><a href="#section-4">4. User message</a></li><li><a href="#section-5">5. Finally และ state</a></li><li><a href="#section-6">6. Offline ไม่เท่ากับ internet</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><strong>Error ต้องแยกประเภท:</strong> timeout, ไม่มี route/network, TLS, HTTP error และ JSON contract error มีสาเหตุและวิธีแก้ต่างกัน อย่ารวมเป็น “เชื่อมต่อไม่ได้” ทั้งหมด</div>
-<section><h2>1. Exception map</h2><ul><li><code>TimeoutException</code>: เกินเวลาที่ client ยอมรอ</li><li><code>SocketException</code>: DNS/route/connection ล้มเหลว</li><li><code>ClientException</code>: transport/client error อื่น</li><li><code>FormatException</code>: URL หรือ response format ผิด</li><li><code>ApiException</code>: server ตอบ status ที่ไม่สำเร็จ</li></ul></section>
-<section><h2>2. Timeout รอบ operation</h2><pre class="code-vs"><code>try {
+<section id="section-1"><h2>1. Exception map</h2><ul><li><code>TimeoutException</code>: เกินเวลาที่ client ยอมรอ</li><li><code>SocketException</code>: DNS/route/connection ล้มเหลว</li><li><code>ClientException</code>: transport/client error อื่น</li><li><code>FormatException</code>: URL หรือ response format ผิด</li><li><code>ApiException</code>: server ตอบ status ที่ไม่สำเร็จ</li></ul></section>
+<section id="section-2"><h2>2. Timeout รอบ operation</h2><pre class="code-vs"><code>try {
   return await _client.get(uri, headers: headers)
       .timeout(const Duration(seconds: 15));
 } on TimeoutException {
@@ -14,11 +15,11 @@
 } on SocketException catch (e) {
   throw NetworkException.offline(cause: e);
 }</code></pre></section>
-<section><h2>3. Connect vs response timeout</h2><p><code>Future.timeout</code> ให้ budget รวมแบบง่าย แต่ไม่ได้แปลว่าจะยกเลิก socket ทุก implementation งาน download/upload ยาวควรมี policy แยกและ cancellation strategy</p></section>
-<section><h2>4. User message</h2><p>ข้อความควร actionable เช่น “ติดต่อ server ไม่ได้ ตรวจ Wi-Fi และ URL” หรือ “server ใช้เวลานาน ลองใหม่” พร้อม technical cause สำหรับ log แต่ไม่โยน stack trace ให้ผู้ใช้</p></section>
-<section><h2>5. Finally และ state</h2><p>ปิด loading ใน <code>finally</code> หรือเปลี่ยนเป็น terminal state ทุก branch เพื่อไม่ให้ปุ่มค้าง และตรวจ <code>mounted</code> ก่อนใช้ context หลัง await</p></section>
-<section><h2>6. Offline ไม่เท่ากับ internet</h2><p>Mobile WMS อาจไม่มี internet แต่ยังเข้าถึง intranet API ได้ จึงต้อง probe endpoint เป้าหมาย ไม่ใช้ connectivity package เป็นคำตัดสินสุดท้าย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>server บันทึก command สำเร็จแต่ response timeout ผู้ใช้กดซ้ำได้ไหม?</p><details><summary>เฉลย</summary><p>ยังไม่รู้ผลแน่ชัด จึงต้องใช้ idempotency key หรือ query status ก่อน retry; timeout ไม่ได้พิสูจน์ว่า server ไม่ทำงาน</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า catch <code>Exception</code> แล้วคืน empty list เพราะเปลี่ยน outage เป็น “ไม่มีงาน” และทำให้ operator ตัดสินใจผิด</div></section>
+<section id="section-3"><h2>3. Connect vs response timeout</h2><p><code>Future.timeout</code> ให้ budget รวมแบบง่าย แต่ไม่ได้แปลว่าจะยกเลิก socket ทุก implementation งาน download/upload ยาวควรมี policy แยกและ cancellation strategy</p></section>
+<section id="section-4"><h2>4. User message</h2><p>ข้อความควร actionable เช่น “ติดต่อ server ไม่ได้ ตรวจ Wi-Fi และ URL” หรือ “server ใช้เวลานาน ลองใหม่” พร้อม technical cause สำหรับ log แต่ไม่โยน stack trace ให้ผู้ใช้</p></section>
+<section id="section-5"><h2>5. Finally และ state</h2><p>ปิด loading ใน <code>finally</code> หรือเปลี่ยนเป็น terminal state ทุก branch เพื่อไม่ให้ปุ่มค้าง และตรวจ <code>mounted</code> ก่อนใช้ context หลัง await</p></section>
+<section id="section-6"><h2>6. Offline ไม่เท่ากับ internet</h2><p>Mobile WMS อาจไม่มี internet แต่ยังเข้าถึง intranet API ได้ จึงต้อง probe endpoint เป้าหมาย ไม่ใช้ connectivity package เป็นคำตัดสินสุดท้าย</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>server บันทึก command สำเร็จแต่ response timeout ผู้ใช้กดซ้ำได้ไหม?</p><details><summary>เฉลย</summary><p>ยังไม่รู้ผลแน่ชัด จึงต้องใช้ idempotency key หรือ query status ก่อน retry; timeout ไม่ได้พิสูจน์ว่า server ไม่ทำงาน</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า catch <code>Exception</code> แล้วคืน empty list เพราะเปลี่ยน outage เป็น “ไม่มีงาน” และทำให้ operator ตัดสินใจผิด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

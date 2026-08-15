@@ -4,8 +4,9 @@
 <title>ConnectionProfile model</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-04 · Flutter + .NET</span><h1>ConnectionProfile model</h1><p>Part 10: Settings, Environments &amp; Connectivity</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Model</a></li><li><a href="#section-2">2. Stable ID</a></li><li><a href="#section-3">3. Environment metadata</a></li><li><a href="#section-4">4. copyWith</a></li><li><a href="#section-5">5. JSON boundary</a></li><li><a href="#section-6">6. Equality</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Invariants</a></li></ol></nav>
 <div class="note"><strong>ConnectionProfile เป็น immutable value:</strong> รวม server identityที่ผู้ใช้ตั้งชื่อ, environment, protocol, host, portและ base path พร้อม JSON/versioning</div>
-<section><h2>1. Model</h2><pre class="code-vs"><code>class ConnectionProfile {
+<section id="section-1"><h2>1. Model</h2><pre class="code-vs"><code>class ConnectionProfile {
   const ConnectionProfile({required this.id, required this.name,
     required this.environment, required this.protocol,
     required this.host, required this.port, this.basePath = ''});
@@ -15,12 +16,12 @@
   final int port;
   String get baseUrl =&gt; /* normalized Uri */;
 }</code></pre></section>
-<section><h2>2. Stable ID</h2><p>ใช้ UUID/created IDเป็น identity ไม่ใช้ nameหรือ URL เพราะแก้ชื่อ/hostได้ Active selectionอ้าง IDและ duplicate-nameเป็น validation/UXคนละเรื่อง</p></section>
-<section><h2>3. Environment metadata</h2><p>development/staging/productionช่วยสี/label/default protocolแต่ไม่ควรเปลี่ยน URLแบบแอบแฝงและไม่ใช้แทน verified server realm</p></section>
-<section><h2>4. copyWith</h2><p>edit draftด้วย immutable copyและรักษา ID/createdAt แยก save-as-newที่ออก IDใหม่จาก save-editsชัดเจน ป้องกันแก้ objectใน listโดยตรง</p></section>
-<section><h2>5. JSON boundary</h2><p><code>fromJson(Object?)</code> ตรวจ required fields, port range, enum fallbackและ normalize legacy host ห้าม throwจน controller loadทั้งรายการล้มเพราะ profileเสียหนึ่งตัว</p></section>
-<section><h2>6. Equality</h2><p>เปรียบเทียบ normalized semantic fieldsสำหรับ dirty/duplicate endpointแต่ identityใช้ ID ไม่ให้ slashต่างกันถือเป็น serverคนละตัวโดยบังเอิญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>save profileเดิมเป็นชื่อ “Warehouse UAT copy” ควรคง IDไหม?</p><details><summary>เฉลย</summary><p>ถ้า Save As Newต้อง IDใหม่; ถ้า rename/edit profileเดิมคง IDเพื่อ active referenceไม่หาย</p></details></section>
-<section><h2>8. Invariants</h2><div class="success">name/hostไม่ว่าง, port valid, path normalized, protocol enum, ID stableและ baseUrlสร้างจาก fieldsเพียงจุดเดียว</div></section>
+<section id="section-2"><h2>2. Stable ID</h2><p>ใช้ UUID/created IDเป็น identity ไม่ใช้ nameหรือ URL เพราะแก้ชื่อ/hostได้ Active selectionอ้าง IDและ duplicate-nameเป็น validation/UXคนละเรื่อง</p></section>
+<section id="section-3"><h2>3. Environment metadata</h2><p>development/staging/productionช่วยสี/label/default protocolแต่ไม่ควรเปลี่ยน URLแบบแอบแฝงและไม่ใช้แทน verified server realm</p></section>
+<section id="section-4"><h2>4. copyWith</h2><p>edit draftด้วย immutable copyและรักษา ID/createdAt แยก save-as-newที่ออก IDใหม่จาก save-editsชัดเจน ป้องกันแก้ objectใน listโดยตรง</p></section>
+<section id="section-5"><h2>5. JSON boundary</h2><p><code>fromJson(Object?)</code> ตรวจ required fields, port range, enum fallbackและ normalize legacy host ห้าม throwจน controller loadทั้งรายการล้มเพราะ profileเสียหนึ่งตัว</p></section>
+<section id="section-6"><h2>6. Equality</h2><p>เปรียบเทียบ normalized semantic fieldsสำหรับ dirty/duplicate endpointแต่ identityใช้ ID ไม่ให้ slashต่างกันถือเป็น serverคนละตัวโดยบังเอิญ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>save profileเดิมเป็นชื่อ “Warehouse UAT copy” ควรคง IDไหม?</p><details><summary>เฉลย</summary><p>ถ้า Save As Newต้อง IDใหม่; ถ้า rename/edit profileเดิมคง IDเพื่อ active referenceไม่หาย</p></details></section>
+<section id="section-8"><h2>8. Invariants</h2><div class="success">name/hostไม่ว่าง, port valid, path normalized, protocol enum, ID stableและ baseUrlสร้างจาก fieldsเพียงจุดเดียว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

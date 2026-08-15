@@ -1,15 +1,26 @@
-<div class="note"><strong>ภาพใหญ่ก่อนเขียนโค้ด:</strong> Dart คือภาษา, Flutter คือ UI framework/runtime ฝั่ง client และ .NET คือ backend คนละ process กัน การเชื่อมกันเกิดผ่าน contract เช่น HTTP/JSON และ SignalR ไม่ใช่การเรียก method ข้ามโปรเจกต์โดยตรง</div>
-<section><h2>1. เมื่อจบบทนี้</h2><ul><li>แยกหน้าที่ Dart, Flutter และ .NET ได้</li><li>วาดเส้นทางหนึ่ง action จาก PDA ถึงฐานข้อมูลและย้อนกลับได้</li><li>รู้ว่าควรเริ่ม debug ที่ชั้นใดเมื่ออาการเกิดบนหน้าจอ</li></ul></section>
-<section><h2>2. Mental model: สามโลกที่มีสัญญากลาง</h2><p><strong>Dart</strong> ให้ type system, class, async และ collection ที่ใช้เขียนแอป ส่วน <strong>Flutter</strong> ใช้ Dart สร้าง widget tree, รับ input, render frame และคุยกับ platform Android/iOS ขณะที่ <strong>.NET</strong> รับ request, ตรวจสิทธิ์, รัน business logic และอ่านเขียนฐานข้อมูล</p><pre class="code-vs"><code>ผู้ใช้/Scanner
-  ↓ event
-Flutter Widget → State/Store → Repository/ApiClient
-                                  ↓ HTTP + JSON / SignalR
-                              .NET Endpoint → Service → Database
-                                  ↓ response/event
-Flutter Model  ← State/Store ← Repository/ApiClient → rebuild UI</code></pre><p>สิ่งที่ข้ามเส้น network มีเพียงข้อมูล ไม่ใช่ Dart object หรือ C# object จริง ๆ ทั้งสองฝั่งจึงต้องตกลงชื่อ field, type, nullable, status code และรูปแบบ error</p></section>
-<section><h2>3. Trace จากโปรเจกต์จริง</h2><ul><li><code>wms_absolute_mobile/lib/features/auth/login_screen.dart</code> รับ event กด Login</li><li><code>features/auth/auth_repository.dart</code> แปลง intent เป็น request</li><li><code>core/api_client.dart</code> สร้าง HTTP request และ decode JSON</li><li>.NET ตรวจ credential แล้วคืน token; Flutter เก็บเป็น <code>AuthSession</code> และเปิด <code>WarehouseShell</code></li></ul><p>อีกแนวทางอยู่ใน <code>wmsapp</code>: screen เรียก singleton <code>ApiService</code> ผ่าน extension ตามโดเมน เช่น <code>ReceivingApi</code> แล้วรับ <code>ApiResult&lt;T&gt;</code> กลับมา ทั้งสองแบบต่อ backend ได้เหมือนกัน แต่ตำแหน่ง owner และความง่ายในการ test ต่างกัน</p></section>
-<section><h2>4. แยกอาการก่อน debug</h2><ol><li><strong>กดแล้วไม่มีอะไรเกิด:</strong> ตรวจ callback, validation และ state guard ฝั่ง Flutter</li><li><strong>โหลดค้าง/ต่อไม่ได้:</strong> ตรวจ base URL, network, timeout และ server health</li><li><strong>ได้ 400/401/500:</strong> เปิด status code กับ response body แล้วเทียบ API contract</li><li><strong>ข้อมูลมาถูกแต่จอไม่เปลี่ยน:</strong> ตรวจ state mutation, notify/setState และ widget ที่กำลังฟัง</li><li><strong>ข้อมูลผิดในฐาน:</strong> trace ต่อจาก .NET endpoint ไป service/transaction ในคอร์ส backend</li></ol></section>
-<section><h2>5. ขอบเขตคอร์สนี้</h2><p>คอร์สนี้ลงลึก Dart/Flutter, mobile workflow และรอยต่อ .NET: URL, HTTP verb, header, JSON, JWT, SignalR, upload และ error contract ส่วน Controller → Service → EF Core/SQL มีคอร์ส <code>zero-to-senior-dotnet8-course</code> อธิบายเต็มอยู่แล้ว เราจะเปิดฝั่ง .NET เท่าที่จำเป็นเพื่อพิสูจน์การเชื่อมต่อ</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>เลือก action “Login” หรือ “สแกนรับสินค้า” แล้วเขียน 6 ช่อง: Event → Widget → State owner → Client/Repository → Endpoint → UI result พร้อมระบุข้อมูลที่ข้าม network</p><details><summary>แนวคำตอบ: Login</summary><p>กดปุ่ม → <code>LoginScreen._submit</code> → local submitting/error state → <code>AuthRepository.login</code> → <code>ApiClient.post</code> ส่ง employeeId/password → endpoint คืน token/user → สร้าง session และ navigate; กรณีผิดแสดงข้อความโดยไม่เปลี่ยน route</p></details></section>
-<section><h2>7. จุดพลาดที่ต้องจำ</h2><div class="warn">อย่าแก้ backend เมื่อ callback ไม่ยิง และอย่าแก้ widget เมื่อ server คืน contract ผิด ให้หาหลักฐานที่ boundary ทีละชั้น: input, log/request, response, state และ rendered output</div></section>
-<section><h2>8. เช็กความเข้าใจ</h2><ul><li>Flutter ไม่ใช่ภาษา; Dart ไม่ใช่ backend</li><li>client กับ server แยก process และอาจแยกเครื่อง</li><li>JSON คือ wire format ที่ต้อง parse/validate</li><li>หนึ่ง action ต้อง trace ไป-กลับได้ครบก่อนถือว่าอ่าน flow ออก</li></ul></section>
+<div class="meta"><span>ระดับ: Beginner</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: รันโปรแกรม Dart แรก</span></div>
+<div class="note"><strong>บทนี้เริ่มจากศูนย์จริง:</strong> ยังไม่ต้องรู้จัก Widget, API หรือ architecture เราจะเริ่มจากไฟล์หนึ่งไฟล์ อ่านโค้ดทีละบรรทัด และทำให้ terminal แสดงผลตามที่เราต้องการ</div>
+<section><h2>1. Dart คืออะไร</h2><p>Dart คือภาษาโปรแกรมที่เราใช้เขียน Flutter โปรแกรม Dart อ่านคำสั่งจากบนลงล่าง โดยเริ่มทำงานที่ฟังก์ชันชื่อ <code>main</code> เสมอ ส่วน Flutter คือชุดเครื่องมือที่นำภาษา Dart ไปสร้างหน้าจอและแอปหลาย platform</p><table><thead><tr><th>คำ</th><th>จำแบบง่าย</th><th>ตัวอย่าง</th></tr></thead><tbody><tr><td>Dart</td><td>ภาษาที่เราเขียน</td><td>ตัวแปร, function, class</td></tr><tr><td>Flutter</td><td>เครื่องมือสร้างแอปด้วย Dart</td><td>Text, Button, Screen</td></tr><tr><td>.NET API</td><td>ระบบหลังบ้านที่แอปคุยด้วยภายหลัง</td><td>login, อ่าน/บันทึกสินค้า</td></tr></tbody></table></section>
+<section><h2>2. โปรแกรมที่เล็กที่สุด</h2><pre class="code-vs"><code>void main() {
+  print('สวัสดี Dart');
+}</code></pre><p><code>void</code> บอกว่า function นี้ไม่ส่งค่ากลับ, <code>main()</code> คือจุดเริ่ม, วงเล็บปีกกา <code>{ }</code> ครอบชุดคำสั่ง และเครื่องหมาย <code>;</code> ปิดหนึ่งคำสั่ง ภาษา Dart แยกตัวพิมพ์เล็ก–ใหญ่ จึงต้องเขียน <code>main</code> และ <code>print</code> ให้ตรง</p></section>
+<section><h2>3. รัน Lab ที่เตรียมไว้</h2><p>เปิด PowerShell ที่โฟลเดอร์คอร์ส แล้วรัน:</p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_basics.dart</code></pre><p>ถ้าเห็นชื่อคลัง จำนวนสินค้า และสถานะ แปลว่า Dart SDK ทำงานแล้ว หากไม่พบคำสั่ง <code>dart</code> ให้ย้อนกลับไปตรวจ PATH และ <code>flutter doctor</code> ใน Part 0</p></section>
+<section><h2>4. ตัวแปรคือกล่องที่มีชื่อ</h2><pre class="code-vs"><code>final warehouseName = 'Bangkok DC';
+var itemCount = 3;
+
+itemCount = itemCount + 1;
+print('$warehouseName มีสินค้า $itemCount รายการ');</code></pre><p><code>final</code> เหมาะกับค่าที่กำหนดครั้งเดียว ส่วน <code>var</code> ให้ Dart อนุมานชนิดและเปลี่ยนค่าได้ การเขียน <code>$ชื่อ</code> ในข้อความเรียกว่า string interpolation</p><div class="warn"><strong>อย่าสับสน:</strong> <code>var</code> ไม่ได้แปลว่าไม่มี type หลังอนุมานเป็น <code>int</code> แล้ว ตัวแปรนี้จะรับข้อความไม่ได้</div></section>
+<section><h2>5. Comment มีไว้บอกเหตุผล</h2><pre class="code-vs"><code>// เพิ่มสินค้าที่เพิ่งสแกนสำเร็จ
+itemCount = itemCount + 1;
+
+/* comment หลายบรรทัด
+   ใช้เมื่อจำเป็นจริง ๆ */</code></pre><p>Comment ไม่ถูกรัน ควรอธิบายว่า “ทำไม” มากกว่าทวนว่าโค้ด “ทำอะไร” และอย่าเก็บโค้ดเก่าทั้งก้อนไว้ใน comment เพราะ Git เก็บประวัติให้เราแล้ว</p></section>
+<section><h2>6. ลองผิดอย่างมีหลักฐาน</h2><ol><li>ลบ <code>;</code> หลัง <code>print</code> แล้วรัน ดูบรรทัด error แรก</li><li>แก้กลับและรันจนผ่าน</li><li>เปลี่ยนชื่อคลังและจำนวนเริ่มต้น</li><li>เพิ่มข้อความอีกหนึ่งบรรทัด เช่น <code>พร้อมเริ่มเรียน Flutter</code></li></ol><p>เป้าหมายไม่ใช่จำ error แต่ฝึกวงจร แก้หนึ่งจุด → รัน → อ่านผล ซึ่งจะใช้ตลอดคอร์ส</p></section>
+<section><h2>7. แบบฝึกหัด</h2><p>เพิ่มตัวแปร <code>scannedBy</code> แล้วแสดงผลเป็น “Bangkok DC มีสินค้า 4 รายการ — ตรวจโดย Somchai” โดยใช้ตัวแปรทุกค่า ห้ามพิมพ์ผลลัพธ์สำเร็จรูปทั้งประโยค</p><details><summary>ดูแนวคำตอบหลังจากลองเอง</summary><pre class="code-vs"><code>final warehouseName = 'Bangkok DC';
+final scannedBy = 'Somchai';
+var itemCount = 3;
+itemCount = itemCount + 1;
+
+print('$warehouseName มีสินค้า $itemCount รายการ — ตรวจโดย $scannedBy');</code></pre></details></section>
+<section><h2>8. สรุปก่อนบทถัดไป</h2><ul><li>ทุกโปรแกรม Dart เริ่มที่ <code>main()</code></li><li><code>print</code> ช่วยดูผลลัพธ์และพิสูจน์ความเข้าใจ</li><li><code>final</code> ใช้กับค่าที่ไม่เปลี่ยน; <code>var</code> ใช้กับค่าที่เปลี่ยนได้</li><li>Dart มี type แม้เราให้ภาษาอนุมาน</li><li>แก้โค้ดทีละเรื่องและอ่าน error แรกก่อนเสมอ</li></ul></section>

@@ -4,8 +4,9 @@
 <title>ListView.builder และ GridView</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-07 · Flutter UI</span><h1>ListView.builder และ GridView</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ListView.builder contract</a></li><li><a href="#section-2">2. Separator และ empty/loading/error</a></li><li><a href="#section-3">3. GridView delegate</a></li><li><a href="#section-4">4. Absolute Home grid</a></li><li><a href="#section-5">5. Grid aspect ratio vs mainAxisExtent</a></li><li><a href="#section-6">6. Pagination และ cache extent</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">List/Grid ที่ดีต้องตัดสินใจ 4 เรื่อง: lazy creation, item identity, extent และ responsive column count โดยไม่ผูก business model เข้ากับ index ที่เปลี่ยนได้</div>
-<section><h2>1. ListView.builder contract</h2><pre class="code-vs"><code>ListView.builder(
+<section id="section-1"><h2>1. ListView.builder contract</h2><pre class="code-vs"><code>ListView.builder(
   itemCount: visibleTasks.length,
   itemExtent: 64,
   itemBuilder: (_, i) {
@@ -13,8 +14,8 @@
     return TaskTile(key: ValueKey(task.id), task: task);
   },
 )</code></pre><p><code>itemCount</code> ป้องกันเรียกเกิน, stable key รักษา state ตาม task, itemExtent/prototypeItem ช่วยคำนวณ scroll geometry เร็วเมื่อความสูงคงที่</p></section>
-<section><h2>2. Separator และ empty/loading/error</h2><p>ใช้ <code>ListView.separated</code> เมื่อ separator ไม่ใช่ข้อมูล อย่าแทรก divider แล้วคูณ index เพราะ key/semantics ซับซ้อน State ของหน้าต้องแยก loading, error, empty และ data ให้ชัด ไม่ใช้ list ว่างแทนทุกสถานะ</p></section>
-<section><h2>3. GridView delegate</h2><pre class="code-vs"><code>GridView.builder(
+<section id="section-2"><h2>2. Separator และ empty/loading/error</h2><p>ใช้ <code>ListView.separated</code> เมื่อ separator ไม่ใช่ข้อมูล อย่าแทรก divider แล้วคูณ index เพราะ key/semantics ซับซ้อน State ของหน้าต้องแยก loading, error, empty และ data ให้ชัด ไม่ใช้ list ว่างแทนทุกสถานะ</p></section>
+<section id="section-3"><h2>3. GridView delegate</h2><pre class="code-vs"><code>GridView.builder(
   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
     crossAxisCount: columns,
     mainAxisSpacing: gap,
@@ -24,10 +25,10 @@
   itemCount: menus.length,
   itemBuilder: (_, i) =&gt; MenuTile(menu: menus[i]),
 )</code></pre><p>FixedCrossAxisCount คุมจำนวนคอลัมน์; MaxCrossAxisExtent คุมความกว้างสูงสุดต่อ tile และให้ frameworkหาจำนวนคอลัมน์ เหมาะกับ tablet/web ที่ช่วงกว้างมาก</p></section>
-<section><h2>4. Absolute Home grid</h2><p>Home กำหนด 2 คอลัมน์คงที่สำหรับงาน PDA และคำนวณ <code>mainAxisExtent</code> ให้สามแถวพอดีกับพื้นที่ Expanded เมนูที่เกินแถวสามจึงเลื่อน เป็น design decision ที่ทำให้ operation หลักอยู่ first viewport เสมอ ไม่ใช่ grid auto-fit ทั่วไป</p></section>
-<section><h2>5. Grid aspect ratio vs mainAxisExtent</h2><p><code>childAspectRatio</code> ผูกสูงกับความกว้าง เหมาะ tile รูปทรงสม่ำเสมอ; <code>mainAxisExtent</code> ระบุความสูงตรง เหมาะเมื่อความสูง viewport/ข้อความเป็นตัวกำหนด ห้ามใส่ทั้งคู่ใน delegate เดียว ตรวจชื่อไทย/อังกฤษและ text scale ก่อนล็อก extent</p></section>
-<section><h2>6. Pagination และ cache extent</h2><p>รายการจาก API จำนวนมากควรโหลดเป็นหน้าเมื่อใกล้ท้าย, ป้องกัน request ซ้ำ และแสดง retry row อย่าเพิ่ม cacheExtent มากเพื่อซ่อน jank โดยไม่ profile เพราะแลก memory/build ล่วงหน้า รูปควร resize/cache ตามขนาดแสดง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>บน PDA ต้อง 2 คอลัมน์ แต่ tablet ต้อง tile กว้างอย่างน้อย 180 และไม่เกิน 260 จะเลือก delegate อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ที่ breakpoint PDA ใช้ fixed 2 columns; tablet ใช้ LayoutBuilder คำนวณ columns จาก availableWidth หรือใช้ <code>SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 260)</code> แล้วตรวจว่าความกว้างจริงไม่ต่ำกว่า 180 โดยคำนวณขั้นต่ำ/จำกัด max content width</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ห้ามใช้ index เป็น identity ของ item ที่ reorder/filter/insert เพราะ checkbox, animation หรือ controller อาจย้ายไปอยู่ข้อมูลคนละแถว ใช้ key จาก domain ID และให้ selection state อ้าง ID ไม่อ้างตำแหน่ง</div></section>
+<section id="section-4"><h2>4. Absolute Home grid</h2><p>Home กำหนด 2 คอลัมน์คงที่สำหรับงาน PDA และคำนวณ <code>mainAxisExtent</code> ให้สามแถวพอดีกับพื้นที่ Expanded เมนูที่เกินแถวสามจึงเลื่อน เป็น design decision ที่ทำให้ operation หลักอยู่ first viewport เสมอ ไม่ใช่ grid auto-fit ทั่วไป</p></section>
+<section id="section-5"><h2>5. Grid aspect ratio vs mainAxisExtent</h2><p><code>childAspectRatio</code> ผูกสูงกับความกว้าง เหมาะ tile รูปทรงสม่ำเสมอ; <code>mainAxisExtent</code> ระบุความสูงตรง เหมาะเมื่อความสูง viewport/ข้อความเป็นตัวกำหนด ห้ามใส่ทั้งคู่ใน delegate เดียว ตรวจชื่อไทย/อังกฤษและ text scale ก่อนล็อก extent</p></section>
+<section id="section-6"><h2>6. Pagination และ cache extent</h2><p>รายการจาก API จำนวนมากควรโหลดเป็นหน้าเมื่อใกล้ท้าย, ป้องกัน request ซ้ำ และแสดง retry row อย่าเพิ่ม cacheExtent มากเพื่อซ่อน jank โดยไม่ profile เพราะแลก memory/build ล่วงหน้า รูปควร resize/cache ตามขนาดแสดง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>บน PDA ต้อง 2 คอลัมน์ แต่ tablet ต้อง tile กว้างอย่างน้อย 180 และไม่เกิน 260 จะเลือก delegate อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ที่ breakpoint PDA ใช้ fixed 2 columns; tablet ใช้ LayoutBuilder คำนวณ columns จาก availableWidth หรือใช้ <code>SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 260)</code> แล้วตรวจว่าความกว้างจริงไม่ต่ำกว่า 180 โดยคำนวณขั้นต่ำ/จำกัด max content width</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ห้ามใช้ index เป็น identity ของ item ที่ reorder/filter/insert เพราะ checkbox, animation หรือ controller อาจย้ายไปอยู่ข้อมูลคนละแถว ใช้ key จาก domain ID และให้ selection state อ้าง ID ไม่อ้างตำแหน่ง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

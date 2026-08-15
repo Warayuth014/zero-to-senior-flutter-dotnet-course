@@ -4,21 +4,22 @@
 <title>tr helper เทียบกับ ARB/gen-l10n</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-08 · Flutter UI</span><h1>tr helper เทียบกับ ARB/gen-l10n</h1><p>Part 11: Theme, Localization, Assets &amp; Platform UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Inline helper</a></li><li><a href="#section-2">2. Inline drawbacks</a></li><li><a href="#section-3">3. ARB example</a></li><li><a href="#section-4">4. Migration strategy</a></li><li><a href="#section-5">5. Placeholders</a></li><li><a href="#section-6">6. Backend messages</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Decision</a></li></ol></nav>
 <div class="note"><strong><code>tr(en, th)</code> เริ่มเร็ว แต่ scaleมีเพดาน:</strong> ARB/gen-l10nให้ key, placeholders, plural/select, toolingและตรวจ missing translationเหมาะเมื่อข้อความโตหรือมีนักแปล</div>
-<section><h2>1. Inline helper</h2><pre class="code-vs"><code>String tr(String english, String thai) =&gt;
+<section id="section-1"><h2>1. Inline helper</h2><pre class="code-vs"><code>String tr(String english, String thai) =&gt;
     AppLanguageController.instance.isThai ? thai : english;
 
 Text(tr('Connection failed', 'เชื่อมต่อล้มเหลว'));</code></pre><p>อ่านง่ายสำหรับสองภาษาและแอปทีมเล็ก</p></section>
-<section><h2>2. Inline drawbacks</h2><p>ข้อความซ้ำ/สะกดไม่ตรง, ค้น missingยาก, ไม่มี key/contextสำหรับนักแปล, plural/interpolationยุ่งและ global helperไม่ทำ widget rebuildเองหาก callerไม่ listen</p></section>
-<section><h2>3. ARB example</h2><pre class="code-vs"><code>// app_en.arb
+<section id="section-2"><h2>2. Inline drawbacks</h2><p>ข้อความซ้ำ/สะกดไม่ตรง, ค้น missingยาก, ไม่มี key/contextสำหรับนักแปล, plural/interpolationยุ่งและ global helperไม่ทำ widget rebuildเองหาก callerไม่ listen</p></section>
+<section id="section-3"><h2>3. ARB example</h2><pre class="code-vs"><code>// app_en.arb
 {"tasksRemaining":"{count, plural, =0{No tasks} one{1 task} other{{count} tasks}}"}
 
 // Widget
 Text(AppLocalizations.of(context)!.tasksRemaining(count));</code></pre></section>
-<section><h2>4. Migration strategy</h2><p>เริ่ม new stringsใน generated localization, สร้าง adapterสำหรับ common labels, migrate screenเมื่อแก้ ไม่ big-bang replaceและไม่ใช้ English sentenceเป็น key</p></section>
-<section><h2>5. Placeholders</h2><p>อย่าต่อ fragmentเช่น <code>tr('Loaded','โหลดแล้ว') + '$n'</code> เพราะลำดับคำต่างภาษา ใช้ข้อความเต็มพร้อม named placeholder</p></section>
-<section><h2>6. Backend messages</h2><p>อย่าแปล server detailด้วย string matching ให้ map stable error/status codeเป็น localization keyและมี safe fallbackสำหรับ unknown</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ข้อความ “โหลดแล้ว 1/5 รายการ” ควรออกแบบอย่างไร?</p><details><summary>เฉลย</summary><p>หนึ่ง localization messageพร้อม placeholders loaded/totalและ plural/selectเมื่อจำเป็น ไม่ต่อคำแยกสามส่วน</p></details></section>
-<section><h2>8. Decision</h2><div class="success">ใช้ tr helperได้เมื่อสองภาษา/ข้อความน้อย/ทีมเดียว; ขยับ ARBเมื่อมี plural, QA translation, reuse, localeเพิ่มหรือ compile-time missing-key checks</div></section>
+<section id="section-4"><h2>4. Migration strategy</h2><p>เริ่ม new stringsใน generated localization, สร้าง adapterสำหรับ common labels, migrate screenเมื่อแก้ ไม่ big-bang replaceและไม่ใช้ English sentenceเป็น key</p></section>
+<section id="section-5"><h2>5. Placeholders</h2><p>อย่าต่อ fragmentเช่น <code>tr('Loaded','โหลดแล้ว') + '$n'</code> เพราะลำดับคำต่างภาษา ใช้ข้อความเต็มพร้อม named placeholder</p></section>
+<section id="section-6"><h2>6. Backend messages</h2><p>อย่าแปล server detailด้วย string matching ให้ map stable error/status codeเป็น localization keyและมี safe fallbackสำหรับ unknown</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ข้อความ “โหลดแล้ว 1/5 รายการ” ควรออกแบบอย่างไร?</p><details><summary>เฉลย</summary><p>หนึ่ง localization messageพร้อม placeholders loaded/totalและ plural/selectเมื่อจำเป็น ไม่ต่อคำแยกสามส่วน</p></details></section>
+<section id="section-8"><h2>8. Decision</h2><div class="success">ใช้ tr helperได้เมื่อสองภาษา/ข้อความน้อย/ทีมเดียว; ขยับ ARBเมื่อมี plural, QA translation, reuse, localeเพิ่มหรือ compile-time missing-key checks</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

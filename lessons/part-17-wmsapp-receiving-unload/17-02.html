@@ -4,17 +4,18 @@
 <title>ReceivingMenu และ pending badge</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-02 · Real Codebase</span><h1>ReceivingMenu และ pending badge</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Inputs</a></li><li><a href="#section-2">2. Pending count</a></li><li><a href="#section-3">3. Refresh on return</a></li><li><a href="#section-4">4. Card semantics</a></li><li><a href="#section-5">5. Route A</a></li><li><a href="#section-6">6. Route B</a></li><li><a href="#section-7">7. Race</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>ReceivingMenu เป็น dashboardเล็ก:</strong> มีสอง card—เริ่มรับเอกสารและรายการค้างผูก pallet—พร้อม badgeที่นับจาก server ไม่ใช่ local cache</div>
-<section><h2>1. Inputs</h2><p><code>ReceivingMenuScreen</code>รับ userId/fullNameจาก HomeScreen ใช้ fullNameใน AppBarและส่งทั้งคู่ต่อ routeลูก ไม่มี session lookupซ้ำในเมนู</p></section>
-<section><h2>2. Pending count</h2><pre class="code-vs"><code>initState() → _loadPendingCount()
+<section id="section-1"><h2>1. Inputs</h2><p><code>ReceivingMenuScreen</code>รับ userId/fullNameจาก HomeScreen ใช้ fullNameใน AppBarและส่งทั้งคู่ต่อ routeลูก ไม่มี session lookupซ้ำในเมนู</p></section>
+<section id="section-2"><h2>2. Pending count</h2><pre class="code-vs"><code>initState() → _loadPendingCount()
 → getPendingPalletLines()
 → count = result.data!.length</code></pre><p>failureถูกละเลยและ countคง 0 จึงแยกไม่ได้ว่าไม่มีค้างหรือโหลดล้ม</p></section>
-<section><h2>3. Refresh on return</h2><pre class="code-vs"><code>await Navigator.push(...ScanPoScreen...);
+<section id="section-3"><h2>3. Refresh on return</h2><pre class="code-vs"><code>await Navigator.push(...ScanPoScreen...);
 _loadPendingCount();</code></pre><p>ทำเหมือนกันกับ PendingPalletScreen จึงสะท้อนรายการใหม่หลังรับ/assign แต่ควรเช็ก mounted/generationและมี loading/error state</p></section>
-<section><h2>4. Card semantics</h2><p><code>ReceivingMenuCard</code>รับ icon/title/subtitle/color/badge/onTap เมื่อ pending&gt;0ใช้ dangerและ badge count; เมื่อ 0ใช้ textGrey เป็น presentation componentที่ไม่รู้ API</p></section>
-<section><h2>5. Route A</h2><p>“รับเอกสาร” push <code>ScanPoScreen(userId, fullName)</code> แล้ว workflowภายในเลือก POและรับสินค้า</p></section>
-<section><h2>6. Route B</h2><p>“ค้างการผูก Pallet” push <code>PendingPalletScreen</code> เพื่อแก้รายการที่ receiptสำเร็จแต่ palletยังไม่ผูก เมนูจึงเป็น recovery entry point ไม่ใช่แค่ navigation</p></section>
-<section><h2>7. Race</h2><p>ถ้ากลับ routeเร็วแล้ว refreshหลายครั้ง responseเก่าอาจทับใหม่ แม้เป็น countอย่างเดียวควรใช้ single-flight/generation และแสดง retryเมื่อโหลดล้มแทน count 0หลอก</p></section>
-<section><h2>8. Tests</h2><div class="success">0/positive badge, API failure, refreshหลังทั้ง routes, disposeระหว่าง load, double tapไม่ pushซ้ำ และ constructorส่ง user identityถูก โดย fake ReceivingRepositoryแทน singleton</div></section>
+<section id="section-4"><h2>4. Card semantics</h2><p><code>ReceivingMenuCard</code>รับ icon/title/subtitle/color/badge/onTap เมื่อ pending&gt;0ใช้ dangerและ badge count; เมื่อ 0ใช้ textGrey เป็น presentation componentที่ไม่รู้ API</p></section>
+<section id="section-5"><h2>5. Route A</h2><p>“รับเอกสาร” push <code>ScanPoScreen(userId, fullName)</code> แล้ว workflowภายในเลือก POและรับสินค้า</p></section>
+<section id="section-6"><h2>6. Route B</h2><p>“ค้างการผูก Pallet” push <code>PendingPalletScreen</code> เพื่อแก้รายการที่ receiptสำเร็จแต่ palletยังไม่ผูก เมนูจึงเป็น recovery entry point ไม่ใช่แค่ navigation</p></section>
+<section id="section-7"><h2>7. Race</h2><p>ถ้ากลับ routeเร็วแล้ว refreshหลายครั้ง responseเก่าอาจทับใหม่ แม้เป็น countอย่างเดียวควรใช้ single-flight/generation และแสดง retryเมื่อโหลดล้มแทน count 0หลอก</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">0/positive badge, API failure, refreshหลังทั้ง routes, disposeระหว่าง load, double tapไม่ pushซ้ำ และ constructorส่ง user identityถูก โดย fake ReceivingRepositoryแทน singleton</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

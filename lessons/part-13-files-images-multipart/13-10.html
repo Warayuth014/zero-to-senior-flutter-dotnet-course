@@ -4,9 +4,10 @@
 <title>Lab: Part image upload กับ .NET</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-10 · Files &amp; Platform</span><h1>Lab: Part image upload กับ .NET</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Flutter contract</a></li><li><a href="#section-3">3. Picker + preview</a></li><li><a href="#section-4">4. .NET endpoint</a></li><li><a href="#section-5">5. Response model</a></li><li><a href="#section-6">6. State transition</a></li><li><a href="#section-7">7. Test plan</a></li><li><a href="#section-8">8. Definition of Done</a></li></ol></nav>
 <div class="note"><strong>Lab ปลาย Part:</strong> ทำ flow เลือก → preview → validate → upload → แสดง URL ใหม่ โดยยึด <code>part_image_screen.dart</code>, <code>upload_api.dart</code> และ <code>ApiService._uploadFile</code> ของ wmsapp แล้วปรับ contract ให้ production-safe</div>
-<section><h2>1. Acceptance criteria</h2><ol><li>เลือก camera/gallery และ cancel ได้</li><li>preview ไม่ decode เกินขนาดจอ</li><li>รับเฉพาะ JPEG/PNG ไม่เกิน 5 MB</li><li>ส่ง <code>partId</code>, <code>uploadId</code> และ <code>file</code></li><li>progress/cancel/error แยกสถานะ</li><li>response URL แสดงรูปใหม่และไม่เกิด duplicate เมื่อ retry</li></ol></section>
-<section><h2>2. Flutter contract</h2><pre class="code-vs"><code>abstract interface class PartImageRepository {
+<section id="section-1"><h2>1. Acceptance criteria</h2><ol><li>เลือก camera/gallery และ cancel ได้</li><li>preview ไม่ decode เกินขนาดจอ</li><li>รับเฉพาะ JPEG/PNG ไม่เกิน 5 MB</li><li>ส่ง <code>partId</code>, <code>uploadId</code> และ <code>file</code></li><li>progress/cancel/error แยกสถานะ</li><li>response URL แสดงรูปใหม่และไม่เกิด duplicate เมื่อ retry</li></ol></section>
+<section id="section-2"><h2>2. Flutter contract</h2><pre class="code-vs"><code>abstract interface class PartImageRepository {
   Future&lt;PartImage&gt; upload({
     required String partId,
     required XFile file,
@@ -15,13 +16,13 @@
     required CancelToken cancelToken,
   });
 }</code></pre><p>screen ไม่รู้ multipart/URL/token และ repository แปล transport error เป็น domain failure</p></section>
-<section><h2>3. Picker + preview</h2><pre class="code-vs"><code>final picked = await picker.pickImage(
+<section id="section-3"><h2>3. Picker + preview</h2><pre class="code-vs"><code>final picked = await picker.pickImage(
   source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 85,
 );
 if (picked == null || !mounted) return;
 final candidate = await validator.validate(picked);
 setState(() =&gt; _candidate = candidate);</code></pre><p>ยังไม่อัปโหลดจนผู้ใช้กดยืนยัน และ restore lost data บน Android ผ่าน flow validation เดียวกัน</p></section>
-<section><h2>4. .NET endpoint</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
+<section id="section-4"><h2>4. .NET endpoint</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
   HttpRequest request, IPartImageService service, ClaimsPrincipal user,
   CancellationToken ct) =&gt; {
     var form = await request.ReadFormAsync(ct);
@@ -30,7 +31,7 @@ setState(() =&gt; _candidate = candidate);</code></pre><p>ยังไม่อ�
       user, form["partId"]!, form["uploadId"]!, file, ct);
     return Results.Created(result.ImageUrl, result);
 }).RequireAuthorization();</code></pre><p>service ต้องตรวจ null/length/signature/dimensions/permission และสร้าง filename เอง; endpoint จำกัด request body ก่อนอ่าน form</p></section>
-<section><h2>5. Response model</h2><pre class="code-vs"><code>public sealed record PartImageResponse(
+<section id="section-5"><h2>5. Response model</h2><pre class="code-vs"><code>public sealed record PartImageResponse(
   string PartId,
   string ImageUrl,
   string ContentType,
@@ -38,11 +39,11 @@ setState(() =&gt; _candidate = candidate);</code></pre><p>ยังไม่อ�
   string ETag);
 
 // Flutter parse เป็น typed DTO และ resolve URL ผ่าน MediaUrlPolicy</code></pre></section>
-<section><h2>6. State transition</h2><pre class="code-vs"><code>idle → picking → preview → uploading(progress)
+<section id="section-6"><h2>6. State transition</h2><pre class="code-vs"><code>idle → picking → preview → uploading(progress)
                        ↘ cancelled → preview
                        ↘ rejected  → preview + field error
                        ↘ success   → refresh/replace image version</code></pre><p>ใช้ operation ID ป้องกัน response งานเก่าทับงานใหม่ และหลัง timeout ให้ reconcile ด้วย uploadId ก่อน retry</p></section>
-<section><h2>7. Test plan</h2><p>Flutter unit test validator/repository mapping, widget test cancel-preview-progress-retry, .NET integration test multipart จริงผ่าน <code>WebApplicationFactory</code>, authorization/limits/signature/idempotency และ end-to-end บน device ผ่าน Wi‑Fi/HTTPS ของสภาพแวดล้อมจริง</p></section>
-<section><h2>8. Definition of Done</h2><div class="success">ไม่ใช่เพียง “รูปขึ้น”: ไม่มี token/path หลุด log, ไม่ไว้ใจ filename/MIME, ไม่เกิด orphan/duplicate, cancel หยุดงานจริง, รูปใหม่ไม่ติด cache เก่า, memory ไม่พุ่งบน PDA และ error ทุกแบบมีทางให้ผู้ใช้แก้ต่อได้</div></section>
+<section id="section-7"><h2>7. Test plan</h2><p>Flutter unit test validator/repository mapping, widget test cancel-preview-progress-retry, .NET integration test multipart จริงผ่าน <code>WebApplicationFactory</code>, authorization/limits/signature/idempotency และ end-to-end บน device ผ่าน Wi‑Fi/HTTPS ของสภาพแวดล้อมจริง</p></section>
+<section id="section-8"><h2>8. Definition of Done</h2><div class="success">ไม่ใช่เพียง “รูปขึ้น”: ไม่มี token/path หลุด log, ไม่ไว้ใจ filename/MIME, ไม่เกิด orphan/duplicate, cancel หยุดงานจริง, รูปใหม่ไม่ติด cache เก่า, memory ไม่พุ่งบน PDA และ error ทุกแบบมีทางให้ผู้ใช้แก้ต่อได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,30 +4,31 @@
 <title>Constraints go down, sizes go up</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-01 · Flutter UI</span><h1>Constraints go down, sizes go up</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. BoxConstraints บอกช่วง ไม่ใช่ขนาดตายตัว</a></li><li><a href="#section-2">2. Constraints go down, sizes go up, parents set positions</a></li><li><a href="#section-3">3. ตัวอย่างจาก HomeView</a></li><li><a href="#section-4">4. Tight กับ loose ที่พบบ่อย</a></li><li><a href="#section-5">5. Unbounded ไม่ใช่ infinity ทุกทิศ</a></li><li><a href="#section-6">6. วิธี debug constraints</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><strong>กฎแกนกลางของ Flutter layout:</strong> parent ส่ง <em>constraints</em> ลงไป, child เลือกขนาดภายในกรอบนั้น, แล้ว parent เลือกตำแหน่งให้ child หากเข้าใจกฎนี้จะวิเคราะห์ overflow, unbounded size และหน้าจอ PDA ที่ผิดสัดส่วนได้โดยไม่เดาสุ่ม</div>
-<section><h2>1. BoxConstraints บอกช่วง ไม่ใช่ขนาดตายตัว</h2><pre class="code-vs"><code>BoxConstraints(
+<section id="section-1"><h2>1. BoxConstraints บอกช่วง ไม่ใช่ขนาดตายตัว</h2><pre class="code-vs"><code>BoxConstraints(
   minWidth: 0,
   maxWidth: 360,
   minHeight: 0,
   maxHeight: 640,
 )</code></pre><p>Child เลือกได้เฉพาะขนาดที่อยู่ในช่วง min–max ถ้า min เท่ากับ max เรียกว่า tight constraint; ถ้ายังมีช่วงให้เลือกเรียกว่า loose constraint ค่า <code>double.infinity</code> ใน child ไม่ได้แปลว่าใหญ่ไม่สิ้นสุด แต่แปลว่าเอา max ที่ parent อนุญาต</p></section>
-<section><h2>2. Constraints go down, sizes go up, parents set positions</h2><ol><li>Scaffold/viewport กำหนดพื้นที่ให้ body</li><li>Column ส่ง constraint ให้ลูกแต่ละตัว</li><li>ลูกคำนวณและส่ง size กลับ</li><li>Column รวม size แล้วจัดตำแหน่งตาม main/cross axis</li></ol><p>Layout เป็นคนละ phase กับ build: build สร้าง configuration tree ส่วน layout เจรจาขนาดบน render tree จึงแก้ layout bug ด้วยการดู parent chain ไม่ใช่เพิ่ม Container แบบสุ่ม</p></section>
-<section><h2>3. ตัวอย่างจาก HomeView</h2><pre class="code-vs"><code>LayoutBuilder(
+<section id="section-2"><h2>2. Constraints go down, sizes go up, parents set positions</h2><ol><li>Scaffold/viewport กำหนดพื้นที่ให้ body</li><li>Column ส่ง constraint ให้ลูกแต่ละตัว</li><li>ลูกคำนวณและส่ง size กลับ</li><li>Column รวม size แล้วจัดตำแหน่งตาม main/cross axis</li></ol><p>Layout เป็นคนละ phase กับ build: build สร้าง configuration tree ส่วน layout เจรจาขนาดบน render tree จึงแก้ layout bug ด้วยการดู parent chain ไม่ใช่เพิ่ม Container แบบสุ่ม</p></section>
+<section id="section-3"><h2>3. ตัวอย่างจาก HomeView</h2><pre class="code-vs"><code>LayoutBuilder(
   builder: (context, page) {
     final compact = page.maxHeight &lt; 650;
     final narrow = page.maxWidth &lt;= 400;
     return WarehouseHome(compact: compact, narrow: narrow);
   },
 )</code></pre><p>Absolute ใช้พื้นที่ที่ parent ส่งให้จริง ไม่ใช่ขนาดจอทั้งเครื่อง จากนั้น LayoutBuilder ชั้นในคำนวณ <code>extent = (maxHeight - gaps) / 3</code> ทำให้กริดพอดีสามแถวในพื้นที่ที่เหลือหลัง banner</p></section>
-<section><h2>4. Tight กับ loose ที่พบบ่อย</h2><ul><li><code>SizedBox(width: 48)</code> ส่ง tight width ให้ลูก</li><li><code>Center</code> คลาย constraint ให้ลูกเลือกขนาด แล้วจัดกลาง</li><li><code>Expanded</code> ส่ง tight constraint ตามพื้นที่ flex ที่ได้รับ</li><li><code>Flexible(fit: FlexFit.loose)</code> ให้พื้นที่สูงสุดแต่ child ไม่จำเป็นต้องใช้หมด</li><li><code>ConstrainedBox</code> เพิ่ม/ผสานข้อจำกัดกับของ parent</li></ul></section>
-<section><h2>5. Unbounded ไม่ใช่ infinity ทุกทิศ</h2><p>Scrollable มักส่ง main-axis แบบไม่จำกัดให้ลูก เช่น Column ใน vertical SingleChildScrollView ไม่มี maxHeight ที่ใช้ได้ จึงห้ามวาง Expanded ในนั้นโดยตรง เพราะ Expanded ต้องแบ่ง “พื้นที่ที่เหลือ” แต่พื้นที่เลื่อนไม่มีปลายทาง ส่วน cross-axis ยังอาจถูกบังคับเต็มความกว้างตาม viewport</p></section>
-<section><h2>6. วิธี debug constraints</h2><p>เริ่มจากข้อความ exception และ widget ที่เป็น nearest relevant ancestor เปิด Flutter Inspector ดู constraints/size แล้วไล่ขึ้นจนพบจุดที่ constraint เปลี่ยน ใช้ <code>debugPrintConstraints</code> ผ่าน LayoutBuilder ชั่วคราวหรือ DevTools Layout Explorer และทดสอบอย่างน้อยจอ 320×568, PDA เป้าหมาย, tablet และ text scale สูง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Column สูงเต็มจอมี header 72, action 56 และ list ที่ต้องกินพื้นที่ที่เหลือ ควรประกอบอย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>Column(children: [
+<section id="section-4"><h2>4. Tight กับ loose ที่พบบ่อย</h2><ul><li><code>SizedBox(width: 48)</code> ส่ง tight width ให้ลูก</li><li><code>Center</code> คลาย constraint ให้ลูกเลือกขนาด แล้วจัดกลาง</li><li><code>Expanded</code> ส่ง tight constraint ตามพื้นที่ flex ที่ได้รับ</li><li><code>Flexible(fit: FlexFit.loose)</code> ให้พื้นที่สูงสุดแต่ child ไม่จำเป็นต้องใช้หมด</li><li><code>ConstrainedBox</code> เพิ่ม/ผสานข้อจำกัดกับของ parent</li></ul></section>
+<section id="section-5"><h2>5. Unbounded ไม่ใช่ infinity ทุกทิศ</h2><p>Scrollable มักส่ง main-axis แบบไม่จำกัดให้ลูก เช่น Column ใน vertical SingleChildScrollView ไม่มี maxHeight ที่ใช้ได้ จึงห้ามวาง Expanded ในนั้นโดยตรง เพราะ Expanded ต้องแบ่ง “พื้นที่ที่เหลือ” แต่พื้นที่เลื่อนไม่มีปลายทาง ส่วน cross-axis ยังอาจถูกบังคับเต็มความกว้างตาม viewport</p></section>
+<section id="section-6"><h2>6. วิธี debug constraints</h2><p>เริ่มจากข้อความ exception และ widget ที่เป็น nearest relevant ancestor เปิด Flutter Inspector ดู constraints/size แล้วไล่ขึ้นจนพบจุดที่ constraint เปลี่ยน ใช้ <code>debugPrintConstraints</code> ผ่าน LayoutBuilder ชั่วคราวหรือ DevTools Layout Explorer และทดสอบอย่างน้อยจอ 320×568, PDA เป้าหมาย, tablet และ text scale สูง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Column สูงเต็มจอมี header 72, action 56 และ list ที่ต้องกินพื้นที่ที่เหลือ ควรประกอบอย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>Column(children: [
   const Header(),
   const SizedBox(height: 8),
   Expanded(child: ListView.builder(/* ... */)),
   const ActionBar(),
 ])</code></pre><p>Expanded ทำให้ list ได้ bounded height ที่เหลือและเลื่อนภายในตัวเอง ไม่ต้องคำนวณ MediaQuery height ลบเลข magic หลายชุด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ overflow ด้วย <code>SingleChildScrollView</code> ครอบทุกอย่างทันที มันอาจซ่อนปัญหา ownership ของพื้นที่, ทำ list ซ้อน scroll และสร้าง child ทั้งหมด ให้ระบุว่าอะไรต้องตรึง อะไรต้องยืด และอะไรต้องเลื่อนก่อนเลือก widget</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ overflow ด้วย <code>SingleChildScrollView</code> ครอบทุกอย่างทันที มันอาจซ่อนปัญหา ownership ของพื้นที่, ทำ list ซ้อน scroll และสร้าง child ทั้งหมด ให้ระบุว่าอะไรต้องตรึง อะไรต้องยืด และอะไรต้องเลื่อนก่อนเลือก widget</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,8 +4,9 @@
 <title>Async action และ try/finally</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-08 · State &amp; Lifecycle</span><h1>Async action และ try/finally</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. try/finally pattern</a></li><li><a href="#section-2">2. Catch เฉพาะที่จัดการได้</a></li><li><a href="#section-3">3. Future.wait</a></li><li><a href="#section-4">4. unawaited อย่างตั้งใจ</a></li><li><a href="#section-5">5. Snapshot input</a></li><li><a href="#section-6">6. Cleanup location</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Async actionที่แข็งแรงต้อง guard concurrent call, publish loading, map error, cleanupใน finally และรักษา state consistency ไม่ว่า success, exception, navigation หรือ disposeจะเกิด</div>
-<section><h2>1. try/finally pattern</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
+<section id="section-1"><h2>1. try/finally pattern</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
   if (_submitting) return;
   _submitting = true; _error = null; notifyListeners();
   try {
@@ -18,12 +19,12 @@
     notifyListeners();
   }
 }</code></pre></section>
-<section><h2>2. Catch เฉพาะที่จัดการได้</h2><p>แปลง known transport/domain exceptionเป็น state แต่ programming errorไม่ควรถูกกลืนเป็น “เกิดข้อผิดพลาด”แล้วเดินต่อผิด invariant ใช้ logging+rethrow/zoneตาม policy และให้ repositoryแปลง HTTPรายละเอียดเป็น typed failures</p></section>
-<section><h2>3. Future.wait</h2><p>WarehouseStore <code>loadAll</code> โหลดหลาย resourceขนานด้วย Future.wait ลดเวลารวม แต่ค่า default errorทำ Futureรวม failเมื่อหนึ่งงาน fail แม้งานอื่นยังวิ่ง แต่ละ loaderจับ errorตนเองจึงเหมาะกับ partial success งานที่ต้อง all-or-nothingต้องออกแบบ transaction/result aggregationชัด</p></section>
-<section><h2>4. unawaited อย่างตั้งใจ</h2><p>ใช้ <code>unawaited</code> เมื่อ fire-and-forgetจริง เช่น refresh badge/historyหลัง success แต่ futureต้องจัดการ errorภายใน ไม่ปล่อย unhandled exception และไม่ใช้เมื่อขั้นถัดไปต้องผลลัพธ์</p></section>
-<section><h2>5. Snapshot input</h2><p>อ่าน draft/entity IDใส่ localก่อน await ถ้า mutable fieldsเปลี่ยนระหว่างทาง resultต้อง applyเฉพาะ operationเดิม ใช้ generation/session token ไม่อ่าน current fieldหลัง awaitแล้วสมมติว่าเหมือนเดิม</p></section>
-<section><h2>6. Cleanup location</h2><p>Busyใน storeปลดใน finallyและ notify ส่วน UI setStateต้องตรวจ mounted แยก Resource cleanupไม่ควรถูกข้ามเพราะ UIหาย หาก commandถูกยกเลิกใช้ cancellation resultเฉพาะไม่เหมารวม error</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>โหลด tasksและsummaryพร้อมกัน Summary failแต่ tasksต้องแสดง จะใช้ Future.waitตรงไหน?</p><details><summary>เฉลย</summary><p>ให้ loadTasks/loadSummaryจับและ publish stateตนเอง แล้ว Future.waitเพื่อรอ completionทั้งหมด หรือใช้ record Results aggregate ไม่ปล่อย summary exceptionทำ global load error หาก summaryเป็น optional ส่วน critical dependenciesค่อย failทั้งหน้า</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ห้าม set loading=falseเฉพาะ success/catchหลายทางเพราะ return/exceptionใหม่ทำค้าง ใช้ finally และอย่า notify successก่อน serverตอบเพียงเพื่อให้ UIเร็ว หากต้อง optimisticให้มี rollbackชัด</div></section>
+<section id="section-2"><h2>2. Catch เฉพาะที่จัดการได้</h2><p>แปลง known transport/domain exceptionเป็น state แต่ programming errorไม่ควรถูกกลืนเป็น “เกิดข้อผิดพลาด”แล้วเดินต่อผิด invariant ใช้ logging+rethrow/zoneตาม policy และให้ repositoryแปลง HTTPรายละเอียดเป็น typed failures</p></section>
+<section id="section-3"><h2>3. Future.wait</h2><p>WarehouseStore <code>loadAll</code> โหลดหลาย resourceขนานด้วย Future.wait ลดเวลารวม แต่ค่า default errorทำ Futureรวม failเมื่อหนึ่งงาน fail แม้งานอื่นยังวิ่ง แต่ละ loaderจับ errorตนเองจึงเหมาะกับ partial success งานที่ต้อง all-or-nothingต้องออกแบบ transaction/result aggregationชัด</p></section>
+<section id="section-4"><h2>4. unawaited อย่างตั้งใจ</h2><p>ใช้ <code>unawaited</code> เมื่อ fire-and-forgetจริง เช่น refresh badge/historyหลัง success แต่ futureต้องจัดการ errorภายใน ไม่ปล่อย unhandled exception และไม่ใช้เมื่อขั้นถัดไปต้องผลลัพธ์</p></section>
+<section id="section-5"><h2>5. Snapshot input</h2><p>อ่าน draft/entity IDใส่ localก่อน await ถ้า mutable fieldsเปลี่ยนระหว่างทาง resultต้อง applyเฉพาะ operationเดิม ใช้ generation/session token ไม่อ่าน current fieldหลัง awaitแล้วสมมติว่าเหมือนเดิม</p></section>
+<section id="section-6"><h2>6. Cleanup location</h2><p>Busyใน storeปลดใน finallyและ notify ส่วน UI setStateต้องตรวจ mounted แยก Resource cleanupไม่ควรถูกข้ามเพราะ UIหาย หาก commandถูกยกเลิกใช้ cancellation resultเฉพาะไม่เหมารวม error</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>โหลด tasksและsummaryพร้อมกัน Summary failแต่ tasksต้องแสดง จะใช้ Future.waitตรงไหน?</p><details><summary>เฉลย</summary><p>ให้ loadTasks/loadSummaryจับและ publish stateตนเอง แล้ว Future.waitเพื่อรอ completionทั้งหมด หรือใช้ record Results aggregate ไม่ปล่อย summary exceptionทำ global load error หาก summaryเป็น optional ส่วน critical dependenciesค่อย failทั้งหน้า</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ห้าม set loading=falseเฉพาะ success/catchหลายทางเพราะ return/exceptionใหม่ทำค้าง ใช้ finally และอย่า notify successก่อน serverตอบเพียงเพื่อให้ UIเร็ว หากต้อง optimisticให้มี rollbackชัด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

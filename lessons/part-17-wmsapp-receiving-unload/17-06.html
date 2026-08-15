@@ -4,21 +4,22 @@
 <title>Validate serial และ duplicate protection</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-06 · Real Codebase</span><h1>Validate serial และ duplicate protection</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Local duplicate</a></li><li><a href="#section-2">2. Quantity guard</a></li><li><a href="#section-3">3. Server validation</a></li><li><a href="#section-4">4. Line/lot match</a></li><li><a href="#section-5">5. Add and focus</a></li><li><a href="#section-6">6. Remove</a></li><li><a href="#section-7">7. Race/double scan</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Duplicate guard มีสองชั้น:</strong> local listตอบผู้ใช้เร็ว แต่ server validationและ uniqueness constraintเท่านั้นที่กัน serialซ้ำข้ามเครื่อง/ข้าม sessionได้</div>
-<section><h2>1. Local duplicate</h2><pre class="code-vs"><code>final index = _serialNumbers.indexOf(serialNo);
+<section id="section-1"><h2>1. Local duplicate</h2><pre class="code-vs"><code>final index = _serialNumbers.indexOf(serialNo);
 if (index &gt;= 0) {
   highlight(index, duplicate: true);
   show duplicate status;
   return;
 }</code></pre><p>normalize trim+uppercaseก่อนเทียบ</p></section>
-<section><h2>2. Quantity guard</h2><p>maxใช้ qtyRemainingถ้า &gt;0 มิฉะนั้น qtyOrdered และ rejectเมื่อ serial countถึง max ต้องระวัง remaining=0ไม่ควร fallback orderedถ้า item complete; server status/revalidationเป็นตัวตัดสินสุดท้าย</p></section>
-<section><h2>3. Server validation</h2><p>หน้าจอเรียก <code>validateReceivingSerial()</code> ผ่าน ReceivingApi ก่อนเพิ่มค่าเข้า local state</p><pre class="code-vs"><code>GET /receiving/validate-serial
+<section id="section-2"><h2>2. Quantity guard</h2><p>maxใช้ qtyRemainingถ้า &gt;0 มิฉะนั้น qtyOrdered และ rejectเมื่อ serial countถึง max ต้องระวัง remaining=0ไม่ควร fallback orderedถ้า item complete; server status/revalidationเป็นตัวตัดสินสุดท้าย</p></section>
+<section id="section-3"><h2>3. Server validation</h2><p>หน้าจอเรียก <code>validateReceivingSerial()</code> ผ่าน ReceivingApi ก่อนเพิ่มค่าเข้า local state</p><pre class="code-vs"><code>GET /receiving/validate-serial
   ?partId=P-001&amp;serialNo=SN-01
 → ValidateSerialResponse</code></pre><p>queryสร้างด้วย Uriจึง encodeค่าอย่างถูกต้อง</p></section>
-<section><h2>4. Line/lot match</h2><p>แม้ serialเป็นของ partถูก ต้องมี <code>serialResult.lineId == item.id</code> มิฉะนั้น rejectพร้อมบอก lotจริง ป้องกัน serialของ lotอื่นหลุดเข้า receipt lineปัจจุบัน</p></section>
-<section><h2>5. Add and focus</h2><p>เมื่อผ่านจึง add list, update qty text, clear input, highlight/scroll row, show status 5sและคืน focusให้ serial field UXเหล่านี้เป็นผลหลัง authoritative validation ไม่ก่อน</p></section>
-<section><h2>6. Remove</h2><p>ลบ serialต้อง confirm, update list/qty/highlightและคืน focus หาก request submitกำลังทำงานควร disable mutationหรือ snapshot serial listที่ส่งเพื่อไม่ให้ UI/stateต่างจาก command</p></section>
-<section><h2>7. Race/double scan</h2><p>scannerยิง serialเดิมสองครั้งเร็วระหว่าง validationแรก pending ทั้งคู่ยังไม่อยู่ local listและอาจ addซ้ำ ต้องมี in-flight set/serialize scan และ server enforce unique/idempotent command</p></section>
-<section><h2>8. Tests</h2><div class="success">local duplicate, concurrent duplicate, case/space, max qty, server reject, wrong line/lot, validation timeout, remove cancel/confirm, focusและ timer dispose พร้อม integration test uniquenessข้ามสอง clients</div></section>
+<section id="section-4"><h2>4. Line/lot match</h2><p>แม้ serialเป็นของ partถูก ต้องมี <code>serialResult.lineId == item.id</code> มิฉะนั้น rejectพร้อมบอก lotจริง ป้องกัน serialของ lotอื่นหลุดเข้า receipt lineปัจจุบัน</p></section>
+<section id="section-5"><h2>5. Add and focus</h2><p>เมื่อผ่านจึง add list, update qty text, clear input, highlight/scroll row, show status 5sและคืน focusให้ serial field UXเหล่านี้เป็นผลหลัง authoritative validation ไม่ก่อน</p></section>
+<section id="section-6"><h2>6. Remove</h2><p>ลบ serialต้อง confirm, update list/qty/highlightและคืน focus หาก request submitกำลังทำงานควร disable mutationหรือ snapshot serial listที่ส่งเพื่อไม่ให้ UI/stateต่างจาก command</p></section>
+<section id="section-7"><h2>7. Race/double scan</h2><p>scannerยิง serialเดิมสองครั้งเร็วระหว่าง validationแรก pending ทั้งคู่ยังไม่อยู่ local listและอาจ addซ้ำ ต้องมี in-flight set/serialize scan และ server enforce unique/idempotent command</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">local duplicate, concurrent duplicate, case/space, max qty, server reject, wrong line/lot, validation timeout, remove cancel/confirm, focusและ timer dispose พร้อม integration test uniquenessข้ามสอง clients</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

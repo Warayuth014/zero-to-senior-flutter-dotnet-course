@@ -4,24 +4,25 @@
 <title>HTTP GET/POST และ request body</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-04 · Flutter + .NET</span><h1>HTTP GET/POST และ request body</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. GET</a></li><li><a href="#section-2">2. POST JSON</a></li><li><a href="#section-3">3. DTO ไม่ใช่ widget state</a></li><li><a href="#section-4">4. Other methods</a></li><li><a href="#section-5">5. .NET counterpart</a></li><li><a href="#section-6">6. Body edge cases</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Checklist</a></li></ol></nav>
 <div class="note"><strong>Method สื่อเจตนา:</strong> GET อ่านข้อมูล, POST ส่ง command/สร้าง resource; payload และ side effect ต้องตรงกับ contract ของ endpoint</div>
-<section><h2>1. GET</h2><pre class="code-vs"><code>final uri = buildUri('/tasks', {'status': 'open'});
+<section id="section-1"><h2>1. GET</h2><pre class="code-vs"><code>final uri = buildUri('/tasks', {'status': 'open'});
 final response = await client.get(uri, headers: headers);</code></pre><p>GET ควร safe และไม่มีการเปลี่ยนข้อมูล เพื่อให้ retry/cache มีความหมาย</p></section>
-<section><h2>2. POST JSON</h2><pre class="code-vs"><code>final response = await client.post(
+<section id="section-2"><h2>2. POST JSON</h2><pre class="code-vs"><code>final response = await client.post(
   buildUri('/tasks/complete'),
   headers: {...headers, 'Content-Type': 'application/json'},
   body: jsonEncode(request.toJson()),
 );</code></pre></section>
-<section><h2>3. DTO ไม่ใช่ widget state</h2><p>สร้าง request DTO ที่มีเฉพาะ field ตาม API เช่น taskId, quantity และ idempotencyKey อย่าส่งทั้ง domain object หรือ map จาก controller เพราะจะรั่ว field และเปลี่ยน contract โดยไม่ตั้งใจ</p></section>
-<section><h2>4. Other methods</h2><p>PUT มักแทน resource เต็ม, PATCH แก้บาง field, DELETE ลบ แต่ความหมายจริงต้องอ่าน API contract ไม่เดาจากชื่อ method อย่างเดียว</p></section>
-<section><h2>5. .NET counterpart</h2><pre class="code-vs"><code>app.MapPost("/api/WMS/tasks/complete",
+<section id="section-3"><h2>3. DTO ไม่ใช่ widget state</h2><p>สร้าง request DTO ที่มีเฉพาะ field ตาม API เช่น taskId, quantity และ idempotencyKey อย่าส่งทั้ง domain object หรือ map จาก controller เพราะจะรั่ว field และเปลี่ยน contract โดยไม่ตั้งใจ</p></section>
+<section id="section-4"><h2>4. Other methods</h2><p>PUT มักแทน resource เต็ม, PATCH แก้บาง field, DELETE ลบ แต่ความหมายจริงต้องอ่าน API contract ไม่เดาจากชื่อ method อย่างเดียว</p></section>
+<section id="section-5"><h2>5. .NET counterpart</h2><pre class="code-vs"><code>app.MapPost("/api/WMS/tasks/complete",
   async (CompleteTaskRequest request, ITaskService service,
          CancellationToken ct) =&gt; {
     var result = await service.CompleteAsync(request, ct);
     return Results.Ok(result);
   });</code></pre></section>
-<section><h2>6. Body edge cases</h2><p>แยก empty body, JSON <code>null</code>, object และ list ให้ชัด ถ้า success endpoint คืน 204 ต้องไม่บังคับ decode map; ถ้า 200 ต้องกำหนด response shape</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>การสแกนยืนยันหยิบสินค้าเป็น GET หรือ POST?</p><details><summary>เฉลย</summary><p>POST เพราะเปลี่ยน state และอาจมี side effect; ต้องออกแบบ duplicate/idempotency ด้วย ไม่ซ่อน command ใน query ของ GET</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">method ตรง intent, URI encode แล้ว, request DTO typed, content-type ถูก, .NET bind ได้ และกำหนด success body/empty body ชัดเจน</div></section>
+<section id="section-6"><h2>6. Body edge cases</h2><p>แยก empty body, JSON <code>null</code>, object และ list ให้ชัด ถ้า success endpoint คืน 204 ต้องไม่บังคับ decode map; ถ้า 200 ต้องกำหนด response shape</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>การสแกนยืนยันหยิบสินค้าเป็น GET หรือ POST?</p><details><summary>เฉลย</summary><p>POST เพราะเปลี่ยน state และอาจมี side effect; ต้องออกแบบ duplicate/idempotency ด้วย ไม่ซ่อน command ใน query ของ GET</p></details></section>
+<section id="section-8"><h2>8. Checklist</h2><div class="success">method ตรง intent, URI encode แล้ว, request DTO typed, content-type ถูก, .NET bind ได้ และกำหนด success body/empty body ชัดเจน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,8 +4,9 @@
 <title>Controller/listener ต้อง dispose อย่างไร</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-12 · Flutter UI</span><h1>Controller/listener ต้อง dispose อย่างไร</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Lifecycle template</a></li><li><a href="#section-2">2. External vs internal resource</a></li><li><a href="#section-3">3. addListener ต้อง remove</a></li><li><a href="#section-4">4. Dynamic maps</a></li><li><a href="#section-5">5. Timer และ async callback</a></li><li><a href="#section-6">6. dispose order</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">กฎ ownership: ใครสร้าง resource คนนั้น dispose และ lifetimeต้องตรงกับสิ่งที่ resourceควบคุม Controller/FocusNode/Timer/Subscription/listenerที่หลุดจะทำให้ memory leak, callbackหลังปิดหน้า หรือใช้ objectที่ถูก disposeแล้ว</div>
-<section><h2>1. Lifecycle template</h2><pre class="code-vs"><code>class _ScanState extends State&lt;ScanPage&gt; {
+<section id="section-1"><h2>1. Lifecycle template</h2><pre class="code-vs"><code>class _ScanState extends State&lt;ScanPage&gt; {
   final _controller = TextEditingController();
   final _focus = FocusNode();
   Timer? _duplicateTimer;
@@ -18,12 +19,12 @@
     super.dispose();
   }
 }</code></pre></section>
-<section><h2>2. External vs internal resource</h2><p>ถ้า childรับ controller/focusจาก constructor ห้าม dispose เพราะ ownerอาจใช้กับ sibling/หลัง childหาย หาก optionalและ childสร้าง fallback ให้เก็บ fieldแยกเช่น <code>_ownController</code> แล้ว disposeเฉพาะของตน Absolute ScanBoxทำ patternนี้กับ controller</p></section>
-<section><h2>3. addListener ต้อง remove</h2><p>สำหรับ controllerที่ตน dispose การ disposeจะล้าง listeners แต่ explicit removeช่วยเมื่อ listenerผูกกับ external objectหรือเปลี่ยน sourceใน didUpdateWidget Patternคือ unsubscribe old → assign new → subscribe new และ unsubscribeใน dispose</p></section>
-<section><h2>4. Dynamic maps</h2><p>Cycle Count สร้าง controller/focusต่อ product codeใน Map เมื่อ listเปลี่ยนต้อง dispose entriesที่ถูกลบ และ disposeทุก valueตอนหน้าปิด ไม่ใช้ indexเป็น keyเพราะ reorderทำ resourceย้าย item ใช้ stable product/line ID</p></section>
-<section><h2>5. Timer และ async callback</h2><p>Timer cancelใน disposeและ cancelตัวเก่าก่อน replace เช่น toast/flash ของ Absolute Callbackยังควรตรวจ mountedเพราะ cancelอาจแข่งกับ callbackที่เริ่มแล้ว Futureยกเลิกไม่ได้โดยอัตโนมัติจึงต้อง ignore stale result/cancel requestตาม owner</p></section>
-<section><h2>6. dispose order</h2><p>หยุด producerก่อน consumer: cancel timer/subscription, remove listeners/observers, dispose controllers/notifiers แล้ว <code>super.dispose()</code> ตาม patternของ framework ห้าม setStateใน dispose และอย่าเรียก requestFocusหลัง nodeถูก dispose</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ScanFieldรับ optional controllerและ optional focusNode ควรจัด ownershipอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>เก็บ <code>_ownController</code>/<code>_ownFocus</code> เฉพาะเมื่อ inputเป็น null, gettersเลือก externalหรือ own, disposeเฉพาะ own หาก widget updateจาก own→external/กลับกันต้องจัด create/disposeใน didUpdateWidget หรือออกแบบ contractไม่เปลี่ยน ownerกลาง lifetimeและ assert/documentไว้</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Disposeสองครั้ง/child dispose resourceของ parentอันตรายพอ ๆ กับไม่ dispose อาการมักเกิดหลัง navigation/rebuildจึงหาได้ยาก เขียน ownershipใน constructor docและทดสอบ mount→replace→unmount</div></section>
+<section id="section-2"><h2>2. External vs internal resource</h2><p>ถ้า childรับ controller/focusจาก constructor ห้าม dispose เพราะ ownerอาจใช้กับ sibling/หลัง childหาย หาก optionalและ childสร้าง fallback ให้เก็บ fieldแยกเช่น <code>_ownController</code> แล้ว disposeเฉพาะของตน Absolute ScanBoxทำ patternนี้กับ controller</p></section>
+<section id="section-3"><h2>3. addListener ต้อง remove</h2><p>สำหรับ controllerที่ตน dispose การ disposeจะล้าง listeners แต่ explicit removeช่วยเมื่อ listenerผูกกับ external objectหรือเปลี่ยน sourceใน didUpdateWidget Patternคือ unsubscribe old → assign new → subscribe new และ unsubscribeใน dispose</p></section>
+<section id="section-4"><h2>4. Dynamic maps</h2><p>Cycle Count สร้าง controller/focusต่อ product codeใน Map เมื่อ listเปลี่ยนต้อง dispose entriesที่ถูกลบ และ disposeทุก valueตอนหน้าปิด ไม่ใช้ indexเป็น keyเพราะ reorderทำ resourceย้าย item ใช้ stable product/line ID</p></section>
+<section id="section-5"><h2>5. Timer และ async callback</h2><p>Timer cancelใน disposeและ cancelตัวเก่าก่อน replace เช่น toast/flash ของ Absolute Callbackยังควรตรวจ mountedเพราะ cancelอาจแข่งกับ callbackที่เริ่มแล้ว Futureยกเลิกไม่ได้โดยอัตโนมัติจึงต้อง ignore stale result/cancel requestตาม owner</p></section>
+<section id="section-6"><h2>6. dispose order</h2><p>หยุด producerก่อน consumer: cancel timer/subscription, remove listeners/observers, dispose controllers/notifiers แล้ว <code>super.dispose()</code> ตาม patternของ framework ห้าม setStateใน dispose และอย่าเรียก requestFocusหลัง nodeถูก dispose</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ScanFieldรับ optional controllerและ optional focusNode ควรจัด ownershipอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>เก็บ <code>_ownController</code>/<code>_ownFocus</code> เฉพาะเมื่อ inputเป็น null, gettersเลือก externalหรือ own, disposeเฉพาะ own หาก widget updateจาก own→external/กลับกันต้องจัด create/disposeใน didUpdateWidget หรือออกแบบ contractไม่เปลี่ยน ownerกลาง lifetimeและ assert/documentไว้</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Disposeสองครั้ง/child dispose resourceของ parentอันตรายพอ ๆ กับไม่ dispose อาการมักเกิดหลัง navigation/rebuildจึงหาได้ยาก เขียน ownershipใน constructor docและทดสอบ mount→replace→unmount</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

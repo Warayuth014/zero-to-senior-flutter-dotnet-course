@@ -4,15 +4,16 @@
 <title>AuthRepository แยกจาก LoginScreen</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-02 · Auth Integration</span><h1>AuthRepository แยกจาก LoginScreen</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ปัญหาของ fat LoginScreen</a></li><li><a href="#section-2">2. Interface</a></li><li><a href="#section-3">3. Screen เหลือ orchestration</a></li><li><a href="#section-4">4. Dependency graph</a></li><li><a href="#section-5">5. Repository ไม่ควรรู้ BuildContext</a></li><li><a href="#section-6">6. ของจริงและจุดต่อยอด</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Review rule</a></li></ol></nav>
 <div class="note"><strong>AuthRepository เป็น boundary:</strong> LoginScreen จัด form/feedback; repository รู้ endpoint, DTO, session persistence และการผูก token กับ ApiClient</div>
-<section><h2>1. ปัญหาของ fat LoginScreen</h2><p>ถ้า widget ต่อ URL, encode password, parse token, เขียน storage และ navigate เอง จะทดสอบยากและ logic auth ซ้ำทุกหน้าที่ต้อง re-login</p></section>
-<section><h2>2. Interface</h2><pre class="code-vs"><code>abstract interface class AuthRepository {
+<section id="section-1"><h2>1. ปัญหาของ fat LoginScreen</h2><p>ถ้า widget ต่อ URL, encode password, parse token, เขียน storage และ navigate เอง จะทดสอบยากและ logic auth ซ้ำทุกหน้าที่ต้อง re-login</p></section>
+<section id="section-2"><h2>2. Interface</h2><pre class="code-vs"><code>abstract interface class AuthRepository {
   AuthSession? get session;
   Future&lt;AuthSession&gt; login(LoginRequest request);
   Future&lt;void&gt; restore();
   Future&lt;void&gt; logout();
 }</code></pre></section>
-<section><h2>3. Screen เหลือ orchestration</h2><pre class="code-vs"><code>try {
+<section id="section-3"><h2>3. Screen เหลือ orchestration</h2><pre class="code-vs"><code>try {
   await auth.login(LoginRequest(
     username: user.text.trim(), password: pass.text));
   if (!context.mounted) return;
@@ -20,10 +21,10 @@
 } on InvalidCredentialsException {
   setState(() =&gt; error = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
 }</code></pre></section>
-<section><h2>4. Dependency graph</h2><p>composition root สร้าง TokenStore → ApiClient → AuthRepository แล้วส่ง instance เดียวให้ LoginScreen และ shell เพื่อให้ bearer token/session เป็น single source of truth</p></section>
-<section><h2>5. Repository ไม่ควรรู้ BuildContext</h2><p>คืน typed result/exception ให้ controller หรือ screen ตัดสิน navigation/dialog เพราะ repository ต้องใช้ได้ใน bootstrap, background flow และ unit test</p></section>
-<section><h2>6. ของจริงและจุดต่อยอด</h2><p><code>wms_absolute_mobile</code> แยก repository แล้ว แต่ session ยังอยู่ memory และ repository ตั้ง <code>_api.authToken</code> โดยตรง ขั้นต่อไปคือ inject session/token store และ notifier เพื่อ restore/logout แบบทดสอบได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน fake repository ที่ login EMP001 สำเร็จและ user อื่น throw InvalidCredentials เพื่อทดสอบ LoginScreen โดยไม่เปิด server</p><details><summary>เฉลย</summary><p>fake ต้องบันทึก request เพื่อ assert trim/ไม่ submit ซ้ำ และ expose session หลังสำเร็จ</p></details></section>
-<section><h2>8. Review rule</h2><div class="warn">หากพบ <code>SharedPreferences.getInstance()</code>, <code>jsonDecode</code> หรือ Authorization header ใน LoginScreen ให้ย้ายออกไป boundary ที่รับผิดชอบ</div></section>
+<section id="section-4"><h2>4. Dependency graph</h2><p>composition root สร้าง TokenStore → ApiClient → AuthRepository แล้วส่ง instance เดียวให้ LoginScreen และ shell เพื่อให้ bearer token/session เป็น single source of truth</p></section>
+<section id="section-5"><h2>5. Repository ไม่ควรรู้ BuildContext</h2><p>คืน typed result/exception ให้ controller หรือ screen ตัดสิน navigation/dialog เพราะ repository ต้องใช้ได้ใน bootstrap, background flow และ unit test</p></section>
+<section id="section-6"><h2>6. ของจริงและจุดต่อยอด</h2><p><code>wms_absolute_mobile</code> แยก repository แล้ว แต่ session ยังอยู่ memory และ repository ตั้ง <code>_api.authToken</code> โดยตรง ขั้นต่อไปคือ inject session/token store และ notifier เพื่อ restore/logout แบบทดสอบได้</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เขียน fake repository ที่ login EMP001 สำเร็จและ user อื่น throw InvalidCredentials เพื่อทดสอบ LoginScreen โดยไม่เปิด server</p><details><summary>เฉลย</summary><p>fake ต้องบันทึก request เพื่อ assert trim/ไม่ submit ซ้ำ และ expose session หลังสำเร็จ</p></details></section>
+<section id="section-8"><h2>8. Review rule</h2><div class="warn">หากพบ <code>SharedPreferences.getInstance()</code>, <code>jsonDecode</code> หรือ Authorization header ใน LoginScreen ให้ย้ายออกไป boundary ที่รับผิดชอบ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

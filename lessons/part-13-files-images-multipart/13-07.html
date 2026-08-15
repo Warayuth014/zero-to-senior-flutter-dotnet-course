@@ -4,11 +4,12 @@
 <title>Cache, resize และ memory</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-07 · Files &amp; Platform</span><h1>Cache, resize และ memory</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. คำนวณ decoded memory</a></li><li><a href="#section-2">2. ลดตั้งแต่ picker</a></li><li><a href="#section-3">3. Decode ตามขนาดแสดงผล</a></li><li><a href="#section-4">4. ImageCache</a></li><li><a href="#section-5">5. Resize กับ compression</a></li><li><a href="#section-6">6. Orientation และ metadata</a></li><li><a href="#section-7">7. อย่าถือ bytes หลายสำเนา</a></li><li><a href="#section-8">8. Performance check</a></li></ol></nav>
 <div class="note"><strong>ไฟล์ 8 MB ไม่ได้แปลว่าใช้ RAM 8 MB:</strong> ภาพ JPEG 4000×3000 เมื่อ decode เป็น RGBA อาจใช้ประมาณ 48 MB ยังไม่รวมสำเนาระหว่าง resize, preview และ upload</div>
-<section><h2>1. คำนวณ decoded memory</h2><pre class="code-vs"><code>width × height × 4 bytes
+<section id="section-1"><h2>1. คำนวณ decoded memory</h2><pre class="code-vs"><code>width × height × 4 bytes
 4000 × 3000 × 4 ≈ 48,000,000 bytes</code></pre><p>หลาย thumbnail ที่ decode เต็มขนาดสามารถทำให้ PDA memory ต่ำกระตุกหรือถูก kill แม้ไฟล์บน disk เล็ก</p></section>
-<section><h2>2. ลดตั้งแต่ picker</h2><p>wmsapp ใช้ <code>maxWidth: 1024</code>, <code>maxHeight: 1024</code>, <code>imageQuality: 85</code> เป็น baseline ที่ดี แต่ต้องกำหนดตามงาน: รูป part สำหรับดูบนจอไม่ต้องเท่ากล้อง 12 MP ส่วน barcode/ตัวอักษรเล็กต้องรักษาความคมมากกว่า</p></section>
-<section><h2>3. Decode ตามขนาดแสดงผล</h2><pre class="code-vs"><code>Image.network(
+<section id="section-2"><h2>2. ลดตั้งแต่ picker</h2><p>wmsapp ใช้ <code>maxWidth: 1024</code>, <code>maxHeight: 1024</code>, <code>imageQuality: 85</code> เป็น baseline ที่ดี แต่ต้องกำหนดตามงาน: รูป part สำหรับดูบนจอไม่ต้องเท่ากล้อง 12 MP ส่วน barcode/ตัวอักษรเล็กต้องรักษาความคมมากกว่า</p></section>
+<section id="section-3"><h2>3. Decode ตามขนาดแสดงผล</h2><pre class="code-vs"><code>Image.network(
   url,
   width: 96,
   height: 96,
@@ -16,10 +17,10 @@
   cacheHeight: 192,
   fit: BoxFit.cover,
 )</code></pre><p><code>width/height</code> เป็น layout ส่วน <code>cacheWidth/cacheHeight</code> บอก decoder ลด bitmap ควรคูณ devicePixelRatio ให้พอคม ไม่ส่งค่าขนาดเต็มต้นฉบับ</p></section>
-<section><h2>4. ImageCache</h2><p>Flutter มี in-memory image cache; key มักมาจาก URL + scale การเปลี่ยน query version ทำให้เป็นคนละ entry ตั้ง cache budget ให้เหมาะกับอุปกรณ์และอย่าเรียก <code>clear()</code> ทั้งระบบเพื่อแก้รูปเดียว เพราะทำให้ทุกหน้าต้อง decode ใหม่</p></section>
-<section><h2>5. Resize กับ compression</h2><p>resize ลดจำนวนพิกเซล ส่วน quality ลดรายละเอียดการบีบอัด เป็นคนละแกน ทำทั้งสองก่อน upload และตรวจผลลัพธ์อีกครั้ง ถ้าต้องรักษา PNG transparency อย่าแปลง JPEG โดยไม่ตั้งใจ; ภาพถ่ายมักเหมาะ JPEG/WebP ตามที่ backend รองรับ</p></section>
-<section><h2>6. Orientation และ metadata</h2><p>กล้องบางเครื่องเก็บการหมุนใน EXIF เมื่อ resize ต้อง library ที่ normalize orientation มิฉะนั้น server/thumbnail อาจแสดงรูปตะแคง พิจารณาลบ GPS/EXIF ที่ไม่จำเป็นเพื่อความเป็นส่วนตัว และเก็บเฉพาะ metadata ทางธุรกิจใน DB</p></section>
-<section><h2>7. อย่าถือ bytes หลายสำเนา</h2><p>หลัง preview/upload เสร็จให้ปล่อย reference ขนาดใหญ่, dispose controller/subscription และใช้ stream สำหรับไฟล์ใหญ่ หลีกเลี่ยงลำดับ <code>read bytes → copy resize → copy multipart</code> พร้อมกัน ถ้าจำเป็นให้ทำงานหนักนอก UI isolate และวัดจริง</p></section>
-<section><h2>8. Performance check</h2><div class="success">วัด peak memory, jank และเวลา decode บน PDA จริงด้วยรายการ 100 รูป ทดสอบ scroll ไปกลับ, รูป 12 MP, orientation หลายแบบ, low-memory/background และตรวจว่า thumbnail ไม่ decode ขนาดต้นฉบับ</div></section>
+<section id="section-4"><h2>4. ImageCache</h2><p>Flutter มี in-memory image cache; key มักมาจาก URL + scale การเปลี่ยน query version ทำให้เป็นคนละ entry ตั้ง cache budget ให้เหมาะกับอุปกรณ์และอย่าเรียก <code>clear()</code> ทั้งระบบเพื่อแก้รูปเดียว เพราะทำให้ทุกหน้าต้อง decode ใหม่</p></section>
+<section id="section-5"><h2>5. Resize กับ compression</h2><p>resize ลดจำนวนพิกเซล ส่วน quality ลดรายละเอียดการบีบอัด เป็นคนละแกน ทำทั้งสองก่อน upload และตรวจผลลัพธ์อีกครั้ง ถ้าต้องรักษา PNG transparency อย่าแปลง JPEG โดยไม่ตั้งใจ; ภาพถ่ายมักเหมาะ JPEG/WebP ตามที่ backend รองรับ</p></section>
+<section id="section-6"><h2>6. Orientation และ metadata</h2><p>กล้องบางเครื่องเก็บการหมุนใน EXIF เมื่อ resize ต้อง library ที่ normalize orientation มิฉะนั้น server/thumbnail อาจแสดงรูปตะแคง พิจารณาลบ GPS/EXIF ที่ไม่จำเป็นเพื่อความเป็นส่วนตัว และเก็บเฉพาะ metadata ทางธุรกิจใน DB</p></section>
+<section id="section-7"><h2>7. อย่าถือ bytes หลายสำเนา</h2><p>หลัง preview/upload เสร็จให้ปล่อย reference ขนาดใหญ่, dispose controller/subscription และใช้ stream สำหรับไฟล์ใหญ่ หลีกเลี่ยงลำดับ <code>read bytes → copy resize → copy multipart</code> พร้อมกัน ถ้าจำเป็นให้ทำงานหนักนอก UI isolate และวัดจริง</p></section>
+<section id="section-8"><h2>8. Performance check</h2><div class="success">วัด peak memory, jank และเวลา decode บน PDA จริงด้วยรายการ 100 รูป ทดสอบ scroll ไปกลับ, รูป 12 MP, orientation หลายแบบ, low-memory/background และตรวจว่า thumbnail ไม่ decode ขนาดต้นฉบับ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

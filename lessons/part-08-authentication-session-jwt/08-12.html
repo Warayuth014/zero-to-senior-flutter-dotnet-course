@@ -4,9 +4,10 @@
 <title>Lab: Login/logout พร้อม fake backend</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-12 · Auth Integration</span><h1>Lab: Login/logout พร้อม fake backend</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Fake backend</a></li><li><a href="#section-3">3. Fake token store</a></li><li><a href="#section-4">4. Core tests</a></li><li><a href="#section-5">5. Widget tests</a></li><li><a href="#section-6">6. Integration seam</a></li><li><a href="#section-7">7. Review questions</a></li><li><a href="#section-8">8. Exit test</a></li></ol></nav>
 <div class="note"><strong>Lab ปิด Part 8:</strong> ทำ login/logout กับ fake backend และ in-memory secure store เพื่อพิสูจน์ session lifecycle โดยไม่ใช้ network จริงหรือ secret จริง</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>LoginScreen ไม่มี HTTP/storage logic</li><li>repository parse token/expiration เป็น AuthSession</li><li>ApiClient แนบ Bearer เฉพาะ authenticated route</li><li>bootstrap restore ก่อน feature request</li><li>401 หลาย request logout ครั้งเดียว</li><li>logout ล้าง token/cache/routes</li><li>server switch ไม่รั่ว token</li></ul></section>
-<section><h2>2. Fake backend</h2><pre class="code-vs"><code>final http = MockClient((request) async {
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>LoginScreen ไม่มี HTTP/storage logic</li><li>repository parse token/expiration เป็น AuthSession</li><li>ApiClient แนบ Bearer เฉพาะ authenticated route</li><li>bootstrap restore ก่อน feature request</li><li>401 หลาย request logout ครั้งเดียว</li><li>logout ล้าง token/cache/routes</li><li>server switch ไม่รั่ว token</li></ul></section>
+<section id="section-2"><h2>2. Fake backend</h2><pre class="code-vs"><code>final http = MockClient((request) async {
   if (request.url.path == '/api/Authenticate/login') {
     return Response('{"token":"test-token",'
       '"expiration":"2099-01-01T00:00:00Z"}', 200);
@@ -14,16 +15,16 @@
   expect(request.headers['Authorization'], 'Bearer test-token');
   return Response('{"items":[],"totalCount":0}', 200);
 });</code></pre></section>
-<section><h2>3. Fake token store</h2><pre class="code-vs"><code>class MemoryTokenStore implements TokenStore {
+<section id="section-3"><h2>3. Fake token store</h2><pre class="code-vs"><code>class MemoryTokenStore implements TokenStore {
   String? value;
   Future&lt;String?&gt; read() async =&gt; value;
   Future&lt;void&gt; write(String token) async =&gt; value = token;
   Future&lt;void&gt; delete() async =&gt; value = null;
 }</code></pre></section>
-<section><h2>4. Core tests</h2><ol><li>valid login sets session/header</li><li>401 invalid credential ไม่ persist</li><li>malformed expiration เป็น contract error</li><li>restore valid/expired/corrupt</li><li>logout ระหว่าง in-flight request</li><li>403 ไม่ logout</li><li>token marker ไม่อยู่ log</li></ol></section>
-<section><h2>5. Widget tests</h2><p>กรอก form → submit ครั้งเดียว → loading disable → fake success เข้า shell; fake failure แสดงข้อความและ passwordไม่ถูก log/persist; logout reset routeจน Back เข้า shellไม่ได้</p></section>
-<section><h2>6. Integration seam</h2><p>เมื่อ unit testsผ่าน เปลี่ยน fake backendเป็น Minimal .NET login fixtureใน environmentทดสอบ โดยใช้ test signing key/credentialชั่วคราว ห้าม commit production secret</p></section>
-<section><h2>7. Review questions</h2><ul><li>ใครเป็น owner ของ session?</li><li>request แรกเกิดหลัง restoreจริงไหม?</li><li>401/403 ต่างกันไหม?</li><li>storage/server bindingครบไหม?</li><li>responseเก่าข้าม logoutได้ไหม?</li></ul></section>
-<section><h2>8. Exit test</h2><div class="success">อธิบายและทดสอบได้ครบ Login → Session → Bearer → Expire/401 → Logout/Restore/Server switch โดย passwordไม่ persist, tokenไม่รั่ว และ .NETยังเป็นผู้บังคับสิทธิ์จริง</div></section>
+<section id="section-4"><h2>4. Core tests</h2><ol><li>valid login sets session/header</li><li>401 invalid credential ไม่ persist</li><li>malformed expiration เป็น contract error</li><li>restore valid/expired/corrupt</li><li>logout ระหว่าง in-flight request</li><li>403 ไม่ logout</li><li>token marker ไม่อยู่ log</li></ol></section>
+<section id="section-5"><h2>5. Widget tests</h2><p>กรอก form → submit ครั้งเดียว → loading disable → fake success เข้า shell; fake failure แสดงข้อความและ passwordไม่ถูก log/persist; logout reset routeจน Back เข้า shellไม่ได้</p></section>
+<section id="section-6"><h2>6. Integration seam</h2><p>เมื่อ unit testsผ่าน เปลี่ยน fake backendเป็น Minimal .NET login fixtureใน environmentทดสอบ โดยใช้ test signing key/credentialชั่วคราว ห้าม commit production secret</p></section>
+<section id="section-7"><h2>7. Review questions</h2><ul><li>ใครเป็น owner ของ session?</li><li>request แรกเกิดหลัง restoreจริงไหม?</li><li>401/403 ต่างกันไหม?</li><li>storage/server bindingครบไหม?</li><li>responseเก่าข้าม logoutได้ไหม?</li></ul></section>
+<section id="section-8"><h2>8. Exit test</h2><div class="success">อธิบายและทดสอบได้ครบ Login → Session → Bearer → Expire/401 → Logout/Restore/Server switch โดย passwordไม่ persist, tokenไม่รั่ว และ .NETยังเป็นผู้บังคับสิทธิ์จริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

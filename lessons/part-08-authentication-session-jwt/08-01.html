@@ -4,23 +4,24 @@
 <title>Login flow end-to-end</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-01 · Auth Integration</span><h1>Login flow end-to-end</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Authentication vs authorization</a></li><li><a href="#section-2">2. Request contract</a></li><li><a href="#section-3">3. Response contract</a></li><li><a href="#section-4">4. State transitions</a></li><li><a href="#section-5">5. ไฟล์จริง</a></li><li><a href="#section-6">6. Failure ที่ต้องแยก</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Security checklist</a></li></ol></nav>
 <div class="note"><strong>Login end-to-end:</strong> รับ credential → validate ฝั่ง UI → HTTPS POST → .NET ตรวจ Identity → ออก token/expiration → Flutter สร้าง AuthSession → แนบ Bearer กับ request ถัดไป → เข้า authenticated shell</div>
-<section><h2>1. Authentication vs authorization</h2><p>Authentication ตอบว่า “คุณคือใคร” ส่วน authorization ตอบว่า “คุณทำอะไรได้” การ login สำเร็จไม่ได้แปลว่าทุก endpoint อนุญาต และการซ่อนปุ่มไม่แทนการตรวจสิทธิ์ฝั่ง server</p></section>
-<section><h2>2. Request contract</h2><pre class="code-vs"><code>POST /api/Authenticate/login
+<section id="section-1"><h2>1. Authentication vs authorization</h2><p>Authentication ตอบว่า “คุณคือใคร” ส่วน authorization ตอบว่า “คุณทำอะไรได้” การ login สำเร็จไม่ได้แปลว่าทุก endpoint อนุญาต และการซ่อนปุ่มไม่แทนการตรวจสิทธิ์ฝั่ง server</p></section>
+<section id="section-2"><h2>2. Request contract</h2><pre class="code-vs"><code>POST /api/Authenticate/login
 Content-Type: application/json
 
 {"username":"EMP001","password":"••••••••"}</code></pre><p>ส่งผ่าน HTTPS เท่านั้นและไม่ log credential</p></section>
-<section><h2>3. Response contract</h2><pre class="code-vs"><code>{
+<section id="section-3"><h2>3. Response contract</h2><pre class="code-vs"><code>{
   "token": "eyJ...",
   "expiration": "2026-08-15T10:00:00Z"
 }</code></pre><p>ตรวจ field/ชนิด/เวลาเหมือน API contract อื่น ไม่ cast dynamic ใน widget</p></section>
-<section><h2>4. State transitions</h2><pre class="code-vs"><code>signedOut → submitting → authenticated
+<section id="section-4"><h2>4. State transitions</h2><pre class="code-vs"><code>signedOut → submitting → authenticated
                     ↘ invalidCredentials
                     ↘ networkFailure
 authenticated → expired/revoked → signedOut</code></pre><p>disable submit ระหว่างส่งและอย่าเปลี่ยน route ก่อนเก็บ session สำเร็จ</p></section>
-<section><h2>5. ไฟล์จริง</h2><p><code>wms_absolute_mobile/features/auth/auth_repository.dart</code> เรียก <code>/api/Authenticate/login</code> แล้วตั้ง token ใน shared ApiClient ส่วน <code>wmsapp/screens/login_screen.dart</code> เป็น mock password และ preferences ซึ่งเหมาะ demo แต่ยังไม่ใช่ security boundary</p></section>
-<section><h2>6. Failure ที่ต้องแยก</h2><ul><li>validation local: field ว่าง</li><li>401: username/password ไม่ถูก</li><li>403: account ไม่มีสิทธิ์หรือ disabled ตาม contract</li><li>timeout/offline: ยังไม่รู้ว่า credential ถูกหรือไม่</li><li>invalid JSON: contract/deployment ผิด</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>วาด flow ตั้งแต่กด Login จน GET tasks สำเร็จ พร้อมจุดที่ password และ token ปรากฏ</p><details><summary>แนวคำตอบ</summary><p>Password อยู่เฉพาะ form/request ชั่วคราว ไม่ persist; token อยู่ AuthSession/secure storage และ Authorization header แต่ต้องถูก redact จาก log</p></details></section>
-<section><h2>8. Security checklist</h2><div class="success">HTTPS, no credential log, typed response, loading guard, generic invalid-login message, server rate limit/lockout และ token ถูกแนบหลัง session พร้อมแล้ว</div></section>
+<section id="section-5"><h2>5. ไฟล์จริง</h2><p><code>wms_absolute_mobile/features/auth/auth_repository.dart</code> เรียก <code>/api/Authenticate/login</code> แล้วตั้ง token ใน shared ApiClient ส่วน <code>wmsapp/screens/login_screen.dart</code> เป็น mock password และ preferences ซึ่งเหมาะ demo แต่ยังไม่ใช่ security boundary</p></section>
+<section id="section-6"><h2>6. Failure ที่ต้องแยก</h2><ul><li>validation local: field ว่าง</li><li>401: username/password ไม่ถูก</li><li>403: account ไม่มีสิทธิ์หรือ disabled ตาม contract</li><li>timeout/offline: ยังไม่รู้ว่า credential ถูกหรือไม่</li><li>invalid JSON: contract/deployment ผิด</li></ul></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>วาด flow ตั้งแต่กด Login จน GET tasks สำเร็จ พร้อมจุดที่ password และ token ปรากฏ</p><details><summary>แนวคำตอบ</summary><p>Password อยู่เฉพาะ form/request ชั่วคราว ไม่ persist; token อยู่ AuthSession/secure storage และ Authorization header แต่ต้องถูก redact จาก log</p></details></section>
+<section id="section-8"><h2>8. Security checklist</h2><div class="success">HTTPS, no credential log, typed response, loading guard, generic invalid-login message, server rate limit/lockout และ token ถูกแนบหลัง session พร้อมแล้ว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

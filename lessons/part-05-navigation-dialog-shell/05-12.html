@@ -4,16 +4,17 @@
 <title>Lab: Login → Shell → Workflow → Logout</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-12 · Flutter UI</span><h1>Lab: Login → Shell → Workflow → Logout</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Composition</a></li><li><a href="#section-3">3. Auth transition</a></li><li><a href="#section-4">4. Workflow result</a></li><li><a href="#section-5">5. Back/modal policy</a></li><li><a href="#section-6">6. Logout</a></li><li><a href="#section-7">7. Tests</a></li><li><a href="#section-8">8. Part 5 Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> ประกอบ Login → authenticated Shell → Workflow → Logout โดยกำหนด route stack, dependency/store lifetime, back policy, modal resultsและ session cleanupให้ทดสอบได้</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>loginสำเร็จแทน Loginด้วย Shell</li><li>shellสร้าง/dispose session storeครั้งเดียว</li><li>bottom navigationใช้ destination sourceเดียว</li><li>workflowคืน Saved/Paused/Cancelledแบบ typed</li><li>PopScopeป้องกัน draft/commitสูญหาย</li><li>settings sheetมี dirty guard</li><li>logoutล้าง session/timers/stackทั้งหมด</li></ul></section>
-<section><h2>2. Composition</h2><pre class="code-vs"><code>App(auth, repositories)
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>loginสำเร็จแทน Loginด้วย Shell</li><li>shellสร้าง/dispose session storeครั้งเดียว</li><li>bottom navigationใช้ destination sourceเดียว</li><li>workflowคืน Saved/Paused/Cancelledแบบ typed</li><li>PopScopeป้องกัน draft/commitสูญหาย</li><li>settings sheetมี dirty guard</li><li>logoutล้าง session/timers/stackทั้งหมด</li></ul></section>
+<section id="section-2"><h2>2. Composition</h2><pre class="code-vs"><code>App(auth, repositories)
 └─ LoginScreen(auth)
    └─ pushReplacement WarehouseShell
       ├─ WarehouseStore(repositories, session)
       ├─ Home / Tasks / Picking destination
       ├─ SettingsSheet(connection)
       └─ Workflow routes → typed results</code></pre></section>
-<section><h2>3. Auth transition</h2><pre class="code-vs"><code>Future&lt;void&gt; login() async {
+<section id="section-3"><h2>3. Auth transition</h2><pre class="code-vs"><code>Future&lt;void&gt; login() async {
   if (submitting) return;
   final session = await auth.login(user, password);
   if (!mounted) return;
@@ -22,7 +23,7 @@
     MaterialPageRoute(builder: (_) =&gt; WarehouseShell(session: session)),
   );
 }</code></pre></section>
-<section><h2>4. Workflow result</h2><pre class="code-vs"><code>final result = await Navigator.push&lt;WorkflowResult&gt;(
+<section id="section-4"><h2>4. Workflow result</h2><pre class="code-vs"><code>final result = await Navigator.push&lt;WorkflowResult&gt;(
   context,
   MaterialPageRoute(builder: (_) =&gt; ReceiveFlow(store: store)),
 );
@@ -32,8 +33,8 @@ switch (result) {
   case Paused(): await store.refreshTasks();
   case Cancelled() || null: break;
 }</code></pre></section>
-<section><h2>5. Back/modal policy</h2><p>Initial workflow popได้; draftถาม discard/pause; submitting lockหรือย้าย operationเข้า store; confirm dialogคืน bool; selection sheetคืน model; ทุก modalปิดด้วย builder contextและคืน focus</p></section>
-<section><h2>6. Logout</h2><pre class="code-vs"><code>final confirmed = await confirmLogout(context);
+<section id="section-5"><h2>5. Back/modal policy</h2><p>Initial workflow popได้; draftถาม discard/pause; submitting lockหรือย้าย operationเข้า store; confirm dialogคืน bool; selection sheetคืน model; ทุก modalปิดด้วย builder contextและคืน focus</p></section>
+<section id="section-6"><h2>6. Logout</h2><pre class="code-vs"><code>final confirmed = await confirmLogout(context);
 if (!confirmed) return;
 await auth.logout();
 if (!context.mounted) return;
@@ -41,7 +42,7 @@ Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
   MaterialPageRoute(builder: (_) =&gt; LoginScreen(auth: auth)),
   (_) =&gt; false,
 );</code></pre><p>Shell dispose store/timerเมื่อ routeถูกล้าง</p></section>
-<section><h2>7. Tests</h2><p>ใช้ fake auth/repositories + NavigatorObserver ทดสอบ failed loginไม่ navigate, success replacement, workflow result refreshถูก command, dirty backไม่ pop, double logoutหนึ่ง transition, logoutแล้ว Backไม่เข้า shell และ store disposeยกเลิก polling</p></section>
-<section><h2>8. Part 5 Exit Test</h2><div class="success"><ul><li>อธิบาย stack/push/pop/replacement/resultได้</li><li>ส่ง dependencyและกำหนด route ownerได้</li><li>ออกแบบ PopScopeกับ transient stateได้</li><li>เลือก dialog/sheet/SnackBar/flashตามงานได้</li><li>สร้าง shellที่รักษา tab/session stateได้</li><li>logoutล้าง auth, resourcesและnavigation stackได้</li></ul></div></section>
+<section id="section-7"><h2>7. Tests</h2><p>ใช้ fake auth/repositories + NavigatorObserver ทดสอบ failed loginไม่ navigate, success replacement, workflow result refreshถูก command, dirty backไม่ pop, double logoutหนึ่ง transition, logoutแล้ว Backไม่เข้า shell และ store disposeยกเลิก polling</p></section>
+<section id="section-8"><h2>8. Part 5 Exit Test</h2><div class="success"><ul><li>อธิบาย stack/push/pop/replacement/resultได้</li><li>ส่ง dependencyและกำหนด route ownerได้</li><li>ออกแบบ PopScopeกับ transient stateได้</li><li>เลือก dialog/sheet/SnackBar/flashตามงานได้</li><li>สร้าง shellที่รักษา tab/session stateได้</li><li>logoutล้าง auth, resourcesและnavigation stackได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

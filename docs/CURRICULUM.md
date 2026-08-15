@@ -18,7 +18,8 @@
 
 ## Progression
 
-- Part -1–6: ภาษา, widget, layout, scanner, state และ model
+- Part 0: ติดตั้งเครื่องมือ รันแอปแรก และ Mini Project สำหรับผู้เริ่มจากศูนย์
+- Dart Foundation และ Part 1–6: ภาษา, widget, layout, scanner, state และ model
 - Part 7–15: .NET integration, auth, architecture, settings, realtime, files, tests และ production
 - Part 16–22: อ่านสอง WMS codebase แบบ trace flow จริง
 - Part 23: เปรียบเทียบและ refactor ด้วย senior trade-offs
@@ -52,8 +53,8 @@
 
 | Part | สถานะ | บทจริง |
 |---|---|---:|
-| -1 Dart Foundation | Authored + verified | 20/20 |
-| 0 Setup, Tools & Project Anatomy | Authored + verified | 12/12 |
+| 0 Start Here: Setup & First Flutter App | Beginner overhaul + verified | 12/12 |
+| Dart Foundation | Authored; beginner overhaul in progress | 20/20 |
 | 1 Flutter Widget Mental Model | Authored + verified | 15/15 |
 | 2 Layout, Responsive & PDA UI | Authored + verified | 15/15 |
 | 3 Forms, Focus & Barcode Scanner | Authored + verified | 14/14 |
@@ -80,4 +81,4 @@
 | 24 Final Project: Production-style Mobile WMS | Authored + verified | 18/18 |
 | 25 Onboarding & Code Reading Playbook | Authored + verified | 13/13 |
 
-คอร์สมี 391 lessons และเขียนเนื้อหาเชิงลึกครบทุกบทแล้ว โดย `authoredCount` ต้องเท่ากับ `lessonCount` และ verifier ต้องยืนยันว่าไม่มี scaffold เหลือ
+คอร์สมี 468 lessons และมีเนื้อหาเฉพาะบทครบทุกบท โดย `authoredCount` ต้องเท่ากับ `lessonCount` และ verifier ต้องยืนยันว่าไม่มี scaffold เหลือ การตรวจคุณภาพสำหรับมือใหม่เป็นงานอีกชั้นหนึ่งและติดตามแยกจาก authored status

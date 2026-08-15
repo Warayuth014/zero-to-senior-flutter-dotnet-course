@@ -1,39 +1,19 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pubspec.yaml และ dependency resolution</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>อ่านโครงสร้างโปรเจกต์แบบไม่หลง</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">00-06 · Foundation</span><h1>pubspec.yaml และ dependency resolution</h1><p>Part 0: Setup, Tools &amp; Project Anatomy</p></header>
-<div class="note"><code>pubspec.yaml</code> เป็น contract ของ package: SDK range, dependencies, version, assets/fonts และ tool config ส่วน <code>pubspec.lock</code> บันทึกเวอร์ชันที่ solver เลือกจริงสำหรับ application</div>
-<section><h2>1. โครงที่ต้องอ่านออก</h2><pre class="code-vs"><code>name: wms_mobile
-publish_to: none
-version: 1.0.0+1
-environment:
-  sdk: ^3.11.5
-dependencies:
-  flutter:
-    sdk: flutter
-  http: ^1.2.2
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-flutter:
-  uses-material-design: true</code></pre><p>YAML ใช้ indentation เป็นโครงสร้าง ห้ามใช้ tab และ key ที่อยู่ผิดระดับอาจถูก ignore หรือ error</p></section>
-<section><h2>2. dependencies กับ dev_dependencies</h2><p>package ที่ runtime/import จาก lib อยู่ <code>dependencies</code>; test/lint/codegen/build tooling อยู่ <code>dev_dependencies</code> อย่าย้าย package runtime ไป dev เพียงเพราะ “ใช้ตอนพัฒนา” เพราะ release build ยังต้อง resolve/import</p></section>
-<section><h2>3. สองโปรเจกต์บอก capability</h2><ul><li><code>wmsapp</code>: http, preferences, intl, image picker, icons, SignalR, Sarabun fonts</li><li><code>wms_absolute_mobile</code>: http, Font Awesome, auto-size text, SVG, preferences และ asset icon folder</li></ul><p>แค่อ่าน pubspec ก็พอเดา boundary ได้: network, persistence, realtime, files และ localization แต่ต้องตามไปดู usage ก่อนสรุป architecture</p></section>
-<section><h2>4. Pub commands โดยไม่ทำ dependency drift</h2><pre class="code-vs"><code>flutter pub get       # resolve ตาม constraints/lock
-flutter pub outdated  # รายงาน current/upgradable/resolvable/latest
-flutter pub deps      # dependency graph
-flutter pub add http  # แก้ pubspec + get อย่างมีเจตนา</code></pre><p><code>pub upgrade</code> เลื่อน versions ภายใน constraint และเปลี่ยน lockfile จึงควรเป็น commit ที่ review/test ได้ ไม่รันก่อน feature แล้วปน diff</p></section>
-<section><h2>5. Lockfile policy</h2><p>Flutter application ควร commit <code>pubspec.lock</code> เพื่อ build ซ้ำได้ ส่วน reusable package มี policy ต่างได้ตามทีม เมื่อ conflict lockfile อย่าลบอัตโนมัติ ให้ resolve จาก pubspec ที่ถูกต้องแล้วดูว่าชุด dependency เปลี่ยนอะไร</p></section>
-<section><h2>6. Assets และ fonts</h2><pre class="code-vs"><code>flutter:
-  assets:
-    - assets/icons/wms/
-  fonts:
-    - family: Sarabun
-      fonts:
-        - asset: assets/fonts/Sarabun-Regular.ttf</code></pre><p>ไฟล์ต้องมีจริง path/case ต้องตรง โดยเฉพาะ CI/Linux ที่ case-sensitive หลังเพิ่ม asset ให้ pub get และ restart หาก bundle ยังไม่อัปเดต</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>จะเพิ่ม <code>mocktail</code> สำหรับ test และรูป <code>assets/images/logo.png</code> ต้องแก้ส่วนใดและ commit อะไรบ้าง?</p><details><summary>เฉลย</summary><p>เพิ่ม mocktail ใน dev_dependencies, เพิ่ม asset path ใต้ flutter, วางไฟล์จริง, รัน pub get และ commit pubspec + lockfile + asset จากนั้น analyze/test และเปิด UI ยืนยัน bundle</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ version <code>any</code> หรือ dependency override ถาวรเพื่อให้ solver ผ่าน เพราะคุณกำลังย้าย incompatibility ไป runtime/คนอื่นแทนการแก้ constraint</div></section>
+<header class="hero"><span class="badge">00-06 · Foundation</span><h1>อ่านโครงสร้างโปรเจกต์แบบไม่หลง</h1><p>Part 0: Start Here: Setup &amp; First Flutter App</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. แผนที่ Project</a></li><li><a href="#section-2">2. lib คือพื้นที่หลัก</a></li><li><a href="#section-3">3. Platform Folders</a></li><li><a href="#section-4">4. ไฟล์ที่สร้างใหม่ได้</a></li><li><a href="#section-5">5. package name กับ app name</a></li><li><a href="#section-6">6. วิธีหาไฟล์โดยไม่หลง</a></li><li><a href="#section-7">7. Mini Exercise</a></li><li><a href="#section-8">8. สรุปจำเร็ว</a></li></ol></nav>
+<div class="meta"><span>ระดับ: Beginner</span><span>หัวข้อ: Project anatomy</span><span>เป้าหมาย: รู้ว่าแก้ไฟล์ไหน</span></div>
+<div class="note"><strong>ไม่ต้องอ่านทุกไฟล์:</strong> Flutter สร้างไฟล์จำนวนมากเพราะรองรับหลาย platform มือใหม่ควรเริ่มจาก <code>lib</code>, <code>test</code> และ <code>pubspec.yaml</code></div>
+<section id="section-1"><h2>1. แผนที่ Project</h2><pre class="code-vs"><code>hello_flutter/<br>├─ lib/            โค้ดแอปที่เราเขียน<br>├─ test/           โค้ดทดสอบ<br>├─ android/        การตั้งค่า Android<br>├─ web/            การตั้งค่า Web<br>├─ pubspec.yaml    ชื่อ, version, packages, assets<br>└─ analysis_options.yaml  กฎตรวจ code</code></pre></section>
+<section id="section-2"><h2>2. lib คือพื้นที่หลัก</h2><p><code>lib/main.dart</code> เป็น entrypoint เริ่มต้น ต่อไปเราจะแยกไฟล์ใต้ <code>lib</code> ตาม feature แต่ยังไม่ควรสร้าง folder architecture ใหญ่ก่อนมีความจำเป็น</p></section>
+<section id="section-3"><h2>3. Platform Folders</h2><p><code>android</code>, <code>ios</code>, <code>web</code>, <code>windows</code> เป็น host project ของแต่ละ platform ส่วนใหญ่ไม่ต้องแก้ในบท UI ปกติ แต่ permission, app name, signing และ native integration จะมาใช้ภายหลัง</p></section>
+<section id="section-4"><h2>4. ไฟล์ที่สร้างใหม่ได้</h2><p>โค้ด Dartใต้ <code>lib</code> และ testsใต้ <code>test</code> คือ sourceของเรา ส่วน <code>build</code> และ <code>.dart_tool</code> เป็นผลลัพธ์/cacheที่เครื่องมือสร้างใหม่ได้และไม่ควรแก้มือ</p><table><thead><tr><th>ควร commit</th><th>ไม่ควร commit</th></tr></thead><tbody><tr><td>lib, test, pubspec.yaml, platform config</td><td>build, .dart_tool, IDE cache</td></tr></tbody></table></section>
+<section id="section-5"><h2>5. package name กับ app name</h2><p>ชื่อใน <code>pubspec.yaml</code> ใช้ importภายใน Dart ส่วนชื่อที่ผู้ใช้เห็นบนมือถืออยู่ใน platform configuration อย่าสมมติว่าแก้จุดเดียวแล้วทุก platformเปลี่ยน</p></section>
+<section id="section-6"><h2>6. วิธีหาไฟล์โดยไม่หลง</h2><ol><li>เริ่มจากสิ่งที่เห็นบนหน้าจอ</li><li>ค้นหาข้อความนั้นใน <code>lib</code></li><li>เปิดไฟล์ที่ค้นพบ</li><li>ตาม importเฉพาะที่เกี่ยวข้อง</li></ol><p>ยังไม่ต้องเปิด generated fileหรืออ่าน platform folderทั้งชุด</p></section>
+<section id="section-7"><h2>7. Mini Exercise</h2><p>ระบุว่าแต่ละงานควรเริ่มที่ใด: เปลี่ยนข้อความบนจอ, เพิ่มรูป, เขียน test, ตั้ง Android permission และลบ build cache</p><details class="answer"><summary>เฉลย</summary><p>ข้อความเริ่มที่ <code>lib</code>; รูปประกาศใน <code>pubspec.yaml</code>; testอยู่ <code>test</code>; permissionอยู่ platform folder; build cacheสร้างใหม่ได้และไม่แก้ source</p></details></section>
+<section id="section-8"><h2>8. สรุปจำเร็ว</h2><div class="success">ทำงานประจำวันเริ่มจาก <code>lib</code> และ <code>test</code> ใช้ <code>pubspec.yaml</code>จัด dependencies/assets และเข้า platform folderเมื่อ featureนั้นต้องใช้จริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

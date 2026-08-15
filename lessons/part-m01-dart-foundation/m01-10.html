@@ -1,17 +1,18 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Extension method ที่ใช้แยก API ตามโดเมน</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>Enum และ enhanced enum</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-10 · Dart Core</span><h1>Extension method ที่ใช้แยก API ตามโดเมน</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-10 · Dart Core</span><h1>Enum และ enhanced enum</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. รูปแบบพื้นฐาน</a></li><li><a href="#section-2">2. โครงจริงของ wmsapp</a></li><li><a href="#section-3">3. ข้อดีและต้นทุนของแบบนี้</a></li><li><a href="#section-4">4. Extension กับ nullable และ generic</a></li><li><a href="#section-5">5. Name conflict และ import</a></li><li><a href="#section-6">6. Decision guide</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Extension method เพิ่ม API ที่เรียกเหมือน member โดยไม่แก้ class ต้นฉบับ ใน <code>wmsapp</code> ใช้แบ่ง ApiService ตามโดเมน 9 ชุด แต่ state/dependency ยังคงเป็นของ object เดิม</div>
-<section><h2>1. รูปแบบพื้นฐาน</h2><pre class="code-vs"><code>extension BarcodeText on String {
+<section id="section-1"><h2>1. รูปแบบพื้นฐาน</h2><pre class="code-vs"><code>extension BarcodeText on String {
   String get normalizedBarcode =&gt; trim().toUpperCase();
   bool get looksLikePallet =&gt; normalizedBarcode.startsWith('PAL-');
 }
 
 final code = input.normalizedBarcode;</code></pre><p>extension ถูก resolve แบบ static จาก type ที่ compiler เห็น ไม่ได้แก้ String จริงและไม่มี runtime polymorphism แบบ virtual method</p></section>
-<section><h2>2. โครงจริงของ wmsapp</h2><pre class="code-vs"><code>// api_service.dart
+<section id="section-2"><h2>2. โครงจริงของ wmsapp</h2><pre class="code-vs"><code>// api_service.dart
 part 'api/receiving_api.dart';
 part 'api/picking_api.dart';
 
@@ -23,17 +24,17 @@ extension PickingApi on ApiService {
     // parse แล้วคืน typed result
   }
 }</code></pre><p>เพราะไฟล์เป็น part ของ library เดียว extension จึงเรียก private <code>_get/_post</code> ได้ ผลคือ call site ใช้ <code>ApiService().getPickOrdersList()</code> แต่ไฟล์แยกตามโดเมน</p></section>
-<section><h2>3. ข้อดีและต้นทุนของแบบนี้</h2><ul><li><strong>ดี:</strong> ลดไฟล์ ApiService ยักษ์, ชื่อ method discover ได้จาก object เดียว, reuse transport/error handling</li><li><strong>ต้นทุน:</strong> ทุกโดเมนยังผูก singleton เดียว, extension เก็บ instance state ของตัวเองไม่ได้, mock เฉพาะ Picking ยากกว่า inject <code>PickingRepository</code></li></ul><p>จึงเป็น organization technique ไม่ใช่ dependency boundary โดยอัตโนมัติ</p></section>
-<section><h2>4. Extension กับ nullable และ generic</h2><pre class="code-vs"><code>extension NullableString on String? {
+<section id="section-3"><h2>3. ข้อดีและต้นทุนของแบบนี้</h2><ul><li><strong>ดี:</strong> ลดไฟล์ ApiService ยักษ์, ชื่อ method discover ได้จาก object เดียว, reuse transport/error handling</li><li><strong>ต้นทุน:</strong> ทุกโดเมนยังผูก singleton เดียว, extension เก็บ instance state ของตัวเองไม่ได้, mock เฉพาะ Picking ยากกว่า inject <code>PickingRepository</code></li></ul><p>จึงเป็น organization technique ไม่ใช่ dependency boundary โดยอัตโนมัติ</p></section>
+<section id="section-4"><h2>4. Extension กับ nullable และ generic</h2><pre class="code-vs"><code>extension NullableString on String? {
   bool get isBlank =&gt; this == null || this!.trim().isEmpty;
 }
 
 extension FirstOrNull&lt;T&gt; on Iterable&lt;T&gt; {
   T? get firstOrNull =&gt; isEmpty ? null : first;
 }</code></pre><p>อย่าใส่ business rule สำคัญใน extension ทั่วไปจน owner หาย เช่น <code>String.completePicking()</code> ไม่สมเหตุผล เพราะ String ไม่ใช่เจ้าของ workflow</p></section>
-<section><h2>5. Name conflict และ import</h2><p>ถ้า extension หลายตัวมี member ชื่อเดียวและมองเห็นพร้อมกัน compiler อาจเลือกไม่ได้ แก้ด้วย import <code>show/hide</code>, ตั้งชื่อไม่ชน หรือเรียก explicit extension override เช่น <code>BarcodeText(raw).normalizedBarcode</code></p></section>
-<section><h2>6. Decision guide</h2><ol><li>utility ที่เป็นธรรมชาติของ type และไม่มี state → extension</li><li>ต้อง inject/mock หรือมี lifecycle → service/repository class</li><li>ต้องเป็น polymorphic behavior → interface + implementation</li><li>ต้องแชร์ private member ข้ามไฟล์ → ทบทวน library/part และ coupling ก่อน</li></ol></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปิด extension <code>ReceivingApi</code> แล้วจำแนกแต่ละ method: transport, contract parsing, business rule หรือ UI concern ถ้าพบสองอย่างหลังให้อธิบายว่าควรย้ายไปที่ใด</p><details><summary>แนวตรวจคำตอบ</summary><p>extension ควรสร้าง request และแปลง response เป็น model; workflow rule อยู่ store/use case; ข้อความ/สีอยู่ presentation หาก parser ซ้ำมากให้ย้ายเข้า model/parser helper</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ไฟล์แยกไม่เท่ากับ architecture แยก ถ้าทุก extension ใช้ singleton/private transport เดียวกัน test seam และ ownership ยังอยู่จุดเดียว</div></section>
+<section id="section-5"><h2>5. Name conflict และ import</h2><p>ถ้า extension หลายตัวมี member ชื่อเดียวและมองเห็นพร้อมกัน compiler อาจเลือกไม่ได้ แก้ด้วย import <code>show/hide</code>, ตั้งชื่อไม่ชน หรือเรียก explicit extension override เช่น <code>BarcodeText(raw).normalizedBarcode</code></p></section>
+<section id="section-6"><h2>6. Decision guide</h2><ol><li>utility ที่เป็นธรรมชาติของ type และไม่มี state → extension</li><li>ต้อง inject/mock หรือมี lifecycle → service/repository class</li><li>ต้องเป็น polymorphic behavior → interface + implementation</li><li>ต้องแชร์ private member ข้ามไฟล์ → ทบทวน library/part และ coupling ก่อน</li></ol></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เปิด extension <code>ReceivingApi</code> แล้วจำแนกแต่ละ method: transport, contract parsing, business rule หรือ UI concern ถ้าพบสองอย่างหลังให้อธิบายว่าควรย้ายไปที่ใด</p><details><summary>แนวตรวจคำตอบ</summary><p>extension ควรสร้าง request และแปลง response เป็น model; workflow rule อยู่ store/use case; ข้อความ/สีอยู่ presentation หาก parser ซ้ำมากให้ย้ายเข้า model/parser helper</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ไฟล์แยกไม่เท่ากับ architecture แยก ถ้าทุก extension ใช้ singleton/private transport เดียวกัน test seam และ ownership ยังอยู่จุดเดียว</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

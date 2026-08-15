@@ -4,8 +4,9 @@
 <title>Back navigation และ PopScope</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-05 · Flutter UI</span><h1>Back navigation และ PopScope</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Guard draft</a></li><li><a href="#section-2">2. didPop สำคัญ</a></li><li><a href="#section-3">3. Internal back</a></li><li><a href="#section-4">4. Unsaved settings</a></li><li><a href="#section-5">5. Predictive back</a></li><li><a href="#section-6">6. Transaction in flight</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>PopScope</code> ควบคุม back gestureเชิงคาดการณ์ได้: <code>canPop</code> ต้องสะท้อนว่าปัจจุบัน popได้หรือไม่ และ callbackจัดการกรณีที่ไม่ได้ popโดยไม่เรียก popซ้ำเป็นวง</div>
-<section><h2>1. Guard draft</h2><pre class="code-vs"><code>PopScope(
+<section id="section-1"><h2>1. Guard draft</h2><pre class="code-vs"><code>PopScope(
   canPop: !isDirty,
   onPopInvokedWithResult: (didPop, _) async {
     if (didPop) return;
@@ -15,12 +16,12 @@
   },
   child: const EditorBody(),
 )</code></pre></section>
-<section><h2>2. didPop สำคัญ</h2><p>ถ้า route popไปแล้ว callbackยังถูกเรียก ห้าม popอีก ตรวจ didPopก่อนเสมอ wmsappใช้ PopScopeใน CheckIn/Packing/Pickingเพื่อ backภายใน stepก่อนออก route</p></section>
-<section><h2>3. Internal back</h2><p>Workflow state machineอาจย้อน stepแทน pop route: canPop falseเมื่อไม่อยู่ initial; callbackสั่ง store.previous/cancel dialog เมื่อกลับ initialจึงให้ route popได้</p></section>
-<section><h2>4. Unsaved settings</h2><p>Absolute settings sheetใช้ isDirtyควบคุม canPopแล้วถาม discard ก่อนปิด ทำให้ drag/back/close buttonใช้ policyเดียวกัน Close buttonควรเรียก maybePopไม่ bypass guard</p></section>
-<section><h2>5. Predictive back</h2><p>Androidต้องรู้ canPopล่วงหน้าเพื่อ animation หลีกเลี่ยง async decisionใน canPop; set canPop=falseแล้วถามใน callback จากนั้น popด้วย flag/commandที่ไม่ถามซ้ำ</p></section>
-<section><h2>6. Transaction in flight</h2><p>ระหว่าง commitอาจ canPop=falseและแสดงเหตุผล หรืออนุญาตออกแต่ operationอยู่ store/idempotent ห้ามปล่อยหน้าแล้ว responseเก่าคืน state obsolete</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Packingอยู่ state scanPartและ Backควรกลับ scanPallet ไม่ออกหน้า ทำอย่างไร?</p><details><summary>เฉลย</summary><p>canPopเฉพาะ initial scanPallet; เมื่อ false callbackตรวจ didPopแล้ว dispatch back eventให้ FSMกลับ stateก่อนหน้า คืน focusตาม state เมื่อ initialรอบถัดไปจึง pop route</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ <code>canPop:false</code> ถาวรโดยไม่มีทางออก/accessibility และอย่าเรียก Navigator.popทันทีใน callbackจน dialog guardไม่ได้ผล</div></section>
+<section id="section-2"><h2>2. didPop สำคัญ</h2><p>ถ้า route popไปแล้ว callbackยังถูกเรียก ห้าม popอีก ตรวจ didPopก่อนเสมอ wmsappใช้ PopScopeใน CheckIn/Packing/Pickingเพื่อ backภายใน stepก่อนออก route</p></section>
+<section id="section-3"><h2>3. Internal back</h2><p>Workflow state machineอาจย้อน stepแทน pop route: canPop falseเมื่อไม่อยู่ initial; callbackสั่ง store.previous/cancel dialog เมื่อกลับ initialจึงให้ route popได้</p></section>
+<section id="section-4"><h2>4. Unsaved settings</h2><p>Absolute settings sheetใช้ isDirtyควบคุม canPopแล้วถาม discard ก่อนปิด ทำให้ drag/back/close buttonใช้ policyเดียวกัน Close buttonควรเรียก maybePopไม่ bypass guard</p></section>
+<section id="section-5"><h2>5. Predictive back</h2><p>Androidต้องรู้ canPopล่วงหน้าเพื่อ animation หลีกเลี่ยง async decisionใน canPop; set canPop=falseแล้วถามใน callback จากนั้น popด้วย flag/commandที่ไม่ถามซ้ำ</p></section>
+<section id="section-6"><h2>6. Transaction in flight</h2><p>ระหว่าง commitอาจ canPop=falseและแสดงเหตุผล หรืออนุญาตออกแต่ operationอยู่ store/idempotent ห้ามปล่อยหน้าแล้ว responseเก่าคืน state obsolete</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Packingอยู่ state scanPartและ Backควรกลับ scanPallet ไม่ออกหน้า ทำอย่างไร?</p><details><summary>เฉลย</summary><p>canPopเฉพาะ initial scanPallet; เมื่อ false callbackตรวจ didPopแล้ว dispatch back eventให้ FSMกลับ stateก่อนหน้า คืน focusตาม state เมื่อ initialรอบถัดไปจึง pop route</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ <code>canPop:false</code> ถาวรโดยไม่มีทางออก/accessibility และอย่าเรียก Navigator.popทันทีใน callbackจน dialog guardไม่ได้ผล</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

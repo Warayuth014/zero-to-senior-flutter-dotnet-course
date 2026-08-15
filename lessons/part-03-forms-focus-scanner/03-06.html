@@ -4,20 +4,21 @@
 <title>Normalize barcode, trim และ case</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-06 · Flutter UI</span><h1>Normalize barcode, trim และ case</h1><p>Part 3: Forms, Focus &amp; Barcode Scanner</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Pipeline ที่ชัด</a></li><li><a href="#section-2">2. trim แบบไหน</a></li><li><a href="#section-3">3. Case sensitivity</a></li><li><a href="#section-4">4. Leading zeros และ numeric-looking codes</a></li><li><a href="#section-5">5. Prefix/symbology</a></li><li><a href="#section-6">6. Equality และ duplicate</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Normalization แปลง input หลายรูปแบบให้เป็น canonical value ก่อน validate/compare แต่ต้องเป็น policy ตามชนิดรหัส ไม่ใช่เรียก <code>trim().toUpperCase()</code> กับข้อมูลทุกชนิดโดยอัตโนมัติ</div>
-<section><h2>1. Pipeline ที่ชัด</h2><pre class="code-vs"><code>String normalizePallet(String raw) =&gt; raw.trim().toUpperCase();
+<section id="section-1"><h2>1. Pipeline ที่ชัด</h2><pre class="code-vs"><code>String normalizePallet(String raw) =&gt; raw.trim().toUpperCase();
 
 final raw = controller.text;
 final pallet = normalizePallet(raw);
 final error = validatePallet(pallet);
 if (error != null) return showError(error);
 await repository.previewPallet(pallet);</code></pre><p>Normalize หนึ่งครั้งที่ input boundary แล้วส่ง canonical value ต่อ ลดการ compare คนละกฎใน UI/store/API</p></section>
-<section><h2>2. trim แบบไหน</h2><p><code>trim()</code> ตัด whitespace หัวท้ายซึ่งมักมาจาก scanner suffix/paste แต่ whitespace ภายในอาจเป็นข้อมูลจริง ห้าม replace ทั้งหมดโดยไม่รู้ contract หาก scanner ส่ง CR/LF แปลกให้ normalize line ending/prefixตาม profileอย่างเจาะจง</p></section>
-<section><h2>3. Case sensitivity</h2><p>Pallet/location มัก case-insensitiveจึง uppercase ได้; serial, token, password หรือ GS1 data อาจ case-sensitive ห้ามเปลี่ยน case wmsapp ใช้ trim+uppercase กับ packing/pallet ID แต่ SerialSelect ใช้ trim อย่างเดียว สะท้อนว่ารหัสคนละชนิดต้องคนละ policy</p></section>
-<section><h2>4. Leading zeros และ numeric-looking codes</h2><p><code>001234</code> เป็น identifier ไม่ใช่ integer การ parse จะทำศูนย์หาย เก็บ barcode/location/serial เป็น String ส่วน quantity จึง parse เป็น int/decimal แยกชนิดตั้งแต่ model/API contract</p></section>
-<section><h2>5. Prefix/symbology</h2><p>บาง label มี application identifier, prefix vendor หรือ check digit เช่น GS1 ควรมี parser ที่คืน typed result/error ไม่ใช้ substring magic ใน widget เก็บทั้ง raw/canonical เมื่อ audit ต้องรู้สิ่งที่สแกนจริง และ redact log ตาม policy</p></section>
-<section><h2>6. Equality และ duplicate</h2><p>Set/List สำหรับ duplicate ต้องเก็บ canonical value ถ้า available set มี rawคนละ case ต้อง normalizeชุด reference ด้วยกฎเดียวกันครั้งเดียว ไม่ normalizeเฉพาะค่าที่สแกนแล้ว compare กับข้อมูลดิบ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>กำหนด normalization สำหรับ pallet <code>" ab-001\r\n"</code>, serial <code>"Sn-aB9 "</code> และ quantity <code>" 005 "</code></p><details><summary>เฉลย</summary><p>Pallet: trim→uppercase = AB-001 หาก contract case-insensitive; serial: trim = Sn-aB9 รักษา case; quantity: trim→int.tryParse = 5 แล้ว validate range อย่าใช้ normalizer เดียวทั้งสามชนิด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า normalize หลังส่ง API หรือ normalizeซ้ำคนละกฎหลายชั้นจนหา bug ไม่พบ กำหนด canonical contract ที่ boundary และให้ backendบันทึก/ตอบรูปแบบมาตรฐาน แต่ยัง validate server-side</div></section>
+<section id="section-2"><h2>2. trim แบบไหน</h2><p><code>trim()</code> ตัด whitespace หัวท้ายซึ่งมักมาจาก scanner suffix/paste แต่ whitespace ภายในอาจเป็นข้อมูลจริง ห้าม replace ทั้งหมดโดยไม่รู้ contract หาก scanner ส่ง CR/LF แปลกให้ normalize line ending/prefixตาม profileอย่างเจาะจง</p></section>
+<section id="section-3"><h2>3. Case sensitivity</h2><p>Pallet/location มัก case-insensitiveจึง uppercase ได้; serial, token, password หรือ GS1 data อาจ case-sensitive ห้ามเปลี่ยน case wmsapp ใช้ trim+uppercase กับ packing/pallet ID แต่ SerialSelect ใช้ trim อย่างเดียว สะท้อนว่ารหัสคนละชนิดต้องคนละ policy</p></section>
+<section id="section-4"><h2>4. Leading zeros และ numeric-looking codes</h2><p><code>001234</code> เป็น identifier ไม่ใช่ integer การ parse จะทำศูนย์หาย เก็บ barcode/location/serial เป็น String ส่วน quantity จึง parse เป็น int/decimal แยกชนิดตั้งแต่ model/API contract</p></section>
+<section id="section-5"><h2>5. Prefix/symbology</h2><p>บาง label มี application identifier, prefix vendor หรือ check digit เช่น GS1 ควรมี parser ที่คืน typed result/error ไม่ใช้ substring magic ใน widget เก็บทั้ง raw/canonical เมื่อ audit ต้องรู้สิ่งที่สแกนจริง และ redact log ตาม policy</p></section>
+<section id="section-6"><h2>6. Equality และ duplicate</h2><p>Set/List สำหรับ duplicate ต้องเก็บ canonical value ถ้า available set มี rawคนละ case ต้อง normalizeชุด reference ด้วยกฎเดียวกันครั้งเดียว ไม่ normalizeเฉพาะค่าที่สแกนแล้ว compare กับข้อมูลดิบ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>กำหนด normalization สำหรับ pallet <code>" ab-001\r\n"</code>, serial <code>"Sn-aB9 "</code> และ quantity <code>" 005 "</code></p><details><summary>เฉลย</summary><p>Pallet: trim→uppercase = AB-001 หาก contract case-insensitive; serial: trim = Sn-aB9 รักษา case; quantity: trim→int.tryParse = 5 แล้ว validate range อย่าใช้ normalizer เดียวทั้งสามชนิด</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า normalize หลังส่ง API หรือ normalizeซ้ำคนละกฎหลายชั้นจนหา bug ไม่พบ กำหนด canonical contract ที่ boundary และให้ backendบันทึก/ตอบรูปแบบมาตรฐาน แต่ยัง validate server-side</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

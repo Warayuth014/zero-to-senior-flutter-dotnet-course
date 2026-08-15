@@ -4,23 +4,24 @@
 <title>MediaQuery และ SafeArea</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-09 · Flutter UI</span><h1>MediaQuery และ SafeArea</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. size ต่างจาก available constraints</a></li><li><a href="#section-2">2. padding, viewPadding และ viewInsets</a></li><li><a href="#section-3">3. SafeArea แบบเลือกด้าน</a></li><li><a href="#section-4">4. จากสองโปรเจกต์</a></li><li><a href="#section-5">5. Keyboard-aware sheet</a></li><li><a href="#section-6">6. APIs ที่ rebuild แคบกว่า</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>MediaQuery</code> บอกคุณสมบัติของ view เช่น size, padding, viewInsets และ text scaling ส่วน <code>SafeArea</code> แปลง padding ที่หลบ system UI เป็น layout โดยสะดวก ทั้งคู่ไม่แทน constraints ของ parent</div>
-<section><h2>1. size ต่างจาก available constraints</h2><p><code>MediaQuery.sizeOf(context)</code> คือขนาด view/window แต่ widget อาจอยู่ครึ่งจอ, dialog หรือ split pane จึงควรใช้ LayoutBuilder เมื่อตัดสิน layout จากพื้นที่ที่ได้รับ ใช้ MediaQuery เมื่อสนใจคุณสมบัติทั้ง view เช่น keyboard/system padding</p></section>
-<section><h2>2. padding, viewPadding และ viewInsets</h2><ul><li><code>padding</code>: ส่วน view ที่ถูก system UI บัง ณ ตอนนั้น</li><li><code>viewPadding</code>: safe padding พื้นฐานไม่ลดตาม keyboard</li><li><code>viewInsets</code>: ส่วนถูกบังเต็ม เช่น on-screen keyboard</li></ul><p>Bottom sheet/form มักต้องสนใจ <code>viewInsets.bottom</code>; content เต็มจอต้องหลบ notch/navigation ด้วย SafeArea</p></section>
-<section><h2>3. SafeArea แบบเลือกด้าน</h2><pre class="code-vs"><code>SafeArea(
+<section id="section-1"><h2>1. size ต่างจาก available constraints</h2><p><code>MediaQuery.sizeOf(context)</code> คือขนาด view/window แต่ widget อาจอยู่ครึ่งจอ, dialog หรือ split pane จึงควรใช้ LayoutBuilder เมื่อตัดสิน layout จากพื้นที่ที่ได้รับ ใช้ MediaQuery เมื่อสนใจคุณสมบัติทั้ง view เช่น keyboard/system padding</p></section>
+<section id="section-2"><h2>2. padding, viewPadding และ viewInsets</h2><ul><li><code>padding</code>: ส่วน view ที่ถูก system UI บัง ณ ตอนนั้น</li><li><code>viewPadding</code>: safe padding พื้นฐานไม่ลดตาม keyboard</li><li><code>viewInsets</code>: ส่วนถูกบังเต็ม เช่น on-screen keyboard</li></ul><p>Bottom sheet/form มักต้องสนใจ <code>viewInsets.bottom</code>; content เต็มจอต้องหลบ notch/navigation ด้วย SafeArea</p></section>
+<section id="section-3"><h2>3. SafeArea แบบเลือกด้าน</h2><pre class="code-vs"><code>SafeArea(
   top: false, // AppBar จัดส่วนบนแล้ว
   minimum: const EdgeInsets.symmetric(horizontal: 12),
   child: WarehouseBody(),
 )</code></pre><p>SafeArea ใช้ MediaQuery padding แล้วแก้ MediaQuery ภายในไม่ให้ descendant บวก safe padding ซ้ำ การซ้อน SafeArea จึงโดยทั่วไปไม่ทบค่าเดิม แต่ padding manual อาจยังซ้ำ</p></section>
-<section><h2>4. จากสองโปรเจกต์</h2><p>wmsapp Home ใช้ SafeArea(top: false) เพราะ AppBar รับพื้นที่บนแล้ว Absolute ครอบ app-wide SafeArea ใต้ MaterialApp และ shell มี SafeArea ในส่วน navigation การออกแบบระดับ root ช่วย consistency แต่ overlay/dialog ที่อยู่นอกตำแหน่งนั้นยังต้องตรวจเอง</p></section>
-<section><h2>5. Keyboard-aware sheet</h2><pre class="code-vs"><code>final insets = MediaQuery.viewInsetsOf(context);
+<section id="section-4"><h2>4. จากสองโปรเจกต์</h2><p>wmsapp Home ใช้ SafeArea(top: false) เพราะ AppBar รับพื้นที่บนแล้ว Absolute ครอบ app-wide SafeArea ใต้ MaterialApp และ shell มี SafeArea ในส่วน navigation การออกแบบระดับ root ช่วย consistency แต่ overlay/dialog ที่อยู่นอกตำแหน่งนั้นยังต้องตรวจเอง</p></section>
+<section id="section-5"><h2>5. Keyboard-aware sheet</h2><pre class="code-vs"><code>final insets = MediaQuery.viewInsetsOf(context);
 return AnimatedPadding(
   duration: const Duration(milliseconds: 180),
   padding: EdgeInsets.only(bottom: insets.bottom),
   child: const ConnectionForm(),
 );</code></pre><p>จำกัด maxHeight และทำ content เลื่อนได้ด้วย เพราะยก sheet อย่างเดียวอาจเหลือความสูงไม่พอเมื่อ PDA เป็น landscape</p></section>
-<section><h2>6. APIs ที่ rebuild แคบกว่า</h2><p>ใช้ <code>MediaQuery.sizeOf</code>, <code>paddingOf</code>, <code>viewInsetsOf</code> เมื่อสนใจ property เดียว แทน <code>MediaQuery.of</code> ทั้ง object เพื่อให้ dependency ชัดและลด rebuild จาก property อื่น รวมทั้งอ่าน textScaler/platformBrightness/highContrast เพื่อ accessibility ตาม use case</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Bottom action bar ถูก navigation gesture บัง แต่ body มี SafeArea อยู่แล้ว ควรแก้ที่ไหน?</p><details><summary>แนวคำตอบ</summary><p>ตรวจ tree ว่า action bar เป็น descendant ของ SafeArea หรือเป็น bottomNavigationBar/overlay คนละ subtree ถ้าอยู่นอกให้ครอบเฉพาะ action bar ด้วย SafeArea(top: false) หรือเพิ่ม padding จาก <code>MediaQuery.paddingOf(context).bottom</code> ที่ owner อย่าบวกทั้ง body และ bar ซ้ำ</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ MediaQuery width เป็น breakpoint ภายใน reusable card เพราะมันเห็นทั้งหน้าจอแม้ card อยู่ pane แคบ ใช้ LayoutBuilder ของ card/pane และใช้ MediaQuery เฉพาะ view-level concerns</div></section>
+<section id="section-6"><h2>6. APIs ที่ rebuild แคบกว่า</h2><p>ใช้ <code>MediaQuery.sizeOf</code>, <code>paddingOf</code>, <code>viewInsetsOf</code> เมื่อสนใจ property เดียว แทน <code>MediaQuery.of</code> ทั้ง object เพื่อให้ dependency ชัดและลด rebuild จาก property อื่น รวมทั้งอ่าน textScaler/platformBrightness/highContrast เพื่อ accessibility ตาม use case</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Bottom action bar ถูก navigation gesture บัง แต่ body มี SafeArea อยู่แล้ว ควรแก้ที่ไหน?</p><details><summary>แนวคำตอบ</summary><p>ตรวจ tree ว่า action bar เป็น descendant ของ SafeArea หรือเป็น bottomNavigationBar/overlay คนละ subtree ถ้าอยู่นอกให้ครอบเฉพาะ action bar ด้วย SafeArea(top: false) หรือเพิ่ม padding จาก <code>MediaQuery.paddingOf(context).bottom</code> ที่ owner อย่าบวกทั้ง body และ bar ซ้ำ</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ MediaQuery width เป็น breakpoint ภายใน reusable card เพราะมันเห็นทั้งหน้าจอแม้ card อยู่ pane แคบ ใช้ LayoutBuilder ของ card/pane และใช้ MediaQuery เฉพาะ view-level concerns</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,8 +4,9 @@
 <title>Optimistic UI และ rollback</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-13 · State &amp; Lifecycle</span><h1>Optimistic UI และ rollback</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Optimistic transaction</a></li><li><a href="#section-2">2. Rollback snapshot</a></li><li><a href="#section-3">3. Pending state</a></li><li><a href="#section-4">4. Warehouse risk</a></li><li><a href="#section-5">5. Server reconciliation</a></li><li><a href="#section-6">6. Error UX</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Optimistic UI แสดงผลเหมือนสำเร็จก่อน serverตอบเพื่อความเร็ว เหมาะ actionย้อนกลับง่าย/โอกาส failต่ำ แต่ warehouse stock/task commitเสี่ยงสูงจึงมักใช้ pendingหรือ pessimistic state พร้อม rollback/reconcileที่ชัด</div>
-<section><h2>1. Optimistic transaction</h2><pre class="code-vs"><code>Future&lt;void&gt; togglePinned(Task task) async {
+<section id="section-1"><h2>1. Optimistic transaction</h2><pre class="code-vs"><code>Future&lt;void&gt; togglePinned(Task task) async {
   final before = task.isPinned;
   _replace(task.copyWith(isPinned: !before));
   notifyListeners();
@@ -17,12 +18,12 @@
     notifyListeners();
   }
 }</code></pre></section>
-<section><h2>2. Rollback snapshot</h2><p>เก็บค่าก่อน mutationและ operation ID หากมี optimisticหลายครั้งซ้อน rollbackเก่าไม่ควรทับ actionใหม่ ใช้ per-entity version/queueหรือ serialize command ไม่เก็บ reference mutableที่ถูกแก้ต่อจน snapshotไม่จริง</p></section>
-<section><h2>3. Pending state</h2><p>ทางกลางคือแสดง row/card pendingทันทีแต่ไม่รวมใน committed stockจน serverตอบ ผู้ใช้เห็น responsivenessและเข้าใจยังไม่เสร็จ เมื่อ failให้ retry/remove pending เมื่อ timeout/unknownให้ reconcileก่อนส่งซ้ำ</p></section>
-<section><h2>4. Warehouse risk</h2><p>การรับเข้า, หยิบ, putawayเปลี่ยน inventoryและอาจมีหลายเครื่องทำพร้อมกัน ควรรอ authoritative response/Conflictก่อนแสดง done WarehouseStoreหลาย commandตั้ง submittingแล้ว apply task/statusหลัง awaitซึ่งเป็น pessimisticที่เหมาะกว่า</p></section>
-<section><h2>5. Server reconciliation</h2><p>Rollback localไม่พอหาก server commitแต่ responseหาย Queryด้วย operation ID/entity versionหรือ refresh authoritative list WarehouseStoreกรณีออกจาก receive flowระหว่าง awaitไม่ restore UIเก่าแต่ unawaited reload receivingเพื่อ reconcile</p></section>
-<section><h2>6. Error UX</h2><p>บอกว่า actionถูก rollback, pendingหรือสถานะไม่แน่ชัด ไม่แสดง successแล้วเปลี่ยนเป็น errorเงียบ ๆ ให้ undoเฉพาะก่อน server commitหรือ endpointรองรับ compensating actionจริง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือก optimistic/pending/pessimisticสำหรับ favorite menu, scan serial, confirm pick</p><details><summary>เฉลย</summary><p>Favorite: optimistic+rollback; scan serialใน local draft: optimistic local acceptedแต่ commit batchภายหลัง; confirm pick: pessimistic/pendingพร้อม busyและ idempotencyเพราะกระทบ stock/concurrency</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า rollbackด้วยการ reloadแล้วคิดว่าปลอดภัยเสมอ Reloadอาจ fail/ช้าและมี actionใหม่แล้ว ต้องมี operation identity, conflict policyและ authoritative reconciliation</div></section>
+<section id="section-2"><h2>2. Rollback snapshot</h2><p>เก็บค่าก่อน mutationและ operation ID หากมี optimisticหลายครั้งซ้อน rollbackเก่าไม่ควรทับ actionใหม่ ใช้ per-entity version/queueหรือ serialize command ไม่เก็บ reference mutableที่ถูกแก้ต่อจน snapshotไม่จริง</p></section>
+<section id="section-3"><h2>3. Pending state</h2><p>ทางกลางคือแสดง row/card pendingทันทีแต่ไม่รวมใน committed stockจน serverตอบ ผู้ใช้เห็น responsivenessและเข้าใจยังไม่เสร็จ เมื่อ failให้ retry/remove pending เมื่อ timeout/unknownให้ reconcileก่อนส่งซ้ำ</p></section>
+<section id="section-4"><h2>4. Warehouse risk</h2><p>การรับเข้า, หยิบ, putawayเปลี่ยน inventoryและอาจมีหลายเครื่องทำพร้อมกัน ควรรอ authoritative response/Conflictก่อนแสดง done WarehouseStoreหลาย commandตั้ง submittingแล้ว apply task/statusหลัง awaitซึ่งเป็น pessimisticที่เหมาะกว่า</p></section>
+<section id="section-5"><h2>5. Server reconciliation</h2><p>Rollback localไม่พอหาก server commitแต่ responseหาย Queryด้วย operation ID/entity versionหรือ refresh authoritative list WarehouseStoreกรณีออกจาก receive flowระหว่าง awaitไม่ restore UIเก่าแต่ unawaited reload receivingเพื่อ reconcile</p></section>
+<section id="section-6"><h2>6. Error UX</h2><p>บอกว่า actionถูก rollback, pendingหรือสถานะไม่แน่ชัด ไม่แสดง successแล้วเปลี่ยนเป็น errorเงียบ ๆ ให้ undoเฉพาะก่อน server commitหรือ endpointรองรับ compensating actionจริง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เลือก optimistic/pending/pessimisticสำหรับ favorite menu, scan serial, confirm pick</p><details><summary>เฉลย</summary><p>Favorite: optimistic+rollback; scan serialใน local draft: optimistic local acceptedแต่ commit batchภายหลัง; confirm pick: pessimistic/pendingพร้อม busyและ idempotencyเพราะกระทบ stock/concurrency</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า rollbackด้วยการ reloadแล้วคิดว่าปลอดภัยเสมอ Reloadอาจ fail/ช้าและมี actionใหม่แล้ว ต้องมี operation identity, conflict policyและ authoritative reconciliation</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

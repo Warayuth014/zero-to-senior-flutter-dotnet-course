@@ -4,8 +4,9 @@
 <title>StatelessWidget และ immutable configuration</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-04 · Flutter UI</span><h1>StatelessWidget และ immutable configuration</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Configuration จาก constructor</a></li><li><a href="#section-2">2. เหตุที่ Stateless rebuild</a></li><li><a href="#section-3">3. ตัวอย่างจริง</a></li><li><a href="#section-4">4. ส่ง store เข้า Stateless ได้ แต่ต้องฟังให้ถูก</a></li><li><a href="#section-5">5. Derived UI ไม่ต้องเก็บ state</a></li><li><a href="#section-6">6. เมื่อควร Stateful</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>StatelessWidget</code> ไม่มี State object ของตัวเอง แต่ rebuild ได้เมื่อ parent update หรือ inherited dependency ที่มันใช้เปลี่ยน คำว่า stateless ไม่ได้แปลว่า “build ครั้งเดียว”</div>
-<section><h2>1. Configuration จาก constructor</h2><pre class="code-vs"><code>class TaskTile extends StatelessWidget {
+<section id="section-1"><h2>1. Configuration จาก constructor</h2><pre class="code-vs"><code>class TaskTile extends StatelessWidget {
   const TaskTile({
     super.key,
     required this.task,
@@ -20,12 +21,12 @@
     onTap: onTap,
   );
 }</code></pre><p>fields เป็น final และ widget แสดงผลจาก input/context Parent เป็น owner ของ mutable state แล้วส่ง snapshot/callback ลงมา</p></section>
-<section><h2>2. เหตุที่ Stateless rebuild</h2><ul><li>parent build คืน instance/config ใหม่</li><li><code>Theme.of</code>, <code>MediaQuery</code>, Localizations ที่ depend เปลี่ยน</li><li>Element ถูก reinsert/update ตาม identity</li></ul><p>จึงห้าม cacheค่าจาก context ใน global หรือทำ API ใน build เพราะ build ถูกเรียกได้บ่อย</p></section>
-<section><h2>3. ตัวอย่างจริง</h2><p><code>HomeView</code>, <code>_Tile</code>, <code>_HomeIcon</code> เป็น StatelessWidget รับ WarehouseStore/snapshot properties/callback แล้วประกอบ UI ส่วน <code>WmsApp</code> ก็ stateless แม้แอปรองรับภาษา/theme เปลี่ยน เพราะ mutable owner อยู่ Listenable ภายนอก</p></section>
-<section><h2>4. ส่ง store เข้า Stateless ได้ แต่ต้องฟังให้ถูก</h2><p>การมี field <code>WarehouseStore store</code> ไม่ทำ widget rebuildเองเมื่อ store mutate ต้องมี ListenableBuilder เหนือ HomeView หรือ builder ภายใน ถ้า parent shell กำลังฟัง store และ rebuild body ก็พอ แต่ dependency scope ต้องอ่านจาก tree จริง</p></section>
-<section><h2>5. Derived UI ไม่ต้องเก็บ state</h2><p>ค่าพวก <code>hasBadge = count &gt; 0</code>, label จาก enum, color จาก status ควรคำนวณใน build/helper pure ไม่ย้ายเป็น mutable state ที่ต้อง sync สองจุด</p></section>
-<section><h2>6. เมื่อควร Stateful</h2><p>เมื่อ widget เป็น owner ของ lifecycle state เช่น controller, focus, animation, subscription หรือ local selection ที่ต้องอยู่ข้าม rebuild หาก state เป็นของ workflow/shared ให้ย้ายไป store ไม่ใช่เปลี่ยนทุกอย่างเป็น StatefulWidget</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Card แสดง status จาก task และกดแล้วเรียก parent ต้องเป็น Stateful ไหม?</p><details><summary>เฉลย</summary><p>ไม่จำเป็น ใช้ Stateless รับ task/status และ callback ถ้า hover/animation/local expand ต้องอยู่ข้าม buildจึงค่อย Stateful หรือ widget animationสำเร็จรูป แต่ business status ยังเป็นของ parent/store</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใส่ mutable collection/controller ใน Stateless แล้วแก้เงียบ ๆ เพราะไม่มี lifecycle/dispose และไม่มี signal rebuild ให้ state owner ชัดหรือสร้างค่าชั่วคราวใน buildเท่านั้น</div></section>
+<section id="section-2"><h2>2. เหตุที่ Stateless rebuild</h2><ul><li>parent build คืน instance/config ใหม่</li><li><code>Theme.of</code>, <code>MediaQuery</code>, Localizations ที่ depend เปลี่ยน</li><li>Element ถูก reinsert/update ตาม identity</li></ul><p>จึงห้าม cacheค่าจาก context ใน global หรือทำ API ใน build เพราะ build ถูกเรียกได้บ่อย</p></section>
+<section id="section-3"><h2>3. ตัวอย่างจริง</h2><p><code>HomeView</code>, <code>_Tile</code>, <code>_HomeIcon</code> เป็น StatelessWidget รับ WarehouseStore/snapshot properties/callback แล้วประกอบ UI ส่วน <code>WmsApp</code> ก็ stateless แม้แอปรองรับภาษา/theme เปลี่ยน เพราะ mutable owner อยู่ Listenable ภายนอก</p></section>
+<section id="section-4"><h2>4. ส่ง store เข้า Stateless ได้ แต่ต้องฟังให้ถูก</h2><p>การมี field <code>WarehouseStore store</code> ไม่ทำ widget rebuildเองเมื่อ store mutate ต้องมี ListenableBuilder เหนือ HomeView หรือ builder ภายใน ถ้า parent shell กำลังฟัง store และ rebuild body ก็พอ แต่ dependency scope ต้องอ่านจาก tree จริง</p></section>
+<section id="section-5"><h2>5. Derived UI ไม่ต้องเก็บ state</h2><p>ค่าพวก <code>hasBadge = count &gt; 0</code>, label จาก enum, color จาก status ควรคำนวณใน build/helper pure ไม่ย้ายเป็น mutable state ที่ต้อง sync สองจุด</p></section>
+<section id="section-6"><h2>6. เมื่อควร Stateful</h2><p>เมื่อ widget เป็น owner ของ lifecycle state เช่น controller, focus, animation, subscription หรือ local selection ที่ต้องอยู่ข้าม rebuild หาก state เป็นของ workflow/shared ให้ย้ายไป store ไม่ใช่เปลี่ยนทุกอย่างเป็น StatefulWidget</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Card แสดง status จาก task และกดแล้วเรียก parent ต้องเป็น Stateful ไหม?</p><details><summary>เฉลย</summary><p>ไม่จำเป็น ใช้ Stateless รับ task/status และ callback ถ้า hover/animation/local expand ต้องอยู่ข้าม buildจึงค่อย Stateful หรือ widget animationสำเร็จรูป แต่ business status ยังเป็นของ parent/store</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใส่ mutable collection/controller ใน Stateless แล้วแก้เงียบ ๆ เพราะไม่มี lifecycle/dispose และไม่มี signal rebuild ให้ state owner ชัดหรือสร้างค่าชั่วคราวใน buildเท่านั้น</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

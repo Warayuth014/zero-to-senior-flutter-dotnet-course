@@ -3,10 +3,11 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ตัวแปร ชนิดข้อมูล และ type inference</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-02 · Dart Core</span><h1>ตัวแปร ชนิดข้อมูล และ type inference</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-02 · Dart Core</span><h1>ตัวแปร ชนิดข้อมูล และ type inference</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ชนิดข้อมูลที่ต้องอ่านออกทันที</a></li><li><a href="#section-2">2. Inference ไม่เท่ากับ dynamic</a></li><li><a href="#section-3">3. Assignment กับ object identity</a></li><li><a href="#section-4">4. ตัวอย่างใน WMS</a></li><li><a href="#section-5">5. กฎเลือก type สำหรับโค้ดงานจริง</a></li><li><a href="#section-6">6. แบบฝึกหัด</a></li><li><a href="#section-7">7. จุดพลาด</a></li><li><a href="#section-8">8. สรุป</a></li></ol></nav>
 <div class="note"><strong>หัวใจของ Dart:</strong> ตัวแปรทุกตัวมี static type แม้เขียนด้วย <code>var</code> ก็ตาม Type inference ช่วยลดคำซ้ำ แต่ไม่ได้ปิด type checking แบบ <code>dynamic</code></div>
-<section><h2>1. ชนิดข้อมูลที่ต้องอ่านออกทันที</h2><ul><li><code>int</code>, <code>double</code>, <code>num</code>: จำนวนเต็ม ทศนิยม และชนิดแม่ของทั้งคู่</li><li><code>String</code>, <code>bool</code>: ข้อความและจริง/เท็จ</li><li><code>Object</code>/<code>Object?</code>: รับค่าได้กว้างแต่ยังต้องตรวจ type ก่อนใช้</li><li><code>dynamic</code>: เลื่อนการตรวจสมาชิกไป runtime—ใช้เฉพาะ boundary ที่หลีกเลี่ยงไม่ได้</li><li><code>Never</code>: function ไม่มีวันคืนค่าปกติ เช่น throw เสมอ</li></ul></section>
-<section><h2>2. Inference ไม่เท่ากับ dynamic</h2><pre class="code-vs"><code>var palletId = 'PAL-001'; // inferred เป็น String
+<section id="section-1"><h2>1. ชนิดข้อมูลที่ต้องอ่านออกทันที</h2><ul><li><code>int</code>, <code>double</code>, <code>num</code>: จำนวนเต็ม ทศนิยม และชนิดแม่ของทั้งคู่</li><li><code>String</code>, <code>bool</code>: ข้อความและจริง/เท็จ</li><li><code>Object</code>/<code>Object?</code>: รับค่าได้กว้างแต่ยังต้องตรวจ type ก่อนใช้</li><li><code>dynamic</code>: เลื่อนการตรวจสมาชิกไป runtime—ใช้เฉพาะ boundary ที่หลีกเลี่ยงไม่ได้</li><li><code>Never</code>: function ไม่มีวันคืนค่าปกติ เช่น throw เสมอ</li></ul></section>
+<section id="section-2"><h2>2. Inference ไม่เท่ากับ dynamic</h2><pre class="code-vs"><code>var palletId = 'PAL-001'; // inferred เป็น String
 palletId = 'PAL-002';     // ได้
 // palletId = 42;          // compile-time error
 
@@ -17,20 +18,20 @@ if (raw is int) {
 
 dynamic unchecked = response['count'];
 unchecked.missingMethod(); // compile ผ่าน แต่พังตอน runtime</code></pre><p>เลือก <code>var</code> เมื่อ type ด้านขวาชัด เลือกเขียน type เมื่อเป็น public API, ค่าเริ่มต้นไม่บอก intent หรืออยากรับ interface ที่กว้างกว่าคลาสจริง</p></section>
-<section><h2>3. Assignment กับ object identity</h2><p>ตัวแปรเก็บ reference ไปยัง object ไม่ได้คัดลอก object ทุกครั้ง การ assign list ให้ตัวแปรใหม่จึงยังชี้ list เดิม:</p><pre class="code-vs"><code>final first = &lt;String&gt;['A'];
+<section id="section-3"><h2>3. Assignment กับ object identity</h2><p>ตัวแปรเก็บ reference ไปยัง object ไม่ได้คัดลอก object ทุกครั้ง การ assign list ให้ตัวแปรใหม่จึงยังชี้ list เดิม:</p><pre class="code-vs"><code>final first = &lt;String&gt;['A'];
 final second = first;
 second.add('B');
 print(first); // [A, B]
 
 final copied = [...first]; // list คนละตัว</code></pre><p>เรื่องนี้สำคัญต่อ state: mutate list เดิมอาจทำให้ listener ที่เทียบ identity ไม่รู้ว่าค่าเปลี่ยน การสร้าง collection/object ใหม่ทำให้ flow ชัดและ test ง่ายกว่า</p></section>
-<section><h2>4. ตัวอย่างใน WMS</h2><p>เปิด <code>wms_absolute_mobile/lib/core/api_client.dart</code> จะเห็น JSON เริ่มเป็น <code>Map&lt;String, dynamic&gt;</code> เพราะข้อมูลเพิ่งข้าม network จากนั้นไฟล์ model/API แปลงเป็น <code>String</code>, <code>int</code>, enum หรือ class ที่แน่นอน ส่วน <code>PdaMetrics.minTapTarget</code> เป็น <code>double</code> ที่มีความหมายด้าน UI ชัดเจน</p></section>
-<section><h2>5. กฎเลือก type สำหรับโค้ดงานจริง</h2><ol><li>ใช้ type ที่แคบที่สุดซึ่งรองรับค่าที่ถูกต้อง</li><li>ถ้า “ไม่มีค่า” เป็นสถานะจริง ใช้ <code>T?</code> ไม่ใช้ค่าวิเศษอย่าง <code>''</code> หรือ <code>-1</code></li><li>กัก <code>dynamic</code> ไว้ใน parser แล้วคืน typed model</li><li>อย่า cast เพียงเพื่อให้ analyzer เงียบ ต้อง validate รูป payload ด้วย</li></ol></section>
-<section><h2>6. แบบฝึกหัด</h2><p>กำหนด type ให้ข้อมูลสแกน: barcode, quantity, optional serial, loading flag และ raw JSON จาก server แล้วอธิบายว่าทำไม</p><details><summary>เฉลย</summary><pre class="code-vs"><code>String barcode = '';
+<section id="section-4"><h2>4. ตัวอย่างใน WMS</h2><p>เปิด <code>wms_absolute_mobile/lib/core/api_client.dart</code> จะเห็น JSON เริ่มเป็น <code>Map&lt;String, dynamic&gt;</code> เพราะข้อมูลเพิ่งข้าม network จากนั้นไฟล์ model/API แปลงเป็น <code>String</code>, <code>int</code>, enum หรือ class ที่แน่นอน ส่วน <code>PdaMetrics.minTapTarget</code> เป็น <code>double</code> ที่มีความหมายด้าน UI ชัดเจน</p></section>
+<section id="section-5"><h2>5. กฎเลือก type สำหรับโค้ดงานจริง</h2><ol><li>ใช้ type ที่แคบที่สุดซึ่งรองรับค่าที่ถูกต้อง</li><li>ถ้า “ไม่มีค่า” เป็นสถานะจริง ใช้ <code>T?</code> ไม่ใช้ค่าวิเศษอย่าง <code>''</code> หรือ <code>-1</code></li><li>กัก <code>dynamic</code> ไว้ใน parser แล้วคืน typed model</li><li>อย่า cast เพียงเพื่อให้ analyzer เงียบ ต้อง validate รูป payload ด้วย</li></ol></section>
+<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>กำหนด type ให้ข้อมูลสแกน: barcode, quantity, optional serial, loading flag และ raw JSON จาก server แล้วอธิบายว่าทำไม</p><details><summary>เฉลย</summary><pre class="code-vs"><code>String barcode = '';
 int quantity = 0;
 String? serial;
 bool isLoading = false;
 Map&lt;String, dynamic&gt; rawJson = &lt;String, dynamic&gt;{};</code></pre><p>หลัง parse แล้วไม่ควรส่ง <code>rawJson</code> เข้า widget แต่สร้าง model ที่มีชนิดแทน</p></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn"><code>var</code> ไม่ได้ทำให้ตัวแปรเปลี่ยนชนิดได้ และ <code>Object?</code> ปลอดภัยกว่า <code>dynamic</code> เพราะ compiler บังคับให้ตรวจ type ก่อนเรียกสมาชิก</div></section>
-<section><h2>8. สรุป</h2><p>อ่าน declaration แล้วตอบให้ได้สามข้อ: ค่าชนิดใดถูกต้อง, null ได้ไหม, และใครมีสิทธิ์เปลี่ยน object นั้น จากสามคำตอบนี้ bug ของ model/state จำนวนมากจะเห็นก่อนรันแอป</p></section>
+<section id="section-7"><h2>7. จุดพลาด</h2><div class="warn"><code>var</code> ไม่ได้ทำให้ตัวแปรเปลี่ยนชนิดได้ และ <code>Object?</code> ปลอดภัยกว่า <code>dynamic</code> เพราะ compiler บังคับให้ตรวจ type ก่อนเรียกสมาชิก</div></section>
+<section id="section-8"><h2>8. สรุป</h2><p>อ่าน declaration แล้วตอบให้ได้สามข้อ: ค่าชนิดใดถูกต้อง, null ได้ไหม, และใครมีสิทธิ์เปลี่ยน object นั้น จากสามคำตอบนี้ bug ของ model/state จำนวนมากจะเห็นก่อนรันแอป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

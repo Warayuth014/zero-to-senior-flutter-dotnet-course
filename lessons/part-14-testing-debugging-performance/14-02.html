@@ -4,8 +4,9 @@
 <title>Pure Dart unit test</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-02 · Testing</span><h1>Pure Dart unit test</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. โครงสร้างพื้นฐาน</a></li><li><a href="#section-2">2. Table-driven tests</a></li><li><a href="#section-3">3. State transition</a></li><li><a href="#section-4">4. Exception และ validation</a></li><li><a href="#section-5">5. เวลาและ ID</a></li><li><a href="#section-6">6. Value equality</a></li><li><a href="#section-7">7. ไม่ทดสอบ private method</a></li><li><a href="#section-8">8. แบบฝึกหัด</a></li></ol></nav>
 <div class="note"><strong>Pure Dart test คือ feedback ที่เร็วที่สุด:</strong> ย้าย logic ออกจาก widget callback มาเป็น function/model/state machine แล้วทดสอบโดยไม่ต้อง <code>pumpWidget</code></div>
-<section><h2>1. โครงสร้างพื้นฐาน</h2><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
+<section id="section-1"><h2>1. โครงสร้างพื้นฐาน</h2><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('normalizeBarcode', () {
@@ -14,30 +15,30 @@ void main() {
     });
   });
 }</code></pre></section>
-<section><h2>2. Table-driven tests</h2><pre class="code-vs"><code>for (final (raw, expected) in [
+<section id="section-2"><h2>2. Table-driven tests</h2><pre class="code-vs"><code>for (final (raw, expected) in [
   ('P-001', 'P-001'),
   (' p-001 ', 'P-001'),
   ('', null),
 ]) {
   test('parse $raw', () =&gt; expect(parsePart(raw), expected));
 }</code></pre><p>เพิ่ม edge cases ได้โดยไม่ทำสำเนา setup และชื่อ case ชี้ค่าที่เสียทันที</p></section>
-<section><h2>3. State transition</h2><pre class="code-vs"><code>final next = ReceivingState.initial().apply(
+<section id="section-3"><h2>3. State transition</h2><pre class="code-vs"><code>final next = ReceivingState.initial().apply(
   const PartScanned('P-001'),
 );
 expect(next.step, ReceivingStep.serial);
 expect(next.partCode, 'P-001');
 expect(next.error, isNull);</code></pre><p>ถ้า transition ต้องใช้ <code>BuildContext</code> แสดงว่า logic กับ UI ยังติดกันเกินไป</p></section>
-<section><h2>4. Exception และ validation</h2><pre class="code-vs"><code>expect(
+<section id="section-4"><h2>4. Exception และ validation</h2><pre class="code-vs"><code>expect(
   () =&gt; Quantity.parse('-1'),
   throwsA(isA&lt;ValidationException&gt;()
       .having((e) =&gt; e.field, 'field', 'qty')),
 );</code></pre><p>assert type/ข้อมูลสำคัญ ไม่ล็อกข้อความทั้งประโยคจน localization ทำ test แตกโดยไม่เกี่ยว behavior</p></section>
-<section><h2>5. เวลาและ ID</h2><pre class="code-vs"><code>final clock = FakeClock(DateTime.utc(2026, 8, 15, 9));
+<section id="section-5"><h2>5. เวลาและ ID</h2><pre class="code-vs"><code>final clock = FakeClock(DateTime.utc(2026, 8, 15, 9));
 final ids = SequenceIds(['cmd-1']);
 final command = factory.create(clock: clock, ids: ids);
 expect(command.createdAt, DateTime.utc(2026, 8, 15, 9));</code></pre></section>
-<section><h2>6. Value equality</h2><p>DTO/state ควร immutable และเปรียบเทียบค่าชัดเจน ใช้ record, overridden equality หรือ matcher แยก field ห้าม assert ด้วย object identity เมื่อ business ต้องการ value equality</p></section>
-<section><h2>7. ไม่ทดสอบ private method</h2><p>ทดสอบ public behavior ผ่าน input/output หาก private logic ซับซ้อนจนอยากเรียกตรง ๆ ให้ extract เป็น collaborator ที่มีความหมาย เช่น <code>ScanValidator</code> มากกว่าเปิด method เพื่อ test อย่างเดียว</p></section>
-<section><h2>8. แบบฝึกหัด</h2><p>เขียน test ของ duplicate serial แบบ case-insensitive และ whitespace-safe</p><details><summary>แนวคำตอบ</summary><p>normalize serial ทั้งค่าที่รับใหม่และ collection เดิมก่อนเทียบ พร้อม case ของค่าใหม่, ซ้ำ, ช่องว่าง และ empty โดยไม่แตะ widget</p></details></section>
+<section id="section-6"><h2>6. Value equality</h2><p>DTO/state ควร immutable และเปรียบเทียบค่าชัดเจน ใช้ record, overridden equality หรือ matcher แยก field ห้าม assert ด้วย object identity เมื่อ business ต้องการ value equality</p></section>
+<section id="section-7"><h2>7. ไม่ทดสอบ private method</h2><p>ทดสอบ public behavior ผ่าน input/output หาก private logic ซับซ้อนจนอยากเรียกตรง ๆ ให้ extract เป็น collaborator ที่มีความหมาย เช่น <code>ScanValidator</code> มากกว่าเปิด method เพื่อ test อย่างเดียว</p></section>
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียน test ของ duplicate serial แบบ case-insensitive และ whitespace-safe</p><details><summary>แนวคำตอบ</summary><p>normalize serial ทั้งค่าที่รับใหม่และ collection เดิมก่อนเทียบ พร้อม case ของค่าใหม่, ซ้ำ, ช่องว่าง และ empty โดยไม่แตะ widget</p></details></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

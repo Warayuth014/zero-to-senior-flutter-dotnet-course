@@ -4,11 +4,12 @@
 <title>Stale response และ request generation token</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-10 · State &amp; Lifecycle</span><h1>Stale response และ request generation token</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Race ตัวอย่าง</a></li><li><a href="#section-2">2. Generation token</a></li><li><a href="#section-3">3. Receive session จริง</a></li><li><a href="#section-4">4. Token vs cancellation</a></li><li><a href="#section-5">5. Per-key concurrency</a></li><li><a href="#section-6">6. Busy flags และ stale finally</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Stale responseเกิดเมื่อ requestเก่ากลับหลัง request/selectionใหม่และทับ stateล่าสุด วิธีง่ายที่ testได้คือ generation/session token: captureเลขตอนเริ่มและ applyเฉพาะเมื่อยังตรง current generation</div>
-<section><h2>1. Race ตัวอย่าง</h2><pre class="code-vs"><code>A: load pallet P1 ─────────────── returns last
+<section id="section-1"><h2>1. Race ตัวอย่าง</h2><pre class="code-vs"><code>A: load pallet P1 ─────────────── returns last
 B: load pallet P2 ───── returns first → UI shows P2
 A result applies                         → UI wrongly shows P1</code></pre></section>
-<section><h2>2. Generation token</h2><pre class="code-vs"><code>int _loadGeneration = 0;
+<section id="section-2"><h2>2. Generation token</h2><pre class="code-vs"><code>int _loadGeneration = 0;
 
 Future&lt;void&gt; load(String id) async {
   final generation = ++_loadGeneration;
@@ -23,11 +24,11 @@ void clear() {
   _state = const Initial();
   notifyListeners();
 }</code></pre></section>
-<section><h2>3. Receive session จริง</h2><p>WarehouseStoreเก็บ <code>_receiveSession</code> captureก่อน validate/confirm แล้วเปรียบเทียบหลัง await หากผู้ใช้ออกจาก flow sessionเพิ่มจึงไม่ restore UIเก่า แม้ backendอาจ commitแล้วก็ refresh receivingเพื่อ reconcile</p></section>
-<section><h2>4. Token vs cancellation</h2><p>Tokenไม่หยุด network/batteryแต่กัน applyผิด; cancellationหยุดงานถ้า clientรองรับแต่ยังต้อง tokenเพราะ cancelอาจแข่ง completion ใช้ทั้งคู่ตาม cost และให้ repositoryรับ cancellation signalเมื่อเหมาะ</p></section>
-<section><h2>5. Per-key concurrency</h2><p>Global generationทำ requestคนละ entityยกเลิกกันหมด หากโหลด detailหลายรายการพร้อมกันใช้ Map&lt;ID,generation&gt;, cache per keyหรือ immutable query key ตรวจ responseตรง request key/current selection</p></section>
-<section><h2>6. Busy flags และ stale finally</h2><p>Requestเก่าไม่ควร set loading=falseของ requestใหม่ ใน finallyตรวจ generationก่อน publish หรือเก็บ in-flight count/tokenใน state มิฉะนั้น spinnerหายขณะ Bยังวิ่ง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Search-as-you-type “pa” ช้ากว่า “pallet” แล้วผลเก่าทับ ต้องทำอะไร?</p><details><summary>เฉลย</summary><p>debounce query, เพิ่ม generationทุก accepted query, capture query/token, apply data/error/loadingเฉพาะ tokenล่าสุด และ cancel HTTPเก่าถ้าได้ Cacheผลตาม queryได้แต่ UI currentต้องตรง queryล่าสุด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ตรวจเพียง <code>if (query == controller.text)</code> เปราะต่อ normalizationและ queryซ้ำรอบใหม่ Generationระบุ operation instanceได้ชัดกว่า และควร testด้วย Completerควบคุมลำดับ response</div></section>
+<section id="section-3"><h2>3. Receive session จริง</h2><p>WarehouseStoreเก็บ <code>_receiveSession</code> captureก่อน validate/confirm แล้วเปรียบเทียบหลัง await หากผู้ใช้ออกจาก flow sessionเพิ่มจึงไม่ restore UIเก่า แม้ backendอาจ commitแล้วก็ refresh receivingเพื่อ reconcile</p></section>
+<section id="section-4"><h2>4. Token vs cancellation</h2><p>Tokenไม่หยุด network/batteryแต่กัน applyผิด; cancellationหยุดงานถ้า clientรองรับแต่ยังต้อง tokenเพราะ cancelอาจแข่ง completion ใช้ทั้งคู่ตาม cost และให้ repositoryรับ cancellation signalเมื่อเหมาะ</p></section>
+<section id="section-5"><h2>5. Per-key concurrency</h2><p>Global generationทำ requestคนละ entityยกเลิกกันหมด หากโหลด detailหลายรายการพร้อมกันใช้ Map&lt;ID,generation&gt;, cache per keyหรือ immutable query key ตรวจ responseตรง request key/current selection</p></section>
+<section id="section-6"><h2>6. Busy flags และ stale finally</h2><p>Requestเก่าไม่ควร set loading=falseของ requestใหม่ ใน finallyตรวจ generationก่อน publish หรือเก็บ in-flight count/tokenใน state มิฉะนั้น spinnerหายขณะ Bยังวิ่ง</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Search-as-you-type “pa” ช้ากว่า “pallet” แล้วผลเก่าทับ ต้องทำอะไร?</p><details><summary>เฉลย</summary><p>debounce query, เพิ่ม generationทุก accepted query, capture query/token, apply data/error/loadingเฉพาะ tokenล่าสุด และ cancel HTTPเก่าถ้าได้ Cacheผลตาม queryได้แต่ UI currentต้องตรง queryล่าสุด</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ตรวจเพียง <code>if (query == controller.text)</code> เปราะต่อ normalizationและ queryซ้ำรอบใหม่ Generationระบุ operation instanceได้ชัดกว่า และควร testด้วย Completerควบคุมลำดับ response</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,18 +4,19 @@
 <title>intl และ date/number format</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-09 · Flutter UI</span><h1>intl และ date/number format</h1><p>Part 11: Theme, Localization, Assets &amp; Platform UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. NumberFormat</a></li><li><a href="#section-2">2. DateFormat</a></li><li><a href="#section-3">3. Cached formatter</a></li><li><a href="#section-4">4. Machine values</a></li><li><a href="#section-5">5. Relative time</a></li><li><a href="#section-6">6. Calendar expectations</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>intl formatตาม locale ไม่เปลี่ยน business value:</strong> เก็บ DateTime/numแบบ typedและ timezoneถูกก่อน แล้ว formatเฉพาะ presentation boundary</div>
-<section><h2>1. NumberFormat</h2><pre class="code-vs"><code>final locale = Localizations.localeOf(context).toLanguageTag();
+<section id="section-1"><h2>1. NumberFormat</h2><pre class="code-vs"><code>final locale = Localizations.localeOf(context).toLanguageTag();
 final qtyText = NumberFormat.decimalPattern(locale).format(quantity);
 final moneyText = NumberFormat.currency(
   locale: locale, symbol: '฿', decimalDigits: 2).format(amount);</code></pre></section>
-<section><h2>2. DateFormat</h2><pre class="code-vs"><code>final local = utcTimestamp.toLocal();
+<section id="section-2"><h2>2. DateFormat</h2><pre class="code-vs"><code>final local = utcTimestamp.toLocal();
 final text = DateFormat.yMMMd(locale).add_Hm().format(local);</code></pre><p>แปลง timezoneตาม contractก่อน formatและอย่า parse display stringกลับเป็น data</p></section>
-<section><h2>3. Cached formatter</h2><p>สร้าง formatterซ้ำใน listใหญ่มี costแต่ cacheต้อง keyedด้วย locale/pattern/currencyและ invalidateเมื่อภาษาเปลี่ยน ไม่ใช้ singleton formatterภาษาเดิม</p></section>
-<section><h2>4. Machine values</h2><p>barcode, pallet ID, location codeและ API numbersใช้ invariant wire format ไม่ format comma/Thai digitก่อนส่ง server การ localizeใช้เฉพาะข้อความแสดง</p></section>
-<section><h2>5. Relative time</h2><p>“12 วินาทีที่แล้ว” ควรใช้ fake Clockใน testและ update intervalเหมาะสม ไม่ให้ widgetหลายร้อยตัวมี Timerของตัวเอง</p></section>
-<section><h2>6. Calendar expectations</h2><p>กำหนด product policyเรื่อง Gregorian/Buddhist Eraและ timezoneโรงงานให้ชัด อย่า assumeว่า locale thหมายถึงต้องเปลี่ยน business calendarโดยอัตโนมัติ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>quantity 1234.5ควรส่ง APIหลัง NumberFormatภาษาไทยไหม?</p><details><summary>เฉลย</summary><p>ไม่ ส่ง numeric JSON 1234.5; formatสำหรับ Textเท่านั้น มิฉะนั้น separator/เลข localizedทำ contractพัง</p></details></section>
-<section><h2>8. Tests</h2><div class="success">en/th decimal/date, zero/negative/large, UTC→local, locale switch, timezone boundaryและ invariant API serialization</div></section>
+<section id="section-3"><h2>3. Cached formatter</h2><p>สร้าง formatterซ้ำใน listใหญ่มี costแต่ cacheต้อง keyedด้วย locale/pattern/currencyและ invalidateเมื่อภาษาเปลี่ยน ไม่ใช้ singleton formatterภาษาเดิม</p></section>
+<section id="section-4"><h2>4. Machine values</h2><p>barcode, pallet ID, location codeและ API numbersใช้ invariant wire format ไม่ format comma/Thai digitก่อนส่ง server การ localizeใช้เฉพาะข้อความแสดง</p></section>
+<section id="section-5"><h2>5. Relative time</h2><p>“12 วินาทีที่แล้ว” ควรใช้ fake Clockใน testและ update intervalเหมาะสม ไม่ให้ widgetหลายร้อยตัวมี Timerของตัวเอง</p></section>
+<section id="section-6"><h2>6. Calendar expectations</h2><p>กำหนด product policyเรื่อง Gregorian/Buddhist Eraและ timezoneโรงงานให้ชัด อย่า assumeว่า locale thหมายถึงต้องเปลี่ยน business calendarโดยอัตโนมัติ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>quantity 1234.5ควรส่ง APIหลัง NumberFormatภาษาไทยไหม?</p><details><summary>เฉลย</summary><p>ไม่ ส่ง numeric JSON 1234.5; formatสำหรับ Textเท่านั้น มิฉะนั้น separator/เลข localizedทำ contractพัง</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">en/th decimal/date, zero/negative/large, UTC→local, locale switch, timezone boundaryและ invariant API serialization</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

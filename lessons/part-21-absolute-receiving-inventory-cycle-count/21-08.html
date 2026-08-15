@@ -4,22 +4,23 @@
 <title>InventoryApi grid endpoint</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">21-08 · Real Codebase</span><h1>InventoryApi grid endpoint</h1><p>Part 21: wms_absolute_mobile: Receiving, Inventory &amp; Cycle Count</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Shared endpoint</a></li><li><a href="#section-2">2. DTO สองชั้น</a></li><li><a href="#section-3">3. Quantity และ empty rule</a></li><li><a href="#section-4">4. Status precedence</a></li><li><a href="#section-5">5. State aliases จาก backend</a></li><li><a href="#section-6">6. Location display กับ domain value</a></li><li><a href="#section-7">7. Scaling และ parse risks</a></li><li><a href="#section-8">8. Mapping tests</a></li></ol></nav>
 <div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/api/inventory_api.dart</code> — reuse grid endpointเดียวแล้วแปลง DB-shaped <code>ContainerView</code> เป็น UI-shaped <code>Pallet</code></div>
-<section><h2>1. Shared endpoint</h2><pre class="code-vs"><code>POST /api/data/get_containers?withContents=true
+<section id="section-1"><h2>1. Shared endpoint</h2><pre class="code-vs"><code>POST /api/data/get_containers?withContents=true
 body: { PageIndex: 1, PageItems: 1000 }
 response: items/Items → ContainerView → Pallet</code></pre><p><code>withContents=true</code> ทำให้คืน product/qty/unitเพิ่มโดยไม่เปลี่ยน web grid callเดิม จึง reuse queryแต่สร้าง mobile read modelที่เหมาะกับหน้าสต็อก</p></section>
-<section><h2>2. DTO สองชั้น</h2><p><code>_toContainer</code> map field 1:1 จาก view columnsก่อน แล้ว <code>_toPallet</code> คำนวณ empty/racked/status/location display การแยกช่วยทดสอบ raw contractกับ business presentation mappingคนละชุดและไม่ฝังชื่อ DBใน widget</p></section>
-<section><h2>3. Quantity และ empty rule</h2><p>qtyถูกปัดเป็น int และ palletถือว่า emptyเมื่อ product codeว่างหรือ qtyเท่ากับ 0 แม้ APIส่ง product metadataอยู่ สิ่งนี้เหมาะกับ UI container-level แต่ถ้าของเป็นทศนิยมหรือยอดติดลบจาก data error การ round/empty ruleอาจปิดบังปัญหา ควรกำหนด domain precisionชัด</p></section>
-<section><h2>4. Status precedence</h2><pre class="code-vs"><code>EMPTY
+<section id="section-2"><h2>2. DTO สองชั้น</h2><p><code>_toContainer</code> map field 1:1 จาก view columnsก่อน แล้ว <code>_toPallet</code> คำนวณ empty/racked/status/location display การแยกช่วยทดสอบ raw contractกับ business presentation mappingคนละชุดและไม่ฝังชื่อ DBใน widget</p></section>
+<section id="section-3"><h2>3. Quantity และ empty rule</h2><p>qtyถูกปัดเป็น int และ palletถือว่า emptyเมื่อ product codeว่างหรือ qtyเท่ากับ 0 แม้ APIส่ง product metadataอยู่ สิ่งนี้เหมาะกับ UI container-level แต่ถ้าของเป็นทศนิยมหรือยอดติดลบจาก data error การ round/empty ruleอาจปิดบังปัญหา ควรกำหนด domain precisionชัด</p></section>
+<section id="section-4"><h2>4. Status precedence</h2><pre class="code-vs"><code>EMPTY
 → PICKING
 → AWAIT_PUTAWAY (pick completed)
 → ALLOCATED (inProcess busy)
 → AT_DEST (location is destination)
 → STORED (has rack location)
 → MOVING</code></pre><p>ลำดับสำคัญ: palletที่ taskจับแล้วไม่ควรถูกตีเป็น STOREDเพียงเพราะยังมี location และ statusแรกที่ตรงจะชนะ</p></section>
-<section><h2>5. State aliases จาก backend</h2><p><code>ContainerView.isPicking</code> รองรับ <code>PICK</code> และเลข <code>18</code>, completedรองรับ typoเดิม <code>PICKCOMPLATE</code> และ <code>19</code>, ส่วน busyมองค่า inProcessที่ไม่ว่าง/ไม่ใช่ no/0 นี่คือ anti-corruption mappingที่ยอมรับ legacy representationโดยไม่กระจาย aliasถึง UI</p></section>
-<section><h2>6. Location display กับ domain value</h2><p>หากไม่มี rack location adapterใส่ <code>'-'</code> ลง <code>Pallet.locationCode</code> เพื่อแสดงผลสะดวก แต่ sentinel stringปะปน domainกับ presentation Senior designควรเก็บ nullable locationแล้วแปลงเป็น dashใน widget เพื่อไม่ให้ search/API logicคิดว่า “-” เป็น locationจริง</p></section>
-<section><h2>7. Scaling และ parse risks</h2><ul><li>จำกัด 1,000 containers ไม่มี loop pagination</li><li>ทุก row castเป็น mapโดยตรง</li><li>รองรับ items/Itemsแต่ fieldภายในรองรับ casingเดียว</li><li>statusใหม่ตกไป MOVING/STOREDตาม precedenceโดยไม่เตือน</li><li>การโหลดทั้งคลังทุกครั้งอาจหนักสำหรับ PDA/network</li></ul></section>
-<section><h2>8. Mapping tests</h2><div class="success">ทำ table-driven testsทุก combinationของ product/qty/location/state/inProcess/destination โดยเฉพาะ precedenceชนกัน และ adapter test URI/body/items casing/decimal/มากกว่า 1,000 rows ยืนยันว่า statusใหม่ไม่ถูกจัดหมวดเงียบโดยไม่มี telemetry</div></section>
+<section id="section-5"><h2>5. State aliases จาก backend</h2><p><code>ContainerView.isPicking</code> รองรับ <code>PICK</code> และเลข <code>18</code>, completedรองรับ typoเดิม <code>PICKCOMPLATE</code> และ <code>19</code>, ส่วน busyมองค่า inProcessที่ไม่ว่าง/ไม่ใช่ no/0 นี่คือ anti-corruption mappingที่ยอมรับ legacy representationโดยไม่กระจาย aliasถึง UI</p></section>
+<section id="section-6"><h2>6. Location display กับ domain value</h2><p>หากไม่มี rack location adapterใส่ <code>'-'</code> ลง <code>Pallet.locationCode</code> เพื่อแสดงผลสะดวก แต่ sentinel stringปะปน domainกับ presentation Senior designควรเก็บ nullable locationแล้วแปลงเป็น dashใน widget เพื่อไม่ให้ search/API logicคิดว่า “-” เป็น locationจริง</p></section>
+<section id="section-7"><h2>7. Scaling และ parse risks</h2><ul><li>จำกัด 1,000 containers ไม่มี loop pagination</li><li>ทุก row castเป็น mapโดยตรง</li><li>รองรับ items/Itemsแต่ fieldภายในรองรับ casingเดียว</li><li>statusใหม่ตกไป MOVING/STOREDตาม precedenceโดยไม่เตือน</li><li>การโหลดทั้งคลังทุกครั้งอาจหนักสำหรับ PDA/network</li></ul></section>
+<section id="section-8"><h2>8. Mapping tests</h2><div class="success">ทำ table-driven testsทุก combinationของ product/qty/location/state/inProcess/destination โดยเฉพาะ precedenceชนกัน และ adapter test URI/body/items casing/decimal/มากกว่า 1,000 rows ยืนยันว่า statusใหม่ไม่ถูกจัดหมวดเงียบโดยไม่มี telemetry</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

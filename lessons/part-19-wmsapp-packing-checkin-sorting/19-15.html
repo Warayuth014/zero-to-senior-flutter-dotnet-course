@@ -4,22 +4,23 @@
 <title>End-to-end outbound trace</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-15 · Real Codebase</span><h1>End-to-end outbound trace</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Packing trace</a></li><li><a href="#section-2">2. Sorting trace</a></li><li><a href="#section-3">3. Check-in trace</a></li><li><a href="#section-4">4. Image trace</a></li><li><a href="#section-5">5. Invariants checklist</a></li><li><a href="#section-6">6. Observability</a></li><li><a href="#section-7">7. End-to-end tests</a></li><li><a href="#section-8">8. Capstone</a></li></ol></nav>
 <div class="note"><strong>บทสรุป outbound:</strong> ความถูกต้องไม่ได้วัดแค่ว่าหน้าสำเร็จขึ้น แต่ packingId ต้องเคลื่อนผ่านทุกสถานะครั้งเดียว พร้อมยอด/serial/location ที่ตรวจย้อนหลังได้</div>
-<section><h2>1. Packing trace</h2><pre class="code-vs"><code>pallet → pack → order → part/serial
+<section id="section-1"><h2>1. Packing trace</h2><pre class="code-vs"><code>pallet → pack → order → part/serial
 → scan-part(s) → packFinalized
 → trackingId + palletReleased</code></pre><p>partial requestที่ commitแล้วต้องไม่ถูกส่งซ้ำเมื่อ batchถัดไป fail</p></section>
-<section><h2>2. Sorting trace</h2><pre class="code-vs"><code>DONE pack(s) → batch ASSIGNED/QUEUED
+<section id="section-2"><h2>2. Sorting trace</h2><pre class="code-vs"><code>DONE pack(s) → batch ASSIGNED/QUEUED
 → station BUSY → counters/FULL
 → clear → station AVAILABLE</code></pre><p>SignalRทำให้เร็ว แต่ REST/versionทำให้ถูก</p></section>
-<section><h2>3. Check-in trace</h2><pre class="code-vs"><code>preview packingId → slot decision
+<section id="section-3"><h2>3. Check-in trace</h2><pre class="code-vs"><code>preview packingId → slot decision
 → scan commit → slot detail
 → ready → complete → dispatch/SHIPPED</code></pre><p>complete failต้องหยุด dispatch และคง stateให้ retryได้</p></section>
-<section><h2>4. Image trace</h2><pre class="code-vs"><code>search part → pick/compress image
+<section id="section-4"><h2>4. Image trace</h2><pre class="code-vs"><code>search part → pick/compress image
 → multipart upload → server validate/store
 → versioned URL → reload/cache refresh</code></pre></section>
-<section><h2>5. Invariants checklist</h2><ul><li>qty/serialไม่เกิน remaining</li><li>packingIdไม่อยู่สอง station/slotพร้อมกัน</li><li>disabled stationไม่รับ batch</li><li>SHIPPED ต้องผ่าน READY</li><li>mutation retryไม่เพิ่มผลซ้ำ</li></ul></section>
-<section><h2>6. Observability</h2><p>ใช้ correlation/operation ID เชื่อม pack scan, batch, station events, check-in และ dispatch พร้อม operator/device/server timestamp Log identifiers/countsได้แต่ไม่ log tokenหรือไฟล์ภาพดิบ</p></section>
-<section><h2>7. End-to-end tests</h2><p>รัน happy pathและ fault injection: network timeoutหลัง commit, duplicate scan, stationเต็ม/disabled, queue assignment, complete/dispatch conflict, reconnect eventหลุด และ image reject แล้วตรวจ DB stateกับ UI recovery</p></section>
-<section><h2>8. Capstone</h2><div class="success">ทำหนึ่ง outbound order ตั้งแต่ destination palletถึง SHIPPED พร้อม sequence diagram, state snapshots และ idempotency keys จากนั้นแก้ chain bug complete→dispatchด้วย typed resultและ testsพิสูจน์ว่า dispatchไม่เกิดเมื่อ complete fail</div></section>
+<section id="section-5"><h2>5. Invariants checklist</h2><ul><li>qty/serialไม่เกิน remaining</li><li>packingIdไม่อยู่สอง station/slotพร้อมกัน</li><li>disabled stationไม่รับ batch</li><li>SHIPPED ต้องผ่าน READY</li><li>mutation retryไม่เพิ่มผลซ้ำ</li></ul></section>
+<section id="section-6"><h2>6. Observability</h2><p>ใช้ correlation/operation ID เชื่อม pack scan, batch, station events, check-in และ dispatch พร้อม operator/device/server timestamp Log identifiers/countsได้แต่ไม่ log tokenหรือไฟล์ภาพดิบ</p></section>
+<section id="section-7"><h2>7. End-to-end tests</h2><p>รัน happy pathและ fault injection: network timeoutหลัง commit, duplicate scan, stationเต็ม/disabled, queue assignment, complete/dispatch conflict, reconnect eventหลุด และ image reject แล้วตรวจ DB stateกับ UI recovery</p></section>
+<section id="section-8"><h2>8. Capstone</h2><div class="success">ทำหนึ่ง outbound order ตั้งแต่ destination palletถึง SHIPPED พร้อม sequence diagram, state snapshots และ idempotency keys จากนั้นแก้ chain bug complete→dispatchด้วย typed resultและ testsพิสูจน์ว่า dispatchไม่เกิดเมื่อ complete fail</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

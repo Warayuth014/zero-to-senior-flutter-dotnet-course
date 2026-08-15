@@ -4,14 +4,15 @@
 <title>Schema migrations และ migration tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">29-14 · State &amp; Lifecycle</span><h1>Schema migrations และ migration tests</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. schemaVersion</a></li><li><a href="#section-2">2. Additive change</a></li><li><a href="#section-3">3. Rename/drop</a></li><li><a href="#section-4">4. Data migration</a></li><li><a href="#section-5">5. Tests</a></li><li><a href="#section-6">6. Downgrade</a></li><li><a href="#section-7">7. Backup/recovery</a></li><li><a href="#section-8">8. Checkpoint</a></li></ol></nav>
 <div class="note"><strong>Migration เป็น production code:</strong> ผู้ใช้เปิด appใหม่บนฐานข้อมูลเก่าหลายเวอร์ชัน การสร้างฐานใหม่ผ่านไม่ได้พิสูจน์ upgrade path</div>
-<section><h2>1. schemaVersion</h2><p>เพิ่ม version เมื่อ schemaเปลี่ยนและเขียน stepจาก oldVersion ไป newVersion ห้ามลดเลขหรือแก้ migrationที่ releaseไปแล้ว</p></section>
-<section><h2>2. Additive change</h2><p>เพิ่ม nullable/default columnง่ายกว่า rename/drop การเพิ่ม NOT NULLให้ tableมีข้อมูลต้องกำหนด backfillที่ deterministic</p></section>
-<section><h2>3. Rename/drop</h2><p>SQLite version/platformต่างกันอาจต้องสร้าง tableใหม่, copy/transformข้อมูล, dropเก่าและ rename ภายใน transaction</p></section>
-<section><h2>4. Data migration</h2><p>แยก schema changeจาก network sync อย่าให้ migrationต้อง online เพราะ appจะเปิดไม่ได้เมื่อ APIล่ม</p></section>
-<section><h2>5. Tests</h2><p>เก็บ schema snapshotของ releaseก่อน สร้าง DBเก่าใส่ fixture เปิดด้วย codeใหม่แล้วตรวจ row, constraint, indexและ queryสำคัญ</p></section>
-<section><h2>6. Downgrade</h2><p>mobile rollbackอาจเปิด DBใหม่ด้วย binaryเก่าไม่ได้ วาง compatibility window, feature flag หรือ forward-fix strategyก่อน rollout</p></section>
-<section><h2>7. Backup/recovery</h2><p>cacheที่ rebuildได้อาจ safe reset แต่ outboxที่ยังไม่ส่งห้ามลบทิ้งเงียบ ๆ แยก recovery policyตามคุณค่าข้อมูล</p></section>
-<section><h2>8. Checkpoint</h2><div class="success">ก่อน release ต้อง test fresh install, upgradeจากทุก supported version, interrupted migration และฐานข้อมูลมี pending outbox</div></section>
+<section id="section-1"><h2>1. schemaVersion</h2><p>เพิ่ม version เมื่อ schemaเปลี่ยนและเขียน stepจาก oldVersion ไป newVersion ห้ามลดเลขหรือแก้ migrationที่ releaseไปแล้ว</p></section>
+<section id="section-2"><h2>2. Additive change</h2><p>เพิ่ม nullable/default columnง่ายกว่า rename/drop การเพิ่ม NOT NULLให้ tableมีข้อมูลต้องกำหนด backfillที่ deterministic</p></section>
+<section id="section-3"><h2>3. Rename/drop</h2><p>SQLite version/platformต่างกันอาจต้องสร้าง tableใหม่, copy/transformข้อมูล, dropเก่าและ rename ภายใน transaction</p></section>
+<section id="section-4"><h2>4. Data migration</h2><p>แยก schema changeจาก network sync อย่าให้ migrationต้อง online เพราะ appจะเปิดไม่ได้เมื่อ APIล่ม</p></section>
+<section id="section-5"><h2>5. Tests</h2><p>เก็บ schema snapshotของ releaseก่อน สร้าง DBเก่าใส่ fixture เปิดด้วย codeใหม่แล้วตรวจ row, constraint, indexและ queryสำคัญ</p></section>
+<section id="section-6"><h2>6. Downgrade</h2><p>mobile rollbackอาจเปิด DBใหม่ด้วย binaryเก่าไม่ได้ วาง compatibility window, feature flag หรือ forward-fix strategyก่อน rollout</p></section>
+<section id="section-7"><h2>7. Backup/recovery</h2><p>cacheที่ rebuildได้อาจ safe reset แต่ outboxที่ยังไม่ส่งห้ามลบทิ้งเงียบ ๆ แยก recovery policyตามคุณค่าข้อมูล</p></section>
+<section id="section-8"><h2>8. Checkpoint</h2><div class="success">ก่อน release ต้อง test fresh install, upgradeจากทุก supported version, interrupted migration และฐานข้อมูลมี pending outbox</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

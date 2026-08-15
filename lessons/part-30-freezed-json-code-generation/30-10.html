@@ -4,14 +4,15 @@
 <title>Sealed unions tagged unions และ exhaustive pattern matching</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">30-10 · Foundation</span><h1>Sealed unions tagged unions และ exhaustive pattern matching</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Declaration</a></li><li><a href="#section-2">2. Generated cases</a></li><li><a href="#section-3">3. Exhaustive switch</a></li><li><a href="#section-4">4. Case-specific API</a></li><li><a href="#section-5">5. when/map</a></li><li><a href="#section-6">6. JSON unions</a></li><li><a href="#section-7">7. UI state</a></li><li><a href="#section-8">8. Test</a></li></ol></nav>
 <div class="note"><strong>Union แทน stateที่เป็นไปได้:</strong> แต่ละ caseมี payloadเฉพาะและ sealed typeทำให้ switchตรวจ exhaustivenessเมื่อเพิ่ม caseใหม่</div>
-<section><h2>1. Declaration</h2><p><code>TaskSyncState</code> มี idle, running(remaining) และ failed(commandId,message) แทน bool flagsที่สร้าง combinationผิดเช่น idleและsyncingพร้อมกัน</p></section>
-<section><h2>2. Generated cases</h2><p>Freezedสร้าง public case classes <code>SyncIdle</code>, <code>SyncRunning</code>, <code>SyncFailed</code> ให้ Dart patterns narrowชนิดและอ่าน payloadปลอดภัย</p></section>
-<section><h2>3. Exhaustive switch</h2><pre class="code-vs"><code>switch (state) {<br>&nbsp;SyncIdle() =&gt; ...<br>&nbsp;SyncRunning(:final remaining) =&gt; ...<br>&nbsp;SyncFailed(:final message) =&gt; ...<br>}</code></pre></section>
-<section><h2>4. Case-specific API</h2><p>ตัวแปรชนิดฐานเรียก field/copyWithเฉพาะ failedไม่ได้ ต้อง pattern-matchก่อน นี่คือ type safetyไม่ใช่ข้อจำกัดที่ควร castหนี</p></section>
-<section><h2>5. when/map</h2><p>Freezedมี generated helpersตาม version/config แต่ Dart 3 pattern matchingลด package-specific syntaxและทำให้ migrationง่าย</p></section>
-<section><h2>6. JSON unions</h2><p>tagged union serializeได้ด้วย discriminator เช่น <code>runtimeType</code>หรือ custom unionKey/valueCase แต่ wire contractควรเป็นชื่อ stableไม่ผูกชื่อ Dartภายใน</p></section>
-<section><h2>7. UI state</h2><p>unionเหมาะ loading/data/empty/errorเมื่อ payloadต่าง แต่ data+refreshingพร้อมกันอาจเหมาะ product stateที่ออกแบบเองมากกว่า unionแบบง่าย</p></section>
-<section><h2>8. Test</h2><div class="success"><code>task_sync_state_test.dart</code> พิสูจน์ exhaustive pattern, case payload, value equalityและ copyWithหลัง type narrowing</div></section>
+<section id="section-1"><h2>1. Declaration</h2><p><code>TaskSyncState</code> มี idle, running(remaining) และ failed(commandId,message) แทน bool flagsที่สร้าง combinationผิดเช่น idleและsyncingพร้อมกัน</p></section>
+<section id="section-2"><h2>2. Generated cases</h2><p>Freezedสร้าง public case classes <code>SyncIdle</code>, <code>SyncRunning</code>, <code>SyncFailed</code> ให้ Dart patterns narrowชนิดและอ่าน payloadปลอดภัย</p></section>
+<section id="section-3"><h2>3. Exhaustive switch</h2><pre class="code-vs"><code>switch (state) {<br>&nbsp;SyncIdle() =&gt; ...<br>&nbsp;SyncRunning(:final remaining) =&gt; ...<br>&nbsp;SyncFailed(:final message) =&gt; ...<br>}</code></pre></section>
+<section id="section-4"><h2>4. Case-specific API</h2><p>ตัวแปรชนิดฐานเรียก field/copyWithเฉพาะ failedไม่ได้ ต้อง pattern-matchก่อน นี่คือ type safetyไม่ใช่ข้อจำกัดที่ควร castหนี</p></section>
+<section id="section-5"><h2>5. when/map</h2><p>Freezedมี generated helpersตาม version/config แต่ Dart 3 pattern matchingลด package-specific syntaxและทำให้ migrationง่าย</p></section>
+<section id="section-6"><h2>6. JSON unions</h2><p>tagged union serializeได้ด้วย discriminator เช่น <code>runtimeType</code>หรือ custom unionKey/valueCase แต่ wire contractควรเป็นชื่อ stableไม่ผูกชื่อ Dartภายใน</p></section>
+<section id="section-7"><h2>7. UI state</h2><p>unionเหมาะ loading/data/empty/errorเมื่อ payloadต่าง แต่ data+refreshingพร้อมกันอาจเหมาะ product stateที่ออกแบบเองมากกว่า unionแบบง่าย</p></section>
+<section id="section-8"><h2>8. Test</h2><div class="success"><code>task_sync_state_test.dart</code> พิสูจน์ exhaustive pattern, case payload, value equalityและ copyWithหลัง type narrowing</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

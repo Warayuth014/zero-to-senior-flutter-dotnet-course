@@ -4,18 +4,19 @@
 <title>ApiClient + error contract</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-05 · Project Lab</span><h1>ApiClient + error contract</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Request API</a></li><li><a href="#section-2">2. Structured failure</a></li><li><a href="#section-3">3. ProblemDetails</a></li><li><a href="#section-4">4. Decode discipline</a></li><li><a href="#section-5">5. Retry policy</a></li><li><a href="#section-6">6. Auth interceptor behavior</a></li><li><a href="#section-7">7. Observability</a></li><li><a href="#section-8">8. Contract tests</a></li></ol></nav>
 <div class="note"><strong>ฐานเดิม:</strong> starter ApiClientมี GET/POST JSON, 15s timeout, Bearer headerและ ApiException ให้ยกระดับเป็น transport boundaryที่ testได้และแยก failure semantics</div>
-<section><h2>1. Request API</h2><p>เพิ่ม URI-safe query builder, DELETE/multipartตามที่ใช้, correlation/idempotency headersและ injected clock/client อย่าสร้าง generic SDKซับซ้อนเกิน endpointsจริง</p></section>
-<section><h2>2. Structured failure</h2><pre class="code-vs"><code>AppFailure(
+<section id="section-1"><h2>1. Request API</h2><p>เพิ่ม URI-safe query builder, DELETE/multipartตามที่ใช้, correlation/idempotency headersและ injected clock/client อย่าสร้าง generic SDKซับซ้อนเกิน endpointsจริง</p></section>
+<section id="section-2"><h2>2. Structured failure</h2><pre class="code-vs"><code>AppFailure(
   kind: network|timeout|unauthorized|forbidden|
         validation|conflict|server|contract|unknown,
   code, message, statusCode, retryable, outcomeUnknown,
 )</code></pre></section>
-<section><h2>3. ProblemDetails</h2><p>รองรับ RFC-style <code>type,title,status,detail,errors,traceId</code>และ legacy message แต่ UIไม่ branchจากข้อความ เก็บ traceIdแสดงใน support detailโดยไม่เผย stack</p></section>
-<section><h2>4. Decode discipline</h2><p>ApiClientตรวจ HTTPและ JSON object envelope ส่วน feature DTO parserตรวจ fields อย่า silentlyคืน mapว่างเมื่อ endpointต้องมี token/items เพราะ success HTTPแต่ contractเสียต้องเป็น contract failure</p></section>
-<section><h2>5. Retry policy</h2><p>GET health/inventory retryแบบ bounded exponential+jitterได้เฉพาะ transient failures Mutationไม่ auto-retryหากไม่มี idempotency key; timeoutหลัง POSTให้ outcomeUnknownและ reconcile</p></section>
-<section><h2>6. Auth interceptor behavior</h2><p>แนบ bearerจาก session provider, 401ส่ง eventให้ session coordinatorครั้งเดียว, ไม่ log Authorizationและไม่ refresh tokenพร้อมกันหลาย request หาก labยังไม่มี refresh endpointให้ logoutชัดเจน</p></section>
-<section><h2>7. Observability</h2><p>บันทึก method, route template, duration, status/failure kind, correlation IDและnetwork stateโดย redact payload/barcodeตาม policy Metricsแยก client timeoutจาก server 5xx</p></section>
-<section><h2>8. Contract tests</h2><div class="success">ทดสอบ 2xx empty/JSON, ProblemDetails, legacy message, invalid JSON, timeout/socket, query encoding, bearer/redaction, 401 coordinationและ POST outcome unknownด้วย fake http client</div></section>
+<section id="section-3"><h2>3. ProblemDetails</h2><p>รองรับ RFC-style <code>type,title,status,detail,errors,traceId</code>และ legacy message แต่ UIไม่ branchจากข้อความ เก็บ traceIdแสดงใน support detailโดยไม่เผย stack</p></section>
+<section id="section-4"><h2>4. Decode discipline</h2><p>ApiClientตรวจ HTTPและ JSON object envelope ส่วน feature DTO parserตรวจ fields อย่า silentlyคืน mapว่างเมื่อ endpointต้องมี token/items เพราะ success HTTPแต่ contractเสียต้องเป็น contract failure</p></section>
+<section id="section-5"><h2>5. Retry policy</h2><p>GET health/inventory retryแบบ bounded exponential+jitterได้เฉพาะ transient failures Mutationไม่ auto-retryหากไม่มี idempotency key; timeoutหลัง POSTให้ outcomeUnknownและ reconcile</p></section>
+<section id="section-6"><h2>6. Auth interceptor behavior</h2><p>แนบ bearerจาก session provider, 401ส่ง eventให้ session coordinatorครั้งเดียว, ไม่ log Authorizationและไม่ refresh tokenพร้อมกันหลาย request หาก labยังไม่มี refresh endpointให้ logoutชัดเจน</p></section>
+<section id="section-7"><h2>7. Observability</h2><p>บันทึก method, route template, duration, status/failure kind, correlation IDและnetwork stateโดย redact payload/barcodeตาม policy Metricsแยก client timeoutจาก server 5xx</p></section>
+<section id="section-8"><h2>8. Contract tests</h2><div class="success">ทดสอบ 2xx empty/JSON, ProblemDetails, legacy message, invalid JSON, timeout/socket, query encoding, bearer/redaction, 401 coordinationและ POST outcome unknownด้วย fake http client</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

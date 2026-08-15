@@ -4,19 +4,20 @@
 <title>Putaway API + models</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-07 · Real Codebase</span><h1>Putaway API + models</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Endpoint inventory</a></li><li><a href="#section-2">2. Scan response</a></li><li><a href="#section-3">3. Confirm payload</a></li><li><a href="#section-4">4. Station status debt</a></li><li><a href="#section-5">5. URL construction risk</a></li><li><a href="#section-6">6. Error propagation</a></li><li><a href="#section-7">7. Parsing hardening</a></li><li><a href="#section-8">8. Contract lab</a></li></ol></nav>
 <div class="note"><strong>Putaway API มี read models แบบ dynamic มากเกินไป:</strong> pallet/confirm มี typed model แต่ station และ prework status ยังเป็น Map จึงเสีย compile-time safety ตรง flow realtime ที่ซับซ้อนที่สุด</div>
-<section><h2>1. Endpoint inventory</h2><pre class="code-vs"><code>GET  /putaway/station-status
+<section id="section-1"><h2>1. Endpoint inventory</h2><pre class="code-vs"><code>GET  /putaway/station-status
 GET  /putaway/scan-pallet/{palletId}?stationId=...
 POST /putaway/confirm
 GET  /putaway/prework-station-status
 POST /putaway/prework-return-pallet</code></pre></section>
-<section><h2>2. Scan response</h2><p><code>PutawayPalletInfo</code> parse items ด้วย UnloadItem และ default suggestedDestination=ASRS, message ว่าง แต่ required fields cast โดยตรงจึง throw หาก payload missing/wrong type</p></section>
-<section><h2>3. Confirm payload</h2><pre class="code-vs"><code>{ stationId, palletId, destination,
+<section id="section-2"><h2>2. Scan response</h2><p><code>PutawayPalletInfo</code> parse items ด้วย UnloadItem และ default suggestedDestination=ASRS, message ว่าง แต่ required fields cast โดยตรงจึง throw หาก payload missing/wrong type</p></section>
+<section id="section-3"><h2>3. Confirm payload</h2><pre class="code-vs"><code>{ stationId, palletId, destination,
   operatorId, wrappingRequired }</code></pre><p><code>PutawayResult</code> คืน success, palletId, stationId, destination และ message เพื่อยืนยัน command ที่ server รับจริง</p></section>
-<section><h2>4. Station status debt</h2><p>ทั้ง getStationStatus และ getPreworkStationStatus คืน <code>List&lt;Map&lt;String,dynamic&gt;&gt;</code> ทำให้ field palletStatus/cutItems/destination ถูก cast ใน widget ควรสร้าง StationStatus DTO และ enum แยก normal/prework</p></section>
-<section><h2>5. URL construction risk</h2><p><code>scanPalletForPutaway</code> ต่อ palletId ใน path และ stationId ใน query ด้วย string โดยตรง ต่างจาก Picking ที่ใช้ <code>Uri.encodeQueryComponent</code> ควรใช้ Uri builder เพื่อ encode ทุก segment/query อย่างสม่ำเสมอ</p></section>
-<section><h2>6. Error propagation</h2><p>service คืน <code>ApiResult.error</code> แต่บาง method ไม่ส่ง statusCode ต่อ ทำให้ UI แยก 409 conflict, 404 และ timeout ไม่ได้ Contract ควรรักษา code/problem details ถึง domain layer</p></section>
-<section><h2>7. Parsing hardening</h2><p>ตรวจ list/map shape, number coercion, unknown status/destination, nullable message และ malformed item พร้อมเก็บ raw transport DTO ไว้ที่ boundary ไม่ปล่อย dynamic เข้า widget</p></section>
-<section><h2>8. Contract lab</h2><div class="success">สร้าง JSON fixtures ของ station empty/busy, PW in-transit/cut-complete, pallet PW/FG และ confirm conflict แล้วทดสอบ Dart parser คู่กับ .NET response serialization รวมถึง ID ที่มีอักขระต้อง encode</div></section>
+<section id="section-4"><h2>4. Station status debt</h2><p>ทั้ง getStationStatus และ getPreworkStationStatus คืน <code>List&lt;Map&lt;String,dynamic&gt;&gt;</code> ทำให้ field palletStatus/cutItems/destination ถูก cast ใน widget ควรสร้าง StationStatus DTO และ enum แยก normal/prework</p></section>
+<section id="section-5"><h2>5. URL construction risk</h2><p><code>scanPalletForPutaway</code> ต่อ palletId ใน path และ stationId ใน query ด้วย string โดยตรง ต่างจาก Picking ที่ใช้ <code>Uri.encodeQueryComponent</code> ควรใช้ Uri builder เพื่อ encode ทุก segment/query อย่างสม่ำเสมอ</p></section>
+<section id="section-6"><h2>6. Error propagation</h2><p>service คืน <code>ApiResult.error</code> แต่บาง method ไม่ส่ง statusCode ต่อ ทำให้ UI แยก 409 conflict, 404 และ timeout ไม่ได้ Contract ควรรักษา code/problem details ถึง domain layer</p></section>
+<section id="section-7"><h2>7. Parsing hardening</h2><p>ตรวจ list/map shape, number coercion, unknown status/destination, nullable message และ malformed item พร้อมเก็บ raw transport DTO ไว้ที่ boundary ไม่ปล่อย dynamic เข้า widget</p></section>
+<section id="section-8"><h2>8. Contract lab</h2><div class="success">สร้าง JSON fixtures ของ station empty/busy, PW in-transit/cut-complete, pallet PW/FG และ confirm conflict แล้วทดสอบ Dart parser คู่กับ .NET response serialization รวมถึง ID ที่มีอักขระต้อง encode</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

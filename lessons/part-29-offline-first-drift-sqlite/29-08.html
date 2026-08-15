@@ -4,14 +4,15 @@
 <title>Reactive watch queries และ UI rebuild</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">29-08 · State &amp; Lifecycle</span><h1>Reactive watch queries และ UI rebuild</h1><p>Part 29: SQLite, Drift &amp; Offline-first Sync</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. watch vs get</a></li><li><a href="#section-2">2. Visible query</a></li><li><a href="#section-3">3. StreamBuilder</a></li><li><a href="#section-4">4. Narrow queries</a></li><li><a href="#section-5">5. Ordering</a></li><li><a href="#section-6">6. Lifecycle</a></li><li><a href="#section-7">7. State ownership</a></li><li><a href="#section-8">8. Exercise</a></li></ol></nav>
 <div class="note"><strong>Reactive database:</strong> UI subscribe query result แล้ว Drift ส่งค่าใหม่เมื่อ table ที่เกี่ยวข้องเปลี่ยน ลดการสั่ง reload หลายจุด</div>
-<section><h2>1. watch vs get</h2><p><code>get()</code> คืน snapshot หนึ่งครั้ง ส่วน <code>watch()</code> คืน Stream และ rerun query เมื่อ dependency เปลี่ยน เลือกตาม lifecycle ของ consumer</p></section>
-<section><h2>2. Visible query</h2><p><code>watchVisibleTasks</code> filter <code>hiddenByCommand = false</code> ทำให้ enqueue command แล้วรายการหายจากทุก subscriber โดยอัตโนมัติ</p></section>
-<section><h2>3. StreamBuilder</h2><p>lab ใช้ stream แสดงจำนวน outbox; หน้าจอใหญ่ควรแปลง row เป็น domain state ใน repository/controller ก่อนถึง widget</p></section>
-<section><h2>4. Narrow queries</h2><p>subscribe เฉพาะ column/rows ที่หน้าต้องใช้ ลดงาน rerun และ rebuild เช่น count query สำหรับ badge แทนอ่าน payload ทั้ง outbox</p></section>
-<section><h2>5. Ordering</h2><p>ใส่ <code>orderBy</code> ทุก query ที่ UI พึ่งลำดับ SQL ไม่รับประกัน insertion order ถ้าไม่ระบุ</p></section>
-<section><h2>6. Lifecycle</h2><p>StreamBuilder จัด subscription ตาม widget; controller ที่ listen เองต้อง cancel ใน dispose และระวัง duplicate listeners จาก rebuild</p></section>
-<section><h2>7. State ownership</h2><p>อย่ามีทั้ง mutable list ใน store และ reactive DB โดยไม่กำหนด authority ระบบเต็มควรให้ DB stream drive list ส่วน store เก็บเฉพาะ UI/action state</p></section>
-<section><h2>8. Exercise</h2><div class="success">เปลี่ยน task list lab ให้ consume <code>watchVisibleTasks</code> แล้วพิสูจน์ว่า transaction เดียวอัปเดต list และ outbox badge สอดคล้องกัน</div></section>
+<section id="section-1"><h2>1. watch vs get</h2><p><code>get()</code> คืน snapshot หนึ่งครั้ง ส่วน <code>watch()</code> คืน Stream และ rerun query เมื่อ dependency เปลี่ยน เลือกตาม lifecycle ของ consumer</p></section>
+<section id="section-2"><h2>2. Visible query</h2><p><code>watchVisibleTasks</code> filter <code>hiddenByCommand = false</code> ทำให้ enqueue command แล้วรายการหายจากทุก subscriber โดยอัตโนมัติ</p></section>
+<section id="section-3"><h2>3. StreamBuilder</h2><p>lab ใช้ stream แสดงจำนวน outbox; หน้าจอใหญ่ควรแปลง row เป็น domain state ใน repository/controller ก่อนถึง widget</p></section>
+<section id="section-4"><h2>4. Narrow queries</h2><p>subscribe เฉพาะ column/rows ที่หน้าต้องใช้ ลดงาน rerun และ rebuild เช่น count query สำหรับ badge แทนอ่าน payload ทั้ง outbox</p></section>
+<section id="section-5"><h2>5. Ordering</h2><p>ใส่ <code>orderBy</code> ทุก query ที่ UI พึ่งลำดับ SQL ไม่รับประกัน insertion order ถ้าไม่ระบุ</p></section>
+<section id="section-6"><h2>6. Lifecycle</h2><p>StreamBuilder จัด subscription ตาม widget; controller ที่ listen เองต้อง cancel ใน dispose และระวัง duplicate listeners จาก rebuild</p></section>
+<section id="section-7"><h2>7. State ownership</h2><p>อย่ามีทั้ง mutable list ใน store และ reactive DB โดยไม่กำหนด authority ระบบเต็มควรให้ DB stream drive list ส่วน store เก็บเฉพาะ UI/action state</p></section>
+<section id="section-8"><h2>8. Exercise</h2><div class="success">เปลี่ยน task list lab ให้ consume <code>watchVisibleTasks</code> แล้วพิสูจน์ว่า transaction เดียวอัปเดต list และ outbox badge สอดคล้องกัน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

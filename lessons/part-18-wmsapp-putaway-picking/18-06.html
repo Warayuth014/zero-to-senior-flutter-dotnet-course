@@ -4,17 +4,18 @@
 <title>Pallet items และ wrapping toggle</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-06 · Real Codebase</span><h1>Pallet items และ wrapping toggle</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. PutawayPalletInfo</a></li><li><a href="#section-2">2. Pallet info card</a></li><li><a href="#section-3">3. Items page</a></li><li><a href="#section-4">4. Aggregate correctness</a></li><li><a href="#section-5">5. Wrapping toggle</a></li><li><a href="#section-6">6. Fixed ASRS</a></li><li><a href="#section-7">7. Stale pallet details</a></li><li><a href="#section-8">8. UI tests</a></li></ol></nav>
 <div class="note"><strong>Operator ต้องเห็นสิ่งที่จะเคลื่อนก่อนยืนยัน:</strong> pallet summary, items, lot และยอดรวมเป็น safety check ส่วน wrapping toggle เปลี่ยนเส้นทางเครื่องจักรจริง</div>
-<section><h2>1. PutawayPalletInfo</h2><p>model มี palletId, type, status, suggestedDestination, items และ message โดย items reuse <code>UnloadItem</code> ทำให้ putaway ผูกกับ model ของอีก domain ซึ่งสะดวกแต่ coupling สูง</p></section>
-<section><h2>2. Pallet info card</h2><p><code>StationPalletInfoCard</code> แสดง identity/type/status และเปิด <code>PalletItemsPage</code> เมื่อกดดูสินค้า หน้าที่ card คือสรุป ไม่ควรคำนวณ business eligibility แทน service</p></section>
-<section><h2>3. Items page</h2><p>หน้า detail แสดง partId, description, owner/brand, lot, image และ qty ของทุก <code>UnloadItem</code> พร้อม summary จำนวนรายการและผลรวม qty ช่วย operator ตรวจ pallet ก่อนส่ง</p></section>
-<section><h2>4. Aggregate correctness</h2><pre class="code-vs"><code>totalQty = items.fold&lt;int&gt;(
+<section id="section-1"><h2>1. PutawayPalletInfo</h2><p>model มี palletId, type, status, suggestedDestination, items และ message โดย items reuse <code>UnloadItem</code> ทำให้ putaway ผูกกับ model ของอีก domain ซึ่งสะดวกแต่ coupling สูง</p></section>
+<section id="section-2"><h2>2. Pallet info card</h2><p><code>StationPalletInfoCard</code> แสดง identity/type/status และเปิด <code>PalletItemsPage</code> เมื่อกดดูสินค้า หน้าที่ card คือสรุป ไม่ควรคำนวณ business eligibility แทน service</p></section>
+<section id="section-3"><h2>3. Items page</h2><p>หน้า detail แสดง partId, description, owner/brand, lot, image และ qty ของทุก <code>UnloadItem</code> พร้อม summary จำนวนรายการและผลรวม qty ช่วย operator ตรวจ pallet ก่อนส่ง</p></section>
+<section id="section-4"><h2>4. Aggregate correctness</h2><pre class="code-vs"><code>totalQty = items.fold&lt;int&gt;(
   0,
   (sum, item) =&gt; sum + item.qty,
 );</code></pre><p>หากหน่วยรองรับทศนิยม int จะไม่พอ และรายการ duplicate part+lot ต้องตัดสินว่าควรรวมหรือแสดง line แยก</p></section>
-<section><h2>5. Wrapping toggle</h2><p><code>StationWrappingToggle</code> เป็น controlled widget รับ value/onChanged เจ้าของ state อยู่ StationSheet ทำให้ destination change สามารถล้าง flag ได้ใน transition เดียว</p></section>
-<section><h2>6. Fixed ASRS</h2><p>send prework station ไม่แสดง destination selector แต่ยังแสดง wrapping toggle เพราะ fixedDestination คือ ASRS ส่วน station ที่ไม่มี fixed destination แสดง toggle ภายใน selector เมื่อ ASRS ถูกเลือก</p></section>
-<section><h2>7. Stale pallet details</h2><p>ระหว่างเปิด items page pallet อาจถูกอีกเครื่องเปลี่ยนสถานะ ข้อมูลหน้านี้เป็น snapshot จึงต้อง validate ตอน confirm และควรแสดง loadedAt/version หากความสดสำคัญ</p></section>
-<section><h2>8. UI tests</h2><div class="success">ทดสอบ empty items, image error, long Thai/English description, lot null, qty aggregate, FG/PW color, wrapping reset เมื่อเปลี่ยน destination และ fixed-ASRS toggle บนหน้าจอ PDA</div></section>
+<section id="section-5"><h2>5. Wrapping toggle</h2><p><code>StationWrappingToggle</code> เป็น controlled widget รับ value/onChanged เจ้าของ state อยู่ StationSheet ทำให้ destination change สามารถล้าง flag ได้ใน transition เดียว</p></section>
+<section id="section-6"><h2>6. Fixed ASRS</h2><p>send prework station ไม่แสดง destination selector แต่ยังแสดง wrapping toggle เพราะ fixedDestination คือ ASRS ส่วน station ที่ไม่มี fixed destination แสดง toggle ภายใน selector เมื่อ ASRS ถูกเลือก</p></section>
+<section id="section-7"><h2>7. Stale pallet details</h2><p>ระหว่างเปิด items page pallet อาจถูกอีกเครื่องเปลี่ยนสถานะ ข้อมูลหน้านี้เป็น snapshot จึงต้อง validate ตอน confirm และควรแสดง loadedAt/version หากความสดสำคัญ</p></section>
+<section id="section-8"><h2>8. UI tests</h2><div class="success">ทดสอบ empty items, image error, long Thai/English description, lot null, qty aggregate, FG/PW color, wrapping reset เมื่อเปลี่ยน destination และ fixed-ASRS toggle บนหน้าจอ PDA</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

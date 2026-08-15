@@ -4,17 +4,18 @@
 <title>Error translation อยู่ชั้นไหน</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-13 · Architecture</span><h1>Error translation อยู่ชั้นไหน</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Translation chain</a></li><li><a href="#section-2">2. Transport layer</a></li><li><a href="#section-3">3. Repository layer</a></li><li><a href="#section-4">4. Store layer</a></li><li><a href="#section-5">5. UI layer</a></li><li><a href="#section-6">6. Preserve cause</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Anti-pattern</a></li></ol></nav>
 <div class="note"><strong>Error translation ทีละ boundary:</strong> low-level causeยังอยู่สำหรับ diagnostics แต่แต่ละชั้นเห็นภาษาที่ตัดสินใจได้ ไม่ส่ง SocketExceptionหรือข้อความ .NETดิบถึง widget</div>
-<section><h2>1. Translation chain</h2><pre class="code-vs"><code>SocketException
+<section id="section-1"><h2>1. Translation chain</h2><pre class="code-vs"><code>SocketException
   → NetworkFailure(cause)
   → ReceivingError.offline(retryAllowed: true)
   → UI: “ติดต่อ WMS ไม่ได้ ตรวจเครือข่าย”</code></pre></section>
-<section><h2>2. Transport layer</h2><p>แปลง timeout/socket/status/ProblemDetails/contract errorเป็น typed infrastructure failuresพร้อม status/code/trace ID โดย redact payload</p></section>
-<section><h2>3. Repository layer</h2><p>แปลง 404เป็น OrderNotFound, 409 codeเป็น AlreadyReceived ฯลฯ เมื่อมี domain meaning; unknown server errorคงเป็น BackendFailureไม่เดาจาก message</p></section>
-<section><h2>4. Store layer</h2><p>ตัดสิน retry, state transitionและ recoverability เช่น conflictอาจ reload authoritative order; unauthorizedส่ง auth effect; contract errorแสดง support trace</p></section>
-<section><h2>5. UI layer</h2><p>localizeข้อความ/ปุ่มตาม typed error ไม่ parse string และไม่แสดง stack trace ให้ operator; loggingทำก่อน localizationเพื่อ aggregateด้วย code</p></section>
-<section><h2>6. Preserve cause</h2><p>ใช้ error objectมี <code>cause</code>/<code>stackTrace</code>/<code>traceId</code> สำหรับ telemetry แต่ equality/testsอิง stable kind/code ไม่อิงข้อความ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>API 409 code <code>PALLET_ALREADY_ASSIGNED</code> ควรแปลที่ไหน?</p><details><summary>เฉลย</summary><p>ApiClient parse ProblemDetails; ReceivingRepository map codeเป็น domain conflict; Storeเลือก refresh/transition; UIแสดงคำแนะนำ</p></details></section>
-<section><h2>8. Anti-pattern</h2><div class="warn">catchทุกอย่างแล้วคืน empty list/nullทำ errorหายและ UIโกหกว่าไม่มีงาน—unknown failureต้องยังเป็น failure</div></section>
+<section id="section-2"><h2>2. Transport layer</h2><p>แปลง timeout/socket/status/ProblemDetails/contract errorเป็น typed infrastructure failuresพร้อม status/code/trace ID โดย redact payload</p></section>
+<section id="section-3"><h2>3. Repository layer</h2><p>แปลง 404เป็น OrderNotFound, 409 codeเป็น AlreadyReceived ฯลฯ เมื่อมี domain meaning; unknown server errorคงเป็น BackendFailureไม่เดาจาก message</p></section>
+<section id="section-4"><h2>4. Store layer</h2><p>ตัดสิน retry, state transitionและ recoverability เช่น conflictอาจ reload authoritative order; unauthorizedส่ง auth effect; contract errorแสดง support trace</p></section>
+<section id="section-5"><h2>5. UI layer</h2><p>localizeข้อความ/ปุ่มตาม typed error ไม่ parse string และไม่แสดง stack trace ให้ operator; loggingทำก่อน localizationเพื่อ aggregateด้วย code</p></section>
+<section id="section-6"><h2>6. Preserve cause</h2><p>ใช้ error objectมี <code>cause</code>/<code>stackTrace</code>/<code>traceId</code> สำหรับ telemetry แต่ equality/testsอิง stable kind/code ไม่อิงข้อความ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>API 409 code <code>PALLET_ALREADY_ASSIGNED</code> ควรแปลที่ไหน?</p><details><summary>เฉลย</summary><p>ApiClient parse ProblemDetails; ReceivingRepository map codeเป็น domain conflict; Storeเลือก refresh/transition; UIแสดงคำแนะนำ</p></details></section>
+<section id="section-8"><h2>8. Anti-pattern</h2><div class="warn">catchทุกอย่างแล้วคืน empty list/nullทำ errorหายและ UIโกหกว่าไม่มีงาน—unknown failureต้องยังเป็น failure</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

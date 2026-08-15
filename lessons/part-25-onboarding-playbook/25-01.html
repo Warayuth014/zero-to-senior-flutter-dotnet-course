@@ -4,19 +4,20 @@
 <title>ลำดับอ่านโปรเจกต์ Flutter ใหม่</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">25-01 · Real Codebase</span><h1>ลำดับอ่านโปรเจกต์ Flutter ใหม่</h1><p>Part 25: Onboarding &amp; Code Reading Playbook</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Baseline environment</a></li><li><a href="#section-2">2. อ่าน rootก่อน lib</a></li><li><a href="#section-3">3. Entry/composition map</a></li><li><a href="#section-4">4. Feature inventory</a></li><li><a href="#section-5">5. เลือกหนึ่ง vertical slice</a></li><li><a href="#section-6">6. State ownership sheet</a></li><li><a href="#section-7">7. Run before change</a></li><li><a href="#section-8">8. Day-one artifact</a></li></ol></nav>
 <div class="note"><strong>เป้าหมายวันแรก:</strong> สร้างแผนที่ execution/state/data flowก่อนอ่านทุกไฟล์ — <code>wmsapp</code>มีประมาณ 110 Dart filesแบบ screen-centric ส่วน <code>wms_absolute_mobile</code>มีประมาณ 35 Dart filesแบบ store/repository</div>
-<section><h2>1. Baseline environment</h2><pre class="code-vs"><code>git status --short
+<section id="section-1"><h2>1. Baseline environment</h2><pre class="code-vs"><code>git status --short
 flutter --version
 flutter doctor -v
 flutter pub get
 flutter analyze
 flutter test</code></pre><p>อ่าน SDK constraintใน pubspecก่อน upgrade; wmsappและ absoluteผูก Dartคนละ baselineจึงไม่ควรใช้ lockfile/assumptionร่วมกัน</p></section>
-<section><h2>2. อ่าน rootก่อน lib</h2><p>เปิด README, pubspec, analysis_options, assets, Android manifests/build configและ test tree เพื่อรู้ platforms/dependencies/fonts/permissions/version จากนั้นจึงเข้า <code>lib/main.dart</code> ไม่เริ่มที่ไฟล์ใหญ่สุดโดยไร้บริบท</p></section>
-<section><h2>3. Entry/composition map</h2><p>wmsapp mainประกอบ theme+HomeScreenและหลาย screensสร้าง ApiService singletonเอง ส่วน absolute mainโหลด language/connectionก่อน runApp, สร้าง ApiClient→AuthRepositoryและ WarehouseShellประกอบ repositories/store นี่กำหนดว่าจะหา dependency ownerตรงไหน</p></section>
-<section><h2>4. Feature inventory</h2><p>ใช้ <code>rg --files lib test</code>แล้วจัดกลุ่ม auth, receiving, putaway, picking, packing, sorting, inventory, tasksและshared core จดไฟล์ top 10ตามขนาดเป็น hotspots ไม่ตีตราว่า badก่อนอ่าน responsibilities</p></section>
-<section><h2>5. เลือกหนึ่ง vertical slice</h2><p>เริ่ม flowเล็กที่มี query+mutation เช่น lab Tasksหรือ absolute Inventory→Task แล้ว trace Widget→state owner→repository/API→model→test ก่อนข้าม feature การอ่านตาม flowสร้าง mental linksเร็วกว่าตาม alphabet</p></section>
-<section><h2>6. State ownership sheet</h2><p>จด state, owner, lifetime, source of truth, consumers, mutation methodsและdisposal แยก local UIจาก domain/server state หากหา ownerไม่ได้หรือมีสองสำเนาให้ mark risk ไม่รีบ refactorวันแรก</p></section>
-<section><h2>7. Run before change</h2><p>เปิด backend/base URLที่ถูก, capture happy/error screenshots/logsและทดสอบ hardware scannerถ้ามี Baselineที่รันไม่ได้ต้องบันทึก exact command/environment/error ไม่แก้หลายอย่างพร้อมจนรู้ไม่ได้ว่าอะไรช่วย</p></section>
-<section><h2>8. Day-one artifact</h2><div class="success">ส่ง architecture sketch, feature map, startup steps, one traced flow, known environment blockersและคำถามธุรกิจ 5ข้อ โดยยังไม่เสนอ rewriteจาก impressionแรก</div></section>
+<section id="section-2"><h2>2. อ่าน rootก่อน lib</h2><p>เปิด README, pubspec, analysis_options, assets, Android manifests/build configและ test tree เพื่อรู้ platforms/dependencies/fonts/permissions/version จากนั้นจึงเข้า <code>lib/main.dart</code> ไม่เริ่มที่ไฟล์ใหญ่สุดโดยไร้บริบท</p></section>
+<section id="section-3"><h2>3. Entry/composition map</h2><p>wmsapp mainประกอบ theme+HomeScreenและหลาย screensสร้าง ApiService singletonเอง ส่วน absolute mainโหลด language/connectionก่อน runApp, สร้าง ApiClient→AuthRepositoryและ WarehouseShellประกอบ repositories/store นี่กำหนดว่าจะหา dependency ownerตรงไหน</p></section>
+<section id="section-4"><h2>4. Feature inventory</h2><p>ใช้ <code>rg --files lib test</code>แล้วจัดกลุ่ม auth, receiving, putaway, picking, packing, sorting, inventory, tasksและshared core จดไฟล์ top 10ตามขนาดเป็น hotspots ไม่ตีตราว่า badก่อนอ่าน responsibilities</p></section>
+<section id="section-5"><h2>5. เลือกหนึ่ง vertical slice</h2><p>เริ่ม flowเล็กที่มี query+mutation เช่น lab Tasksหรือ absolute Inventory→Task แล้ว trace Widget→state owner→repository/API→model→test ก่อนข้าม feature การอ่านตาม flowสร้าง mental linksเร็วกว่าตาม alphabet</p></section>
+<section id="section-6"><h2>6. State ownership sheet</h2><p>จด state, owner, lifetime, source of truth, consumers, mutation methodsและdisposal แยก local UIจาก domain/server state หากหา ownerไม่ได้หรือมีสองสำเนาให้ mark risk ไม่รีบ refactorวันแรก</p></section>
+<section id="section-7"><h2>7. Run before change</h2><p>เปิด backend/base URLที่ถูก, capture happy/error screenshots/logsและทดสอบ hardware scannerถ้ามี Baselineที่รันไม่ได้ต้องบันทึก exact command/environment/error ไม่แก้หลายอย่างพร้อมจนรู้ไม่ได้ว่าอะไรช่วย</p></section>
+<section id="section-8"><h2>8. Day-one artifact</h2><div class="success">ส่ง architecture sketch, feature map, startup steps, one traced flow, known environment blockersและคำถามธุรกิจ 5ข้อ โดยยังไม่เสนอ rewriteจาก impressionแรก</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

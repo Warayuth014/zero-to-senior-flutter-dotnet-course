@@ -4,19 +4,20 @@
 <title>Status code และ error payload</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-09 · Flutter + .NET</span><h1>Status code และ error payload</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. กลุ่มสำคัญ</a></li><li><a href="#section-2">2. Typed ApiException</a></li><li><a href="#section-3">3. อ่าน body อย่างปลอดภัย</a></li><li><a href="#section-4">4. UI policy</a></li><li><a href="#section-5">5. ห้ามใช้ message เป็น logic</a></li><li><a href="#section-6">6. Preserve evidence</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. หลักจำ</a></li></ol></nav>
 <div class="note"><strong>Status code ตอบว่า request จบแบบไหน:</strong> error payload ตอบรายละเอียด ห้ามพึ่งอย่างใดอย่างหนึ่งเพียงอย่างเดียว</div>
-<section><h2>1. กลุ่มสำคัญ</h2><ul><li>400 validation/request ผิด</li><li>401 token ไม่มีหรือใช้ไม่ได้</li><li>403 ไม่มีสิทธิ์</li><li>404 resource/route ไม่พบ</li><li>409 conflict/สถานะเปลี่ยนแล้ว</li><li>422 semantic validation</li><li>429 rate limit</li><li>500–599 server/proxy failure</li></ul></section>
-<section><h2>2. Typed ApiException</h2><pre class="code-vs"><code>throw ApiException(
+<section id="section-1"><h2>1. กลุ่มสำคัญ</h2><ul><li>400 validation/request ผิด</li><li>401 token ไม่มีหรือใช้ไม่ได้</li><li>403 ไม่มีสิทธิ์</li><li>404 resource/route ไม่พบ</li><li>409 conflict/สถานะเปลี่ยนแล้ว</li><li>422 semantic validation</li><li>429 rate limit</li><li>500–599 server/proxy failure</li></ul></section>
+<section id="section-2"><h2>2. Typed ApiException</h2><pre class="code-vs"><code>throw ApiException(
   statusCode: response.statusCode,
   code: problem.code,
   userMessage: problem.detail ?? fallbackFor(status),
   correlationId: problem.traceId,
 );</code></pre></section>
-<section><h2>3. อ่าน body อย่างปลอดภัย</h2><p>Error body อาจเป็น ProblemDetails, legacy map, plain text, HTML หรือว่าง จึง parse แบบ best effort และต้องมี fallback จาก status เสมอ</p></section>
-<section><h2>4. UI policy</h2><p>409 อาจให้ refresh งาน, 401 ส่งไป login, 403 แสดงไม่มีสิทธิ์, 400 ชี้ field ที่ผิด, 500 ให้ลองใหม่พร้อม trace ID แต่ policy navigation ควรอยู่เหนือ transport layer</p></section>
-<section><h2>5. ห้ามใช้ message เป็น logic</h2><p>อย่าเขียน <code>if (message.contains('already'))</code> ให้ server ส่ง stable machine code เช่น <code>TASK_ALREADY_COMPLETED</code> และ Flutter map เป็น enum/action</p></section>
-<section><h2>6. Preserve evidence</h2><p>เก็บ status, safe error code, endpoint, elapsed time และ trace ID สำหรับ log โดย truncate/redact body ที่อาจมีข้อมูลสำคัญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>404 จาก <code>/tasks/T-1</code> กับ 404 จาก route พิมพ์ผิดต่างกันอย่างไร?</p><details><summary>เฉลย</summary><p>status เท่ากันแต่ error code/ProblemDetails และ contract ช่วยแยก resource missing จาก deployment/config path ผิด</p></details></section>
-<section><h2>8. หลักจำ</h2><div class="success">Status ขับ policy ระดับกว้าง, stable error code ขับ behavior เฉพาะ และข้อความมีไว้แสดง—not control flow</div></section>
+<section id="section-3"><h2>3. อ่าน body อย่างปลอดภัย</h2><p>Error body อาจเป็น ProblemDetails, legacy map, plain text, HTML หรือว่าง จึง parse แบบ best effort และต้องมี fallback จาก status เสมอ</p></section>
+<section id="section-4"><h2>4. UI policy</h2><p>409 อาจให้ refresh งาน, 401 ส่งไป login, 403 แสดงไม่มีสิทธิ์, 400 ชี้ field ที่ผิด, 500 ให้ลองใหม่พร้อม trace ID แต่ policy navigation ควรอยู่เหนือ transport layer</p></section>
+<section id="section-5"><h2>5. ห้ามใช้ message เป็น logic</h2><p>อย่าเขียน <code>if (message.contains('already'))</code> ให้ server ส่ง stable machine code เช่น <code>TASK_ALREADY_COMPLETED</code> และ Flutter map เป็น enum/action</p></section>
+<section id="section-6"><h2>6. Preserve evidence</h2><p>เก็บ status, safe error code, endpoint, elapsed time และ trace ID สำหรับ log โดย truncate/redact body ที่อาจมีข้อมูลสำคัญ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>404 จาก <code>/tasks/T-1</code> กับ 404 จาก route พิมพ์ผิดต่างกันอย่างไร?</p><details><summary>เฉลย</summary><p>status เท่ากันแต่ error code/ProblemDetails และ contract ช่วยแยก resource missing จาก deployment/config path ผิด</p></details></section>
+<section id="section-8"><h2>8. หลักจำ</h2><div class="success">Status ขับ policy ระดับกว้าง, stable error code ขับ behavior เฉพาะ และข้อความมีไว้แสดง—not control flow</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

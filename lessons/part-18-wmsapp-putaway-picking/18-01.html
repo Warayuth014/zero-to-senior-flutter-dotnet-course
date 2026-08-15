@@ -4,18 +4,19 @@
 <title>Putaway domain map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-01 · Real Codebase</span><h1>Putaway domain map</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Putaway flow map</a></li><li><a href="#section-2">2. Picking flow map</a></li><li><a href="#section-3">3. Station families</a></li><li><a href="#section-4">4. Identity map</a></li><li><a href="#section-5">5. Two sources of state</a></li><li><a href="#section-6">6. Command vs event</a></li><li><a href="#section-7">7. Failure boundaries</a></li><li><a href="#section-8">8. วิธีอ่าน Part นี้</a></li></ol></nav>
 <div class="note"><strong>Part 18 คือการเคลื่อน inventory ผ่าน station:</strong> Putaway ส่ง pallet ไป ASRS/Prework/Replenish ส่วน Picking ดึงของจาก source pallet ไป destination pallet ทุกขั้นต้องรักษา pallet, order และ part identity ให้ตรงกัน</div>
-<section><h2>1. Putaway flow map</h2><pre class="code-vs"><code>station scan → pallet scan → inspect items
+<section id="section-1"><h2>1. Putaway flow map</h2><pre class="code-vs"><code>station scan → pallet scan → inspect items
 → choose destination/wrapping → confirm
 → AMR dispatch → SignalR event → REST reconcile</code></pre><p>หน้าจอไม่ได้ขยับสินค้าเอง แต่ส่ง intent ให้ .NET แล้วแสดงสถานะงานขนส่งที่ backend ยืนยัน</p></section>
-<section><h2>2. Picking flow map</h2><pre class="code-vs"><code>orders list → order detail → assign source station
+<section id="section-2"><h2>2. Picking flow map</h2><pre class="code-vs"><code>orders list → order detail → assign source station
 → scan part/serial or qty → choose dest pallet
 → confirm pick → return source / continue / send dest to pack</code></pre><p>หนึ่ง order อาจใช้หลาย source pallet และใช้ destination pallet เดิมต่อได้</p></section>
-<section><h2>3. Station families</h2><p>Putaway ปกติมี <code>STN-1..3</code> ส่วน Prework มี <code>PW-STN-1..6</code> โดยสถานีเลขคี่เป็น receive และเลขคู่เป็น send กติกาอยู่ใน <code>StationInfo</code>: allowedType, fixedDestination และ <code>PWRole</code></p></section>
-<section><h2>4. Identity map</h2><ul><li>stationId ระบุจุดกายภาพ</li><li>palletId ระบุภาชนะและ inventory ปัจจุบัน</li><li>pickOrderId ระบุความต้องการรวม</li><li>partId/lot/serial ระบุสินค้าที่เคลื่อน</li></ul><p>ห้ามแทน line หรือ lot ด้วย partId เมื่อหนึ่ง part ปรากฏหลายชุด</p></section>
-<section><h2>5. Two sources of state</h2><p>REST status เป็น authoritative snapshot ส่วน SignalR เป็นเหตุการณ์เร่ง UI ให้ตอบสนองเร็ว Pattern ในโค้ดคือ merge event บางส่วนแล้วเรียก REST โหลดใหม่ จึงต้องกัน response เก่าทับ state ใหม่และรองรับ event หลุด</p></section>
-<section><h2>6. Command vs event</h2><p><code>confirmPutaway</code>, <code>confirmPickV2</code>, <code>returnPallet</code> และ <code>sendToPack</code> เป็น command ที่อาจเปลี่ยนข้อมูล ส่วน StationDispatched/PalletArrived/PalletReturned เป็น notification ห้ามนำ event มา commit inventory ซ้ำใน client</p></section>
-<section><h2>7. Failure boundaries</h2><p>แยก validation reject, conflict, timeout ที่ไม่รู้ผล, transport failure และ event disconnect เพราะ retry policy ต่างกัน โดยเฉพาะ confirm/return ต้องมี idempotency key หรือ query สถานะก่อน retry</p></section>
-<section><h2>8. วิธีอ่าน Part นี้</h2><div class="success">ทุกบทให้ trace 5 ช่อง: user scan → local transition → API payload → backend result/event → UI reconciliation แล้วจด invariant อย่างน้อยหนึ่งข้อและ failure case อย่างน้อยสองกรณี</div></section>
+<section id="section-3"><h2>3. Station families</h2><p>Putaway ปกติมี <code>STN-1..3</code> ส่วน Prework มี <code>PW-STN-1..6</code> โดยสถานีเลขคี่เป็น receive และเลขคู่เป็น send กติกาอยู่ใน <code>StationInfo</code>: allowedType, fixedDestination และ <code>PWRole</code></p></section>
+<section id="section-4"><h2>4. Identity map</h2><ul><li>stationId ระบุจุดกายภาพ</li><li>palletId ระบุภาชนะและ inventory ปัจจุบัน</li><li>pickOrderId ระบุความต้องการรวม</li><li>partId/lot/serial ระบุสินค้าที่เคลื่อน</li></ul><p>ห้ามแทน line หรือ lot ด้วย partId เมื่อหนึ่ง part ปรากฏหลายชุด</p></section>
+<section id="section-5"><h2>5. Two sources of state</h2><p>REST status เป็น authoritative snapshot ส่วน SignalR เป็นเหตุการณ์เร่ง UI ให้ตอบสนองเร็ว Pattern ในโค้ดคือ merge event บางส่วนแล้วเรียก REST โหลดใหม่ จึงต้องกัน response เก่าทับ state ใหม่และรองรับ event หลุด</p></section>
+<section id="section-6"><h2>6. Command vs event</h2><p><code>confirmPutaway</code>, <code>confirmPickV2</code>, <code>returnPallet</code> และ <code>sendToPack</code> เป็น command ที่อาจเปลี่ยนข้อมูล ส่วน StationDispatched/PalletArrived/PalletReturned เป็น notification ห้ามนำ event มา commit inventory ซ้ำใน client</p></section>
+<section id="section-7"><h2>7. Failure boundaries</h2><p>แยก validation reject, conflict, timeout ที่ไม่รู้ผล, transport failure และ event disconnect เพราะ retry policy ต่างกัน โดยเฉพาะ confirm/return ต้องมี idempotency key หรือ query สถานะก่อน retry</p></section>
+<section id="section-8"><h2>8. วิธีอ่าน Part นี้</h2><div class="success">ทุกบทให้ trace 5 ช่อง: user scan → local transition → API payload → backend result/event → UI reconciliation แล้วจด invariant อย่างน้อยหนึ่งข้อและ failure case อย่างน้อยสองกรณี</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

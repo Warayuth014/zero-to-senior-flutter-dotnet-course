@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="th">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>List, Set, Map และ collection operators</title><link rel="stylesheet" href="../../assets/course.css"></head>
+<title>List, Set, Map และการวนข้อมูล</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
-<header class="hero"><span class="badge">m01-05 · Dart Core</span><h1>List, Set, Map และ collection operators</h1><p>Part -1: Dart Foundation for Flutter</p></header>
+<header class="hero"><span class="badge">m01-05 · Dart Core</span><h1>List, Set, Map และการวนข้อมูล</h1><p>Dart Foundation: Dart from Zero</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. เลือก collection จากคำถาม</a></li><li><a href="#section-2">2. Typed collection และ operators</a></li><li><a href="#section-3">3. Mutation กับ state</a></li><li><a href="#section-4">4. Equality และ uniqueness</a></li><li><a href="#section-5">5. ตัวอย่างจริง</a></li><li><a href="#section-6">6. Collection pitfalls</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. สรุป</a></li></ol></nav>
 <div class="note"><code>List</code> เก็บลำดับและค่าซ้ำ, <code>Set</code> เก็บสมาชิกไม่ซ้ำ, <code>Map</code> จับคู่ key-value การเลือกผิดทำให้ทั้ง intent และ complexity ของ workflow อ่านยาก</div>
-<section><h2>1. เลือก collection จากคำถาม</h2><table><thead><tr><th>ต้องการ</th><th>ใช้</th><th>ตัวอย่าง WMS</th></tr></thead><tbody><tr><td>รายการเรียงลำดับ/ซ้ำได้</td><td><code>List&lt;T&gt;</code></td><td>รายการ part ใน pallet</td></tr><tr><td>ตรวจสมาชิกไม่ซ้ำ</td><td><code>Set&lt;T&gt;</code></td><td>serial ที่สแกนแล้ว</td></tr><tr><td>หา value ด้วย key</td><td><code>Map&lt;K,V&gt;</code></td><td>task ตาม taskId, step ตาม TaskType</td></tr></tbody></table></section>
-<section><h2>2. Typed collection และ operators</h2><pre class="code-vs"><code>final scannedSerials = &lt;String&gt;{'SN-001'};
+<section id="section-1"><h2>1. เลือก collection จากคำถาม</h2><table><thead><tr><th>ต้องการ</th><th>ใช้</th><th>ตัวอย่าง WMS</th></tr></thead><tbody><tr><td>รายการเรียงลำดับ/ซ้ำได้</td><td><code>List&lt;T&gt;</code></td><td>รายการ part ใน pallet</td></tr><tr><td>ตรวจสมาชิกไม่ซ้ำ</td><td><code>Set&lt;T&gt;</code></td><td>serial ที่สแกนแล้ว</td></tr><tr><td>หา value ด้วย key</td><td><code>Map&lt;K,V&gt;</code></td><td>task ตาม taskId, step ตาม TaskType</td></tr></tbody></table></section>
+<section id="section-2"><h2>2. Typed collection และ operators</h2><pre class="code-vs"><code>final scannedSerials = &lt;String&gt;{'SN-001'};
 final quantities = &lt;String, int&gt;{'PART-A': 2};
 final pending = tasks.where((t) =&gt; !t.done).toList();
 final ids = tasks.map((t) =&gt; t.id).toSet();
@@ -17,16 +18,16 @@ final menu = &lt;String&gt;[
   for (final role in extraRoles) role.label,
   ...customMenus,
 ];</code></pre><p><code>where</code>/<code>map</code> คืน lazy <code>Iterable</code>; ใช้ <code>toList()</code> เมื่ออยาก snapshot หรือ API ต้องการ List จริง ระวัง enumerate ซ้ำถ้าข้างในแพงหรือ source เปลี่ยนได้</p></section>
-<section><h2>3. Mutation กับ state</h2><pre class="code-vs"><code>// mutation เดิม: listener บางแบบอาจไม่เห็น identity ใหม่
+<section id="section-3"><h2>3. Mutation กับ state</h2><pre class="code-vs"><code>// mutation เดิม: listener บางแบบอาจไม่เห็น identity ใหม่
 items.add(newItem);
 
 // immutable-style update: intent ชัดและ rollback ง่าย
 items = [...items, newItem];
 items = [for (final x in items) if (x.id == id) x.complete() else x];</code></pre><p><code>final List</code> ยังแก้สมาชิกได้ ถ้า expose list จาก store ให้ใช้ unmodifiable view/copy เพื่อไม่ให้ UI ข้าม command แล้วแก้ state โดยตรง</p></section>
-<section><h2>4. Equality และ uniqueness</h2><p>Set/Map ใช้ <code>==</code> กับ <code>hashCode</code> ของ key ถ้า model ไม่ override equality วัตถุสองตัวที่ข้อมูลเหมือนกันอาจยังเป็นคนละสมาชิก สำหรับ barcode มัก normalize เป็น String ก่อนใส่ Set ง่ายและชัดกว่าใช้ object ดิบ</p></section>
-<section><h2>5. ตัวอย่างจริง</h2><ul><li><code>wms_absolute_mobile/lib/features/warehouse/workflow_definitions.dart</code> ใช้ <code>Map&lt;TaskType, List&lt;StepDef&gt;&gt;</code> เพราะต้อง lookup flow จากชนิดงาน</li><li><code>wmsapp/lib/services/signalr_service.dart</code> ใช้ <code>List&lt;SignalRCallback&gt;</code> เพราะ event หนึ่งมีผู้ฟังหลายราย</li><li>parser ใน API ใช้ <code>whereType&lt;Map&lt;String,dynamic&gt;&gt;()</code> กรอง element ก่อนสร้าง model</li></ul></section>
-<section><h2>6. Collection pitfalls</h2><div class="warn"><code>firstWhere</code> จะ throw ถ้าไม่พบ, <code>single</code> จะ throw ถ้าจำนวนไม่ใช่หนึ่ง, และแก้ list ระหว่าง iterate อาจพัง ใช้ helper ที่คืน nullable, ตรวจ invariant หรือสร้าง list ใหม่ตามความหมายของงาน</div></section>
-<section><h2>7. แบบฝึกหัด</h2><p>รับ serial ต่อเนื่อง ต้องไม่ยิง API เมื่อซ้ำ และต้องรักษาลำดับแสดงผล ควรใช้โครงสร้างใด?</p><details><summary>เฉลย</summary><p>ใช้ทั้ง <code>List&lt;String&gt;</code> สำหรับลำดับ UI และ <code>Set&lt;String&gt;</code> สำหรับ membership O(1) โดย normalize ก่อนตรวจ เพิ่มทั้งสองภายใต้ command เดียวเพื่อรักษา invariant; หรือใช้ LinkedHashSet หากไม่ต้องเก็บข้อมูลอื่นและยอมให้ Set เป็น source เดียว</p></details></section>
-<section><h2>8. สรุป</h2><p>ก่อนเขียน loop ให้ตอบว่า ordering, duplicate และ lookup สำคัญอย่างไร แล้วเลือก collection จาก invariant ไม่ใช่เลือก List เพราะคุ้นมือ</p></section>
+<section id="section-4"><h2>4. Equality และ uniqueness</h2><p>Set/Map ใช้ <code>==</code> กับ <code>hashCode</code> ของ key ถ้า model ไม่ override equality วัตถุสองตัวที่ข้อมูลเหมือนกันอาจยังเป็นคนละสมาชิก สำหรับ barcode มัก normalize เป็น String ก่อนใส่ Set ง่ายและชัดกว่าใช้ object ดิบ</p></section>
+<section id="section-5"><h2>5. ตัวอย่างจริง</h2><ul><li><code>wms_absolute_mobile/lib/features/warehouse/workflow_definitions.dart</code> ใช้ <code>Map&lt;TaskType, List&lt;StepDef&gt;&gt;</code> เพราะต้อง lookup flow จากชนิดงาน</li><li><code>wmsapp/lib/services/signalr_service.dart</code> ใช้ <code>List&lt;SignalRCallback&gt;</code> เพราะ event หนึ่งมีผู้ฟังหลายราย</li><li>parser ใน API ใช้ <code>whereType&lt;Map&lt;String,dynamic&gt;&gt;()</code> กรอง element ก่อนสร้าง model</li></ul></section>
+<section id="section-6"><h2>6. Collection pitfalls</h2><div class="warn"><code>firstWhere</code> จะ throw ถ้าไม่พบ, <code>single</code> จะ throw ถ้าจำนวนไม่ใช่หนึ่ง, และแก้ list ระหว่าง iterate อาจพัง ใช้ helper ที่คืน nullable, ตรวจ invariant หรือสร้าง list ใหม่ตามความหมายของงาน</div></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>รับ serial ต่อเนื่อง ต้องไม่ยิง API เมื่อซ้ำ และต้องรักษาลำดับแสดงผล ควรใช้โครงสร้างใด?</p><details><summary>เฉลย</summary><p>ใช้ทั้ง <code>List&lt;String&gt;</code> สำหรับลำดับ UI และ <code>Set&lt;String&gt;</code> สำหรับ membership O(1) โดย normalize ก่อนตรวจ เพิ่มทั้งสองภายใต้ command เดียวเพื่อรักษา invariant; หรือใช้ LinkedHashSet หากไม่ต้องเก็บข้อมูลอื่นและยอมให้ Set เป็น source เดียว</p></details></section>
+<section id="section-8"><h2>8. สรุป</h2><p>ก่อนเขียน loop ให้ตอบว่า ordering, duplicate และ lookup สำคัญอย่างไร แล้วเลือก collection จาก invariant ไม่ใช่เลือก List เพราะคุ้นมือ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

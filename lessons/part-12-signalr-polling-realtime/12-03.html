@@ -4,8 +4,9 @@
 <title>HubConnectionBuilder ใน Flutter</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-03 · Realtime</span><h1>HubConnectionBuilder ใน Flutter</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Build</a></li><li><a href="#section-2">2. URL parity</a></li><li><a href="#section-3">3. Token freshness</a></li><li><a href="#section-4">4. Handler registration</a></li><li><a href="#section-5">5. Connection state</a></li><li><a href="#section-6">6. Error propagation</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>HubConnectionBuilder:</strong> สร้าง URLจาก resolved server/base pathเดียวกับ ApiClient แนบ token provider และ register handlersก่อน startเพื่อไม่พลาด eventแรก</div>
-<section><h2>1. Build</h2><pre class="code-vs"><code>final hubUrl = '$resolvedBaseUrl/hubs/tasks';
+<section id="section-1"><h2>1. Build</h2><pre class="code-vs"><code>final hubUrl = '$resolvedBaseUrl/hubs/tasks';
 final connection = HubConnectionBuilder()
     .withUrl(hubUrl /*, options: token transport config */)
     .withAutomaticReconnect()
@@ -13,12 +14,12 @@ final connection = HubConnectionBuilder()
 
 connection.on('TaskStatusChanged', onTaskStatusChanged);
 await connection.start();</code></pre></section>
-<section><h2>2. URL parity</h2><p>ห้ามต่อจาก hardcoded hostที่ต่างจาก connection profile/API Hub routeอาจอยู่หลัง reverse-proxy base pathและ server switchต้อง rebuild connection</p></section>
-<section><h2>3. Token freshness</h2><p>ถ้า libraryรองรับ access token factoryให้ดึง tokenล่าสุดตอน connect/reconnect ไม่ capture tokenเก่าใน constructor หลัง logoutต้อง stopก่อน clear/rebuild</p></section>
-<section><h2>4. Handler registration</h2><p>registerชื่อ event exact case/contractก่อน startและเก็บ handler referenceสำหรับ off/removeภายหลัง ห้ามสร้าง anonymous closureใหม่ตอน unsubscribe</p></section>
-<section><h2>5. Connection state</h2><p>expose disconnected/connecting/connected/reconnectingให้ Store/Shellแสดงสถานะและตัดสิน fallback ไม่ให้ screenเดาว่ามี connectionจาก object != null</p></section>
-<section><h2>6. Error propagation</h2><p>อย่า catch connect errorแล้ว logอย่างเดียวจน UIคิดว่า realtimeทำงาน ให้ serviceคืน/notify typed stateและเริ่ม fallback pollingตาม policy</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>profileเปลี่ยนจาก Aเป็น Bแต่ singleton connectionยัง connectedที่ Aควรทำอะไร?</p><details><summary>เฉลย</summary><p>เพิ่ม realm generation, stop A, clear subscriptions/server-scoped state, build URL B, start+resubscribeและ HTTP reconcile ห้ามส่ง token Aไป B</p></details></section>
-<section><h2>8. Tests</h2><div class="success">resolved hub URL/base path, handlerก่อน start, connect failure state, token redaction, server switchและ duplicate startไม่สร้างสอง connections</div></section>
+<section id="section-2"><h2>2. URL parity</h2><p>ห้ามต่อจาก hardcoded hostที่ต่างจาก connection profile/API Hub routeอาจอยู่หลัง reverse-proxy base pathและ server switchต้อง rebuild connection</p></section>
+<section id="section-3"><h2>3. Token freshness</h2><p>ถ้า libraryรองรับ access token factoryให้ดึง tokenล่าสุดตอน connect/reconnect ไม่ capture tokenเก่าใน constructor หลัง logoutต้อง stopก่อน clear/rebuild</p></section>
+<section id="section-4"><h2>4. Handler registration</h2><p>registerชื่อ event exact case/contractก่อน startและเก็บ handler referenceสำหรับ off/removeภายหลัง ห้ามสร้าง anonymous closureใหม่ตอน unsubscribe</p></section>
+<section id="section-5"><h2>5. Connection state</h2><p>expose disconnected/connecting/connected/reconnectingให้ Store/Shellแสดงสถานะและตัดสิน fallback ไม่ให้ screenเดาว่ามี connectionจาก object != null</p></section>
+<section id="section-6"><h2>6. Error propagation</h2><p>อย่า catch connect errorแล้ว logอย่างเดียวจน UIคิดว่า realtimeทำงาน ให้ serviceคืน/notify typed stateและเริ่ม fallback pollingตาม policy</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>profileเปลี่ยนจาก Aเป็น Bแต่ singleton connectionยัง connectedที่ Aควรทำอะไร?</p><details><summary>เฉลย</summary><p>เพิ่ม realm generation, stop A, clear subscriptions/server-scoped state, build URL B, start+resubscribeและ HTTP reconcile ห้ามส่ง token Aไป B</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">resolved hub URL/base path, handlerก่อน start, connect failure state, token redaction, server switchและ duplicate startไม่สร้างสอง connections</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

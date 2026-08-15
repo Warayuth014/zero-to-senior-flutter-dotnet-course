@@ -23,8 +23,8 @@
 
 ## สถานะเนื้อหา
 
-- Part -1: เขียนเนื้อหาเฉพาะบทครบ 20/20 บท พร้อมตัวอย่างจากสอง codebase แบบฝึกหัด และแนวคำตอบ
-- Part 0: เขียนเนื้อหาเฉพาะบทครบ 12/12 บท พร้อม environment checks และ lab เปิดสองโปรเจกต์จริง
+- Part 0 — Start Here: รื้อใหม่สำหรับผู้ไม่เคยเขียน Flutter ครบ 12/12 บท ตั้งแต่ติดตั้งจนถึง Mini Project Warehouse Counter ที่รันและทดสอบได้
+- Dart Foundation: มีเนื้อหา 20/20 บท และเริ่มรื้อเส้นทางใหม่จากศูนย์แล้ว โดยบทแรกเริ่มที่ `main`, `print`, ตัวแปร และ lab Dart จริง
 - Part 1: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ตั้งแต่ widget mental model จนถึง lab วิเคราะห์ Dashboard จากโปรเจกต์จริง
 - Part 2: เขียนเนื้อหาเฉพาะบทครบ 15/15 บท ครอบคลุม constraints, responsive layout, scrolling, PDA ergonomics และ lab Warehouse Home
 - Part 3: เขียนเนื้อหาเฉพาะบทครบ 14/14 บท ครอบคลุม form, focus, keyboard-wedge scanner, duplicate guard และ scan state machine
@@ -56,7 +56,9 @@
 - Part 29: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท พร้อม Drift/SQLite offline-first lab ครอบคลุม local source of truth, reactive query, transactional outbox, optimistic UI, idempotent sync/retry, conflict, migration, security และ in-memory database tests
 - Part 30: เขียนเนื้อหาเฉพาะบทครบ 16/16 บท พร้อม refactor WmsTask ด้วย Freezed/json_serializable และ sealed TaskSyncState ครอบคลุม immutability, equality, copyWith, JSON/enum/converter, unions, build_runner, DTO-domain boundary และ compatibility tests
 
-คอร์สเขียนเนื้อหาเฉพาะบทครบแล้ว 468/468 บท ไม่มีบท scaffold เหลือ
+คอร์สมีเนื้อหาเฉพาะบท 468/468 บทและไม่มี scaffold เหลือ แต่กำลังปรับลำดับและวิธีอธิบายทั้งคอร์สให้เป็นมิตรกับผู้เริ่มต้นมากขึ้น สถานะ “มีเนื้อหา” จึงไม่ถูกใช้แทนคำว่า “รื้อเพื่อมือใหม่เสร็จแล้ว”
+
+ทุกบทที่ generate ใหม่มีสารบัญภายในบทและหัวข้อที่กดข้ามไปอ่านได้ เพื่อให้บทที่ยาวอ่านเป็นช่วงได้เหมือนคอร์ส .NET
 
 ไฟล์ต้นฉบับของบทที่เขียนจริงอยู่ใน `content/` ส่วน `lessons/` เป็นไฟล์ที่ generator สร้าง ห้ามแก้ `lessons/` โดยตรงเพราะจะถูกเขียนทับ
 

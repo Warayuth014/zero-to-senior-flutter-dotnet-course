@@ -4,17 +4,18 @@
 <title>Check-in preview vs commit</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-07 · Real Codebase</span><h1>Check-in preview vs commit</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Preview request</a></li><li><a href="#section-2">2. Preview response</a></li><li><a href="#section-3">3. Destination dialog</a></li><li><a href="#section-4">4. Existing vs new slot</a></li><li><a href="#section-5">5. Commit request</a></li><li><a href="#section-6">6. Preview race</a></li><li><a href="#section-7">7. Pending state</a></li><li><a href="#section-8">8. Preview/commit tests</a></li></ol></nav>
 <div class="note"><strong>Preview แยก read decision จาก commit:</strong> scan Packing ID ครั้งแรกยังไม่เขียน DB แต่คืน slot/destination/items/progress เพื่อให้ operator ตรวจ ก่อนกด Check-IN จริง</div>
-<section><h2>1. Preview request</h2><pre class="code-vs"><code>POST /checkin/preview
+<section id="section-1"><h2>1. Preview request</h2><pre class="code-vs"><code>POST /checkin/preview
 { "packingId": packingId }</code></pre><p>แม้ใช้ POST endpoint นี้ประกาศว่าไม่มี side effect จึงสามารถเรียกซ้ำเพื่อ refresh decision ได้</p></section>
-<section><h2>2. Preview response</h2><p>มี owner/customer order, pack status, items/orders, pickOrderIds, slotId, isNewSlot, isAlreadyCheckedIn, dispatchDestination และ pipeline counters</p></section>
-<section><h2>3. Destination dialog</h2><p>dialog barrierDismissible=false แสดง destination/slot หรือคำเตือนสแกนซ้ำ ผู้ใช้กดรับทราบแล้ว UI จึงตั้ง pending pack แต่ยังไม่ commit</p></section>
-<section><h2>4. Existing vs new slot</h2><p>slot เดิมเรียก GET detail; slot ใหม่สร้าง synthetic CheckInSlotDetail status OPEN จาก counters ใน preview เพื่อแสดง pipeline ก่อนมี row จริงใน DB</p></section>
-<section><h2>5. Commit request</h2><pre class="code-vs"><code>POST /checkin/scan
+<section id="section-2"><h2>2. Preview response</h2><p>มี owner/customer order, pack status, items/orders, pickOrderIds, slotId, isNewSlot, isAlreadyCheckedIn, dispatchDestination และ pipeline counters</p></section>
+<section id="section-3"><h2>3. Destination dialog</h2><p>dialog barrierDismissible=false แสดง destination/slot หรือคำเตือนสแกนซ้ำ ผู้ใช้กดรับทราบแล้ว UI จึงตั้ง pending pack แต่ยังไม่ commit</p></section>
+<section id="section-4"><h2>4. Existing vs new slot</h2><p>slot เดิมเรียก GET detail; slot ใหม่สร้าง synthetic CheckInSlotDetail status OPEN จาก counters ใน preview เพื่อแสดง pipeline ก่อนมี row จริงใน DB</p></section>
+<section id="section-5"><h2>5. Commit request</h2><pre class="code-vs"><code>POST /checkin/scan
 { "packingId": packingId,
   "operatorId": operatorId }</code></pre><p>response คืน slotId และ isReadyToComplete เท่านั้น จากนั้น UI refresh slot</p></section>
-<section><h2>6. Preview race</h2><p>ระหว่าง preview กับ commit pack อาจถูกอีกเครื่อง check-in หรือ slot เปลี่ยน Backend ต้อง validate/assign atomically และตอบผล authoritative; client มี local duplicate guardแต่ห้ามพึ่ง guard นี้</p></section>
-<section><h2>7. Pending state</h2><p><code>_pendingPack</code> คือ draft พร้อมปุ่มยืนยัน; isAlreadyCheckedIn ปิดปุ่ม การสแกน carton ใหม่ขณะมี pending อาจแทน draft เดิม จึงควร confirm discard หรือ serialize workflow</p></section>
-<section><h2>8. Preview/commit tests</h2><div class="success">ทดสอบ new/existing slot, already checked-in, destination null, preview stale, two-device race, timeout after commit และ scan ใหม่ทับ pending โดย carton ต้องถูกบันทึกไม่เกินหนึ่งครั้ง</div></section>
+<section id="section-6"><h2>6. Preview race</h2><p>ระหว่าง preview กับ commit pack อาจถูกอีกเครื่อง check-in หรือ slot เปลี่ยน Backend ต้อง validate/assign atomically และตอบผล authoritative; client มี local duplicate guardแต่ห้ามพึ่ง guard นี้</p></section>
+<section id="section-7"><h2>7. Pending state</h2><p><code>_pendingPack</code> คือ draft พร้อมปุ่มยืนยัน; isAlreadyCheckedIn ปิดปุ่ม การสแกน carton ใหม่ขณะมี pending อาจแทน draft เดิม จึงควร confirm discard หรือ serialize workflow</p></section>
+<section id="section-8"><h2>8. Preview/commit tests</h2><div class="success">ทดสอบ new/existing slot, already checked-in, destination null, preview stale, two-device race, timeout after commit และ scan ใหม่ทับ pending โดย carton ต้องถูกบันทึกไม่เกินหนึ่งครั้ง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,9 +4,10 @@
 <title>Stack, Positioned และ overlay</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-05 · Flutter UI</span><h1>Stack, Positioned และ overlay</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Stack วัดลูกอย่างไร</a></li><li><a href="#section-2">2. Badge บน tile</a></li><li><a href="#section-3">3. Positioned และ Positioned.fill</a></li><li><a href="#section-4">4. Loading overlay ที่ปลอดภัย</a></li><li><a href="#section-5">5. clipBehavior และ hit testing</a></li><li><a href="#section-6">6. Overlay/Portal ต่างจาก Stack</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>Stack</code> เหมาะกับองค์ประกอบที่ซ้อนเชิงภาพและมี owner ของพื้นที่ชัด เช่น badge บนการ์ด, loading overlay หรือปุ่มลอย ไม่เหมาะกับการสร้าง layout ปกติทั้งหน้าด้วยพิกัดคงที่</div>
-<section><h2>1. Stack วัดลูกอย่างไร</h2><p>Non-positioned children มีส่วนกำหนดขนาด Stack ส่วน Positioned children ถูกวางหลัง Stack รู้ขนาดแล้ว ค่า <code>alignment</code> จัด non-positioned/partially positioned child และ <code>fit</code> ควบคุม constraints ที่ส่งให้ non-positioned children</p></section>
-<section><h2>2. Badge บน tile</h2><pre class="code-vs"><code>Stack(
+<section id="section-1"><h2>1. Stack วัดลูกอย่างไร</h2><p>Non-positioned children มีส่วนกำหนดขนาด Stack ส่วน Positioned children ถูกวางหลัง Stack รู้ขนาดแล้ว ค่า <code>alignment</code> จัด non-positioned/partially positioned child และ <code>fit</code> ควบคุม constraints ที่ส่งให้ non-positioned children</p></section>
+<section id="section-2"><h2>2. Badge บน tile</h2><pre class="code-vs"><code>Stack(
   clipBehavior: Clip.none,
   children: [
     WarehouseTile(onTap: onTap),
@@ -14,8 +15,8 @@
       Positioned(top: -6, right: -6, child: CountBadge(count)),
   ],
 )</code></pre><p>Tile ยังเป็น non-positioned owner ของขนาด Badge เป็น decoration ที่ไม่เปลี่ยน flow ต้องเผื่อไม่ให้ถูก parent clip และเพิ่ม semantics ให้ screen reader อ่านจำนวนด้วย</p></section>
-<section><h2>3. Positioned และ Positioned.fill</h2><p>กำหนด left+right จะบังคับ width, top+bottom จะบังคับ height; กำหนดเพียงด้านเดียว child เลือกขนาดอีกส่วน <code>Positioned.fill</code> เหมาะกับ overlay เต็มพื้นที่ เช่น absorb input ระหว่าง submit</p></section>
-<section><h2>4. Loading overlay ที่ปลอดภัย</h2><pre class="code-vs"><code>Stack(children: [
+<section id="section-3"><h2>3. Positioned และ Positioned.fill</h2><p>กำหนด left+right จะบังคับ width, top+bottom จะบังคับ height; กำหนดเพียงด้านเดียว child เลือกขนาดอีกส่วน <code>Positioned.fill</code> เหมาะกับ overlay เต็มพื้นที่ เช่น absorb input ระหว่าง submit</p></section>
+<section id="section-4"><h2>4. Loading overlay ที่ปลอดภัย</h2><pre class="code-vs"><code>Stack(children: [
   const WorkflowBody(),
   if (busy)
     const Positioned.fill(
@@ -25,9 +26,9 @@
       ),
     ),
 ])</code></pre><p>ถ้าต้อง block tap ใช้ ModalBarrier หรือ AbsorbPointer อย่างชัดเจน พร้อม semantics/label และอย่าลืม error path ที่ปิด busy</p></section>
-<section><h2>5. clipBehavior และ hit testing</h2><p><code>Clip.none</code> ทำให้ภาพวาดล้นได้ แต่ส่วนที่อยู่นอก bounds ของ Stack อาจไม่ได้รับ hit ตามที่คาดและอาจชน sibling ถ้าต้องกดได้ให้ขยาย owner bounds/touch target ไม่ใช้การวาดล้นเป็นพื้นที่ปฏิสัมพันธ์หลัก</p></section>
-<section><h2>6. Overlay/Portal ต่างจาก Stack</h2><p>Dropdown, tooltip, toast และ menu ที่ต้องลอยเหนือ route หรือหนี clip ของ ancestor ควรใช้ Overlay, OverlayPortal หรือ API ของ Material เช่น showMenu/showDialog Stack ใช้ได้เฉพาะขอบเขต subtree ของมัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>จะแสดงวงกลมสถานะ online ที่มุม avatar และต้องกด avatar ได้เต็ม 48×48 ควรให้ใครรับ gesture?</p><details><summary>เฉลย</summary><p>ให้ Stack/SizedBox มีขนาด 48×48 และ avatar เป็นปุ่ม/InkWell เจ้าของ gesture วาง status เป็น Positioned ภายใน bounds หรือ IgnorePointer ถ้าเป็น decoration เท่านั้น เพิ่ม semantic value “ออนไลน์” ให้ avatar ไม่ทำวงกลมเล็กเป็น target แยก</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">การวาง form ด้วย Positioned(top: 120, left: 16...) จะพังเมื่อ keyboard, rotation, tablet หรือ text scale เปลี่ยน ใช้ Flex/scroll/constraints สำหรับ flow ปกติ และใช้ Stack เฉพาะความสัมพันธ์การซ้อนจริง</div></section>
+<section id="section-5"><h2>5. clipBehavior และ hit testing</h2><p><code>Clip.none</code> ทำให้ภาพวาดล้นได้ แต่ส่วนที่อยู่นอก bounds ของ Stack อาจไม่ได้รับ hit ตามที่คาดและอาจชน sibling ถ้าต้องกดได้ให้ขยาย owner bounds/touch target ไม่ใช้การวาดล้นเป็นพื้นที่ปฏิสัมพันธ์หลัก</p></section>
+<section id="section-6"><h2>6. Overlay/Portal ต่างจาก Stack</h2><p>Dropdown, tooltip, toast และ menu ที่ต้องลอยเหนือ route หรือหนี clip ของ ancestor ควรใช้ Overlay, OverlayPortal หรือ API ของ Material เช่น showMenu/showDialog Stack ใช้ได้เฉพาะขอบเขต subtree ของมัน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จะแสดงวงกลมสถานะ online ที่มุม avatar และต้องกด avatar ได้เต็ม 48×48 ควรให้ใครรับ gesture?</p><details><summary>เฉลย</summary><p>ให้ Stack/SizedBox มีขนาด 48×48 และ avatar เป็นปุ่ม/InkWell เจ้าของ gesture วาง status เป็น Positioned ภายใน bounds หรือ IgnorePointer ถ้าเป็น decoration เท่านั้น เพิ่ม semantic value “ออนไลน์” ให้ avatar ไม่ทำวงกลมเล็กเป็น target แยก</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การวาง form ด้วย Positioned(top: 120, left: 16...) จะพังเมื่อ keyboard, rotation, tablet หรือ text scale เปลี่ยน ใช้ Flex/scroll/constraints สำหรับ flow ปกติ และใช้ Stack เฉพาะความสัมพันธ์การซ้อนจริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

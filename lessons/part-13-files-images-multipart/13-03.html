@@ -4,30 +4,31 @@
 <title>MultipartRequest</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-03 · Files &amp; Platform</span><h1>MultipartRequest</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. โครงสร้าง request</a></li><li><a href="#section-2">2. MultipartRequest ใน wmsapp</a></li><li><a href="#section-3">3. Header ที่ควรเพิ่ม</a></li><li><a href="#section-4">4. ระบุ filename และ media type</a></li><li><a href="#section-5">5. send คืน streamed response</a></li><li><a href="#section-6">6. Retry อย่างระวัง</a></li><li><a href="#section-7">7. Client lifetime</a></li><li><a href="#section-8">8. Contract test</a></li></ol></nav>
 <div class="note"><strong>Multipart ไม่ใช่ JSON:</strong> request มี boundary แบ่งแต่ละ part ซึ่ง client library ต้องเป็นผู้สร้าง ห้ามกำหนด <code>Content-Type: multipart/form-data</code> เองโดยไม่มี boundary</div>
-<section><h2>1. โครงสร้าง request</h2><p><code>multipart/form-data</code> รวม text fields และ binary file ใน HTTP request เดียว แต่ละ part มีชื่อ เช่น <code>partId</code> และ <code>file</code> ชื่อเหล่านี้คือ API contract และต้องตรงกับ parameter ฝั่ง .NET</p></section>
-<section><h2>2. MultipartRequest ใน wmsapp</h2><pre class="code-vs"><code>final request = http.MultipartRequest('POST', uri);
+<section id="section-1"><h2>1. โครงสร้าง request</h2><p><code>multipart/form-data</code> รวม text fields และ binary file ใน HTTP request เดียว แต่ละ part มีชื่อ เช่น <code>partId</code> และ <code>file</code> ชื่อเหล่านี้คือ API contract และต้องตรงกับ parameter ฝั่ง .NET</p></section>
+<section id="section-2"><h2>2. MultipartRequest ใน wmsapp</h2><pre class="code-vs"><code>final request = http.MultipartRequest('POST', uri);
 request.fields.addAll(fields);
 request.files.add(
   await http.MultipartFile.fromPath('file', file.path),
 );
 final streamed = await request.send()
     .timeout(const Duration(seconds: 30));</code></pre></section>
-<section><h2>3. Header ที่ควรเพิ่ม</h2><p>เพิ่ม <code>Authorization: Bearer ...</code>, correlation ID และ accept header ผ่าน <code>request.headers</code> แต่ปล่อยให้ <code>MultipartRequest</code> สร้าง content type/boundary ห้าม log token, raw bytes หรือ path ส่วนตัวของผู้ใช้</p></section>
-<section><h2>4. ระบุ filename และ media type</h2><pre class="code-vs"><code>final part = http.MultipartFile.fromBytes(
+<section id="section-3"><h2>3. Header ที่ควรเพิ่ม</h2><p>เพิ่ม <code>Authorization: Bearer ...</code>, correlation ID และ accept header ผ่าน <code>request.headers</code> แต่ปล่อยให้ <code>MultipartRequest</code> สร้าง content type/boundary ห้าม log token, raw bytes หรือ path ส่วนตัวของผู้ใช้</p></section>
+<section id="section-4"><h2>4. ระบุ filename และ media type</h2><pre class="code-vs"><code>final part = http.MultipartFile.fromBytes(
   'file',
   bytes,
   filename: safeDisplayName,
   contentType: MediaType('image', 'jpeg'),
 );
 request.files.add(part);</code></pre><p>media type จาก client เป็น hint เท่านั้น server ยังต้องตรวจ signature จริง และไม่ใช้ filename นี้เป็นชื่อไฟล์บน disk</p></section>
-<section><h2>5. send คืน streamed response</h2><pre class="code-vs"><code>final streamed = await request.send();
+<section id="section-5"><h2>5. send คืน streamed response</h2><pre class="code-vs"><code>final streamed = await request.send();
 final response = await http.Response.fromStream(streamed);
 if (response.statusCode &lt; 200 || response.statusCode &gt;= 300) {
   throw UploadException.fromResponse(response);
 }</code></pre><p>ต้อง consume response body เพื่อคืน connection ให้ pool และแปล ProblemDetails เป็น error ที่ UI เข้าใจได้</p></section>
-<section><h2>6. Retry อย่างระวัง</h2><p>upload POST อาจสำเร็จที่ server แต่ response ขาดระหว่างทาง การ retry แบบทันทีจึงสร้างไฟล์ซ้ำได้ ส่ง <code>Idempotency-Key</code>/<code>uploadId</code> และให้ server คืนผลเดิมเมื่อ key ซ้ำ หรือทำ endpoint แบบ replace ต่อ part ที่ชัดเจน</p></section>
-<section><h2>7. Client lifetime</h2><p>inject <code>http.Client</code> เพื่อ reuse connection และทดสอบได้ อย่าสร้าง client ใหม่ทุก upload โดยไม่ close ใน production ส่วนการยกเลิกต้องปิด request/subscription เฉพาะงาน ไม่ควรปิด shared client แล้วทำให้ request อื่นล้ม</p></section>
-<section><h2>8. Contract test</h2><div class="success">ยืนยัน method/path, header auth, field name, file part name, filename, content type, status 2xx, ProblemDetails และ duplicate upload ID โดยไม่ assert boundary string ที่ library สุ่มขึ้นมา</div></section>
+<section id="section-6"><h2>6. Retry อย่างระวัง</h2><p>upload POST อาจสำเร็จที่ server แต่ response ขาดระหว่างทาง การ retry แบบทันทีจึงสร้างไฟล์ซ้ำได้ ส่ง <code>Idempotency-Key</code>/<code>uploadId</code> และให้ server คืนผลเดิมเมื่อ key ซ้ำ หรือทำ endpoint แบบ replace ต่อ part ที่ชัดเจน</p></section>
+<section id="section-7"><h2>7. Client lifetime</h2><p>inject <code>http.Client</code> เพื่อ reuse connection และทดสอบได้ อย่าสร้าง client ใหม่ทุก upload โดยไม่ close ใน production ส่วนการยกเลิกต้องปิด request/subscription เฉพาะงาน ไม่ควรปิด shared client แล้วทำให้ request อื่นล้ม</p></section>
+<section id="section-8"><h2>8. Contract test</h2><div class="success">ยืนยัน method/path, header auth, field name, file part name, filename, content type, status 2xx, ProblemDetails และ duplicate upload ID โดยไม่ assert boundary string ที่ library สุ่มขึ้นมา</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

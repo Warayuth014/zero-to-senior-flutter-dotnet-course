@@ -4,17 +4,18 @@
 <title>Connect, disconnect และ reconnect</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-04 · Realtime</span><h1>Connect, disconnect และ reconnect</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State machine</a></li><li><a href="#section-2">2. Single-flight connect</a></li><li><a href="#section-3">3. Automatic reconnect</a></li><li><a href="#section-4">4. Reconnected hook</a></li><li><a href="#section-5">5. Manual disconnect</a></li><li><a href="#section-6">6. App lifecycle</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Chaos tests</a></li></ol></nav>
 <div class="note"><strong>Reconnectคืน transport ไม่คืนข้อมูลที่พลาด:</strong> หลัง reconnectต้อง join groupsใหม่ตาม server behaviorและโหลด snapshot/deltaตั้งแต่ last versionเพื่อ reconcile</div>
-<section><h2>1. State machine</h2><pre class="code-vs"><code>disconnected → connecting → connected
+<section id="section-1"><h2>1. State machine</h2><pre class="code-vs"><code>disconnected → connecting → connected
        ↑            ↓ error      ↓ lost
        └──── reconnecting ←──────┘
 connected → stopping → disconnected</code></pre></section>
-<section><h2>2. Single-flight connect</h2><p>เก็บ <code>Future&lt;void&gt;? _connecting</code> ให้หลาย screensรอ Futureเดียว ไม่เรียก startพร้อมกันและ ref-countเพิ่มซ้ำจาก retry</p></section>
-<section><h2>3. Automatic reconnect</h2><p>กำหนด delays/backoffตาม libraryและ expose attempt/last error ใช้ jitterเมื่อ devicesจำนวนมาก reconnectหลัง server restart</p></section>
-<section><h2>4. Reconnected hook</h2><ol><li>ตรวจ session/server generation</li><li>join groupsใหม่ถ้าจำเป็น</li><li>HTTP refreshหรือขอ eventsหลัง lastVersion</li><li>ค่อย mark realtime synchronized</li></ol></section>
-<section><h2>5. Manual disconnect</h2><p>logout/server switch/dispose ownerต้องตั้ง intent flagเพื่อไม่ให้ automatic reconnectต่อเอง แยก intentional stopจาก network drop</p></section>
-<section><h2>6. App lifecycle</h2><p>backgroundอาจ suspend socketและ timer เมื่อ resumedอย่าเชื่อ connection stateเก่า ให้ ensureConnected + reconcile และปรับตาม platform/battery policy</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>connection reconnectสำเร็จหลังหลุด 30 วินาที ควรแค่เปลี่ยน dotเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้อง resubscribe/rejoinและ refresh snapshotหรือ deltaก่อนจึงถือ synchronized เพราะ eventsระหว่างหลุดอาจหาย</p></details></section>
-<section><h2>8. Chaos tests</h2><div class="success">server down/up, Wi-Fi toggle, tokenหมดอายุ, app background/resume, logoutระหว่าง reconnectและ devicesพร้อมกันโดยไม่มี reconnect storm</div></section>
+<section id="section-2"><h2>2. Single-flight connect</h2><p>เก็บ <code>Future&lt;void&gt;? _connecting</code> ให้หลาย screensรอ Futureเดียว ไม่เรียก startพร้อมกันและ ref-countเพิ่มซ้ำจาก retry</p></section>
+<section id="section-3"><h2>3. Automatic reconnect</h2><p>กำหนด delays/backoffตาม libraryและ expose attempt/last error ใช้ jitterเมื่อ devicesจำนวนมาก reconnectหลัง server restart</p></section>
+<section id="section-4"><h2>4. Reconnected hook</h2><ol><li>ตรวจ session/server generation</li><li>join groupsใหม่ถ้าจำเป็น</li><li>HTTP refreshหรือขอ eventsหลัง lastVersion</li><li>ค่อย mark realtime synchronized</li></ol></section>
+<section id="section-5"><h2>5. Manual disconnect</h2><p>logout/server switch/dispose ownerต้องตั้ง intent flagเพื่อไม่ให้ automatic reconnectต่อเอง แยก intentional stopจาก network drop</p></section>
+<section id="section-6"><h2>6. App lifecycle</h2><p>backgroundอาจ suspend socketและ timer เมื่อ resumedอย่าเชื่อ connection stateเก่า ให้ ensureConnected + reconcile และปรับตาม platform/battery policy</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>connection reconnectสำเร็จหลังหลุด 30 วินาที ควรแค่เปลี่ยน dotเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้อง resubscribe/rejoinและ refresh snapshotหรือ deltaก่อนจึงถือ synchronized เพราะ eventsระหว่างหลุดอาจหาย</p></details></section>
+<section id="section-8"><h2>8. Chaos tests</h2><div class="success">server down/up, Wi-Fi toggle, tokenหมดอายุ, app background/resume, logoutระหว่าง reconnectและ devicesพร้อมกันโดยไม่มี reconnect storm</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

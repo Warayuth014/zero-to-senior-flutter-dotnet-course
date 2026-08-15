@@ -4,17 +4,18 @@
 <title>Constructor dependency injection</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-08 · Architecture</span><h1>Constructor dependency injection</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Inject graph</a></li><li><a href="#section-2">2. Required dependencies</a></li><li><a href="#section-3">3. Inject values too</a></li><li><a href="#section-4">4. Lifetime</a></li><li><a href="#section-5">5. Avoid service locator</a></li><li><a href="#section-6">6. Circular dependency</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Checklist</a></li></ol></nav>
 <div class="note"><strong>Constructor dependency injection:</strong> dependencyมองเห็นจาก signature, สร้างที่ composition rootและแทนด้วย fakeได้ ไม่ต้องใช้ global locatorเพื่อค้นหากลาง method</div>
-<section><h2>1. Inject graph</h2><pre class="code-vs"><code>final client = ApiClient(config: config, tokenProvider: auth.token);
+<section id="section-1"><h2>1. Inject graph</h2><pre class="code-vs"><code>final client = ApiClient(config: config, tokenProvider: auth.token);
 final receiving = RemoteReceivingRepository(ReceivingApi(client));
 final store = ReceivingStore(repository: receiving, clock: systemClock);
 runApp(App(receivingStoreFactory: () =&gt; store));</code></pre></section>
-<section><h2>2. Required dependencies</h2><p>ใช้ required constructorสำหรับสิ่งที่ classทำงานไม่ได้ เช่น repository; optional/defaultเฉพาะ convenienceที่ semanticsชัด เช่น Clock production—not silent singleton fallbackใน core logic</p></section>
-<section><h2>3. Inject values too</h2><p>Clock, UUID generator, retry policy, current userและ feature flagsเป็น nondeterministic/config dependenciesที่ควร injectเมื่อ logicต้องใช้ เพื่อ testเวลา/idempotencyได้</p></section>
-<section><h2>4. Lifetime</h2><p>ApiClient/authอาจ app-scoped, WarehouseStore shell-scoped, ReceivingFlowStore route-scoped กำหนด owner/disposeตรง composition boundary</p></section>
-<section><h2>5. Avoid service locator</h2><p><code>GetIt.I&lt;ApiService&gt;()</code> ใน methodซ่อน dependencyและทำ test order/global stateเสี่ยง ถ้าใช้ DI containerให้ resolveที่ boundaryแล้วส่ง constructorต่อ</p></section>
-<section><h2>6. Circular dependency</h2><p>Authต้องใช้ clientแต่ clientต้องใช้ token แก้ด้วย TokenProvider callback/interfaceหรือแยก anonymous transport ไม่ให้ AuthRepositoryกับ ApiClientอ้างกันเป็น owner</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Storeใช้ <code>DateTime.now()</code> ตัด “done today” แล้ว testข้ามเที่ยง flaky จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>inject Clock/Now functionและกำหนด timezone boundary; testส่งเวลาคงที่</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">ดู constructorแล้วรู้ dependencyครบ, lifetime/disposeชัด, fakeง่าย, ไม่มี network/storage/clock globalแอบอยู่ใน business method</div></section>
+<section id="section-2"><h2>2. Required dependencies</h2><p>ใช้ required constructorสำหรับสิ่งที่ classทำงานไม่ได้ เช่น repository; optional/defaultเฉพาะ convenienceที่ semanticsชัด เช่น Clock production—not silent singleton fallbackใน core logic</p></section>
+<section id="section-3"><h2>3. Inject values too</h2><p>Clock, UUID generator, retry policy, current userและ feature flagsเป็น nondeterministic/config dependenciesที่ควร injectเมื่อ logicต้องใช้ เพื่อ testเวลา/idempotencyได้</p></section>
+<section id="section-4"><h2>4. Lifetime</h2><p>ApiClient/authอาจ app-scoped, WarehouseStore shell-scoped, ReceivingFlowStore route-scoped กำหนด owner/disposeตรง composition boundary</p></section>
+<section id="section-5"><h2>5. Avoid service locator</h2><p><code>GetIt.I&lt;ApiService&gt;()</code> ใน methodซ่อน dependencyและทำ test order/global stateเสี่ยง ถ้าใช้ DI containerให้ resolveที่ boundaryแล้วส่ง constructorต่อ</p></section>
+<section id="section-6"><h2>6. Circular dependency</h2><p>Authต้องใช้ clientแต่ clientต้องใช้ token แก้ด้วย TokenProvider callback/interfaceหรือแยก anonymous transport ไม่ให้ AuthRepositoryกับ ApiClientอ้างกันเป็น owner</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Storeใช้ <code>DateTime.now()</code> ตัด “done today” แล้ว testข้ามเที่ยง flaky จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>inject Clock/Now functionและกำหนด timezone boundary; testส่งเวลาคงที่</p></details></section>
+<section id="section-8"><h2>8. Checklist</h2><div class="success">ดู constructorแล้วรู้ dependencyครบ, lifetime/disposeชัด, fakeง่าย, ไม่มี network/storage/clock globalแอบอยู่ใน business method</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

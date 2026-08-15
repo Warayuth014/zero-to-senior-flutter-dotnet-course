@@ -4,23 +4,24 @@
 <title>Receiving domain map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-01 · Real Codebase</span><h1>Receiving domain map</h1><p>Part 17: wmsapp: Receiving &amp; Unload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Receiving route</a></li><li><a href="#section-2">2. Receiving data flow</a></li><li><a href="#section-3">3. Unload route</a></li><li><a href="#section-4">4. Identity keys</a></li><li><a href="#section-5">5. Source ownership</a></li><li><a href="#section-6">6. Partial success</a></li><li><a href="#section-7">7. Failure boundaries</a></li><li><a href="#section-8">8. Trace rule</a></li></ol></nav>
 <div class="note"><strong>Inbound มีสองการเปลี่ยน ownership:</strong> Receiving ยืนยันของจาก POเข้า WMSและผูก pallet; Unloadเปิด palletจาก ASRSแล้วแยก Part/Lotออกก่อน Load to Basket ทุก commandต้องรักษา line/lot/serial identity</div>
-<section><h2>1. Receiving route</h2><pre class="code-vs"><code>Home → ReceivingMenu
+<section id="section-1"><h2>1. Receiving route</h2><pre class="code-vs"><code>Home → ReceivingMenu
   → ScanPo → ScanPart
   → PendingPallet (แก้ partial assignment)</code></pre><p>Homeส่ง userId/fullName; Receiving menu refresh pending countทุกครั้งที่ routeลูกกลับ</p></section>
-<section><h2>2. Receiving data flow</h2><pre class="code-vs"><code>PO ID → POResponse
+<section id="section-2"><h2>2. Receiving data flow</h2><pre class="code-vs"><code>PO ID → POResponse
 Part ID → PartLinesResponse
 → choose condition + lot
 → validate serial(s) / manual qty
 → scanReceiptPart(..., palletId)
 → ReceiptLineResponse</code></pre></section>
-<section><h2>3. Unload route</h2><pre class="code-vs"><code>Home → UnloadMenu
+<section id="section-3"><h2>3. Unload route</h2><pre class="code-vs"><code>Home → UnloadMenu
   → UnloadScreen → UnloadSessionSheet
   → LoadToBasketScreen</code></pre><p>Unloadและ Basketเป็นคนละ endpoint/state แม้หน้าต่อกันทางธุรกิจ</p></section>
-<section><h2>4. Identity keys</h2><p><code>poId</code>ระบุเอกสาร, <code>lineId</code>ระบุ Part+condition+lot, <code>partId</code>อย่างเดียวไม่พอ, <code>serialNo</code>ระบุชิ้น, <code>palletId</code>/<code>basketId</code>ระบุ container และ <code>sessionId</code>ผูก unload operation</p></section>
-<section><h2>5. Source ownership</h2><p>Screen Stateถือ controllers/focus/loading/selections, ApiService extensionsประกอบ transport, models parse DTO และ serverเป็น authorityของ qty/status/assignment หลัง commandสำเร็จ flowที่ดี reload authoritative snapshotแทน patchซับซ้อนเอง</p></section>
-<section><h2>6. Partial success</h2><p>Receiving APIอาจบันทึกรับสำเร็จแต่ผูก palletล้ม โดยคืน <code>palletError</code> Screenต้องเก็บ lineไว้ pendingและห้าม resend receiptทั้งก้อน นี่เป็น outcomeแบบ “success + follow-up required” ไม่ใช่ boolean errorธรรมดา</p></section>
-<section><h2>7. Failure boundaries</h2><p>POไม่พบ, condition/lotไม่ตรง, serialซ้ำ/ผิด line, qtyเกิน, pallet typeขัดกัน, unload partial remainder, session staleและ basket loadซ้ำ แต่ละจุดควรมี typed outcome/idempotency ไม่ใช้ข้อความเป็น control flow</p></section>
-<section><h2>8. Trace rule</h2><div class="success">ทุก actionให้จด stateก่อน → API method/path/payload → response DTO → stateหลัง → focus/navigation → retry semantics โดยเฉพาะ “serverทำสำเร็จแต่ clientไม่เห็น response”</div></section>
+<section id="section-4"><h2>4. Identity keys</h2><p><code>poId</code>ระบุเอกสาร, <code>lineId</code>ระบุ Part+condition+lot, <code>partId</code>อย่างเดียวไม่พอ, <code>serialNo</code>ระบุชิ้น, <code>palletId</code>/<code>basketId</code>ระบุ container และ <code>sessionId</code>ผูก unload operation</p></section>
+<section id="section-5"><h2>5. Source ownership</h2><p>Screen Stateถือ controllers/focus/loading/selections, ApiService extensionsประกอบ transport, models parse DTO และ serverเป็น authorityของ qty/status/assignment หลัง commandสำเร็จ flowที่ดี reload authoritative snapshotแทน patchซับซ้อนเอง</p></section>
+<section id="section-6"><h2>6. Partial success</h2><p>Receiving APIอาจบันทึกรับสำเร็จแต่ผูก palletล้ม โดยคืน <code>palletError</code> Screenต้องเก็บ lineไว้ pendingและห้าม resend receiptทั้งก้อน นี่เป็น outcomeแบบ “success + follow-up required” ไม่ใช่ boolean errorธรรมดา</p></section>
+<section id="section-7"><h2>7. Failure boundaries</h2><p>POไม่พบ, condition/lotไม่ตรง, serialซ้ำ/ผิด line, qtyเกิน, pallet typeขัดกัน, unload partial remainder, session staleและ basket loadซ้ำ แต่ละจุดควรมี typed outcome/idempotency ไม่ใช้ข้อความเป็น control flow</p></section>
+<section id="section-8"><h2>8. Trace rule</h2><div class="success">ทุก actionให้จด stateก่อน → API method/path/payload → response DTO → stateหลัง → focus/navigation → retry semantics โดยเฉพาะ “serverทำสำเร็จแต่ clientไม่เห็น response”</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

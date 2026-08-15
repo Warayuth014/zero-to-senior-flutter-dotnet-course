@@ -4,15 +4,16 @@
 <title>Separation of concerns</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-01 · Architecture</span><h1>Separation of concerns</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Four concerns</a></li><li><a href="#section-2">2. Change test</a></li><li><a href="#section-3">3. Boundary flow</a></li><li><a href="#section-4">4. แยกเท่าที่จำเป็น</a></li><li><a href="#section-5">5. Cohesion</a></li><li><a href="#section-6">6. Warning signs</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. หลักตัดสิน</a></li></ol></nav>
 <div class="note"><strong>Separation of concerns:</strong> แยกเพราะเหตุผลในการเปลี่ยนต่างกัน—not เพื่อเพิ่มจำนวนไฟล์ UI เปลี่ยนตาม UX, workflow เปลี่ยนตามธุรกิจ, transport เปลี่ยนตาม API และ persistence เปลี่ยนตามแหล่งข้อมูล</div>
-<section><h2>1. Four concerns</h2><ul><li>Presentation: render/input/navigation</li><li>Application: orchestration และ workflow state</li><li>Domain: กฎ/คำศัพท์ธุรกิจ</li><li>Infrastructure: HTTP, JSON, storage, SignalR</li></ul></section>
-<section><h2>2. Change test</h2><p>ถามว่า “ถ้า endpoint เปลี่ยน casing ไฟล์ UI ต้องแก้ไหม?” และ “ถ้า layout เปลี่ยน repository test พังไหม?” ถ้าพังข้ามเหตุผลแสดงว่า concerns ยังปนกัน</p></section>
-<section><h2>3. Boundary flow</h2><pre class="code-vs"><code>Widget → Store → Repository → RemoteDataSource → .NET
+<section id="section-1"><h2>1. Four concerns</h2><ul><li>Presentation: render/input/navigation</li><li>Application: orchestration และ workflow state</li><li>Domain: กฎ/คำศัพท์ธุรกิจ</li><li>Infrastructure: HTTP, JSON, storage, SignalR</li></ul></section>
+<section id="section-2"><h2>2. Change test</h2><p>ถามว่า “ถ้า endpoint เปลี่ยน casing ไฟล์ UI ต้องแก้ไหม?” และ “ถ้า layout เปลี่ยน repository test พังไหม?” ถ้าพังข้ามเหตุผลแสดงว่า concerns ยังปนกัน</p></section>
+<section id="section-3"><h2>3. Boundary flow</h2><pre class="code-vs"><code>Widget → Store → Repository → RemoteDataSource → .NET
        ← ViewState ← Domain model ← DTO/JSON</code></pre><p>dependency ชี้เข้าหา abstraction/logic ไม่ให้ domain import Flutter หรือ package http</p></section>
-<section><h2>4. แยกเท่าที่จำเป็น</h2><p>feature CRUD เล็กอาจใช้ Widget → Repository ได้ แต่ workflow scan หลาย step, offline/retry หรือหลาย data source ควรมี Store/application layer ห้ามสร้าง UseCase หนึ่งไฟล์ต่อ methodเพียงเพราะ diagram บอก</p></section>
-<section><h2>5. Cohesion</h2><p>ของที่เปลี่ยนด้วยกันควรอยู่ใกล้กัน เช่น Receiving API + DTOs + repository อยู่ feature เดียว ส่วน generic ApiClient, auth และ connection เป็น shared core</p></section>
-<section><h2>6. Warning signs</h2><ul><li>widget เรียก jsonDecode</li><li>ApiClient เปิด dialog</li><li>repository ถือ BuildContext</li><li>model import material.dart เพื่อเลือกสี</li><li>ทุก featureแก้ God Store ไฟล์เดียว</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>จัดวาง barcode normalization, HTTP timeout, selected row และ quantity business limit ลงชั้นที่เหมาะสม</p><details><summary>แนวคำตอบ</summary><p>normalize input ที่ application/domain boundary, timeout infrastructure, selected row presentation/store, quantity invariant domain/server</p></details></section>
-<section><h2>8. หลักตัดสิน</h2><div class="success">ทุก class ควรบอกได้ว่ารับผิดชอบอะไร, ไม่รับผิดชอบอะไร, dependency ใด และทดสอบโดยไม่เปิดส่วนอื่นได้อย่างไร</div></section>
+<section id="section-4"><h2>4. แยกเท่าที่จำเป็น</h2><p>feature CRUD เล็กอาจใช้ Widget → Repository ได้ แต่ workflow scan หลาย step, offline/retry หรือหลาย data source ควรมี Store/application layer ห้ามสร้าง UseCase หนึ่งไฟล์ต่อ methodเพียงเพราะ diagram บอก</p></section>
+<section id="section-5"><h2>5. Cohesion</h2><p>ของที่เปลี่ยนด้วยกันควรอยู่ใกล้กัน เช่น Receiving API + DTOs + repository อยู่ feature เดียว ส่วน generic ApiClient, auth และ connection เป็น shared core</p></section>
+<section id="section-6"><h2>6. Warning signs</h2><ul><li>widget เรียก jsonDecode</li><li>ApiClient เปิด dialog</li><li>repository ถือ BuildContext</li><li>model import material.dart เพื่อเลือกสี</li><li>ทุก featureแก้ God Store ไฟล์เดียว</li></ul></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จัดวาง barcode normalization, HTTP timeout, selected row และ quantity business limit ลงชั้นที่เหมาะสม</p><details><summary>แนวคำตอบ</summary><p>normalize input ที่ application/domain boundary, timeout infrastructure, selected row presentation/store, quantity invariant domain/server</p></details></section>
+<section id="section-8"><h2>8. หลักตัดสิน</h2><div class="success">ทุก class ควรบอกได้ว่ารับผิดชอบอะไร, ไม่รับผิดชอบอะไร, dependency ใด และทดสอบโดยไม่เปิดส่วนอื่นได้อย่างไร</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

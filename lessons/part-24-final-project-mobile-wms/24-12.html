@@ -4,15 +4,16 @@
 <title>Cycle count flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-12 · Project Lab</span><h1>Cycle count flow</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Server phases</a></li><li><a href="#section-2">2. Lookup contract</a></li><li><a href="#section-3">3. Count modes</a></li><li><a href="#section-4">4. Preserve inputs</a></li><li><a href="#section-5">5. Submit/close</a></li><li><a href="#section-6">6. Polling</a></li><li><a href="#section-7">7. Error/reconciliation</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Cycle Count slice:</strong> workflowมี phaseจาก server ไม่ใช่ formกรอกตัวเลขธรรมดา; รองรับ count/recount/variance/closeและ auditโดยไม่เผย expectedจนธุรกิจอนุญาต</div>
-<section><h2>1. Server phases</h2><pre class="code-vs"><code>waiting → ready → counting → submitted
+<section id="section-1"><h2>1. Server phases</h2><pre class="code-vs"><code>waiting → ready → counting → submitted
 → recount_required | returning | completed</code></pre><p>unknown phaseปิด mutationและให้ refresh/support ไม่ mapเป็น ready</p></section>
-<section><h2>2. Lookup contract</h2><p>scan pallet/stationแล้ว GET/POST lookupคืน sessionId/version/phase/linesและ permissions Expected quantityซ่อนหรือแสดงตาม blind-count policy ไม่ให้ client inferจาก inventory cacheถ้าต้อง blind</p></section>
-<section><h2>3. Count modes</h2><p>quantity modeกรอก decimalต่อ product, scan modeเพิ่มหน่วย/serialพร้อม duplicate guardและ explicit zero ใช้ product stable IDไม่ใช้ translated nameเป็น map key</p></section>
-<section><h2>4. Preserve inputs</h2><p>refresh phaseเดิมต้องเก็บ counts local; transitionเป็น readyใหม่จึง resetตาม session/version เปลี่ยน pallet/close/logout invalidate generationเพื่อ responseเก่าไม่คืน sessionเดิม</p></section>
-<section><h2>5. Submit/close</h2><p>POST countsพร้อม sessionId/version/idempotency key Backendคำนวณ varianceและตัดสิน recount/returning; closeต้อง permission/confirmationและคืน final audit reference</p></section>
-<section><h2>6. Polling</h2><p>pollเฉพาะ waiting/returning phase, single-flight, pause backgroundและ stopเมื่อ completed/ออกหน้า Pull refreshยังมีไว้แต่ไม่ใช่เหตุผลให้ phaseรอ staleตลอด</p></section>
-<section><h2>7. Error/reconciliation</h2><p>version conflict reload phaseแต่เก็บ draftแยกให้ผู้ใช้ตรวจ, timeout submit query sessionก่อน retry, invalid countชี้ line, history failureไม่ block active countแต่แสดง stale indicator</p></section>
-<section><h2>8. Tests</h2><div class="success">ทุก phase, blind policy, decimal/zero/duplicate scan, preserve/reset, stale generation, overlapping poll, conflict, timeout-after-commit, close permissionและ app backgroundด้วย fake clock</div></section>
+<section id="section-2"><h2>2. Lookup contract</h2><p>scan pallet/stationแล้ว GET/POST lookupคืน sessionId/version/phase/linesและ permissions Expected quantityซ่อนหรือแสดงตาม blind-count policy ไม่ให้ client inferจาก inventory cacheถ้าต้อง blind</p></section>
+<section id="section-3"><h2>3. Count modes</h2><p>quantity modeกรอก decimalต่อ product, scan modeเพิ่มหน่วย/serialพร้อม duplicate guardและ explicit zero ใช้ product stable IDไม่ใช้ translated nameเป็น map key</p></section>
+<section id="section-4"><h2>4. Preserve inputs</h2><p>refresh phaseเดิมต้องเก็บ counts local; transitionเป็น readyใหม่จึง resetตาม session/version เปลี่ยน pallet/close/logout invalidate generationเพื่อ responseเก่าไม่คืน sessionเดิม</p></section>
+<section id="section-5"><h2>5. Submit/close</h2><p>POST countsพร้อม sessionId/version/idempotency key Backendคำนวณ varianceและตัดสิน recount/returning; closeต้อง permission/confirmationและคืน final audit reference</p></section>
+<section id="section-6"><h2>6. Polling</h2><p>pollเฉพาะ waiting/returning phase, single-flight, pause backgroundและ stopเมื่อ completed/ออกหน้า Pull refreshยังมีไว้แต่ไม่ใช่เหตุผลให้ phaseรอ staleตลอด</p></section>
+<section id="section-7"><h2>7. Error/reconciliation</h2><p>version conflict reload phaseแต่เก็บ draftแยกให้ผู้ใช้ตรวจ, timeout submit query sessionก่อน retry, invalid countชี้ line, history failureไม่ block active countแต่แสดง stale indicator</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">ทุก phase, blind policy, decimal/zero/duplicate scan, preserve/reset, stale generation, overlapping poll, conflict, timeout-after-commit, close permissionและ app backgroundด้วย fake clock</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

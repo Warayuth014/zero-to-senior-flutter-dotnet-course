@@ -4,20 +4,21 @@
 <title>Idempotency ฝั่ง UI</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-14 · State &amp; Lifecycle</span><h1>Idempotency ฝั่ง UI</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Guard by state</a></li><li><a href="#section-2">2. Operation key</a></li><li><a href="#section-3">3. Disable UI ไม่พอ</a></li><li><a href="#section-4">4. Duplicate domain value</a></li><li><a href="#section-5">5. Timeout unknown outcome</a></li><li><a href="#section-6">6. Tests</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">UI idempotencyทำให้ eventซ้ำให้ผลเหมือนครั้งเดียวภายใน client session ด้วย guard, command identity และ state transition แต่ความถูกต้องสุดท้ายของ mutationต้องมี server idempotency/unique constraintด้วย</div>
-<section><h2>1. Guard by state</h2><pre class="code-vs"><code>Future&lt;void&gt; confirmPick() async {
+<section id="section-1"><h2>1. Guard by state</h2><pre class="code-vs"><code>Future&lt;void&gt; confirmPick() async {
   if (state is! ReadyToConfirm) return;
   final ready = state as ReadyToConfirm;
   state = Submitting(ready.draft);
   notifyListeners();
   // eventที่สองเห็น Submittingและ return
 }</code></pre><p>State machine guardแข็งแรงกว่า boolกระจัดกระจายเพราะบอก actionที่อนุญาต</p></section>
-<section><h2>2. Operation key</h2><p>สร้าง UUIDตอนเริ่ม business operationและเก็บคู่ pending state Retry requestเดิม reuse key; userเริ่ม operationใหม่จึงสร้าง keyใหม่ ส่ง header/bodyให้ .NET endpointเก็บผล/unique keyตาม user+operation</p></section>
-<section><h2>3. Disable UI ไม่พอ</h2><p>Enter, scanner, hardware button, deep callbackและ double tapอาจเข้าก่อน rebuild ต้อง guard synchronousใน command และ serverตรวจอีกชั้น Disabled widgetเป็น feedback/accessibilityไม่ใช่ lockหลัก</p></section>
-<section><h2>4. Duplicate domain value</h2><p>Idempotency keyต่างจาก barcode duplicate รหัสเดิมอาจเป็น operationใหม่ที่ถูกต้อง หรือ scanซ้ำผิด ต้องมี domain ruleแยก เช่น serial unique, product barcodeเพิ่ม qty, retry confirmใช้ operationเดิม</p></section>
-<section><h2>5. Timeout unknown outcome</h2><p>อย่าปลด stateเป็น Readyแล้วสร้าง keyใหม่ทันที เพราะ serverอาจ commitแล้ว เปลี่ยนเป็น Unknown/Reconcile, query statusด้วย key หรือ retry same keyจนได้ deterministic result</p></section>
-<section><h2>6. Tests</h2><p>เรียก commandสองครั้งก่อน Futureแรกจบ assert repositoryหนึ่ง call; timeoutแล้ว retry assert keyเดิม; successแล้ว eventซ้ำไม่ call; reset/new draftจึง keyใหม่ ใช้ Completerกับ fake UUID generator</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้กด Confirm, timeout, ปิดหน้าแล้วกลับมา ต้องเก็บอะไรเพื่อ retryปลอดภัย?</p><details><summary>เฉลย</summary><p>persist pending operation ID + canonical request hash/entity ID/statusตามความเสี่ยง Query backendก่อนหรือ retry keyเดิม Backendตอบผลเดิม/Conflict ไม่สร้าง transactionใหม่จาก UI stateที่ลืม requestเก่า</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Debounce 500msไม่ใช่ idempotency Requestอาจใช้ 5s, app retryหรือสอง deviceยังซ้ำ ต้องออกแบบ command stateและ backend contractร่วมกัน</div></section>
+<section id="section-2"><h2>2. Operation key</h2><p>สร้าง UUIDตอนเริ่ม business operationและเก็บคู่ pending state Retry requestเดิม reuse key; userเริ่ม operationใหม่จึงสร้าง keyใหม่ ส่ง header/bodyให้ .NET endpointเก็บผล/unique keyตาม user+operation</p></section>
+<section id="section-3"><h2>3. Disable UI ไม่พอ</h2><p>Enter, scanner, hardware button, deep callbackและ double tapอาจเข้าก่อน rebuild ต้อง guard synchronousใน command และ serverตรวจอีกชั้น Disabled widgetเป็น feedback/accessibilityไม่ใช่ lockหลัก</p></section>
+<section id="section-4"><h2>4. Duplicate domain value</h2><p>Idempotency keyต่างจาก barcode duplicate รหัสเดิมอาจเป็น operationใหม่ที่ถูกต้อง หรือ scanซ้ำผิด ต้องมี domain ruleแยก เช่น serial unique, product barcodeเพิ่ม qty, retry confirmใช้ operationเดิม</p></section>
+<section id="section-5"><h2>5. Timeout unknown outcome</h2><p>อย่าปลด stateเป็น Readyแล้วสร้าง keyใหม่ทันที เพราะ serverอาจ commitแล้ว เปลี่ยนเป็น Unknown/Reconcile, query statusด้วย key หรือ retry same keyจนได้ deterministic result</p></section>
+<section id="section-6"><h2>6. Tests</h2><p>เรียก commandสองครั้งก่อน Futureแรกจบ assert repositoryหนึ่ง call; timeoutแล้ว retry assert keyเดิม; successแล้ว eventซ้ำไม่ call; reset/new draftจึง keyใหม่ ใช้ Completerกับ fake UUID generator</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้กด Confirm, timeout, ปิดหน้าแล้วกลับมา ต้องเก็บอะไรเพื่อ retryปลอดภัย?</p><details><summary>เฉลย</summary><p>persist pending operation ID + canonical request hash/entity ID/statusตามความเสี่ยง Query backendก่อนหรือ retry keyเดิม Backendตอบผลเดิม/Conflict ไม่สร้าง transactionใหม่จาก UI stateที่ลืม requestเก่า</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Debounce 500msไม่ใช่ idempotency Requestอาจใช้ 5s, app retryหรือสอง deviceยังซ้ำ ต้องออกแบบ command stateและ backend contractร่วมกัน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

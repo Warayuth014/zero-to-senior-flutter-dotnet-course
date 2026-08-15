@@ -4,18 +4,19 @@
 <title>Connection profiles และ health check</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-04 · Project Lab</span><h1>Connection profiles และ health check</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Profile model</a></li><li><a href="#section-2">2. Persistence</a></li><li><a href="#section-3">3. Health probe</a></li><li><a href="#section-4">4. Single source URL</a></li><li><a href="#section-5">5. Switch security</a></li><li><a href="#section-6">6. Lifecycle/battery</a></li><li><a href="#section-7">7. .NET contract</a></li><li><a href="#section-8">8. Acceptance tests</a></li></ol></nav>
 <div class="note"><strong>ต่อยอด:</strong> starterรับ <code>WMS_API_BASE_URL</code>เพียงค่าเดียว ให้เพิ่ม connection profilesและใช้ <code>GET /api/WMS/mobile_health</code>เป็น probeเดียวกับ base URLที่ requestsจริงใช้</div>
-<section><h2>1. Profile model</h2><p>เก็บ id, name, baseUrl, environment label, created/updated timeและ activeId ไม่เก็บ tokenใน profile Normalize scheme/host/port, ตัด slashและ reject path/queryที่ไม่อนุญาต</p></section>
-<section><h2>2. Persistence</h2><p>profilesไม่ใช่ secretจึงใช้ SharedPreferencesได้ Decodeแบบ versionedและ recoverจาก malformed dataด้วย safe seed ไม่ให้แอปค้างที่ startup การลบ active profileต้องเลือก replacementและห้ามลบตัวสุดท้าย</p></section>
-<section><h2>3. Health probe</h2><p>timeoutสั้น, วัด latency, parse service/status/serverTimeและแยก DNS/socket/timeout/HTTP/contract error อย่าถือว่า TCP portเปิดเท่ากับ WMS APIพร้อม</p></section>
-<section><h2>4. Single source URL</h2><p>ApiClientอ่าน active base URLต่อ requestหรือ rebuild clientอย่างควบคุม Connection dotต้อง probe URLเดียวกัน ห้าม statusบอก server Aแต่ business callไป Bจาก cached base</p></section>
-<section><h2>5. Switch security</h2><p>เมื่อเปลี่ยน hostให้ clear JWT/sessionและ scoped storesก่อน requestถัดไป เพราะ tokenของ serverเดิมไม่ควรถูกส่ง serverใหม่ จากนั้น probeและบังคับ loginใหม่</p></section>
-<section><h2>6. Lifecycle/battery</h2><p>probeตอนเปิด settings, activate, shell entryและ app resume ไม่ poll dotทุกไม่กี่วินาทีตลอดวัน Business task pollingมีเหตุผลคนละอย่างและต้องจัดแยก</p></section>
-<section><h2>7. .NET contract</h2><pre class="code-vs"><code>200 {
+<section id="section-1"><h2>1. Profile model</h2><p>เก็บ id, name, baseUrl, environment label, created/updated timeและ activeId ไม่เก็บ tokenใน profile Normalize scheme/host/port, ตัด slashและ reject path/queryที่ไม่อนุญาต</p></section>
+<section id="section-2"><h2>2. Persistence</h2><p>profilesไม่ใช่ secretจึงใช้ SharedPreferencesได้ Decodeแบบ versionedและ recoverจาก malformed dataด้วย safe seed ไม่ให้แอปค้างที่ startup การลบ active profileต้องเลือก replacementและห้ามลบตัวสุดท้าย</p></section>
+<section id="section-3"><h2>3. Health probe</h2><p>timeoutสั้น, วัด latency, parse service/status/serverTimeและแยก DNS/socket/timeout/HTTP/contract error อย่าถือว่า TCP portเปิดเท่ากับ WMS APIพร้อม</p></section>
+<section id="section-4"><h2>4. Single source URL</h2><p>ApiClientอ่าน active base URLต่อ requestหรือ rebuild clientอย่างควบคุม Connection dotต้อง probe URLเดียวกัน ห้าม statusบอก server Aแต่ business callไป Bจาก cached base</p></section>
+<section id="section-5"><h2>5. Switch security</h2><p>เมื่อเปลี่ยน hostให้ clear JWT/sessionและ scoped storesก่อน requestถัดไป เพราะ tokenของ serverเดิมไม่ควรถูกส่ง serverใหม่ จากนั้น probeและบังคับ loginใหม่</p></section>
+<section id="section-6"><h2>6. Lifecycle/battery</h2><p>probeตอนเปิด settings, activate, shell entryและ app resume ไม่ poll dotทุกไม่กี่วินาทีตลอดวัน Business task pollingมีเหตุผลคนละอย่างและต้องจัดแยก</p></section>
+<section id="section-7"><h2>7. .NET contract</h2><pre class="code-vs"><code>200 {
   "service":"wms-mobile-lab",
   "status":"ok",
   "serverTime":"...Z"
 }</code></pre><p>ใน productionเพิ่ม version/capabilitiesเพื่อ clientรู้ว่า endpointsที่ต้องใช้รองรับหรือไม่</p></section>
-<section><h2>8. Acceptance tests</h2><div class="success">add/edit/activate/remove, invalid URL, malformed persistence, health timeout/wrong JSON, server switch logoutและ app resume probe โดย inject http client/fake clock ไม่ใช้ internetจริงใน unit tests</div></section>
+<section id="section-8"><h2>8. Acceptance tests</h2><div class="success">add/edit/activate/remove, invalid URL, malformed persistence, health timeout/wrong JSON, server switch logoutและ app resume probe โดย inject http client/fake clock ไม่ใช้ internetจริงใน unit tests</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

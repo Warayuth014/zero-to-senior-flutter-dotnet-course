@@ -4,8 +4,9 @@
 <title>Text overflow และ AutoSizeText</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-11 · Flutter UI</span><h1>Text overflow และ AutoSizeText</h1><p>Part 2: Layout, Responsive &amp; PDA UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Text overflow ต้องมี bounded width</a></li><li><a href="#section-2">2. clip, fade, ellipsis และ visible</a></li><li><a href="#section-3">3. AutoSizeText ทำอะไร</a></li><li><a href="#section-4">4. ลำดับ fallback ที่ปลอดภัย</a></li><li><a href="#section-5">5. Text scale และ accessibility</a></li><li><a href="#section-6">6. Localization จริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">ข้อความเป็นข้อมูลแบบ dynamic: ภาษา, font, text scale และค่าจาก API เปลี่ยนความยาวได้ Responsive UI ต้องกำหนด priority, line budget และ fallback โดยไม่ซ่อนข้อมูลปฏิบัติงานสำคัญ</div>
-<section><h2>1. Text overflow ต้องมี bounded width</h2><pre class="code-vs"><code>Row(children: [
+<section id="section-1"><h2>1. Text overflow ต้องมี bounded width</h2><pre class="code-vs"><code>Row(children: [
   const Icon(Icons.inventory),
   const SizedBox(width: 8),
   Expanded(
@@ -16,18 +17,18 @@
     ),
   ),
 ])</code></pre><p>ถ้า Text ใน Row ไม่ได้รับ maxWidth ที่จำกัด ellipsis ไม่มีจุดตัด จึงต้องใช้ Expanded/Flexible/ConstrainedBox ก่อนตั้ง overflow</p></section>
-<section><h2>2. clip, fade, ellipsis และ visible</h2><p>ellipsis สื่อว่ามีข้อความต่อแต่ต้องมีทางดูเต็ม เช่น detail/tooltip; fade เหมาะ decorative text; clip อาจดูเหมือนข้อมูลขาด; visible เสี่ยงชน widget อื่น สำหรับ barcode, location หรือ quantity ที่ห้ามตีความผิด ควร wrap/แยกบรรทัดหรือเปิด detail มากกว่าตัดเงียบ</p></section>
-<section><h2>3. AutoSizeText ทำอะไร</h2><pre class="code-vs"><code>AutoSizeText(
+<section id="section-2"><h2>2. clip, fade, ellipsis และ visible</h2><p>ellipsis สื่อว่ามีข้อความต่อแต่ต้องมีทางดูเต็ม เช่น detail/tooltip; fade เหมาะ decorative text; clip อาจดูเหมือนข้อมูลขาด; visible เสี่ยงชน widget อื่น สำหรับ barcode, location หรือ quantity ที่ห้ามตีความผิด ควร wrap/แยกบรรทัดหรือเปิด detail มากกว่าตัดเงียบ</p></section>
+<section id="section-3"><h2>3. AutoSizeText ทำอะไร</h2><pre class="code-vs"><code>AutoSizeText(
   title,
   maxLines: 2,
   minFontSize: 10,
   stepGranularity: 0.5,
   overflow: TextOverflow.ellipsis,
 )</code></pre><p>มันลองลด font ภายใน bounds จนพอดีหรือถึง min แล้วใช้ overflow Absolute Home ใช้กับ title/subtitle ของ tile ที่ height เปลี่ยน แต่ต้องมี bounded width/height และห้ามตั้ง min ต่ำจนอ่านไม่ได้</p></section>
-<section><h2>4. ลำดับ fallback ที่ปลอดภัย</h2><ol><li>ให้ width/flex ที่ถูกต้อง</li><li>อนุญาตเพิ่มบรรทัด</li><li>ปรับ composition/ซ่อน secondary content เมื่อ narrow</li><li>ลด font ในช่วงจำกัด</li><li>ellipsis พร้อมทางดูข้อมูลเต็ม</li></ol><p>อย่าเริ่มจากลด font เพราะแก้ภาพได้แต่ทำลาย ergonomics</p></section>
-<section><h2>5. Text scale และ accessibility</h2><p>ทดสอบ TextScaler สูงอย่างน้อย 1.3 และ 2.0 หลีกเลี่ยง Container height ตายตัวรอบข้อความสำคัญ ปุ่มควรขยายสูงหรือ wrap ได้ ไม่ clamp text scale ทั้งแอปเพื่อรักษาหน้าตา หาก PDA มี policy เฉพาะต้องบันทึกเหตุผลและยังมีขนาดอ่านได้</p></section>
-<section><h2>6. Localization จริง</h2><p>คำไทยอาจตัดบรรทัดต่างจากอังกฤษและรหัสคลังอาจไม่มีจุดตัด ใช้ softWrap, zero-width strategy เฉพาะ identifier ที่ยอมตัดได้ และทดสอบค่าจาก API ยาวสุด Absolute ส่ง <code>narrow</code> ให้ tile เพื่อกำหนด maxLines/sub style ตามพื้นที่</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Tile แสดงชื่อ location, description และจำนวนค้าง บนจอเตี้ย ควรเก็บอะไรและยอมลดอะไร?</p><details><summary>แนวคำตอบ</summary><p>รักษา location identifier และจำนวนค้างซึ่งใช้ตัดสินงาน; description เป็น secondary จึงซ่อน/ellipsis เมื่อ tight; เปลี่ยน tile เป็น Row, ให้ชื่อ 1–2 บรรทัด แล้ว AutoSize ในช่วงอ่านได้ ไม่ตัดจำนวนหรือทำ font ทั้ง tile เหลือ 7px</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Tooltip ที่แสดงเฉพาะ hover ไม่ช่วยผู้ใช้ PDA แบบสัมผัส ให้ข้อมูลเต็มเข้าถึงได้ด้วย tap/detail/semantics และอย่าใช้ ellipsis กับ serial/lot/location แล้วให้ผู้ใช้เดาว่ารายการใด</div></section>
+<section id="section-4"><h2>4. ลำดับ fallback ที่ปลอดภัย</h2><ol><li>ให้ width/flex ที่ถูกต้อง</li><li>อนุญาตเพิ่มบรรทัด</li><li>ปรับ composition/ซ่อน secondary content เมื่อ narrow</li><li>ลด font ในช่วงจำกัด</li><li>ellipsis พร้อมทางดูข้อมูลเต็ม</li></ol><p>อย่าเริ่มจากลด font เพราะแก้ภาพได้แต่ทำลาย ergonomics</p></section>
+<section id="section-5"><h2>5. Text scale และ accessibility</h2><p>ทดสอบ TextScaler สูงอย่างน้อย 1.3 และ 2.0 หลีกเลี่ยง Container height ตายตัวรอบข้อความสำคัญ ปุ่มควรขยายสูงหรือ wrap ได้ ไม่ clamp text scale ทั้งแอปเพื่อรักษาหน้าตา หาก PDA มี policy เฉพาะต้องบันทึกเหตุผลและยังมีขนาดอ่านได้</p></section>
+<section id="section-6"><h2>6. Localization จริง</h2><p>คำไทยอาจตัดบรรทัดต่างจากอังกฤษและรหัสคลังอาจไม่มีจุดตัด ใช้ softWrap, zero-width strategy เฉพาะ identifier ที่ยอมตัดได้ และทดสอบค่าจาก API ยาวสุด Absolute ส่ง <code>narrow</code> ให้ tile เพื่อกำหนด maxLines/sub style ตามพื้นที่</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Tile แสดงชื่อ location, description และจำนวนค้าง บนจอเตี้ย ควรเก็บอะไรและยอมลดอะไร?</p><details><summary>แนวคำตอบ</summary><p>รักษา location identifier และจำนวนค้างซึ่งใช้ตัดสินงาน; description เป็น secondary จึงซ่อน/ellipsis เมื่อ tight; เปลี่ยน tile เป็น Row, ให้ชื่อ 1–2 บรรทัด แล้ว AutoSize ในช่วงอ่านได้ ไม่ตัดจำนวนหรือทำ font ทั้ง tile เหลือ 7px</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Tooltip ที่แสดงเฉพาะ hover ไม่ช่วยผู้ใช้ PDA แบบสัมผัส ให้ข้อมูลเต็มเข้าถึงได้ด้วย tap/detail/semantics และอย่าใช้ ellipsis กับ serial/lot/location แล้วให้ผู้ใช้เดาว่ารายการใด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

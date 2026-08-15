@@ -4,18 +4,19 @@
 <title>Migration ทีละ seam</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">23-12 · Architecture</span><h1>Migration ทีละ seam</h1><p>Part 23: Compare, Refactor &amp; Senior Decisions</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. หา seamจาก call boundary</a></li><li><a href="#section-2">2. Strangler pattern</a></li><li><a href="#section-3">3. Compatibility fa&#231;ade</a></li><li><a href="#section-4">4. One axis per change</a></li><li><a href="#section-5">5. Preserve server contract</a></li><li><a href="#section-6">6. Feature flagsเมื่อ riskสูง</a></li><li><a href="#section-7">7. Migration scoreboard</a></li><li><a href="#section-8">8. Rollback plan</a></li></ol></nav>
 <div class="note"><strong>เป้าหมาย:</strong> ย้าย architectureทีละ seamโดยระบบ deployได้ทุกขั้น ไม่สร้าง branchใหญ่ที่เปลี่ยน UI, state, HTTPและmodelsพร้อมกัน</div>
-<section><h2>1. หา seamจาก call boundary</h2><p>จุดที่ดีคือ API call, constructor, pure widget, mapperหรือ command method เพราะสร้าง adapter/fakeได้โดยไม่แตะ backend seamที่ไม่มี testsหรือมี globalอ่านเขียนหลายจุดต้องสร้าง façadeก่อน</p></section>
-<section><h2>2. Strangler pattern</h2><p>ให้ codeใหม่ครอบ codeเดิม เช่น PackingRepositoryเรียก ApiService extensionเดิม Screenเรียก controllerใหม่ทีละ command เมื่อ consumersย้ายครบค่อยลบ direct calls จึงไม่มี rewrite day</p></section>
-<section><h2>3. Compatibility façade</h2><pre class="code-vs"><code>class LegacyPackingFacade {
+<section id="section-1"><h2>1. หา seamจาก call boundary</h2><p>จุดที่ดีคือ API call, constructor, pure widget, mapperหรือ command method เพราะสร้าง adapter/fakeได้โดยไม่แตะ backend seamที่ไม่มี testsหรือมี globalอ่านเขียนหลายจุดต้องสร้าง façadeก่อน</p></section>
+<section id="section-2"><h2>2. Strangler pattern</h2><p>ให้ codeใหม่ครอบ codeเดิม เช่น PackingRepositoryเรียก ApiService extensionเดิม Screenเรียก controllerใหม่ทีละ command เมื่อ consumersย้ายครบค่อยลบ direct calls จึงไม่มี rewrite day</p></section>
+<section id="section-3"><h2>3. Compatibility façade</h2><pre class="code-vs"><code>class LegacyPackingFacade {
   LegacyPackingFacade(this.repository);
   Future&lt;ApiResult&lt;Packing&gt;&gt; scan(...) =>
       adapt(repository.scan(...));
 }</code></pre><p>adapterชั่วคราวต้องมี removal issue/date ไม่เช่นนั้นกลายเป็น layerถาวรสองแบบ</p></section>
-<section><h2>4. One axis per change</h2><p>PRหนึ่ง extract widgets, PRถัดไป introduce repository, ต่อด้วย controller แล้วค่อยเปลี่ยน Result type การแยก axisช่วย reviewว่า behaviorเปลี่ยนหรือเพียง structureและ revertเฉพาะขั้นได้</p></section>
-<section><h2>5. Preserve server contract</h2><p>Flutter refactorไม่ควรเปลี่ยน endpoint/body/statusพร้อมกัน หากจำเป็นต้องเปลี่ยน .NET ใช้ version/backward-compatible fieldsและ deploy serverก่อน clientเพราะ PDAอัปเดตไม่พร้อมกันทุกเครื่อง</p></section>
-<section><h2>6. Feature flagsเมื่อ riskสูง</h2><p>ใช้ flagเลือก old/new implementationที่ repository/controller seam พร้อม metricsเทียบ success/error/latency แต่หลีกเลี่ยงสอง mutation pathsพร้อมกันถ้า backend idempotencyยังไม่พร้อม</p></section>
-<section><h2>7. Migration scoreboard</h2><p>ติดตาม call sitesที่ยัง new singleton, screensที่ยังมี domain transition, raw mapsและ testsต่อ feature ไม่วัดแค่จำนวนไฟล์ migrated และห้ามประกาศเสร็จขณะ façadeเก่ายังเป็น default</p></section>
-<section><h2>8. Rollback plan</h2><div class="success">ทุก seamต้องตอบว่า rollback code/config/dataอย่างไร ไม่มี schema irreversible, command duplicateหรือ cached state incompatible Refactorที่ revertไม่ได้คือ production migration ไม่ใช่ cleanupธรรมดา</div></section>
+<section id="section-4"><h2>4. One axis per change</h2><p>PRหนึ่ง extract widgets, PRถัดไป introduce repository, ต่อด้วย controller แล้วค่อยเปลี่ยน Result type การแยก axisช่วย reviewว่า behaviorเปลี่ยนหรือเพียง structureและ revertเฉพาะขั้นได้</p></section>
+<section id="section-5"><h2>5. Preserve server contract</h2><p>Flutter refactorไม่ควรเปลี่ยน endpoint/body/statusพร้อมกัน หากจำเป็นต้องเปลี่ยน .NET ใช้ version/backward-compatible fieldsและ deploy serverก่อน clientเพราะ PDAอัปเดตไม่พร้อมกันทุกเครื่อง</p></section>
+<section id="section-6"><h2>6. Feature flagsเมื่อ riskสูง</h2><p>ใช้ flagเลือก old/new implementationที่ repository/controller seam พร้อม metricsเทียบ success/error/latency แต่หลีกเลี่ยงสอง mutation pathsพร้อมกันถ้า backend idempotencyยังไม่พร้อม</p></section>
+<section id="section-7"><h2>7. Migration scoreboard</h2><p>ติดตาม call sitesที่ยัง new singleton, screensที่ยังมี domain transition, raw mapsและ testsต่อ feature ไม่วัดแค่จำนวนไฟล์ migrated และห้ามประกาศเสร็จขณะ façadeเก่ายังเป็น default</p></section>
+<section id="section-8"><h2>8. Rollback plan</h2><div class="success">ทุก seamต้องตอบว่า rollback code/config/dataอย่างไร ไม่มี schema irreversible, command duplicateหรือ cached state incompatible Refactorที่ revertไม่ได้คือ production migration ไม่ใช่ cleanupธรรมดา</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

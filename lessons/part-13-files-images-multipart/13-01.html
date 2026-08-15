@@ -4,25 +4,26 @@
 <title>ImagePicker และ platform permission</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-01 · Files &amp; Platform</span><h1>ImagePicker และ platform permission</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Flow ใน wmsapp</a></li><li><a href="#section-2">2. XFile และการยกเลิก</a></li><li><a href="#section-3">3. Permission ตาม platform</a></li><li><a href="#section-4">4. Denied ไม่เท่ากับ permanently denied</a></li><li><a href="#section-5">5. Android activity ถูกทำลาย</a></li><li><a href="#section-6">6. State ที่อ่านง่าย</a></li><li><a href="#section-7">7. UX และ lifecycle</a></li><li><a href="#section-8">8. Checklist</a></li></ol></nav>
 <div class="note"><strong>เป้าหมาย:</strong> เลือกรูปจากกล้องหรือคลังภาพอย่างปลอดภัย เข้าใจว่า <code>pickImage()</code> อาจคืน <code>null</code> และ permission เป็นสถานะที่เปลี่ยนได้ ไม่ใช่ขั้นตอนที่ขอครั้งเดียวแล้วจบ</div>
-<section><h2>1. Flow ใน wmsapp</h2><p><code>part_image_screen.dart</code> เปิด bottom sheet ให้เลือก <code>ImageSource.camera</code> หรือ <code>gallery</code> แล้วเรียก <code>ImagePicker.pickImage</code> พร้อมลดรูปเป็น 1024×1024 และ quality 85 ก่อนอัปโหลด นี่เป็นจุดเริ่มที่ดีเพราะลด bandwidth ตั้งแต่ต้นทาง</p></section>
-<section><h2>2. XFile และการยกเลิก</h2><pre class="code-vs"><code>final XFile? picked = await picker.pickImage(
+<section id="section-1"><h2>1. Flow ใน wmsapp</h2><p><code>part_image_screen.dart</code> เปิด bottom sheet ให้เลือก <code>ImageSource.camera</code> หรือ <code>gallery</code> แล้วเรียก <code>ImagePicker.pickImage</code> พร้อมลดรูปเป็น 1024×1024 และ quality 85 ก่อนอัปโหลด นี่เป็นจุดเริ่มที่ดีเพราะลด bandwidth ตั้งแต่ต้นทาง</p></section>
+<section id="section-2"><h2>2. XFile และการยกเลิก</h2><pre class="code-vs"><code>final XFile? picked = await picker.pickImage(
   source: source,
   maxWidth: 1024,
   maxHeight: 1024,
   imageQuality: 85,
 );
 if (picked == null) return; // ผู้ใช้กดยกเลิก ไม่ใช่ error</code></pre></section>
-<section><h2>3. Permission ตาม platform</h2><p>Android/iOS มีรายละเอียดต่างกันตามเวอร์ชันและ source ที่ใช้ กำหนดข้อความ usage description ใน iOS และ permission ที่จำเป็นใน Android manifest ตามเอกสารของ plugin เวอร์ชันที่ล็อกไว้ อย่าขอ permission ทั้งหมดตอนเปิดแอป—ขอเมื่อผู้ใช้กดฟีเจอร์นั้นเพื่อให้เหตุผลชัดเจน</p></section>
-<section><h2>4. Denied ไม่เท่ากับ permanently denied</h2><p>เมื่อถูกปฏิเสธครั้งแรกให้บอกว่าฟีเจอร์ใดใช้ไม่ได้และอนุญาตให้ลองใหม่ แต่หากระบบไม่แสดง prompt อีกแล้ว ให้เสนอปุ่มเปิด Settings พร้อมทางเลือกกลับหน้าก่อนหน้า ห้ามวนเรียก permission dialog อัตโนมัติ</p></section>
-<section><h2>5. Android activity ถูกทำลาย</h2><p>ระหว่างเปิด camera ระบบอาจ kill activity เพราะหน่วยความจำต่ำ เมื่อกลับมา future เดิมอาจหาย แอป production ควรเรียก <code>ImagePicker.retrieveLostData()</code> ตอนเริ่ม screen/app และนำ <code>XFile</code> ที่กู้ได้กลับเข้าสู่ preview โดยไม่อัปโหลดเองทันที</p></section>
-<section><h2>6. State ที่อ่านง่าย</h2><pre class="code-vs"><code>sealed class PickState {}
+<section id="section-3"><h2>3. Permission ตาม platform</h2><p>Android/iOS มีรายละเอียดต่างกันตามเวอร์ชันและ source ที่ใช้ กำหนดข้อความ usage description ใน iOS และ permission ที่จำเป็นใน Android manifest ตามเอกสารของ plugin เวอร์ชันที่ล็อกไว้ อย่าขอ permission ทั้งหมดตอนเปิดแอป—ขอเมื่อผู้ใช้กดฟีเจอร์นั้นเพื่อให้เหตุผลชัดเจน</p></section>
+<section id="section-4"><h2>4. Denied ไม่เท่ากับ permanently denied</h2><p>เมื่อถูกปฏิเสธครั้งแรกให้บอกว่าฟีเจอร์ใดใช้ไม่ได้และอนุญาตให้ลองใหม่ แต่หากระบบไม่แสดง prompt อีกแล้ว ให้เสนอปุ่มเปิด Settings พร้อมทางเลือกกลับหน้าก่อนหน้า ห้ามวนเรียก permission dialog อัตโนมัติ</p></section>
+<section id="section-5"><h2>5. Android activity ถูกทำลาย</h2><p>ระหว่างเปิด camera ระบบอาจ kill activity เพราะหน่วยความจำต่ำ เมื่อกลับมา future เดิมอาจหาย แอป production ควรเรียก <code>ImagePicker.retrieveLostData()</code> ตอนเริ่ม screen/app และนำ <code>XFile</code> ที่กู้ได้กลับเข้าสู่ preview โดยไม่อัปโหลดเองทันที</p></section>
+<section id="section-6"><h2>6. State ที่อ่านง่าย</h2><pre class="code-vs"><code>sealed class PickState {}
 class PickIdle extends PickState {}
 class PickPreview extends PickState { final XFile file; }
 class PickFailure extends PickState { final String message; }
 
 // picking และ uploading ควรเป็นคนละ state/operation</code></pre><p>แยกการเลือกออกจากการอัปโหลด ผู้ใช้จึงเปลี่ยนรูป ตรวจ preview หรือยกเลิกได้ก่อนใช้ network</p></section>
-<section><h2>7. UX และ lifecycle</h2><p>กันการกดซ้ำระหว่าง picker เปิดอยู่, ตรวจ <code>mounted</code> ก่อนใช้ <code>context</code> หลัง <code>await</code>, และอย่าบล็อกทั้งหน้าขณะเพียงเลือกรูป ปุ่มอัปโหลดควร disabled เฉพาะ operation ที่ชนกัน</p></section>
-<section><h2>8. Checklist</h2><div class="success">ทดสอบ camera, gallery, cancel, deny, deny ถาวร, activity recreation, รูปใหญ่มาก, หมุนจอ และการกลับจาก background บนอุปกรณ์จริงอย่างน้อย Android รุ่นที่ใช้งานในคลัง</div></section>
+<section id="section-7"><h2>7. UX และ lifecycle</h2><p>กันการกดซ้ำระหว่าง picker เปิดอยู่, ตรวจ <code>mounted</code> ก่อนใช้ <code>context</code> หลัง <code>await</code>, และอย่าบล็อกทั้งหน้าขณะเพียงเลือกรูป ปุ่มอัปโหลดควร disabled เฉพาะ operation ที่ชนกัน</p></section>
+<section id="section-8"><h2>8. Checklist</h2><div class="success">ทดสอบ camera, gallery, cancel, deny, deny ถาวร, activity recreation, รูปใหญ่มาก, หมุนจอ และการกลับจาก background บนอุปกรณ์จริงอย่างน้อย Android รุ่นที่ใช้งานในคลัง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

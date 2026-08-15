@@ -4,23 +4,24 @@
 <title>Light/dark mode ด้วย ValueNotifier</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-02 · Flutter UI</span><h1>Light/dark mode ด้วย ValueNotifier</h1><p>Part 11: Theme, Localization, Assets &amp; Platform UI</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Controller</a></li><li><a href="#section-2">2. MaterialApp wiring</a></li><li><a href="#section-3">3. Persist explicit choice</a></li><li><a href="#section-4">4. Effective brightness</a></li><li><a href="#section-5">5. No global context</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Theme mode เป็น app state:</strong> ValueNotifierเหมาะ stateเล็กที่เปลี่ยนทั้ง MaterialApp; persist choiceแยกจาก effective system brightness</div>
-<section><h2>1. Controller</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
+<section id="section-1"><h2>1. Controller</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
   ThemeController() : super(ThemeMode.system);
   void setMode(ThemeMode mode) =&gt; value = mode;
   void toggle(bool systemIsDark) =&gt; value =
       (value == ThemeMode.dark || value == ThemeMode.system &amp;&amp; systemIsDark)
           ? ThemeMode.light : ThemeMode.dark;
 }</code></pre></section>
-<section><h2>2. MaterialApp wiring</h2><pre class="code-vs"><code>ValueListenableBuilder(
+<section id="section-2"><h2>2. MaterialApp wiring</h2><pre class="code-vs"><code>ValueListenableBuilder(
   valueListenable: themeController,
   builder: (_, mode, __) =&gt; MaterialApp(
     theme: AppTheme.light, darkTheme: AppTheme.dark, themeMode: mode));</code></pre></section>
-<section><h2>3. Persist explicit choice</h2><p>เก็บ enum string <code>system/light/dark</code> ใน preferences โหลดก่อนหรือระหว่าง bootstrapโดยมี default system อย่าเก็บ boolเพราะเพิ่ม mode systemภายหลัง migrateยาก</p></section>
-<section><h2>4. Effective brightness</h2><p>เวลาเลือก icon/overlayใช้ <code>Theme.of(context).brightness</code> ไม่อนุมานจาก controller value เพราะ <code>ThemeMode.system</code> ต้องตาม platform</p></section>
-<section><h2>5. No global context</h2><p>ThemeControllerไม่ควรถือ BuildContextหรือสี เป็นเจ้าของ modeเท่านั้น Widget/theme builderอ่าน contextและ render</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp</code> ใช้ <code>ThemeProvider extends ValueNotifier&lt;ThemeMode&gt;</code> และ MaterialAppมี light/dark theme เป็น patternเรียบง่ายที่เหมาะกับ stateนี้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>controller valueเป็น systemแต่โทรศัพท์ dark ควรแสดงไอคอนพระอาทิตย์หรือพระจันทร์?</p><details><summary>แนวคำตอบ</summary><p>ตัดสินจาก effective brightnessใน contextและ tooltipบอก actionที่จะเกิด ไม่ใช่ value enumอย่างเดียว</p></details></section>
-<section><h2>8. Tests</h2><div class="success">restoreทั้งสาม mode, system brightnessเปลี่ยน, toggle, persistence failureและ system UI overlayตาม effective theme</div></section>
+<section id="section-3"><h2>3. Persist explicit choice</h2><p>เก็บ enum string <code>system/light/dark</code> ใน preferences โหลดก่อนหรือระหว่าง bootstrapโดยมี default system อย่าเก็บ boolเพราะเพิ่ม mode systemภายหลัง migrateยาก</p></section>
+<section id="section-4"><h2>4. Effective brightness</h2><p>เวลาเลือก icon/overlayใช้ <code>Theme.of(context).brightness</code> ไม่อนุมานจาก controller value เพราะ <code>ThemeMode.system</code> ต้องตาม platform</p></section>
+<section id="section-5"><h2>5. No global context</h2><p>ThemeControllerไม่ควรถือ BuildContextหรือสี เป็นเจ้าของ modeเท่านั้น Widget/theme builderอ่าน contextและ render</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p><code>wmsapp</code> ใช้ <code>ThemeProvider extends ValueNotifier&lt;ThemeMode&gt;</code> และ MaterialAppมี light/dark theme เป็น patternเรียบง่ายที่เหมาะกับ stateนี้</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>controller valueเป็น systemแต่โทรศัพท์ dark ควรแสดงไอคอนพระอาทิตย์หรือพระจันทร์?</p><details><summary>แนวคำตอบ</summary><p>ตัดสินจาก effective brightnessใน contextและ tooltipบอก actionที่จะเกิด ไม่ใช่ value enumอย่างเดียว</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">restoreทั้งสาม mode, system brightnessเปลี่ยน, toggle, persistence failureและ system UI overlayตาม effective theme</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

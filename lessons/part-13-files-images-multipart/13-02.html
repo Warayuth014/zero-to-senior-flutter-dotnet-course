@@ -4,13 +4,14 @@
 <title>dart:io File กับ kIsWeb</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-02 · Files &amp; Platform</span><h1>dart:io File กับ kIsWeb</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. XFile เป็น boundary ที่ดีกว่า</a></li><li><a href="#section-2">2. ปัญหาในโค้ดจริง</a></li><li><a href="#section-3">3. Portable value object</a></li><li><a href="#section-4">4. Bytes กับ stream</a></li><li><a href="#section-5">5. kIsWeb ใช้เมื่อไร</a></li><li><a href="#section-6">6. Conditional import</a></li><li><a href="#section-7">7. อย่าเก็บ path เป็นข้อมูลถาวร</a></li><li><a href="#section-8">8. แบบฝึกหัด</a></li></ol></nav>
 <div class="note"><strong>กฎสำคัญ:</strong> <code>dart:io File</code> ใช้ได้กับ mobile/desktop แต่ import นี้ทำให้ Flutter Web compile ไม่ผ่านได้ แม้ branch ที่เรียกจะถูกครอบด้วย <code>kIsWeb</code> ก็ตาม</div>
-<section><h2>1. XFile เป็น boundary ที่ดีกว่า</h2><p><code>image_picker</code> คืน <code>XFile</code> ซึ่งอ่านชื่อ, path, length และ bytes ได้ข้าม platform ให้ UI และ repository รับ <code>XFile</code> หรือ type ของเราเอง แล้วค่อยแปลงเป็น multipart ใน data source</p></section>
-<section><h2>2. ปัญหาในโค้ดจริง</h2><pre class="code-vs"><code>// wmsapp ปัจจุบัน
+<section id="section-1"><h2>1. XFile เป็น boundary ที่ดีกว่า</h2><p><code>image_picker</code> คืน <code>XFile</code> ซึ่งอ่านชื่อ, path, length และ bytes ได้ข้าม platform ให้ UI และ repository รับ <code>XFile</code> หรือ type ของเราเอง แล้วค่อยแปลงเป็น multipart ใน data source</p></section>
+<section id="section-2"><h2>2. ปัญหาในโค้ดจริง</h2><pre class="code-vs"><code>// wmsapp ปัจจุบัน
 required File imageFile;
 File(picked.path);
 MultipartFile.fromPath('file', imageFile.path);</code></pre><p>เหมาะกับ Android/iOS ที่แอปนี้ใช้งาน แต่หากจะรองรับ Web ต้องไม่ให้ shared file import <code>dart:io</code> และไม่ควรสมมติว่า browser มี filesystem path ที่ server/client อ่านตรงกันได้</p></section>
-<section><h2>3. Portable value object</h2><pre class="code-vs"><code>class UploadAsset {
+<section id="section-3"><h2>3. Portable value object</h2><pre class="code-vs"><code>class UploadAsset {
   final String name;
   final int length;
   final Future&lt;List&lt;int&gt;&gt; Function() readBytes;
@@ -22,15 +23,15 @@ final asset = UploadAsset(
   await picked.length(),
   picked.readAsBytes,
 );</code></pre></section>
-<section><h2>4. Bytes กับ stream</h2><p><code>readAsBytes()</code> สะดวกและ web-safe แต่โหลดทั้งไฟล์เข้าหน่วยความจำ ไฟล์ที่จำกัดไว้ไม่กี่ MB ใช้ได้ ส่วนไฟล์ใหญ่ควรเปิด stream และสร้าง multipart จาก stream เพื่อไม่ให้เกิด memory spike</p></section>
-<section><h2>5. kIsWeb ใช้เมื่อไร</h2><pre class="code-vs"><code>if (kIsWeb) {
+<section id="section-4"><h2>4. Bytes กับ stream</h2><p><code>readAsBytes()</code> สะดวกและ web-safe แต่โหลดทั้งไฟล์เข้าหน่วยความจำ ไฟล์ที่จำกัดไว้ไม่กี่ MB ใช้ได้ ส่วนไฟล์ใหญ่ควรเปิด stream และสร้าง multipart จาก stream เพื่อไม่ให้เกิด memory spike</p></section>
+<section id="section-5"><h2>5. kIsWeb ใช้เมื่อไร</h2><pre class="code-vs"><code>if (kIsWeb) {
   return Image.memory(await picked.readAsBytes());
 }
 return Image.file(File(picked.path));</code></pre><p>ตัวอย่างนี้ยังต้องอยู่ในไฟล์ที่ไม่ถูก compile สำหรับ web หรือแยกด้วย conditional import เพราะ parser ยังเห็น <code>dart:io</code> วิธีง่ายที่สุดคือใช้ <code>Image.memory</code>/<code>Image.network</code> ที่ portable หรือสร้าง adapter แยก platform</p></section>
-<section><h2>6. Conditional import</h2><pre class="code-vs"><code>import 'preview_stub.dart'
+<section id="section-6"><h2>6. Conditional import</h2><pre class="code-vs"><code>import 'preview_stub.dart'
   if (dart.library.io) 'preview_io.dart'
   if (dart.library.html) 'preview_web.dart';</code></pre><p>ให้แต่ละ implementation รู้เรื่อง platform ของตน ส่วน screen เรียก interface เดียว ทำให้ test ด้วย fake ได้และไม่กระจาย <code>kIsWeb</code> ทั่ว codebase</p></section>
-<section><h2>7. อย่าเก็บ path เป็นข้อมูลถาวร</h2><p>path จาก picker อาจเป็น temporary file และหายหลังระบบล้าง cache หากต้อง retry ภายหลังให้ copy เข้า app documents/cache ที่มี lifecycle ชัดเจน หรือเก็บ bytes ที่เข้ารหัส พร้อม metadata และ cleanup policy</p></section>
-<section><h2>8. แบบฝึกหัด</h2><p>เปลี่ยน signature ของ <code>uploadPartImage</code> จาก <code>File</code> เป็น <code>XFile</code> หรือ <code>UploadAsset</code> แล้วอธิบายว่าจะใช้ <code>fromPath</code>, <code>fromBytes</code> หรือ stream ในแต่ละ platform</p><details><summary>แนวคำตอบ</summary><p>mobile ใช้ fromPath เพื่อ stream จาก disk, web ใช้ bytes/stream จาก picker และทั้งคู่ต้องตรวจ length ก่อนสร้าง request</p></details></section>
+<section id="section-7"><h2>7. อย่าเก็บ path เป็นข้อมูลถาวร</h2><p>path จาก picker อาจเป็น temporary file และหายหลังระบบล้าง cache หากต้อง retry ภายหลังให้ copy เข้า app documents/cache ที่มี lifecycle ชัดเจน หรือเก็บ bytes ที่เข้ารหัส พร้อม metadata และ cleanup policy</p></section>
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เปลี่ยน signature ของ <code>uploadPartImage</code> จาก <code>File</code> เป็น <code>XFile</code> หรือ <code>UploadAsset</code> แล้วอธิบายว่าจะใช้ <code>fromPath</code>, <code>fromBytes</code> หรือ stream ในแต่ละ platform</p><details><summary>แนวคำตอบ</summary><p>mobile ใช้ fromPath เพื่อ stream จาก disk, web ใช้ bytes/stream จาก picker และทั้งคู่ต้องตรวจ length ก่อนสร้าง request</p></details></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

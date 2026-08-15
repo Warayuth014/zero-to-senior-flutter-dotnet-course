@@ -4,17 +4,18 @@
 <title>Putaway prework send/receive columns</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-04 · Real Codebase</span><h1>Putaway prework send/receive columns</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Six-station topology</a></li><li><a href="#section-2">2. Two status maps</a></li><li><a href="#section-3">3. Parallel initial load</a></li><li><a href="#section-4">4. Receive states</a></li><li><a href="#section-5">5. Send states</a></li><li><a href="#section-6">6. Return empty pallet</a></li><li><a href="#section-7">7. Animation vs truth</a></li><li><a href="#section-8">8. Test matrix</a></li></ol></nav>
 <div class="note"><strong>Prework เป็นสองคอลัมน์แต่ใช้คนละ state source:</strong> receive stations แสดง pallet ที่เรียกมา/ตัดเสร็จ ส่วน send stations แสดง pallet ที่กำลังส่งกลับ ASRS</div>
-<section><h2>1. Six-station topology</h2><p>PW-STN-1/3/5 เป็น <code>PWRole.receive</code>; PW-STN-2/4/6 เป็น send พร้อม <code>fixedDestination: ASRS</code> และทุกสถานีจำกัด <code>allowedType: PW</code></p></section>
-<section><h2>2. Two status maps</h2><p><code>_receiveStatus</code> มาจาก <code>prework-station-status</code> ส่วน <code>_stationStatus</code> มาจาก station-status ทั่วไป การใช้ map แยกสะท้อน backend read model คนละชุด แต่ควรมี type แทน dynamic map</p></section>
-<section><h2>3. Parallel initial load</h2><pre class="code-vs"><code>await Future.wait([
+<section id="section-1"><h2>1. Six-station topology</h2><p>PW-STN-1/3/5 เป็น <code>PWRole.receive</code>; PW-STN-2/4/6 เป็น send พร้อม <code>fixedDestination: ASRS</code> และทุกสถานีจำกัด <code>allowedType: PW</code></p></section>
+<section id="section-2"><h2>2. Two status maps</h2><p><code>_receiveStatus</code> มาจาก <code>prework-station-status</code> ส่วน <code>_stationStatus</code> มาจาก station-status ทั่วไป การใช้ map แยกสะท้อน backend read model คนละชุด แต่ควรมี type แทน dynamic map</p></section>
+<section id="section-3"><h2>3. Parallel initial load</h2><pre class="code-vs"><code>await Future.wait([
   _loadStationStatus(),
   _loadPreworkStationStatus(),
 ]);</code></pre><p>ลดเวลาโหลดรวม แต่แต่ละ call กลืน error จึงอาจได้ครึ่งหน้าที่ดูเหมือนปกติ ควรแสดง freshness/error แยกต่อ column</p></section>
-<section><h2>4. Receive states</h2><p>ไม่มี pallet แสดง empty; status <code>IN_TRANSIT</code> แสดงกำลังมาและปิดการเปิด sheet; state อื่นแสดง cut complete, cutItems และปุ่ม return empty pallet</p></section>
-<section><h2>5. Send states</h2><p>send station ใช้ StationSheet เดิมเพื่อ scan PW pallet และ confirm ไป ASRS ปลายทางถูกล็อก จึงเลือก PREWORK/REPLENISH ไม่ได้ แต่ wrapping ยังเปิดได้เมื่อ fixed destination เป็น ASRS</p></section>
-<section><h2>6. Return empty pallet</h2><p><code>preworkReturnPallet(palletId, stationId)</code> เปลี่ยน pallet เป็น AVAILABLE หลัง confirm เมื่อสำเร็จ sheet ปิด แสดง snackbar และ parent เริ่ม animation การ return</p></section>
-<section><h2>7. Animation vs truth</h2><p>ข้อความ AMR picking up/returning เปลี่ยนด้วย timer 2+2 วินาทีแล้ว refresh สถานะ Timer เป็น feedback เท่านั้น ไม่ควรกำหนดว่ากระบวนการจริงเสร็จ หาก event มาช้าหรือเร็ว UI ต้องยัง reconcile กับ server</p></section>
-<section><h2>8. Test matrix</h2><div class="success">ทดสอบ receive empty/in-transit/cut-complete, cutItems ว่าง/หลายรายการ, send busy, return reject/timeout/success, event ระหว่าง timer และ dispose ก่อน timer จบ โดย assert ว่า timer ถูก cancel และไม่ setState หลัง dispose</div></section>
+<section id="section-4"><h2>4. Receive states</h2><p>ไม่มี pallet แสดง empty; status <code>IN_TRANSIT</code> แสดงกำลังมาและปิดการเปิด sheet; state อื่นแสดง cut complete, cutItems และปุ่ม return empty pallet</p></section>
+<section id="section-5"><h2>5. Send states</h2><p>send station ใช้ StationSheet เดิมเพื่อ scan PW pallet และ confirm ไป ASRS ปลายทางถูกล็อก จึงเลือก PREWORK/REPLENISH ไม่ได้ แต่ wrapping ยังเปิดได้เมื่อ fixed destination เป็น ASRS</p></section>
+<section id="section-6"><h2>6. Return empty pallet</h2><p><code>preworkReturnPallet(palletId, stationId)</code> เปลี่ยน pallet เป็น AVAILABLE หลัง confirm เมื่อสำเร็จ sheet ปิด แสดง snackbar และ parent เริ่ม animation การ return</p></section>
+<section id="section-7"><h2>7. Animation vs truth</h2><p>ข้อความ AMR picking up/returning เปลี่ยนด้วย timer 2+2 วินาทีแล้ว refresh สถานะ Timer เป็น feedback เท่านั้น ไม่ควรกำหนดว่ากระบวนการจริงเสร็จ หาก event มาช้าหรือเร็ว UI ต้องยัง reconcile กับ server</p></section>
+<section id="section-8"><h2>8. Test matrix</h2><div class="success">ทดสอบ receive empty/in-transit/cut-complete, cutItems ว่าง/หลายรายการ, send busy, return reject/timeout/success, event ระหว่าง timer และ dispose ก่อน timer จบ โดย assert ว่า timer ถูก cancel และไม่ setState หลัง dispose</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

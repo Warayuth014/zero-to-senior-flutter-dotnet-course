@@ -4,8 +4,9 @@
 <title>Inherited state concept</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-14 · Flutter UI</span><h1>Inherited state concept</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Conceptual API</a></li><li><a href="#section-2">2. of(context) ทำ dependency</a></li><li><a href="#section-3">3. ตัวอย่าง built-inจริง</a></li><li><a href="#section-4">4. InheritedWidget เองไม่ได้ mutate</a></li><li><a href="#section-5">5. Granularity ของ updateShouldNotify</a></li><li><a href="#section-6">6. Constructor injection vs inherited</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">InheritedWidget ส่งข้อมูลลง treeและบันทึกว่า Elementใด depend เมื่อค่าเปลี่ยน framework rebuildเฉพาะ dependents เป็นฐานของ <code>Theme.of</code>, <code>MediaQuery</code>, Localizations และ state packagesหลายตัว</div>
-<section><h2>1. Conceptual API</h2><pre class="code-vs"><code>class SessionScope extends InheritedWidget {
+<section id="section-1"><h2>1. Conceptual API</h2><pre class="code-vs"><code>class SessionScope extends InheritedWidget {
   const SessionScope({super.key, required this.session, required super.child});
   final AuthSession session;
 
@@ -15,12 +16,12 @@
   @override
   bool updateShouldNotify(SessionScope old) =&gt; old.session != session;
 }</code></pre></section>
-<section><h2>2. of(context) ทำ dependency</h2><p>เมื่อ childเรียก <code>SessionScope.of(context)</code> Elementนั้นถูกลงทะเบียน หาก scope widgetใหม่ตัดสิน notify child buildใหม่ ไม่ต้องส่ง sessionผ่าน constructorทุกระดับที่ไม่ใช้มัน</p></section>
-<section><h2>3. ตัวอย่าง built-inจริง</h2><ul><li><code>Theme.of(context)</code>: color/text/theme</li><li><code>MediaQuery.of(context)</code>: size/padding/viewInsets</li><li><code>Localizations</code>: locale/resources</li><li><code>Navigator.of(context)</code>: หา stateของ ancestor navigator (กลไกภายในสัมพันธ์กับ tree)</li></ul><p>wmsappอ่าน Themeในหลาย widgets; scan sheetsอ่าน MediaQueryของ contextเฉพาะตำแหน่ง</p></section>
-<section><h2>4. InheritedWidget เองไม่ได้ mutate</h2><p>มันเป็น immutable configเหมือน widgetอื่น Mutable sourceมักอยู่ StatefulWidget/ChangeNotifier แล้วใช้ InheritedNotifier/Providerครอบ การออกแบบต้องแยก ownerจาก distribution mechanism</p></section>
-<section><h2>5. Granularity ของ updateShouldNotify</h2><p>คืน trueทุกครั้งทำ dependentsกว้าง rebuild; เทียบไม่ครบทำ UI stale ถ้า stateใหญ่และ consumersใช้คนละ sliceให้แยก scopes/aspects/selectorsหรือ view models แทน God scopeหนึ่งก้อน</p></section>
-<section><h2>6. Constructor injection vs inherited</h2><p>ส่ง constructorเมื่อ dependencyตรง/ใกล้และอยากเห็นชัด; inheritedเมื่อ descendantจำนวนมากข้าม intermediate widgetsและ lifetimeเป็น subtree policy เช่น theme/session อย่าใช้ inheritedเพียงลด parameterสองชั้นจน dependencyซ่อนหมด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>AuthRepositoryต้องใช้ LoginและShellหลาย descendants ควรเลือกอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอนนี้ constructor injectionใน absoluteชัดและจำนวนชั้นไม่มากจึงเหมาะ หากหลาย featureลึกต้องใช้ session/read-only authอาจสร้าง AuthScope/Providerที่ app/session root แต่ commandและlifetimeยังอยู่ AuthRepository พร้อม tests ไม่ให้ widgetsแก้ tokenตรง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ถ้าเรียก <code>of(context)</code> จาก contextเหนือ scopeจะหาไม่พบ ต้องเข้าใจตำแหน่ง Element และใช้ Builder/child context ไม่แก้ด้วย global variableทันที</div></section>
+<section id="section-2"><h2>2. of(context) ทำ dependency</h2><p>เมื่อ childเรียก <code>SessionScope.of(context)</code> Elementนั้นถูกลงทะเบียน หาก scope widgetใหม่ตัดสิน notify child buildใหม่ ไม่ต้องส่ง sessionผ่าน constructorทุกระดับที่ไม่ใช้มัน</p></section>
+<section id="section-3"><h2>3. ตัวอย่าง built-inจริง</h2><ul><li><code>Theme.of(context)</code>: color/text/theme</li><li><code>MediaQuery.of(context)</code>: size/padding/viewInsets</li><li><code>Localizations</code>: locale/resources</li><li><code>Navigator.of(context)</code>: หา stateของ ancestor navigator (กลไกภายในสัมพันธ์กับ tree)</li></ul><p>wmsappอ่าน Themeในหลาย widgets; scan sheetsอ่าน MediaQueryของ contextเฉพาะตำแหน่ง</p></section>
+<section id="section-4"><h2>4. InheritedWidget เองไม่ได้ mutate</h2><p>มันเป็น immutable configเหมือน widgetอื่น Mutable sourceมักอยู่ StatefulWidget/ChangeNotifier แล้วใช้ InheritedNotifier/Providerครอบ การออกแบบต้องแยก ownerจาก distribution mechanism</p></section>
+<section id="section-5"><h2>5. Granularity ของ updateShouldNotify</h2><p>คืน trueทุกครั้งทำ dependentsกว้าง rebuild; เทียบไม่ครบทำ UI stale ถ้า stateใหญ่และ consumersใช้คนละ sliceให้แยก scopes/aspects/selectorsหรือ view models แทน God scopeหนึ่งก้อน</p></section>
+<section id="section-6"><h2>6. Constructor injection vs inherited</h2><p>ส่ง constructorเมื่อ dependencyตรง/ใกล้และอยากเห็นชัด; inheritedเมื่อ descendantจำนวนมากข้าม intermediate widgetsและ lifetimeเป็น subtree policy เช่น theme/session อย่าใช้ inheritedเพียงลด parameterสองชั้นจน dependencyซ่อนหมด</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>AuthRepositoryต้องใช้ LoginและShellหลาย descendants ควรเลือกอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอนนี้ constructor injectionใน absoluteชัดและจำนวนชั้นไม่มากจึงเหมาะ หากหลาย featureลึกต้องใช้ session/read-only authอาจสร้าง AuthScope/Providerที่ app/session root แต่ commandและlifetimeยังอยู่ AuthRepository พร้อม tests ไม่ให้ widgetsแก้ tokenตรง</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ถ้าเรียก <code>of(context)</code> จาก contextเหนือ scopeจะหาไม่พบ ต้องเข้าใจตำแหน่ง Element และใช้ Builder/child context ไม่แก้ด้วย global variableทันที</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

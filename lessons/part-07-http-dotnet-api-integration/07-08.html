@@ -4,22 +4,23 @@
 <title>Decode success response</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-08 · Flutter + .NET</span><h1>Decode success response</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Success range</a></li><li><a href="#section-2">2. Decode UTF-8</a></li><li><a href="#section-3">3. Shape guard</a></li><li><a href="#section-4">4. Empty response</a></li><li><a href="#section-5">5. Parse ที่ API boundary</a></li><li><a href="#section-6">6. Content-Type guard</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Test matrix</a></li></ol></nav>
 <div class="note"><strong>Decode สองชั้น:</strong> HTTP success เป็นเพียง transport success; body ยังต้องผ่าน JSON syntax, shape และ domain validation ก่อนเป็นข้อมูลที่ UI เชื่อถือได้</div>
-<section><h2>1. Success range</h2><p>โดยทั่วไป status 200–299 สำเร็จ แต่แต่ละ endpoint ต้องกำหนด expected status เช่น POST create อาจคืน 201 และ command ที่ไม่มี body อาจคืน 204</p></section>
-<section><h2>2. Decode UTF-8</h2><pre class="code-vs"><code>Object? decodeJson(http.Response response) {
+<section id="section-1"><h2>1. Success range</h2><p>โดยทั่วไป status 200–299 สำเร็จ แต่แต่ละ endpoint ต้องกำหนด expected status เช่น POST create อาจคืน 201 และ command ที่ไม่มี body อาจคืน 204</p></section>
+<section id="section-2"><h2>2. Decode UTF-8</h2><pre class="code-vs"><code>Object? decodeJson(http.Response response) {
   if (response.bodyBytes.isEmpty) return null;
   final text = utf8.decode(response.bodyBytes);
   return jsonDecode(text);
 }</code></pre><p>ใช้ body bytes ช่วยรักษาภาษาไทยเมื่อ header encoding จาก server/proxy ไม่สมบูรณ์</p></section>
-<section><h2>3. Shape guard</h2><pre class="code-vs"><code>final raw = decodeJson(response);
+<section id="section-3"><h2>3. Shape guard</h2><pre class="code-vs"><code>final raw = decodeJson(response);
 if (raw is! Map&lt;String, dynamic&gt;) {
   throw ContractException('Expected JSON object');
 }
 return TaskDto.fromJson(raw);</code></pre></section>
-<section><h2>4. Empty response</h2><p>204 ต้องไม่เรียก <code>jsonDecode('')</code> สำหรับ 200 empty body ให้ถือเป็น contract error เว้นแต่ endpoint ระบุชัดว่าอนุญาต</p></section>
-<section><h2>5. Parse ที่ API boundary</h2><p>ApiClient อาจคืน typed decoded object หรือ raw map ให้ feature API parse ต่อ แต่ห้ามส่ง raw dynamic ถึง widget เพราะ cast error จะเกิดไกลจากต้นเหตุ</p></section>
-<section><h2>6. Content-Type guard</h2><p>ถ้า proxy คืน HTML พร้อม status 200 การเช็ก Content-Type และ shape จะจับได้เร็วกว่า error <code>type 'String' is not a subtype...</code> ที่ไม่บอกสาเหตุ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>response 200 body เป็น <code>[]</code> แต่ endpoint สัญญาว่าคืน grid object ควรทำอะไร?</p><details><summary>เฉลย</summary><p>throw ContractException พร้อม endpoint/correlation ID; อย่าแปลงเป็น empty page เพราะซ่อน contract drift</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">ทดสอบ valid object/list, Thai UTF-8, empty 204, empty 200, malformed JSON, wrong top-level shape และ required field ผิดชนิด</div></section>
+<section id="section-4"><h2>4. Empty response</h2><p>204 ต้องไม่เรียก <code>jsonDecode('')</code> สำหรับ 200 empty body ให้ถือเป็น contract error เว้นแต่ endpoint ระบุชัดว่าอนุญาต</p></section>
+<section id="section-5"><h2>5. Parse ที่ API boundary</h2><p>ApiClient อาจคืน typed decoded object หรือ raw map ให้ feature API parse ต่อ แต่ห้ามส่ง raw dynamic ถึง widget เพราะ cast error จะเกิดไกลจากต้นเหตุ</p></section>
+<section id="section-6"><h2>6. Content-Type guard</h2><p>ถ้า proxy คืน HTML พร้อม status 200 การเช็ก Content-Type และ shape จะจับได้เร็วกว่า error <code>type 'String' is not a subtype...</code> ที่ไม่บอกสาเหตุ</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>response 200 body เป็น <code>[]</code> แต่ endpoint สัญญาว่าคืน grid object ควรทำอะไร?</p><details><summary>เฉลย</summary><p>throw ContractException พร้อม endpoint/correlation ID; อย่าแปลงเป็น empty page เพราะซ่อน contract drift</p></details></section>
+<section id="section-8"><h2>8. Test matrix</h2><div class="success">ทดสอบ valid object/list, Thai UTF-8, empty 204, empty 200, malformed JSON, wrong top-level shape และ required field ผิดชนิด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

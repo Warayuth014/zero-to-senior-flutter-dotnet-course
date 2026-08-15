@@ -4,20 +4,21 @@
 <title>Scanner layout test</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-13 · Testing</span><h1>Scanner layout test</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ส่งข้อมูลผ่าน TextInput</a></li><li><a href="#section-2">2. Hardware key path</a></li><li><a href="#section-3">3. Focus contract</a></li><li><a href="#section-4">4. Duplicate และ rapid scan</a></li><li><a href="#section-5">5. Fixed scanner layout</a></li><li><a href="#section-6">6. Overflow และ keyboard inset</a></li><li><a href="#section-7">7. Scan state machine</a></li><li><a href="#section-8">8. Device test</a></li></ol></nav>
 <div class="note"><strong>Scanner test ต้องพิสูจน์ทั้ง input และ ergonomics:</strong> barcode scanner อาจทำตัวเป็น keyboard wedge จึงต้องทดสอบ focus, Enter, duplicate guard และ layout บน viewport PDA ไม่ใช่เพียงเรียก submit method ตรง ๆ</div>
-<section><h2>1. ส่งข้อมูลผ่าน TextInput</h2><pre class="code-vs"><code>final input = find.byKey(const ValueKey('receiving-scan-input'));
+<section id="section-1"><h2>1. ส่งข้อมูลผ่าน TextInput</h2><pre class="code-vs"><code>final input = find.byKey(const ValueKey('receiving-scan-input'));
 await tester.enterText(input, 'PLT-0001');
 await tester.testTextInput.receiveAction(TextInputAction.done);
 await tester.pump();</code></pre><p>พิสูจน์ว่า <code>onSubmitted</code> wiring ทำงานเหมือน scanner ที่ส่ง Enter</p></section>
-<section><h2>2. Hardware key path</h2><p>ถ้า screen ฟัง <code>HardwareKeyboard</code>/<code>Focus</code> โดยตรง ให้ส่ง key down/up ตามลำดับและรวม buffer จน Enter; แยก test repeated key, modifier, CR/LF และ event หลัง focus หลุด อย่าพึ่งเฉพาะ <code>enterText</code></p></section>
-<section><h2>3. Focus contract</h2><p>หลัง success/error/dialog ปิด ตรวจว่า scanner focus กลับมาตาม workflow ใช้ FocusNode ที่ inject/หา widget แล้ว assert <code>hasFocus</code> หลัง pump ห้าม request focus ทุก build เพราะทำ keyboard/focus แข่งกัน</p></section>
-<section><h2>4. Duplicate และ rapid scan</h2><pre class="code-vs"><code>await scan(tester, 'SER-001');
+<section id="section-2"><h2>2. Hardware key path</h2><p>ถ้า screen ฟัง <code>HardwareKeyboard</code>/<code>Focus</code> โดยตรง ให้ส่ง key down/up ตามลำดับและรวม buffer จน Enter; แยก test repeated key, modifier, CR/LF และ event หลัง focus หลุด อย่าพึ่งเฉพาะ <code>enterText</code></p></section>
+<section id="section-3"><h2>3. Focus contract</h2><p>หลัง success/error/dialog ปิด ตรวจว่า scanner focus กลับมาตาม workflow ใช้ FocusNode ที่ inject/หา widget แล้ว assert <code>hasFocus</code> หลัง pump ห้าม request focus ทุก build เพราะทำ keyboard/focus แข่งกัน</p></section>
+<section id="section-4"><h2>4. Duplicate และ rapid scan</h2><pre class="code-vs"><code>await scan(tester, 'SER-001');
 await scan(tester, 'SER-001');
 expect(repo.receives, hasLength(1));
 expect(find.textContaining('already scanned'), findsOneWidget);</code></pre><p>เพิ่ม case ตัวพิมพ์/ช่องว่าง และ scan ตัวที่สองขณะ request แรก pending</p></section>
-<section><h2>5. Fixed scanner layout</h2><p><code>scanner_layout_test.dart</code> เก็บตำแหน่ง input ก่อน drag รายการ แล้ว assert y เท่าเดิม นี่พิสูจน์ข้อกำหนดหน้าปฏิบัติงานว่าช่อง scan ไม่เลื่อนหายบนจอ 390×560</p></section>
-<section><h2>6. Overflow และ keyboard inset</h2><p>ทดสอบ viewport เตี้ย, text scale ใหญ่ และ <code>viewInsets.bottom</code> จำลอง soft keyboard; assert <code>tester.takeException()</code> เป็น null และ action สำคัญยังเข้าถึงได้โดยไม่ให้ทั้งหน้า scroll ผิดโครง</p></section>
-<section><h2>7. Scan state machine</h2><p>part → serial → pallet ต้องยอมรับเฉพาะชนิดปัจจุบัน Test scan ผิดขั้น, server reject, back หนึ่ง step, resume draft และ reset เมื่อออก flow โดยแยก pure state tests จาก widget wiring</p></section>
-<section><h2>8. Device test</h2><div class="success">widget test จำลอง keyboard ได้ แต่ต้อง smoke test กับ scanner รุ่นจริง: suffix Enter/Tab, key timing, IME, screen off/on, Bluetooth disconnect และการสแกนเร็วต่อเนื่องใน build profile/release</div></section>
+<section id="section-5"><h2>5. Fixed scanner layout</h2><p><code>scanner_layout_test.dart</code> เก็บตำแหน่ง input ก่อน drag รายการ แล้ว assert y เท่าเดิม นี่พิสูจน์ข้อกำหนดหน้าปฏิบัติงานว่าช่อง scan ไม่เลื่อนหายบนจอ 390×560</p></section>
+<section id="section-6"><h2>6. Overflow และ keyboard inset</h2><p>ทดสอบ viewport เตี้ย, text scale ใหญ่ และ <code>viewInsets.bottom</code> จำลอง soft keyboard; assert <code>tester.takeException()</code> เป็น null และ action สำคัญยังเข้าถึงได้โดยไม่ให้ทั้งหน้า scroll ผิดโครง</p></section>
+<section id="section-7"><h2>7. Scan state machine</h2><p>part → serial → pallet ต้องยอมรับเฉพาะชนิดปัจจุบัน Test scan ผิดขั้น, server reject, back หนึ่ง step, resume draft และ reset เมื่อออก flow โดยแยก pure state tests จาก widget wiring</p></section>
+<section id="section-8"><h2>8. Device test</h2><div class="success">widget test จำลอง keyboard ได้ แต่ต้อง smoke test กับ scanner รุ่นจริง: suffix Enter/Tab, key timing, IME, screen off/on, Bluetooth disconnect และการสแกนเร็วต่อเนื่องใน build profile/release</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

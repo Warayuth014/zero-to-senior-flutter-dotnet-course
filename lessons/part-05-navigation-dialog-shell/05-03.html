@@ -4,19 +4,20 @@
 <title>รับ result กลับจาก route</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-03 · Flutter UI</span><h1>รับ result กลับจาก route</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Typed selection</a></li><li><a href="#section-2">2. Cancel คือ null</a></li><li><a href="#section-3">3. Result object</a></li><li><a href="#section-4">4. ตัวอย่างจริง</a></li><li><a href="#section-5">5. Result vs shared state</a></li><li><a href="#section-6">6. Async safety</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">ทุก Routeมี Future result แบบ typed <code>Navigator.push&lt;T&gt;</code> รอ และ <code>Navigator.pop(context, T)</code> คืน นี่เหมาะกับ selection/editor/modal โดยไม่สร้าง callbackย้อนหลายชั้น</div>
-<section><h2>1. Typed selection</h2><pre class="code-vs"><code>final selected = await Navigator.push&lt;Location&gt;(
+<section id="section-1"><h2>1. Typed selection</h2><pre class="code-vs"><code>final selected = await Navigator.push&lt;Location&gt;(
   context,
   MaterialPageRoute(builder: (_) =&gt; LocationPicker(items: locations)),
 );
 if (!context.mounted || selected == null) return;
 store.selectLocation(selected.id);</code></pre></section>
-<section><h2>2. Cancel คือ null</h2><p>Back/barrierมักคืน null แยกจาก valid false/empty list ให้ typeมีความหมาย เช่น bool resultควรเช็ค <code>== true</code> ไม่ใช้ <code>result!</code></p></section>
-<section><h2>3. Result object</h2><p>เมื่อมีหลายค่าใช้ record/sealed result เช่น <code>({String id, bool changed})</code> หรือ Saved/Deleted/Cancelled อย่าใช้ Map string keysที่ runtimeพัง</p></section>
-<section><h2>4. ตัวอย่างจริง</h2><p>wmsapp SerialSelect pop Listของ serials, image source sheetคืน enum, part/lot sheetsคืน typed model ส่วน Absolute dialog scannerคืน custom scan object/string/int ตามงาน</p></section>
-<section><h2>5. Result vs shared state</h2><p>Resultเหมาะ one-shot outcome Shared storeเหมาะข้อมูลที่หลาย routes observeต่อเนื่อง ใช้ resultบอก “changed”แล้ว source route refresh authoritative dataได้</p></section>
-<section><h2>6. Async safety</h2><p>หลัง await route sourceอาจ unmountedหรือ selectionไม่ relevant ตรวจ context/current entityก่อน apply และอย่าเก็บ resultใน controllerของ routeที่ disposeแล้ว</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Editorมี Save/Delete/Back จะออกแบบ resultอย่างไร?</p><details><summary>เฉลย</summary><p>sealed <code>EditorResult</code>: Saved(entity), Deleted(id); Backคืน null จากนั้น caller switchเฉพาะ non-nullและ refresh/เอา rowออกตาม authoritative policy</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า pop resultก่อน API saveสำเร็จ มิฉะนั้น callerแสดงข้อมูลที่ยังไม่ commit ระหว่าง submit lock modal/pageและคืน resultหลัง authoritative success</div></section>
+<section id="section-2"><h2>2. Cancel คือ null</h2><p>Back/barrierมักคืน null แยกจาก valid false/empty list ให้ typeมีความหมาย เช่น bool resultควรเช็ค <code>== true</code> ไม่ใช้ <code>result!</code></p></section>
+<section id="section-3"><h2>3. Result object</h2><p>เมื่อมีหลายค่าใช้ record/sealed result เช่น <code>({String id, bool changed})</code> หรือ Saved/Deleted/Cancelled อย่าใช้ Map string keysที่ runtimeพัง</p></section>
+<section id="section-4"><h2>4. ตัวอย่างจริง</h2><p>wmsapp SerialSelect pop Listของ serials, image source sheetคืน enum, part/lot sheetsคืน typed model ส่วน Absolute dialog scannerคืน custom scan object/string/int ตามงาน</p></section>
+<section id="section-5"><h2>5. Result vs shared state</h2><p>Resultเหมาะ one-shot outcome Shared storeเหมาะข้อมูลที่หลาย routes observeต่อเนื่อง ใช้ resultบอก “changed”แล้ว source route refresh authoritative dataได้</p></section>
+<section id="section-6"><h2>6. Async safety</h2><p>หลัง await route sourceอาจ unmountedหรือ selectionไม่ relevant ตรวจ context/current entityก่อน apply และอย่าเก็บ resultใน controllerของ routeที่ disposeแล้ว</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Editorมี Save/Delete/Back จะออกแบบ resultอย่างไร?</p><details><summary>เฉลย</summary><p>sealed <code>EditorResult</code>: Saved(entity), Deleted(id); Backคืน null จากนั้น caller switchเฉพาะ non-nullและ refresh/เอา rowออกตาม authoritative policy</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า pop resultก่อน API saveสำเร็จ มิฉะนั้น callerแสดงข้อมูลที่ยังไม่ commit ระหว่าง submit lock modal/pageและคืน resultหลัง authoritative success</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,29 +4,30 @@
 <title>Inject http.Client</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-04 · Testing</span><h1>Inject http.Client</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Constructor injection</a></li><li><a href="#section-2">2. MockClient</a></li><li><a href="#section-3">3. ตรวจ request semantics</a></li><li><a href="#section-4">4. Error matrix</a></li><li><a href="#section-5">5. Socket กับ timeout</a></li><li><a href="#section-6">6. Streaming/multipart</a></li><li><a href="#section-7">7. Ownership</a></li><li><a href="#section-8">8. ระดับที่ HTTP fake พิสูจน์ไม่ได้</a></li></ol></nav>
 <div class="note"><strong>อย่าให้ repository สร้าง HTTP client เองแบบซ่อน:</strong> inject <code>http.Client</code> หรือ transport interface เพื่อส่ง response ที่ต้องการและตรวจ request โดยไม่เปิด port/network จริง</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ReceivingApi {
+<section id="section-1"><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ReceivingApi {
   ReceivingApi({required http.Client client, required Uri baseUri})
       : _client = client, _baseUri = baseUri;
   final http.Client _client;
   final Uri _baseUri;
 }</code></pre><p>composition root สร้าง client จริงครั้งเดียว ส่วน test ส่ง fake client</p></section>
-<section><h2>2. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
+<section id="section-2"><h2>2. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
   expect(request.method, 'GET');
   expect(request.url.path, '/api/receiving/open');
   return http.Response('{"items":[],"total":0}', 200,
       headers: {'content-type': 'application/json'});
 });</code></pre></section>
-<section><h2>3. ตรวจ request semantics</h2><p>assert path/query/headers/body ที่เป็น contract เช่น bearer token, page และ JSON field แต่ไม่ assert header ที่ library จัดให้เองทุกตัวหรือ JSON whitespace/order เพราะทำ test เปราะโดยไม่เพิ่มความมั่นใจ</p></section>
-<section><h2>4. Error matrix</h2><pre class="code-vs"><code>for (final (status, expected) in [
+<section id="section-3"><h2>3. ตรวจ request semantics</h2><p>assert path/query/headers/body ที่เป็น contract เช่น bearer token, page และ JSON field แต่ไม่ assert header ที่ library จัดให้เองทุกตัวหรือ JSON whitespace/order เพราะทำ test เปราะโดยไม่เพิ่มความมั่นใจ</p></section>
+<section id="section-4"><h2>4. Error matrix</h2><pre class="code-vs"><code>for (final (status, expected) in [
   (400, Failure.validation),
   (401, Failure.sessionExpired),
   (409, Failure.conflict),
   (500, Failure.server),
 ]) { /* arrange response → assert mapped failure */ }</code></pre></section>
-<section><h2>5. Socket กับ timeout</h2><p>callback fake สามารถ throw <code>SocketException</code>, <code>TimeoutException</code> หรือคืน malformed body พิสูจน์ว่า adapter แปล error ไม่รั่ว exception รายละเอียด transport ไปถึง UI</p></section>
-<section><h2>6. Streaming/multipart</h2><p>สำหรับ upload/download ใช้ custom <code>BaseClient</code> จับ <code>BaseRequest</code> และคืน <code>StreamedResponse</code> เพื่อทดสอบ progress/cancel/body stream ระวัง consume stream ได้ครั้งเดียว และไม่ล็อก multipart boundary ที่สุ่ม</p></section>
-<section><h2>7. Ownership</h2><p>ถ้า repository รับ shared client มาจากภายนอก มันไม่ควร close เอง; composition root เป็นผู้ dispose ระบุ ownership ใน API ชัดเจนเพื่อไม่ให้ test หรือ request อื่นล้มตามกัน</p></section>
-<section><h2>8. ระดับที่ HTTP fake พิสูจน์ไม่ได้</h2><div class="success">ยังต้องมี .NET integration/contract tests สำหรับ routing, model binding, auth และ serialization จริง พร้อม sandbox end-to-end เล็กน้อย เพราะ MockClient พิสูจน์เพียง Dart adapter ตาม response ที่เราสร้างเอง</div></section>
+<section id="section-5"><h2>5. Socket กับ timeout</h2><p>callback fake สามารถ throw <code>SocketException</code>, <code>TimeoutException</code> หรือคืน malformed body พิสูจน์ว่า adapter แปล error ไม่รั่ว exception รายละเอียด transport ไปถึง UI</p></section>
+<section id="section-6"><h2>6. Streaming/multipart</h2><p>สำหรับ upload/download ใช้ custom <code>BaseClient</code> จับ <code>BaseRequest</code> และคืน <code>StreamedResponse</code> เพื่อทดสอบ progress/cancel/body stream ระวัง consume stream ได้ครั้งเดียว และไม่ล็อก multipart boundary ที่สุ่ม</p></section>
+<section id="section-7"><h2>7. Ownership</h2><p>ถ้า repository รับ shared client มาจากภายนอก มันไม่ควร close เอง; composition root เป็นผู้ dispose ระบุ ownership ใน API ชัดเจนเพื่อไม่ให้ test หรือ request อื่นล้มตามกัน</p></section>
+<section id="section-8"><h2>8. ระดับที่ HTTP fake พิสูจน์ไม่ได้</h2><div class="success">ยังต้องมี .NET integration/contract tests สำหรับ routing, model binding, auth และ serialization จริง พร้อม sandbox end-to-end เล็กน้อย เพราะ MockClient พิสูจน์เพียง Dart adapter ตาม response ที่เราสร้างเอง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

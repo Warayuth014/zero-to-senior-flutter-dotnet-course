@@ -4,20 +4,21 @@
 <title>Fallback polling และ backoff</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-11 · Realtime</span><h1>Fallback polling และ backoff</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Poll loop ไม่ overlap</a></li><li><a href="#section-2">2. Backoff</a></li><li><a href="#section-3">3. Screen-aware</a></li><li><a href="#section-4">4. Realtime recovery</a></li><li><a href="#section-5">5. Manual refresh</a></li><li><a href="#section-6">6. Staleness</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>Fallback pollingเป็น degraded mode:</strong> เริ่มเมื่อ realtime disconnected/unsynchronized, หยุดเมื่อ reconnect+reconcileสำเร็จ และใช้ backoff/jitterเพื่อไม่ถล่ม server</div>
-<section><h2>1. Poll loop ไม่ overlap</h2><pre class="code-vs"><code>Future&lt;void&gt; pollOnce() async {
+<section id="section-1"><h2>1. Poll loop ไม่ overlap</h2><pre class="code-vs"><code>Future&lt;void&gt; pollOnce() async {
   if (_polling || disposed || !needsFallback) return;
   _polling = true;
   try { await refresh(); _attempt = 0; }
   catch (_) { _attempt++; }
   finally { _polling = false; scheduleNext(); }
 }</code></pre></section>
-<section><h2>2. Backoff</h2><p>successใช้ intervalปกติ เช่น 15s; failureเพิ่ม 2^attemptถึง maxและ jitter ถ้า businessต้อง 5sระบุ SLA/โหลด ไม่ใช้ Timer.periodicยิงซ้อนเมื่อ requestนานกว่า interval</p></section>
-<section><h2>3. Screen-aware</h2><p>pollเฉพาะ dataที่ visible/จำเป็น ลด WarehouseStore timerที่เรียกหลาย endpointพร้อมกันทุกช่วง และ pauseตอน background/logout/server switch</p></section>
-<section><h2>4. Realtime recovery</h2><p>เมื่อ hub reconnectให้หยุด fallbackหลัง HTTP reconcileสำเร็จ ไม่หยุดทันทีที่ socket connectedเพราะ stateอาจยังพลาด events</p></section>
-<section><h2>5. Manual refresh</h2><p>user pull-to-refreshควรร่วม single-flightกับ pollและแสดง feedbackต่างกัน ไม่เปิด requestคู่ที่ responseแข่งกัน</p></section>
-<section><h2>6. Staleness</h2><p>เก็บ lastSuccessfulSyncและแสดง stale/offlineเมื่อเกิน threshold Green realtime dotไม่แทน data freshnessถ้า refresh/parseล้ม</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>poll interval 5sแต่ APIใช้ 8s จะเกิดอะไรกับ Timer.periodic?</p><details><summary>เฉลย</summary><p>request overlapและ response race ใช้ non-overlap self-scheduling/single-flightแล้ว scheduleหลัง requestจบ</p></details></section>
-<section><h2>8. Tests</h2><div class="success">fake clockตรวจ interval/backoff/jitter cap, no overlap, pause/resume, reconnect reconcileและ timer cancelเมื่อ dispose</div></section>
+<section id="section-2"><h2>2. Backoff</h2><p>successใช้ intervalปกติ เช่น 15s; failureเพิ่ม 2^attemptถึง maxและ jitter ถ้า businessต้อง 5sระบุ SLA/โหลด ไม่ใช้ Timer.periodicยิงซ้อนเมื่อ requestนานกว่า interval</p></section>
+<section id="section-3"><h2>3. Screen-aware</h2><p>pollเฉพาะ dataที่ visible/จำเป็น ลด WarehouseStore timerที่เรียกหลาย endpointพร้อมกันทุกช่วง และ pauseตอน background/logout/server switch</p></section>
+<section id="section-4"><h2>4. Realtime recovery</h2><p>เมื่อ hub reconnectให้หยุด fallbackหลัง HTTP reconcileสำเร็จ ไม่หยุดทันทีที่ socket connectedเพราะ stateอาจยังพลาด events</p></section>
+<section id="section-5"><h2>5. Manual refresh</h2><p>user pull-to-refreshควรร่วม single-flightกับ pollและแสดง feedbackต่างกัน ไม่เปิด requestคู่ที่ responseแข่งกัน</p></section>
+<section id="section-6"><h2>6. Staleness</h2><p>เก็บ lastSuccessfulSyncและแสดง stale/offlineเมื่อเกิน threshold Green realtime dotไม่แทน data freshnessถ้า refresh/parseล้ม</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>poll interval 5sแต่ APIใช้ 8s จะเกิดอะไรกับ Timer.periodic?</p><details><summary>เฉลย</summary><p>request overlapและ response race ใช้ non-overlap self-scheduling/single-flightแล้ว scheduleหลัง requestจบ</p></details></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">fake clockตรวจ interval/backoff/jitter cap, no overlap, pause/resume, reconnect reconcileและ timer cancelเมื่อ dispose</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

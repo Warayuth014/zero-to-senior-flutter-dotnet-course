@@ -4,20 +4,21 @@
 <title>ส่ง fields พร้อม file</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-04 · Files &amp; Platform</span><h1>ส่ง fields พร้อม file</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Contract ของ Part image</a></li><li><a href="#section-2">2. ฝั่ง Flutter</a></li><li><a href="#section-3">3. Binding ใน Minimal API</a></li><li><a href="#section-4">4. Binding model</a></li><li><a href="#section-5">5. Validation แบบ atomic</a></li><li><a href="#section-6">6. หลายไฟล์</a></li><li><a href="#section-7">7. Error ที่ actionable</a></li><li><a href="#section-8">8. แบบฝึกหัด</a></li></ol></nav>
 <div class="note"><strong>หนึ่ง request หนึ่ง intent:</strong> fields อธิบายว่าไฟล์เป็นของ entity ใด ส่วน file คือ payload ทั้งสองส่วนต้องผ่าน authorization และ validation ร่วมกัน</div>
-<section><h2>1. Contract ของ Part image</h2><pre class="code-vs"><code>POST /api/upload/part-image
+<section id="section-1"><h2>1. Contract ของ Part image</h2><pre class="code-vs"><code>POST /api/upload/part-image
 Content-Type: multipart/form-data
 
 partId = P-1001
 file   = warehouse-part.jpg</code></pre><p>wmsapp ส่ง <code>fields: {'partId': partId}</code> และ file part ชื่อ <code>file</code> ถ้าฝั่ง .NET เปลี่ยนชื่อ parameter ต้อง version contract หรือแก้ client พร้อมกัน</p></section>
-<section><h2>2. ฝั่ง Flutter</h2><pre class="code-vs"><code>request.fields.addAll({
+<section id="section-2"><h2>2. ฝั่ง Flutter</h2><pre class="code-vs"><code>request.fields.addAll({
   'partId': partId.trim(),
   'uploadId': uploadId,
 });
 request.files.add(await http.MultipartFile.fromPath(
   'file', image.path, filename: image.name,
 ));</code></pre><p>แปลงค่าที่ไม่ใช่ string อย่าง timestamp/number ให้เป็นรูปแบบ invariant ที่ตกลงกัน ไม่ส่ง JSON string ซ้อนใน field ถ้า model ซับซ้อนโดยไม่มี schema ชัดเจน</p></section>
-<section><h2>3. Binding ใน Minimal API</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
+<section id="section-3"><h2>3. Binding ใน Minimal API</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
     HttpRequest request,
     CancellationToken ct) =&gt; {
   var form = await request.ReadFormAsync(ct);
@@ -25,20 +26,20 @@ request.files.add(await http.MultipartFile.fromPath(
   IFormFile? file = form.Files.GetFile("file");
   // validate + authorize + save
 });</code></pre></section>
-<section><h2>4. Binding model</h2><pre class="code-vs"><code>public sealed class PartImageForm {
+<section id="section-4"><h2>4. Binding model</h2><pre class="code-vs"><code>public sealed class PartImageForm {
   public required string PartId { get; init; }
   public required IFormFile File { get; init; }
 }
 
 // Controller: ([FromForm] PartImageForm form, CancellationToken ct)</code></pre><p>เลือก style ให้เข้ากับ backend แต่ต้องทดสอบชื่อ fields แบบ case/format ที่ client ส่งจริง</p></section>
-<section><h2>5. Validation แบบ atomic</h2><p>ตรวจ partId ว่ามีจริงและผู้ใช้มีสิทธิ์, ตรวจ file, บันทึกไฟล์ แล้วอัปเดต metadata ในลำดับที่ recover ได้ หากบันทึก DB ล้มหลังเขียน disk ต้องลบ orphan หรือมี cleanup job; ถ้าเก็บ object storage ควรใช้ staging key แล้ว promote</p></section>
-<section><h2>6. หลายไฟล์</h2><p>ถ้ารองรับหลายภาพ ให้ตกลงชื่อ <code>files</code> ซ้ำหลาย part และจำกัดทั้งจำนวนไฟล์, ขนาดต่อไฟล์ และขนาดรวม อย่าส่ง request ใหญ่มหาศาลเพราะผู้ใช้อาจเสีย network ทั้งก้อนเมื่อไฟล์เดียวผิด</p></section>
-<section><h2>7. Error ที่ actionable</h2><pre class="code-vs"><code>{
+<section id="section-5"><h2>5. Validation แบบ atomic</h2><p>ตรวจ partId ว่ามีจริงและผู้ใช้มีสิทธิ์, ตรวจ file, บันทึกไฟล์ แล้วอัปเดต metadata ในลำดับที่ recover ได้ หากบันทึก DB ล้มหลังเขียน disk ต้องลบ orphan หรือมี cleanup job; ถ้าเก็บ object storage ควรใช้ staging key แล้ว promote</p></section>
+<section id="section-6"><h2>6. หลายไฟล์</h2><p>ถ้ารองรับหลายภาพ ให้ตกลงชื่อ <code>files</code> ซ้ำหลาย part และจำกัดทั้งจำนวนไฟล์, ขนาดต่อไฟล์ และขนาดรวม อย่าส่ง request ใหญ่มหาศาลเพราะผู้ใช้อาจเสีย network ทั้งก้อนเมื่อไฟล์เดียวผิด</p></section>
+<section id="section-7"><h2>7. Error ที่ actionable</h2><pre class="code-vs"><code>{
   "type": ".../invalid-upload",
   "title": "Image rejected",
   "status": 400,
   "errors": { "file": ["Maximum size is 5 MB"] }
 }</code></pre><p>UI map field error มาที่ preview/ปุ่มเลือกใหม่ ส่วน 401/403 ต้องแยกจาก validation และ 409 ใช้เมื่อ state ของ part ขัดแย้ง</p></section>
-<section><h2>8. แบบฝึกหัด</h2><p>หาก part ถูกลบหลังผู้ใช้เลือกรูปแต่ก่อนอัปโหลด server ควรตอบอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอบ 404 หากไม่เปิดเผย entity หรือ 409 หาก client รู้จัก part อยู่แล้ว พร้อมไม่เก็บไฟล์ orphan และให้ UI refresh รายการ</p></details></section>
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>หาก part ถูกลบหลังผู้ใช้เลือกรูปแต่ก่อนอัปโหลด server ควรตอบอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอบ 404 หากไม่เปิดเผย entity หรือ 409 หาก client รู้จัก part อยู่แล้ว พร้อมไม่เก็บไฟล์ orphan และให้ UI refresh รายการ</p></details></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

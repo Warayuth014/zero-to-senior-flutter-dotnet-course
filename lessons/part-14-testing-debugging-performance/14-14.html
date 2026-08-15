@@ -4,18 +4,19 @@
 <title>DevTools inspector/debugger</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-14 · Testing</span><h1>DevTools inspector/debugger</h1><p>Part 14: Testing, Debugging &amp; Performance</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Build mode</a></li><li><a href="#section-2">2. Widget Inspector</a></li><li><a href="#section-3">3. Debugger</a></li><li><a href="#section-4">4. Logging ที่สืบได้</a></li><li><a href="#section-5">5. Network</a></li><li><a href="#section-6">6. CPU/frames</a></li><li><a href="#section-7">7. Memory</a></li><li><a href="#section-8">8. Debug record</a></li></ol></nav>
 <div class="note"><strong>Debug จากหลักฐาน:</strong> เริ่มจาก reproduce ที่เล็กที่สุด เก็บ state/request/timeline แล้วใช้ Inspector, Debugger, Network และ Memory ตามอาการ หลีกเลี่ยงใส่ print แบบไม่มีโครงทั่วแอป</div>
-<section><h2>1. Build mode</h2><p>debug เหมาะ breakpoints/assert/hot reload แต่ performance ไม่แทน release; profile ใช้วัด CPU/GPU/memory ใกล้ของจริง; release ใช้ตรวจพฤติกรรมสุดท้าย ห้ามสรุป jank จาก debug mode</p></section>
-<section><h2>2. Widget Inspector</h2><p>ใช้ Select Widget, Layout Explorer และ constraints ดู overflow/พื้นที่ว่าง ตรวจ parent ที่ส่ง unbounded constraint, flex/scroll nesting และ repaint boundaries ก่อนแก้ด้วย hard-coded size</p></section>
-<section><h2>3. Debugger</h2><p>ตั้ง conditional breakpoint ที่ partId/step เฉพาะ, inspect call stack และ watch expression ใช้ pause on uncaught exceptions เพื่อเจอต้นทางก่อน error ถูกแปล หลีกเลี่ยง breakpoint ใน build ที่ถูกเรียกถี่จนทำ timing เปลี่ยน</p></section>
-<section><h2>4. Logging ที่สืบได้</h2><pre class="code-vs"><code>log.info('receive.submit', {
+<section id="section-1"><h2>1. Build mode</h2><p>debug เหมาะ breakpoints/assert/hot reload แต่ performance ไม่แทน release; profile ใช้วัด CPU/GPU/memory ใกล้ของจริง; release ใช้ตรวจพฤติกรรมสุดท้าย ห้ามสรุป jank จาก debug mode</p></section>
+<section id="section-2"><h2>2. Widget Inspector</h2><p>ใช้ Select Widget, Layout Explorer และ constraints ดู overflow/พื้นที่ว่าง ตรวจ parent ที่ส่ง unbounded constraint, flex/scroll nesting และ repaint boundaries ก่อนแก้ด้วย hard-coded size</p></section>
+<section id="section-3"><h2>3. Debugger</h2><p>ตั้ง conditional breakpoint ที่ partId/step เฉพาะ, inspect call stack และ watch expression ใช้ pause on uncaught exceptions เพื่อเจอต้นทางก่อน error ถูกแปล หลีกเลี่ยง breakpoint ใน build ที่ถูกเรียกถี่จนทำ timing เปลี่ยน</p></section>
+<section id="section-4"><h2>4. Logging ที่สืบได้</h2><pre class="code-vs"><code>log.info('receive.submit', {
   'operationId': operationId,
   'partId': partId,
   'step': state.step.name,
 });</code></pre><p>ใส่ correlation/operation ID และ event name แต่ไม่ log JWT, password, serial ส่วนบุคคลหรือ response body ใหญ่</p></section>
-<section><h2>5. Network</h2><p>ดู method, URL, status, duration, request/response size และ waterfall เปรียบเทียบ operation ID กับ .NET logs จำลอง offline/slow/timeout และตรวจ duplicate calls หลัง rebuild ไม่อ่านเพียงข้อความ error UI</p></section>
-<section><h2>6. CPU/frames</h2><p>เปิด Performance overlay/DevTools Timeline ใน profile mode บันทึกช่วง reproduce สั้น ๆ แยก UI thread/raster jank แล้วหา expensive build/layout/paint, synchronous JSON/image decode หรือ widget ที่ rebuild เกินจำเป็น</p></section>
-<section><h2>7. Memory</h2><p>ถ่าย heap snapshot ก่อนเข้า flow, หลังใช้งาน และหลังออก/GC ดู retaining path ของ Store, Timer, StreamSubscription, Controller, Image และ BuildContext การที่ memory สูงครั้งเดียวไม่เท่ากับ leak—ต้องดูวัตถุที่ควรถูกปล่อยแต่ยังถูก retain</p></section>
-<section><h2>8. Debug record</h2><div class="success">บันทึก device/build/commit, ขั้น reproduce, expected/actual, timestamp, operation ID, screenshot/timeline และ test ที่เพิ่มหลังแก้ เพื่อให้ bug เดิมกลับมาแล้ว CI จับได้</div></section>
+<section id="section-5"><h2>5. Network</h2><p>ดู method, URL, status, duration, request/response size และ waterfall เปรียบเทียบ operation ID กับ .NET logs จำลอง offline/slow/timeout และตรวจ duplicate calls หลัง rebuild ไม่อ่านเพียงข้อความ error UI</p></section>
+<section id="section-6"><h2>6. CPU/frames</h2><p>เปิด Performance overlay/DevTools Timeline ใน profile mode บันทึกช่วง reproduce สั้น ๆ แยก UI thread/raster jank แล้วหา expensive build/layout/paint, synchronous JSON/image decode หรือ widget ที่ rebuild เกินจำเป็น</p></section>
+<section id="section-7"><h2>7. Memory</h2><p>ถ่าย heap snapshot ก่อนเข้า flow, หลังใช้งาน และหลังออก/GC ดู retaining path ของ Store, Timer, StreamSubscription, Controller, Image และ BuildContext การที่ memory สูงครั้งเดียวไม่เท่ากับ leak—ต้องดูวัตถุที่ควรถูกปล่อยแต่ยังถูก retain</p></section>
+<section id="section-8"><h2>8. Debug record</h2><div class="success">บันทึก device/build/commit, ขั้น reproduce, expected/actual, timestamp, operation ID, screenshot/timeline และ test ที่เพิ่มหลังแก้ เพื่อให้ bug เดิมกลับมาแล้ว CI จับได้</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

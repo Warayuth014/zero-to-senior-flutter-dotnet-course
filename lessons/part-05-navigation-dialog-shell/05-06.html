@@ -4,19 +4,20 @@
 <title>Bottom navigation กับ shell เดียว</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-06 · Flutter UI</span><h1>Bottom navigation กับ shell เดียว</h1><p>Part 5: Navigation, Dialog &amp; Application Shell</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Shell tree</a></li><li><a href="#section-2">2. Single selected destination</a></li><li><a href="#section-3">3. Preserve tab state</a></li><li><a href="#section-4">4. Nested Navigator</a></li><li><a href="#section-5">5. Store lifetime</a></li><li><a href="#section-6">6. Responsive navigation</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Application shellถือองค์ประกอบคงที่ของ session เช่น header, body slot, bottom navigation, feedback overlay และ feature store Navigation itemเปลี่ยน destinationภายใน shellโดยไม่สร้าง session/storeใหม่ทุก tap</div>
-<section><h2>1. Shell tree</h2><pre class="code-vs"><code>WarehouseShell (owns session store)
+<section id="section-1"><h2>1. Shell tree</h2><pre class="code-vs"><code>WarehouseShell (owns session store)
 └─ Scaffold
    ├─ AppBar / status / user menu
    ├─ Body destination
    ├─ feedback overlay
    └─ NavigationBar / bottomNavigationBar</code></pre></section>
-<section><h2>2. Single selected destination</h2><p>เก็บ selected index/screen key sourceเดียว Map index↔destinationอย่างแน่นอน ไม่ให้ highlight tabหนึ่งแต่ bodyอีกหน้า Absolute store.screenกำหนด bodyและ bottom navผ่าน ListenableBuilder</p></section>
-<section><h2>3. Preserve tab state</h2><p>IndexedStackรักษา subtree/scrollแต่ใช้ memoryและ background listeners; สร้างตาม selectedทิ้ง transient stateแต่เบา เลือก per tabตาม UX และย้าย business stateเข้า storeไม่พึ่ง widgetค้าง</p></section>
-<section><h2>4. Nested Navigator</h2><p>แต่ละ tabมี nested stackได้เมื่อ backต้องย้อนภายใน tabและสลับ tabแล้วเก็บ stack แต่ complexityเพิ่มเรื่อง root dialog/deep link ใช้เมื่อมี requirementจริง Shellแบบ screen keyง่ายกว่าสำหรับ PDA workflowตื้น</p></section>
-<section><h2>5. Store lifetime</h2><p>Shellสร้าง WarehouseStoreครั้งเดียวใน initState, loadAllและ disposeพร้อม shell ทำ polling/session stateอยู่ถูกช่วง Logoutต้องหยุด timerผ่าน dispose</p></section>
-<section><h2>6. Responsive navigation</h2><p>PDAใช้ bottom navจำนวน destinationหลักจำกัด; tabletอาจ NavigationRail แต่เลือก stateเดียวและ callbacksเดียว ไม่สร้าง shellสองชุดที่ behaviorต่างกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Tab Tasksเลื่อน listแล้วไป Home/กลับ Tasksควรรักษา offsetอย่างไร?</p><details><summary>เฉลย</summary><p>ถ้า UXต้องรักษาใช้ IndexedStack/PageStorageKeyหรือ owner ScrollControllerตาม tab; dataอยู่ storeและ refreshตาม policy ไม่เก็บ controllerใน global repository</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า push Shellใหม่ทุกครั้งที่แตะ Home และอย่ามี Navigatorหลายตัวโดยไม่มี back/root modal policy มิฉะนั้น logout/dialogปิดผิด stack</div></section>
+<section id="section-2"><h2>2. Single selected destination</h2><p>เก็บ selected index/screen key sourceเดียว Map index↔destinationอย่างแน่นอน ไม่ให้ highlight tabหนึ่งแต่ bodyอีกหน้า Absolute store.screenกำหนด bodyและ bottom navผ่าน ListenableBuilder</p></section>
+<section id="section-3"><h2>3. Preserve tab state</h2><p>IndexedStackรักษา subtree/scrollแต่ใช้ memoryและ background listeners; สร้างตาม selectedทิ้ง transient stateแต่เบา เลือก per tabตาม UX และย้าย business stateเข้า storeไม่พึ่ง widgetค้าง</p></section>
+<section id="section-4"><h2>4. Nested Navigator</h2><p>แต่ละ tabมี nested stackได้เมื่อ backต้องย้อนภายใน tabและสลับ tabแล้วเก็บ stack แต่ complexityเพิ่มเรื่อง root dialog/deep link ใช้เมื่อมี requirementจริง Shellแบบ screen keyง่ายกว่าสำหรับ PDA workflowตื้น</p></section>
+<section id="section-5"><h2>5. Store lifetime</h2><p>Shellสร้าง WarehouseStoreครั้งเดียวใน initState, loadAllและ disposeพร้อม shell ทำ polling/session stateอยู่ถูกช่วง Logoutต้องหยุด timerผ่าน dispose</p></section>
+<section id="section-6"><h2>6. Responsive navigation</h2><p>PDAใช้ bottom navจำนวน destinationหลักจำกัด; tabletอาจ NavigationRail แต่เลือก stateเดียวและ callbacksเดียว ไม่สร้าง shellสองชุดที่ behaviorต่างกัน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Tab Tasksเลื่อน listแล้วไป Home/กลับ Tasksควรรักษา offsetอย่างไร?</p><details><summary>เฉลย</summary><p>ถ้า UXต้องรักษาใช้ IndexedStack/PageStorageKeyหรือ owner ScrollControllerตาม tab; dataอยู่ storeและ refreshตาม policy ไม่เก็บ controllerใน global repository</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า push Shellใหม่ทุกครั้งที่แตะ Home และอย่ามี Navigatorหลายตัวโดยไม่มี back/root modal policy มิฉะนั้น logout/dialogปิดผิด stack</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

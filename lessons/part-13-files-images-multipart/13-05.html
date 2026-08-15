@@ -4,33 +4,34 @@
 <title>Response URL และ relative path</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-05 · Files &amp; Platform</span><h1>Response URL และ relative path</h1><p>Part 13: Files, Images &amp; Multipart Upload</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. โค้ดจริงและข้อจำกัด</a></li><li><a href="#section-2">2. Response DTO</a></li><li><a href="#section-3">3. Resolve ด้วย Uri</a></li><li><a href="#section-4">4. Trust boundary</a></li><li><a href="#section-5">5. Cache busting</a></li><li><a href="#section-6">6. NetworkImage error</a></li><li><a href="#section-7">7. Authenticated media</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>URL ใน response คือข้อมูลที่ต้องออกแบบ:</strong> อย่าต่อ string ด้วยการลบ <code>/api</code> อย่างเดียว เพราะ base path, reverse proxy, CDN และ tenant path เปลี่ยนได้</div>
-<section><h2>1. โค้ดจริงและข้อจำกัด</h2><pre class="code-vs"><code>final base = await ApiService._resolveBase();
+<section id="section-1"><h2>1. โค้ดจริงและข้อจำกัด</h2><pre class="code-vs"><code>final base = await ApiService._resolveBase();
 final serverBase = base.replaceAll('/api', '');
 return '$serverBase$relativePath';</code></pre><p>ใช้ได้เมื่อ base ลงท้าย <code>/api</code> เสมอ แต่ <code>replaceAll</code> อาจลบคำว่า api ตำแหน่งอื่น และการต่อ string ทำ slash หาย/ซ้ำหรือ encode path ผิดได้</p></section>
-<section><h2>2. Response DTO</h2><pre class="code-vs"><code>{
+<section id="section-2"><h2>2. Response DTO</h2><pre class="code-vs"><code>{
   "imageUrl": "/media/parts/8f0c.jpg",
   "contentType": "image/jpeg",
   "width": 1024,
   "height": 768,
   "etag": "\"a1b2\""
 }</code></pre><p>คืน public URL หรือ stable media ID ไม่คืน physical disk path เช่น <code>C:\uploads\...</code></p></section>
-<section><h2>3. Resolve ด้วย Uri</h2><pre class="code-vs"><code>Uri resolveMedia(Uri apiBase, String value) {
+<section id="section-3"><h2>3. Resolve ด้วย Uri</h2><pre class="code-vs"><code>Uri resolveMedia(Uri apiBase, String value) {
   final candidate = Uri.parse(value);
   if (candidate.hasScheme) return validateMediaOrigin(candidate);
   final origin = apiBase.replace(path: '/', query: null, fragment: null);
   return origin.resolveUri(candidate);
 }</code></pre><p>หากระบบอยู่ใต้ path เช่น <code>/wms/</code> ให้ server คืน absolute public URL หรือ client config media base โดยตรง ไม่เดาจาก API path</p></section>
-<section><h2>4. Trust boundary</h2><p>ถ้า response คืน absolute URL ให้ allowlist scheme <code>https</code> และ host ที่ไว้ใจได้ ป้องกัน UI โหลดรูปจาก host แปลก, ส่ง auth header ผิด origin หรือเปิดช่อง tracking ห้ามนำ URL จาก server ไปอ่านเป็น local file path</p></section>
-<section><h2>5. Cache busting</h2><p>ถ้า replace รูปที่ URL เดิม cache อาจยังแสดงรูปเก่า ใช้ content-addressed filename, version query เช่น <code>?v=etag</code> หรือ HTTP ETag/Cache-Control ที่ถูกต้อง วิธีสร้างชื่อใหม่ทุก version ง่ายและปลอดภัยกว่าการ disable cache ทั้งหมด</p></section>
-<section><h2>6. NetworkImage error</h2><pre class="code-vs"><code>Image.network(
+<section id="section-4"><h2>4. Trust boundary</h2><p>ถ้า response คืน absolute URL ให้ allowlist scheme <code>https</code> และ host ที่ไว้ใจได้ ป้องกัน UI โหลดรูปจาก host แปลก, ส่ง auth header ผิด origin หรือเปิดช่อง tracking ห้ามนำ URL จาก server ไปอ่านเป็น local file path</p></section>
+<section id="section-5"><h2>5. Cache busting</h2><p>ถ้า replace รูปที่ URL เดิม cache อาจยังแสดงรูปเก่า ใช้ content-addressed filename, version query เช่น <code>?v=etag</code> หรือ HTTP ETag/Cache-Control ที่ถูกต้อง วิธีสร้างชื่อใหม่ทุก version ง่ายและปลอดภัยกว่าการ disable cache ทั้งหมด</p></section>
+<section id="section-6"><h2>6. NetworkImage error</h2><pre class="code-vs"><code>Image.network(
   imageUri.toString(),
   fit: BoxFit.cover,
   errorBuilder: (_, error, __) =&gt; const Icon(Icons.broken_image),
   loadingBuilder: (_, child, progress) =&gt;
       progress == null ? child : const CircularProgressIndicator(),
 )</code></pre></section>
-<section><h2>7. Authenticated media</h2><p>หาก endpoint รูปต้องใช้ JWT, <code>Image.network</code> รองรับ headers บางกรณีแต่ cache/key ต้องระวัง token rotation ทางเลือกคือ signed URL อายุสั้นหรือ image provider/client ที่ inject auth และไม่บันทึก token ใน URL/log</p></section>
-<section><h2>8. Tests</h2><div class="success">ทดสอบ relative path มี/ไม่มี slash, base มี subpath, URL encoded Unicode/space, absolute trusted/untrusted host, HTTP ถูกปฏิเสธใน production และ URL version เปลี่ยนหลัง replace รูป</div></section>
+<section id="section-7"><h2>7. Authenticated media</h2><p>หาก endpoint รูปต้องใช้ JWT, <code>Image.network</code> รองรับ headers บางกรณีแต่ cache/key ต้องระวัง token rotation ทางเลือกคือ signed URL อายุสั้นหรือ image provider/client ที่ inject auth และไม่บันทึก token ใน URL/log</p></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">ทดสอบ relative path มี/ไม่มี slash, base มี subpath, URL encoded Unicode/space, absolute trusted/untrusted host, HTTP ถูกปฏิเสธใน production และ URL version เปลี่ยนหลัง replace รูป</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

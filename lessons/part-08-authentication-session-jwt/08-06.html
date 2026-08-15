@@ -4,23 +4,24 @@
 <title>Startup bootstrap ก่อน request แรก</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-06 · Auth Integration</span><h1>Startup bootstrap ก่อน request แรก</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Startup states</a></li><li><a href="#section-2">2. Ordered initialization</a></li><li><a href="#section-3">3. Splash ไม่ใช่ delay</a></li><li><a href="#section-4">4. First request invariant</a></li><li><a href="#section-5">5. Parallel ที่ปลอดภัย</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Acceptance</a></li></ol></nav>
 <div class="note"><strong>Bootstrap gate:</strong> ก่อน request แรกต้องโหลด connection profile และ auth session ให้เสร็จ มิฉะนั้น request อาจไป server default โดยไม่มี token แล้วเกิด 401 ที่ดูเหมือน logout</div>
-<section><h2>1. Startup states</h2><pre class="code-vs"><code>sealed class BootstrapState {}
+<section id="section-1"><h2>1. Startup states</h2><pre class="code-vs"><code>sealed class BootstrapState {}
 class Booting extends BootstrapState {}
 class NeedsLogin extends BootstrapState {}
 class Ready extends BootstrapState { Ready(this.session); final AuthSession session; }
 class BootFailed extends BootstrapState { BootFailed(this.message); final String message; }</code></pre></section>
-<section><h2>2. Ordered initialization</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
+<section id="section-2"><h2>2. Ordered initialization</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await connectionProfiles.load();
   await auth.restore();
   runApp(App(bootstrap: bootstrap));
 }</code></pre></section>
-<section><h2>3. Splash ไม่ใช่ delay</h2><p>Splash แสดงตาม Future/state จริง ไม่ใช้ fixed timer เพราะเครื่องเร็วเสียเวลา เครื่องช้ายัง race และ error ไม่มีทาง retry</p></section>
-<section><h2>4. First request invariant</h2><p>ApiClient ต้องมี base URL ที่ active และ token ที่ restore แล้วก่อน Store เริ่ม polling/load ใน <code>initState</code> ควรสร้าง authenticated shell หลัง gate ready เท่านั้น</p></section>
-<section><h2>5. Parallel ที่ปลอดภัย</h2><p>theme/language อาจโหลดคู่กันได้ แต่ auth restore ต้องรอ connection profile ถ้า session bind กับ server และ feature data ต้องรอ auth; วาด dependency graphก่อนใช้ <code>Future.wait</code></p></section>
-<section><h2>6. ของจริง</h2><p><code>wms_absolute_mobile/main.dart</code> เรียก <code>WidgetsFlutterBinding.ensureInitialized()</code> และรอ language/connection profile ก่อน <code>runApp</code>; Part นี้เพิ่ม session restore เข้า sequence เดียวกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ภาษาโหลดไม่ได้แต่ token/server ถูกต้อง ควร block app ทั้งหมดหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>ใช้ default locale และ log warning ได้ ส่วน connection/auth corruption ต้องเข้าสถานะ recoverable ที่ให้เลือก server/login ไม่ปล่อย feature request วิ่งผิด config</p></details></section>
-<section><h2>8. Acceptance</h2><div class="success">ไม่มี flash หน้า login ก่อน restore, ไม่มี request ก่อน ready, error retry ได้, logout ระหว่าง boot ปลอดภัย และ test ควบคุมลำดับด้วย fake dependencies</div></section>
+<section id="section-3"><h2>3. Splash ไม่ใช่ delay</h2><p>Splash แสดงตาม Future/state จริง ไม่ใช้ fixed timer เพราะเครื่องเร็วเสียเวลา เครื่องช้ายัง race และ error ไม่มีทาง retry</p></section>
+<section id="section-4"><h2>4. First request invariant</h2><p>ApiClient ต้องมี base URL ที่ active และ token ที่ restore แล้วก่อน Store เริ่ม polling/load ใน <code>initState</code> ควรสร้าง authenticated shell หลัง gate ready เท่านั้น</p></section>
+<section id="section-5"><h2>5. Parallel ที่ปลอดภัย</h2><p>theme/language อาจโหลดคู่กันได้ แต่ auth restore ต้องรอ connection profile ถ้า session bind กับ server และ feature data ต้องรอ auth; วาด dependency graphก่อนใช้ <code>Future.wait</code></p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p><code>wms_absolute_mobile/main.dart</code> เรียก <code>WidgetsFlutterBinding.ensureInitialized()</code> และรอ language/connection profile ก่อน <code>runApp</code>; Part นี้เพิ่ม session restore เข้า sequence เดียวกัน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ภาษาโหลดไม่ได้แต่ token/server ถูกต้อง ควร block app ทั้งหมดหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>ใช้ default locale และ log warning ได้ ส่วน connection/auth corruption ต้องเข้าสถานะ recoverable ที่ให้เลือก server/login ไม่ปล่อย feature request วิ่งผิด config</p></details></section>
+<section id="section-8"><h2>8. Acceptance</h2><div class="success">ไม่มี flash หน้า login ก่อน restore, ไม่มี request ก่อน ready, error retry ได้, logout ระหว่าง boot ปลอดภัย และ test ควบคุมลำดับด้วย fake dependencies</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,8 +4,9 @@
 <title>JWT response และ AuthSession</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-03 · Auth Integration</span><h1>JWT response และ AuthSession</h1><p>Part 8: Authentication, Session &amp; JWT</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. AuthSession</a></li><li><a href="#section-2">2. Claims ที่พบบ่อย</a></li><li><a href="#section-3">3. Server validation</a></li><li><a href="#section-4">4. Response vs decode token</a></li><li><a href="#section-5">5. Clock skew</a></li><li><a href="#section-6">6. ห้ามเก็บ secret ใน JWT</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Contract tests</a></li></ol></nav>
 <div class="note"><strong>JWT คือ signed access credential:</strong> header.payload.signature อ่าน payload ได้แต่แก้ไม่ได้โดยไม่ทำลาย signature; ไม่ใช่ encryption และ client ไม่ใช่ผู้ตัดสินความถูกต้องสุดท้าย</div>
-<section><h2>1. AuthSession</h2><pre class="code-vs"><code>class AuthSession {
+<section id="section-1"><h2>1. AuthSession</h2><pre class="code-vs"><code>class AuthSession {
   const AuthSession({required this.accessToken, required this.expiresAt,
     required this.username, required this.roles});
   final String accessToken;
@@ -14,12 +15,12 @@
   final Set&lt;String&gt; roles;
   bool isExpiredAt(DateTime now) =&gt; !now.isBefore(expiresAt);
 }</code></pre></section>
-<section><h2>2. Claims ที่พบบ่อย</h2><p><code>sub</code> คือ subject, <code>exp</code> expiration เป็น Unix seconds, <code>iss</code> issuer, <code>aud</code> audience และ role/name อาจใช้ URI claim type ตาม .NET configuration</p></section>
-<section><h2>3. Server validation</h2><p>.NET ต้องตรวจ signature, issuer, audience, expiration และ signing key ทุก request ส่วน Flutter อ่าน claimsเพื่อ UX ได้ แต่ server เป็น security authority</p></section>
-<section><h2>4. Response vs decode token</h2><p>ถ้า login response ส่ง username/roles/expiration แบบ typed จะลดการผูก client กับ claim naming แต่ต้องกำหนด source of truth; ถ้า decode JWT ให้รองรับ claim shape ที่ตกลงและ validate types</p></section>
-<section><h2>5. Clock skew</h2><p>ถือ token ใกล้หมดอายุเป็น expired ก่อนจริง เช่น 30–60 วินาที เพื่อลด request ที่หมดอายุระหว่างเดินทาง และเวลาใน device อาจคลาดเคลื่อน จึงควรใช้ server expiration/refresh policy อย่างระวัง</p></section>
-<section><h2>6. ห้ามเก็บ secret ใน JWT</h2><p>Payload decode ได้โดยผู้ถือ token ห้ามใส่ password, connection string หรือข้อมูลลับ; claim มากเกินทำ token ใหญ่และถูกส่งทุก request</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>UI decode role ADMIN จาก token แล้วเปิดปุ่มลบได้หรือไม่?</p><details><summary>เฉลย</summary><p>ใช้เพื่อปรับ UI ได้ แต่ DELETE endpoint ยังต้องตรวจ policy/role ฝั่ง .NET และ client ต้อง handle 403 เพราะ role อาจถูกถอนหรือ token ถูก revoke</p></details></section>
-<section><h2>8. Contract tests</h2><div class="success">ทดสอบ token/expiration missing, invalid date, exp seconds, roles string/list, expired/near-expiry และ claim names จาก .NET fixture จริง</div></section>
+<section id="section-2"><h2>2. Claims ที่พบบ่อย</h2><p><code>sub</code> คือ subject, <code>exp</code> expiration เป็น Unix seconds, <code>iss</code> issuer, <code>aud</code> audience และ role/name อาจใช้ URI claim type ตาม .NET configuration</p></section>
+<section id="section-3"><h2>3. Server validation</h2><p>.NET ต้องตรวจ signature, issuer, audience, expiration และ signing key ทุก request ส่วน Flutter อ่าน claimsเพื่อ UX ได้ แต่ server เป็น security authority</p></section>
+<section id="section-4"><h2>4. Response vs decode token</h2><p>ถ้า login response ส่ง username/roles/expiration แบบ typed จะลดการผูก client กับ claim naming แต่ต้องกำหนด source of truth; ถ้า decode JWT ให้รองรับ claim shape ที่ตกลงและ validate types</p></section>
+<section id="section-5"><h2>5. Clock skew</h2><p>ถือ token ใกล้หมดอายุเป็น expired ก่อนจริง เช่น 30–60 วินาที เพื่อลด request ที่หมดอายุระหว่างเดินทาง และเวลาใน device อาจคลาดเคลื่อน จึงควรใช้ server expiration/refresh policy อย่างระวัง</p></section>
+<section id="section-6"><h2>6. ห้ามเก็บ secret ใน JWT</h2><p>Payload decode ได้โดยผู้ถือ token ห้ามใส่ password, connection string หรือข้อมูลลับ; claim มากเกินทำ token ใหญ่และถูกส่งทุก request</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>UI decode role ADMIN จาก token แล้วเปิดปุ่มลบได้หรือไม่?</p><details><summary>เฉลย</summary><p>ใช้เพื่อปรับ UI ได้ แต่ DELETE endpoint ยังต้องตรวจ policy/role ฝั่ง .NET และ client ต้อง handle 403 เพราะ role อาจถูกถอนหรือ token ถูก revoke</p></details></section>
+<section id="section-8"><h2>8. Contract tests</h2><div class="success">ทดสอบ token/expiration missing, invalid date, exp seconds, roles string/list, expired/near-expiry และ claim names จาก .NET fixture จริง</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,14 +4,15 @@
 <title>เปรียบเทียบ trade-offs และ migration strategy</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">27-14 · State &amp; Lifecycle</span><h1>เปรียบเทียบ trade-offs และ migration strategy</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Provider</a></li><li><a href="#section-2">2. Riverpod</a></li><li><a href="#section-3">3. Cubit/Bloc</a></li><li><a href="#section-4">4. เลือกตาม codebase</a></li><li><a href="#section-5">5. ห้ามผสมไร้ boundary</a></li><li><a href="#section-6">6. Migration strategy</a></li><li><a href="#section-7">7. Exit strategy</a></li><li><a href="#section-8">8. ADR outcome</a></li></ol></nav>
 <div class="note"><strong>Trade-off matrix:</strong> ไม่มีคำตอบเดียวสำหรับทุกทีม แต่มีคำตอบที่อธิบายด้วย constraintsและ migration costได้</div>
-<section><h2>1. Provider</h2><p>จุดแข็งคือเล็ก, Flutter-native mental model, reuse ChangeNotifierเดิมและ ecosystemกว้าง จุดแลกคือ mutable state/notify granularityและ side-effect patternต้องออกแบบเอง</p></section>
-<section><h2>2. Riverpod</h2><p>จุดแข็งคือ graphไม่ผูก lookup typeกับ BuildContext, async/cache/override typedและ container tests จุดแลกคือ API surface/version evolutionและทีมต้องเข้าใจ provider lifecycle/invalidation</p></section>
-<section><h2>3. Cubit/Bloc</h2><p>จุดแข็งคือ explicit immutable transitions, stream tooling, Builder/Listener separationและ conventionทีมใหญ่ จุดแลกคือ types/boilerplateมากขึ้น โดย Bloc eventsไม่คุ้มทุก feature</p></section>
-<section><h2>4. เลือกตาม codebase</h2><p>แอป ChangeNotifierเดิมไม่ควร rewriteทั้งระบบเพื่อ trend เริ่ม Providerหรือคง injectionเดิมแล้วแก้ painจริง แอปใหม่ async graphหนักอาจเลือก Riverpod ทีมมี Bloc convention/observabilityอาจเลือก Cubit/Bloc</p></section>
-<section><h2>5. ห้ามผสมไร้ boundary</h2><p>migrationช่วงหนึ่งผสมได้ แต่กำหนด feature boundary/adapter/deadline ไม่ให้ widgetเดียวอ่านสาม containers เพราะ ownershipและdebug pathจะสับสน</p></section>
-<section><h2>6. Migration strategy</h2><ol><li>ตรึง behaviorด้วย tests</li><li>รักษา repository contract</li><li>ย้ายหนึ่ง vertical slice</li><li>วัด defects/rebuild/onboarding</li><li>ตัดสิน ADRก่อนขยาย</li></ol></section>
-<section><h2>7. Exit strategy</h2><p>Package choiceดีต้องเปลี่ยนออกได้โดย domain/repositoryไม่พัง หลีกเลี่ยง provider refs/BuildContext/Emitใน modelsและ data sources</p></section>
-<section><h2>8. ADR outcome</h2><div class="success">เขียน Decision, Context, Options, Consequences, Migration/Rollbackและ metrics ไม่ใช้ “นิยมกว่า” เป็นเหตุผลเดียว และทบทวนเมื่อ team/requirementsเปลี่ยน</div></section>
+<section id="section-1"><h2>1. Provider</h2><p>จุดแข็งคือเล็ก, Flutter-native mental model, reuse ChangeNotifierเดิมและ ecosystemกว้าง จุดแลกคือ mutable state/notify granularityและ side-effect patternต้องออกแบบเอง</p></section>
+<section id="section-2"><h2>2. Riverpod</h2><p>จุดแข็งคือ graphไม่ผูก lookup typeกับ BuildContext, async/cache/override typedและ container tests จุดแลกคือ API surface/version evolutionและทีมต้องเข้าใจ provider lifecycle/invalidation</p></section>
+<section id="section-3"><h2>3. Cubit/Bloc</h2><p>จุดแข็งคือ explicit immutable transitions, stream tooling, Builder/Listener separationและ conventionทีมใหญ่ จุดแลกคือ types/boilerplateมากขึ้น โดย Bloc eventsไม่คุ้มทุก feature</p></section>
+<section id="section-4"><h2>4. เลือกตาม codebase</h2><p>แอป ChangeNotifierเดิมไม่ควร rewriteทั้งระบบเพื่อ trend เริ่ม Providerหรือคง injectionเดิมแล้วแก้ painจริง แอปใหม่ async graphหนักอาจเลือก Riverpod ทีมมี Bloc convention/observabilityอาจเลือก Cubit/Bloc</p></section>
+<section id="section-5"><h2>5. ห้ามผสมไร้ boundary</h2><p>migrationช่วงหนึ่งผสมได้ แต่กำหนด feature boundary/adapter/deadline ไม่ให้ widgetเดียวอ่านสาม containers เพราะ ownershipและdebug pathจะสับสน</p></section>
+<section id="section-6"><h2>6. Migration strategy</h2><ol><li>ตรึง behaviorด้วย tests</li><li>รักษา repository contract</li><li>ย้ายหนึ่ง vertical slice</li><li>วัด defects/rebuild/onboarding</li><li>ตัดสิน ADRก่อนขยาย</li></ol></section>
+<section id="section-7"><h2>7. Exit strategy</h2><p>Package choiceดีต้องเปลี่ยนออกได้โดย domain/repositoryไม่พัง หลีกเลี่ยง provider refs/BuildContext/Emitใน modelsและ data sources</p></section>
+<section id="section-8"><h2>8. ADR outcome</h2><div class="success">เขียน Decision, Context, Options, Consequences, Migration/Rollbackและ metrics ไม่ใช้ “นิยมกว่า” เป็นเหตุผลเดียว และทบทวนเมื่อ team/requirementsเปลี่ยน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

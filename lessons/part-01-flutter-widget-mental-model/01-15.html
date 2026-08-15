@@ -4,8 +4,9 @@
 <title>Lab: Dashboard widget tree</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-15 · Flutter UI</span><h1>Lab: Dashboard widget tree</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Root-to-dashboard trace</a></li><li><a href="#section-2">2. HomeView tree</a></li><li><a href="#section-3">3. Identity map</a></li><li><a href="#section-4">4. Rebuild experiment</a></li><li><a href="#section-5">5. Code reading questions</a></li><li><a href="#section-6">6. Widget test assignment</a></li><li><a href="#section-7">7. เปรียบเทียบ wmsapp</a></li><li><a href="#section-8">8. Part 1 Exit Test</a></li></ol></nav>
 <div class="note"><strong>Lab:</strong> อ่าน Dashboard widget tree ของ <code>wms_absolute_mobile</code> จาก runtime ownerลงถึง responsive tiles แล้วพิสูจน์ identity/rebuild/local stateด้วย Inspectorและ widget tests ไม่ใช่แค่วาดกล่องจากภาพ</div>
-<section><h2>1. Root-to-dashboard trace</h2><pre class="code-vs"><code>main
+<section id="section-1"><h2>1. Root-to-dashboard trace</h2><pre class="code-vs"><code>main
 └─ WmsApp (ListenableBuilder: language)
    └─ MaterialApp + app-wide SafeArea
       └─ LoginScreen
@@ -16,7 +17,7 @@
                │     └─ KeyedSubtree(ValueKey(store.screen))
                │        └─ HomeView
                └─ ListenableBuilder(store): bottom nav</code></pre></section>
-<section><h2>2. HomeView tree</h2><pre class="code-vs"><code>HomeView (Stateless, receives store)
+<section id="section-2"><h2>2. HomeView tree</h2><pre class="code-vs"><code>HomeView (Stateless, receives store)
 └─ LayoutBuilder(page constraints)
    └─ Padding → Column
       ├─ DispatchTile(callback → store.nav)
@@ -24,17 +25,17 @@
       │  └─ LayoutBuilder(grid constraints)
       │     └─ GridView → Tile[] → HomeIcon/AutoSizeText
       └─ SummaryCard (Stateful: list/chart local mode)</code></pre><p>Responsiveค่ามาจาก constraints; business counts/navigationมาจาก store; list/chartเป็น local presentation state นี่คือ ownerสามระดับที่ต้องแยก</p></section>
-<section><h2>3. Identity map</h2><ul><li><code>ValueKey(store.screen)</code>: screen identityสำหรับ AnimatedSwitcher</li><li>title/sub ValueKeys: identityของ responsive AutoSizeText</li><li>dashboard list/chart keys: AnimatedSwitcher state/animationและ test finder</li><li>GlobalKey Formอยู่ Loginไม่ใช่ Dashboard เพราะ operation validateอยู่ที่นั่น</li></ul></section>
-<section><h2>4. Rebuild experiment</h2><ol><li>เปิด Inspector/track rebuilds</li><li>สลับภาษา: root MaterialApp/inherited localization subtreeเปลี่ยน</li><li>store notify badge: shell listenersและ dependent body/nav build</li><li>สลับ list/chart: SummaryCard setState subtreeเฉพาะ card</li><li>resize Windows/PDA: LayoutBuildersคำนวณ compact/narrow/extentใหม่</li></ol><p>บันทึกสิ่งที่สังเกตจริง ไม่สรุปจากทฤษฎีอย่างเดียว</p></section>
-<section><h2>5. Code reading questions</h2><ul><li>เหตุใด HomeViewยัง statelessทั้งที่ badgeเปลี่ยน?</li><li>ทำไม SummaryCard stateไม่ย้ายเข้า WarehouseStore?</li><li>ถ้าลบ ValueKey(store.screen) transition/stateจะต่างอย่างไร?</li><li>ใคร dispose store/timers/observer?</li><li>API ถูกยิงใน buildหรือ lifecycleใด?</li></ul></section>
-<section><h2>6. Widget test assignment</h2><pre class="code-vs"><code>testWidgets('dashboard switches list to chart', (tester) async {
+<section id="section-3"><h2>3. Identity map</h2><ul><li><code>ValueKey(store.screen)</code>: screen identityสำหรับ AnimatedSwitcher</li><li>title/sub ValueKeys: identityของ responsive AutoSizeText</li><li>dashboard list/chart keys: AnimatedSwitcher state/animationและ test finder</li><li>GlobalKey Formอยู่ Loginไม่ใช่ Dashboard เพราะ operation validateอยู่ที่นั่น</li></ul></section>
+<section id="section-4"><h2>4. Rebuild experiment</h2><ol><li>เปิด Inspector/track rebuilds</li><li>สลับภาษา: root MaterialApp/inherited localization subtreeเปลี่ยน</li><li>store notify badge: shell listenersและ dependent body/nav build</li><li>สลับ list/chart: SummaryCard setState subtreeเฉพาะ card</li><li>resize Windows/PDA: LayoutBuildersคำนวณ compact/narrow/extentใหม่</li></ol><p>บันทึกสิ่งที่สังเกตจริง ไม่สรุปจากทฤษฎีอย่างเดียว</p></section>
+<section id="section-5"><h2>5. Code reading questions</h2><ul><li>เหตุใด HomeViewยัง statelessทั้งที่ badgeเปลี่ยน?</li><li>ทำไม SummaryCard stateไม่ย้ายเข้า WarehouseStore?</li><li>ถ้าลบ ValueKey(store.screen) transition/stateจะต่างอย่างไร?</li><li>ใคร dispose store/timers/observer?</li><li>API ถูกยิงใน buildหรือ lifecycleใด?</li></ul></section>
+<section id="section-6"><h2>6. Widget test assignment</h2><pre class="code-vs"><code>testWidgets('dashboard switches list to chart', (tester) async {
   await tester.pumpWidget(buildDashboard(fakeStore));
   expect(find.byKey(const ValueKey('dashboard-list')), findsOneWidget);
   await tester.tap(find.byKey(const ValueKey('dashboard-mode-chart')));
   await tester.pumpAndSettle();
   expect(find.byKey(const ValueKey('dashboard-chart')), findsOneWidget);
 });</code></pre><p>เพิ่ม test badge/store notifyและ narrow constraintอีกอย่างละหนึ่งเคส โดยใช้ fakeไม่ต่อ network</p></section>
-<section><h2>7. เปรียบเทียบ wmsapp</h2><p>วาด root <code>ValueListenableBuilder(theme) → MaterialApp → HomeScreen</code> แล้วเลือก menu cardหนึ่งใบ trace callback → Navigator → screen เปรียบเทียบว่า stateอยู่ screen-localมากกว่า absolute store-centricอย่างไร ยังไม่ตัดสินว่าแบบใดดีกว่าจนดู testability/flowใน Part architecture</p></section>
-<section><h2>8. Part 1 Exit Test</h2><div class="success"><ul><li>แยก Widget/Element/RenderObjectและ build/layout/paintได้</li><li>วาง state/resourceใน Stateless/State/storeตาม lifetimeได้</li><li>ใช้ context/key/callback/listenableโดยอธิบาย identity/dependencyได้</li><li>trace Dashboardจาก mainถึง tileและกลับจาก tapถึง storeได้</li><li>เขียน widget testพิสูจน์ local stateกับ store rebuildได้</li></ul></div></section>
+<section id="section-7"><h2>7. เปรียบเทียบ wmsapp</h2><p>วาด root <code>ValueListenableBuilder(theme) → MaterialApp → HomeScreen</code> แล้วเลือก menu cardหนึ่งใบ trace callback → Navigator → screen เปรียบเทียบว่า stateอยู่ screen-localมากกว่า absolute store-centricอย่างไร ยังไม่ตัดสินว่าแบบใดดีกว่าจนดู testability/flowใน Part architecture</p></section>
+<section id="section-8"><h2>8. Part 1 Exit Test</h2><div class="success"><ul><li>แยก Widget/Element/RenderObjectและ build/layout/paintได้</li><li>วาง state/resourceใน Stateless/State/storeตาม lifetimeได้</li><li>ใช้ context/key/callback/listenableโดยอธิบาย identity/dependencyได้</li><li>trace Dashboardจาก mainถึง tileและกลับจาก tapถึง storeได้</li><li>เขียน widget testพิสูจน์ local stateกับ store rebuildได้</li></ul></div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,27 +4,28 @@
 <title>สร้าง project + feature folders</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">24-02 · Project Lab</span><h1>สร้าง project + feature folders</h1><p>Part 24: Final Project: Production-style Mobile WMS</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Bootstrap</a></li><li><a href="#section-2">2. Target folders</a></li><li><a href="#section-3">3. Feature anatomy</a></li><li><a href="#section-4">4. Dependency rule</a></li><li><a href="#section-5">5. Composition root</a></li><li><a href="#section-6">6. Environment config</a></li><li><a href="#section-7">7. Git milestones</a></li><li><a href="#section-8">8. Checkpoint</a></li></ol></nav>
 <div class="note"><strong>เริ่มจากของจริง:</strong> starterมี <code>core/api_client.dart</code> และ <code>features/tasks/{model,repository,store,screen}</code> อยู่แล้ว ให้ขยาย feature-first ไม่ทิ้งแล้วสร้างใหม่ทั้งก้อน</div>
-<section><h2>1. Bootstrap</h2><pre class="code-vs"><code>flutter pub get
+<section id="section-1"><h2>1. Bootstrap</h2><pre class="code-vs"><code>flutter pub get
 flutter analyze
 flutter test
 dotnet build .\labs\dotnet\WmsMobileApi
 dotnet run --project ... --urls http://0.0.0.0:5080</code></pre><p>เก็บ baseline outputก่อนแก้และยืนยัน emulatorใช้ 10.0.2.2 ไม่ใช่ localhostของมือถือ</p></section>
-<section><h2>2. Target folders</h2><pre class="code-vs"><code>lib/
+<section id="section-2"><h2>2. Target folders</h2><pre class="code-vs"><code>lib/
   app/             app.dart, composition_root.dart
   core/            api, config, auth boundary, result
   design/          theme, localization, PDA widgets
   features/
     auth/ dashboard/ receiving/ inventory/
     cycle_count/ tasks/ attachments/</code></pre></section>
-<section><h2>3. Feature anatomy</h2><p>แต่ละ featureมี model/domain, repository contract, remote implementation, store/controllerและ presentationเท่าที่จำเป็น ไม่บังคับสร้างห้า foldersว่างทุก feature; dependency directionสำคัญกว่าหน้าตา tree</p></section>
-<section><h2>4. Dependency rule</h2><p>Widgetรู้ Storeและview data, Storeรู้ repository contract, remote repositoryรู้ ApiClient/DTO แต่ ApiClientไม่ import feature ห้าม feature Aแก้ public mutable listของ B; cross-feature eventผ่าน coordinatorหรือ explicit method</p></section>
-<section><h2>5. Composition root</h2><pre class="code-vs"><code>ApiClient → AuthRepository
+<section id="section-3"><h2>3. Feature anatomy</h2><p>แต่ละ featureมี model/domain, repository contract, remote implementation, store/controllerและ presentationเท่าที่จำเป็น ไม่บังคับสร้างห้า foldersว่างทุก feature; dependency directionสำคัญกว่าหน้าตา tree</p></section>
+<section id="section-4"><h2>4. Dependency rule</h2><p>Widgetรู้ Storeและview data, Storeรู้ repository contract, remote repositoryรู้ ApiClient/DTO แต่ ApiClientไม่ import feature ห้าม feature Aแก้ public mutable listของ B; cross-feature eventผ่าน coordinatorหรือ explicit method</p></section>
+<section id="section-5"><h2>5. Composition root</h2><pre class="code-vs"><code>ApiClient → AuthRepository
           → TaskRepository / InventoryRepository / ...
 repositories → feature stores
 stores → AppShell</code></pre><p>สร้าง graphจุดเดียวและกำหนด scope: app-wide config, session-wide client, feature-wide store</p></section>
-<section><h2>6. Environment config</h2><p>ใช้ <code>--dart-define</code>เป็น bootstrap fallbackแล้วให้ connection profileเป็น runtime choice ห้าม commit production URL/token signing password และ validate URLก่อนสร้าง request</p></section>
-<section><h2>7. Git milestones</h2><p>commitต่อ vertical sliceที่ build/testได้ ไม่ commit generated build/bin/obj และไม่ผสม formatterทั้ง repoกับ behavior change ตั้ง branch/PRพร้อม acceptance criteriaและ rollback noteสำหรับ mutation flow</p></section>
-<section><h2>8. Checkpoint</h2><div class="success">ก่อนบทถัดไป starterยังโหลด/complete taskได้, testsเดิมผ่าน, composition rootสร้าง dependenciesชัดและไม่มี screenใหม่ ApiClient/serviceเองจากภายใน widget</div></section>
+<section id="section-6"><h2>6. Environment config</h2><p>ใช้ <code>--dart-define</code>เป็น bootstrap fallbackแล้วให้ connection profileเป็น runtime choice ห้าม commit production URL/token signing password และ validate URLก่อนสร้าง request</p></section>
+<section id="section-7"><h2>7. Git milestones</h2><p>commitต่อ vertical sliceที่ build/testได้ ไม่ commit generated build/bin/obj และไม่ผสม formatterทั้ง repoกับ behavior change ตั้ง branch/PRพร้อม acceptance criteriaและ rollback noteสำหรับ mutation flow</p></section>
+<section id="section-8"><h2>8. Checkpoint</h2><div class="success">ก่อนบทถัดไป starterยังโหลด/complete taskได้, testsเดิมผ่าน, composition rootสร้าง dependenciesชัดและไม่มี screenใหม่ ApiClient/serviceเองจากภายใน widget</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

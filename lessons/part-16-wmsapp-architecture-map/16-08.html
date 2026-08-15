@@ -4,20 +4,21 @@
 <title>Model folders และ fromJson patterns</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-08 · Real Codebase</span><h1>Model folders และ fromJson patterns</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Barrel map</a></li><li><a href="#section-2">2. Simple fromJson</a></li><li><a href="#section-3">3. Nested collections</a></li><li><a href="#section-4">4. Naming/casing</a></li><li><a href="#section-5">5. Nullability</a></li><li><a href="#section-6">6. Domain vs DTO</a></li><li><a href="#section-7">7. Immutability/equality</a></li><li><a href="#section-8">8. Contract checklist</a></li></ol></nav>
 <div class="note"><strong>models คือ DTO boundary:</strong> <code>wms_models.dart</code>เป็น barrel exportไปยัง commonและ 8 domain model files ทำให้ ApiService importครั้งเดียว แต่ screenบางแห่ง importไฟล์โดเมนตรงเพื่อ dependencyชัดกว่า</div>
-<section><h2>1. Barrel map</h2><pre class="code-vs"><code>common/user.dart, common/part.dart
+<section id="section-1"><h2>1. Barrel map</h2><pre class="code-vs"><code>common/user.dart, common/part.dart
 receiving, unload, putaway, picking,
 packing, basket, checkin, sorting</code></pre></section>
-<section><h2>2. Simple fromJson</h2><pre class="code-vs"><code>factory Part.fromJson(Map&lt;String, dynamic&gt; json) =&gt; Part(
+<section id="section-2"><h2>2. Simple fromJson</h2><pre class="code-vs"><code>factory Part.fromJson(Map&lt;String, dynamic&gt; json) =&gt; Part(
   partId: json['partId'],
   owner: json['owner'],
   imageUrl: json['imageUrl'],
 );</code></pre><p>อ่านง่ายแต่ required fieldผิดชนิด/nullจะ throw runtime cast ไม่บอก JSON pathชัดเจน</p></section>
-<section><h2>3. Nested collections</h2><p>response models map listย่อยด้วย <code>.map(...fromJson).toList()</code> ต้องตรวจ root key missing/null/wrong type, elementไม่ใช่ Mapและ empty list จาก fixtureจริง อย่าเชื่อ <code>response.data!</code>โดยไม่มี contract</p></section>
-<section><h2>4. Naming/casing</h2><p>DTO keysสะท้อน backendหลาย style เช่น partIdกับ business abbreviations ให้ codecชั้นเดียวรับผิดชอบ ห้ามกระจาย <code>json['...']</code>ใน widgets เพราะ renameหนึ่ง keyจะแก้หลายหน้า</p></section>
-<section><h2>5. Nullability</h2><p>nullableต้องหมายถึง domainจริง ไม่ใช่ใช้ <code>?/?? ''</code>เพื่อกลบ server bug Required fieldควร failพร้อม field pathใน repositoryและ UIแสดง contract error ไม่ renderข้อมูลผิดเงียบ ๆ</p></section>
-<section><h2>6. Domain vs DTO</h2><p>ปัจจุบันหลาย classเป็นทั้ง wire DTOและ UI model ใช้ง่ายแต่ status string/date/number semanticsรั่ว Refactorเฉพาะจุดซับซ้อนให้ DTO parseก่อนแล้ว mapเป็น domain type เช่น enum, Quantity, EntityId</p></section>
-<section><h2>7. Immutability/equality</h2><p>fieldsส่วนใหญ่ finalแต่ constructorsไม่ const/equalityไม่ได้กำหนด Store/testจึงอาจเปรียบเทียบ identity เพิ่ม value equality/copyWithเมื่อ state architectureต้องใช้ ไม่ทำ mechanical rewriteทุก modelโดยไม่มี consumer</p></section>
-<section><h2>8. Contract checklist</h2><div class="success">happy fixtureจาก .NET, missing/null/wrong type, unknown status, int/double, Thai/Unicode, UTC/offset, extra fields, empty/nested list และ outbound key names พร้อมผูก OpenAPI/integration testกัน drift</div></section>
+<section id="section-3"><h2>3. Nested collections</h2><p>response models map listย่อยด้วย <code>.map(...fromJson).toList()</code> ต้องตรวจ root key missing/null/wrong type, elementไม่ใช่ Mapและ empty list จาก fixtureจริง อย่าเชื่อ <code>response.data!</code>โดยไม่มี contract</p></section>
+<section id="section-4"><h2>4. Naming/casing</h2><p>DTO keysสะท้อน backendหลาย style เช่น partIdกับ business abbreviations ให้ codecชั้นเดียวรับผิดชอบ ห้ามกระจาย <code>json['...']</code>ใน widgets เพราะ renameหนึ่ง keyจะแก้หลายหน้า</p></section>
+<section id="section-5"><h2>5. Nullability</h2><p>nullableต้องหมายถึง domainจริง ไม่ใช่ใช้ <code>?/?? ''</code>เพื่อกลบ server bug Required fieldควร failพร้อม field pathใน repositoryและ UIแสดง contract error ไม่ renderข้อมูลผิดเงียบ ๆ</p></section>
+<section id="section-6"><h2>6. Domain vs DTO</h2><p>ปัจจุบันหลาย classเป็นทั้ง wire DTOและ UI model ใช้ง่ายแต่ status string/date/number semanticsรั่ว Refactorเฉพาะจุดซับซ้อนให้ DTO parseก่อนแล้ว mapเป็น domain type เช่น enum, Quantity, EntityId</p></section>
+<section id="section-7"><h2>7. Immutability/equality</h2><p>fieldsส่วนใหญ่ finalแต่ constructorsไม่ const/equalityไม่ได้กำหนด Store/testจึงอาจเปรียบเทียบ identity เพิ่ม value equality/copyWithเมื่อ state architectureต้องใช้ ไม่ทำ mechanical rewriteทุก modelโดยไม่มี consumer</p></section>
+<section id="section-8"><h2>8. Contract checklist</h2><div class="success">happy fixtureจาก .NET, missing/null/wrong type, unknown status, int/double, Thai/Unicode, UTC/offset, extra fields, empty/nested list และ outbound key names พร้อมผูก OpenAPI/integration testกัน drift</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

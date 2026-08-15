@@ -4,8 +4,9 @@
 <title>Callback จาก child กลับ parent</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-12 · Flutter UI</span><h1>Callback จาก child กลับ parent</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Typed callback</a></li><li><a href="#section-2">2. Child แจ้ง intent ไม่แก้ parent state</a></li><li><a href="#section-3">3. Closure เพิ่ม argument</a></li><li><a href="#section-4">4. Async callback และ duplicate tap</a></li><li><a href="#section-5">5. Result จาก dialog/route</a></li><li><a href="#section-6">6. Callback identity/performance</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Data/config ไหล parent → child ผ่าน constructor ส่วน event ไหล child → owner ผ่าน typed callback นี่คือ unidirectional UIพื้นฐานที่ทำให้ child reusableและ business mutationมีจุดเดียว</div>
-<section><h2>1. Typed callback</h2><pre class="code-vs"><code>class QuantityEditor extends StatelessWidget {
+<section id="section-1"><h2>1. Typed callback</h2><pre class="code-vs"><code>class QuantityEditor extends StatelessWidget {
   const QuantityEditor({
     super.key,
     required this.value,
@@ -16,24 +17,24 @@
   final ValueChanged&lt;int&gt; onChanged;
   final Future&lt;void&gt; Function() onConfirm;
 }</code></pre><p>อย่าใช้ <code>Function</code> กว้างเพราะ compilerตรวจ argument/returnไม่ได้ Signatureบอก async/error ownershipให้เห็น</p></section>
-<section><h2>2. Child แจ้ง intent ไม่แก้ parent state</h2><pre class="code-vs"><code>QuantityEditor(
+<section id="section-2"><h2>2. Child แจ้ง intent ไม่แก้ parent state</h2><pre class="code-vs"><code>QuantityEditor(
   value: store.quantity,
   onChanged: store.setQuantity,
   onConfirm: store.confirmPick,
 )</code></pre><p>Childไม่ต้องรู้ setState/ChangeNotifier/API Parent/storeตรวจ invariantและ notifyกลับลงมาเป็น valueใหม่</p></section>
-<section><h2>3. Closure เพิ่ม argument</h2><pre class="code-vs"><code>_Tile(
+<section id="section-3"><h2>3. Closure เพิ่ม argument</h2><pre class="code-vs"><code>_Tile(
   title: 'Receiving',
   onTap: () =&gt; store.nav('receive'),
 )</code></pre><p>HomeViewใช้ patternนี้ Closureเหมาะ adapterสั้น ๆ แต่ถ้าจับ stateหลายตัว/logicยาวให้ใช้ named methodเพื่อ stack trace/test/อ่านง่าย</p></section>
-<section><h2>4. Async callback และ duplicate tap</h2><p>Widget button APIรับ void callbackจึงไม่ await Futureอัตโนมัติ Ownerต้องกัน busy, catch errorและแสดง loading Childอาจ disableด้วย <code>onPressed: busy ? null : onConfirm</code> อย่าให้ทั้ง childและparentมี busyคนละค่า</p></section>
-<section><h2>5. Result จาก dialog/route</h2><p>บาง eventเหมาะ request-responseผ่าน Future เช่น <code>showDialog&lt;bool&gt;</code> หรือ Navigator.pushคืน result Parent awaitแล้วตรวจ mountedก่อน commit state ทำให้ dialogเป็น presentation componentไม่เรียก repositoryเอง</p></section>
-<section><h2>6. Callback identity/performance</h2><p>closureใหม่ทุก buildปกติไม่ใช่ปัญหาหลัก อย่า optimizeด้วย cache callbackก่อนวัด ให้สนใจ side effectและ rebuild scopeก่อน แต่ listener APIที่ removeต้องใช้ callback instanceเดียวกับตอน add จึงเก็บ method/fieldตาม lifecycle</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ ScanBoxที่แจ้ง barcode submitและไม่รู้ API/store</p><details><summary>เฉลย</summary><pre class="code-vs"><code>class ScanBox extends StatelessWidget {
+<section id="section-4"><h2>4. Async callback และ duplicate tap</h2><p>Widget button APIรับ void callbackจึงไม่ await Futureอัตโนมัติ Ownerต้องกัน busy, catch errorและแสดง loading Childอาจ disableด้วย <code>onPressed: busy ? null : onConfirm</code> อย่าให้ทั้ง childและparentมี busyคนละค่า</p></section>
+<section id="section-5"><h2>5. Result จาก dialog/route</h2><p>บาง eventเหมาะ request-responseผ่าน Future เช่น <code>showDialog&lt;bool&gt;</code> หรือ Navigator.pushคืน result Parent awaitแล้วตรวจ mountedก่อน commit state ทำให้ dialogเป็น presentation componentไม่เรียก repositoryเอง</p></section>
+<section id="section-6"><h2>6. Callback identity/performance</h2><p>closureใหม่ทุก buildปกติไม่ใช่ปัญหาหลัก อย่า optimizeด้วย cache callbackก่อนวัด ให้สนใจ side effectและ rebuild scopeก่อน แต่ listener APIที่ removeต้องใช้ callback instanceเดียวกับตอน add จึงเก็บ method/fieldตาม lifecycle</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ออกแบบ ScanBoxที่แจ้ง barcode submitและไม่รู้ API/store</p><details><summary>เฉลย</summary><pre class="code-vs"><code>class ScanBox extends StatelessWidget {
   const ScanBox({super.key, required this.busy, required this.onSubmitted});
   final bool busy;
   final Future&lt;void&gt; Function(String barcode) onSubmitted;
   // normalizeขั้น presentationขั้นต่ำ; owner validate/domain/API
 }</code></pre><p>Ownerส่ง <code>(code) =&gt; store.submitScan(code)</code> และ busyจาก sourceเดียว</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Callback chainผ่าน 5ชั้นอาจบอกว่า state ownerอยู่ไกลเกิน ควรย้าย feature container/storeใกล้ consumersหรือใช้ inherited/providerอย่างมีขอบเขต ไม่แก้ด้วย global singletonทันที</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Callback chainผ่าน 5ชั้นอาจบอกว่า state ownerอยู่ไกลเกิน ควรย้าย feature container/storeใกล้ consumersหรือใช้ inherited/providerอย่างมีขอบเขต ไม่แก้ด้วย global singletonทันที</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

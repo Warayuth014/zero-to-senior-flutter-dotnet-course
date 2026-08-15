@@ -4,14 +4,15 @@
 <title>Immutable TaskPatternState และ Cubit implementation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">27-11 · State &amp; Lifecycle</span><h1>Immutable TaskPatternState และ Cubit implementation</h1><p>Part 27: State Management: Provider, Riverpod &amp; BLoC/Cubit</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. State fields</a></li><li><a href="#section-2">2. Unmodifiable collections</a></li><li><a href="#section-3">3. Nullable copyWith</a></li><li><a href="#section-4">4. Cubit load</a></li><li><a href="#section-5">5. Cubit complete</a></li><li><a href="#section-6">6. Equality</a></li><li><a href="#section-7">7. State explosion</a></li><li><a href="#section-8">8. Exercise</a></li></ol></nav>
 <div class="note"><strong>Immutable TaskPatternState:</strong> snapshotเดียวถูกใช้โดย RiverpodและCubitเพื่อให้การเปรียบเทียบไม่ปนกับ modelคนละแบบ</div>
-<section><h2>1. State fields</h2><p><code>tasks</code>, <code>refreshing</code>, <code>busyTaskIds</code>, <code>error</code> และ <code>message</code> ครอบ read/action dimensionsโดยไม่เอา repository/clientเข้ามาใน state</p></section>
-<section><h2>2. Unmodifiable collections</h2><p>constructor/copyWithสร้าง read-only list/set ป้องกัน snapshotเก่าถูกแก้ย้อนหลัง ซึ่งทำให้ time-travel/debug/equalityเสียความหมาย</p></section>
-<section><h2>3. Nullable copyWith</h2><p>ใช้ sentinelแยก “ไม่เปลี่ยน error” จาก “ตั้ง errorเป็น null” เพราะ parameter <code>String? error</code> อย่างเดียวแยกสอง intentไม่ได้</p></section>
-<section><h2>4. Cubit load</h2><p>emit refreshing trueก่อน await แล้ว emit tasks/errorหลังจบ UIจึงวาดจาก stateอย่างเดียว ไม่มี hidden mutable booleanนอก stream</p></section>
-<section><h2>5. Cubit complete</h2><p>เพิ่ม busy id, ส่ง command, ลบ taskและปลด busyด้วย snapshotsใหม่ Known/unknown errorsเดิน pathต่างและ reconcileผ่าน repository</p></section>
-<section><h2>6. Equality</h2><p>Labไม่เพิ่ม Equatableเพราะ emit instanceใหม่ทุกครั้งและ testsตรวจ fields ระบบใหญ่ควรใช้ value equality/freezedเพื่อ BlocSelector/distinct/testsที่แม่น แต่ต้องเข้าใจ collection equality</p></section>
-<section><h2>7. State explosion</h2><p>อย่าสร้าง booleanทุก combinationจน invalid statesเกิดง่าย อาจใช้ sealed states/substatesสำหรับ workflowขั้นตอน หรือแยก resource stateจาก command stateตาม aggregate</p></section>
-<section><h2>8. Exercise</h2><div class="success">เขียน invariant: task idห้ามอยู่ busyถ้าไม่อยู่ tasks ยกเว้นช่วง reconciliation แล้วเพิ่ม assertion/test ตรวจทุก Cubit emission สำคัญ</div></section>
+<section id="section-1"><h2>1. State fields</h2><p><code>tasks</code>, <code>refreshing</code>, <code>busyTaskIds</code>, <code>error</code> และ <code>message</code> ครอบ read/action dimensionsโดยไม่เอา repository/clientเข้ามาใน state</p></section>
+<section id="section-2"><h2>2. Unmodifiable collections</h2><p>constructor/copyWithสร้าง read-only list/set ป้องกัน snapshotเก่าถูกแก้ย้อนหลัง ซึ่งทำให้ time-travel/debug/equalityเสียความหมาย</p></section>
+<section id="section-3"><h2>3. Nullable copyWith</h2><p>ใช้ sentinelแยก “ไม่เปลี่ยน error” จาก “ตั้ง errorเป็น null” เพราะ parameter <code>String? error</code> อย่างเดียวแยกสอง intentไม่ได้</p></section>
+<section id="section-4"><h2>4. Cubit load</h2><p>emit refreshing trueก่อน await แล้ว emit tasks/errorหลังจบ UIจึงวาดจาก stateอย่างเดียว ไม่มี hidden mutable booleanนอก stream</p></section>
+<section id="section-5"><h2>5. Cubit complete</h2><p>เพิ่ม busy id, ส่ง command, ลบ taskและปลด busyด้วย snapshotsใหม่ Known/unknown errorsเดิน pathต่างและ reconcileผ่าน repository</p></section>
+<section id="section-6"><h2>6. Equality</h2><p>Labไม่เพิ่ม Equatableเพราะ emit instanceใหม่ทุกครั้งและ testsตรวจ fields ระบบใหญ่ควรใช้ value equality/freezedเพื่อ BlocSelector/distinct/testsที่แม่น แต่ต้องเข้าใจ collection equality</p></section>
+<section id="section-7"><h2>7. State explosion</h2><p>อย่าสร้าง booleanทุก combinationจน invalid statesเกิดง่าย อาจใช้ sealed states/substatesสำหรับ workflowขั้นตอน หรือแยก resource stateจาก command stateตาม aggregate</p></section>
+<section id="section-8"><h2>8. Exercise</h2><div class="success">เขียน invariant: task idห้ามอยู่ busyถ้าไม่อยู่ tasks ยกเว้นช่วง reconciliation แล้วเพิ่ม assertion/test ตรวจทุก Cubit emission สำคัญ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

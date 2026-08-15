@@ -4,16 +4,17 @@
 <title>Single source of truth</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-09 · Architecture</span><h1>Single source of truth</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Choose owner</a></li><li><a href="#section-2">2. Derived state</a></li><li><a href="#section-3">3. Mutable list trap</a></li><li><a href="#section-4">4. Remote refresh</a></li><li><a href="#section-5">5. Cache is not another truth</a></li><li><a href="#section-6">6. Selection by ID</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Review questions</a></li></ol></nav>
 <div class="note"><strong>Single source of truth (SSOT):</strong> ข้อมูลหนึ่งชนิดมี ownerหลักหนึ่งจุด ส่วนค่าที่เหลือ deriveหรือ snapshotตาม contract ไม่ copy mutable stateหลายที่แล้วหวังว่าจะ syncเอง</div>
-<section><h2>1. Choose owner</h2><p>Authenticated userอยู่ AuthStore, active serverอยู่ ConnectionController, receiving workflowอยู่ ReceivingStore และ server inventoryเป็น authoritative remote stateที่ repositoryโหลดเข้ามา</p></section>
-<section><h2>2. Derived state</h2><pre class="code-vs"><code>List&lt;Task&gt; get openTasks =&gt;
+<section id="section-1"><h2>1. Choose owner</h2><p>Authenticated userอยู่ AuthStore, active serverอยู่ ConnectionController, receiving workflowอยู่ ReceivingStore และ server inventoryเป็น authoritative remote stateที่ repositoryโหลดเข้ามา</p></section>
+<section id="section-2"><h2>2. Derived state</h2><pre class="code-vs"><code>List&lt;Task&gt; get openTasks =&gt;
     state.tasks.where((task) =&gt; task.status == TaskStatus.open).toList();
 int get openCount =&gt; openTasks.length;</code></pre><p>ไม่เก็บ <code>openCount</code> แยกถ้าคำนวณได้ เพราะ mutationอาจลืมอัปเดต</p></section>
-<section><h2>3. Mutable list trap</h2><p>ห้าม expose <code>final List tasks</code> ให้ widget <code>add/remove</code> ได้ คืน <code>UnmodifiableListView</code> หรือ immutable stateและเปลี่ยนผ่าน actions</p></section>
-<section><h2>4. Remote refresh</h2><p>หลัง command success เลือก patch stateจาก typed responseหรือ re-fetch authoritative dataตาม consistency/performance ไม่ patchหนึ่ง storeแต่ลืม dashboardอีก store</p></section>
-<section><h2>5. Cache is not another truth</h2><p>cacheเป็นสำเนาที่มี freshness/version policy Repositoryเป็นผู้ reconcile remote/local และเปิด metadataเช่น stale/offlineให้ UIรู้</p></section>
-<section><h2>6. Selection by ID</h2><p>เก็บ selectedTaskIdแทน copy Task object เมื่อ list refresh getterหา current objectจาก SSOT ลดรายละเอียดเก่าค้าง แต่ handle IDหายอย่างชัดเจน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>HomeStoreกับTaskStoreถือ list tasksคนละชุด หลัง completeควรแก้อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>มี task ownerเดียว/shared query cache หรือทั้งสอง invalidate/reloadผ่าน repository policy; อย่า mutateสอง listด้วย codeซ้ำ</p></details></section>
-<section><h2>8. Review questions</h2><div class="success">ใครเป็น owner? ใครเปลี่ยนได้? derivedอะไรได้? refreshแล้ว selectionยังถูกไหม? logout/server switchล้าง scopeใด?</div></section>
+<section id="section-3"><h2>3. Mutable list trap</h2><p>ห้าม expose <code>final List tasks</code> ให้ widget <code>add/remove</code> ได้ คืน <code>UnmodifiableListView</code> หรือ immutable stateและเปลี่ยนผ่าน actions</p></section>
+<section id="section-4"><h2>4. Remote refresh</h2><p>หลัง command success เลือก patch stateจาก typed responseหรือ re-fetch authoritative dataตาม consistency/performance ไม่ patchหนึ่ง storeแต่ลืม dashboardอีก store</p></section>
+<section id="section-5"><h2>5. Cache is not another truth</h2><p>cacheเป็นสำเนาที่มี freshness/version policy Repositoryเป็นผู้ reconcile remote/local และเปิด metadataเช่น stale/offlineให้ UIรู้</p></section>
+<section id="section-6"><h2>6. Selection by ID</h2><p>เก็บ selectedTaskIdแทน copy Task object เมื่อ list refresh getterหา current objectจาก SSOT ลดรายละเอียดเก่าค้าง แต่ handle IDหายอย่างชัดเจน</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>HomeStoreกับTaskStoreถือ list tasksคนละชุด หลัง completeควรแก้อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>มี task ownerเดียว/shared query cache หรือทั้งสอง invalidate/reloadผ่าน repository policy; อย่า mutateสอง listด้วย codeซ้ำ</p></details></section>
+<section id="section-8"><h2>8. Review questions</h2><div class="success">ใครเป็น owner? ใครเปลี่ยนได้? derivedอะไรได้? refreshแล้ว selectionยังถูกไหม? logout/server switchล้าง scopeใด?</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

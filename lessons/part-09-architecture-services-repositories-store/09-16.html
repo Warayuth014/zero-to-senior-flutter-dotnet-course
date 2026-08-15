@@ -4,9 +4,10 @@
 <title>Lab: Refactor feature หนึ่งแบบมี test</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-16 · Architecture</span><h1>Lab: Refactor feature หนึ่งแบบมี test</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Acceptance criteria</a></li><li><a href="#section-2">2. Target files</a></li><li><a href="#section-3">3. Repository contract</a></li><li><a href="#section-4">4. State sequence tests</a></li><li><a href="#section-5">5. Repository tests</a></li><li><a href="#section-6">6. Widget tests</a></li><li><a href="#section-7">7. Migration sequence</a></li><li><a href="#section-8">8. Exit test</a></li></ol></nav>
 <div class="note"><strong>Lab ปิด Part 9:</strong> Refactor Receiving sliceหนึ่งจาก screen/API couplingเป็น Widget → ReceivingStore → ReceivingRepository → RemoteDataSource พร้อม testsทุก boundary</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>Screenไม่มี HTTP/JSON/storage</li><li>repository interfaceใช้ domain language</li><li>remote implementation map DTO/failure</li><li>Storeมี immutable stateและ generation guard</li><li>dependenciesเข้าทาง constructor</li><li>characterization + repository + store + widget testsผ่าน</li></ul></section>
-<section><h2>2. Target files</h2><pre class="code-vs"><code>features/receiving/
+<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>Screenไม่มี HTTP/JSON/storage</li><li>repository interfaceใช้ domain language</li><li>remote implementation map DTO/failure</li><li>Storeมี immutable stateและ generation guard</li><li>dependenciesเข้าทาง constructor</li><li>characterization + repository + store + widget testsผ่าน</li></ul></section>
+<section id="section-2"><h2>2. Target files</h2><pre class="code-vs"><code>features/receiving/
   domain/receiving_repository.dart
   data/receiving_remote_data_source.dart
   data/remote_receiving_repository.dart
@@ -14,14 +15,14 @@
   application/receiving_store.dart
   presentation/receiving_screen.dart
   presentation/widgets/...</code></pre></section>
-<section><h2>3. Repository contract</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
+<section id="section-3"><h2>3. Repository contract</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
   Future&lt;InboundOrder&gt; findOrder(String orderNo);
   Future&lt;Receipt&gt; receive(ReceiveCommand command);
 }</code></pre><p>ใช้ fakeตัวนี้เขียน Store testsก่อนย้าย HTTP</p></section>
-<section><h2>4. State sequence tests</h2><ul><li>load: idle→loading→ready</li><li>not found/network/contract errorแยกกัน</li><li>scan Aแล้ว B: A responseเก่าถูก ignore</li><li>submitซ้ำถูก guard</li><li>successอัปเดต SSOT/typed effectครั้งเดียว</li></ul></section>
-<section><h2>5. Repository tests</h2><p>ใช้ fake JsonClient assert path/query/body, fixturesสำหรับ casing/null, map domainและ error code <code>PALLET_ALREADY_ASSIGNED</code> โดยไม่มี Flutter binding</p></section>
-<section><h2>6. Widget tests</h2><p>inject fake Store/repository, submit barcode, verify loading/empty/error/success, focusและ dialog result โดยไม่เปิด server; screenshotเดิมช่วยตรวจว่า refactorไม่เปลี่ยน UI</p></section>
-<section><h2>7. Migration sequence</h2><ol><li>ล็อก behaviorเดิม</li><li>สร้าง interface+fake</li><li>ย้าย remote mapping</li><li>ย้าย action/state</li><li>extract widgets</li><li>ลบ codeซ้ำและ forwarding facade</li></ol></section>
-<section><h2>8. Exit test</h2><div class="success">เมื่อจบต้องชี้ owner/dependency/error/SSOTของทุกชั้นได้ เปลี่ยน endpointโดยไม่แก้ widgetและเปลี่ยน UIโดยไม่แก้ repository พร้อมใช้ patternเดียวกัน refactor God Screen/Storeส่วนถัดไป</div></section>
+<section id="section-4"><h2>4. State sequence tests</h2><ul><li>load: idle→loading→ready</li><li>not found/network/contract errorแยกกัน</li><li>scan Aแล้ว B: A responseเก่าถูก ignore</li><li>submitซ้ำถูก guard</li><li>successอัปเดต SSOT/typed effectครั้งเดียว</li></ul></section>
+<section id="section-5"><h2>5. Repository tests</h2><p>ใช้ fake JsonClient assert path/query/body, fixturesสำหรับ casing/null, map domainและ error code <code>PALLET_ALREADY_ASSIGNED</code> โดยไม่มี Flutter binding</p></section>
+<section id="section-6"><h2>6. Widget tests</h2><p>inject fake Store/repository, submit barcode, verify loading/empty/error/success, focusและ dialog result โดยไม่เปิด server; screenshotเดิมช่วยตรวจว่า refactorไม่เปลี่ยน UI</p></section>
+<section id="section-7"><h2>7. Migration sequence</h2><ol><li>ล็อก behaviorเดิม</li><li>สร้าง interface+fake</li><li>ย้าย remote mapping</li><li>ย้าย action/state</li><li>extract widgets</li><li>ลบ codeซ้ำและ forwarding facade</li></ol></section>
+<section id="section-8"><h2>8. Exit test</h2><div class="success">เมื่อจบต้องชี้ owner/dependency/error/SSOTของทุกชั้นได้ เปลี่ยน endpointโดยไม่แก้ widgetและเปลี่ยน UIโดยไม่แก้ repository พร้อมใช้ patternเดียวกัน refactor God Screen/Storeส่วนถัดไป</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

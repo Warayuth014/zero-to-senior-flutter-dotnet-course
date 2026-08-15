@@ -4,25 +4,26 @@
 <title>URL, URI, base URL และ API prefix</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-02 · Flutter + .NET</span><h1>URL, URI, base URL และ API prefix</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Anatomy</a></li><li><a href="#section-2">2. ใช้ Uri แทน string query</a></li><li><a href="#section-3">3. Normalize ที่ boundary</a></li><li><a href="#section-4">4. Prefix คนละระบบ</a></li><li><a href="#section-5">5. Encoding</a></li><li><a href="#section-6">6. Validate ก่อนใช้</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><strong>กติกา URL:</strong> แยก scheme, host, port, base path, API prefix และ endpoint path ให้ชัด แล้วประกอบด้วย <code>Uri</code> จุดเดียว</div>
-<section><h2>1. Anatomy</h2><pre class="code-vs"><code>http://192.168.1.50:5000/wms/api/WMS/tasks
+<section id="section-1"><h2>1. Anatomy</h2><pre class="code-vs"><code>http://192.168.1.50:5000/wms/api/WMS/tasks
 └─scheme └────authority────┘ └base┘└prefix┘└path┘</code></pre><p><code>baseUrl</code> ไม่ควรเปลี่ยนความหมายไปมาว่ารวม <code>/api</code> แล้วหรือยัง</p></section>
-<section><h2>2. ใช้ Uri แทน string query</h2><pre class="code-vs"><code>final base = Uri.parse(profile.baseUrl);
+<section id="section-2"><h2>2. ใช้ Uri แทน string query</h2><pre class="code-vs"><code>final base = Uri.parse(profile.baseUrl);
 final uri = base.replace(
   path: '${base.path}/api/WMS/tasks'.replaceAll('//', '/'),
   queryParameters: {'search': barcode, 'page': '$page'},
 );</code></pre></section>
-<section><h2>3. Normalize ที่ boundary</h2><p>ตอนบันทึก connection profile ให้ trim, ตรวจ scheme/host/port และตัด trailing slash ตามกติกากลาง อย่ากระจาย <code>endsWith('/')</code> ทุก API method</p></section>
-<section><h2>4. Prefix คนละระบบ</h2><p>API บางชุดอาจเป็น <code>/api/WMS</code> ขณะที่ health เป็น <code>/api/health</code> จึงควรให้ API class ระบุ route จาก base URL ไม่ hardcode prefix ซ้ำซ้อนใน UI</p></section>
-<section><h2>5. Encoding</h2><p><code>Uri</code> encode ช่องว่าง, ภาษาไทย, <code>#</code>, <code>&amp;</code> และ barcode ที่มีอักขระพิเศษได้ถูกต้อง การต่อ <code>?search=$value</code> เองเสี่ยง query แตก</p></section>
-<section><h2>6. Validate ก่อนใช้</h2><pre class="code-vs"><code>Uri parseBaseUrl(String raw) {
+<section id="section-3"><h2>3. Normalize ที่ boundary</h2><p>ตอนบันทึก connection profile ให้ trim, ตรวจ scheme/host/port และตัด trailing slash ตามกติกากลาง อย่ากระจาย <code>endsWith('/')</code> ทุก API method</p></section>
+<section id="section-4"><h2>4. Prefix คนละระบบ</h2><p>API บางชุดอาจเป็น <code>/api/WMS</code> ขณะที่ health เป็น <code>/api/health</code> จึงควรให้ API class ระบุ route จาก base URL ไม่ hardcode prefix ซ้ำซ้อนใน UI</p></section>
+<section id="section-5"><h2>5. Encoding</h2><p><code>Uri</code> encode ช่องว่าง, ภาษาไทย, <code>#</code>, <code>&amp;</code> และ barcode ที่มีอักขระพิเศษได้ถูกต้อง การต่อ <code>?search=$value</code> เองเสี่ยง query แตก</p></section>
+<section id="section-6"><h2>6. Validate ก่อนใช้</h2><pre class="code-vs"><code>Uri parseBaseUrl(String raw) {
   final uri = Uri.tryParse(raw.trim());
   if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
     throw const FormatException('กรุณาระบุ URL เช่น http://host:5000');
   }
   return uri;
 }</code></pre></section>
-<section><h2>7. แบบฝึกหัด</h2><p>base URL คือ <code>http://10.0.2.2:5000/wms/</code> และ search คือ <code>A&amp;B 01</code> จงสร้าง URI ที่ไม่ทำ base path หาย</p><details><summary>เฉลย</summary><p>ใช้ <code>Uri.replace</code> กับ <code>queryParameters</code> และ normalize slash; ห้ามเอา string search ไปต่อท้ายตรง ๆ</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn"><code>Uri.resolve('/api/...')</code> ที่ path ขึ้นต้นด้วย slash จะทิ้ง base path เดิม เช่น <code>/wms</code>; ต้องตั้ง contract การประกอบ path และมี unit test</div></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>base URL คือ <code>http://10.0.2.2:5000/wms/</code> และ search คือ <code>A&amp;B 01</code> จงสร้าง URI ที่ไม่ทำ base path หาย</p><details><summary>เฉลย</summary><p>ใช้ <code>Uri.replace</code> กับ <code>queryParameters</code> และ normalize slash; ห้ามเอา string search ไปต่อท้ายตรง ๆ</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>Uri.resolve('/api/...')</code> ที่ path ขึ้นต้นด้วย slash จะทิ้ง base path เดิม เช่น <code>/wms</code>; ต้องตั้ง contract การประกอบ path และมี unit test</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

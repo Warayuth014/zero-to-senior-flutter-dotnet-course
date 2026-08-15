@@ -4,17 +4,18 @@
 <title>Debug context/lifecycle crash</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">25-05 · Real Codebase</span><h1>Debug context/lifecycle crash</h1><p>Part 25: Onboarding &amp; Code Reading Playbook</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. อ่าน stackแรกของเรา</a></li><li><a href="#section-2">2. mountedหลัง await</a></li><li><a href="#section-3">3. Dialog lifecycle</a></li><li><a href="#section-4">4. Resource ownership</a></li><li><a href="#section-5">5. Listener symmetry</a></li><li><a href="#section-6">6. Store dispose</a></li><li><a href="#section-7">7. Navigation race test</a></li><li><a href="#section-8">8. Fix quality</a></li></ol></nav>
 <div class="note"><strong>Crash กลุ่มนี้:</strong> setState after dispose, unmounted context, deactivated ancestor, controller used after dispose, duplicate listenerและ dialog teardown race</div>
-<section><h2>1. อ่าน stackแรกของเรา</h2><p>หา first application frameและ async boundary ไม่แก้ตามบรรทัด frameworkท้าย stack เก็บ navigation/dialog/action sequenceที่ reproduceและ device/platformเพราะ Flutter Web teardownอาจต่าง Android</p></section>
-<section><h2>2. mountedหลัง await</h2><pre class="code-vs"><code>final result = await operation();
+<section id="section-1"><h2>1. อ่าน stackแรกของเรา</h2><p>หา first application frameและ async boundary ไม่แก้ตามบรรทัด frameworkท้าย stack เก็บ navigation/dialog/action sequenceที่ reproduceและ device/platformเพราะ Flutter Web teardownอาจต่าง Android</p></section>
+<section id="section-2"><h2>2. mountedหลัง await</h2><pre class="code-vs"><code>final result = await operation();
 if (!mounted) return;          // State
 if (!context.mounted) return;  // BuildContext
 setState(() => apply(result));</code></pre><p>แต่ mountedไม่กัน stale identity จึงเพิ่ม generation/keyเมื่อต้อง latest-wins</p></section>
-<section><h2>3. Dialog lifecycle</h2><p>อย่า refresh ancestorระหว่าง descendant dialogกำลัง dispose รอ <code>showDialog</code>คืน resultแล้วค่อย mutate/store reload และตรวจ context ownerที่ยัง mounted</p></section>
-<section><h2>4. Resource ownership</h2><p>Stateที่สร้าง TextEditingController/FocusNode/Animation/Timer/StreamSubscriptionต้อง dispose/cancel; externally supplied controllerเป็นของ caller ห้าม child disposeซ้ำ ระบุ ownershipใน constructor/docs</p></section>
-<section><h2>5. Listener symmetry</h2><p>add observer/listener/subscriptionใน initต้อง removeใน dispose หาก dependencyเปลี่ยนใน didUpdateWidgetต้อง unsubscribe old/subscribe new ไม่เช่นนั้น callbackเก่าหรือ duplicate events</p></section>
-<section><h2>6. Store dispose</h2><p>ChangeNotifier cancel timer/streamและ invalidate in-flight commitsก่อน super.dispose Future cancelไม่ได้เสมอจึงมี disposed/session generation guardด้วย Objectที่สร้าง storeเป็นผู้ dispose ไม่ให้หลาย widgetsแย่ง ownership</p></section>
-<section><h2>7. Navigation race test</h2><p>ใช้ delayed fake: เปิดหน้า→เริ่ม request→pop/logout/close dialog→complete request แล้ว expectไม่มี exception/notify stale ทำซ้ำกับ rapid tab switchและ app background</p></section>
-<section><h2>8. Fix quality</h2><div class="success">fixต้องอธิบาย owner/lifetimeและมี reproduction test ไม่ใช้ catchกว้างหรือ delay 100msเพื่อซ่อน timing เพราะเครื่องช้าจะพังอีก</div></section>
+<section id="section-3"><h2>3. Dialog lifecycle</h2><p>อย่า refresh ancestorระหว่าง descendant dialogกำลัง dispose รอ <code>showDialog</code>คืน resultแล้วค่อย mutate/store reload และตรวจ context ownerที่ยัง mounted</p></section>
+<section id="section-4"><h2>4. Resource ownership</h2><p>Stateที่สร้าง TextEditingController/FocusNode/Animation/Timer/StreamSubscriptionต้อง dispose/cancel; externally supplied controllerเป็นของ caller ห้าม child disposeซ้ำ ระบุ ownershipใน constructor/docs</p></section>
+<section id="section-5"><h2>5. Listener symmetry</h2><p>add observer/listener/subscriptionใน initต้อง removeใน dispose หาก dependencyเปลี่ยนใน didUpdateWidgetต้อง unsubscribe old/subscribe new ไม่เช่นนั้น callbackเก่าหรือ duplicate events</p></section>
+<section id="section-6"><h2>6. Store dispose</h2><p>ChangeNotifier cancel timer/streamและ invalidate in-flight commitsก่อน super.dispose Future cancelไม่ได้เสมอจึงมี disposed/session generation guardด้วย Objectที่สร้าง storeเป็นผู้ dispose ไม่ให้หลาย widgetsแย่ง ownership</p></section>
+<section id="section-7"><h2>7. Navigation race test</h2><p>ใช้ delayed fake: เปิดหน้า→เริ่ม request→pop/logout/close dialog→complete request แล้ว expectไม่มี exception/notify stale ทำซ้ำกับ rapid tab switchและ app background</p></section>
+<section id="section-8"><h2>8. Fix quality</h2><div class="success">fixต้องอธิบาย owner/lifetimeและมี reproduction test ไม่ใช้ catchกว้างหรือ delay 100msเพื่อซ่อน timing เพราะเครื่องช้าจะพังอีก</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,8 +4,9 @@
 <title>Decode event arguments</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-05 · Realtime</span><h1>Decode event arguments</h1><p>Part 12: SignalR, Polling &amp; Realtime</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Raw handler</a></li><li><a href="#section-2">2. Typed event</a></li><li><a href="#section-3">3. Multiple arguments</a></li><li><a href="#section-4">4. Casing/numbers/time</a></li><li><a href="#section-5">5. Contract error isolation</a></li><li><a href="#section-6">6. ของจริง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Fixture tests</a></li></ol></nav>
 <div class="note"><strong>SignalR argsยังเป็น dynamic boundary:</strong> ตรวจ list/จำนวน/top-level shape แล้ว parseผ่าน DTO converterเดียวกับ JSON API ไม่ castตรงใน screen</div>
-<section><h2>1. Raw handler</h2><pre class="code-vs"><code>void onTaskChanged(List&lt;Object?&gt;? args) {
+<section id="section-1"><h2>1. Raw handler</h2><pre class="code-vs"><code>void onTaskChanged(List&lt;Object?&gt;? args) {
   if (args == null || args.length != 1) {
     reportContractError('TaskStatusChanged args'); return;
   }
@@ -15,12 +16,12 @@
     Map&lt;String, dynamic&gt;.from(raw)).toDomain();
   events.add(event);
 }</code></pre></section>
-<section><h2>2. Typed event</h2><p>ประกอบ eventId, entity ID, status enum, versionและ occurredAt ให้ validationชัด Unknown statusใช้ safe mappingหรือ trigger refresh ไม่ crash listener loop</p></section>
-<section><h2>3. Multiple arguments</h2><p>SignalR eventอาจส่งหลาย argsแต่ object payloadเดียว versionง่ายกว่า หาก contractหลาย argsให้ parse index+type explicitและมี testsจาก .NET fixtureจริง</p></section>
-<section><h2>4. Casing/numbers/time</h2><p>ใช้ convertersกลางจาก Part 6รองรับ camel/Pascal migration, int/doubleและ UTC timestamp ไม่สร้าง parse logicอีกชุดเฉพาะ realtime</p></section>
-<section><h2>5. Contract error isolation</h2><p>eventเสียหนึ่งตัวต้องไม่หยุด handlersอื่นหรือ connection แจ้ง telemetryพร้อม event name/trace safe metadataแล้ว schedule HTTP reconcile</p></section>
-<section><h2>6. ของจริง</h2><p>SignalR servicesใน <code>wmsapp</code> ใช้ <code>_parseArgs</code> แปลง Mapทั่วไปเป็น <code>Map&lt;String,dynamic&gt;</code> ขั้นต่อไปคือ typed DTOแทนส่ง mapถึง screen</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p><code>version</code> มาเป็น string "12" ควร cast intตรงไหม?</p><details><summary>เฉลย</summary><p>ไม่ ใช้ requireInt converterตาม contract/fallbackและบันทึก contract drift; ห้าม <code>as int</code> ใน UI handler</p></details></section>
-<section><h2>8. Fixture tests</h2><div class="success">null/empty/multiple args, Map&lt;dynamic,dynamic&gt;, missing ID, casing, number string, invalid date, unknown statusและ malformed eventไม่ฆ่า stream</div></section>
+<section id="section-2"><h2>2. Typed event</h2><p>ประกอบ eventId, entity ID, status enum, versionและ occurredAt ให้ validationชัด Unknown statusใช้ safe mappingหรือ trigger refresh ไม่ crash listener loop</p></section>
+<section id="section-3"><h2>3. Multiple arguments</h2><p>SignalR eventอาจส่งหลาย argsแต่ object payloadเดียว versionง่ายกว่า หาก contractหลาย argsให้ parse index+type explicitและมี testsจาก .NET fixtureจริง</p></section>
+<section id="section-4"><h2>4. Casing/numbers/time</h2><p>ใช้ convertersกลางจาก Part 6รองรับ camel/Pascal migration, int/doubleและ UTC timestamp ไม่สร้าง parse logicอีกชุดเฉพาะ realtime</p></section>
+<section id="section-5"><h2>5. Contract error isolation</h2><p>eventเสียหนึ่งตัวต้องไม่หยุด handlersอื่นหรือ connection แจ้ง telemetryพร้อม event name/trace safe metadataแล้ว schedule HTTP reconcile</p></section>
+<section id="section-6"><h2>6. ของจริง</h2><p>SignalR servicesใน <code>wmsapp</code> ใช้ <code>_parseArgs</code> แปลง Mapทั่วไปเป็น <code>Map&lt;String,dynamic&gt;</code> ขั้นต่อไปคือ typed DTOแทนส่ง mapถึง screen</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p><code>version</code> มาเป็น string "12" ควร cast intตรงไหม?</p><details><summary>เฉลย</summary><p>ไม่ ใช้ requireInt converterตาม contract/fallbackและบันทึก contract drift; ห้าม <code>as int</code> ใน UI handler</p></details></section>
+<section id="section-8"><h2>8. Fixture tests</h2><div class="success">null/empty/multiple args, Map&lt;dynamic,dynamic&gt;, missing ID, casing, number string, invalid date, unknown statusและ malformed eventไม่ฆ่า stream</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

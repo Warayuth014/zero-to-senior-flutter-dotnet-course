@@ -4,8 +4,9 @@
 <title>Local state ด้วย setState</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-01 · State &amp; Lifecycle</span><h1>Local state ด้วย setState</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Local UI state</a></li><li><a href="#section-2">2. setState ต้อง synchronous</a></li><li><a href="#section-3">3. Scope ของ rebuild</a></li><li><a href="#section-4">4. State ที่เหมาะ/ไม่เหมาะ</a></li><li><a href="#section-5">5. Equality guard</a></li><li><a href="#section-6">6. Mutation ก่อน/ใน setState</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>setState</code> บอก framework ว่า local mutable state ของ State object เปลี่ยนและ subtree นี้ต้อง build ใหม่ มันไม่เก็บ stateให้เราและไม่ควรครอบงาน async ทั้งก้อน ใช้เมื่อ owner/consumerอยู่ใกล้และ lifetimeผูกกับหน้าจอ</div>
-<section><h2>1. Local UI state</h2><pre class="code-vs"><code>class _SummaryCardState extends State&lt;SummaryCard&gt; {
+<section id="section-1"><h2>1. Local UI state</h2><pre class="code-vs"><code>class _SummaryCardState extends State&lt;SummaryCard&gt; {
   DashboardMode _mode = DashboardMode.list;
 
   void _select(DashboardMode next) {
@@ -13,12 +14,12 @@
     setState(() =&gt; _mode = next);
   }
 }</code></pre><p>โหมด list/chart ของ SummaryCard ใน Absolute เป็น local presentation state ที่ไม่ต้องให้ทั้ง WarehouseStoreรู้</p></section>
-<section><h2>2. setState ต้อง synchronous</h2><p>Callbackของ setStateต้องแก้ค่าแบบ synchronousและคืนทันที ห้าม <code>setState(() async { ... })</code> ให้ awaitนอกแล้ว setStateเฉพาะ snapshotที่พร้อม เพราะ frameworkต้องรู้ทันทีว่า mutationจบเมื่อไร</p></section>
-<section><h2>3. Scope ของ rebuild</h2><p>setStateทำให้ State subtree buildใหม่ ไม่ได้ repaintทุกจุดเสมอ Element/render diffจะ reuseส่วนที่ไม่เปลี่ยน แต่ build methodใหญ่ยังมี cost จึงแตก componentตาม responsibilityและวาง stateใกล้ consumer</p></section>
-<section><h2>4. State ที่เหมาะ/ไม่เหมาะ</h2><ul><li>เหมาะ: toggle, selected tab, controller visibility, animation flag</li><li>ไม่เหมาะ: inventoryที่หลายหน้าต้องใช้, auth session, cache/API workflowข้าม route</li></ul><p>ข้อมูลข้าม featureควรมี owner/store/repositoryชัด ไม่ส่ง setState callbackทอดยาวทั้งแอป</p></section>
-<section><h2>5. Equality guard</h2><p>ถ้าค่าใหม่เท่าเดิมไม่ต้อง setState ลด rebuildและ side effects downstream แต่ห้าม optimizeจนไม่ notifyเมื่อ object mutableภายในเปลี่ยน ทางที่ดีใช้ immutable snapshot/equalityตาม semantic</p></section>
-<section><h2>6. Mutation ก่อน/ใน setState</h2><p>Frameworkต้องการให้เรียก setStateเมื่อ mutationกระทบ build เขียน mutationใน callbackเพื่ออ่าน intentง่าย หาก mutateก่อนแล้ว setStateเปล่ายังทำงานแต่เสี่ยง return/exceptionจนลืมแจ้ง และอย่าวาง API/file I/Oใน callback</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้า scanมี <code>showHelp</code>, current pallet และรายการ inventory อะไรควรอยู่ local?</p><details><summary>เฉลย</summary><p>showHelpเป็น local setState; current palletอาจอยู่ workflow controllerถ้ามีหลาย step/ต้องคงเมื่อ UIสลับ; inventoryอยู่ store/repositoryเพราะโหลด asyncและหลาย consumer หลักคือ ownership/lifetime ไม่ใช่จำนวนตัวแปร</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าเรียก setStateใน build, dispose หรือหลัง State unmounted และอย่าใช้ setStateเพื่อบังคับ refreshเมื่อ source of truthไม่เปลี่ยน ต้องแก้ source/notification contract</div></section>
+<section id="section-2"><h2>2. setState ต้อง synchronous</h2><p>Callbackของ setStateต้องแก้ค่าแบบ synchronousและคืนทันที ห้าม <code>setState(() async { ... })</code> ให้ awaitนอกแล้ว setStateเฉพาะ snapshotที่พร้อม เพราะ frameworkต้องรู้ทันทีว่า mutationจบเมื่อไร</p></section>
+<section id="section-3"><h2>3. Scope ของ rebuild</h2><p>setStateทำให้ State subtree buildใหม่ ไม่ได้ repaintทุกจุดเสมอ Element/render diffจะ reuseส่วนที่ไม่เปลี่ยน แต่ build methodใหญ่ยังมี cost จึงแตก componentตาม responsibilityและวาง stateใกล้ consumer</p></section>
+<section id="section-4"><h2>4. State ที่เหมาะ/ไม่เหมาะ</h2><ul><li>เหมาะ: toggle, selected tab, controller visibility, animation flag</li><li>ไม่เหมาะ: inventoryที่หลายหน้าต้องใช้, auth session, cache/API workflowข้าม route</li></ul><p>ข้อมูลข้าม featureควรมี owner/store/repositoryชัด ไม่ส่ง setState callbackทอดยาวทั้งแอป</p></section>
+<section id="section-5"><h2>5. Equality guard</h2><p>ถ้าค่าใหม่เท่าเดิมไม่ต้อง setState ลด rebuildและ side effects downstream แต่ห้าม optimizeจนไม่ notifyเมื่อ object mutableภายในเปลี่ยน ทางที่ดีใช้ immutable snapshot/equalityตาม semantic</p></section>
+<section id="section-6"><h2>6. Mutation ก่อน/ใน setState</h2><p>Frameworkต้องการให้เรียก setStateเมื่อ mutationกระทบ build เขียน mutationใน callbackเพื่ออ่าน intentง่าย หาก mutateก่อนแล้ว setStateเปล่ายังทำงานแต่เสี่ยง return/exceptionจนลืมแจ้ง และอย่าวาง API/file I/Oใน callback</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้า scanมี <code>showHelp</code>, current pallet และรายการ inventory อะไรควรอยู่ local?</p><details><summary>เฉลย</summary><p>showHelpเป็น local setState; current palletอาจอยู่ workflow controllerถ้ามีหลาย step/ต้องคงเมื่อ UIสลับ; inventoryอยู่ store/repositoryเพราะโหลด asyncและหลาย consumer หลักคือ ownership/lifetime ไม่ใช่จำนวนตัวแปร</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าเรียก setStateใน build, dispose หรือหลัง State unmounted และอย่าใช้ setStateเพื่อบังคับ refreshเมื่อ source of truthไม่เปลี่ยน ต้องแก้ source/notification contract</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

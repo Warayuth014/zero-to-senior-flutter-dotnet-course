@@ -4,8 +4,9 @@
 <title>Timer.periodic และ polling</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-11 · State &amp; Lifecycle</span><h1>Timer.periodic และ polling</h1><p>Part 4: State, Async &amp; Lifecycle</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Timer.periodic</a></li><li><a href="#section-2">2. Overlapping request</a></li><li><a href="#section-3">3. Poll เฉพาะที่ดู</a></li><li><a href="#section-4">4. Lifecycle</a></li><li><a href="#section-5">5. Backoff และ jitter</a></li><li><a href="#section-6">6. Timer test</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Polling คือการแลก freshnessกับ battery, radio, server load และ race Timer.periodicไม่รอ Futureเดิมจบ จึงต้องมี in-flight guard, lifecycle policy, backoff และ disposeที่ชัด</div>
-<section><h2>1. Timer.periodic</h2><pre class="code-vs"><code>Timer? _timer;
+<section id="section-1"><h2>1. Timer.periodic</h2><pre class="code-vs"><code>Timer? _timer;
 
 void startPolling() {
   _timer?.cancel();
@@ -19,18 +20,18 @@ void dispose() {
   _timer?.cancel();
   super.dispose();
 }</code></pre></section>
-<section><h2>2. Overlapping request</h2><pre class="code-vs"><code>bool _refreshing = false;
+<section id="section-2"><h2>2. Overlapping request</h2><pre class="code-vs"><code>bool _refreshing = false;
 Future&lt;void&gt; _refreshIfIdle() async {
   if (_refreshing) return;
   _refreshing = true;
   try { await repository.refresh(); }
   finally { _refreshing = false; }
 }</code></pre><p>ถ้า requestใช้ 8sแต่ timer 5s guardจะ skip tickแทนซ้อน request</p></section>
-<section><h2>3. Poll เฉพาะที่ดู</h2><p>WarehouseStore timer 5sเรียก refreshตาม <code>screen</code>: tasks/history/picks/cycle-countที่เกี่ยวข้อง ลด callหน้าที่ไม่เปิด แต่ storeยังตื่นทุก 5s ควรพิจารณา start/stopตาม route/app lifecycleหรือ realtime SignalRใน Partหลัง</p></section>
-<section><h2>4. Lifecycle</h2><p>เมื่อ app paused/backgroundหยุดหรือยืด polling; resumedให้ refreshทันทีแล้ว restart schedule Absolute connection dotเลือกไม่ pollตลอดวัน แต่ refreshตอน shell mount/resume/เปลี่ยน profile เป็น policyประหยัดแบตที่เหมาะกับข้อมูลไม่ต้อง realtime</p></section>
-<section><h2>5. Backoff และ jitter</h2><p>เมื่อ networkล้มไม่ควรยิงทุก 5sตลอด ใช้ exponential backoffมีเพดานและ jitterลด clientพร้อมกัน resetเมื่อ success/foreground/manual retry แยก offline detectionจาก server errorอย่างระวัง</p></section>
-<section><h2>6. Timer test</h2><p>Inject scheduler/clockหรือใช้ <code>fake_async</code> เพื่อเดินเวลา deterministic ทดสอบ no overlap, stop/dispose, background/resume และ backoff ไม่รอเวลาจริงใน unit test</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Connection dotต้องสดพอแต่ PDAใช้ทั้งกะ ควร poll 1sไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรตามค่าเริ่ม ใช้ผลจาก requestจริง + refreshตอน mount/resume/profile change/manual retry อาจ pollช้าขณะ settingsเปิด หากธุรกิจต้อง realtimeใช้ push/heartbeatที่ออกแบบ serverร่วมและวัด battery/data</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Timer.cancelหยุด tickอนาคตแต่ไม่ cancel Futureที่เริ่มแล้ว Resultยังต้อง generation/disposed guard และ unawaited Futureต้องจับ errorภายใน</div></section>
+<section id="section-3"><h2>3. Poll เฉพาะที่ดู</h2><p>WarehouseStore timer 5sเรียก refreshตาม <code>screen</code>: tasks/history/picks/cycle-countที่เกี่ยวข้อง ลด callหน้าที่ไม่เปิด แต่ storeยังตื่นทุก 5s ควรพิจารณา start/stopตาม route/app lifecycleหรือ realtime SignalRใน Partหลัง</p></section>
+<section id="section-4"><h2>4. Lifecycle</h2><p>เมื่อ app paused/backgroundหยุดหรือยืด polling; resumedให้ refreshทันทีแล้ว restart schedule Absolute connection dotเลือกไม่ pollตลอดวัน แต่ refreshตอน shell mount/resume/เปลี่ยน profile เป็น policyประหยัดแบตที่เหมาะกับข้อมูลไม่ต้อง realtime</p></section>
+<section id="section-5"><h2>5. Backoff และ jitter</h2><p>เมื่อ networkล้มไม่ควรยิงทุก 5sตลอด ใช้ exponential backoffมีเพดานและ jitterลด clientพร้อมกัน resetเมื่อ success/foreground/manual retry แยก offline detectionจาก server errorอย่างระวัง</p></section>
+<section id="section-6"><h2>6. Timer test</h2><p>Inject scheduler/clockหรือใช้ <code>fake_async</code> เพื่อเดินเวลา deterministic ทดสอบ no overlap, stop/dispose, background/resume และ backoff ไม่รอเวลาจริงใน unit test</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection dotต้องสดพอแต่ PDAใช้ทั้งกะ ควร poll 1sไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรตามค่าเริ่ม ใช้ผลจาก requestจริง + refreshตอน mount/resume/profile change/manual retry อาจ pollช้าขณะ settingsเปิด หากธุรกิจต้อง realtimeใช้ push/heartbeatที่ออกแบบ serverร่วมและวัด battery/data</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Timer.cancelหยุด tickอนาคตแต่ไม่ cancel Futureที่เริ่มแล้ว Resultยังต้อง generation/disposed guard และ unawaited Futureต้องจับ errorภายใน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

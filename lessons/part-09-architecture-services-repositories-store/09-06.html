@@ -4,8 +4,9 @@
 <title>Remote repository implementation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-06 · Architecture</span><h1>Remote repository implementation</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Implementation</a></li><li><a href="#section-2">2. DTO mapping</a></li><li><a href="#section-3">3. Error translation</a></li><li><a href="#section-4">4. Mapping vs orchestration</a></li><li><a href="#section-5">5. N+1 awareness</a></li><li><a href="#section-6">6. Cancellation/generation</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Repository tests</a></li></ol></nav>
 <div class="note"><strong>Remote implementation เป็น adapter:</strong> แปลง domain call → request DTO/HTTP และ response DTO → domain พร้อม error translation</div>
-<section><h2>1. Implementation</h2><pre class="code-vs"><code>final class RemoteReceivingRepository implements ReceivingRepository {
+<section id="section-1"><h2>1. Implementation</h2><pre class="code-vs"><code>final class RemoteReceivingRepository implements ReceivingRepository {
   RemoteReceivingRepository(this.remote);
   final ReceivingRemoteDataSource remote;
 
@@ -15,12 +16,12 @@
     return dto.toDomain();
   }
 }</code></pre></section>
-<section><h2>2. DTO mapping</h2><p>request mapperกำหนด casing/optional fields; response mapperตรวจ contractและ domain invariants ทำให้ domainไม่ import JSON annotationsหรือ legacy key fallback</p></section>
-<section><h2>3. Error translation</h2><p>Socket/timeout/ApiException/ContractExceptionถูกแปลงเป็น repository failuresที่ stable เช่น NetworkUnavailable, Conflict, Unauthorized และ UnexpectedContract โดยรักษา cause/trace IDสำหรับ diagnostics</p></section>
-<section><h2>4. Mapping vs orchestration</h2><p>repositoryอาจรวม remote+cache policy แต่ workflowหลาย stepเช่น validate→confirm→receiveควรอยู่ application service/Store ไม่ฝัง user interactionใน remote adapter</p></section>
-<section><h2>5. N+1 awareness</h2><p>ของจริง TasksApi โหลด task listแล้วขอ detailทีละ row การซ่อนหลัง repositoryทำ callerสะอาดแต่ไม่ได้ทำ performanceหาย ต้องมี metricsและพิจารณา backend aggregate/batch endpoint</p></section>
-<section><h2>6. Cancellation/generation</h2><p>Dart Futureทั่วไป cancelไม่ได้ง่าย Repositoryควรรับ cancellation abstractionเมื่อจำเป็นหรือ Store ignoreผลด้วย generation token; .NETรับ CancellationTokenต่อถึง DB</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>APIคืน 404 ตอนค้น order ควร throw ApiExceptionถึง UIหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>Repositoryแปลงเป็น <code>OrderNotFound</code> หรือ nullตาม interface contract; UIไม่ควรรู้ status 404หาก semanticsคือไม่มี order</p></details></section>
-<section><h2>8. Repository tests</h2><div class="success">assert endpoint/request DTO, mapping success, legacy casing, each failure translation, trace preservationและไม่รั่ว transport type</div></section>
+<section id="section-2"><h2>2. DTO mapping</h2><p>request mapperกำหนด casing/optional fields; response mapperตรวจ contractและ domain invariants ทำให้ domainไม่ import JSON annotationsหรือ legacy key fallback</p></section>
+<section id="section-3"><h2>3. Error translation</h2><p>Socket/timeout/ApiException/ContractExceptionถูกแปลงเป็น repository failuresที่ stable เช่น NetworkUnavailable, Conflict, Unauthorized และ UnexpectedContract โดยรักษา cause/trace IDสำหรับ diagnostics</p></section>
+<section id="section-4"><h2>4. Mapping vs orchestration</h2><p>repositoryอาจรวม remote+cache policy แต่ workflowหลาย stepเช่น validate→confirm→receiveควรอยู่ application service/Store ไม่ฝัง user interactionใน remote adapter</p></section>
+<section id="section-5"><h2>5. N+1 awareness</h2><p>ของจริง TasksApi โหลด task listแล้วขอ detailทีละ row การซ่อนหลัง repositoryทำ callerสะอาดแต่ไม่ได้ทำ performanceหาย ต้องมี metricsและพิจารณา backend aggregate/batch endpoint</p></section>
+<section id="section-6"><h2>6. Cancellation/generation</h2><p>Dart Futureทั่วไป cancelไม่ได้ง่าย Repositoryควรรับ cancellation abstractionเมื่อจำเป็นหรือ Store ignoreผลด้วย generation token; .NETรับ CancellationTokenต่อถึง DB</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>APIคืน 404 ตอนค้น order ควร throw ApiExceptionถึง UIหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>Repositoryแปลงเป็น <code>OrderNotFound</code> หรือ nullตาม interface contract; UIไม่ควรรู้ status 404หาก semanticsคือไม่มี order</p></details></section>
+<section id="section-8"><h2>8. Repository tests</h2><div class="success">assert endpoint/request DTO, mapping success, legacy casing, each failure translation, trace preservationและไม่รั่ว transport type</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

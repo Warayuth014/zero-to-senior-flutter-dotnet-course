@@ -4,20 +4,21 @@
 <title>Build ต้อง pure และไม่ควรยิง API ตรงไหน</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-09 · Flutter UI</span><h1>Build ต้อง pure และไม่ควรยิง API ตรงไหน</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. สิ่งที่ทำใน buildได้</a></li><li><a href="#section-2">2. สิ่งที่ไม่ควรทำ</a></li><li><a href="#section-3">3. Build อาจรันบ่อยเพราะอะไร</a></li><li><a href="#section-4">4. API load pattern</a></li><li><a href="#section-5">5. ตัวอย่าง absolute shell</a></li><li><a href="#section-6">6. Derived work ที่แพง</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note"><code>build()</code> ต้องเป็นการแปลง current configuration/state/context → widgets ที่ทำซ้ำได้ ปราศจาก side effect ที่ต้องเกิดครั้งเดียว เพราะ framework เรียก buildเมื่อไรก็ได้ตาม dependency/frame scheduling</div>
-<section><h2>1. สิ่งที่ทำใน buildได้</h2><ul><li>คำนวณ derived valuesเร็ว ๆ</li><li>เลือก widgetจาก enum/state</li><li>สร้าง callbacksที่เรียก commandภายหลัง</li><li>อ่าน Theme/MediaQuery/Localizations</li><li>ประกอบ widgets/collections</li></ul></section>
-<section><h2>2. สิ่งที่ไม่ควรทำ</h2><pre class="code-vs"><code>@override
+<section id="section-1"><h2>1. สิ่งที่ทำใน buildได้</h2><ul><li>คำนวณ derived valuesเร็ว ๆ</li><li>เลือก widgetจาก enum/state</li><li>สร้าง callbacksที่เรียก commandภายหลัง</li><li>อ่าน Theme/MediaQuery/Localizations</li><li>ประกอบ widgets/collections</li></ul></section>
+<section id="section-2"><h2>2. สิ่งที่ไม่ควรทำ</h2><pre class="code-vs"><code>@override
 Widget build(BuildContext context) {
   repository.loadTasks(); // ผิด: ทุก rebuild ยิงใหม่
   timer = Timer(...);     // ผิด: resource ซ้ำ
   store.addListener(...); // ผิด: listener ทวีคูณ
   return const SizedBox();
 }</code></pre><p>ย้ายครั้งแรกไป initState/store load command; dependencyเปลี่ยนใช้ didUpdateWidget/didChangeDependencies; user actionไป callback</p></section>
-<section><h2>3. Build อาจรันบ่อยเพราะอะไร</h2><p>setState, parent update, Listenable builder, inherited dependency, animation และ hot reload ล้วนเรียก buildได้ โค้ดที่ “ตอนนี้เห็นรันครั้งเดียว” ไม่มีสัญญาว่าจะเป็นเช่นนั้น</p></section>
-<section><h2>4. API load pattern</h2><p>State ownerถือ loading/data/error แล้วเริ่ม loadครั้งเดียวตาม lifecycle หรือ event; buildอ่าน snapshotและเลือก Loading/Error/Empty/Data อย่าสร้าง Futureใหม่ทุก buildให้ FutureBuilder ถ้าจะใช้ให้ cache Futureใน Stateและเปลี่ยนเมื่อ inputเปลี่ยน</p></section>
-<section><h2>5. ตัวอย่าง absolute shell</h2><p>Shell สร้าง storeและ <code>unawaited(store.loadAll())</code> ใน initState จากนั้น buildใช้ ListenableBuilderอ่าน store ส่วน <code>_body()</code> เป็น pure switchคืน screenตาม <code>store.screen</code> นี่แยก side effectจาก renderingชัด</p></section>
-<section><h2>6. Derived work ที่แพง</h2><p>Filter/sort listใหญ่มากใน buildอาจ pureแต่ช้า ให้ derive/cachingใน state layerตาม input revisionหรือใช้ memoizationที่ correct ก่อน optimizeต้อง profile อย่า cache widget/contextแบบทำให้ข้อมูลเก่า</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้า Task ต้องโหลดเมื่อ taskIdเปลี่ยน ออกแบบ lifecycleโดยไม่ยิงใน build</p><details><summary>เฉลย</summary><p>เริ่ม loadใน initStateจาก initial widget.taskId; ใน didUpdateWidgetเทียบ old/new idแล้ว loadใหม่/cancelหรือ generation token; set state/storeตามผล; buildแสดง snapshotเท่านั้น</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">การห่อ side effectด้วย <code>Future.microtask</code> หรือ post-frame callbackจาก buildไม่ได้ทำให้ถูก ถ้า buildซ้ำก็ scheduleซ้ำ ต้องมี owner/event/lifecycle invariantที่ชัด</div></section>
+<section id="section-3"><h2>3. Build อาจรันบ่อยเพราะอะไร</h2><p>setState, parent update, Listenable builder, inherited dependency, animation และ hot reload ล้วนเรียก buildได้ โค้ดที่ “ตอนนี้เห็นรันครั้งเดียว” ไม่มีสัญญาว่าจะเป็นเช่นนั้น</p></section>
+<section id="section-4"><h2>4. API load pattern</h2><p>State ownerถือ loading/data/error แล้วเริ่ม loadครั้งเดียวตาม lifecycle หรือ event; buildอ่าน snapshotและเลือก Loading/Error/Empty/Data อย่าสร้าง Futureใหม่ทุก buildให้ FutureBuilder ถ้าจะใช้ให้ cache Futureใน Stateและเปลี่ยนเมื่อ inputเปลี่ยน</p></section>
+<section id="section-5"><h2>5. ตัวอย่าง absolute shell</h2><p>Shell สร้าง storeและ <code>unawaited(store.loadAll())</code> ใน initState จากนั้น buildใช้ ListenableBuilderอ่าน store ส่วน <code>_body()</code> เป็น pure switchคืน screenตาม <code>store.screen</code> นี่แยก side effectจาก renderingชัด</p></section>
+<section id="section-6"><h2>6. Derived work ที่แพง</h2><p>Filter/sort listใหญ่มากใน buildอาจ pureแต่ช้า ให้ derive/cachingใน state layerตาม input revisionหรือใช้ memoizationที่ correct ก่อน optimizeต้อง profile อย่า cache widget/contextแบบทำให้ข้อมูลเก่า</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้า Task ต้องโหลดเมื่อ taskIdเปลี่ยน ออกแบบ lifecycleโดยไม่ยิงใน build</p><details><summary>เฉลย</summary><p>เริ่ม loadใน initStateจาก initial widget.taskId; ใน didUpdateWidgetเทียบ old/new idแล้ว loadใหม่/cancelหรือ generation token; set state/storeตามผล; buildแสดง snapshotเท่านั้น</p></details></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การห่อ side effectด้วย <code>Future.microtask</code> หรือ post-frame callbackจาก buildไม่ได้ทำให้ถูก ถ้า buildซ้ำก็ scheduleซ้ำ ต้องมี owner/event/lifecycle invariantที่ชัด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,16 +4,17 @@
 <title>Putaway SignalR events</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-08 · Real Codebase</span><h1>Putaway SignalR events</h1><p>Part 18: wmsapp: Putaway &amp; Picking</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Singleton + ref count</a></li><li><a href="#section-2">2. Hub connection</a></li><li><a href="#section-3">3. Listener lifecycle</a></li><li><a href="#section-4">4. Safe dispatch</a></li><li><a href="#section-5">5. Parse event args</a></li><li><a href="#section-6">6. Optimistic merge</a></li><li><a href="#section-7">7. Connection gaps</a></li><li><a href="#section-8">8. Realtime tests</a></li></ol></nav>
 <div class="note"><strong>SignalR เป็น invalidation channel:</strong> event ทำให้หน้าจอรู้ว่าควร refresh ไม่ใช่แหล่งข้อมูลเดียว เพราะ reconnect อาจพลาด event และ event payload อาจมีเพียงบาง field</div>
-<section><h2>1. Singleton + ref count</h2><p><code>SignalRService</code> เป็น singleton; connect เพิ่ม <code>_refCount</code> และ disconnect ลด เมื่อถึงศูนย์จึง stop connection ทำให้ Putaway กับ Prework ใช้ hub เดียวพร้อมกันได้</p></section>
-<section><h2>2. Hub connection</h2><p>service resolve server URL แล้วต่อ <code>/hubs/putaway</code> ด้วย automatic reconnect จากนั้น register StationDispatched, PalletArrived, PalletReturned และ LabelingCompleted</p></section>
-<section><h2>3. Listener lifecycle</h2><p>screen add callbacks ใน initState และ remove ใน dispose การ remove ต้องส่ง function instance เดิม ซึ่ง method tear-off ของ state ทำได้ตามโค้ดปัจจุบัน แต่ duplicate registration ยังควรป้องกัน</p></section>
-<section><h2>4. Safe dispatch</h2><pre class="code-vs"><code>for (final cb in List.of(listeners)) {
+<section id="section-1"><h2>1. Singleton + ref count</h2><p><code>SignalRService</code> เป็น singleton; connect เพิ่ม <code>_refCount</code> และ disconnect ลด เมื่อถึงศูนย์จึง stop connection ทำให้ Putaway กับ Prework ใช้ hub เดียวพร้อมกันได้</p></section>
+<section id="section-2"><h2>2. Hub connection</h2><p>service resolve server URL แล้วต่อ <code>/hubs/putaway</code> ด้วย automatic reconnect จากนั้น register StationDispatched, PalletArrived, PalletReturned และ LabelingCompleted</p></section>
+<section id="section-3"><h2>3. Listener lifecycle</h2><p>screen add callbacks ใน initState และ remove ใน dispose การ remove ต้องส่ง function instance เดิม ซึ่ง method tear-off ของ state ทำได้ตามโค้ดปัจจุบัน แต่ duplicate registration ยังควรป้องกัน</p></section>
+<section id="section-4"><h2>4. Safe dispatch</h2><pre class="code-vs"><code>for (final cb in List.of(listeners)) {
   cb(data);
 }</code></pre><p>copy list ก่อน iterate ทำให้ callback remove listener ระหว่าง dispatch ได้โดยไม่เกิด concurrent modification</p></section>
-<section><h2>5. Parse event args</h2><p><code>_parseArgs</code> รับ null/empty/non-map เป็น empty map แล้ว handler screen ตรวจ stationId ต่อ ความทนนี้กัน crash แต่ malformed events ถูกกลืน ควร log metric พร้อม event name/schema version</p></section>
-<section><h2>6. Optimistic merge</h2><p>StationDispatched merge pallet/destination เพื่อแสดง busy ทันที จากนั้นโหลด REST ใหม่ ส่วน events อื่นใช้ refresh อย่างเดียว Pattern นี้ลด latency แต่ต้องมี request generation guard ไม่ให้ response เก่าทับ event ใหม่</p></section>
-<section><h2>7. Connection gaps</h2><p>connect catch แล้ว log แต่ไม่ส่ง connection state ให้ UI; automatic reconnect ไม่รับประกัน event replay จึงควร refresh เมื่อ reconnected, ทำ periodic reconciliation และแสดงสถานะ stale/offline</p></section>
-<section><h2>8. Realtime tests</h2><div class="success">fake stream แล้วทดสอบ event ซ้ำ/ผิดลำดับ/unknown station, disconnect-reconnect, สอง screens ref-count, listener remove, REST response เก่าหลัง event และ event ที่ payload ขาด field โดย state สุดท้ายต้องตรง snapshot ล่าสุด</div></section>
+<section id="section-5"><h2>5. Parse event args</h2><p><code>_parseArgs</code> รับ null/empty/non-map เป็น empty map แล้ว handler screen ตรวจ stationId ต่อ ความทนนี้กัน crash แต่ malformed events ถูกกลืน ควร log metric พร้อม event name/schema version</p></section>
+<section id="section-6"><h2>6. Optimistic merge</h2><p>StationDispatched merge pallet/destination เพื่อแสดง busy ทันที จากนั้นโหลด REST ใหม่ ส่วน events อื่นใช้ refresh อย่างเดียว Pattern นี้ลด latency แต่ต้องมี request generation guard ไม่ให้ response เก่าทับ event ใหม่</p></section>
+<section id="section-7"><h2>7. Connection gaps</h2><p>connect catch แล้ว log แต่ไม่ส่ง connection state ให้ UI; automatic reconnect ไม่รับประกัน event replay จึงควร refresh เมื่อ reconnected, ทำ periodic reconciliation และแสดงสถานะ stale/offline</p></section>
+<section id="section-8"><h2>8. Realtime tests</h2><div class="success">fake stream แล้วทดสอบ event ซ้ำ/ผิดลำดับ/unknown station, disconnect-reconnect, สอง screens ref-count, listener remove, REST response เก่าหลัง event และ event ที่ payload ขาด field โดย state สุดท้ายต้องตรง snapshot ล่าสุด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

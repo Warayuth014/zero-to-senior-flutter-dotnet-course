@@ -4,25 +4,26 @@
 <title>ApiResult เทียบกับ throw ApiException</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-10 · Flutter + .NET</span><h1>ApiResult เทียบกับ throw ApiException</h1><p>Part 7: HTTP + .NET API Integration</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Result type</a></li><li><a href="#section-2">2. Exception style</a></li><li><a href="#section-3">3. เลือก Result เมื่อ</a></li><li><a href="#section-4">4. เลือก throw เมื่อ</a></li><li><a href="#section-5">5. อย่าซ้อนสองระบบ</a></li><li><a href="#section-6">6. Generic และ stack trace</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Decision rule</a></li></ol></nav>
 <div class="note"><strong>สองแนวทาง:</strong> คืน <code>ApiResult&lt;T&gt;</code> ทำ failure ชัดใน type; throw <code>ApiException</code> ทำ happy path อ่านง่าย ทั้งคู่ใช้ได้ถ้ากำหนด policy สม่ำเสมอ</div>
-<section><h2>1. Result type</h2><pre class="code-vs"><code>sealed class ApiResult&lt;T&gt; const ApiResult();
+<section id="section-1"><h2>1. Result type</h2><pre class="code-vs"><code>sealed class ApiResult&lt;T&gt; const ApiResult();
 final class ApiSuccess&lt;T&gt; extends ApiResult&lt;T&gt; {
   const ApiSuccess(this.value); final T value;
 }
 final class ApiFailure&lt;T&gt; extends ApiResult&lt;T&gt; {
   const ApiFailure(this.error); final ApiError error;
 }</code></pre></section>
-<section><h2>2. Exception style</h2><pre class="code-vs"><code>try {
+<section id="section-2"><h2>2. Exception style</h2><pre class="code-vs"><code>try {
   final page = await api.fetchTasks();
   state = Ready(page);
 } on ApiException catch (e) {
   state = Failed(e.userMessage);
 }</code></pre></section>
-<section><h2>3. เลือก Result เมื่อ</h2><p>failure เป็นผลที่คาดหมายและ caller ต้อง pattern-match ทุกครั้ง เช่น validation/conflict ใน workflow หรือทีมต้องการให้ compiler บังคับ handle</p></section>
-<section><h2>4. เลือก throw เมื่อ</h2><p>service method มีค่าปกติหนึ่งแบบและใช้ shared boundary แปลง exception เป็น UI state ทำให้ chain หลายชั้นไม่ต้อง unwrap ซ้ำ</p></section>
-<section><h2>5. อย่าซ้อนสองระบบ</h2><p><code>ApiResult</code> ที่บาง branch ยัง throw network exception ทำให้ caller ต้อง handle สองทาง ถ้าใช้ Result ควรกำหนดว่าอะไรถูก capture และอะไรเป็น programmer error</p></section>
-<section><h2>6. Generic และ stack trace</h2><p>ถ้า rethrow ใช้ <code>rethrow</code> เพื่อรักษา stack trace ไม่ใช้ <code>throw e</code>; Result ควรเก็บ cause สำหรับ diagnostics โดยไม่ expose ให้ UI</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แอปมี 30 API methods และทุก Store ใช้ Loading/Error/Success เดียวกัน ควรเริ่มจากอะไร?</p><details><summary>แนวคำตอบ</summary><p>เลือก convention เดียว เช่น typed ApiException + central mapper หรือ Result + exhaustive switch แล้วเขียนตัวอย่างมาตรฐานและ tests ก่อน migrate</p></details></section>
-<section><h2>8. Decision rule</h2><div class="success">ความสม่ำเสมอและ typed error สำคัญกว่าชื่อ pattern; ห้ามคืน null เพื่อแทนทั้ง not-found, offline และ parse error</div></section>
+<section id="section-3"><h2>3. เลือก Result เมื่อ</h2><p>failure เป็นผลที่คาดหมายและ caller ต้อง pattern-match ทุกครั้ง เช่น validation/conflict ใน workflow หรือทีมต้องการให้ compiler บังคับ handle</p></section>
+<section id="section-4"><h2>4. เลือก throw เมื่อ</h2><p>service method มีค่าปกติหนึ่งแบบและใช้ shared boundary แปลง exception เป็น UI state ทำให้ chain หลายชั้นไม่ต้อง unwrap ซ้ำ</p></section>
+<section id="section-5"><h2>5. อย่าซ้อนสองระบบ</h2><p><code>ApiResult</code> ที่บาง branch ยัง throw network exception ทำให้ caller ต้อง handle สองทาง ถ้าใช้ Result ควรกำหนดว่าอะไรถูก capture และอะไรเป็น programmer error</p></section>
+<section id="section-6"><h2>6. Generic และ stack trace</h2><p>ถ้า rethrow ใช้ <code>rethrow</code> เพื่อรักษา stack trace ไม่ใช้ <code>throw e</code>; Result ควรเก็บ cause สำหรับ diagnostics โดยไม่ expose ให้ UI</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แอปมี 30 API methods และทุก Store ใช้ Loading/Error/Success เดียวกัน ควรเริ่มจากอะไร?</p><details><summary>แนวคำตอบ</summary><p>เลือก convention เดียว เช่น typed ApiException + central mapper หรือ Result + exhaustive switch แล้วเขียนตัวอย่างมาตรฐานและ tests ก่อน migrate</p></details></section>
+<section id="section-8"><h2>8. Decision rule</h2><div class="success">ความสม่ำเสมอและ typed error สำคัญกว่าชื่อ pattern; ห้ามคืน null เพื่อแทนทั้ง not-found, offline และ parse error</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

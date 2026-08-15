@@ -4,14 +4,15 @@
 <title>DTO-domain separation validation และ API evolution</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">30-14 · Foundation</span><h1>DTO-domain separation validation และ API evolution</h1><p>Part 30: Freezed, JSON Serialization &amp; Code Generation</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Same model trade-off</a></li><li><a href="#section-2">2. Validation</a></li><li><a href="#section-3">3. Mapper</a></li><li><a href="#section-4">4. API evolution</a></li><li><a href="#section-5">5. Trust boundary</a></li><li><a href="#section-6">6. Sensitive fields</a></li><li><a href="#section-7">7. Error context</a></li><li><a href="#section-8">8. Checkpoint</a></li></ol></nav>
 <div class="note"><strong>DTO ไม่จำเป็นต้องเป็น domain model:</strong> generated JSON classสะท้อน wire ส่วน domainสะท้อนกฎธุรกิจ Mapping seamกัน API evolutionไม่ให้กระจายทั่ว UI</div>
-<section><h2>1. Same model trade-off</h2><p>labใช้ WmsTaskเดียวเพราะ contractเล็กและเน้น generator แต่ระบบใหญ่ควรแยกเมื่อชื่อ/nullability/lifecycleของ wireต่างจาก domain</p></section>
-<section><h2>2. Validation</h2><p>requiredใน Dartบังคับ caller ไม่ตรวจ non-empty/range/cross-field invariant จึงยังต้อง normalize/validateก่อนสร้าง trusted domain object</p></section>
-<section><h2>3. Mapper</h2><pre class="code-vs"><code>TaskDto.fromJson(raw) → validate/map → WmsTask</code></pre><p>repositoryแปลง decode errorsเป็น failure vocabularyของ feature</p></section>
-<section><h2>4. API evolution</h2><p>รองรับ old/new keyหรือ versionใน DTO mapperชั่วคราว เก็บ deprecation deadlineและ telemetryก่อนลบ fallback</p></section>
-<section><h2>5. Trust boundary</h2><p>JSONจาก network/local DB/deep linkเป็น untrusted inputเสมอ Codegenลด castมือแต่ไม่ได้ sanitize HTML/path/URLหรือ authorize action</p></section>
-<section><h2>6. Sensitive fields</h2><p>toString/equality/generated JSONอาจรวม token/PII ห้ามใส่ secretในทั่วไป modelหรือ log objectทั้งก้อน; redact/excludeและแยก secure type</p></section>
-<section><h2>7. Error context</h2><p>รายงาน endpoint/key/type/correlationโดยไม่เก็บ payloadลับ และแยก malformed contractจาก business rejection</p></section>
-<section><h2>8. Checkpoint</h2><div class="success">เลือก modelจริงหนึ่งตัวและตัดสินด้วยหลักฐานว่าควรรวม DTO-domainหรือแยก พร้อม testsที่ boundary</div></section>
+<section id="section-1"><h2>1. Same model trade-off</h2><p>labใช้ WmsTaskเดียวเพราะ contractเล็กและเน้น generator แต่ระบบใหญ่ควรแยกเมื่อชื่อ/nullability/lifecycleของ wireต่างจาก domain</p></section>
+<section id="section-2"><h2>2. Validation</h2><p>requiredใน Dartบังคับ caller ไม่ตรวจ non-empty/range/cross-field invariant จึงยังต้อง normalize/validateก่อนสร้าง trusted domain object</p></section>
+<section id="section-3"><h2>3. Mapper</h2><pre class="code-vs"><code>TaskDto.fromJson(raw) → validate/map → WmsTask</code></pre><p>repositoryแปลง decode errorsเป็น failure vocabularyของ feature</p></section>
+<section id="section-4"><h2>4. API evolution</h2><p>รองรับ old/new keyหรือ versionใน DTO mapperชั่วคราว เก็บ deprecation deadlineและ telemetryก่อนลบ fallback</p></section>
+<section id="section-5"><h2>5. Trust boundary</h2><p>JSONจาก network/local DB/deep linkเป็น untrusted inputเสมอ Codegenลด castมือแต่ไม่ได้ sanitize HTML/path/URLหรือ authorize action</p></section>
+<section id="section-6"><h2>6. Sensitive fields</h2><p>toString/equality/generated JSONอาจรวม token/PII ห้ามใส่ secretในทั่วไป modelหรือ log objectทั้งก้อน; redact/excludeและแยก secure type</p></section>
+<section id="section-7"><h2>7. Error context</h2><p>รายงาน endpoint/key/type/correlationโดยไม่เก็บ payloadลับ และแยก malformed contractจาก business rejection</p></section>
+<section id="section-8"><h2>8. Checkpoint</h2><div class="success">เลือก modelจริงหนึ่งตัวและตัดสินด้วยหลักฐานว่าควรรวม DTO-domainหรือแยก พร้อม testsที่ boundary</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

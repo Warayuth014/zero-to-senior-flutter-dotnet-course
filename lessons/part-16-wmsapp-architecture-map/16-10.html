@@ -4,22 +4,23 @@
 <title>PartThumbnail และ image URL</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-10 · Real Codebase</span><h1>PartThumbnail และ image URL</h1><p>Part 16: wmsapp Real Codebase Map</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. Input/output</a></li><li><a href="#section-2">2. Async path</a></li><li><a href="#section-3">3. Rebuild issue</a></li><li><a href="#section-4">4. URL issue</a></li><li><a href="#section-5">5. Image memory</a></li><li><a href="#section-6">6. Error states</a></li><li><a href="#section-7">7. Better boundary</a></li><li><a href="#section-8">8. Tests</a></li></ol></nav>
 <div class="note"><strong>PartThumbnail เป็นตัวอย่าง dependency ไหลเข้า widget:</strong> StatelessWidgetสร้าง <code>ApiService()</code>, resolve relative URLผ่าน FutureBuilder แล้วโหลด Image.network จึงรวม config, async, network, cacheและ presentationในจุดเดียว</div>
-<section><h2>1. Input/output</h2><p>รับ <code>String? imageUrl</code>และ size default 40 ถ้า null/emptyแสดง package icon มิฉะนั้น resolve URL → spinner → network imageหรือ error icon</p></section>
-<section><h2>2. Async path</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
+<section id="section-1"><h2>1. Input/output</h2><p>รับ <code>String? imageUrl</code>และ size default 40 ถ้า null/emptyแสดง package icon มิฉะนั้น resolve URL → spinner → network imageหรือ error icon</p></section>
+<section id="section-2"><h2>2. Async path</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
   future: ApiService().getImageFullUrl(imageUrl!),
   builder: (_, snap) =&gt; snap.hasData
       ? Image.network(snap.data!)
       : spinner,
 )</code></pre></section>
-<section><h2>3. Rebuild issue</h2><p>สร้าง Futureใหม่ทุก build ทำให้ parent rebuildจาก search/theme/pollingเริ่ม resolveซ้ำแม้ URLเดิม Futureควร cacheใน State/repositoryหรือ resolutionควร synchronousหลัง config bootstrap</p></section>
-<section><h2>4. URL issue</h2><p><code>getImageFullUrl</code>นำ API baseไป <code>replaceAll('/api','')</code>แล้วต่อ relative string เสี่ยง slash/path/hostผิด ใช้ <code>Uri.resolve</code>กับ media baseที่ explicitและ allowlist absolute origin</p></section>
-<section><h2>5. Image memory</h2><p>กำหนด layout width/heightแต่ไม่ได้ส่ง <code>cacheWidth/cacheHeight</code> decoderอาจเก็บ bitmapต้นฉบับใหญ่สำหรับ thumbnail 40px เพิ่ม decode sizeตาม devicePixelRatioและ versioned cache key</p></section>
-<section><h2>6. Error states</h2><p>resolve Future errorตอนนี้แสดง spinnerต่อเพราะเช็กเพียง <code>hasData</code> ต้องแยก waiting/error/emptyและ retry ส่วน Image.networkมี errorBuilderแล้วแต่ไม่มี loading progressจาก download</p></section>
-<section><h2>7. Better boundary</h2><pre class="code-vs"><code>PartThumbnail(
+<section id="section-3"><h2>3. Rebuild issue</h2><p>สร้าง Futureใหม่ทุก build ทำให้ parent rebuildจาก search/theme/pollingเริ่ม resolveซ้ำแม้ URLเดิม Futureควร cacheใน State/repositoryหรือ resolutionควร synchronousหลัง config bootstrap</p></section>
+<section id="section-4"><h2>4. URL issue</h2><p><code>getImageFullUrl</code>นำ API baseไป <code>replaceAll('/api','')</code>แล้วต่อ relative string เสี่ยง slash/path/hostผิด ใช้ <code>Uri.resolve</code>กับ media baseที่ explicitและ allowlist absolute origin</p></section>
+<section id="section-5"><h2>5. Image memory</h2><p>กำหนด layout width/heightแต่ไม่ได้ส่ง <code>cacheWidth/cacheHeight</code> decoderอาจเก็บ bitmapต้นฉบับใหญ่สำหรับ thumbnail 40px เพิ่ม decode sizeตาม devicePixelRatioและ versioned cache key</p></section>
+<section id="section-6"><h2>6. Error states</h2><p>resolve Future errorตอนนี้แสดง spinnerต่อเพราะเช็กเพียง <code>hasData</code> ต้องแยก waiting/error/emptyและ retry ส่วน Image.networkมี errorBuilderแล้วแต่ไม่มี loading progressจาก download</p></section>
+<section id="section-7"><h2>7. Better boundary</h2><pre class="code-vs"><code>PartThumbnail(
   imageUri: mediaPolicy.resolve(part.imageUrl),
   cacheKey: part.imageVersion,
 )</code></pre><p>widgetรับ presentation-ready valueและ ImageProviderที่ fakeได้ ไม่รู้ ApiService</p></section>
-<section><h2>8. Tests</h2><div class="success">null/empty, resolving, resolve failure, network failure, parent rebuildเรียก resolverครั้งเดียว, URLเปลี่ยน, theme/list reorderและ decode dimensionsเหมาะกับ PDA</div></section>
+<section id="section-8"><h2>8. Tests</h2><div class="success">null/empty, resolving, resolve failure, network failure, parent rebuildเรียก resolverครั้งเดียว, URLเปลี่ยน, theme/list reorderและ decode dimensionsเหมาะกับ PDA</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

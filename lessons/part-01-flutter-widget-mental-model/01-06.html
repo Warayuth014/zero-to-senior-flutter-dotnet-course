@@ -4,8 +4,9 @@
 <title>initState, didChangeDependencies, build และ dispose</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-06 · Flutter UI</span><h1>initState, didChangeDependencies, build และ dispose</h1><p>Part 1: Flutter Widget Mental Model</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. ลำดับหลัก</a></li><li><a href="#section-2">2. initState</a></li><li><a href="#section-3">3. didChangeDependencies</a></li><li><a href="#section-4">4. didUpdateWidget</a></li><li><a href="#section-5">5. dispose แบบสมมาตร</a></li><li><a href="#section-6">6. Resource ที่ส่งเข้ามาไม่ใช่เจ้าของเสมอ</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. จุดพลาด</a></li></ol></nav>
 <div class="note">Lifecycle คือสัญญาว่าเมื่อไร State มี context/widget พร้อม, เมื่อไร dependency เปลี่ยน และเมื่อไรต้องคืน resource การจำชื่อ method โดยไม่รู้ owner ทำให้ listener ซ้ำและใช้ object หลัง dispose</div>
-<section><h2>1. ลำดับหลัก</h2><pre class="code-vs"><code>createState
+<section id="section-1"><h2>1. ลำดับหลัก</h2><pre class="code-vs"><code>createState
 → initState
 → didChangeDependencies
 → build (เกิดซ้ำได้)
@@ -13,14 +14,14 @@
 → build ...
 → deactivate (อาจย้าย/reinsert)
 → dispose (จบถาวร)</code></pre></section>
-<section><h2>2. initState</h2><p>รันครั้งเดียวต่อ State ใช้สร้าง controller, subscribe resource ที่ไม่ต้อง depend on inherited context และเริ่มงานจาก initial config เรียก <code>super.initState()</code> ตาม convention/framework contract</p><pre class="code-vs"><code>@override
+<section id="section-2"><h2>2. initState</h2><p>รันครั้งเดียวต่อ State ใช้สร้าง controller, subscribe resource ที่ไม่ต้อง depend on inherited context และเริ่มงานจาก initial config เรียก <code>super.initState()</code> ตาม convention/framework contract</p><pre class="code-vs"><code>@override
 void initState() {
   super.initState();
   controller = TextEditingController();
   service.addListener(_onChanged);
 }</code></pre></section>
-<section><h2>3. didChangeDependencies</h2><p>รันหลัง initState และเมื่อ inherited dependency ที่ State depend เปลี่ยน เหมาะงานที่ต้องใช้ Localizations/Theme/MediaQuery แล้วต้อง cache/subscribeตาม dependency แต่ต้อง guard ไม่ทำ side effect ซ้ำทุกครั้งโดยไม่ยกเลิกของเดิม</p></section>
-<section><h2>4. didUpdateWidget</h2><p>เมื่อ parent ส่ง widget config ใหม่แต่ State เดิมอยู่ต่อ ถ้า subscriptionขึ้นกับ <code>widget.source</code> ต้องถอด oldWidget.source แล้วต่อ widget.source ใหม่:</p><pre class="code-vs"><code>@override
+<section id="section-3"><h2>3. didChangeDependencies</h2><p>รันหลัง initState และเมื่อ inherited dependency ที่ State depend เปลี่ยน เหมาะงานที่ต้องใช้ Localizations/Theme/MediaQuery แล้วต้อง cache/subscribeตาม dependency แต่ต้อง guard ไม่ทำ side effect ซ้ำทุกครั้งโดยไม่ยกเลิกของเดิม</p></section>
+<section id="section-4"><h2>4. didUpdateWidget</h2><p>เมื่อ parent ส่ง widget config ใหม่แต่ State เดิมอยู่ต่อ ถ้า subscriptionขึ้นกับ <code>widget.source</code> ต้องถอด oldWidget.source แล้วต่อ widget.source ใหม่:</p><pre class="code-vs"><code>@override
 void didUpdateWidget(covariant ScanPanel oldWidget) {
   super.didUpdateWidget(oldWidget);
   if (oldWidget.source != widget.source) {
@@ -28,9 +29,9 @@ void didUpdateWidget(covariant ScanPanel oldWidget) {
     widget.source.addListener(_sync);
   }
 }</code></pre></section>
-<section><h2>5. dispose แบบสมมาตร</h2><p>ทุก add/listen/create ต้องมี remove/cancel/dispose โดย owner เดียวกัน Absolute WarehouseShell add WidgetsBindingObserver, สร้าง timers/store แล้ว remove/cancel/dispose ก่อน super.dispose; Login/packing/scan screens dispose controller/focus ของตน</p></section>
-<section><h2>6. Resource ที่ส่งเข้ามาไม่ใช่เจ้าของเสมอ</h2><p><code>pda_widgets.dart</code> มีแนวคิดชัด: controller ภายนอกเป็นของ caller จึง dispose เฉพาะ controller ที่ widget สร้างเอง กฎคือผู้สร้าง/รับ ownership ตาม contract เป็นคนคืน ไม่ dispose dependency ที่ยืมมา</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Widget รับ optional external controller ถ้าไม่ส่งให้สร้างเอง เขียน ownership lifecycle</p><details><summary>เฉลย</summary><pre class="code-vs"><code>TextEditingController? _owned;
+<section id="section-5"><h2>5. dispose แบบสมมาตร</h2><p>ทุก add/listen/create ต้องมี remove/cancel/dispose โดย owner เดียวกัน Absolute WarehouseShell add WidgetsBindingObserver, สร้าง timers/store แล้ว remove/cancel/dispose ก่อน super.dispose; Login/packing/scan screens dispose controller/focus ของตน</p></section>
+<section id="section-6"><h2>6. Resource ที่ส่งเข้ามาไม่ใช่เจ้าของเสมอ</h2><p><code>pda_widgets.dart</code> มีแนวคิดชัด: controller ภายนอกเป็นของ caller จึง dispose เฉพาะ controller ที่ widget สร้างเอง กฎคือผู้สร้าง/รับ ownership ตาม contract เป็นคนคืน ไม่ dispose dependency ที่ยืมมา</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Widget รับ optional external controller ถ้าไม่ส่งให้สร้างเอง เขียน ownership lifecycle</p><details><summary>เฉลย</summary><pre class="code-vs"><code>TextEditingController? _owned;
 TextEditingController get controller =&gt; widget.controller ?? _owned!;
 @override void initState() {
   super.initState();
@@ -40,6 +41,6 @@ TextEditingController get controller =&gt; widget.controller ?? _owned!;
   _owned?.dispose();
   super.dispose();
 }</code></pre><p>ถ้า external controller เปลี่ยนต้องพิจารณา didUpdateWidget ด้วย</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่ายิง API ใน build และอย่า subscribe ใน build เพราะทุก rebuild จะสร้าง side effect ใหม่ ใช้ lifecycle/store command ที่มี idempotency และ cancellation ชัด</div></section>
+<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่ายิง API ใน build และอย่า subscribe ใน build เพราะทุก rebuild จะสร้าง side effect ใหม่ ใช้ lifecycle/store command ที่มี idempotency และ cancellation ชัด</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,18 +4,19 @@
 <title>Check-in models + API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-09 · Real Codebase</span><h1>Check-in models + API</h1><p>Part 19: wmsapp: Packing, Check-in &amp; Sorting</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. API surface</a></li><li><a href="#section-2">2. Preview model</a></li><li><a href="#section-3">3. Preview items</a></li><li><a href="#section-4">4. Scan result</a></li><li><a href="#section-5">5. Slot model</a></li><li><a href="#section-6">6. Date/status parsing</a></li><li><a href="#section-7">7. Command responses</a></li><li><a href="#section-8">8. Contract lab</a></li></ol></nav>
 <div class="note"><strong>Check-in contract มีทั้ง carton และ pipeline:</strong> slot assignment อิง owner/customer order ขณะที่ counters สะท้อนความคืบหน้าข้าม Picking, Packing, Sorting และ Check-in</div>
-<section><h2>1. API surface</h2><pre class="code-vs"><code>POST /checkin/preview
+<section id="section-1"><h2>1. API surface</h2><pre class="code-vs"><code>POST /checkin/preview
 POST /checkin/scan
 GET  /checkin/slot/{slotId}
 POST /checkin/complete
 POST /checkin/dispatch</code></pre></section>
-<section><h2>2. Preview model</h2><p><code>PreviewCheckInResponse</code> รวม pack identity/content, slot decision, duplicate flag, destination และ counters ค่า <code>skuCount</code> derive จาก items.length ไม่ควรเก็บซ้ำ</p></section>
-<section><h2>3. Preview items</h2><p>PreviewCheckInItem มี partId, description, brand, imageUrl และ qty เหมาะกับ visual verification แต่ไม่มี lot/serial เพราะขั้นนี้ยืนยัน carton รวม ไม่ใช่แก้ inventory line</p></section>
-<section><h2>4. Scan result</h2><p><code>ScanCheckInResponse</code> คืน slotId กับ isReadyToComplete ขนาดเล็กและชัด แต่ timeout หลัง commit ต้องมี operation/query status เพื่อค้นผล ไม่ควรยิง scan ซ้ำโดยเดา</p></section>
-<section><h2>5. Slot model</h2><p><code>CheckInSlotDetail</code> มี status, cartons และ pipeline counters ส่วน carton มี packing/tracking/status/time/counts ทำให้ refresh หนึ่งครั้ง rebuild ทั้งหน้าได้</p></section>
-<section><h2>6. Date/status parsing</h2><p>scannedAt invalid fallback เป็น now และ status เป็น String ควรใช้ UTC timestamp ที่ parse failure สังเกตได้กับ enum ที่รองรับ unknown เพื่อไม่ทำ carton เสียดูเหมือนเพิ่งสแกน</p></section>
-<section><h2>7. Command responses</h2><p>complete/dispatch คืน void ทำให้ clientรู้เพียง success HTTP หากต้องแสดงสถานะ/version/dispatch destination ควรคืน typed result หรือตามด้วย GET slot อย่างบังคับ</p></section>
-<section><h2>8. Contract lab</h2><div class="success">fixture preview new/existing/duplicate, slot OPEN/READY/SHIPPED, malformed dates/status และ problem details 409 จาก concurrent scan/complete/dispatch แล้วทดสอบ Dart/.NET contract คู่กัน</div></section>
+<section id="section-2"><h2>2. Preview model</h2><p><code>PreviewCheckInResponse</code> รวม pack identity/content, slot decision, duplicate flag, destination และ counters ค่า <code>skuCount</code> derive จาก items.length ไม่ควรเก็บซ้ำ</p></section>
+<section id="section-3"><h2>3. Preview items</h2><p>PreviewCheckInItem มี partId, description, brand, imageUrl และ qty เหมาะกับ visual verification แต่ไม่มี lot/serial เพราะขั้นนี้ยืนยัน carton รวม ไม่ใช่แก้ inventory line</p></section>
+<section id="section-4"><h2>4. Scan result</h2><p><code>ScanCheckInResponse</code> คืน slotId กับ isReadyToComplete ขนาดเล็กและชัด แต่ timeout หลัง commit ต้องมี operation/query status เพื่อค้นผล ไม่ควรยิง scan ซ้ำโดยเดา</p></section>
+<section id="section-5"><h2>5. Slot model</h2><p><code>CheckInSlotDetail</code> มี status, cartons และ pipeline counters ส่วน carton มี packing/tracking/status/time/counts ทำให้ refresh หนึ่งครั้ง rebuild ทั้งหน้าได้</p></section>
+<section id="section-6"><h2>6. Date/status parsing</h2><p>scannedAt invalid fallback เป็น now และ status เป็น String ควรใช้ UTC timestamp ที่ parse failure สังเกตได้กับ enum ที่รองรับ unknown เพื่อไม่ทำ carton เสียดูเหมือนเพิ่งสแกน</p></section>
+<section id="section-7"><h2>7. Command responses</h2><p>complete/dispatch คืน void ทำให้ clientรู้เพียง success HTTP หากต้องแสดงสถานะ/version/dispatch destination ควรคืน typed result หรือตามด้วย GET slot อย่างบังคับ</p></section>
+<section id="section-8"><h2>8. Contract lab</h2><div class="success">fixture preview new/existing/duplicate, slot OPEN/READY/SHIPPED, malformed dates/status และ problem details 409 จาก concurrent scan/complete/dispatch แล้วทดสอบ Dart/.NET contract คู่กัน</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

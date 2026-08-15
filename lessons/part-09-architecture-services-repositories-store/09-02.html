@@ -4,11 +4,12 @@
 <title>UI, logic และ data layer</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-02 · Architecture</span><h1>UI, logic และ data layer</h1><p>Part 9: Architecture: Service, Repository &amp; Store</p></header>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">1. UI layer</a></li><li><a href="#section-2">2. Logic layer</a></li><li><a href="#section-3">3. Data layer</a></li><li><a href="#section-4">4. Example</a></li><li><a href="#section-5">5. Effects ไม่ใช่ state ทุกอย่าง</a></li><li><a href="#section-6">6. Rule of dependencies</a></li><li><a href="#section-7">7. แบบฝึกหัด</a></li><li><a href="#section-8">8. Review checklist</a></li></ol></nav>
 <div class="note"><strong>สามชั้นที่ใช้จริง:</strong> UI แสดง state/ส่ง intent, logic คุม workflow, data layer อ่านเขียนข้อมูลและแปลง contract</div>
-<section><h2>1. UI layer</h2><p>Widget อ่าน immutable ViewState, เรียก action เช่น <code>store.scan(code)</code>, จัด focus/navigation/dialog ตาม effect และไม่รู้ endpoint/JSON</p></section>
-<section><h2>2. Logic layer</h2><p>Store/ViewModel ตรวจ transition, loading/duplicate/race, เรียก repository และสร้าง state ใหม่ โดยไม่สร้าง Widget หรือใช้ ScaffoldMessenger โดยตรง</p></section>
-<section><h2>3. Data layer</h2><p>Repository/DataSource กำหนด URI, request DTO, decode response, cache/remote policy และ translate transport errors ให้ logic layer เข้าใจ</p></section>
-<section><h2>4. Example</h2><pre class="code-vs"><code>// UI
+<section id="section-1"><h2>1. UI layer</h2><p>Widget อ่าน immutable ViewState, เรียก action เช่น <code>store.scan(code)</code>, จัด focus/navigation/dialog ตาม effect และไม่รู้ endpoint/JSON</p></section>
+<section id="section-2"><h2>2. Logic layer</h2><p>Store/ViewModel ตรวจ transition, loading/duplicate/race, เรียก repository และสร้าง state ใหม่ โดยไม่สร้าง Widget หรือใช้ ScaffoldMessenger โดยตรง</p></section>
+<section id="section-3"><h2>3. Data layer</h2><p>Repository/DataSource กำหนด URI, request DTO, decode response, cache/remote policy และ translate transport errors ให้ logic layer เข้าใจ</p></section>
+<section id="section-4"><h2>4. Example</h2><pre class="code-vs"><code>// UI
 onSubmitted: store.submitBarcode
 
 // Logic
@@ -21,9 +22,9 @@ Future&lt;void&gt; submitBarcode(String raw) async {
 // Data
 Future&lt;Item&gt; validateBarcode(String code) async =&gt;
   ItemDto.fromJson(await api.get('/items/$code')).toDomain();</code></pre></section>
-<section><h2>5. Effects ไม่ใช่ state ทุกอย่าง</h2><p>toast/navigation แบบ one-shot ใช้ effect channel/callbackที่ typed หรือให้ UI ตอบสนองต่อ action result อย่าเก็บ bool <code>showSuccess</code> ค้างจน rebuild ซ้ำ</p></section>
-<section><h2>6. Rule of dependencies</h2><p>UI import logic/models; logic import repository interface/domain; infrastructure implement interfaceและ import HTTP DTO หลีกเลี่ยง circular importด้วย ownership ที่ชัด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ปัจจุบัน screen มี try/catch SocketException แล้ว set error string ควรย้ายอะไร?</p><details><summary>เฉลย</summary><p>Data layer แปลง SocketException เป็น NetworkFailure; logic map เป็น error state; UI render message/retry action</p></details></section>
-<section><h2>8. Review checklist</h2><div class="success">เปลี่ยน widget testโดย fake store, เปลี่ยน APIโดย repository test, และทดสอบ workflowโดย fake repositoryได้อย่างอิสระ</div></section>
+<section id="section-5"><h2>5. Effects ไม่ใช่ state ทุกอย่าง</h2><p>toast/navigation แบบ one-shot ใช้ effect channel/callbackที่ typed หรือให้ UI ตอบสนองต่อ action result อย่าเก็บ bool <code>showSuccess</code> ค้างจน rebuild ซ้ำ</p></section>
+<section id="section-6"><h2>6. Rule of dependencies</h2><p>UI import logic/models; logic import repository interface/domain; infrastructure implement interfaceและ import HTTP DTO หลีกเลี่ยง circular importด้วย ownership ที่ชัด</p></section>
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ปัจจุบัน screen มี try/catch SocketException แล้ว set error string ควรย้ายอะไร?</p><details><summary>เฉลย</summary><p>Data layer แปลง SocketException เป็น NetworkFailure; logic map เป็น error state; UI render message/retry action</p></details></section>
+<section id="section-8"><h2>8. Review checklist</h2><div class="success">เปลี่ยน widget testโดย fake store, เปลี่ยน APIโดย repository test, และทดสอบ workflowโดย fake repositoryได้อย่างอิสระ</div></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
