@@ -59,6 +59,7 @@
 | 3 Forms, Focus & Barcode Scanner | Authored + verified | 14/14 |
 | 4 State, Async & Lifecycle | Authored + verified | 16/16 |
 | 5 Navigation, Dialog & Application Shell | Authored + verified | 12/12 |
-| 6–25 | Scaffold/roadmap | 0/287 |
+| 6 Models, JSON & API Contracts | Authored + verified | 14/14 |
+| 7–25 | Scaffold/roadmap | 0/273 |
 
 คำว่า “391 lessons” ใน manifest หมายถึงจำนวนเส้นทางบททั้งหมด ไม่ได้หมายความว่าเขียนเนื้อหาเชิงลึกครบแล้ว ให้ใช้ `authoredCount` เป็นตัวเลขความคืบหน้าด้านเนื้อหา
