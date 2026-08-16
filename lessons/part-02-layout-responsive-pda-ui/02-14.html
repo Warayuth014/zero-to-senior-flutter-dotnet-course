@@ -4,25 +4,139 @@
 <title>RenderFlex Overflow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-14 · Flutter UI</span><h1>RenderFlex Overflow</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">อ่าน error ให้ครบ</a></li><li><a href="#section-2">Classification</a></li><li><a href="#section-3">Decision tree</a></li><li><a href="#section-4">ตัวอย่าง Row</a></li><li><a href="#section-5">ตัวอย่าง Column</a></li><li><a href="#section-6">Regression matrix</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">แถบเหลืองดำ RenderFlex overflow คือหลักฐานว่า child ต้องการ main-axis มากกว่าที่ Flex มี การแก้อย่างเป็นระบบคือหา constraint owner และ content priority ไม่ใช่สุ่มเพิ่ม Expanded/scroll/font เล็ก</div>
-<section id="section-1"><h2>1. อ่าน error ให้ครบ</h2><p>จด Flex direction, จำนวน pixels ที่ล้น, constraints และ nearest ancestor เปิด Inspector เลือก RenderFlex แล้วดู size ของลูก จุดที่เห็นแถบ overflow เป็นปลายเหตุ; root cause อาจอยู่ parent ที่บังคับ height/width ต่ำเกิน</p></section>
-<section id="section-2"><h2>2. Classification</h2><ul><li>Row + text ยาว: child ไม่มี bounded width</li><li>Column + content สูง: viewport ไม่มี scroll/flex policy</li><li>Fixed-height card + text scale: height assumption ผิด</li><li>Nested scroll + Expanded: main axis unbounded</li><li>Keyboard: available height ลดลงแต่หน้าไม่เลื่อน</li><li>Localization/data: fixture สั้นกว่าข้อมูลจริง</li></ul></section>
-<section id="section-3"><h2>3. Decision tree</h2><ol><li>เนื้อหาควรยืดหยุ่น? ใช้ Expanded/Flexible</li><li>ควรขึ้นบรรทัด? กำหนด maxLines/softWrap</li><li>ควรเลื่อน? ให้ scrollable เป็น owner ของ overflow</li><li>ข้อมูลรองซ่อนได้? adaptive composition</li><li>ขนาดตายตัวไม่มีเหตุผล? เอาออก/ใช้ min constraint</li><li>จำเป็นต้อง scale เชิงภาพ? FittedBox/AutoSize ในขอบเขตจำกัด</li></ol></section>
-<section id="section-4"><h2>4. ตัวอย่าง Row</h2><pre class="code-vs"><code>// ผิด: Text วัดตัวเองตามความยาว
-Row(children: [Icon(Icons.place), Text(location), Text(qty)])
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: แถบที่เห็นคือปลายเหตุ</a></li><li><a href="#section-4">อ่าน error ให้ครบ</a></li><li><a href="#section-5">จำแนกสาเหตุ</a></li><li><a href="#section-6">ลำดับการตัดสินใจ</a></li><li><a href="#section-7">ทางแก้ที่เป็นการซ่อนปัญหา</a></li><li><a href="#section-8">ทดสอบไม่ให้กลับมาอีก</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านและแก้แถบสีเหลืองดำอย่างเป็นระบบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1–2.13 ทั้งหมด — บทนี้เป็นการรวบวิธีแก้ปัญหาที่กระจายอยู่ในบทก่อน ๆ<br><strong>จบบทนี้แล้วจะทำได้:</strong> วิเคราะห์สาเหตุของเนื้อหาล้นได้จากข้อความ error โดยไม่ต้องลองสุ่ม และรู้ว่าทางแก้ไหนเป็นการซ่อนปัญหา</div>
 
-// ถูก: กำหนดผู้รับพื้นที่ที่เหลือ
-Row(children: [
-  const Icon(Icons.place),
-  const SizedBox(width: 8),
-  Expanded(child: Text(location, maxLines: 2)),
-  const SizedBox(width: 8),
-  Text(qty),
-])</code></pre></section>
-<section id="section-5"><h2>5. ตัวอย่าง Column</h2><p>ถ้ารายการต้องเลื่อนและ action ตรึง ให้ Expanded(ListView) ถ้าทั้งหน้าควรเลื่อนและ child น้อย ให้ SingleChildScrollView ถ้าหลาย section + list ใหญ่ ให้ CustomScrollView ห้ามแก้ด้วย Column(mainAxisSize:min) เมื่อ parent ยังส่ง height tight และเนื้อหายังเกิน</p></section>
-<section id="section-6"><h2>6. Regression matrix</h2><p>หลังแก้ทดสอบ width/height ก่อน-ตรง-หลัง breakpoint, landscape, keyboard เปิด, text scale 2.0, ภาษาไทย/อังกฤษ, long identifier, empty/error/loading และจำนวนสูงสุด เพิ่ม widget/golden test เฉพาะ layout contract สำคัญเพื่อกันกลับมา</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Home tile สูง 80 มี icon, title 2 บรรทัด, subtitle 2 บรรทัด และ chevron แล้วล้นล่าง แก้ตาม product priority อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ตรวจว่าความสูงถูกคำนวณจาก viewportจริง; ที่ tight breakpoint เปลี่ยน Column เป็น Row, รักษา icon/title/action, ลด/ซ่อน subtitle หรือให้ 1 บรรทัด, ลด decorative gaps และใช้ AutoSizeText ภายใน min อ่านได้ ไม่ครอบ tile ด้วย scroll view และไม่ลด touch target</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ถ้าใส่ <code>ClipRect</code> แล้วแถบเหลืองหาย layout ยังผิด เพียงซ่อนภาพล้น ข้อมูล/ปุ่มอาจถูกตัดและ hit target ผิด ต้องแก้ constraint/content policy ก่อน clipping</div></section>
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>แถบสีเหลืองดำคือ error ที่เจอบ่อยที่สุดใน Flutter และเป็นตัวที่คนใหม่แก้แบบสุ่มมากที่สุด — ลองใส่ <code>Expanded</code> ดู ไม่ได้ก็ลอง <code>SingleChildScrollView</code> ไม่ได้ก็ลดขนาดตัวอักษร</p><p>ความจริงคือมันเป็น error ที่วิเคราะห์ได้ตรงไปตรงมาที่สุดตัวหนึ่ง เพราะ Flutter บอกข้อมูลมาครบแล้ว เราแค่ต้องอ่านให้เป็น</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>RenderFlex</code></td><td>ตัวจัดวางที่อยู่เบื้องหลัง <code>Row</code> และ <code>Column</code></td></tr>
+<tr><td>overflow</td><td>ลูกต้องการพื้นที่มากกว่าที่มี</td></tr>
+<tr><td>constraint owner</td><td>widget ที่เป็นคนตัดสินขนาดจริง ๆ</td></tr>
+<tr><td>root cause</td><td>ต้นเหตุจริง ซึ่งอาจอยู่คนละที่กับจุดที่เห็นแถบ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: แถบที่เห็นคือปลายเหตุ</h2><p>ทบทวนกฎสามข้อจาก 2.1 — เมื่อเกิดเนื้อหาล้น แปลว่ามีคนใดคนหนึ่งในสองคนนี้ผิด</p><table><thead><tr><th>ใครผิด</th><th>อาการ</th><th>แก้ที่ไหน</th></tr></thead><tbody>
+<tr><td>ลูกขอมากเกินไป</td><td>ข้อความยาวไม่มีขอบเขต</td><td>ให้ขอบเขตกับลูก</td></tr>
+<tr><td>แม่ให้น้อยเกินไป</td><td>ล็อกความสูงไว้ตายตัว</td><td>ปลดล็อกหรือเพิ่มพื้นที่</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> จุดที่เห็นแถบสีเหลืองดำคือจุดที่ <em>พื้นที่ไม่พอ</em> แต่ต้นเหตุอาจอยู่ที่แม่ซึ่งอยู่สูงขึ้นไปหลายชั้น — ต้องไล่ขึ้นไปดูเสมอ</div></section>
+
+<section id="section-4"><h2>4. อ่าน error ให้ครบ</h2><pre class="code-vs"><code>A RenderFlex overflowed by 42 pixels on the right.
+
+The overflowing RenderFlex has an orientation of Axis.horizontal.
+The relevant error-causing widget was:
+    Row Row:file:///lib/features/inbound/line_card.dart:38:14</code></pre><table><thead><tr><th>ข้อมูลที่ได้</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>42 pixels on the right</code></td><td>ล้นเท่าไร — ถ้าล้นน้อยมากอาจเป็นเรื่องระยะขอบ ถ้าล้นเป็นร้อยคือมีตัวที่ไม่ยืดหยุ่นตัวใหญ่</td></tr>
+<tr><td><code>Axis.horizontal</code></td><td>เป็น <code>Row</code> ไม่ใช่ <code>Column</code></td></tr>
+<tr><td>ชื่อไฟล์และบรรทัด</td><td>จุดเริ่มไล่ — ไม่ใช่จุดที่ต้องแก้เสมอไป</td></tr>
+</tbody></table><p>Flutter ยังพิมพ์ต่ออีกหลายบรรทัดพร้อมคำแนะนำ ซึ่งคนส่วนใหญ่ข้ามไป — การอ่านให้จบมักบอกคำตอบมาแล้ว</p></section>
+
+<section id="section-5"><h2>5. จำแนกสาเหตุ</h2><table><thead><tr><th>รูปแบบ</th><th>สาเหตุ</th><th>บทที่แก้</th></tr></thead><tbody>
+<tr><td><code>Row</code> + ข้อความยาว</td><td>ข้อความไม่มีขอบเขต</td><td>2.3 + 2.11</td></tr>
+<tr><td><code>Column</code> + เนื้อหาสูงเกินจอ</td><td>ไม่มีใครรับหน้าที่เลื่อน</td><td>2.6</td></tr>
+<tr><td>การ์ดที่ล็อกความสูง + ตัวอักษรใหญ่</td><td>สมมติความสูงผิด</td><td>2.9</td></tr>
+<tr><td>พื้นที่เลื่อนซ้อนกัน</td><td>ไม่มีขอบเขตในแกนที่เลื่อน</td><td>2.1 + 2.6</td></tr>
+<tr><td>แป้นพิมพ์ขึ้นแล้วล้น</td><td>พื้นที่ลดลงแต่เนื้อหาเลื่อนไม่ได้</td><td>2.9</td></tr>
+<tr><td>ล้นเฉพาะบางรายการ</td><td>ข้อมูลจริงยาวกว่าข้อมูลทดสอบ</td><td>2.11</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. ลำดับการตัดสินใจ</h2><p>ถามตามลำดับนี้ แล้วหยุดที่ข้อแรกที่ตอบว่าใช่</p><ol><li><strong>เนื้อหาชิ้นนี้ควรยืดหดได้ไหม</strong> → ห่อด้วย <code>Expanded</code> หรือ <code>Flexible</code> (2.3)</li><li><strong>ควรขึ้นบรรทัดใหม่หรือตัดข้อความไหม</strong> → ตั้ง <code>maxLines</code> และ <code>overflow</code> (2.11)</li><li><strong>ทั้งส่วนนี้ควรเลื่อนได้ไหม</strong> → ใช้พื้นที่เลื่อน (2.6)</li><li><strong>มีข้อมูลรองที่ซ่อนได้ไหม</strong> → ซ่อนเมื่อจอแคบ (2.10)</li><li><strong>มีขนาดตายตัวที่ไม่มีเหตุผลไหม</strong> → เอาออก</li><li><strong>จำเป็นต้องย่อขนาดจริง ๆ ไหม</strong> → ย่อเฉพาะข้อความรอง ในช่วงที่ยังอ่านออก</li></ol><div class="warn">ถ้าตอบว่า “ใช่” ตั้งแต่ข้อ 1 หรือ 2 แต่ข้ามไปแก้ข้อ 6 คุณจะได้หน้าจอที่ไม่มีแถบเหลืองแต่ใช้งานยากขึ้น — ซึ่งแย่กว่าเดิม เพราะแถบเหลืองอย่างน้อยก็บอกว่ามีปัญหา</div></section>
+
+<section id="section-7"><h2>7. ทางแก้ที่เป็นการซ่อนปัญหา</h2><table><thead><tr><th>วิธี</th><th>แถบหายไหม</th><th>ปัญหาที่ยังอยู่</th></tr></thead><tbody>
+<tr><td><code>ClipRect</code> ครอบไว้</td><td>หาย</td><td>เนื้อหายังถูกตัด และปุ่มที่ถูกตัดกดไม่ได้</td></tr>
+<tr><td>ห่อทุกอย่างด้วยพื้นที่เลื่อน</td><td>หาย</td><td>เกิดพื้นที่เลื่อนซ้อนกัน และปุ่มสำคัญเลื่อนหาย</td></tr>
+<tr><td>ห่อทุกตัวด้วย <code>Expanded</code></td><td>หาย</td><td>ไอคอนและปุ่มถูกยืดผิดสัดส่วน (2.3)</td></tr>
+<tr><td><code>FittedBox</code> ครอบทั้งแถว</td><td>หาย</td><td>ทุกอย่างเล็กลงรวมถึงปุ่ม จนกดไม่โดน (2.4)</td></tr>
+<tr><td>ปิดการปรับขนาดตัวอักษร</td><td>หาย</td><td>ผู้ใช้ที่ต้องการตัวอักษรใหญ่ใช้ไม่ได้ (2.9)</td></tr>
+</tbody></table><p><code>ClipRect</code> อันตรายที่สุดในตาราง เพราะแถบเตือนหายไปสนิทและหน้าจอดูปกติ แต่ข้อมูลบางส่วนหายไปเงียบ ๆ — ตรงกับเหตุผลที่ 2.11 บอกว่าอย่าใช้ <code>clip</code> กับข้อความ</p></section>
+
+<section id="section-8"><h2>8. ทดสอบไม่ให้กลับมาอีก</h2><p>เมื่อแก้แล้ว ให้เขียนเทสต์ที่จับปัญหานี้ได้ ไม่งั้นอีกสามเดือนจะกลับมา</p><pre class="code-vs"><code>testWidgets('ชื่อสินค้ายาวไม่ทำให้ layout ล้น', (tester) async {
+  await pumpAtWidth(tester, 360);
+
+  // ถ้าเกิด RenderFlex overflow เฟรมเวิร์กจะบันทึกเป็น exception
+  expect(tester.takeException(), isNull);
+});</code></pre><p><code>tester.takeException()</code> คือกุญแจ — เมื่อเกิดเนื้อหาล้น Flutter บันทึกเป็นข้อผิดพลาดไว้ เทสต์จึงจับได้แม้ไม่ได้ดูหน้าจอ</p><p>ชุดขนาดที่ควรทดสอบ</p><table><thead><tr><th>ทดสอบอะไร</th><th>ค่าที่ควรใช้</th></tr></thead><tbody>
+<tr><td>ความกว้างแคบสุดที่รองรับ</td><td>320</td></tr>
+<tr><td>ค่าใกล้จุดตัดทั้งสองฝั่ง</td><td>479 และ 481</td></tr>
+<tr><td>ความสูงเมื่อแป้นพิมพ์ขึ้น</td><td>ประมาณครึ่งหนึ่งของจอ</td></tr>
+<tr><td>ข้อมูลที่ยาวที่สุดที่เป็นไปได้</td><td>ชื่อสินค้า 200 ตัวอักษร</td></tr>
+<tr><td>ขนาดตัวอักษรใหญ่สุดที่รองรับ</td><td>ตัวคูณ 2.0</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ใส่ <code>Expanded</code> แล้วยังล้น</td><td>ใส่ผิดตัว — ตัวที่กินพื้นที่จริงยังไม่ยืดหยุ่น</td><td>ดูว่าใครในขั้นที่ 1 ของ 2.3 กินเยอะ</td></tr>
+<tr><td>แก้แล้วบนจอกว้าง แต่ยังล้นบนจอแคบ</td><td>ทดสอบขนาดเดียว</td><td>ทดสอบที่ 320 เสมอ</td></tr>
+<tr><td>ล้นเฉพาะข้อมูลบางรายการ</td><td>ข้อมูลทดสอบสั้นกว่าข้อมูลจริง</td><td>ทดสอบด้วยค่าที่ยาวที่สุดที่เป็นไปได้</td></tr>
+<tr><td>แถบหายแต่ปุ่มกดไม่ได้</td><td>ใช้ <code>ClipRect</code> ซ่อน</td><td>ย้อนกลับไปแก้ที่ขอบเขต</td></tr>
+<tr><td>ล้นหลังปล่อยแอปไปแล้ว</td><td>ผู้ใช้ตั้งตัวอักษรใหญ่</td><td>ทดสอบตัวคูณ 2.0</td></tr>
+<tr><td>แก้ตรงที่เห็นแถบแล้วไม่หาย</td><td>ต้นเหตุอยู่ที่แม่</td><td>ไล่ขึ้นไปดูว่าใครล็อกขนาดไว้</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>ช่องเมนูบนหน้าแรกล็อกความสูงไว้ 80 และมีไอคอน หัวข้อ 2 บรรทัด คำอธิบาย 2 บรรทัด และลูกศรด้านขวา ผู้ใช้บางคนรายงานว่าเห็นแถบสีเหลืองดำที่ทุกช่อง</p><ol><li>ไล่หาสาเหตุอย่างเป็นระบบ ต้องดูอะไรบ้าง</li><li>แก้ตามลำดับความสำคัญของข้อมูล</li><li>เขียนเทสต์กันไม่ให้กลับมา</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ไล่หาสาเหตุ</strong></p><table><thead><tr><th>ตรวจอะไร</th><th>เพราะอะไร</th></tr></thead><tbody>
+<tr><td>ทิศทางที่ล้น</td><td>ล้นด้านล่างแปลว่าเป็น <code>Column</code> ในช่อง ไม่ใช่ <code>Row</code></td></tr>
+<tr><td>ผู้ใช้ที่รายงานตั้งขนาดตัวอักษรเท่าไร</td><td>คำว่า “ผู้ใช้บางคน” เป็นเบาะแสสำคัญ — ถ้าล้นทุกคนจะเจอตั้งแต่ตอนพัฒนา</td></tr>
+<tr><td>ความสูง 80 มาจากไหน</td><td>ถ้าเป็นเลขที่ใครสักคนใส่ไว้เฉย ๆ แปลว่าไม่มีเหตุผลรองรับ</td></tr>
+<tr><td>ข้อมูลจริงยาวแค่ไหน</td><td>คำอธิบายที่มาจากฐานข้อมูลอาจยาวกว่าที่ทดสอบ</td></tr>
+</tbody></table><p>คำว่า “ผู้ใช้บางคน” ชี้ไปที่สาเหตุเกือบแน่นอนคือ <strong>ขนาดตัวอักษรที่ผู้ใช้ตั้งเอง</strong> ตามที่เตือนไว้ใน 2.7 และ 2.9 — ข้อความสี่บรรทัดที่พอดีในความสูง 80 ที่ตัวคูณ 1.0 จะต้องการประมาณ 104 ที่ตัวคูณ 1.3</p><p><strong>ข้อ 2 — แก้ตามลำดับ</strong></p><p>ไล่ตามลำดับในหัวข้อ 6 จะได้คำตอบตั้งแต่ข้อ 4 และ 5</p><pre class="code-vs"><code>// เดิม — ล็อกความสูงตายตัว
+SizedBox(
+  height: 80,
+  child: Column(
+    children: [
+      Row(children: [Icon(...), Expanded(child: Text(title, maxLines: 2)), Icon(Icons.chevron_right)]),
+      Text(subtitle, maxLines: 2),
+    ],
+  ),
+)
+
+// แก้ — กำหนดขั้นต่ำแทนความสูงตายตัว และลดข้อมูลรอง
+ConstrainedBox(
+  constraints: const BoxConstraints(
+    minHeight: 80,                    // ขั้นต่ำเพื่อรักษาพื้นที่กด
+  ),
+  child: Padding(
+    padding: const EdgeInsets.all(8),
+    child: Row(
+      children: [
+        Icon(menu.icon, size: 28),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(menu.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+              if (!compact)                       // ซ่อนข้อมูลรองเมื่อพื้นที่น้อย
+                Text(
+                  menu.subtitle,
+                  maxLines: 1,                    // ลดจาก 2 เหลือ 1
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
+          ),
+        ),
+        const Icon(Icons.chevron_right),
+      ],
+    ),
+  ),
+)</code></pre><p><strong>เหตุผลของแต่ละการเปลี่ยน</strong></p><ul><li><strong>เปลี่ยน <code>SizedBox(height: 80)</code> เป็น <code>minHeight: 80</code></strong> — ยังรักษาพื้นที่กดขั้นต่ำตาม 2.13 แต่ยอมให้สูงขึ้นได้เมื่อตัวอักษรใหญ่ นี่คือการแก้ต้นเหตุ</li><li><strong>ซ่อนคำอธิบายเมื่อแคบ</strong> — เป็นข้อมูลรอง ส่วนหัวข้อคือสิ่งที่ผู้ใช้ใช้ตัดสินใจ (2.11)</li><li><strong>ลดคำอธิบายเหลือ 1 บรรทัด</strong> — ลดความต้องการพื้นที่ลงครึ่งหนึ่ง</li><li><strong>ไม่ลดขนาดไอคอนหรือลูกศร</strong> — เพราะเป็นสิ่งที่บอกว่ากดได้</li></ul><p><strong>ข้อ 3 — เทสต์กันไม่ให้กลับมา</strong></p><pre class="code-vs"><code>testWidgets('ช่องเมนูไม่ล้นแม้ผู้ใช้ตั้งตัวอักษรใหญ่', (tester) async {
+  tester.view.physicalSize = const Size(320, 640);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  await tester.pumpWidget(
+    MediaQuery(
+      // จำลองผู้ใช้ที่ตั้งขนาดตัวอักษร 200%
+      data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
+      child: const MaterialApp(home: MenuScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+
+  expect(tester.takeException(), isNull);
+});</code></pre><p><strong>ทำไมเทสต์นี้มีค่ามาก:</strong> เพราะปัญหานี้ <em>ไม่มีทางเจอ</em> ตอนพัฒนา นักพัฒนาไม่มีใครตั้งตัวอักษร 200% บนเครื่องตัวเอง เทสต์จึงเป็นทางเดียวที่จะจับได้ก่อนถึงมือผู้ใช้ — และเป็นตัวอย่างของสิ่งที่ 2.14 หัวข้อ 8 หมายถึงเมื่อบอกให้ทดสอบตัวคูณ 2.0</p><p><strong>ลองต่อ:</strong> ย้อนโค้ดกลับไปเป็น <code>SizedBox(height: 80)</code> แล้วรันเทสต์นี้ — ควรเห็นมันล้มเหลว ซึ่งยืนยันว่าเทสต์จับปัญหาได้จริง ไม่ใช่ผ่านเพราะบังเอิญ</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>แถบสีเหลืองดำวิเคราะห์ได้ ไม่ต้องลองสุ่ม</li><li>อ่าน error ให้ครบ — มันบอกทิศทาง จำนวนพิกเซล และไฟล์</li><li>จุดที่เห็นแถบอาจไม่ใช่จุดที่ต้องแก้ ต้องไล่ขึ้นไปหาแม่</li><li>ไล่ตามลำดับ: ให้ขอบเขต → ตัดข้อความ → ให้เลื่อน → ซ่อนข้อมูลรอง → เอาขนาดตายตัวออก → ย่อเป็นทางสุดท้าย</li><li><code>ClipRect</code> ทำให้แถบหายแต่ข้อมูลยังถูกตัด</li><li>ใช้ <code>tester.takeException()</code> จับปัญหานี้ในเทสต์</li><li>ทดสอบที่ 320, ค่าใกล้จุดตัด, ข้อมูลยาวสุด และตัวคูณตัวอักษร 2.0</li></ul></div><p><strong>บทถัดไป:</strong> 2.15 คือ lab ปิด Part — สร้างหน้าแรกของแอปคลังที่ใช้ได้ทั้ง PDA และแท็บเล็ต โดยใช้ทุกอย่างใน 14 บทที่ผ่านมา</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

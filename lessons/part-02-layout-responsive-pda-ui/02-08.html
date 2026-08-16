@@ -4,25 +4,146 @@
 <title>Sliver Basics</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-08 · Flutter UI</span><h1>Sliver Basics</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทำไม ListView อย่างเดียวไม่พอ</a></li><li><a href="#section-2">Sliver vocabulary</a></li><li><a href="#section-3">Warehouse feed ตัวอย่าง</a></li><li><a href="#section-4">Box protocol กับ sliver protocol</a></li><li><a href="#section-5">Pinned controls และ scanner UX</a></li><li><a href="#section-6">KeepAlive และ state ของแถว</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Sliver คือชิ้นส่วนของ scroll viewport ที่รายงาน geometry แบบ lazy ทำให้ header, grid, list และ footer หลายชนิดแชร์การเลื่อนเดียวโดยไม่ต้องซ้อน scrollable</div>
-<section id="section-1"><h2>1. ทำไม ListView อย่างเดียวไม่พอ</h2><p>เมื่อหน้าต้องมี app header ยุบได้, summary box, grid เมนู, list งานหลายร้อยแถว และ loading footer การครอบ Column/ListView หลายชั้นทำให้ unbounded/shrinkWrap แต่ CustomScrollView รวมทุกส่วนเป็น slivers ใน viewport เดียว</p></section>
-<section id="section-2"><h2>2. Sliver vocabulary</h2><ul><li><code>SliverAppBar</code>: header scroll/pin/floating</li><li><code>SliverToBoxAdapter</code>: box widget หนึ่งก้อน</li><li><code>SliverList</code>: lazy list</li><li><code>SliverGrid</code>: lazy grid</li><li><code>SliverPadding</code>: padding ที่เข้าใจ sliver geometry</li><li><code>SliverFillRemaining</code>: เติม viewport ที่เหลือ เช่น empty state</li></ul></section>
-<section id="section-3"><h2>3. Warehouse feed ตัวอย่าง</h2><pre class="code-vs"><code>CustomScrollView(slivers: [
-  const SliverAppBar(title: Text('งานคลัง'), pinned: true),
-  SliverToBoxAdapter(child: DailySummary()),
-  SliverPadding(
-    padding: const EdgeInsets.all(12),
-    sliver: SliverList.builder(
-      itemCount: tasks.length,
-      itemBuilder: (_, i) =&gt; TaskTile(tasks[i]),
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ต่อรถไฟทีละตู้</a></li><li><a href="#section-4">sliver ที่ใช้บ่อย</a></li><li><a href="#section-5">SliverAppBar: สามพฤติกรรม</a></li><li><a href="#section-6">widget ธรรมดากับ sliver ปนกันไม่ได้</a></li><li><a href="#section-7">เมื่อไหร่ที่ยังไม่ต้องใช้</a></li><li><a href="#section-8">สถานะของแถวที่เลื่อนพ้นจอไป</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: รวมหลายส่วนไว้ในพื้นที่เลื่อนเดียว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.6 (พื้นที่เลื่อนซ้อนกัน) และ 2.7 (<code>ListView.builder</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>CustomScrollView</code> เมื่อหลายส่วนต้องเลื่อนไปด้วยกัน และรู้ว่าเมื่อไหร่ที่ยังไม่ต้องใช้</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 2.6 เราแก้ปัญหาพื้นที่เลื่อนซ้อนกันด้วยการทำให้ส่วนหัวตรึงอยู่กับที่ ซึ่งใช้ได้ดีในกรณีส่วนใหญ่ แต่บางหน้าจอต้องการให้ส่วนหัวเลื่อนหายไปด้วยเพื่อให้เห็นรายการมากขึ้น</p><p>ปัญหาคือถ้าเอาส่วนหัวใส่ใน <code>Column</code> แล้วครอบด้วยพื้นที่เลื่อน เราจะกลับไปเจอปัญหาเดิม — <code>sliver</code> คือทางออกที่ออกแบบมาเพื่อกรณีนี้โดยเฉพาะ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>sliver</td><td>ชิ้นส่วนหนึ่งชิ้นของพื้นที่เลื่อน ที่รู้วิธีทำงานแบบ lazy</td></tr>
+<tr><td><code>CustomScrollView</code></td><td>พื้นที่เลื่อนที่รับ sliver หลายชิ้นมาต่อกัน</td></tr>
+<tr><td>box widget</td><td>widget ปกติที่เราใช้มาตลอด</td></tr>
+<tr><td>pinned</td><td>ติดอยู่ด้านบนแม้เลื่อนผ่านไปแล้ว</td></tr>
+<tr><td>floating</td><td>โผล่กลับมาทันทีเมื่อเลื่อนขึ้น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ต่อรถไฟทีละตู้</h2><p><code>ListView</code> ที่เราใช้มาคือรถไฟที่มีตู้เดียว ส่วน <code>CustomScrollView</code> คือการต่อตู้เอง โดยแต่ละตู้ทำหน้าที่ต่างกันแต่เลื่อนไปด้วยกัน</p><pre class="code-vs"><code>CustomScrollView
+├── SliverAppBar          ← ตู้หัวขบวน อาจติดอยู่หรือเลื่อนหาย
+├── SliverToBoxAdapter    ← ตู้ที่ใส่ widget ธรรมดาหนึ่งชิ้น
+├── SliverList            ← ตู้รายการ ยังคง lazy
+└── SliverToBoxAdapter    ← ตู้ท้าย เช่นสถานะกำลังโหลดเพิ่ม</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกอย่างที่อยู่ใน <code>slivers:</code> ต้องเป็น sliver — widget ธรรมดาใส่ตรง ๆ ไม่ได้ ต้องห่อด้วย <code>SliverToBoxAdapter</code> ก่อน</div></section>
+
+<section id="section-4"><h2>4. sliver ที่ใช้บ่อย</h2><table><thead><tr><th>ชื่อ</th><th>ใช้ทำอะไร</th><th>เทียบกับตัวปกติ</th></tr></thead><tbody>
+<tr><td><code>SliverList.builder</code></td><td>รายการแบบ lazy</td><td><code>ListView.builder</code></td></tr>
+<tr><td><code>SliverGrid.builder</code></td><td>ตารางแบบ lazy</td><td><code>GridView.builder</code></td></tr>
+<tr><td><code>SliverToBoxAdapter</code></td><td>ใส่ widget ธรรมดาหนึ่งชิ้น</td><td>—</td></tr>
+<tr><td><code>SliverPadding</code></td><td>ระยะขอบที่เข้าใจ sliver</td><td><code>Padding</code></td></tr>
+<tr><td><code>SliverAppBar</code></td><td>แถบหัวที่เลื่อนหายหรือติดได้</td><td><code>AppBar</code></td></tr>
+<tr><td><code>SliverFillRemaining</code></td><td>เติมพื้นที่ที่เหลือ เช่นข้อความ “ไม่มีข้อมูล”</td><td>—</td></tr>
+</tbody></table><pre class="code-vs"><code>CustomScrollView(
+  slivers: [
+    const SliverAppBar(
+      title: Text('งานคลัง'),
+      pinned: true,                    // ติดอยู่ด้านบนตลอด
     ),
+    const SliverToBoxAdapter(child: DailySummary()),
+    SliverPadding(
+      padding: const EdgeInsets.all(12),
+      sliver: SliverList.builder(
+        itemCount: lines.length,
+        itemBuilder: (context, index) =&gt; InboundLineCard(
+          key: ValueKey&lt;String&gt;(lines[index].palletCode),
+          line: lines[index],
+        ),
+      ),
+    ),
+  ],
+)</code></pre><p>สังเกตว่า <code>SliverPadding</code> ใช้ property ชื่อ <code>sliver:</code> ไม่ใช่ <code>child:</code> — เป็นสัญญาณว่ามันรับ sliver ไม่ใช่ widget ธรรมดา</p></section>
+
+<section id="section-5"><h2>5. SliverAppBar: สามพฤติกรรม</h2><table><thead><tr><th>ตั้งค่า</th><th>พฤติกรรม</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>ไม่ตั้งอะไร</td><td>เลื่อนหายไปแล้วไม่กลับมาจนกว่าจะเลื่อนถึงบนสุด</td><td>หัวข้อที่ดูครั้งเดียวก็พอ</td></tr>
+<tr><td><code>pinned: true</code></td><td>ย่อลงแล้วติดอยู่ด้านบนตลอด</td><td>ชื่อหน้าจอที่ต้องเห็นเสมอ</td></tr>
+<tr><td><code>floating: true</code></td><td>โผล่กลับมาทันทีที่เลื่อนขึ้นนิดเดียว</td><td>แถบค้นหาที่ต้องเรียกใช้ได้เร็ว</td></tr>
+</tbody></table><p>สำหรับแอปคลังบน PDA แนะนำ <code>pinned: true</code> เพราะพนักงานต้องรู้ตลอดว่าตัวเองอยู่หน้าจอไหน — การเลื่อนแล้วหัวข้อหายไปทำให้สับสนได้ง่ายเมื่อทำงานเร็ว ๆ</p></section>
+
+<section id="section-6"><h2>6. widget ธรรมดากับ sliver ปนกันไม่ได้</h2><pre class="code-vs"><code>// ผิด — Container เป็น widget ธรรมดา
+CustomScrollView(
+  slivers: [
+    Container(height: 100),          // error
+  ],
+)
+
+// ถูก — ห่อก่อน
+CustomScrollView(
+  slivers: [
+    const SliverToBoxAdapter(child: SizedBox(height: 100)),
+  ],
+)
+
+// ผิดอีกทาง — เอา sliver ไปใส่ที่รับ widget ธรรมดา
+Column(
+  children: [
+    SliverList.builder(...),         // error
+  ],
+)</code></pre><p>ข้อความ error ที่จะเจอมักพูดถึง <code>RenderSliver</code> กับ <code>RenderBox</code> ซึ่งอ่านแล้วไม่รู้เรื่อง แต่ทุกครั้งที่เห็นสองคำนี้ ให้ตรวจข้อเดียว — เอาของผิดประเภทไปใส่ผิดที่หรือเปล่า</p><div class="warn">ข้อควรระวังที่กระทบเรื่องอื่น: <code>SliverToBoxAdapter</code> <strong>ไม่ lazy</strong> — มันสร้างลูกทั้งก้อนทันที ดังนั้นห้ามเอา <code>Column</code> ที่มีพันแถวไปใส่ในนั้น ต้องใช้ <code>SliverList</code> ถึงจะได้ประโยชน์ของ lazy ตามที่คุยกันใน 2.6</div></section>
+
+<section id="section-7"><h2>7. เมื่อไหร่ที่ยังไม่ต้องใช้</h2><table><thead><tr><th>สถานการณ์</th><th>ใช้อะไร</th></tr></thead><tbody>
+<tr><td>ฟอร์มสั้น ๆ ที่เลื่อนได้</td><td><code>SingleChildScrollView</code></td></tr>
+<tr><td>รายการอย่างเดียว</td><td><code>ListView.builder</code></td></tr>
+<tr><td>ส่วนหัวตรึง + รายการเลื่อน</td><td><code>Column</code> + <code>Expanded</code> (2.6)</td></tr>
+<tr><td>หลายส่วนต้องเลื่อนไปด้วยกัน และมีรายการยาว</td><td><code>CustomScrollView</code></td></tr>
+<tr><td>ต้องการหัวข้อที่ย่อหรือติดขณะเลื่อน</td><td><code>CustomScrollView</code></td></tr>
+</tbody></table><p><code>CustomScrollView</code> เพิ่มแนวคิดอีกชุดที่ทีมต้องเข้าใจ จึงไม่ควรใช้เป็นค่าเริ่มต้น ให้เริ่มจากสามแบบแรกก่อน แล้วเปลี่ยนมาใช้เมื่อมีเหตุผลจริง</p></section>
+
+<section id="section-8"><h2>8. สถานะของแถวที่เลื่อนพ้นจอไป</h2><p>เชื่อมกับ 1.3 และ 1.5: แถวที่เลื่อนพ้นจอไปอาจถูกทำลาย เมื่อเลื่อนกลับมาจะถูกสร้างใหม่ ผลคือ <strong>สถานะที่เก็บไว้ใน <code>State</code> ของแถวนั้นจะหาย</strong></p><pre class="code-vs"><code>// อันตราย — ติ๊กถูกจะหายเมื่อเลื่อนพ้นจอแล้วเลื่อนกลับมา
+class _RowState extends State&lt;Row&gt; {
+  bool _checked = false;
+}
+
+// ปลอดภัย — สถานะอยู่ที่หน้าจอ อ้างด้วยรหัสจริง
+final Set&lt;String&gt; _checkedIds = {};</code></pre><p>นี่คือเหตุผลอีกข้อที่ 1.5 บอกให้เก็บข้อมูลไว้ที่แม่ร่วมที่ต่ำที่สุด — และเป็นเหตุผลที่ lab ของ Part 1 เก็บ <code>_doneIds</code> ไว้ที่หน้าจอ ไม่ใช่ในแต่ละแถว</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>error พูดถึง <code>RenderSliver</code> หรือ <code>RenderBox</code></td><td>เอาของผิดประเภทไปใส่ผิดที่</td><td>ห่อด้วย <code>SliverToBoxAdapter</code> หรือย้ายออกมา</td></tr>
+<tr><td>ใส่ <code>Padding</code> ใน <code>slivers:</code> แล้วพัง</td><td>ต้องใช้ <code>SliverPadding</code></td><td>เปลี่ยนชื่อและใช้ <code>sliver:</code> แทน <code>child:</code></td></tr>
+<tr><td>เปลี่ยนมาใช้ sliver แล้วยังช้าเหมือนเดิม</td><td>ใส่ <code>Column</code> ยาวใน <code>SliverToBoxAdapter</code></td><td>ใช้ <code>SliverList.builder</code></td></tr>
+<tr><td>ติ๊กถูกหายเมื่อเลื่อนกลับมา</td><td>เก็บสถานะไว้ใน <code>State</code> ของแถว</td><td>ย้ายไปเก็บที่หน้าจอ อ้างด้วยรหัส</td></tr>
+<tr><td>หัวข้อหายตอนเลื่อน ทั้งที่อยากให้ติด</td><td>ลืม <code>pinned: true</code></td><td>เพิ่มเข้าไป</td></tr>
+<tr><td>ใช้ <code>CustomScrollView</code> กับฟอร์มสั้น ๆ</td><td>ใช้เครื่องมือเกินความจำเป็น</td><td>ใช้ <code>SingleChildScrollView</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอเดิมเขียนแบบนี้ และช้ามากเมื่อมีงาน 1,000 ใบ</p><pre class="code-vs"><code>SingleChildScrollView(
+  child: Column(
+    children: [
+      const DailySummary(),
+      const SizedBox(height: 12),
+      for (final task in tasks) TaskCard(task: task),   // สร้างครบ 1,000 ใบ
+    ],
   ),
-])</code></pre></section>
-<section id="section-4"><h2>4. Box protocol กับ sliver protocol</h2><p>Widget ปกติใช้ BoxConstraints/Size ส่วน sliver ใช้ SliverConstraints/SliverGeometry ห้ามวาง Container ตรงใน <code>slivers:</code> ต้องแปลงด้วย SliverToBoxAdapter และห้ามเอา SliverList ไปเป็น child ของ Column โดยตรง</p></section>
-<section id="section-5"><h2>5. Pinned controls และ scanner UX</h2><p>Filter/search ที่ต้องอยู่ขณะเลื่อนใช้ SliverPersistentHeader pinned หรือวางนอก CustomScrollView ใน Column แล้ว Expanded scroll area การเลือกขึ้นกับว่า header ควรใช้พื้นที่คงที่หรือเข้าร่วม scroll ไม่ควรใช้ Stack ปักพิกัดแล้วบังรายการ</p></section>
-<section id="section-6"><h2>6. KeepAlive และ state ของแถว</h2><p>Sliver children นอก viewport อาจถูกทำลาย สถานะธุรกิจต้องอยู่ store/model ไม่ฝากไว้ใน State ของ tile หากต้องรักษา UI state เฉพาะแถวใช้ key + AutomaticKeepAliveClientMixin อย่างจำกัด เพราะเก็บทุกแถวทำลายประโยชน์ด้าน memory</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนหน้า SingleChildScrollView ที่มี summary + Column สร้าง task 1,000 ใบให้ lazy โดยไม่เปลี่ยนหน้าตา</p><details><summary>เฉลย</summary><p>ใช้ CustomScrollView: summary เป็น SliverToBoxAdapter, spacing เป็น adapter เล็กหรือ SliverPadding, task เป็น SliverList.builder, footer/error เป็น SliverToBoxAdapter เก็บ ScrollController เดิมที่ owner และทดสอบ empty/loading/pagination</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Sliver ไม่จำเป็นกับ form สั้นทุกหน้า มันเพิ่ม abstraction และ protocol อีกชุด ใช้เมื่อหลาย section ต้องแชร์ viewport/lazy behavior หรือมี scroll effects จริง ส่วน form จำนวนคงที่ใช้ SingleChildScrollView อ่านง่ายกว่า</div></section>
+)</code></pre><ol><li>แปลงให้เป็น lazy โดยหน้าตายังเหมือนเดิมทุกอย่าง</li><li>อธิบายว่าทำไมวิธีของ 2.6 (<code>Column</code> + <code>Expanded</code>) ใช้ไม่ได้กับโจทย์นี้</li><li>ถ้าต้องเพิ่มแถวสถานะกำลังโหลดที่ท้ายรายการ จะใส่ตรงไหน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>CustomScrollView(
+  slivers: [
+    const SliverToBoxAdapter(child: DailySummary()),
+    const SliverToBoxAdapter(child: SizedBox(height: 12)),
+    SliverList.builder(
+      itemCount: tasks.length,
+      itemBuilder: (context, index) =&gt; TaskCard(
+        key: ValueKey&lt;String&gt;(tasks[index].id),
+        task: tasks[index],
+      ),
+    ),
+  ],
+)</code></pre><p>หน้าตาเหมือนเดิมทุกประการ เพราะลำดับและเนื้อหาไม่เปลี่ยน สิ่งที่เปลี่ยนคือตอนนี้ <code>TaskCard</code> ถูกสร้างเฉพาะที่มองเห็น</p><p><strong>ข้อ 2 — ทำไมวิธีของ 2.6 ใช้ไม่ได้</strong></p><p>เพราะโจทย์บอกว่า “หน้าตายังเหมือนเดิมทุกอย่าง” ซึ่งแปลว่ายอดสรุปต้อง <strong>เลื่อนหายไปพร้อมรายการ</strong> ถ้าใช้ <code>Column</code> + <code>Expanded</code> ยอดสรุปจะกลายเป็นตรึงอยู่กับที่ ซึ่งเปลี่ยนพฤติกรรมของหน้าจอไป</p><p>ถ้าโจทย์ไม่ได้บังคับข้อนี้ วิธีของ 2.6 จะง่ายกว่าและควรเลือกก่อน — นี่คือประเด็นในหัวข้อ 7 ว่า <code>CustomScrollView</code> ไม่ใช่ค่าเริ่มต้น แต่เป็นทางเลือกเมื่อมีเหตุผลเฉพาะ</p><p><strong>ข้อ 3</strong></p><pre class="code-vs"><code>CustomScrollView(
+  slivers: [
+    const SliverToBoxAdapter(child: DailySummary()),
+    const SliverToBoxAdapter(child: SizedBox(height: 12)),
+    SliverList.builder(
+      itemCount: tasks.length,
+      itemBuilder: (context, index) =&gt; TaskCard(
+        key: ValueKey&lt;String&gt;(tasks[index].id),
+        task: tasks[index],
+      ),
+    ),
+    if (loadingMore)
+      const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+  ],
+)</code></pre><p><strong>ทำไมใส่เป็น sliver แยก แทนที่จะบวก <code>itemCount</code> เหมือนใน 2.7</strong></p><p>ทั้งสองวิธีถูก แต่การแยกออกมาชัดกว่าเมื่ออยู่ใน <code>CustomScrollView</code> อยู่แล้ว เพราะไม่ต้องเขียน <code>if (index &gt;= tasks.length)</code> ใน <code>itemBuilder</code> ซึ่งทำให้ตัวสร้างแถวมีสองหน้าที่ปนกัน — ตรงกับหลักใน D1.4 ที่ว่าฟังก์ชันควรทำเรื่องเดียว</p><p><strong>สิ่งที่ควรสังเกตที่สุด:</strong> <code>if (loadingMore)</code> ใช้ collection if ใน <code>slivers:</code> ได้เหมือนกับ <code>children:</code> ทุกประการ เพราะทั้งคู่เป็น <code>List</code> ธรรมดาของ Dart ตาม D1.5 — sliver ไม่ได้มีไวยากรณ์พิเศษอะไรเลย</p><p><strong>ลองต่อ:</strong> เพิ่ม <code>SliverAppBar(pinned: true)</code> เป็นตัวแรกสุด แล้วเลื่อนดู จะเห็นว่ายอดสรุปเลื่อนหายไปแต่หัวข้อยังติดอยู่ — เป็นพฤติกรรมที่ทำไม่ได้เลยด้วย <code>Column</code> + <code>Expanded</code></p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>sliver คือชิ้นส่วนของพื้นที่เลื่อนที่รู้วิธีทำงานแบบ lazy</li><li><code>CustomScrollView</code> ต่อ sliver หลายชิ้นให้เลื่อนไปด้วยกัน</li><li>ทุกอย่างใน <code>slivers:</code> ต้องเป็น sliver — ห่อด้วย <code>SliverToBoxAdapter</code></li><li><code>SliverToBoxAdapter</code> ไม่ lazy อย่าใส่รายการยาวลงไป</li><li><code>SliverAppBar</code> มีสามพฤติกรรม — บน PDA แนะนำ <code>pinned</code></li><li>แถวที่เลื่อนพ้นจออาจถูกทำลาย สถานะต้องเก็บที่หน้าจอ</li><li>อย่าใช้เป็นค่าเริ่มต้น — เริ่มจากวิธีที่ง่ายกว่าก่อน</li></ul></div><p><strong>บทถัดไป:</strong> 2.9 จะจัดการเรื่องพื้นที่ที่ระบบปฏิบัติการกินไป — รอยบาก แถบล่าง และแป้นพิมพ์ ซึ่งเป็นสาเหตุที่หน้าจอดูดีบนเครื่องหนึ่งแต่ผิดบนอีกเครื่อง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

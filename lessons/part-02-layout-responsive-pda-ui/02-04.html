@@ -4,34 +4,110 @@
 <title>Padding / Align / SizedBox</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-04 · Flutter UI</span><h1>Padding / Align / SizedBox</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Padding หักพื้นที่ก่อนส่งให้ลูก</a></li><li><a href="#section-2">Center คือ Align กลางแบบย่อ</a></li><li><a href="#section-3">SizedBox มีสามบทบาท</a></li><li><a href="#section-4">ConstrainedBox และข้อจำกัดที่ซ้อนกัน</a></li><li><a href="#section-5">FractionallySizedBox, AspectRatio, FittedBox</a></li><li><a href="#section-6">Spacing tokens ใน PDA</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Padding, Align, Center และ SizedBox เปลี่ยน constraints หรือการวางตำแหน่งคนละแบบ การอ่าน wrapper chain ทีละชั้นช่วยให้รู้ว่า spacing มาจากไหนและเหตุใด child จึงไม่เต็มพื้นที่</div>
-<section id="section-1"><h2>1. Padding หักพื้นที่ก่อนส่งให้ลูก</h2><pre class="code-vs"><code>Padding(
-  padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-  child: ScanPanel(),
-)</code></pre><p>ถ้า parent กว้าง 360 และ padding ซ้ายขวา 12 ลูกได้รับ maxWidth 336 จากนั้น Padding บวก inset กลับตอนรายงาน size การซ้อน Padding หลายชั้นจึงสะสมจริงและทำ PDA แคบเร็วกว่าที่คิด</p></section>
-<section id="section-2"><h2>2. Center คือ Align กลางแบบย่อ</h2><p>เมื่อมี bounded area, Align/Center สามารถกินพื้นที่ที่ parent อนุญาตแล้ววาง child ตาม alignment; หากแกนหนึ่ง unbounded มันหดตาม child ในแกนนั้น ใช้ <code>widthFactor/heightFactor</code> เมื่อต้องการให้ขนาดเป็นเท่าของ child แต่ระวังผลกับ constraint chain</p></section>
-<section id="section-3"><h2>3. SizedBox มีสามบทบาท</h2><ul><li>กำหนด tight width/height: ช่อง icon 48×48</li><li>สร้าง gap ที่มีความหมายคงที่</li><li><code>SizedBox.expand</code> ขอใช้ constraint สูงสุด</li></ul><p><code>SizedBox.shrink</code> ขอ 0 แต่ parent tight อาจยังบังคับใหญ่กว่า 0 ได้</p></section>
-<section id="section-4"><h2>4. ConstrainedBox และข้อจำกัดที่ซ้อนกัน</h2><pre class="code-vs"><code>ConstrainedBox(
-  constraints: const BoxConstraints(maxWidth: 560),
-  child: LoginForm(),
-)</code></pre><p>ข้อจำกัดใหม่ถูก intersect กับของ parent ไม่ได้ override แบบ CSS ตัวอย่าง Login ของ Absolute ใช้ Center + ConstrainedBox ทำให้ฟอร์มไม่กว้างเกินบน tablet แต่ยังหดได้บน PDA</p></section>
-<section id="section-5"><h2>5. FractionallySizedBox, AspectRatio, FittedBox</h2><p>ใช้ FractionallySizedBox เมื่อขนาดเป็นสัดส่วนของพื้นที่ parent, AspectRatio เมื่ออัตราส่วนมีความหมาย เช่นภาพ/กล้อง, FittedBox เมื่อย่อ/ขยาย child ที่มีขนาดของตัวเอง เช่นตัวเลขใหญ่ในช่องจำกัด อย่าใช้ FittedBox ครอบ form หรือข้อความยาวทั้งหน้าเพราะ touch target/text scale จะผิดความหมาย</p></section>
-<section id="section-6"><h2>6. Spacing tokens ใน PDA</h2><p>รวมค่า radius, inset, control height และ gap ที่ใช้ซ้ำเป็น token เช่น <code>PdaMetrics</code> ทำให้ density สม่ำเสมอ แต่ breakpoint อาจเลือก token ชุด compact ได้ Absolute ใช้ inset 10/12 และ gap 8/10 ตาม maxHeight แทนลดทุกอย่างแบบสุ่ม</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ต้องการหน้าล็อกอินอยู่กลางจอ กว้างไม่เกิน 480 แต่เมื่อ keyboard ขึ้นต้องเลื่อนได้ จัด wrapper order อย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>SafeArea(
-  child: LayoutBuilder(builder: (_, c) =&gt;
-    SingleChildScrollView(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: แต่ละตัวแทรกตรงไหนของกฎสามข้อ</a></li><li><a href="#section-4">Padding: หักพื้นที่ก่อนส่งต่อ</a></li><li><a href="#section-5">SizedBox: สามหน้าที่</a></li><li><a href="#section-6">ConstrainedBox: จำกัดไม่ให้กว้างเกินไป</a></li><li><a href="#section-7">ตัวช่วยเฉพาะทางที่ควรรู้จัก</a></li><li><a href="#section-8">รวมค่าที่ใช้ซ้ำไว้ที่เดียว</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จัดระยะห่างและตำแหน่งให้อยู่มือ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (tight กับ loose) และ 2.3 (<code>Expanded</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>Padding</code>, <code>Center</code>, <code>SizedBox</code>, <code>ConstrainedBox</code> ได้ถูกที่ และเข้าใจว่าแต่ละตัวเปลี่ยนข้อจำกัดที่ส่งให้ลูกอย่างไร</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>สามบทแรกทำให้เราจัดโครงหน้าจอได้แล้ว แต่ทุกอย่างยังติดกันแน่นและชิดขอบจอ บทนี้คือเครื่องมือจัดระยะ ซึ่งดูเหมือนง่ายแต่มีจุดที่พลาดกันบ่อยสองเรื่อง</p><ul><li>ระยะขอบซ้อนกันหลายชั้นจนพื้นที่จริงเหลือน้อยกว่าที่คิด</li><li>ใส่ขนาดให้ widget แล้วไม่มีผล เพราะแม่ส่ง tight constraint มา (จาก 2.1)</li></ul></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>EdgeInsets</code></td><td>ระยะขอบทั้งสี่ด้าน</td></tr>
+<tr><td>inset</td><td>ระยะที่หักเข้ามาจากขอบ</td></tr>
+<tr><td>alignment</td><td>ตำแหน่งที่จัดลูกไว้ในพื้นที่ที่มี</td></tr>
+<tr><td>intersect</td><td>การรวมข้อจำกัดสองชุดเข้าด้วยกัน โดยเอาส่วนที่ทับกัน</td></tr>
+<tr><td>design token</td><td>ค่ามาตรฐานที่ตั้งชื่อไว้ใช้ร่วมกันทั้งแอป</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: แต่ละตัวแทรกตรงไหนของกฎสามข้อ</h2><p>ทบทวน 2.1: ข้อจำกัดไหลลง ขนาดไหลขึ้น แม่วางตำแหน่ง — widget ในบทนี้แทรกอยู่คนละจุดของวงจรนั้น</p><table><thead><tr><th>widget</th><th>ทำอะไรกับข้อจำกัดที่ส่งลง</th><th>ทำอะไรกับตำแหน่ง</th></tr></thead><tbody>
+<tr><td><code>Padding</code></td><td>หักระยะขอบออกก่อนส่งต่อ</td><td>เลื่อนลูกเข้ามาตามระยะนั้น</td></tr>
+<tr><td><code>Center</code> / <code>Align</code></td><td>คลายเป็น loose ให้ลูกเลือกเอง</td><td>จัดลูกตามตำแหน่งที่ระบุ</td></tr>
+<tr><td><code>SizedBox</code></td><td>บังคับเป็น tight ตามค่าที่ใส่</td><td>ไม่ทำ</td></tr>
+<tr><td><code>ConstrainedBox</code></td><td>รวมข้อจำกัดของตัวเองกับของแม่</td><td>ไม่ทำ</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เวลาสงสัยว่าทำไมลูกได้ขนาดแบบนั้น ให้ไล่อ่าน wrapper ทีละชั้นจากบนลงล่างแล้วถามว่า “ชั้นนี้แก้ข้อจำกัดอย่างไร” — คำตอบอยู่ในตารางข้างบนทั้งหมด</div></section>
+
+<section id="section-4"><h2>4. Padding: หักพื้นที่ก่อนส่งต่อ</h2><pre class="code-vs"><code>Padding(
+  padding: const EdgeInsets.all(12),
+  child: SomeWidget(),
+)</code></pre><p>ถ้าแม่ให้พื้นที่กว้าง 360 ลูกจะได้รับ 360 − 12 − 12 = <strong>336</strong> จากนั้น <code>Padding</code> บวกระยะกลับเข้าไปตอนรายงานขนาดขึ้นไป</p><table><thead><tr><th>รูปแบบ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>EdgeInsets.all(12)</code></td><td>ทั้งสี่ด้าน 12</td></tr>
+<tr><td><code>EdgeInsets.symmetric(horizontal: 16, vertical: 8)</code></td><td>ซ้ายขวา 16 บนล่าง 8</td></tr>
+<tr><td><code>EdgeInsets.only(left: 8)</code></td><td>เฉพาะซ้าย</td></tr>
+<tr><td><code>EdgeInsets.fromLTRB(12, 8, 12, 16)</code></td><td>ระบุทีละด้านตามลำดับ ซ้าย บน ขวา ล่าง</td></tr>
+</tbody></table><div class="warn"><strong>ระยะขอบสะสมจริง</strong> — ใน lab มี <code>Padding(all: 12)</code> ที่ระดับหน้าจอ และ <code>Padding(all: 12)</code> อีกชั้นในการ์ดแต่ละใบ รวมแล้วเนื้อหาในการ์ดห่างจากขอบจอ 24 บนจอ PDA กว้าง 320 นั่นแปลว่าเหลือพื้นที่ใช้งานจริงแค่ 272 ซึ่งเป็นเหตุผลที่ต้องทดสอบบนความกว้างจริงเสมอ</div></section>
+
+<section id="section-5"><h2>5. SizedBox: สามหน้าที่</h2><pre class="code-vs"><code>// 1) บังคับขนาด
+SizedBox(width: 48, height: 48, child: IconButton(...))
+
+// 2) สร้างช่องว่าง — ใช้บ่อยที่สุด
+const SizedBox(height: 12)
+
+// 3) ขอพื้นที่สูงสุดที่แม่ให้ได้
+SizedBox.expand(child: ...)</code></pre><p>หน้าที่ที่สองคือที่ใช้บ่อยที่สุด และควรใช้แทน <code>Padding</code> เมื่อต้องการช่องว่าง <em>ระหว่าง</em> ลูกใน <code>Row</code>/<code>Column</code> เพราะอ่านง่ายกว่าและไม่ต้องคิดว่าจะใส่ระยะที่ตัวไหน</p><pre class="code-vs"><code>Column(
+  children: [
+    SummaryBar(...),
+    const SizedBox(height: 12),   // ชัดเจนว่าเป็นช่องว่างระหว่างสองตัวนี้
+    Expanded(child: ListView.builder(...)),
+  ],
+)</code></pre><p>อย่าลืมว่าตาม 2.1 ถ้าแม่ส่ง tight constraint มา <code>SizedBox</code> ก็บังคับขนาดไม่ได้ — เช่นวาง <code>SizedBox(width: 100)</code> ไว้ใน <code>Expanded</code> ความกว้างจะถูกกำหนดโดย <code>Expanded</code> ไม่ใช่ค่า 100</p></section>
+
+<section id="section-6"><h2>6. ConstrainedBox: จำกัดไม่ให้กว้างเกินไป</h2><pre class="code-vs"><code>Center(
+  child: ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 480),
+    child: LoginForm(),
+  ),
+)</code></pre><p>ผลคือฟอร์มกว้างเต็มที่ 480 บนแท็บเล็ต แต่ยังหดตามได้บน PDA กว้าง 320 — เป็นรูปแบบที่ควรใช้กับทุกฟอร์ม เพราะฟอร์มที่กว้าง 1200 พิกเซลอ่านยากมาก</p><p>คำว่า <strong>รวมข้อจำกัด</strong> สำคัญ: <code>ConstrainedBox</code> ไม่ได้เขียนทับของแม่ แต่เอามาตัดกัน</p><pre class="code-vs"><code>แม่ให้:        maxWidth 320
+เราขอ:         maxWidth 480
+ผลลัพธ์:       maxWidth 320   ← ตัวที่แคบกว่าชนะ</code></pre><p>จึงเป็นไปไม่ได้ที่จะใช้ <code>ConstrainedBox</code> ทำให้ลูกใหญ่เกินที่แม่อนุญาต ซึ่งตรงกับกฎใน 2.1 ที่ว่าลูกไม่มีทางฝ่าฝืนข้อจำกัดของแม่</p></section>
+
+<section id="section-7"><h2>7. ตัวช่วยเฉพาะทางที่ควรรู้จัก</h2><table><thead><tr><th>widget</th><th>ใช้เมื่อ</th><th>ข้อควรระวัง</th></tr></thead><tbody>
+<tr><td><code>AspectRatio</code></td><td>อัตราส่วนมีความหมาย เช่นภาพถ่ายหรือกล้อง</td><td>ต้องมีขอบเขตอย่างน้อยหนึ่งด้าน</td></tr>
+<tr><td><code>FittedBox</code></td><td>ย่อ/ขยายให้พอดีช่อง เช่นตัวเลขใหญ่</td><td>อย่าครอบทั้งหน้าจอ ตัวอักษรจะเล็กจนอ่านไม่ออก</td></tr>
+<tr><td><code>FractionallySizedBox</code></td><td>ขนาดเป็นสัดส่วนของแม่ เช่น 80%</td><td>ต้องมีขอบเขตที่ชัดเจน</td></tr>
+<tr><td><code>IntrinsicHeight</code></td><td>ให้ลูกใน <code>Row</code> สูงเท่ากัน</td><td>ต้องวัดสองรอบ ใช้กับรายการยาวไม่ได้</td></tr>
+</tbody></table><div class="warn"><code>FittedBox</code> ดูเหมือนเป็นทางแก้ครอบจักรวาลของเนื้อหาล้น แต่มันย่อขนาดจริง ๆ รวมถึงปุ่มและตัวอักษร ผลคือปุ่มอาจเล็กจนกดไม่โดนบน PDA และผู้ใช้ที่ตั้งขนาดตัวอักษรใหญ่จะไม่ได้ประโยชน์เลย เพราะทุกอย่างถูกย่อกลับ</div></section>
+
+<section id="section-8"><h2>8. รวมค่าที่ใช้ซ้ำไว้ที่เดียว</h2><p>ใน lab มีการรวมค่าที่ใช้ร่วมกันไว้ในที่เดียว</p><pre class="code-vs"><code>class Breakpoints {
+  const Breakpoints._();
+
+  /// ต่ำกว่านี้ถือว่าเป็นจอ PDA แนวตั้ง
+  static const double compact = 480;
+
+  /// ปุ่มบน PDA ต้องกดได้ด้วยมือที่ใส่ถุงมือ
+  static const double minTapTarget = 48;
+}</code></pre><p>ประโยชน์ไม่ใช่แค่ประหยัดการพิมพ์ แต่คือ <strong>ตัวเลขมีชื่อและมีเหตุผลกำกับ</strong> — เมื่ออ่านเจอ <code>Breakpoints.minTapTarget</code> เรารู้ทันทีว่าทำไมต้องเป็น 48 ต่างจากการเห็นเลข <code>48</code> ลอย ๆ กระจายอยู่สิบที่ซึ่งไม่มีใครกล้าแก้</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ใส่ <code>width</code> ให้ <code>SizedBox</code> แล้วไม่มีผล</td><td>แม่ส่ง tight constraint มา</td><td>ไปแก้ที่แม่ หรือใส่ <code>Align</code> คั่นเพื่อคลายข้อจำกัด</td></tr>
+<tr><td>เนื้อหาแคบกว่าที่คิดมากบน PDA</td><td>ระยะขอบซ้อนกันหลายชั้น</td><td>ไล่นับ <code>Padding</code> ทุกชั้นแล้วรวมกัน</td></tr>
+<tr><td><code>ConstrainedBox(maxWidth: 800)</code> แล้วยังไม่กว้างขึ้น</td><td>ข้อจำกัดถูกตัดกับของแม่</td><td>ต้องแก้ที่แม่ก่อน</td></tr>
+<tr><td><code>Center</code> แล้วลูกยังกว้างเต็ม</td><td>ลูกขอขนาดสูงสุดเอง เช่น <code>Container</code> ไม่ระบุขนาด</td><td>กำหนดขนาดให้ลูก หรือครอบ <code>ConstrainedBox</code></td></tr>
+<tr><td>ปุ่มเล็กลงจนกดไม่โดน</td><td>ใช้ <code>FittedBox</code> ครอบพื้นที่กว้างเกินไป</td><td>ใช้เฉพาะกับข้อความหรือตัวเลขเดี่ยว ๆ</td></tr>
+<tr><td>ตัวเลขระยะกระจายทั่วโปรเจกต์และไม่สม่ำเสมอ</td><td>ไม่มีที่รวม</td><td>สร้าง class ค่าคงที่แบบ <code>Breakpoints</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>สร้างหน้าล็อกอินที่ต้อง</p><ol><li>อยู่กลางจอเมื่อพื้นที่เหลือเยอะ</li><li>กว้างไม่เกิน 480 บนแท็บเล็ต แต่หดได้บน PDA</li><li>เลื่อนได้เมื่อแป้นพิมพ์ขึ้นมาบัง</li><li>ไม่ไปอยู่ใต้รอยบากหรือแถบล่างของระบบ</li></ol><p>จงเรียงลำดับ wrapper ให้ถูก และอธิบายว่าทำไมลำดับนั้นสำคัญ</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>SafeArea(                                       // 4) หลบรอยบาก
+  child: LayoutBuilder(
+    builder: (context, constraints) =&gt; SingleChildScrollView(   // 3) เลื่อนได้
       padding: const EdgeInsets.all(16),
       child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: c.maxHeight - 32),
-        child: Center(child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: LoginForm(),
-        )),
+        // บังคับให้เนื้อหาสูงอย่างน้อยเท่าพื้นที่ที่มี
+        // เพื่อให้ Center ข้างในมีที่ให้จัดกลางจริง
+        constraints: BoxConstraints(minHeight: constraints.maxHeight - 32),
+        child: Center(                          // 1) อยู่กลาง
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),   // 2) ไม่กว้างเกิน
+            child: const LoginForm(),
+          ),
+        ),
       ),
     ),
   ),
-)</code></pre></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">เลข magic ที่คำนวณ <code>screenHeight - appBar - statusBar - keyboard - 37</code> เปราะต่อ platform และ text scale ให้พึ่ง constraints, SafeArea, Scaffold resize และ viewInsets ตามหน้าที่ก่อนคำนวณเอง</div></section>
+)</code></pre><p><strong>ทำไมลำดับสำคัญ</strong></p><table><thead><tr><th>ถ้าสลับเป็น</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td><code>SingleChildScrollView</code> อยู่นอก <code>SafeArea</code></td><td>เนื้อหาเลื่อนไปอยู่ใต้รอยบากได้</td></tr>
+<tr><td><code>Center</code> อยู่นอก <code>SingleChildScrollView</code></td><td>จัดกลางในพื้นที่ที่ไม่จำกัด ซึ่งไม่มีความหมาย</td></tr>
+<tr><td>ไม่มี <code>ConstrainedBox</code> ที่ใส่ <code>minHeight</code></td><td>เนื้อหาหดตามฟอร์ม แล้ว <code>Center</code> ไม่มีพื้นที่ให้จัดกลาง ฟอร์มจะไปติดบนสุด</td></tr>
+</tbody></table><p><strong>จุดที่ยากที่สุดของข้อนี้</strong> คือชั้น <code>ConstrainedBox(minHeight: ...)</code> ซึ่งดูเกินจำเป็นแต่จำเป็นจริง — ตาม 2.1 พื้นที่ที่เลื่อนได้ส่งขอบเขตแบบไม่จำกัดในทิศแนวตั้ง <code>Center</code> จึงไม่รู้ว่า “กลาง” อยู่ตรงไหน การใส่ <code>minHeight</code> เท่ากับพื้นที่ที่มีจริง ทำให้เนื้อหาสูงอย่างน้อยเท่าจอ <code>Center</code> จึงจัดกลางได้ แต่เมื่อแป้นพิมพ์ขึ้นมาและฟอร์มสูงกว่าพื้นที่ ก็ยังเลื่อนได้ตามปกติ</p><p><strong>ทำไมลบ 32:</strong> เพราะ <code>padding: EdgeInsets.all(16)</code> กินไป 16 บนและ 16 ล่าง ถ้าไม่หักออก เนื้อหาจะสูงเกินพื้นที่เล็กน้อยและมีแถบเลื่อนโผล่มาทั้งที่ยังไม่มีอะไรล้น</p><p><strong>ลองต่อ:</strong> เอา <code>SafeArea</code> ออกแล้วรันบนอุปกรณ์ที่มีรอยบาก จะเห็นว่าหัวข้อฟอร์มโดนบัง จากนั้นใส่กลับแล้วเทียบ — เรื่อง <code>SafeArea</code> และ <code>MediaQuery</code> จะลงลึกใน 2.9</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>Padding</code> หักพื้นที่ก่อนส่งต่อ และสะสมจริงเมื่อซ้อนหลายชั้น</li><li><code>Center</code>/<code>Align</code> คลายข้อจำกัดให้ลูกเลือกขนาดเอง</li><li><code>SizedBox</code> ใช้บ่อยที่สุดในบทบาทช่องว่างระหว่างลูก</li><li><code>ConstrainedBox</code> รวมข้อจำกัดกับแม่ ไม่ได้เขียนทับ — ตัวที่แคบกว่าชนะ</li><li><code>FittedBox</code> ย่อทุกอย่างรวมถึงปุ่ม อย่าใช้ครอบพื้นที่กว้าง</li><li>รวมค่าระยะและขนาดที่ใช้ซ้ำไว้ที่เดียวพร้อมเหตุผล</li></ul></div><p><strong>บทถัดไป:</strong> 2.5 จะสอน <code>Stack</code> ซึ่งใช้ซ้อน widget ทับกัน เช่นจุดแจ้งเตือนบนไอคอน — และเตือนว่าอย่าเอาไปใช้จัดหน้าจอทั้งหน้า</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

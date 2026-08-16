@@ -1,12 +1,129 @@
-<div class="note">เลือก scroll widget จากจำนวนข้อมูลและ ownership ของ viewport: <code>SingleChildScrollView</code> เหมาะกับ child ก้อนเดียวขนาดไม่ใหญ่มาก ส่วน <code>ListView</code> เป็น lazy multi-child scrollable สำหรับรายการที่เติบโต</div>
-<section><h2>1. SingleChildScrollView ใช้เมื่อไร</h2><p>เหมาะกับ form, settings หรือ dialog content ที่ปกติพอดีแต่ต้องเลื่อนเมื่อจอเตี้ย/keyboard ขึ้น มันสร้าง child subtree ทั้งหมด จึงไม่เหมาะกับรายการคลังหลายร้อยหรือหลายพันแถว</p></section>
-<section><h2>2. ListView คือ viewport + sliver list</h2><pre class="code-vs"><code>ListView.builder(
-  itemCount: tasks.length,
-  itemBuilder: (context, index) =&gt; TaskTile(tasks[index]),
-)</code></pre><p>Builder สร้างเฉพาะ items ใกล้ viewport และ recycle element/render work ตามการเลื่อน จึงลด initial build/memory แต่ child state ต้องมี identity ที่ถูกเมื่อ reorder/filter</p></section>
-<section><h2>3. Scrollable ซ้อนกัน</h2><p>ปัญหาคลาสสิกคือ SingleChildScrollView → Column → ListView แต่ทั้งคู่เลื่อนแกนเดียวกัน ให้รวมเป็น ListView/CustomScrollView เดียว หาก list เล็กและจำเป็นจริงใช้ <code>shrinkWrap: true</code> กับ <code>NeverScrollableScrollPhysics</code> แต่ต้องยอมรับว่ารายการทั้งหมดถูกวัด</p></section>
-<section><h2>4. wmsapp Home</h2><p>Home ใช้ <code>SafeArea → Column → Expanded → SingleChildScrollView → Column</code> ถูกกับเมนูจำนวนจำกัดและต้องเลื่อนทั้งหน้า Expanded ให้ scroll view มี viewport bounded แต่คู่การ์ดสร้างทั้งหมดทันที ซึ่งยอมรับได้เพราะจำนวนคงที่ หากเมนูมาจาก server และเพิ่มมากควรเปลี่ยนเป็น lazy grid/list</p></section>
-<section><h2>5. Keyboard และ form</h2><p>Scaffold โดยปกติ resize body ตาม <code>viewInsets</code> เมื่อ keyboard ขึ้น SingleChildScrollView ทำให้ focused field เลื่อนเข้า view ได้ ใช้ <code>keyboardDismissBehavior</code>, FocusTraversal และ padding bottom ตาม viewInsets เฉพาะ sheet/custom layout ที่ Scaffold ไม่จัดให้</p></section>
-<section><h2>6. Controller และตำแหน่งเลื่อน</h2><p>สร้าง ScrollController ใน State เมื่อ owner ต้องอ่าน/สั่ง offset และ dispose เมื่อ State ตาย ใช้ PageStorageKey/Restoration เมื่อควรรักษาตำแหน่งตาม route/tab อย่าสร้าง controller ใหม่ใน build เพราะตำแหน่งและ listeners จะหาย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้า receiving มี header, scan form 4 ช่อง, รายการ item 800 แถว และปุ่ม confirm ตรึงล่าง ควรจัด scroll อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ใช้ Column: header/form ตาม UX, Expanded(ListView.builder) สำหรับ 800 แถว, action bar ด้านล่าง หากทั้ง header/form ต้องเลื่อนไปด้วยใช้ CustomScrollView ที่รวม SliverToBoxAdapter + SliverList แล้ววางปุ่มนอก scroll ไม่ใช้ SingleChildScrollView ครอบ ListView 800 แถว</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn"><code>shrinkWrap: true</code> ไม่ใช่ยารักษา unbounded ทุกกรณี มันทำให้ scrollable ต้องคำนวณขนาดจากลูกทั้งหมดและเสีย lazy advantage ใช้เมื่อรายการเล็กและ bounded ทางธุรกิจ พร้อม test performance ด้วยข้อมูลสูงสุดจริง</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ทำให้เนื้อหาที่ยาวเกินจอเลื่อนได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (unbounded) และ 2.3 (<code>Expanded</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกระหว่าง <code>SingleChildScrollView</code> กับ <code>ListView</code> ได้ถูก และแก้ปัญหาพื้นที่เลื่อนซ้อนกันที่คนใหม่เจอกันทุกคน</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เมื่อเนื้อหายาวเกินจอ Flutter ไม่ได้ทำให้เลื่อนได้อัตโนมัติเหมือนหน้าเว็บ — มันแสดงแถบสีเหลืองดำแทน เราต้องบอกเองว่าส่วนไหนเลื่อนได้</p><p>ทางเลือกมีสองตัวหลัก และการเลือกผิดไม่ได้ทำให้หน้าจอพัง แต่ทำให้แอปช้าลงมากบน PDA โดยที่บนเครื่องพัฒนาไม่รู้สึกอะไรเลย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>viewport</td><td>ช่องหน้าต่างที่มองเห็น ส่วนเนื้อหาเลื่อนอยู่ข้างหลัง</td></tr>
+<tr><td>lazy</td><td>สร้างเฉพาะที่มองเห็น ไม่สร้างทั้งหมด</td></tr>
+<tr><td><code>shrinkWrap</code></td><td>ให้รายการหดตามเนื้อหาแทนที่จะกินพื้นที่เต็ม</td></tr>
+<tr><td><code>ScrollController</code></td><td>ตัวควบคุมที่อ่านและสั่งตำแหน่งการเลื่อนได้</td></tr>
+<tr><td><code>viewInsets</code></td><td>พื้นที่ที่ถูกระบบบัง เช่นแป้นพิมพ์</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ก่อสร้างทั้งตึก หรือสร้างเฉพาะชั้นที่ยืนอยู่</h2><table><thead><tr><th></th><th><code>SingleChildScrollView</code></th><th><code>ListView.builder</code></th></tr></thead><tbody>
+<tr><td>เปรียบเทียบ</td><td>สร้างตึกทั้งหลังก่อน แล้วค่อยขึ้นลิฟต์</td><td>สร้างเฉพาะชั้นที่กำลังยืนอยู่และชั้นถัดไป</td></tr>
+<tr><td>สร้างลูก</td><td>ทั้งหมดทันที</td><td>เฉพาะที่มองเห็นและใกล้เคียง</td></tr>
+<tr><td>รับลูกได้</td><td>ตัวเดียว (ปกติเป็น <code>Column</code>)</td><td>หลายตัว</td></tr>
+<tr><td>เหมาะกับ</td><td>ฟอร์ม หน้าตั้งค่า เนื้อหาที่รู้ว่าไม่ยาวมาก</td><td>รายการที่โตได้เรื่อย ๆ</td></tr>
+<tr><td>จำนวนที่รับไหว</td><td>ไม่กี่สิบชิ้น</td><td>เป็นหมื่นก็ได้</td></tr>
+</tbody></table><div class="note"><strong>เกณฑ์ตัดสินที่ใช้ได้เสมอ:</strong> ถามว่า <em>“จำนวนรายการมาจากไหน”</em> — ถ้ามาจากโค้ดที่เราเขียนเองและนับได้ ใช้ <code>SingleChildScrollView</code> ได้ ถ้ามาจาก API หรือฐานข้อมูลซึ่งวันหนึ่งอาจเป็นพัน ใช้ <code>ListView.builder</code> เสมอ</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    SummaryBar(...),                     // ตรึงอยู่กับที่
+    const SizedBox(height: 12),
+    Expanded(                            // ให้ viewport มีขอบเขต
+      child: ListView.builder(           // ส่วนที่เลื่อนได้
+        itemCount: demoLines.length,
+        itemBuilder: (context, index) {
+          final line = demoLines[index];
+          return InboundLineCard(
+            key: ValueKey&lt;String&gt;(line.palletCode),
+            line: line,
+            compact: isCompact,
+          );
+        },
+      ),
+    ),
+  ],
+)</code></pre><p>นี่คือรูปแบบที่ใช้ได้กับเกือบทุกหน้าจอในแอปคลัง: <strong>ส่วนหัวตรึง ส่วนกลางเลื่อน</strong> ซึ่งดีกว่าการให้ทั้งหน้าเลื่อน เพราะพนักงานยังเห็นยอดสรุปตลอดเวลาขณะไล่ดูรายการ</p><p>ทบทวนจาก 2.1 ว่าทำไมต้องมี <code>Expanded</code>: พื้นที่ที่เลื่อนได้ต้องรู้ว่าตัวเอง <em>สูงเท่าไร</em> ถึงจะรู้ว่าต้องแสดงกี่แถว ถ้าอยู่ใน <code>Column</code> เฉย ๆ มันจะไม่มีขอบเขตและพัง</p></section>
+
+<section><h2>5. กับดักใหญ่: พื้นที่เลื่อนซ้อนกัน</h2><pre class="code-vs"><code>// ผิด — เลื่อนแนวตั้งซ้อนแนวตั้ง
+SingleChildScrollView(
+  child: Column(
+    children: [
+      const Header(),
+      ListView.builder(...),    // พัง หรือต้องใส่ shrinkWrap ซึ่งเสียประโยชน์
+    ],
+  ),
+)</code></pre><p>คนใหม่มักเจอ error แล้วค้นเจอทางแก้ว่าให้ใส่ <code>shrinkWrap: true</code> กับ <code>physics: NeverScrollableScrollPhysics()</code> ซึ่งทำให้ error หายจริง แต่มีราคาที่ต้องจ่าย</p><table><thead><tr><th>ผลของ <code>shrinkWrap: true</code></th><th>ทำไมเป็นปัญหา</th></tr></thead><tbody>
+<tr><td>รายการต้องวัดลูกทุกตัวเพื่อรู้ความสูงรวม</td><td>เสียประโยชน์ของ lazy ไปทั้งหมด — กลับไปสร้างครบทุกแถวเหมือน <code>Column</code></td></tr>
+<tr><td>ทุกครั้งที่ข้อมูลเปลี่ยนต้องวัดใหม่ทั้งหมด</td><td>ยิ่งรายการยาว ยิ่งหน่วง</td></tr>
+</tbody></table><p><strong>ทางแก้ที่ถูกมีสองทาง</strong></p><ol><li><strong>ให้มีพื้นที่เลื่อนชั้นเดียว</strong> — ใช้ <code>Column</code> + <code>Expanded</code> ตามแบบใน lab ส่วนหัวตรึงไว้</li><li><strong>ถ้าส่วนหัวต้องเลื่อนไปด้วย</strong> — ใช้ <code>CustomScrollView</code> ที่รวมทุกอย่างไว้ในพื้นที่เลื่อนเดียว (เรื่องของ 2.8)</li></ol><p>ใช้ <code>shrinkWrap</code> ได้เมื่อรายการสั้นและมีเพดานแน่นอนทางธุรกิจ เช่น “สินค้าที่แนบมากับพาเลทนี้ไม่เกิน 5 รายการ” ไม่ใช่ใช้เป็นทางหนี error</p></section>
+
+<section><h2>6. แป้นพิมพ์กับฟอร์ม</h2><p>เมื่อแป้นพิมพ์ขึ้นมา <code>Scaffold</code> จะย่อพื้นที่ของเนื้อหาลงให้อัตโนมัติ ถ้าเนื้อหาอยู่ใน <code>SingleChildScrollView</code> อยู่แล้ว ช่องที่กำลังพิมพ์จะถูกเลื่อนขึ้นมาให้เห็นเอง</p><p>นี่คือเหตุผลหลักที่ฟอร์มควรอยู่ในพื้นที่เลื่อนได้เสมอ แม้จะดูพอดีจอบนเครื่องพัฒนา — เพราะบน PDA จอเตี้ยกว่า และเมื่อแป้นพิมพ์กินไปครึ่งจอ ฟอร์มที่เคยพอดีจะล้นทันที</p><div class="warn">อย่าคำนวณระยะเผื่อแป้นพิมพ์เองด้วยตัวเลขคงที่ เพราะความสูงของแป้นพิมพ์ต่างกันไปตามอุปกรณ์ ภาษา และว่าผู้ใช้เปิดแถบคำแนะนำไว้หรือไม่ — ปล่อยให้ <code>Scaffold</code> กับพื้นที่เลื่อนจัดการ</div></section>
+
+<section><h2>7. ScrollController</h2><p>ใช้เมื่อต้องอ่านหรือสั่งตำแหน่งการเลื่อน เช่นเลื่อนกลับไปบนสุดหลังสแกนสำเร็จ</p><pre class="code-vs"><code>class _ScanListState extends State&lt;ScanList&gt; {
+  final _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();      // ของที่เราสร้าง เราคืน (1.6)
+    super.dispose();
+  }
+
+  void _scrollToTop() {
+    _controller.animateTo(
+      0,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) =&gt; ListView.builder(
+    controller: _controller,
+    ...
+  );
+}</code></pre><p>เป็นการใช้กฎ “ใครสร้างต้องคืน” จาก 1.6 อีกครั้ง — และห้ามสร้างใน <code>build</code> ตามกฎใน 1.9 เพราะตำแหน่งการเลื่อนจะรีเซ็ตทุกครั้งที่หน้าจอวาดใหม่</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Vertical viewport was given unbounded height</code></td><td>พื้นที่เลื่อนอยู่ใน <code>Column</code> โดยไม่มีขอบเขต</td><td>ครอบด้วย <code>Expanded</code></td></tr>
+<tr><td>รายการเลื่อนไม่ได้ ทั้งที่ใช้ <code>ListView</code></td><td>ใส่ <code>NeverScrollableScrollPhysics</code></td><td>ตรวจว่าตั้งใจหรือลอกมาโดยไม่รู้ตัว</td></tr>
+<tr><td>เลื่อนแล้วกระตุกมากเมื่อข้อมูลเยอะ</td><td>ใช้ <code>SingleChildScrollView</code> + <code>Column</code> กับรายการยาว</td><td>เปลี่ยนเป็น <code>ListView.builder</code></td></tr>
+<tr><td>ใส่ <code>shrinkWrap</code> แล้วแอปช้าลง</td><td>เสียประโยชน์ของ lazy</td><td>จัดโครงให้มีพื้นที่เลื่อนชั้นเดียว</td></tr>
+<tr><td>ตำแหน่งเลื่อนรีเซ็ตเองตลอด</td><td>สร้าง <code>ScrollController</code> ใน <code>build</code></td><td>ย้ายไปเป็น field ของ <code>State</code></td></tr>
+<tr><td>ช่องกรอกถูกแป้นพิมพ์บัง</td><td>ฟอร์มไม่ได้อยู่ในพื้นที่เลื่อนได้</td><td>ครอบด้วย <code>SingleChildScrollView</code></td></tr>
+<tr><td>เลื่อนแล้วสองชั้นขยับพร้อมกันงง ๆ</td><td>มีพื้นที่เลื่อนซ้อนกันในแกนเดียว</td><td>เหลือชั้นเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หน้าจอรับเข้าสินค้าประกอบด้วย</p><ul><li>หัวข้อและยอดสรุป</li><li>ฟอร์มสแกน 4 ช่อง</li><li>รายการที่รับเข้าแล้ว ซึ่งมาจาก API และอาจมีถึง 800 แถว</li><li>ปุ่มยืนยันที่ต้องอยู่ล่างสุดเสมอ กดได้ตลอดเวลา</li></ul><ol><li>จัดโครงอย่างไร ถ้ายอดสรุปควรเห็นตลอด</li><li>จัดอย่างไร ถ้าลูกค้าขอให้ยอดสรุปเลื่อนหายไปด้วยเพื่อให้เห็นรายการมากขึ้น</li><li>อธิบายว่าทำไมห้ามใช้ <code>SingleChildScrollView</code> ครอบทั้งหมดในทั้งสองกรณี</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ยอดสรุปเห็นตลอด</strong></p><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    const SummaryHeader(),                       // ตรึง
+    const ScanForm(),                            // ตรึง
+    Expanded(                                    // เลื่อนเฉพาะส่วนนี้
+      child: ListView.builder(
+        itemCount: lines.length,
+        itemBuilder: (context, index) =&gt; LineCard(
+          key: ValueKey&lt;String&gt;(lines[index].palletCode),
+          line: lines[index],
+        ),
+      ),
+    ),
+    const SafeArea(top: false, child: ConfirmBar()),   // ตรึงล่างสุด
+  ],
+)</code></pre><p><strong>ข้อ 2 — ยอดสรุปเลื่อนไปด้วย</strong></p><pre class="code-vs"><code>Column(
+  children: [
+    Expanded(
+      child: CustomScrollView(          // พื้นที่เลื่อนเดียว รวมทุกอย่าง
+        slivers: [
+          const SliverToBoxAdapter(child: SummaryHeader()),
+          const SliverToBoxAdapter(child: ScanForm()),
+          SliverList.builder(           // ยังคง lazy อยู่
+            itemCount: lines.length,
+            itemBuilder: (context, index) =&gt; LineCard(
+              key: ValueKey&lt;String&gt;(lines[index].palletCode),
+              line: lines[index],
+            ),
+          ),
+        ],
+      ),
+    ),
+    const SafeArea(top: false, child: ConfirmBar()),   // ยังตรึงอยู่นอก
+  ],
+)</code></pre><p>จุดสำคัญคือปุ่มยืนยัน <strong>อยู่นอกพื้นที่เลื่อนทั้งสองกรณี</strong> เพราะโจทย์บอกว่าต้องกดได้ตลอดเวลา ถ้าเอาไปไว้ข้างในผู้ใช้ต้องเลื่อนลงไปสุดก่อนถึงจะกดได้ ซึ่งบนหน้าจอที่มี 800 แถวคือฝันร้าย</p><p><strong>ข้อ 3 — ทำไมห้ามครอบทั้งหมด</strong></p><p>สองเหตุผล เหตุผลแรกคือถ้าครอบด้วย <code>SingleChildScrollView</code> แล้วใส่ <code>ListView</code> ข้างใน จะได้พื้นที่เลื่อนซ้อนกันตามหัวข้อ 5 และต้องพึ่ง <code>shrinkWrap</code> ซึ่งทำให้ 800 แถวถูกสร้างครบทันที</p><p>เหตุผลที่สองซึ่งสำคัญกว่าคือ <strong>ปุ่มยืนยันจะเลื่อนหายไปด้วย</strong> ผู้ใช้ที่เพิ่งสแกนเสร็จต้องเลื่อนผ่าน 800 แถวเพื่อไปหาปุ่ม ในคลังจริงที่ต้องทำงานเร็ว นี่คือปัญหาการใช้งานที่ร้ายแรงกว่าเรื่องประสิทธิภาพเสียอีก</p><p><strong>ข้อสังเกตเรื่อง <code>SafeArea(top: false)</code>:</strong> ใส่ที่ปุ่มล่างเพื่อกันไม่ให้ปุ่มไปอยู่ใต้แถบนำทางของระบบ และปิด <code>top</code> เพราะด้านบนมีคนจัดการแล้ว — รายละเอียดใน 2.9</p><p><strong>ลองต่อ:</strong> ใน lab ให้เปลี่ยน <code>ListView.builder</code> เป็น <code>SingleChildScrollView</code> + <code>Column</code> แล้วเพิ่มข้อมูลจำลองเป็น 2,000 แถว จับเวลาตอนเปิดหน้าจอเทียบกัน — ความต่างจะชัดเจนมากบนอุปกรณ์จริง</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>SingleChildScrollView</code> สร้างลูกทั้งหมดทันที เหมาะกับฟอร์มและเนื้อหาที่นับได้</li><li><code>ListView.builder</code> สร้างเฉพาะที่มองเห็น เหมาะกับรายการที่โตได้</li><li>ถามว่าจำนวนรายการมาจากไหน ถ้ามาจาก API ให้ใช้ตัวหลังเสมอ</li><li>พื้นที่เลื่อนต้องมีขอบเขต — ครอบด้วย <code>Expanded</code></li><li>อย่าให้มีพื้นที่เลื่อนซ้อนกันในแกนเดียว</li><li><code>shrinkWrap</code> ทำให้ error หายแต่เสียประโยชน์ของ lazy</li><li>ฟอร์มควรอยู่ในพื้นที่เลื่อนได้เสมอ เพราะแป้นพิมพ์กินพื้นที่</li><li>ปุ่มสำคัญควรอยู่นอกพื้นที่เลื่อน</li></ul></div><p><strong>บทถัดไป:</strong> 2.7 จะลงรายละเอียดการใช้ <code>ListView</code> และ <code>GridView</code> ให้ถูกวิธี ทั้งเรื่องตัวคั่น สถานะว่าง และการเลือกจำนวนคอลัมน์ตามขนาดจอ</p></section>

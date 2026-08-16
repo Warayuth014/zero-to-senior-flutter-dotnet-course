@@ -1,25 +1,153 @@
-<div class="note">List/Grid ที่ดีต้องตัดสินใจ 4 เรื่อง: lazy creation, item identity, extent และ responsive column count โดยไม่ผูก business model เข้ากับ index ที่เปลี่ยนได้</div>
-<section><h2>1. ListView.builder contract</h2><pre class="code-vs"><code>ListView.builder(
-  itemCount: visibleTasks.length,
-  itemExtent: 64,
-  itemBuilder: (_, i) {
-    final task = visibleTasks[i];
-    return TaskTile(key: ValueKey(task.id), task: task);
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำรายการและตารางที่ใช้งานจริงได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.6 (เลือกพื้นที่เลื่อน) และ 1.8 (<code>key</code> กับตัวตนของแถว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำรายการที่มีตัวคั่น จัดการสถานะว่างและกำลังโหลด และเลือกจำนวนคอลัมน์ของตารางตามขนาดจอได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 2.6 เราเลือก <code>ListView.builder</code> ได้แล้ว แต่รายการในแอปจริงต้องตอบคำถามอีกสี่ข้อที่ตัวอย่างพื้นฐานไม่ได้ครอบคลุม</p><ol><li>ถ้าไม่มีข้อมูลเลย จะแสดงอะไร</li><li>ระหว่างโหลดจะแสดงอะไร</li><li>ตัวคั่นระหว่างแถวทำอย่างไรให้ถูก</li><li>บนแท็บเล็ตควรแสดงกี่คอลัมน์</li></ol></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>itemCount</code></td><td>จำนวนแถวทั้งหมด</td></tr>
+<tr><td><code>itemExtent</code></td><td>ความสูงคงที่ของทุกแถว</td></tr>
+<tr><td>delegate</td><td>ตัวกำหนดกติกาการจัดวางของตาราง</td></tr>
+<tr><td>empty state</td><td>หน้าตาเมื่อไม่มีข้อมูล</td></tr>
+<tr><td>pagination</td><td>การโหลดข้อมูลทีละหน้า</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สี่สถานะที่ทุกรายการต้องมี</h2><p>รายการหนึ่งรายการไม่ได้มีแค่ “มีข้อมูล” กับ “ไม่มีข้อมูล” แต่มีสี่สถานะที่ต้องแสดงต่างกัน</p><table><thead><tr><th>สถานะ</th><th>ผู้ใช้ควรเห็น</th><th>ทำอะไรต่อได้</th></tr></thead><tbody>
+<tr><td>กำลังโหลด</td><td>ตัวบอกว่ากำลังทำงาน</td><td>รอ</td></tr>
+<tr><td>มีข้อมูล</td><td>รายการ</td><td>ทำงาน</td></tr>
+<tr><td>ว่าง</td><td>“ยังไม่มีงานในกะนี้”</td><td>รู้ว่าไม่ใช่ความผิดพลาด</td></tr>
+<tr><td>ล้มเหลว</td><td>ข้อความ + ปุ่มลองใหม่</td><td>ลองใหม่</td></tr>
+</tbody></table><div class="note"><strong>ทบทวนจาก D1.10:</strong> นี่คือเหตุผลที่เราแนะนำให้ใช้ enum แทน <code>bool</code> หลายตัว — เพราะสี่สถานะนี้ต้องเกิดทีละหนึ่งเท่านั้น และการแสดง “ไม่มีงาน” ทั้งที่ระบบล่มเป็นบั๊กที่ทำให้พนักงานกลับบ้านทั้งที่มีของรออยู่ (D1.14 หัวข้อ 9)</div></section>
+
+<section><h2>4. ListView.builder ที่ครบถ้วน</h2><pre class="code-vs"><code>Widget build(BuildContext context) {
+  return switch (state) {
+    LoadState.loading =&gt; const Center(child: CircularProgressIndicator()),
+    LoadState.failure =&gt; ErrorView(onRetry: _load),
+    LoadState.empty =&gt; const EmptyView(message: 'ยังไม่มีงานในกะนี้'),
+    LoadState.success =&gt; ListView.builder(
+      itemCount: lines.length,
+      itemBuilder: (context, index) {
+        final line = lines[index];
+        return InboundLineCard(
+          key: ValueKey&lt;String&gt;(line.palletCode),   // ตัวตนจากข้อมูล ไม่ใช่ตำแหน่ง
+          line: line,
+        );
+      },
+    ),
+  };
+}</code></pre><p>สามสิ่งที่ต้องมีเสมอ</p><table><thead><tr><th>สิ่งที่ต้องมี</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>itemCount</code></td><td>ถ้าไม่ใส่ รายการจะเลื่อนไม่รู้จบและ <code>itemBuilder</code> จะถูกเรียกเกินข้อมูลที่มี</td></tr>
+<tr><td><code>key</code> จากรหัสจริง</td><td>ป้องกันข้อมูลสลับแถวเมื่อเรียงใหม่ (1.8)</td></tr>
+<tr><td>แยกสถานะให้ครบสี่</td><td>ผู้ใช้แยกออกว่า “ไม่มีของ” กับ “ระบบพัง” ต่างกัน</td></tr>
+</tbody></table></section>
+
+<section><h2>5. ตัวคั่นระหว่างแถว</h2><pre class="code-vs"><code>// ถูก — ใช้ตัวที่ออกแบบมาเพื่อการนี้
+ListView.separated(
+  itemCount: lines.length,
+  separatorBuilder: (context, index) =&gt; const Divider(height: 1),
+  itemBuilder: (context, index) =&gt; LineCard(line: lines[index]),
+)
+
+// ผิด — แทรกตัวคั่นเข้าไปในข้อมูลแล้วคำนวณ index เอง
+ListView.builder(
+  itemCount: lines.length * 2 - 1,
+  itemBuilder: (context, index) {
+    if (index.isOdd) return const Divider();
+    return LineCard(line: lines[index ~/ 2]);   // อ่านยากและพลาดง่าย
   },
-)</code></pre><p><code>itemCount</code> ป้องกันเรียกเกิน, stable key รักษา state ตาม task, itemExtent/prototypeItem ช่วยคำนวณ scroll geometry เร็วเมื่อความสูงคงที่</p></section>
-<section><h2>2. Separator และ empty/loading/error</h2><p>ใช้ <code>ListView.separated</code> เมื่อ separator ไม่ใช่ข้อมูล อย่าแทรก divider แล้วคูณ index เพราะ key/semantics ซับซ้อน State ของหน้าต้องแยก loading, error, empty และ data ให้ชัด ไม่ใช้ list ว่างแทนทุกสถานะ</p></section>
-<section><h2>3. GridView delegate</h2><pre class="code-vs"><code>GridView.builder(
-  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-    crossAxisCount: columns,
-    mainAxisSpacing: gap,
-    crossAxisSpacing: gap,
-    mainAxisExtent: tileHeight,
+)</code></pre><p>แบบหลังใช้งานได้จริง แต่ทำให้การใส่ <code>key</code> ยุ่งยาก และเมื่อต้องเพิ่มความสามารถอย่างการลบแถว การคำนวณ index จะซับซ้อนขึ้นเรื่อย ๆ จนผิดพลาด</p><p>ทางเลือกที่ง่ายกว่าตัวคั่นคือใช้ <code>Card</code> ที่มีระยะขอบในตัว อย่างที่ lab ทำ — แต่ละใบแยกกันด้วยเงาและช่องว่าง โดยไม่ต้องมีเส้นคั่นเลย</p></section>
+
+<section><h2>6. GridView: เลือกจำนวนคอลัมน์</h2><p>มีสองวิธีกำหนด และเลือกต่างกันตามเจตนา</p><pre class="code-vs"><code>// แบบที่ 1 — กำหนดจำนวนคอลัมน์ตรง ๆ
+GridView.builder(
+  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+    crossAxisCount: 2,
+    mainAxisSpacing: 12,
+    crossAxisSpacing: 12,
+    mainAxisExtent: 120,      // ความสูงของแต่ละช่อง
   ),
   itemCount: menus.length,
-  itemBuilder: (_, i) =&gt; MenuTile(menu: menus[i]),
-)</code></pre><p>FixedCrossAxisCount คุมจำนวนคอลัมน์; MaxCrossAxisExtent คุมความกว้างสูงสุดต่อ tile และให้ frameworkหาจำนวนคอลัมน์ เหมาะกับ tablet/web ที่ช่วงกว้างมาก</p></section>
-<section><h2>4. Absolute Home grid</h2><p>Home กำหนด 2 คอลัมน์คงที่สำหรับงาน PDA และคำนวณ <code>mainAxisExtent</code> ให้สามแถวพอดีกับพื้นที่ Expanded เมนูที่เกินแถวสามจึงเลื่อน เป็น design decision ที่ทำให้ operation หลักอยู่ first viewport เสมอ ไม่ใช่ grid auto-fit ทั่วไป</p></section>
-<section><h2>5. Grid aspect ratio vs mainAxisExtent</h2><p><code>childAspectRatio</code> ผูกสูงกับความกว้าง เหมาะ tile รูปทรงสม่ำเสมอ; <code>mainAxisExtent</code> ระบุความสูงตรง เหมาะเมื่อความสูง viewport/ข้อความเป็นตัวกำหนด ห้ามใส่ทั้งคู่ใน delegate เดียว ตรวจชื่อไทย/อังกฤษและ text scale ก่อนล็อก extent</p></section>
-<section><h2>6. Pagination และ cache extent</h2><p>รายการจาก API จำนวนมากควรโหลดเป็นหน้าเมื่อใกล้ท้าย, ป้องกัน request ซ้ำ และแสดง retry row อย่าเพิ่ม cacheExtent มากเพื่อซ่อน jank โดยไม่ profile เพราะแลก memory/build ล่วงหน้า รูปควร resize/cache ตามขนาดแสดง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>บน PDA ต้อง 2 คอลัมน์ แต่ tablet ต้อง tile กว้างอย่างน้อย 180 และไม่เกิน 260 จะเลือก delegate อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ที่ breakpoint PDA ใช้ fixed 2 columns; tablet ใช้ LayoutBuilder คำนวณ columns จาก availableWidth หรือใช้ <code>SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 260)</code> แล้วตรวจว่าความกว้างจริงไม่ต่ำกว่า 180 โดยคำนวณขั้นต่ำ/จำกัด max content width</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ห้ามใช้ index เป็น identity ของ item ที่ reorder/filter/insert เพราะ checkbox, animation หรือ controller อาจย้ายไปอยู่ข้อมูลคนละแถว ใช้ key จาก domain ID และให้ selection state อ้าง ID ไม่อ้างตำแหน่ง</div></section>
+  itemBuilder: (context, index) =&gt; MenuTile(menu: menus[index]),
+)
+
+// แบบที่ 2 — กำหนดความกว้างสูงสุด แล้วให้ Flutter หาจำนวนคอลัมน์เอง
+gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+  maxCrossAxisExtent: 260,
+  mainAxisSpacing: 12,
+  crossAxisSpacing: 12,
+),</code></pre><table><thead><tr><th></th><th>กำหนดจำนวนคอลัมน์</th><th>กำหนดความกว้างสูงสุด</th></tr></thead><tbody>
+<tr><td>ควบคุมได้แม่นยำ</td><td>มาก</td><td>น้อยกว่า</td></tr>
+<tr><td>ปรับตามจอกว้าง</td><td>ต้องเขียนเงื่อนไขเอง</td><td>ปรับให้อัตโนมัติ</td></tr>
+<tr><td>เหมาะกับ</td><td>เมนูหลักบน PDA ที่ต้องเห็นครบในหน้าเดียว</td><td>รายการสินค้าบนแท็บเล็ตหรือเว็บ</td></tr>
+</tbody></table><div class="warn">อย่าใส่ทั้ง <code>childAspectRatio</code> และ <code>mainAxisExtent</code> พร้อมกัน เพราะทั้งคู่กำหนดความสูงคนละวิธี — ใช้ <code>mainAxisExtent</code> เมื่อรู้ความสูงที่ต้องการ และใช้ <code>childAspectRatio</code> เมื่อสัดส่วนสำคัญกว่า เช่นรูปภาพ</div></section>
+
+<section><h2>7. ระวังเรื่องขนาดตัวอักษร</h2><p>เมื่อล็อกความสูงของช่องด้วย <code>mainAxisExtent</code> หรือ <code>itemExtent</code> ต้องทดสอบกับผู้ใช้ที่ตั้งขนาดตัวอักษรใหญ่ขึ้นด้วย</p><p>ข้อความไทยที่พอดีในความสูง 120 อาจล้นเมื่อผู้ใช้ตั้งขนาดตัวอักษรเป็น 130% ซึ่งพนักงานคลังที่อายุมากมักตั้งไว้ ผลคือแถบสีเหลืองดำโผล่ในทุกช่องของตาราง</p><p>ทางแก้คือเผื่อความสูงไว้ หรือใช้ <code>maxLines</code> กับ <code>ellipsis</code> ตามที่จะเรียนใน 2.11 — และทดสอบกับขนาดตัวอักษรที่ใหญ่ที่สุดที่รองรับเสมอ</p></section>
+
+<section><h2>8. โหลดทีละหน้า</h2><p>เมื่อข้อมูลมีเป็นพัน การโหลดมาทั้งหมดครั้งเดียวจะช้าและกินหน่วยความจำ วิธีที่ใช้กันคือโหลดเพิ่มเมื่อผู้ใช้เลื่อนใกล้ท้ายรายการ</p><pre class="code-vs"><code>ListView.builder(
+  itemCount: lines.length + (hasMore ? 1 : 0),   // เผื่อแถวสุดท้ายไว้แสดงสถานะ
+  itemBuilder: (context, index) {
+    if (index &gt;= lines.length) {
+      _loadMoreIfNeeded();                       // ต้องกันเรียกซ้ำ (D1.15)
+      return const Center(child: CircularProgressIndicator());
+    }
+    return LineCard(
+      key: ValueKey&lt;String&gt;(lines[index].palletCode),
+      line: lines[index],
+    );
+  },
+)</code></pre><p>จุดที่ต้องระวังคือ <code>itemBuilder</code> ถูกเรียกได้หลายครั้งต่อการเลื่อนหนึ่งครั้ง จึงต้องกันการยิงซ้ำด้วยธงเหมือนที่ทำใน D1.15 หัวข้อ 7 ไม่งั้นจะยิง API สิบครั้งพร้อมกัน</p><p>สำหรับงานคลัง มักดีกว่าถ้าให้ผู้ใช้ค้นหาแทนการเลื่อนดูทั้งหมด — พนักงานที่ถือ PDA ไม่ได้อยากเลื่อนผ่านสองพันรายการเพื่อหาพาเลทใบเดียว</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>รายการเลื่อนไม่รู้จบ</td><td>ลืมใส่ <code>itemCount</code></td><td>ใส่เสมอ</td></tr>
+<tr><td><code>RangeError</code> ใน <code>itemBuilder</code></td><td><code>itemCount</code> ไม่ตรงกับข้อมูลจริง</td><td>ตรวจว่าใช้ list ตัวเดียวกัน</td></tr>
+<tr><td>ติ๊กถูกย้ายไปแถวอื่นหลังเรียงใหม่</td><td>ใช้ index เป็นตัวตน</td><td>ใช้ <code>ValueKey</code> จากรหัสจริง และเก็บสถานะโดยอ้างรหัส</td></tr>
+<tr><td>หน้าจอบอกว่าไม่มีข้อมูลทั้งที่ระบบล่ม</td><td>ดักข้อผิดพลาดแล้วคืนรายการว่าง</td><td>แยกสี่สถานะให้ครบ</td></tr>
+<tr><td>ช่องในตารางล้นเมื่อผู้ใช้ตั้งตัวอักษรใหญ่</td><td>ล็อกความสูงตายตัว</td><td>เผื่อความสูง หรือใช้ <code>maxLines</code> + <code>ellipsis</code></td></tr>
+<tr><td>ยิง API ซ้ำสิบครั้งตอนเลื่อนถึงท้าย</td><td>ไม่ได้กันการเรียกซ้ำ</td><td>ใช้ธงกันตามแบบ D1.15</td></tr>
+<tr><td>ใส่ทั้ง <code>childAspectRatio</code> และ <code>mainAxisExtent</code></td><td>กำหนดความสูงซ้อนกัน</td><td>เลือกอย่างเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทำหน้าจอเมนูหลักของแอปคลัง ที่มีเมนู 6 รายการ โดย</p><ol><li>บน PDA กว้าง 320–480 ต้องเป็น 2 คอลัมน์ และเห็นครบทั้ง 6 รายการโดยไม่ต้องเลื่อน</li><li>บนแท็บเล็ตกว้างกว่า 480 ให้ช่องกว้างไม่เกิน 260 และปรับจำนวนคอลัมน์เอง</li><li>ปุ่มแต่ละช่องต้องสูงอย่างน้อย 48</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>LayoutBuilder(
+  builder: (context, constraints) {
+    final isCompact = constraints.maxWidth &lt; Breakpoints.compact;
+
+    if (isCompact) {
+      // ข้อ 1 — คำนวณความสูงช่องให้ 3 แถวพอดีพื้นที่ที่มี
+      const rows = 3;
+      const gap = 12.0;
+      final tileHeight = (constraints.maxHeight - gap * (rows - 1)) / rows;
+
+      return GridView.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: gap,
+          crossAxisSpacing: gap,
+          mainAxisExtent: tileHeight.clamp(Breakpoints.minTapTarget, 200),
+        ),
+        itemCount: menus.length,
+        itemBuilder: (context, index) =&gt; MenuTile(
+          key: ValueKey&lt;String&gt;(menus[index].id),
+          menu: menus[index],
+        ),
+      );
+    }
+
+    // ข้อ 2 — ให้ Flutter หาจำนวนคอลัมน์จากความกว้างสูงสุดต่อช่อง
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 260,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        mainAxisExtent: 140,
+      ),
+      itemCount: menus.length,
+      itemBuilder: (context, index) =&gt; MenuTile(
+        key: ValueKey&lt;String&gt;(menus[index].id),
+        menu: menus[index],
+      ),
+    );
+  },
+)</code></pre><p><strong>ทำไมบน PDA ต้องคำนวณความสูงเอง แทนที่จะใช้ค่าคงที่</strong></p><p>เพราะโจทย์ข้อ 1 บอกว่า “ต้องเห็นครบโดยไม่ต้องเลื่อน” ซึ่งเป็นข้อกำหนดที่มาจากงานจริง — พนักงานที่ถือ PDA ในมือข้างหนึ่งและถือของอีกข้าง ไม่ควรต้องเลื่อนหาเมนูหลัก การคำนวณจากพื้นที่ที่ได้รับจริง (ตามกฎข้อ 1 ใน 2.1) ทำให้พอดีเสมอไม่ว่าจอจะสูงเท่าไร</p><p><strong>ทำไมมี <code>.clamp()</code></strong></p><p>เพื่อกันกรณีสุดโต่งสองด้าน — ถ้าจอเตี้ยมาก (เช่นเมื่อแป้นพิมพ์ขึ้น) ช่องอาจคำนวณได้เตี้ยกว่า 48 จนกดไม่โดน และถ้าจอสูงมากช่องจะยืดจนดูประหลาด <code>clamp</code> จำกัดทั้งสองด้านในบรรทัดเดียว</p><p><strong>ทำไมสองกรณีใช้ delegate คนละแบบ</strong></p><table><thead><tr><th>จอ</th><th>เจตนา</th><th>เครื่องมือที่ตรงกับเจตนา</th></tr></thead><tbody>
+<tr><td>PDA</td><td>“ต้องเห็นครบ 6 ช่อง ใน 2 คอลัมน์”</td><td>กำหนดจำนวนคอลัมน์ตรง ๆ</td></tr>
+<tr><td>แท็บเล็ต</td><td>“ช่องอย่าใหญ่เกินไป ที่เหลือแล้วแต่พื้นที่”</td><td>กำหนดความกว้างสูงสุด</td></tr>
+</tbody></table><p>นี่คือประเด็นที่สำคัญที่สุดของข้อนี้ — เลือกเครื่องมือตาม <em>เจตนา</em> ไม่ใช่เลือกตัวใดตัวหนึ่งไปใช้ทั้งแอปเพราะคุ้นมือ</p><p><strong>จุดที่คนมักพลาด:</strong> ใช้ <code>MediaQuery</code> อ่านความกว้างของทั้งเครื่องแทน <code>LayoutBuilder</code> ซึ่งจะผิดทันทีถ้าตารางนี้ถูกเอาไปวางในแผงด้านข้างที่กว้างแค่ครึ่งจอ — ความต่างของสองตัวนี้คือเรื่องของ 2.9 และ 2.10</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ตั้งจอเป็น 360 แล้วตรวจว่าเห็นครบ 6 ช่องโดยไม่มี exception จากนั้นตั้งเป็น 1024 แล้วตรวจว่าช่องกว้างไม่เกิน 260 — ดูรูปแบบการตั้งขนาดจอได้จาก <code>test/layout_basics_test.dart</code></p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>รายการต้องมีสี่สถานะ: กำลังโหลด มีข้อมูล ว่าง ล้มเหลว</li><li>ใส่ <code>itemCount</code> และ <code>key</code> จากรหัสจริงเสมอ</li><li>ใช้ <code>ListView.separated</code> แทนการคำนวณ index เอง</li><li>กำหนดจำนวนคอลัมน์เมื่อต้องควบคุมแม่นยำ กำหนดความกว้างสูงสุดเมื่อต้องการให้ปรับเอง</li><li>อย่าใส่ <code>childAspectRatio</code> คู่กับ <code>mainAxisExtent</code></li><li>ทดสอบกับขนาดตัวอักษรใหญ่สุดที่รองรับ</li><li>โหลดทีละหน้าต้องกันการยิงซ้ำ</li></ul></div><p><strong>บทถัดไป:</strong> 2.8 จะแนะนำ sliver ซึ่งเป็นกลไกที่อยู่เบื้องหลัง <code>ListView</code> และเป็นทางที่ทำให้ส่วนหัวเลื่อนหายไปพร้อมรายการได้ตามที่เจอในแบบฝึกหัดของ 2.6</p></section>

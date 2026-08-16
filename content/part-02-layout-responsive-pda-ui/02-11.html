@@ -1,25 +1,123 @@
-<div class="note">ข้อความเป็นข้อมูลแบบ dynamic: ภาษา, font, text scale และค่าจาก API เปลี่ยนความยาวได้ Responsive UI ต้องกำหนด priority, line budget และ fallback โดยไม่ซ่อนข้อมูลปฏิบัติงานสำคัญ</div>
-<section><h2>1. Text overflow ต้องมี bounded width</h2><pre class="code-vs"><code>Row(children: [
-  const Icon(Icons.inventory),
-  const SizedBox(width: 8),
-  Expanded(
-    child: Text(
-      partName,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จัดการข้อความยาวโดยไม่ทำข้อมูลหาย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.3 (<code>Expanded</code>) และ 2.10 (เปลี่ยนโครงก่อนลดขนาด)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดข้อความยาวได้อย่างปลอดภัย และรู้ว่าข้อมูลประเภทไหนห้ามตัดเด็ดขาดเพราะจะทำให้พนักงานทำงานผิด</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ข้อความในแอปจริงยาวไม่เท่ากันและควบคุมไม่ได้ เพราะมาจากฐานข้อมูลที่คนอื่นกรอก จากหลายภาษา และจากขนาดตัวอักษรที่ผู้ใช้ตั้งเอง</p><p>บทนี้ไม่ได้เกี่ยวกับความสวยงามอย่างเดียว แต่เกี่ยวกับความถูกต้องของงาน — การตัดข้อความผิดที่ทำให้พนักงานหยิบของผิดพาเลทได้จริง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>overflow</code></td><td>จะทำอย่างไรกับส่วนที่ยาวเกิน</td></tr>
+<tr><td><code>maxLines</code></td><td>จำนวนบรรทัดสูงสุด</td></tr>
+<tr><td>ellipsis</td><td>จุดไข่ปลาที่บอกว่ามีข้อความต่อ</td></tr>
+<tr><td><code>softWrap</code></td><td>ยอมขึ้นบรรทัดใหม่เมื่อจบคำหรือไม่</td></tr>
+<tr><td>identifier</td><td>ข้อมูลที่ใช้ระบุตัวตน เช่นรหัสพาเลท</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ตัดได้ กับ ห้ามตัด</h2><p>ก่อนจะเลือกวิธีจัดการข้อความยาว ต้องตอบคำถามเดียวก่อน — <strong>ถ้าผู้ใช้อ่านไม่ครบ เขายังทำงานถูกไหม</strong></p><table><thead><tr><th>ประเภทข้อมูล</th><th>ตัวอย่าง</th><th>ตัดได้ไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>คำอธิบาย</td><td>ชื่อสินค้าเต็ม ๆ</td><td><strong>ตัดได้</strong></td><td>เห็นบางส่วนก็พอให้จำได้</td></tr>
+<tr><td>ตัวระบุตัวตน</td><td>รหัสพาเลท ซีเรียล ล็อต</td><td><strong>ห้ามตัด</strong></td><td>ตัดแล้วแยกไม่ออกว่าใบไหน</td></tr>
+<tr><td>จำนวน</td><td>12 ชิ้น</td><td><strong>ห้ามตัด</strong></td><td>ตัดแล้วอาจอ่านเป็นคนละจำนวน</td></tr>
+<tr><td>ตำแหน่งจัดเก็บ</td><td>A-01-02</td><td><strong>ห้ามตัด</strong></td><td>เดินไปผิดที่</td></tr>
+</tbody></table><div class="warn"><strong>อันตรายที่เห็นภาพชัดที่สุด:</strong> รหัส <code>PAL-100123</code> กับ <code>PAL-100189</code> ถ้าถูกตัดเป็น <code>PAL-1001…</code> ทั้งคู่ จะแยกไม่ออกเลย พนักงานอาจยืนยันผิดใบโดยที่หน้าจอ “ดูปกติ” — บั๊กแบบนี้ไม่มี error ให้เห็น มีแต่ของหายจากคลัง</div></section>
+
+<section><h2>4. ต้องมีขอบเขตก่อน ellipsis ถึงทำงาน</h2><pre class="code-vs"><code>// ไม่ทำงาน — Text ไม่มีขอบเขต จึงไม่มีจุดที่จะตัด
+Row(
+  children: [
+    const Icon(Icons.inventory_2_outlined),
+    Text(productName, overflow: TextOverflow.ellipsis),   // ยังล้น
+  ],
+)
+
+// ทำงาน — Expanded ให้ขอบเขตก่อน
+Row(
+  children: [
+    const Icon(Icons.inventory_2_outlined),
+    const SizedBox(width: 12),
+    Expanded(
+      child: Text(
+        productName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
     ),
-  ),
-])</code></pre><p>ถ้า Text ใน Row ไม่ได้รับ maxWidth ที่จำกัด ellipsis ไม่มีจุดตัด จึงต้องใช้ Expanded/Flexible/ConstrainedBox ก่อนตั้ง overflow</p></section>
-<section><h2>2. clip, fade, ellipsis และ visible</h2><p>ellipsis สื่อว่ามีข้อความต่อแต่ต้องมีทางดูเต็ม เช่น detail/tooltip; fade เหมาะ decorative text; clip อาจดูเหมือนข้อมูลขาด; visible เสี่ยงชน widget อื่น สำหรับ barcode, location หรือ quantity ที่ห้ามตีความผิด ควร wrap/แยกบรรทัดหรือเปิด detail มากกว่าตัดเงียบ</p></section>
-<section><h2>3. AutoSizeText ทำอะไร</h2><pre class="code-vs"><code>AutoSizeText(
-  title,
-  maxLines: 2,
-  minFontSize: 10,
-  stepGranularity: 0.5,
+  ],
+)</code></pre><p>นี่คือเหตุผลที่ 2.3 บอกว่า <code>Expanded</code> อย่างเดียวยังไม่พอ ต้องบอกด้วยว่าจะตัดอย่างไร — <strong>ทั้งสองอย่างต้องมาคู่กันเสมอ</strong></p></section>
+
+<section><h2>5. ดูของจริงใน lab</h2><pre class="code-vs"><code>Text(
+  line.productName,
+  maxLines: compact ? 1 : 2,        // จอแคบ 1 บรรทัด จอกว้าง 2 บรรทัด
   overflow: TextOverflow.ellipsis,
-)</code></pre><p>มันลองลด font ภายใน bounds จนพอดีหรือถึง min แล้วใช้ overflow Absolute Home ใช้กับ title/subtitle ของ tile ที่ height เปลี่ยน แต่ต้องมี bounded width/height และห้ามตั้ง min ต่ำจนอ่านไม่ได้</p></section>
-<section><h2>4. ลำดับ fallback ที่ปลอดภัย</h2><ol><li>ให้ width/flex ที่ถูกต้อง</li><li>อนุญาตเพิ่มบรรทัด</li><li>ปรับ composition/ซ่อน secondary content เมื่อ narrow</li><li>ลด font ในช่วงจำกัด</li><li>ellipsis พร้อมทางดูข้อมูลเต็ม</li></ol><p>อย่าเริ่มจากลด font เพราะแก้ภาพได้แต่ทำลาย ergonomics</p></section>
-<section><h2>5. Text scale และ accessibility</h2><p>ทดสอบ TextScaler สูงอย่างน้อย 1.3 และ 2.0 หลีกเลี่ยง Container height ตายตัวรอบข้อความสำคัญ ปุ่มควรขยายสูงหรือ wrap ได้ ไม่ clamp text scale ทั้งแอปเพื่อรักษาหน้าตา หาก PDA มี policy เฉพาะต้องบันทึกเหตุผลและยังมีขนาดอ่านได้</p></section>
-<section><h2>6. Localization จริง</h2><p>คำไทยอาจตัดบรรทัดต่างจากอังกฤษและรหัสคลังอาจไม่มีจุดตัด ใช้ softWrap, zero-width strategy เฉพาะ identifier ที่ยอมตัดได้ และทดสอบค่าจาก API ยาวสุด Absolute ส่ง <code>narrow</code> ให้ tile เพื่อกำหนด maxLines/sub style ตามพื้นที่</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Tile แสดงชื่อ location, description และจำนวนค้าง บนจอเตี้ย ควรเก็บอะไรและยอมลดอะไร?</p><details><summary>แนวคำตอบ</summary><p>รักษา location identifier และจำนวนค้างซึ่งใช้ตัดสินงาน; description เป็น secondary จึงซ่อน/ellipsis เมื่อ tight; เปลี่ยน tile เป็น Row, ให้ชื่อ 1–2 บรรทัด แล้ว AutoSize ในช่วงอ่านได้ ไม่ตัดจำนวนหรือทำ font ทั้ง tile เหลือ 7px</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Tooltip ที่แสดงเฉพาะ hover ไม่ช่วยผู้ใช้ PDA แบบสัมผัส ให้ข้อมูลเต็มเข้าถึงได้ด้วย tap/detail/semantics และอย่าใช้ ellipsis กับ serial/lot/location แล้วให้ผู้ใช้เดาว่ารายการใด</div></section>
+  style: theme.textTheme.bodySmall,
+)</code></pre><p>และเทสต์ยืนยันทั้งสองกรณี</p><pre class="code-vs"><code>expect(longName.overflow, TextOverflow.ellipsis);
+expect(longName.maxLines, 1);      // ที่ความกว้าง 360
+expect(longName.maxLines, 2);      // ที่ความกว้าง 900</code></pre><p>สังเกตว่าใน lab เดียวกัน <code>line.palletCode</code> และ <code>line.quantity</code> <strong>ไม่มี</strong> <code>overflow</code> เลย เพราะทั้งคู่เป็นข้อมูลที่ห้ามตัดตามตารางในหัวข้อ 3 — และเนื่องจากรหัสพาเลทมีความยาวคงที่ เราจึงรู้ว่ามันจะไม่ล้นแน่นอน</p></section>
+
+<section><h2>6. ตัวเลือกของ overflow</h2><table><thead><tr><th>ค่า</th><th>ผล</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>ellipsis</code></td><td>ตัดแล้วใส่จุดไข่ปลา</td><td>คำอธิบาย ที่มีทางดูฉบับเต็ม</td></tr>
+<tr><td><code>fade</code></td><td>จางหายไป</td><td>ข้อความประกอบที่ไม่สำคัญ</td></tr>
+<tr><td><code>clip</code></td><td>ตัดตรง ๆ ไม่มีสัญญาณ</td><td><strong>แทบไม่ควรใช้</strong> — ผู้ใช้ไม่รู้ว่ามีต่อ</td></tr>
+<tr><td><code>visible</code></td><td>ปล่อยล้นออกไป</td><td>ไม่ควรใช้ จะไปทับ widget อื่น</td></tr>
+</tbody></table><p><code>clip</code> อันตรายเพราะไม่มีสัญญาณอะไรบอกว่าข้อความถูกตัด ผู้ใช้จะเชื่อว่าที่เห็นคือทั้งหมด — ต่างจาก <code>ellipsis</code> ที่จุดไข่ปลาบอกชัดว่ายังมีต่อ</p></section>
+
+<section><h2>7. ลำดับที่ควรทำเมื่อข้อความยาวเกิน</h2><ol><li><strong>ให้ขอบเขตที่ถูกต้อง</strong> ด้วย <code>Expanded</code> — แก้ที่ต้นเหตุก่อน</li><li><strong>ยอมให้เพิ่มบรรทัด</strong> — <code>maxLines: 2</code></li><li><strong>ซ่อนข้อมูลรอง</strong> เมื่อจอแคบ — เอาคำอธิบายออก เก็บรหัสไว้</li><li><strong>ลดขนาดตัวอักษร</strong> ในช่วงที่ยังอ่านออก</li><li><strong>ตัดด้วยจุดไข่ปลา</strong> พร้อมมีทางดูฉบับเต็ม</li></ol><div class="warn"><strong>อย่าเริ่มจากข้อ 4</strong> ซึ่งเป็นสิ่งที่คนใหม่ทำบ่อยที่สุด — การลดขนาดตัวอักษรแก้ภาพที่เห็นได้ทันที แต่ทำให้พนักงานที่อ่านหน้าจอกลางแดดในคลังอ่านไม่ออก ซึ่งแย่กว่าการเห็นข้อความไม่ครบ</div></section>
+
+<section><h2>8. ต้องมีทางดูฉบับเต็มเสมอ</h2><p>เมื่อตัดข้อความด้วยจุดไข่ปลา ต้องมีทางให้ผู้ใช้ดูฉบับเต็มได้</p><table><thead><tr><th>วิธี</th><th>ใช้ได้บน PDA ไหม</th></tr></thead><tbody>
+<tr><td>แตะที่แถวเพื่อเปิดหน้ารายละเอียด</td><td><strong>ได้</strong> — วิธีที่แนะนำ</td></tr>
+<tr><td>กดค้างแล้วแสดงข้อความเต็ม</td><td>ได้ แต่ผู้ใช้ต้องรู้ว่าทำได้</td></tr>
+<tr><td>เอาเมาส์ไปชี้แล้วขึ้นคำอธิบาย</td><td><strong>ไม่ได้</strong> — PDA เป็นจอสัมผัส ไม่มีเมาส์</td></tr>
+</tbody></table><p>ข้อสุดท้ายเป็นกับดักที่พบบ่อยเมื่อพัฒนาบนเดสก์ท็อป — ทดสอบแล้วเห็นคำอธิบายโผล่มาตอนเอาเมาส์ไปชี้ จึงคิดว่าแก้ปัญหาแล้ว แต่บนอุปกรณ์จริงไม่มีทางเรียกดูได้เลย</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ใส่ <code>ellipsis</code> แล้วยังล้น</td><td>ข้อความไม่มีขอบเขต</td><td>ห่อด้วย <code>Expanded</code> ก่อน</td></tr>
+<tr><td>ข้อความหายไปเฉย ๆ ไม่มีจุดไข่ปลา</td><td>ใช้ <code>clip</code></td><td>เปลี่ยนเป็น <code>ellipsis</code></td></tr>
+<tr><td>พนักงานยืนยันผิดพาเลท</td><td>ตัดรหัสด้วยจุดไข่ปลา</td><td>ห้ามตัดตัวระบุตัวตน — ให้ขึ้นบรรทัดใหม่หรือย่อส่วนอื่นแทน</td></tr>
+<tr><td>ข้อความล้นเมื่อผู้ใช้ตั้งตัวอักษรใหญ่</td><td>ล็อกความสูงไว้</td><td>ปล่อยให้สูงตามเนื้อหา (2.9)</td></tr>
+<tr><td>คำอธิบายดูได้เฉพาะตอนเอาเมาส์ชี้</td><td>ออกแบบบนเดสก์ท็อป</td><td>ทำให้แตะแล้วเปิดรายละเอียดได้</td></tr>
+<tr><td>ลดขนาดตัวอักษรจนอ่านไม่ออก</td><td>เริ่มจากทางแก้ที่ผิดลำดับ</td><td>ทำตามลำดับในหัวข้อ 7</td></tr>
+<tr><td>ภาษาอังกฤษพอดี แต่ภาษาไทยล้น</td><td>ทดสอบภาษาเดียว</td><td>ทดสอบด้วยข้อความจริงที่ยาวที่สุด</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>แถวหนึ่งในรายการต้องแสดงสี่อย่างบนจอ PDA กว้าง 320</p><ul><li>รหัสพาเลท <code>PAL-100189</code></li><li>ชื่อสินค้า อาจยาวถึง 80 ตัวอักษร</li><li>ตำแหน่งจัดเก็บ <code>A-01-02</code></li><li>จำนวน <code>1,250</code></li></ul><ol><li>จัดวางอย่างไรให้ครบโดยไม่ล้น</li><li>ระบุว่าอะไรตัดได้และอะไรห้ามตัด พร้อมเหตุผล</li><li>ถ้าจอแคบกว่านี้อีกจนใส่ไม่ครบจริง ๆ จะทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.start,
+  children: [
+    // บรรทัดบน — ข้อมูลที่ห้ามตัด อยู่ครบเสมอ
+    Row(
+      children: [
+        Text(
+          line.palletCode,
+          style: theme.textTheme.titleMedium,   // ไม่ใส่ overflow เลย
+        ),
+        const Spacer(),
+        Text(
+          '${line.quantity}',
+          style: theme.textTheme.titleMedium,
+        ),
+      ],
+    ),
+    const SizedBox(height: 4),
+
+    // บรรทัดล่าง — ตำแหน่งห้ามตัด ชื่อสินค้าตัดได้
+    Row(
+      children: [
+        Chip(
+          label: Text(line.location),          // ห้ามตัด
+          visualDensity: VisualDensity.compact,
+        ),
+        const SizedBox(width: 8),
+        Expanded(                              // ตัวเดียวที่ยอมเสียพื้นที่
+          child: Text(
+            line.productName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+      ],
+    ),
+  ],
+)</code></pre><p><strong>ข้อ 1 — หลักการจัดวาง</strong></p><p>แยกเป็นสองบรรทัด โดยจัดกลุ่มตาม “ตัดได้” กับ “ห้ามตัด” — บรรทัดบนมีแต่ข้อมูลที่ห้ามตัดสองตัว ซึ่งทั้งคู่สั้นและความยาวคาดเดาได้ จึงใส่ในบรรทัดเดียวได้อย่างปลอดภัย ส่วนบรรทัดล่างมีตัวที่ห้ามตัดหนึ่งตัวและตัวที่ยอมเสียพื้นที่หนึ่งตัว</p><p><strong>ข้อ 2 — อะไรตัดได้</strong></p><table><thead><tr><th>ข้อมูล</th><th>ตัดได้</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท</td><td>ไม่</td><td><code>PAL-100189</code> กับ <code>PAL-100123</code> ตัดแล้วเหมือนกัน</td></tr>
+<tr><td>จำนวน</td><td>ไม่</td><td><code>1,250</code> ตัดเป็น <code>1,2…</code> อาจอ่านเป็น 12</td></tr>
+<tr><td>ตำแหน่ง</td><td>ไม่</td><td>เดินไปผิดช่อง</td></tr>
+<tr><td>ชื่อสินค้า</td><td>ได้</td><td>เห็นครึ่งเดียวก็รู้ว่าคืออะไร และมีรหัสยืนยันอยู่แล้ว</td></tr>
+</tbody></table><p><strong>ข้อ 3 — ถ้าใส่ไม่ครบจริง ๆ</strong></p><p>ทำตามลำดับในหัวข้อ 7 โดยไล่จากบนลงล่าง</p><ol><li><strong>ซ่อนชื่อสินค้าไปเลย</strong> เมื่อแคบมาก แล้วให้แตะดูรายละเอียดแทน — ดีกว่าแสดงจุดไข่ปลาที่ไม่ให้ข้อมูลอะไร</li><li><strong>ย้ายตำแหน่งจัดเก็บขึ้นไปบรรทัดบน</strong> ต่อจากรหัส เพราะทั้งคู่สั้น</li><li><strong>ลดขนาดตัวอักษรของชื่อสินค้า</strong> เท่านั้น ไม่ลดของรหัสหรือจำนวน</li></ol><p><strong>สิ่งที่ห้ามทำเด็ดขาด:</strong> ย่อขนาดตัวอักษรทั้งแถวลงจนใส่ครบ เพราะรหัสพาเลทกับจำนวนคือสองสิ่งที่พนักงานต้องอ่านให้แม่นที่สุด การทำให้มันเล็กลงเพื่อให้ชื่อสินค้าที่ไม่สำคัญเท่าใส่ครบ คือการสลับลำดับความสำคัญกลับด้าน</p><p><strong>ข้อสังเกตเรื่อง <code>Spacer()</code>:</strong> ใช้ในบรรทัดบนเพื่อดันจำนวนไปขวาสุด ซึ่งได้ผลดีตรงนี้เพราะทั้งสองฝั่งมีความยาวคาดเดาได้ ต่างจากกรณีในแบบฝึกหัด 2.3 ที่มีข้อความยาวไม่จำกัดปนอยู่ด้วย</p><p><strong>ลองต่อ:</strong> ใน lab ให้เปลี่ยนชื่อสินค้าของ <code>PAL-1001</code> เป็นข้อความยาว 200 ตัวอักษร แล้วรันเทสต์ — ควรผ่านทั้งหมด เพราะ <code>Expanded</code> กับ <code>ellipsis</code> จัดการให้แล้ว จากนั้นลองเปลี่ยนรหัสพาเลทเป็นข้อความยาวแทน จะเห็นแถบสีเหลืองดำทันที ซึ่งเป็นสัญญาณที่ถูกต้อง เพราะมันบอกว่าข้อมูลที่ห้ามตัดกำลังจะถูกตัด</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ถามก่อนเสมอว่า “อ่านไม่ครบแล้วยังทำงานถูกไหม”</li><li>ตัวระบุตัวตน จำนวน และตำแหน่ง ห้ามตัดเด็ดขาด</li><li><code>ellipsis</code> ต้องมาคู่กับขอบเขตจาก <code>Expanded</code> เสมอ</li><li>อย่าใช้ <code>clip</code> เพราะไม่มีสัญญาณบอกว่าข้อความถูกตัด</li><li>แก้ที่ขอบเขตก่อน ลดขนาดตัวอักษรเป็นทางท้าย ๆ</li><li>ต้องมีทางดูข้อความเต็มที่ใช้ได้บนจอสัมผัส</li><li>ทดสอบด้วยข้อความจริงที่ยาวที่สุดและภาษาที่ยาวที่สุด</li></ul></div><p><strong>บทถัดไป:</strong> 2.12 จะดู widget สำเร็จรูปที่ใช้จัดกลุ่มข้อมูล — การ์ด ป้าย และตัวเลขแจ้งเตือน ซึ่งช่วยให้หน้าจอรายการอ่านง่ายขึ้นมากโดยไม่ต้องออกแบบเอง</p></section>

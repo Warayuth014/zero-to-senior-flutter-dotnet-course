@@ -1,18 +1,96 @@
-<div class="note"><code>MediaQuery</code> บอกคุณสมบัติของ view เช่น size, padding, viewInsets และ text scaling ส่วน <code>SafeArea</code> แปลง padding ที่หลบ system UI เป็น layout โดยสะดวก ทั้งคู่ไม่แทน constraints ของ parent</div>
-<section><h2>1. size ต่างจาก available constraints</h2><p><code>MediaQuery.sizeOf(context)</code> คือขนาด view/window แต่ widget อาจอยู่ครึ่งจอ, dialog หรือ split pane จึงควรใช้ LayoutBuilder เมื่อตัดสิน layout จากพื้นที่ที่ได้รับ ใช้ MediaQuery เมื่อสนใจคุณสมบัติทั้ง view เช่น keyboard/system padding</p></section>
-<section><h2>2. padding, viewPadding และ viewInsets</h2><ul><li><code>padding</code>: ส่วน view ที่ถูก system UI บัง ณ ตอนนั้น</li><li><code>viewPadding</code>: safe padding พื้นฐานไม่ลดตาม keyboard</li><li><code>viewInsets</code>: ส่วนถูกบังเต็ม เช่น on-screen keyboard</li></ul><p>Bottom sheet/form มักต้องสนใจ <code>viewInsets.bottom</code>; content เต็มจอต้องหลบ notch/navigation ด้วย SafeArea</p></section>
-<section><h2>3. SafeArea แบบเลือกด้าน</h2><pre class="code-vs"><code>SafeArea(
-  top: false, // AppBar จัดส่วนบนแล้ว
-  minimum: const EdgeInsets.symmetric(horizontal: 12),
-  child: WarehouseBody(),
-)</code></pre><p>SafeArea ใช้ MediaQuery padding แล้วแก้ MediaQuery ภายในไม่ให้ descendant บวก safe padding ซ้ำ การซ้อน SafeArea จึงโดยทั่วไปไม่ทบค่าเดิม แต่ padding manual อาจยังซ้ำ</p></section>
-<section><h2>4. จากสองโปรเจกต์</h2><p>wmsapp Home ใช้ SafeArea(top: false) เพราะ AppBar รับพื้นที่บนแล้ว Absolute ครอบ app-wide SafeArea ใต้ MaterialApp และ shell มี SafeArea ในส่วน navigation การออกแบบระดับ root ช่วย consistency แต่ overlay/dialog ที่อยู่นอกตำแหน่งนั้นยังต้องตรวจเอง</p></section>
-<section><h2>5. Keyboard-aware sheet</h2><pre class="code-vs"><code>final insets = MediaQuery.viewInsetsOf(context);
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: หลบรอยบาก แถบระบบ และแป้นพิมพ์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.7 (<code>.of(context)</code>) และ 2.6 (แป้นพิมพ์กับพื้นที่เลื่อน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>SafeArea</code> และ <code>MediaQuery</code> ได้ถูกที่ และเข้าใจว่าทำไมหน้าจอที่ดูดีบนเครื่องหนึ่งกลับผิดบนอีกเครื่อง</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>พื้นที่หน้าจอที่เราใช้ได้จริง ไม่เท่ากับขนาดจอทั้งหมด เพราะระบบปฏิบัติการกินไปบางส่วน</p><ul><li>รอยบากหรือกล้องหน้าด้านบน</li><li>แถบนำทางหรือเส้นลากด้านล่าง</li><li>แป้นพิมพ์ที่ขึ้นมาบังครึ่งจอ</li></ul><p>ที่ทำให้ปัญหานี้ยากคือ <strong>เครื่องพัฒนามักไม่มีสิ่งเหล่านี้</strong> โค้ดจึงดูถูกต้องจนกว่าจะเอาไปลงบน PDA จริง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>MediaQuery</code></td><td>ข้อมูลของหน้าต่างทั้งบาน เช่นขนาด ระยะที่ระบบกิน</td></tr>
+<tr><td><code>SafeArea</code></td><td>widget ที่หลบพื้นที่ที่ระบบกินให้อัตโนมัติ</td></tr>
+<tr><td><code>padding</code></td><td>ระยะที่ระบบบังอยู่ตอนนี้</td></tr>
+<tr><td><code>viewInsets</code></td><td>ระยะที่ถูกบังเต็ม เช่นแป้นพิมพ์</td></tr>
+<tr><td><code>textScaler</code></td><td>ตัวคูณขนาดตัวอักษรที่ผู้ใช้ตั้งไว้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ขนาดจอ ไม่เท่ากับพื้นที่ที่เราได้</h2><pre class="code-vs"><code>┌─────────────────────┐  ← ขนาดจอทั้งหมด (MediaQuery.size)
+│ ▓▓▓ รอยบาก ▓▓▓▓▓▓▓ │  ← padding.top
+├─────────────────────┤
+│                     │
+│   พื้นที่ที่เราได้จริง   │  ← SafeArea ให้ส่วนนี้
+│                     │
+├─────────────────────┤
+│ ▓▓ แถบนำทาง ▓▓▓▓▓ │  ← padding.bottom
+└─────────────────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>MediaQuery</code> บอกเรื่องของ <em>หน้าต่างทั้งบาน</em> ส่วน <code>LayoutBuilder</code> (บทหน้า) บอกเรื่องของ <em>พื้นที่ที่ widget ตัวนี้ได้รับจริง</em> — สองอย่างนี้ต่างกัน และเลือกผิดจะพังเมื่อหน้าจอถูกเอาไปวางในแผงย่อย</div></section>
+
+<section><h2>4. SafeArea: ใช้ให้ถูกที่</h2><pre class="code-vs"><code>Scaffold(
+  appBar: AppBar(title: const Text('รับเข้าสินค้า')),
+  body: SafeArea(
+    child: ...,
+  ),
+)</code></pre><p>ใน lab เราใส่ <code>SafeArea</code> ครอบเนื้อหาของ <code>Scaffold</code> ไว้ ซึ่งเป็นตำแหน่งที่ถูก</p><p><strong>เลือกด้านได้</strong> ซึ่งจำเป็นบ่อยกว่าที่คิด</p><pre class="code-vs"><code>SafeArea(
+  top: false,        // AppBar จัดการด้านบนให้แล้ว ไม่ต้องเผื่อซ้ำ
+  child: ActionBar(),
+)</code></pre><table><thead><tr><th>สถานการณ์</th><th>ตั้งอย่างไร</th></tr></thead><tbody>
+<tr><td>มี <code>AppBar</code> อยู่แล้ว</td><td><code>top: false</code></td></tr>
+<tr><td>แถบปุ่มด้านล่าง</td><td><code>top: false</code> เผื่อเฉพาะล่าง</td></tr>
+<tr><td>หน้าจอเต็มจอไม่มี <code>AppBar</code></td><td>ใช้ค่าเริ่มต้น เผื่อทุกด้าน</td></tr>
+<tr><td>อยากมีระยะขอบขั้นต่ำแม้ไม่มีรอยบาก</td><td>ใส่ <code>minimum: EdgeInsets.symmetric(horizontal: 12)</code></td></tr>
+</tbody></table><div class="warn">การซ้อน <code>SafeArea</code> หลายชั้นไม่ทำให้ระยะทบกัน เพราะชั้นในรู้ว่าชั้นนอกเผื่อไปแล้ว — แต่ถ้าเราไปบวก <code>MediaQuery.paddingOf(context).bottom</code> เองด้วยมือ <strong>จะทบกันจริง</strong> ทำให้เกิดช่องว่างใหญ่ผิดปกติที่หาสาเหตุยาก</div></section>
+
+<section><h2>5. แป้นพิมพ์: viewInsets</h2><p>เมื่อแป้นพิมพ์ขึ้น <code>Scaffold</code> จะย่อพื้นที่ให้อัตโนมัติอยู่แล้ว จึงไม่ต้องทำอะไรเพิ่มในกรณีปกติ</p><p>กรณีที่ต้องจัดการเองคือแผ่นเลื่อนขึ้นจากด้านล่าง ซึ่งไม่ได้อยู่ใน <code>Scaffold</code></p><pre class="code-vs"><code>final insets = MediaQuery.viewInsetsOf(context);
+
 return AnimatedPadding(
   duration: const Duration(milliseconds: 180),
-  padding: EdgeInsets.only(bottom: insets.bottom),
-  child: const ConnectionForm(),
-);</code></pre><p>จำกัด maxHeight และทำ content เลื่อนได้ด้วย เพราะยก sheet อย่างเดียวอาจเหลือความสูงไม่พอเมื่อ PDA เป็น landscape</p></section>
-<section><h2>6. APIs ที่ rebuild แคบกว่า</h2><p>ใช้ <code>MediaQuery.sizeOf</code>, <code>paddingOf</code>, <code>viewInsetsOf</code> เมื่อสนใจ property เดียว แทน <code>MediaQuery.of</code> ทั้ง object เพื่อให้ dependency ชัดและลด rebuild จาก property อื่น รวมทั้งอ่าน textScaler/platformBrightness/highContrast เพื่อ accessibility ตาม use case</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Bottom action bar ถูก navigation gesture บัง แต่ body มี SafeArea อยู่แล้ว ควรแก้ที่ไหน?</p><details><summary>แนวคำตอบ</summary><p>ตรวจ tree ว่า action bar เป็น descendant ของ SafeArea หรือเป็น bottomNavigationBar/overlay คนละ subtree ถ้าอยู่นอกให้ครอบเฉพาะ action bar ด้วย SafeArea(top: false) หรือเพิ่ม padding จาก <code>MediaQuery.paddingOf(context).bottom</code> ที่ owner อย่าบวกทั้ง body และ bar ซ้ำ</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ MediaQuery width เป็น breakpoint ภายใน reusable card เพราะมันเห็นทั้งหน้าจอแม้ card อยู่ pane แคบ ใช้ LayoutBuilder ของ card/pane และใช้ MediaQuery เฉพาะ view-level concerns</div></section>
+  padding: EdgeInsets.only(bottom: insets.bottom),   // ยกขึ้นเหนือแป้นพิมพ์
+  child: const ScanForm(),
+);</code></pre><table><thead><tr><th>ค่า</th><th>บอกอะไร</th><th>ลดลงเมื่อแป้นพิมพ์ขึ้นไหม</th></tr></thead><tbody>
+<tr><td><code>padding</code></td><td>ระยะที่ระบบบังตอนนี้</td><td>ลด (เพราะแป้นพิมพ์บังแทน)</td></tr>
+<tr><td><code>viewPadding</code></td><td>ระยะที่ระบบบังโดยพื้นฐาน</td><td>ไม่ลด</td></tr>
+<tr><td><code>viewInsets</code></td><td>ระยะที่ถูกบังเต็ม</td><td>เพิ่มขึ้นตามความสูงแป้นพิมพ์</td></tr>
+</tbody></table><p>ความต่างสามข้อนี้อธิบายอาการที่งงบ่อย: ทำไมพอแป้นพิมพ์ขึ้น ปุ่มที่เผื่อระยะไว้ด้วย <code>padding.bottom</code> ถึงขยับผิดที่ — เพราะ <code>padding.bottom</code> กลายเป็น 0 ไปแล้ว</p></section>
+
+<section><h2>6. อ่านเฉพาะค่าที่ต้องใช้</h2><pre class="code-vs"><code>// ดี — ผูกกับค่าเดียว
+final size = MediaQuery.sizeOf(context);
+final insets = MediaQuery.viewInsetsOf(context);
+
+// ไม่ดี — ผูกกับทุกค่า
+final media = MediaQuery.of(context);</code></pre><p>ทบทวนจาก 1.14: การเรียก <code>.of(context)</code> คือการสมัครรับข่าว ถ้าเรียก <code>MediaQuery.of</code> ทั้งก้อน widget จะถูกวาดใหม่ทุกครั้งที่ <em>อะไรก็ตาม</em> ใน <code>MediaQuery</code> เปลี่ยน รวมถึงแป้นพิมพ์ที่กำลังเลื่อนขึ้นทีละพิกเซล</p><p>การใช้ <code>sizeOf</code> จะวาดใหม่เฉพาะเมื่อขนาดเปลี่ยนจริง ซึ่งลดงานลงมากบน PDA</p></section>
+
+<section><h2>7. ขนาดตัวอักษรที่ผู้ใช้ตั้งเอง</h2><p><code>MediaQuery</code> ยังบอกด้วยว่าผู้ใช้ตั้งขนาดตัวอักษรไว้เท่าไร ซึ่งเป็นเรื่องที่มักถูกลืมและทำให้หน้าจอพังบนอุปกรณ์ของผู้ใช้จริง</p><p>พนักงานคลังที่อายุมากมักตั้งขนาดตัวอักษรไว้ 130–150% ซึ่งทำให้</p><ul><li>ช่องที่ล็อกความสูงไว้เกิดแถบสีเหลืองดำ (ตามที่เตือนใน 2.7)</li><li>ปุ่มที่มีข้อความยาวถูกตัด</li><li>รายการที่คำนวณจำนวนแถวไว้แสดงได้น้อยลง</li></ul><div class="warn"><strong>อย่าปิดการปรับขนาดตัวอักษร</strong> ด้วยการบังคับตัวคูณเป็น 1.0 เพื่อให้หน้าจอไม่พัง — นั่นคือการแก้ปัญหาด้วยการทำให้ผู้ใช้ที่ต้องการตัวอักษรใหญ่ใช้งานไม่ได้ ให้แก้ที่ layout ให้ยืดหยุ่นแทน</div><p>วิธีทดสอบคือตั้งขนาดตัวอักษรในระบบให้ใหญ่สุด แล้วเปิดแอปดูทุกหน้าจอ — ควรทำก่อนส่งมอบทุกครั้ง</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หัวข้อโดนรอยบากบัง</td><td>ไม่มี <code>SafeArea</code></td><td>ครอบเนื้อหาของ <code>Scaffold</code></td></tr>
+<tr><td>ปุ่มล่างโดนแถบนำทางบัง</td><td>ปุ่มอยู่นอก <code>SafeArea</code></td><td>ครอบเฉพาะปุ่มด้วย <code>SafeArea(top: false)</code></td></tr>
+<tr><td>มีช่องว่างใหญ่ด้านบนผิดปกติ</td><td>มี <code>SafeArea</code> แล้วยังบวก <code>padding.top</code> เองอีก</td><td>เลือกอย่างใดอย่างหนึ่ง</td></tr>
+<tr><td>เผื่อระยะด้วย <code>padding.bottom</code> แล้วเพี้ยนตอนแป้นพิมพ์ขึ้น</td><td><code>padding</code> ลดลงเมื่อแป้นพิมพ์บังแทน</td><td>ใช้ <code>viewPadding</code> หรือ <code>SafeArea</code></td></tr>
+<tr><td>แผ่นเลื่อนขึ้นถูกแป้นพิมพ์บัง</td><td>ไม่ได้เผื่อ <code>viewInsets.bottom</code></td><td>ใส่ระยะล่างตามค่านั้น</td></tr>
+<tr><td>หน้าจอวาดใหม่รัวขณะแป้นพิมพ์เลื่อนขึ้น</td><td>ใช้ <code>MediaQuery.of</code> ทั้งก้อน</td><td>ใช้ <code>sizeOf</code> หรือ <code>paddingOf</code></td></tr>
+<tr><td>เนื้อหาล้นเมื่อผู้ใช้ตั้งตัวอักษรใหญ่</td><td>ล็อกความสูงตายตัว</td><td>ทำให้ยืดหยุ่น อย่าปิดการปรับขนาด</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หน้าจอรับเข้าสินค้ามีโครงตามนี้ และเจอปัญหาสองอย่างบน PDA จริง</p><pre class="code-vs"><code>Scaffold(
+  appBar: AppBar(title: const Text('รับเข้าสินค้า')),
+  body: SafeArea(
+    child: Column(
+      children: [
+        const ScanForm(),
+        Expanded(child: ListView.builder(...)),
+      ],
+    ),
+  ),
+  bottomNavigationBar: const ConfirmBar(),
+)</code></pre><ul><li>ปัญหาที่ 1: ปุ่มยืนยันโดนเส้นลากด้านล่างของระบบบังบางส่วน</li><li>ปัญหาที่ 2: เมื่อแป้นพิมพ์ขึ้น ช่องกรอกล่างสุดของฟอร์มถูกบัง</li></ul><ol><li>อธิบายว่าทำไม <code>SafeArea</code> ที่มีอยู่ถึงไม่ช่วยปัญหาที่ 1</li><li>แก้ปัญหาที่ 1</li><li>แก้ปัญหาที่ 2</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ทำไม <code>SafeArea</code> ไม่ช่วย</strong></p><p>เพราะ <code>ConfirmBar</code> อยู่ใน <code>bottomNavigationBar:</code> ซึ่งเป็นคนละที่กับ <code>body:</code> ที่ <code>SafeArea</code> ครอบอยู่ ตาม 1.7 การครอบ widget หนึ่งมีผลเฉพาะกับสิ่งที่อยู่ <em>ใต้มัน</em> ใน tree เท่านั้น — <code>bottomNavigationBar</code> เป็นพี่น้องกับ <code>body</code> ไม่ใช่ลูก</p><p>นี่เป็นตัวอย่างที่ดีว่าทำไมต้องเข้าใจ tree จริงตอนรัน ไม่ใช่ดูจากลำดับในไฟล์</p><p><strong>ข้อ 2 — แก้ปัญหาปุ่มโดนบัง</strong></p><pre class="code-vs"><code>bottomNavigationBar: const SafeArea(
+  top: false,              // ด้านบนมี AppBar และ body จัดการแล้ว
+  child: ConfirmBar(),
+),</code></pre><p>ใส่ <code>top: false</code> เพราะถ้าเผื่อด้านบนด้วยจะได้ช่องว่างเปล่า ๆ เหนือแถบปุ่มโดยไม่มีเหตุผล</p><p><strong>ข้อ 3 — แก้ปัญหาแป้นพิมพ์บังช่องกรอก</strong></p><pre class="code-vs"><code>body: SafeArea(
+  child: Column(
+    children: [
+      // ให้ฟอร์มเลื่อนได้ เมื่อพื้นที่หดจากแป้นพิมพ์
+      Flexible(
+        child: SingleChildScrollView(child: const ScanForm()),
+      ),
+      Expanded(child: ListView.builder(...)),
+    ],
+  ),
+),</code></pre><p>เหตุผลตรงกับ 2.6 หัวข้อ 6: <code>Scaffold</code> ย่อพื้นที่ของ <code>body</code> ให้อัตโนมัติเมื่อแป้นพิมพ์ขึ้นอยู่แล้ว แต่ถ้าฟอร์มไม่ได้อยู่ในพื้นที่ที่เลื่อนได้ มันก็แค่ถูกบีบจนล้น ไม่ได้เลื่อนขึ้นมาให้เห็น</p><p><strong>ทำไมใช้ <code>Flexible</code> ไม่ใช่ <code>Expanded</code>:</strong> ตาม 2.3 — <code>Expanded</code> จะบังคับให้ฟอร์มกินพื้นที่เต็มส่วนแบ่งเสมอ แม้ตอนที่ยังไม่มีแป้นพิมพ์และฟอร์มสั้น ทำให้เหลือที่ให้รายการน้อยลงโดยไม่จำเป็น ส่วน <code>Flexible</code> ให้ฟอร์มสูงตามเนื้อหาเมื่อพื้นที่พอ และหดลงพร้อมเลื่อนได้เมื่อพื้นที่ไม่พอ</p><p><strong>สิ่งที่ห้ามทำในทั้งสองข้อ:</strong> เผื่อระยะด้วยตัวเลขคงที่อย่าง <code>padding: EdgeInsets.only(bottom: 34)</code> เพราะความสูงของเส้นลากด้านล่างและแป้นพิมพ์ต่างกันไปตามอุปกรณ์ ภาษา และการตั้งค่าของผู้ใช้ — ตัวเลขที่ถูกบนเครื่องหนึ่งจะผิดบนอีกเครื่องเสมอ</p><p><strong>ลองต่อ:</strong> เปิดแอปบนอุปกรณ์จำลองที่มีรอยบาก แล้วสลับไปแบบไม่มีรอยบาก โดยไม่แก้โค้ดเลย — ถ้าใช้ <code>SafeArea</code> ถูกที่ ทั้งสองแบบจะแสดงผลถูกต้องทันที</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>ขนาดจอไม่เท่ากับพื้นที่ที่เราได้ใช้จริง</li><li><code>SafeArea</code> หลบรอยบากและแถบระบบให้อัตโนมัติ และเลือกด้านได้</li><li><code>SafeArea</code> มีผลเฉพาะกับสิ่งที่อยู่ใต้มันใน tree</li><li><code>padding</code> ลดลงเมื่อแป้นพิมพ์บังแทน ส่วน <code>viewPadding</code> ไม่ลด</li><li><code>viewInsets</code> คือความสูงของแป้นพิมพ์</li><li>ใช้ <code>sizeOf</code>/<code>paddingOf</code> แทน <code>of</code> เพื่อลดการวาดใหม่</li><li>อย่าปิดการปรับขนาดตัวอักษร ให้แก้ layout ให้ยืดหยุ่นแทน</li><li>อย่าเผื่อระยะด้วยตัวเลขคงที่</li></ul></div><p><strong>บทถัดไป:</strong> 2.10 จะแยกให้ชัดระหว่าง <code>MediaQuery</code> กับ <code>LayoutBuilder</code> และสอนวางจุดตัดขนาดจอที่ใช้ได้จริงกับทั้ง PDA และแท็บเล็ต</p></section>

@@ -4,84 +4,230 @@
 <title>Lab: Responsive Home</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-15 · Flutter UI</span><h1>Lab: Responsive Home</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Acceptance criteria</a></li><li><a href="#section-2">Model และ layout policy</a></li><li><a href="#section-3">Page tree</a></li><li><a href="#section-4">Responsive grid implementation</a></li><li><a href="#section-5">Tile contract</a></li><li><a href="#section-6">Widget tests</a></li><li><a href="#section-7">เทียบกับโปรเจกต์จริง</a></li><li><a href="#section-8">Part 2 Exit Test</a></li></ol></nav>
-<div class="note"><strong>Lab:</strong> สร้าง Responsive Warehouse Home จาก menu data ชุดเดียว ให้ PDA แคบ/เตี้ยและ tablet ใช้งานได้ รักษา touch target, ข้อมูลหลัก, scroll ownership และ widget identity พร้อมเทียบ design decision กับ Home ของสอง codebase</div>
-<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>PDA 320×568 และ 400×800 แสดง operation หลัก 6 รายการโดยไม่ RenderFlex overflow</li><li>จอเตี้ยใช้ compact/tile แนวนอน; tablet เพิ่ม columns และจำกัด content width</li><li>เมนูเกิน first viewport เลื่อนได้ด้วย GridView เดียว</li><li>badge มี label/icon/สีและ semantics ไม่พึ่งสีอย่างเดียว</li><li>ชื่อยาว/text scale 2.0 ยังเข้าถึงข้อมูลเต็มได้</li><li>tap ส่ง menu ID กลับ owner ไม่เรียก API ใน tile</li></ul></section>
-<section id="section-2"><h2>2. Model และ layout policy</h2><pre class="code-vs"><code>typedef WarehouseMenu = ({
-  String id,
-  String title,
-  String subtitle,
-  IconData icon,
-  int pending,
-});
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โจทย์</a></li><li><a href="#section-2">ขั้นที่ 1: แยกข้อมูลออกจากหน้าตา</a></li><li><a href="#section-3">ขั้นที่ 2: รวมการตัดสินใจเรื่อง layout ไว้ที่เดียว</a></li><li><a href="#section-4">ขั้นที่ 3: ประกอบหน้าจอ</a></li><li><a href="#section-5">ขั้นที่ 4: ช่องเมนูที่เปลี่ยนโครงตามพื้นที่</a></li><li><a href="#section-6">ขั้นที่ 5: ตัวเลขงานค้างที่แยกออกได้โดยไม่ต้องใช้สี</a></li><li><a href="#section-7">ขั้นที่ 6: เขียนเทสต์ตามเกณฑ์</a></li><li><a href="#section-8">ขั้นที่ 7: ตรวจด้วยตาตัวเอง</a></li><li><a href="#section-9">แบบทดสอบตัวเองก่อนไป Part 3</a></li><li><a href="#section-10">สรุปปิด Part 2</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–90 นาที</span><span>ลงมือทำ: สร้างหน้าแรกที่ใช้ได้ทั้ง PDA และแท็บเล็ต</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1–2.14 ทั้งหมด บทนี้ไม่มีเนื้อหาใหม่<br><strong>จบบทนี้แล้วจะทำได้:</strong> ประกอบหน้าจอจริงที่รองรับหลายขนาดจอ พร้อมเทสต์ที่พิสูจน์ว่าไม่ล้นและปุ่มยังกดได้</div>
 
-class WarehouseLayout {
-  const WarehouseLayout(this.columns, this.compact, this.gap);
+<section id="section-1"><h2>1. โจทย์</h2><p>สร้างหน้าแรกของแอปคลังที่แสดงเมนูหลัก 6 รายการ โดยต้องผ่านเกณฑ์ทั้งหมดนี้</p><table><thead><tr><th>เกณฑ์</th><th>มาจากบท</th></tr></thead><tbody>
+<tr><td>บนจอ 320×568 และ 400×800 ต้องไม่มีแถบสีเหลืองดำ</td><td>2.14</td></tr>
+<tr><td>จอแคบใช้ 2 คอลัมน์ จอกว้างเพิ่มคอลัมน์และจำกัดความกว้างเนื้อหา</td><td>2.7, 2.10</td></tr>
+<tr><td>เมนูที่เกินหน้าจอต้องเลื่อนได้ ด้วยพื้นที่เลื่อนชั้นเดียว</td><td>2.6</td></tr>
+<tr><td>ตัวเลขงานค้างต้องมีทั้งสี ไอคอน และข้อความ</td><td>2.12</td></tr>
+<tr><td>ชื่อเมนูยาวและตัวอักษร 200% ต้องยังใช้งานได้</td><td>2.11, 2.9</td></tr>
+<tr><td>พื้นที่กดของแต่ละช่องอย่างน้อย 48</td><td>2.13</td></tr>
+<tr><td>แตะแล้วส่งรหัสเมนูกลับให้แม่ ไม่เรียก API เอง</td><td>1.12</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. ขั้นที่ 1: แยกข้อมูลออกจากหน้าตา</h2><pre class="code-vs"><code>class WarehouseMenu {
+  const WarehouseMenu({
+    required this.id,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    this.pending = 0,
+  });
+
+  final String id;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final int pending;
+}</code></pre><p>ข้อมูลล้วน ไม่มี widget ปนอยู่เลย — ตามหลักที่ใช้มาตั้งแต่ D1.20 ว่าสิ่งที่แยกออกจาก UI ได้คือสิ่งที่ทดสอบได้</p></section>
+
+<section id="section-3"><h2>3. ขั้นที่ 2: รวมการตัดสินใจเรื่อง layout ไว้ที่เดียว</h2><pre class="code-vs"><code>class HomeLayout {
+  const HomeLayout({
+    required this.columns,
+    required this.compact,
+    required this.gap,
+  });
+
+  factory HomeLayout.from(BoxConstraints constraints) {
+    final compact = constraints.maxWidth &lt; 480 || constraints.maxHeight &lt; 650;
+    final columns = switch (constraints.maxWidth) {
+      &gt;= 900 =&gt; 4,
+      &gt;= 600 =&gt; 3,
+      _ =&gt; 2,
+    };
+    return HomeLayout(
+      columns: columns,
+      compact: compact,
+      gap: compact ? 8 : 12,
+    );
+  }
+
   final int columns;
   final bool compact;
   final double gap;
+}</code></pre><p>ประโยชน์สองข้อตามที่คุยไว้ใน 2.10 — ตัวเลขทั้งหมดอยู่ที่เดียว และทดสอบได้โดยไม่ต้องประกอบหน้าจอ</p><pre class="code-vs"><code>test('จอ PDA ได้ 2 คอลัมน์และโหมด compact', () {
+  final layout = HomeLayout.from(const BoxConstraints(maxWidth: 320, maxHeight: 568));
+  expect(layout.columns, 2);
+  expect(layout.compact, isTrue);
+});</code></pre></section>
 
-  factory WarehouseLayout.from(BoxConstraints c) {
-    final compact = c.maxHeight &lt; 650 || c.maxWidth &lt; 360;
-    final columns = c.maxWidth &gt;= 900 ? 4 : c.maxWidth &gt;= 600 ? 3 : 2;
-    return WarehouseLayout(columns, compact, compact ? 8 : 12);
-  }
-}</code></pre></section>
-<section id="section-3"><h2>3. Page tree</h2><pre class="code-vs"><code>SafeArea
-└─ Center
-   └─ ConstrainedBox(maxWidth: 1100)
-      └─ LayoutBuilder
-         └─ Column
-            ├─ WarehouseHeader
-            ├─ SizedBox(gap)
-            └─ Expanded
-               └─ GridView.builder
-                  └─ WarehouseMenuTile</code></pre><p>Center/ConstrainedBox กัน tablet กว้างเกินอ่าน LayoutBuilder เห็น constraint หลัง maxWidth แล้ว GridView เป็น scroll owner คนเดียว</p></section>
-<section id="section-4"><h2>4. Responsive grid implementation</h2><pre class="code-vs"><code>LayoutBuilder(builder: (context, c) {
-  final spec = WarehouseLayout.from(c);
-  return Column(children: [
-    WarehouseHeader(compact: spec.compact),
-    SizedBox(height: spec.gap),
-    Expanded(
-      child: GridView.builder(
-        key: const PageStorageKey('warehouse-home-grid'),
-        padding: EdgeInsets.all(spec.gap),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: spec.columns,
-          crossAxisSpacing: spec.gap,
-          mainAxisSpacing: spec.gap,
-          mainAxisExtent: spec.compact ? 88 : 136,
-        ),
-        itemCount: menus.length,
-        itemBuilder: (_, i) =&gt; WarehouseMenuTile(
-          key: ValueKey(menus[i].id),
-          menu: menus[i],
-          compact: spec.compact,
-          onTap: () =&gt; onSelected(menus[i].id),
+<section id="section-4"><h2>4. ขั้นที่ 3: ประกอบหน้าจอ</h2><pre class="code-vs"><code>Scaffold(
+  appBar: AppBar(title: const Text('เมนูหลัก')),
+  body: SafeArea(
+    child: Center(
+      child: ConstrainedBox(
+        // จำกัดความกว้างบนแท็บเล็ต ไม่ให้ยืดจนอ่านยาก (2.4)
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final layout = HomeLayout.from(constraints);
+
+            return GridView.builder(          // พื้นที่เลื่อนชั้นเดียว (2.6)
+              padding: EdgeInsets.all(layout.gap),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: layout.columns,
+                crossAxisSpacing: layout.gap,
+                mainAxisSpacing: layout.gap,
+                mainAxisExtent: layout.compact ? 96 : 140,
+              ),
+              itemCount: menus.length,
+              itemBuilder: (context, index) =&gt; MenuTile(
+                key: ValueKey&lt;String&gt;(menus[index].id),   // ตัวตนจากข้อมูล (1.8)
+                menu: menus[index],
+                compact: layout.compact,
+                onTap: () =&gt; onSelected(menus[index].id), // แจ้งกลับ ไม่ตัดสินใจเอง (1.12)
+              ),
+            );
+          },
         ),
       ),
     ),
-  ]);
-})</code></pre></section>
-<section id="section-5"><h2>5. Tile contract</h2><p>เมื่อ compact ใช้ Row(icon → Expanded title/subtitle → chevron) เมื่อปกติใช้ Column; badge วางด้วย Stack แต่ยังอยู่ใน tile bounds; title มี maxLines 2, subtitle เป็น secondary; InkWell/Material ครอบพื้นที่เต็มและ Semantics อ่าน “รับสินค้าเข้า, งานค้าง 12, ปุ่ม”</p></section>
-<section id="section-6"><h2>6. Widget tests</h2><pre class="code-vs"><code>testWidgets('PDA uses two columns without overflow', (tester) async {
-  tester.view.physicalSize = const Size(320, 568);
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.resetPhysicalSize);
-  addTearDown(tester.view.resetDevicePixelRatio);
+  ),
+)</code></pre><p>สังเกตลำดับของ wrapper ซึ่งมีเหตุผลทุกชั้น</p><table><thead><tr><th>ชั้น</th><th>ทำไมอยู่ตรงนี้</th></tr></thead><tbody>
+<tr><td><code>SafeArea</code></td><td>อยู่นอกสุด เพื่อหลบรอยบากก่อนคำนวณอย่างอื่น (2.9)</td></tr>
+<tr><td><code>ConstrainedBox</code></td><td>จำกัดความกว้าง <strong>ก่อน</strong> <code>LayoutBuilder</code> เพื่อให้ค่าที่วัดได้เป็นค่าหลังจำกัดแล้ว</td></tr>
+<tr><td><code>LayoutBuilder</code></td><td>วัดพื้นที่ที่ได้จริง ไม่ใช่ขนาดจอ (2.10)</td></tr>
+<tr><td><code>GridView</code></td><td>เป็นเจ้าของการเลื่อนคนเดียว (2.6)</td></tr>
+</tbody></table><div class="warn">ถ้าสลับ <code>ConstrainedBox</code> ไปไว้ข้างใน <code>LayoutBuilder</code> จะได้ค่าความกว้างเป็น 1400 บนจอกว้าง แล้วคำนวณเป็น 4 คอลัมน์ ทั้งที่พื้นที่จริงถูกจำกัดไว้ที่ 1100 — เป็นบั๊กแบบเดียวกับแบบฝึกหัดใน 2.10 ทุกประการ</div></section>
 
-  await tester.pumpWidget(buildHome(textScale: 1));
-  expect(find.byType(WarehouseMenuTile), findsWidgets);
-  expect(tester.takeException(), isNull);
+<section id="section-5"><h2>5. ขั้นที่ 4: ช่องเมนูที่เปลี่ยนโครงตามพื้นที่</h2><pre class="code-vs"><code>class MenuTile extends StatelessWidget {
+  const MenuTile({
+    super.key,
+    required this.menu,
+    required this.compact,
+    required this.onTap,
+  });
+
+  final WarehouseMenu menu;
+  final bool compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          // เปลี่ยนโครง ไม่ใช่ย่อทุกอย่าง (2.10)
+          child: compact ? _buildRow(theme) : _buildColumn(theme),
+        ),
+      ),
+    );
+  }
+  ...
+}</code></pre><p>โหมดแคบเรียงแนวนอนเพื่อประหยัดความสูง ส่วนโหมดปกติเรียงแนวตั้งซึ่งอ่านง่ายกว่าเมื่อมีพื้นที่</p><pre class="code-vs"><code>Widget _buildRow(ThemeData theme) =&gt; Row(
+  children: [
+    _icon(theme),
+    const SizedBox(width: 12),
+    Expanded(                                  // ตัวเดียวที่ยอมเสียพื้นที่ (2.3)
+      child: Text(
+        menu.title,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,       // ต้องมาคู่กับ Expanded (2.11)
+        style: theme.textTheme.titleSmall,
+      ),
+    ),
+    const Icon(Icons.chevron_right),
+  ],
+);</code></pre><p>สังเกตว่าโหมดแคบ <strong>ตัดคำอธิบายออกไปเลย</strong> ไม่ใช่ย่อให้เล็กลง — ตรงกับลำดับใน 2.13 หัวข้อ 8 ที่ให้ซ่อนข้อมูลรองก่อนลดขนาด</p></section>
+
+<section id="section-6"><h2>6. ขั้นที่ 5: ตัวเลขงานค้างที่แยกออกได้โดยไม่ต้องใช้สี</h2><pre class="code-vs"><code>Widget _icon(ThemeData theme) {
+  if (menu.pending == 0) {
+    return Icon(menu.icon, size: compact ? 28 : 36);
+  }
+
+  return Semantics(
+    // โปรแกรมอ่านหน้าจอได้ยินข้อความเต็ม ไม่ใช่แค่ตัวเลข (2.13)
+    label: '${menu.title} งานค้าง ${menu.pending} รายการ',
+    child: Badge(
+      label: Text(menu.pending &gt; 99 ? '99+' : '${menu.pending}'),
+      backgroundColor: theme.colorScheme.error,
+      child: Icon(menu.icon, size: compact ? 28 : 36),
+    ),
+  );
+}</code></pre><p>ครบสามช่องทางตาม 2.12 — สีแดงสำหรับคนที่กวาดตาเร็ว ตัวเลขสำหรับทุกคน และข้อความเต็มสำหรับโปรแกรมอ่านหน้าจอ</p></section>
+
+<section id="section-7"><h2>7. ขั้นที่ 6: เขียนเทสต์ตามเกณฑ์</h2><p>แปลงเกณฑ์ทุกข้อในหัวข้อ 1 ให้เป็นเทสต์ ใช้รูปแบบเดียวกับ <code>test/layout_basics_test.dart</code></p><pre class="code-vs"><code>Future&lt;void&gt; pumpHome(
+  WidgetTester tester, {
+  required double width,
+  double height = 800,
+  double textScale = 1.0,
+  ValueChanged&lt;String&gt;? onSelected,
+}) async {
+  tester.view.physicalSize = Size(width, height);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  await tester.pumpWidget(
+    MediaQuery(
+      data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+      child: MaterialApp(
+        home: HomeScreen(menus: demoMenus, onSelected: onSelected ?? (_) {}),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}</code></pre><pre class="code-vs"><code>testWidgets('จอ PDA 320x568 ไม่ล้น', (tester) async {
+  await pumpHome(tester, width: 320, height: 568);
+  expect(tester.takeException(), isNull);              // 2.14
 });
 
-testWidgets('tap returns stable domain id', (tester) async {
+testWidgets('ตัวอักษร 200% ยังไม่ล้น', (tester) async {
+  await pumpHome(tester, width: 320, height: 568, textScale: 2.0);
+  expect(tester.takeException(), isNull);              // 2.9
+});
+
+testWidgets('พื้นที่กดของแต่ละช่องอย่างน้อย 48', (tester) async {
+  await pumpHome(tester, width: 320, height: 568);
+  final size = tester.getSize(find.byKey(const ValueKey&lt;String&gt;('receive')));
+  expect(size.height, greaterThanOrEqualTo(48));       // 2.13
+});
+
+testWidgets('แตะแล้วส่งรหัสเมนูกลับ ไม่ใช่ตำแหน่ง', (tester) async {
   String? selected;
-  await tester.pumpWidget(buildHome(onSelected: (id) =&gt; selected = id));
-  await tester.tap(find.byKey(const ValueKey('receive')));
-  expect(selected, 'receive');
-});</code></pre><p>เพิ่มเคส 400×800, 900×700, height 649/650, text scale 2.0, ภาษาไทยยาว และ scroll ไปเมนูท้าย</p></section>
-<section id="section-7"><h2>7. เทียบกับโปรเจกต์จริง</h2><p>Absolute เหมาะกับ fixed PDA operations: 2 columns และคำนวณสามแถวจาก available height พร้อม tile เปลี่ยน composition รายใบ ส่วน wmsapp Home ใช้คู่ Row/Expanded ใน SingleChildScrollView อ่านง่ายสำหรับเมนูคงที่แต่ยังไม่ adapt columns จาก width Lab นี้เก็บข้อดีทั้งสอง: data-driven lazy grid + local constraints + component vocabulary</p></section>
-<section id="section-8"><h2>8. Part 2 Exit Test</h2><div class="success"><ul><li>อธิบาย constraints chain และหา unbounded axis ได้</li><li>เลือก Flex/scroll/list/grid/sliver ตาม ownership และขนาดข้อมูลได้</li><li>ใช้ SafeArea, MediaQuery และ LayoutBuilder ถูกระดับได้</li><li>ออกแบบ text/status/touch target สำหรับ PDA และ accessibility ได้</li><li>แก้ overflow ด้วย evidence และ regression matrix ได้</li><li>สร้าง/test Responsive Warehouse Home โดยไม่ผูก UI กับ API ได้</li></ul></div></section>
+  await pumpHome(tester, width: 320, onSelected: (id) =&gt; selected = id);
+
+  await tester.tap(find.byKey(const ValueKey&lt;String&gt;('receive')));
+  expect(selected, 'receive');                          // 1.12
+});
+
+testWidgets('เมนูที่เกินหน้าจอเลื่อนถึงได้', (tester) async {
+  await pumpHome(tester, width: 320, height: 568);
+
+  await tester.drag(find.byType(GridView), const Offset(0, -300));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const ValueKey&lt;String&gt;('settings')), findsOneWidget);
+  expect(tester.takeException(), isNull);               // 2.6
+});</code></pre><p>ข้อสังเกตสำคัญของเทสต์ตัวที่สี่ — มันตรวจว่าได้ <code>'receive'</code> ไม่ใช่ <code>0</code> ซึ่งพิสูจน์ว่าโค้ดใช้รหัสจริงเป็นตัวตน ไม่ใช่ตำแหน่ง ตามที่เตือนไว้ใน 1.8 และ 2.7</p></section>
+
+<section id="section-8"><h2>8. ขั้นที่ 7: ตรวจด้วยตาตัวเอง</h2><p>เทสต์จับได้หลายอย่างแต่ไม่ใช่ทุกอย่าง ให้รันจริงแล้วตรวจรายการนี้</p><table><thead><tr><th>ตรวจอะไร</th><th>ผ่านเมื่อ</th></tr></thead><tbody>
+<tr><td>ย่อหน้าต่างเบราว์เซอร์จากกว้างไปแคบช้า ๆ</td><td>จำนวนคอลัมน์เปลี่ยนอย่างราบรื่น ไม่มีแถบเหลืองแวบ</td></tr>
+<tr><td>แปลงภาพหน้าจอเป็นขาวดำ</td><td>ยังแยกเมนูที่มีงานค้างออกได้</td></tr>
+<tr><td>ตั้งขนาดตัวอักษรในระบบเป็นใหญ่สุด</td><td>อ่านได้ครบ ปุ่มยังกดได้</td></tr>
+<tr><td>ใส่ชื่อเมนูยาว 60 ตัวอักษร</td><td>ตัดด้วยจุดไข่ปลา ไม่ล้น</td></tr>
+<tr><td>เปิดโหมดมืด</td><td>สีทุกอย่างยังอ่านออก</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบทดสอบตัวเองก่อนไป Part 3</h2><div class="success"><p>คุณพร้อมไปต่อเมื่อทำสิ่งเหล่านี้ได้โดยไม่เปิดดูเฉลย</p><ul><li>อธิบายกฎสามข้อของ layout ด้วยภาษาของตัวเอง</li><li>บอกได้ว่า error เรื่องขอบเขตไม่จำกัดเกิดจากอะไรและแก้อย่างไร</li><li>เลือกระหว่าง <code>Expanded</code> กับ <code>Flexible</code> ได้พร้อมเหตุผล</li><li>เลือกระหว่าง <code>SingleChildScrollView</code> กับ <code>ListView.builder</code> ได้</li><li>บอกได้ว่าเมื่อไหร่ใช้ <code>LayoutBuilder</code> เมื่อไหร่ใช้ <code>MediaQuery</code></li><li>ระบุได้ว่าข้อมูลชิ้นไหนห้ามตัดด้วยจุดไข่ปลา</li><li>ไล่หาสาเหตุของแถบสีเหลืองดำได้อย่างเป็นระบบ</li><li>เขียนเทสต์ที่ตรวจว่า layout ไม่ล้นที่ขนาดจอและขนาดตัวอักษรที่กำหนด</li></ul></div></section>
+
+<section id="section-10"><h2>10. สรุปปิด Part 2</h2><div class="success"><ul><li>Layout ทั้งหมดอธิบายได้ด้วยกฎสามข้อ — ข้อจำกัดไหลลง ขนาดไหลขึ้น แม่วางตำแหน่ง</li><li>เนื้อหาล้นคือหลักฐาน ไม่ใช่ความรำคาญ — มันบอกว่าเรายังไม่ได้ตัดสินใจเรื่องลำดับความสำคัญ</li><li>ตัดสินใจล่วงหน้าเสมอว่าอะไรตรึง อะไรยืด อะไรเลื่อน</li><li>เมื่อพื้นที่ไม่พอ ให้เปลี่ยนโครงก่อน ย่อขนาดเป็นทางสุดท้าย</li><li>ข้อมูลที่ใช้ตัดสินใจทำงานห้ามถูกตัดหรือย่อ</li><li>PDA ไม่ใช่มือถือจอเล็ก — มันมีข้อกำหนดของตัวเอง</li><li>ข้อกำหนดด้านการใช้งานที่เขียนเป็นเทสต์ได้ จะไม่ถูกลืม</li></ul></div><p><strong>ต่อจากนี้:</strong> Part 3 จะเข้าสู่การรับข้อมูลจากผู้ใช้และจากเครื่องสแกน ซึ่งเป็นหัวใจของการทำงานในคลัง — และเป็นที่ที่เรื่องโฟกัส การกันยิงซ้ำ และการคืนทรัพยากรจาก Part 1 จะถูกใช้งานจริงทั้งหมด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

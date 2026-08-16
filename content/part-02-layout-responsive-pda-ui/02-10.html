@@ -1,16 +1,105 @@
-<div class="note"><code>LayoutBuilder</code> ทำให้ widget เลือก layout จาก constraints ณ ตำแหน่งนั้น Adaptive UI ที่ดีเปลี่ยนโครง/ความหนาแน่นตามพื้นที่และงาน ไม่ผูกกับชื่ออุปกรณ์ว่า “มือถือ” หรือ “tablet” อย่างเดียว</div>
-<section><h2>1. Breakpoint จากความต้องการเนื้อหา</h2><pre class="code-vs"><code>LayoutBuilder(builder: (_, c) {
-  final columns = switch (c.maxWidth) {
-    &lt; 420 =&gt; 2,
-    &lt; 840 =&gt; 3,
-    _ =&gt; 4,
-  };
-  return WarehouseGrid(columns: columns);
-})</code></pre><p>ตัวเลขต้องมาจาก minimum usable tile width + gaps + text scale และทดสอบ boundary ไม่ใช่คัด breakpoint เว็บมาใช้โดยไม่มีเหตุผล</p></section>
-<section><h2>2. Absolute ใช้สองมิติ</h2><p>Home ใช้ <code>maxHeight &lt; 650</code> เลือก compact spacing และ <code>maxWidth &lt;= 400</code> เลือก narrow text/layout จากนั้น tile แต่ละใบใช้ maxHeight ของตนสลับ Row เมื่อเตี้ยกว่า 92 นี่คือ container-level adaptation หลายชั้น ไม่ใช่ media query เดียวทั้งแอป</p></section>
-<section><h2>3. เปลี่ยนโครง ไม่ใช่ย่อทุกอย่าง</h2><ul><li>narrow: ซ่อน secondary status แต่รักษา label/value</li><li>short: tile เปลี่ยน icon บน→icon ซ้าย</li><li>wide: เพิ่ม pane/details ไม่ขยายบรรทัดข้อความไม่สิ้นสุด</li><li>high text scale: ลด columns ก่อนลด font</li></ul><p>ลำดับนี้รักษาความสามารถใช้งานดีกว่าบีบ font จนอ่านไม่ได้</p></section>
-<section><h2>4. Orientation เป็นข้อมูลรอง</h2><p>OrientationBuilder บอก portrait/landscape แต่เครื่องพับ, split screen และ desktop resize ทำให้ orientation ไม่พอบอกพื้นที่ ใช้ constraints เป็นหลัก หาก logic ต้องรู้ orientation เพื่อกล้อง/หมุนปุ่มจริงจึงอ่าน orientation เพิ่ม</p></section>
-<section><h2>5. ป้องกัน breakpoint กระจาย</h2><p>รวม policy เป็นชื่อเชิงความหมาย เช่น <code>WarehouseLayout.fromConstraints(c)</code> ที่คืน density/columns/showSecondary ไม่ให้ทุก widgetมีเลข 400/650 คนละชุด แต่ child ที่มี local content constraint ยังควรตัดสินใจใกล้ตนเอง</p></section>
-<section><h2>6. Testing matrix</h2><p>Widget test ด้วย <code>tester.view.physicalSize</code>/<code>devicePixelRatio</code> หรือครอบ SizedBox หลายขนาด ตรวจ 319/320, 399/400/401, ความสูง 649/650/651, text scale 1.0/1.3/2.0 และภาษาไทย/อังกฤษ Assertions ควรตรวจโครง/จำนวน columns/visibility ไม่อิง screenshot อย่างเดียว</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Dashboard กว้าง 700 แต่ถูกวางใน master-detail pane กว้าง 340 หากใช้ MediaQuery จะแสดง 3 columns แล้วล้น จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>ครอบ Dashboard ด้วย LayoutBuilder และคำนวณจาก <code>constraints.maxWidth</code> ของ pane ให้ 2 columns ที่ 340 ส่วน page-level ใช้ MediaQuery ได้สำหรับ safe area/keyboard หาก breakpoint ซ้ำให้ส่ง layout policy/value object ลงมาโดยยัง validate local constraint</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Breakpoint ที่ดีไม่ควรทำให้ state หรือ API request เปลี่ยนเพียงเพราะ resize เปลี่ยนเฉพาะ presentation/composition รักษา controller/store/key เดิม หรือย้าย state ขึ้นเหนือ adaptive branch เพื่อไม่ให้ข้อมูลที่กรอกหายเมื่อหมุนจอ</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำหน้าจอเดียวให้ใช้ได้ทั้ง PDA และแท็บเล็ต</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (ข้อจำกัดไหลลง) และ 2.9 (<code>MediaQuery</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกได้ว่าเมื่อไหร่ใช้ <code>LayoutBuilder</code> เมื่อไหร่ใช้ <code>MediaQuery</code> และวางจุดตัดขนาดจอที่มีเหตุผลรองรับ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 2.9 เราเจอประโยคว่า <code>MediaQuery</code> บอกเรื่องหน้าต่างทั้งบาน ส่วน <code>LayoutBuilder</code> บอกเรื่องพื้นที่ที่ widget ได้รับจริง บทนี้จะทำให้ความต่างนั้นเป็นเรื่องที่ใช้ตัดสินใจได้</p><p>ความต่างนี้สำคัญเพราะหน้าจอเดียวกันอาจถูกเอาไปวางในที่ที่แคบกว่าจอ เช่นแผงด้านข้างบนแท็บเล็ต ถ้าเราตัดสินใจจากขนาดจอทั้งเครื่อง เราจะได้ layout ที่ผิด</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>breakpoint</td><td>ขนาดที่เป็นจุดตัดให้เปลี่ยน layout</td></tr>
+<tr><td>adaptive</td><td>เปลี่ยนโครงตามพื้นที่ ไม่ใช่แค่ย่อ</td></tr>
+<tr><td><code>LayoutBuilder</code></td><td>widget ที่บอกข้อจำกัดที่ตัวเองได้รับ</td></tr>
+<tr><td>compact</td><td>โหมดสำหรับพื้นที่แคบ</td></tr>
+<tr><td>master-detail</td><td>รูปแบบที่มีรายการซ้ายและรายละเอียดขวา</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ถามจอ หรือถามพื้นที่ของตัวเอง</h2><table><thead><tr><th></th><th><code>MediaQuery</code></th><th><code>LayoutBuilder</code></th></tr></thead><tbody>
+<tr><td>ตอบคำถาม</td><td>“หน้าต่างทั้งบานเป็นอย่างไร”</td><td>“ฉันได้พื้นที่เท่าไร”</td></tr>
+<tr><td>ค่าเปลี่ยนเมื่อ</td><td>หมุนจอ เปลี่ยนขนาดหน้าต่าง แป้นพิมพ์ขึ้น</td><td>แม่ให้พื้นที่ต่างไป</td></tr>
+<tr><td>เหมาะกับ</td><td>รอยบาก แถบระบบ แป้นพิมพ์ ขนาดตัวอักษร</td><td>ตัดสินใจเรื่อง layout</td></tr>
+<tr><td>ใช้ผิดแล้ว</td><td>widget ที่อยู่ในแผงแคบจะคิดว่าตัวเองกว้าง</td><td>—</td></tr>
+</tbody></table><div class="note"><strong>กฎที่ใช้ได้เสมอ:</strong> ตัดสินใจเรื่อง <em>layout</em> ให้ใช้ <code>LayoutBuilder</code> ตัดสินใจเรื่อง <em>สภาพแวดล้อมของอุปกรณ์</em> ให้ใช้ <code>MediaQuery</code></div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>LayoutBuilder(
+  builder: (context, constraints) {
+    final isCompact = constraints.maxWidth &lt; Breakpoints.compact;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          SummaryBar(stacked: isCompact, ...),
+          ...
+        ],
+      ),
+    );
+  },
+)</code></pre><p>ผลลัพธ์ที่ได้ต่างกันสองแบบ ซึ่งเทสต์ยืนยันไว้แล้ว</p><pre class="code-vs"><code>flutter test --no-pub test/layout_basics_test.dart</code></pre><table><thead><tr><th>ความกว้าง</th><th>แถบสรุป</th><th>ชื่อสินค้า</th></tr></thead><tbody>
+<tr><td>900</td><td>เรียงเป็นแถวเดียว</td><td>ได้ 2 บรรทัด</td></tr>
+<tr><td>360</td><td>ซ้อนลงล่าง</td><td>ได้ 1 บรรทัด</td></tr>
+</tbody></table><p>สังเกตว่าเราส่ง <code>isCompact</code> ลงไปเป็นค่า แทนที่จะให้ลูกแต่ละตัวไปถามขนาดจอเอง — วิธีนี้ทำให้ลูกทดสอบง่ายมาก เพราะแค่ส่ง <code>stacked: true</code> เข้าไปก็ทดสอบโหมดแคบได้โดยไม่ต้องจำลองขนาดจอ</p></section>
+
+<section><h2>5. เปลี่ยนโครง ไม่ใช่ย่อทุกอย่าง</h2><p>ความผิดพลาดที่พบบ่อยคือพอจอแคบก็ลดขนาดตัวอักษรและปุ่มลงให้พอดี ซึ่งทำให้อ่านยากและกดไม่โดน โดยเฉพาะบน PDA ที่ผู้ใช้ใส่ถุงมือ</p><p>ลำดับที่ควรทำเมื่อพื้นที่ไม่พอ</p><ol><li><strong>เปลี่ยนทิศการเรียง</strong> — จาก <code>Row</code> เป็น <code>Column</code> เหมือนที่แถบสรุปใน lab ทำ</li><li><strong>ลดจำนวนคอลัมน์</strong> — จาก 3 เหลือ 2</li><li><strong>ซ่อนข้อมูลรอง</strong> — เอาคำอธิบายออก เก็บรหัสและจำนวนไว้</li><li><strong>ลดจำนวนบรรทัด</strong> — จาก 2 บรรทัดเหลือ 1 พร้อมจุดไข่ปลา</li><li><strong>ลดขนาดตัวอักษร</strong> — ทางเลือกสุดท้าย และต้องมีขั้นต่ำที่ยังอ่านออก</li></ol><div class="warn"><strong>ห้ามลดขนาดปุ่มลงต่ำกว่า 48</strong> ไม่ว่าจอจะแคบแค่ไหน — ถ้าพื้นที่ไม่พอสำหรับปุ่มสามปุ่ม ให้เหลือสองปุ่มแล้วย้ายที่เหลือไปเมนู ไม่ใช่ย่อทั้งสามปุ่มให้เล็กลง เหตุผลเต็ม ๆ อยู่ใน 2.13</div></section>
+
+<section><h2>6. ตัวเลข breakpoint มาจากไหน</h2><p>อย่าคัดตัวเลขจากบทความออกแบบเว็บมาใช้ตรง ๆ ให้คำนวณจากเนื้อหาจริง</p><pre class="code-vs"><code>ความกว้างขั้นต่ำที่ช่องหนึ่งใช้ได้จริง   = 160
+ช่องว่างระหว่างช่อง                     =  12
+ระยะขอบซ้ายขวา                        =  12 × 2
+
+สองคอลัมน์ต้องการ = 160×2 + 12 + 24 = 356
+→ ต่ำกว่า 356 ต้องเหลือคอลัมน์เดียว</code></pre><p>ใน lab เราตั้ง <code>Breakpoints.compact = 480</code> ซึ่งเป็นค่าที่เผื่อไว้สำหรับข้อความไทยที่ยาวกว่าอังกฤษและผู้ใช้ที่ตั้งตัวอักษรใหญ่</p><p>สิ่งที่สำคัญกว่าตัวเลขคือ <strong>ตัวเลขนั้นมีชื่อและมีเหตุผลกำกับ</strong> ตามที่ทำใน 2.4 — เมื่อวันหนึ่งต้องปรับ จะมีคนกล้าแก้เพราะรู้ว่าค่านี้มาจากไหน</p></section>
+
+<section><h2>7. อย่าให้ breakpoint กระจายทั่วโปรเจกต์</h2><pre class="code-vs"><code>// แย่ — เลข 480 โผล่ในสิบไฟล์ และบางไฟล์ใช้ 460
+if (MediaQuery.sizeOf(context).width &lt; 480) { ... }
+
+// ดี — มีที่เดียว มีชื่อ มีเหตุผล
+if (constraints.maxWidth &lt; Breakpoints.compact) { ... }</code></pre><p>เมื่อโปรเจกต์โตขึ้น อาจรวมการตัดสินใจทั้งชุดไว้ในที่เดียว</p><pre class="code-vs"><code>class WarehouseLayout {
+  const WarehouseLayout({
+    required this.columns,
+    required this.stacked,
+    required this.titleMaxLines,
+  });
+
+  factory WarehouseLayout.fromWidth(double width) {
+    if (width &lt; Breakpoints.compact) {
+      return const WarehouseLayout(columns: 1, stacked: true, titleMaxLines: 1);
+    }
+    return const WarehouseLayout(columns: 2, stacked: false, titleMaxLines: 2);
+  }
+
+  final int columns;
+  final bool stacked;
+  final int titleMaxLines;
+}</code></pre><p>ข้อดีคือการตัดสินใจทั้งหมดอยู่ที่เดียว อ่านรวดเดียวจบ และทดสอบได้โดยไม่ต้องประกอบหน้าจอ — เพราะมันเป็นแค่ฟังก์ชันธรรมดาตามหลักใน D1.20</p></section>
+
+<section><h2>8. ข้อมูลต้องไม่หายเมื่อเปลี่ยนโครง</h2><p>เมื่อผู้ใช้หมุนจอกลางคัน layout เปลี่ยน แต่สิ่งที่พิมพ์ไว้ต้องไม่หาย</p><pre class="code-vs"><code>// อันตราย — สลับ widget คนละชนิดตามขนาด
+if (isCompact) {
+  return CompactForm(...);      // State คนละตัวกับด้านล่าง
+} else {
+  return WideForm(...);         // สลับแล้วข้อมูลหาย
+}
+
+// ปลอดภัย — widget ตัวเดียว รับค่าบอกโหมด
+return ScanForm(compact: isCompact);</code></pre><p>เหตุผลตรงกับ 1.3: เมื่อชนิดของ widget เปลี่ยน Flutter ทิ้ง Element เดิมทั้งกิ่ง และข้อมูลที่อยู่กับ Element นั้นก็หายไปด้วย</p><p>ถ้าจำเป็นต้องสลับโครงจริง ๆ ให้ย้ายข้อมูลขึ้นไปเก็บที่แม่ซึ่งอยู่เหนือจุดที่สลับ ตามหลักใน 1.5</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>การ์ดล้นเมื่อเอาไปวางในแผงแคบ</td><td>ใช้ <code>MediaQuery</code> อ่านขนาดจอทั้งเครื่อง</td><td>เปลี่ยนเป็น <code>LayoutBuilder</code></td></tr>
+<tr><td>ข้อความที่พิมพ์หายเมื่อหมุนจอ</td><td>สลับเป็น widget คนละชนิด</td><td>ใช้ widget ตัวเดียวแล้วส่งค่าบอกโหมด</td></tr>
+<tr><td>เลข breakpoint ไม่ตรงกันในแต่ละไฟล์</td><td>ไม่มีที่รวม</td><td>ตั้งชื่อไว้ที่เดียว</td></tr>
+<tr><td>จอแคบแล้วปุ่มเล็กจนกดไม่โดน</td><td>ย่อทุกอย่างแทนที่จะเปลี่ยนโครง</td><td>ทำตามลำดับในหัวข้อ 5</td></tr>
+<tr><td>ทำงานดีบนจอเดียว แต่พังที่ค่าใกล้จุดตัด</td><td>ไม่ได้ทดสอบที่ขอบ</td><td>ทดสอบที่ 479 และ 481</td></tr>
+<tr><td>ยิง API ใหม่เมื่อหมุนจอ</td><td>โครงที่สลับไปสร้าง <code>State</code> ใหม่</td><td>ย้ายข้อมูลขึ้นเหนือจุดสลับ</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>แดชบอร์ดหนึ่งใช้โค้ดนี้ และทำงานถูกต้องเมื่อเปิดเต็มจอบนแท็บเล็ตกว้าง 900</p><pre class="code-vs"><code>final width = MediaQuery.sizeOf(context).width;
+final columns = width &lt; 420 ? 2 : (width &lt; 840 ? 3 : 4);
+return WarehouseGrid(columns: columns);</code></pre><p>วันหนึ่งทีมเอาแดชบอร์ดนี้ไปวางในแผงซ้ายของหน้าจอแบบรายการ-รายละเอียด ซึ่งแผงกว้างแค่ 340 แล้วเกิดแถบสีเหลืองดำ</p><ol><li>อธิบายว่าทำไมถึงล้น</li><li>แก้ให้ถูก</li><li>อธิบายว่าส่วนไหนของหน้าจอที่ยังควรใช้ <code>MediaQuery</code> อยู่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ทำไมล้น</strong></p><p><code>MediaQuery.sizeOf(context).width</code> คืนความกว้างของ <strong>หน้าต่างทั้งบาน</strong> ซึ่งยังเป็น 900 แม้แดชบอร์ดจะถูกวางในแผงกว้าง 340 โค้ดจึงคำนวณได้ 4 คอลัมน์ แล้วพยายามยัดสี่ช่องลงในพื้นที่ 340 ซึ่งไม่พอ</p><p>สิ่งที่ทำให้บั๊กนี้อันตรายคือ <strong>โค้ดไม่ได้เปลี่ยนเลย</strong> — มันเคยถูกและยังดูถูกอยู่ แต่ผิดเพราะบริบทที่ถูกใช้เปลี่ยนไป</p><p><strong>ข้อ 2 — แก้ให้ถูก</strong></p><pre class="code-vs"><code>LayoutBuilder(
+  builder: (context, constraints) {
+    final width = constraints.maxWidth;      // พื้นที่ที่ได้รับจริง
+    final columns = width &lt; 420 ? 2 : (width &lt; 840 ? 3 : 4);
+    return WarehouseGrid(columns: columns);
+  },
+)</code></pre><p>เปลี่ยนแค่แหล่งที่มาของตัวเลข ตรรกะเดิมทั้งหมดยังใช้ได้ — ตอนนี้แผง 340 จะได้ 2 คอลัมน์ และเมื่อเปิดเต็มจอ 900 ก็ยังได้ 4 เหมือนเดิม</p><p><strong>ข้อ 3 — ส่วนที่ยังควรใช้ <code>MediaQuery</code></strong></p><table><thead><tr><th>เรื่อง</th><th>ใช้อะไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>จำนวนคอลัมน์</td><td><code>LayoutBuilder</code></td><td>ขึ้นกับพื้นที่ที่ได้รับ</td></tr>
+<tr><td>ระยะหลบรอยบากและแถบระบบ</td><td><code>MediaQuery</code> ผ่าน <code>SafeArea</code></td><td>เป็นเรื่องของอุปกรณ์ ไม่ใช่ของแผง</td></tr>
+<tr><td>ระยะเผื่อแป้นพิมพ์</td><td><code>MediaQuery.viewInsetsOf</code></td><td>แป้นพิมพ์บังทั้งหน้าต่าง</td></tr>
+<tr><td>ขนาดตัวอักษรที่ผู้ใช้ตั้ง</td><td><code>MediaQuery</code></td><td>เป็นการตั้งค่าระดับระบบ</td></tr>
+</tbody></table><p><strong>ข้อสังเกตที่สำคัญที่สุด:</strong> ทั้งสองอย่างใช้ร่วมกันในหน้าจอเดียวได้และควรใช้ด้วย — ไม่ใช่เลือกอย่างใดอย่างหนึ่งไปทั้งแอป โดยวาง <code>SafeArea</code> ไว้ระดับหน้าจอ และวาง <code>LayoutBuilder</code> ไว้ตรงที่ต้องตัดสินใจเรื่องโครง เหมือนที่ lab ทำ</p><p><strong>บทเรียนที่ใช้ได้ต่อไป:</strong> เวลาเขียน widget ที่จะถูกเอาไปใช้ซ้ำ ให้ถามเสมอว่า “ถ้ามีคนเอาฉันไปวางในที่แคบกว่านี้ ฉันยังทำงานถูกไหม” — ถ้าคำตอบขึ้นกับขนาดจอทั้งเครื่อง แปลว่ายังผูกกับบริบทมากเกินไป</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ครอบแดชบอร์ดด้วย <code>SizedBox(width: 340)</code> แล้วตรวจว่าได้ 2 คอลัมน์ — ทำได้โดยไม่ต้องจำลองขนาดจอเลย ซึ่งเป็นข้อดีอีกอย่างของ <code>LayoutBuilder</code></p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ตัดสินใจเรื่อง layout ใช้ <code>LayoutBuilder</code> เรื่องอุปกรณ์ใช้ <code>MediaQuery</code></li><li><code>MediaQuery</code> ยังบอกความกว้างจอเต็มแม้ widget จะอยู่ในแผงแคบ</li><li>เมื่อพื้นที่ไม่พอ ให้เปลี่ยนโครงก่อน ลดขนาดตัวอักษรเป็นทางสุดท้าย</li><li>ห้ามลดขนาดปุ่มต่ำกว่า 48</li><li>คำนวณ breakpoint จากเนื้อหาจริง และตั้งชื่อไว้ที่เดียว</li><li>อย่าสลับเป็น widget คนละชนิด เพราะข้อมูลจะหาย</li><li>ทดสอบที่ค่าใกล้จุดตัดทั้งสองฝั่ง</li></ul></div><p><strong>บทถัดไป:</strong> 2.11 จะจัดการกับข้อความยาวอย่างเป็นระบบ — เมื่อไหร่ควรตัดด้วยจุดไข่ปลา เมื่อไหร่ห้ามตัดเด็ดขาด และทำไมรหัสพาเลทกับจำนวนเป็นสองอย่างที่ห้ามตัด</p></section>

@@ -1,15 +1,136 @@
-<div class="note">Card, Chip และ Badge ไม่ใช่เพียง decoration แต่เป็นภาษา visual hierarchy/status ที่ต้องใช้สม่ำเสมอ สีต้องเสริมข้อความและ icon ไม่เป็นช่องทางเดียวในการสื่อความหมาย</div>
-<section><h2>1. Card เป็น grouping boundary</h2><p>ใช้ Card/PdaCard รวมข้อมูลและ action ที่เกี่ยวข้องหนึ่งหน่วย มี padding, radius, border/elevation ตาม design token อย่าใส่ Card ซ้อน Card โดยไม่มี hierarchy เพราะเพิ่ม noise และกินพื้นที่ PDA</p></section>
-<section><h2>2. Chip ใช้กับ metadata/action เล็ก</h2><ul><li>Chip: label/status แบบอ่านอย่างเดียว</li><li>FilterChip/ChoiceChip: เลือกตัวกรอง/ตัวเลือก</li><li>ActionChip: action รองสั้น ๆ</li><li>InputChip: entity ที่เพิ่ม/ลบได้</li></ul><p>อย่าเลียนแบบ chip ด้วย Container หากต้องการ semantics/interaction ของ Material แต่ custom PdaChip ใช้ได้เมื่อเป็น read-only status และมี contrast/semantics ครบ</p></section>
-<section><h2>3. Badge คือข้อมูลรองขนาดสั้น</h2><p>จำนวนงานค้างบน menu tile เป็น badge ที่ดี: ซ่อนได้เมื่อศูนย์, จำกัดรูปแบบเช่น 99+, มี semantic label “งานค้าง 120” และไม่บัง icon/title Absolute ส่ง count และ badgeColor ตามโดเมนให้ tile</p></section>
-<section><h2>4. Status color mapping</h2><pre class="code-vs"><code>sealed class TaskStatusStyle {
-  static (Color, IconData, String) of(TaskStatus s) =&gt; switch (s) {
-    TaskStatus.ready =&gt; (Colors.blue, Icons.play_arrow, 'พร้อมทำ'),
-    TaskStatus.done  =&gt; (Colors.green, Icons.check, 'เสร็จแล้ว'),
-    TaskStatus.error =&gt; (Colors.red, Icons.error, 'ผิดพลาด'),
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จัดกลุ่มข้อมูลให้อ่านง่ายด้วย widget สำเร็จรูป</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.2 (ธีมและ <code>Theme.of</code>) และ 2.11 (ลำดับความสำคัญของข้อมูล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>Card</code>, <code>Chip</code> และตัวเลขแจ้งเตือนอย่างสม่ำเสมอ และออกแบบสีสถานะที่ผู้ใช้ตาบอดสีก็แยกออก</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>หน้าจอรายการที่มีแต่ข้อความเรียงกันอ่านยากมาก โดยเฉพาะเมื่อพนักงานต้องกวาดตาหาข้อมูลอย่างรวดเร็วขณะทำงาน</p><p>Flutter มี widget สำเร็จรูปที่ช่วยจัดกลุ่มและแสดงสถานะให้อยู่แล้ว บทนี้จะสอนใช้ให้ถูก และที่สำคัญกว่าคือใช้ให้ <strong>สม่ำเสมอทั้งแอป</strong> เพราะการที่สีส้มหมายถึงคนละอย่างในสองหน้าจอ อันตรายกว่าการไม่มีสีเลย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Card</code></td><td>กล่องที่มีเงาและมุมโค้ง ใช้จัดกลุ่มข้อมูลหนึ่งหน่วย</td></tr>
+<tr><td><code>Chip</code></td><td>ป้ายเล็ก ๆ สำหรับข้อมูลประกอบหรือตัวกรอง</td></tr>
+<tr><td>badge</td><td>ตัวเลขแจ้งเตือนที่ซ้อนบนไอคอน</td></tr>
+<tr><td>visual hierarchy</td><td>การทำให้ตาเห็นสิ่งสำคัญก่อน</td></tr>
+<tr><td>contrast</td><td>ความต่างของสีที่ทำให้อ่านออก</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: หนึ่งการ์ด หนึ่งหน่วยงาน</h2><p>ในแอปคลัง หนึ่ง <code>Card</code> ควรตรงกับ <strong>หนึ่งสิ่งที่พนักงานทำงานด้วย</strong> — หนึ่งพาเลท หนึ่งใบงาน หนึ่งรายการรับเข้า</p><p>ประโยชน์ที่ตามมาคือผู้ใช้รู้ทันทีว่าข้อมูลชิ้นไหนเป็นของชิ้นไหน โดยไม่ต้องอ่าน</p><pre class="code-vs"><code>Card(
+  child: Padding(
+    padding: const EdgeInsets.all(12),
+    child: Column(
+      children: [
+        // ทุกอย่างในนี้เป็นของพาเลทใบเดียวกัน
+      ],
+    ),
+  ),
+)</code></pre><div class="warn"><strong>อย่าใส่ <code>Card</code> ซ้อน <code>Card</code></strong> โดยไม่มีเหตุผล เพราะเงาซ้อนกันทำให้ตาสับสนว่าอะไรอยู่ในอะไร และกินระยะขอบเพิ่มอีกชั้นซึ่งบน PDA แคบ ๆ เสียพื้นที่มาก (ทบทวน 2.4 เรื่องระยะขอบสะสม)</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>Card(
+  child: Padding(
+    padding: const EdgeInsets.all(12),
+    child: Column(
+      children: [
+        Row(...),                      // รหัส ชื่อ จำนวน
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Chip(
+              label: Text(line.location),
+              visualDensity: VisualDensity.compact,
+            ),
+            const Spacer(),
+            FilledButton(...),
+          ],
+        ),
+      ],
+    ),
+  ),
+)</code></pre><p>สังเกตว่า <code>Card</code> ทำให้เราไม่ต้องใส่ตัวคั่นระหว่างแถวเลย — ตามที่บอกไว้ใน 2.7 ว่าเงาและช่องว่างทำหน้าที่แทนเส้นคั่นได้ดีกว่า</p><p>ส่วน <code>visualDensity: VisualDensity.compact</code> ทำให้ป้ายเล็กลงเล็กน้อย ซึ่งเหมาะกับ PDA ที่พื้นที่จำกัด</p></section>
+
+<section><h2>5. Chip แต่ละแบบใช้ต่างกัน</h2><table><thead><tr><th>ชนิด</th><th>ใช้เมื่อ</th><th>ตัวอย่างในงานคลัง</th></tr></thead><tbody>
+<tr><td><code>Chip</code></td><td>แสดงข้อมูลอย่างเดียว กดไม่ได้</td><td>ตำแหน่งจัดเก็บ</td></tr>
+<tr><td><code>FilterChip</code></td><td>เลือกได้หลายตัวเพื่อกรอง</td><td>กรองตามโซน A B C</td></tr>
+<tr><td><code>ChoiceChip</code></td><td>เลือกได้ตัวเดียว</td><td>เลือกกะเช้า/บ่าย/ดึก</td></tr>
+<tr><td><code>ActionChip</code></td><td>กดแล้วทำอะไรบางอย่าง</td><td>“ดูรายละเอียด”</td></tr>
+</tbody></table><div class="warn">ถ้าจะให้กดได้ ต้องใช้ชนิดที่ออกแบบมาให้กด อย่าเอา <code>Chip</code> ธรรมดาไปห่อ <code>GestureDetector</code> เพราะจะไม่มีเอฟเฟกต์ตอนกด ไม่มีเสียงตอบรับ และโปรแกรมอ่านหน้าจอจะไม่ประกาศว่าเป็นปุ่ม — ผู้ใช้จะไม่รู้ว่ากดได้</div></section>
+
+<section><h2>6. สีสถานะต้องมาจากที่เดียว</h2><p>ความผิดพลาดที่พบบ่อยที่สุดคือเขียน <code>if</code> เลือกสีกระจายอยู่ทุกหน้าจอ ผลคือสถานะเดียวกันมีสีต่างกันในแต่ละหน้า</p><pre class="code-vs"><code>// รวมไว้ที่เดียว พร้อมทั้งสี ไอคอน และข้อความ
+enum TaskStatus {
+  waiting('รอเริ่ม', Icons.schedule),
+  active('กำลังทำ', Icons.play_arrow),
+  done('เสร็จแล้ว', Icons.check_circle),
+  failed('ผิดพลาด', Icons.error_outline);
+
+  const TaskStatus(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+
+  Color colorOf(ColorScheme scheme) =&gt; switch (this) {
+    TaskStatus.waiting =&gt; scheme.outline,
+    TaskStatus.active =&gt; scheme.primary,
+    TaskStatus.done =&gt; scheme.tertiary,
+    TaskStatus.failed =&gt; scheme.error,
   };
-}</code></pre><p>Map จาก domain status ที่เดียว ไม่กระจาย if/color ในหลาย screen และส่ง label/icon คู่สีเสมอ</p></section>
-<section><h2>5. Contrast และ dark mode</h2><p>ตรวจ contrast ของ foreground/background ใน light/dark, disabled และ pressed state สีที่ใช้ alpha ต่ำบนพื้นต่างกันอาจอ่านไม่ได้ ใช้ ColorScheme semantic roles หรือ design tokens และทดสอบเครื่อง PDA จริงที่ความสว่างต่ำ/กลางแจ้ง</p></section>
-<section><h2>6. ตัวอย่าง PdaCard</h2><p>Absolute PdaCard ใช้ surface ขาว, border, shadow เบา, radius กลาง และ optional left accent 4px เพื่อแยกสถานะโดยไม่เปลี่ยนโครง SecTitle ใช้แถบสี + text และ PdaChip ใช้พื้นโปร่ง/ขอบจากสีเดียวกัน นี่คือ component vocabulary ที่ reuse ได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบสถานะ task 4 ค่า: waiting, active, done, failed ให้ผู้ใช้ตาบอดสีแยกได้</p><details><summary>แนวคำตอบ</summary><p>ใช้ label ชัด + icon ต่างรูป + สี semantic + optional border/pattern: waiting=นาฬิกา, active=ลูกศร/กำลังทำ, done=check, failed=error พร้อม semantic value และอย่าใช้เขียว/แดงเป็นสัญญาณเดียว ทดสอบ grayscale/high contrast</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้สี accent คนละความหมายระหว่างหน้า เช่นส้มหมายถึง warning ในหน้า A แต่ done ในหน้า B สร้าง status policy กลางและแยกสี brand/navigation ออกจากสีสถานะธุรกิจ</div></section>
+}</code></pre><p>นี่คือ enhanced enum จาก D1.10 ที่ใช้จริง — ข้อความ ไอคอน และสี ผูกติดกับสถานะไปตลอด เมื่อเพิ่มสถานะใหม่ analyzer จะชี้จุดที่ต้องแก้ให้ทันที</p></section>
+
+<section><h2>7. สีอย่างเดียวไม่พอ</h2><p>ผู้ชายประมาณ 1 ใน 12 คนแยกสีแดงกับเขียวได้ไม่ดี ซึ่งเป็นสองสีที่ใช้บอก “สำเร็จ” กับ “ผิดพลาด” พอดี</p><p>ทางแก้ไม่ใช่เลี่ยงสี แต่คือ <strong>อย่าให้สีเป็นช่องทางเดียว</strong></p><table><thead><tr><th>ช่องทาง</th><th>ตัวอย่าง</th><th>ช่วยใคร</th></tr></thead><tbody>
+<tr><td>สี</td><td>แดง/เขียว</td><td>คนทั่วไปที่กวาดตาเร็ว ๆ</td></tr>
+<tr><td>ไอคอน</td><td>เครื่องหมายถูก/เครื่องหมายตกใจ</td><td>ผู้ใช้ตาบอดสี</td></tr>
+<tr><td>ข้อความ</td><td>“เสร็จแล้ว” / “ผิดพลาด”</td><td>ทุกคน รวมถึงโปรแกรมอ่านหน้าจอ</td></tr>
+</tbody></table><p>สังเกตว่า enum ในหัวข้อ 6 บังคับให้มีครบทั้งสามอย่างโดยอัตโนมัติ เพราะทุกค่าต้องระบุทั้งข้อความและไอคอนตั้งแต่ตอนประกาศ — เป็นการออกแบบชนิดข้อมูลให้ทำสิ่งที่ถูกต้องได้ง่ายกว่าทำผิด</p><p><strong>วิธีทดสอบอย่างเร็ว:</strong> ถ่ายภาพหน้าจอแล้วแปลงเป็นขาวดำ ถ้ายังแยกสถานะออกได้แปลว่าผ่าน</p></section>
+
+<section><h2>8. ตัวเลขแจ้งเตือน</h2><pre class="code-vs"><code>Badge(
+  label: Text(count &gt; 99 ? '99+' : '$count'),
+  isLabelVisible: count &gt; 0,          // ซ่อนเองเมื่อไม่มีงานค้าง
+  child: const Icon(Icons.inbox_outlined),
+)</code></pre><p>สามข้อที่ต้องทำเสมอ</p><ol><li><strong>ซ่อนเมื่อเป็นศูนย์</strong> — “0” ไม่ได้ให้ข้อมูลอะไรและรบกวนสายตา</li><li><strong>จำกัดรูปแบบ</strong> — <code>99+</code> เพราะเลข 4 หลักจะล้นออกนอกไอคอน</li><li><strong>มีข้อความสำหรับโปรแกรมอ่านหน้าจอ</strong> — “งานค้าง 12 รายการ” ไม่ใช่แค่ “12”</li></ol></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สีเดียวกันหมายคนละอย่างในสองหน้าจอ</td><td>เขียน <code>if</code> เลือกสีกระจาย</td><td>รวมไว้ใน enum ที่เดียว</td></tr>
+<tr><td>ผู้ใช้แยกสถานะไม่ออก</td><td>ใช้สีเป็นช่องทางเดียว</td><td>เพิ่มไอคอนและข้อความ</td></tr>
+<tr><td>กดป้ายแล้วไม่มีอะไรเกิดขึ้น</td><td>ใช้ <code>Chip</code> ธรรมดาห่อ <code>GestureDetector</code></td><td>ใช้ <code>ActionChip</code> หรือ <code>FilterChip</code></td></tr>
+<tr><td>ตัวเลขแจ้งเตือนล้นออกนอกไอคอน</td><td>ไม่ได้จำกัดรูปแบบ</td><td>ใช้ <code>99+</code></td></tr>
+<tr><td>เห็นเลข 0 บนทุกไอคอน</td><td>ไม่ได้ซ่อนเมื่อไม่มีข้อมูล</td><td>ตั้ง <code>isLabelVisible</code></td></tr>
+<tr><td>อ่านไม่ออกในโหมดมืด</td><td>เขียนสีตายตัวแทนสีจากธีม</td><td>ใช้ค่าจาก <code>ColorScheme</code> (1.2)</td></tr>
+<tr><td>การ์ดซ้อนการ์ดจนดูรก</td><td>ใช้ <code>Card</code> เป็นกรอบตกแต่ง</td><td>ใช้เมื่อเป็นการจัดกลุ่มจริง</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ออกแบบการแสดงสถานะใบงานสี่ค่า — รอเริ่ม กำลังทำ เสร็จแล้ว ผิดพลาด — โดย</p><ol><li>ผู้ใช้ตาบอดสีต้องแยกออกได้</li><li>สถานะเดียวกันต้องหน้าตาเหมือนกันทุกหน้าจอ</li><li>ใช้ได้ทั้งโหมดสว่างและโหมดมืด</li><li>เพิ่มสถานะที่ห้าในอนาคตแล้วต้องรู้ว่าต้องไปแก้ตรงไหนบ้าง</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>enum TaskStatus {
+  waiting('รอเริ่ม', Icons.schedule),
+  active('กำลังทำ', Icons.play_arrow),
+  done('เสร็จแล้ว', Icons.check_circle),
+  failed('ผิดพลาด', Icons.error_outline);
+
+  const TaskStatus(this.label, this.icon);
+
+  final String label;
+  final IconData icon;
+
+  Color colorOf(ColorScheme scheme) =&gt; switch (this) {
+    TaskStatus.waiting =&gt; scheme.outline,
+    TaskStatus.active =&gt; scheme.primary,
+    TaskStatus.done =&gt; scheme.tertiary,
+    TaskStatus.failed =&gt; scheme.error,
+  };
+}
+
+class StatusChip extends StatelessWidget {
+  const StatusChip({super.key, required this.status});
+
+  final TaskStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = status.colorOf(Theme.of(context).colorScheme);
+
+    return Chip(
+      avatar: Icon(status.icon, size: 18, color: color),   // ช่องทางที่ 2
+      label: Text(status.label),                           // ช่องทางที่ 3
+      side: BorderSide(color: color),                      // ช่องทางที่ 1
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}</code></pre><p><strong>ข้อ 1 — ผู้ใช้ตาบอดสีแยกออก</strong></p><p>เพราะมีสามช่องทางพร้อมกัน ไอคอนของทั้งสี่สถานะเป็นรูปคนละแบบชัดเจน (นาฬิกา ลูกศร เครื่องหมายถูก เครื่องหมายตกใจ) และมีข้อความกำกับ — ถ้าแปลงเป็นขาวดำก็ยังแยกได้</p><p><strong>ข้อ 2 — เหมือนกันทุกหน้าจอ</strong></p><p>เพราะทุกหน้าจอใช้ <code>StatusChip</code> ตัวเดียวกัน และมันดึงทุกอย่างจาก enum ไม่มีที่ไหนเขียนสีหรือข้อความเองได้เลย</p><p><strong>ข้อ 3 — ใช้ได้ทั้งสองโหมด</strong></p><p>เพราะ <code>colorOf</code> รับ <code>ColorScheme</code> เข้ามาแล้วเลือกจากค่าในนั้น ไม่ได้เขียน <code>Colors.red</code> ตายตัว — เมื่อสลับโหมดมืด ธีมจะให้ค่าที่เหมาะกับพื้นหลังใหม่โดยอัตโนมัติ (ทบทวน 1.2)</p><p><strong>ข้อ 4 — เพิ่มสถานะที่ห้า</strong></p><p>เพิ่มค่าใน enum หนึ่งบรรทัด แล้วรัน <code>flutter analyze</code> — มันจะชี้ว่า <code>switch</code> ใน <code>colorOf</code> ยังไม่ครอบคลุมค่าใหม่ ตามที่เรียนใน D1.10 หัวข้อ 5</p><pre class="code-vs"><code>paused('พักไว้', Icons.pause_circle_outline);
+
+// analyzer: The type 'TaskStatus' is not exhaustively matched
+// → ชี้ให้ไปเติมใน colorOf ทันที</code></pre><p>นี่คือจุดที่แสดงว่าการออกแบบชนิดข้อมูลดี ๆ ให้ผลตอบแทนจริง — เราไม่ต้องจำเองว่ามีที่ไหนต้องแก้บ้าง เครื่องมือบอกให้</p><p><strong>จุดที่คนมักพลาด:</strong> เขียน <code>colorOf</code> โดยมี <code>_ =&gt; Colors.grey</code> ปิดท้าย ซึ่งทำให้สถานะใหม่ได้สีเทาเงียบ ๆ โดยไม่มีใครรู้ว่าลืมกำหนด — เป็นสิ่งที่ D1.10 เตือนไว้ตรง ๆ ว่าการเติม <code>_</code> ทำลายประโยชน์ข้อสำคัญที่สุดของ enum</p><p><strong>ลองต่อ:</strong> ถ่ายภาพหน้าจอที่มี <code>StatusChip</code> ครบทั้งสี่ค่า แล้วแปลงเป็นขาวดำ ถ้ายังแยกออกได้ทั้งหมดแปลว่าออกแบบผ่าน</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>หนึ่ง <code>Card</code> ควรตรงกับหนึ่งสิ่งที่ผู้ใช้ทำงานด้วย</li><li>อย่าใส่ <code>Card</code> ซ้อนกันโดยไม่มีเหตุผล</li><li>เลือกชนิดของ <code>Chip</code> ตามว่ากดได้หรือไม่</li><li>รวมสี ไอคอน และข้อความของสถานะไว้ใน enum ที่เดียว</li><li>สีอย่างเดียวไม่พอ ต้องมีไอคอนและข้อความด้วย</li><li>ตัวเลขแจ้งเตือนต้องซ่อนเมื่อเป็นศูนย์และจำกัดรูปแบบ</li><li>ใช้สีจากธีมเสมอ เพื่อให้โหมดมืดทำงานได้เอง</li></ul></div><p><strong>บทถัดไป:</strong> 2.13 จะรวบเรื่องที่แตะมาหลายบทให้เป็นเรื่องเดียว — ข้อกำหนดเฉพาะของหน้าจอที่ใช้ในคลัง ตั้งแต่ขนาดปุ่มสำหรับมือที่ใส่ถุงมือ ไปจนถึงการทำงานร่วมกับเครื่องสแกน</p></section>

@@ -4,20 +4,136 @@
 <title>PDA Touch &amp; Accessibility</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-13 · Flutter UI</span><h1>PDA Touch &amp; Accessibility</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Touch target ไม่เท่ากับ icon size</a></li><li><a href="#section-2">Primary action placement</a></li><li><a href="#section-3">Scanner และ hardware keyboard</a></li><li><a href="#section-4">Semantics และ traversal</a></li><li><a href="#section-5">Feedback และ error recovery</a></li><li><a href="#section-6">Density แบบมีลำดับชั้น</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">PDA ถูกใช้ด้วยนิ้วโป้ง, ถุงมือ, การเดิน และการสแกนต่อเนื่อง UI ต้องลดความแม่นยำที่ต้องใช้, ทำสถานะชัด และให้ workflow เดินด้วย hardware keyboard/scanner ได้ ไม่ใช่แค่ทำทุกอย่างเล็กเพื่อใส่จอ</div>
-<section id="section-1"><h2>1. Touch target ไม่เท่ากับ icon size</h2><p>Icon อาจ 20–24 logical pixels แต่พื้นที่กดควรอย่างน้อยประมาณ 48×48 ตาม Material และใหญ่ขึ้นสำหรับถุงมือ Absolute PdaButton สูง 54 (compact 46) และเต็มความกว้าง ทำให้ action หลักกดได้แม้เคลื่อนที่</p></section>
-<section id="section-2"><h2>2. Primary action placement</h2><p>วาง action ที่ใช้ซ้ำใกล้นิ้ว/ท้าย flow, ตรึงเมื่อจำเป็น และอย่าให้ keyboard/navigation bar บัง แยก destructive action ออกจาก confirm ทั้งตำแหน่ง สี และ dialog ลดการกดพลาดจากกล้ามเนื้อจำ</p></section>
-<section id="section-3"><h2>3. Scanner และ hardware keyboard</h2><p>รักษา focus ที่ scan field, submit ด้วย Enter, debounce/lock ระหว่าง request, แสดงค่าที่อ่านล่าสุดและเสียง/สั่น/สีเป็น feedback หลายช่องทาง ปุ่ม manual fallback ต้องกดง่าย แต่ไม่แย่ง focus ทุก rebuild</p></section>
-<section id="section-4"><h2>4. Semantics และ traversal</h2><pre class="code-vs"><code>Semantics(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: พื้นที่กด ไม่เท่ากับสิ่งที่เห็น</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">ปุ่มสำคัญวางตรงไหน</a></li><li><a href="#section-6">ทำงานร่วมกับเครื่องสแกน</a></li><li><a href="#section-7">ข้อมูลสำหรับโปรแกรมอ่านหน้าจอ</a></li><li><a href="#section-8">ลำดับการลดเมื่อพื้นที่ไม่พอ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ออกแบบหน้าจอให้ใช้ได้จริงในคลัง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.10 (เปลี่ยนโครงก่อนย่อ), 2.11 (ข้อมูลที่ห้ามตัด) และ 2.12 (สถานะหลายช่องทาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบหน้าจอที่พนักงานใส่ถุงมือใช้งานได้จริง และรู้ว่าข้อกำหนดของ PDA ต่างจากมือถือทั่วไปตรงไหน</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตลอด Part นี้เราอ้างถึงตัวเลข 48 และคำว่า “มือที่ใส่ถุงมือ” มาหลายครั้งโดยยังไม่อธิบายเต็ม บทนี้จะรวบให้ครบ</p><p>เหตุที่ต้องมีบทนี้แยกออกมา เพราะ PDA ในคลังใช้งานต่างจากมือถือในกระเป๋ามาก และหน้าจอที่ออกแบบมาดีสำหรับมือถืออาจใช้ไม่ได้เลยในคลัง</p><table><thead><tr><th></th><th>มือถือทั่วไป</th><th>PDA ในคลัง</th></tr></thead><tbody>
+<tr><td>สภาพมือ</td><td>มือเปล่า นิ่ง</td><td>ใส่ถุงมือ เดินไปด้วย</td></tr>
+<tr><td>สภาพแสง</td><td>ในร่ม</td><td>กลางแดด หรือคลังมืด</td></tr>
+<tr><td>ความเร็ว</td><td>ค่อย ๆ ดู</td><td>ต้องเร็ว ทำซ้ำเป็นร้อยครั้งต่อกะ</td></tr>
+<tr><td>วิธีป้อนข้อมูล</td><td>พิมพ์</td><td>ยิงบาร์โค้ดเป็นหลัก</td></tr>
+<tr><td>ผลเมื่อกดผิด</td><td>กดใหม่</td><td>ของหายจากคลังจริง</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>touch target</td><td>พื้นที่ที่กดแล้วโดน ซึ่งใหญ่กว่าไอคอนได้</td></tr>
+<tr><td>logical pixel</td><td>หน่วยที่ Flutter ใช้ ซึ่งไม่ขึ้นกับความละเอียดจอ</td></tr>
+<tr><td>haptic</td><td>การสั่นตอบรับ</td></tr>
+<tr><td>semantics</td><td>ข้อมูลที่โปรแกรมอ่านหน้าจอใช้</td></tr>
+<tr><td>destructive action</td><td>การกระทำที่ย้อนกลับยาก เช่นยกเลิกงาน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: พื้นที่กด ไม่เท่ากับสิ่งที่เห็น</h2><pre class="code-vs"><code>┌──────────────┐  ← พื้นที่ที่กดแล้วโดน 48×48
+│              │
+│   ┌──────┐   │
+│   │ ไอคอน │   │  ← สิ่งที่ตาเห็น 24×24
+│   └──────┘   │
+│              │
+└──────────────┘</code></pre><p>ไอคอนขนาด 24 ดูพอดีสวยงาม แต่ถ้าพื้นที่กดเป็น 24 ด้วย ผู้ใช้ที่ใส่ถุงมือจะกดพลาดตลอด เพราะปลายนิ้วที่ใส่ถุงมือแตะจอเป็นวงกว้างและควบคุมได้ไม่แม่น</p><div class="note"><strong>ตัวเลขที่ต้องจำ:</strong> 48 คือขั้นต่ำตามมาตรฐาน Material สำหรับมือเปล่า — สำหรับงานที่ใส่ถุงมือควรเผื่อขึ้นไปอีก ใน lab เราตั้ง <code>Breakpoints.minTapTarget = 48</code> เป็นขั้นต่ำ และปุ่มหลักในแอปคลังจริงมักใช้ 54 ขึ้นไป</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>ConstrainedBox(
+  constraints: const BoxConstraints(
+    minHeight: Breakpoints.minTapTarget,
+    minWidth: Breakpoints.minTapTarget * 2,
+  ),
+  child: FilledButton(
+    key: ValueKey&lt;String&gt;('confirm-${line.palletCode}'),
+    onPressed: () {},
+    child: const Text('ยืนยัน'),
+  ),
+)</code></pre><p>และเทสต์ยืนยันว่าเงื่อนไขนี้เป็นจริงแม้บนจอแคบสุด</p><pre class="code-vs"><code>testWidgets('ปุ่มยืนยันสูงพอสำหรับมือที่ใส่ถุงมือ', (tester) async {
+  await pumpAtWidth(tester, 360);
+
+  final size = tester.getSize(
+    find.byKey(const ValueKey&lt;String&gt;('confirm-PAL-1001')),
+  );
+  expect(size.height, greaterThanOrEqualTo(Breakpoints.minTapTarget));
+});</code></pre><p>นี่คือตัวอย่างของการเปลี่ยนข้อกำหนดด้านการใช้งานให้เป็นเทสต์ที่ตรวจอัตโนมัติ — ถ้าวันหนึ่งมีคนย่อปุ่มลงเพื่อให้ใส่ข้อมูลได้มากขึ้น เทสต์จะฟ้องทันทีก่อนถึงมือผู้ใช้</p></section>
+
+<section id="section-5"><h2>5. ปุ่มสำคัญวางตรงไหน</h2><table><thead><tr><th>หลัก</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ปุ่มที่ใช้ซ้ำบ่อยอยู่ล่าง</td><td>นิ้วโป้งเอื้อมถึงง่ายเมื่อถือมือเดียว</td></tr>
+<tr><td>ปุ่มยืนยันอยู่นอกพื้นที่เลื่อน</td><td>ไม่ต้องเลื่อนหา (ทบทวน 2.6)</td></tr>
+<tr><td>ปุ่มที่ย้อนกลับยากต้องอยู่ห่างจากปุ่มปกติ</td><td>กันการกดพลาดจากความเคยชิน</td></tr>
+<tr><td>ปุ่มที่ย้อนกลับยากต้องมีสีและข้อความต่าง</td><td>ไม่ให้กดโดยไม่ทันคิด</td></tr>
+</tbody></table><p>ข้อสามและสี่สำคัญมากในงานคลัง — พนักงานที่ทำงานเดิมซ้ำร้อยครั้งต่อกะจะกดด้วยความเคยชิน ถ้าปุ่ม “ยกเลิกงาน” อยู่ตำแหน่งเดียวกับ “ยืนยัน” ในบางหน้าจอ จะมีคนกดผิดแน่นอน</p></section>
+
+<section id="section-6"><h2>6. ทำงานร่วมกับเครื่องสแกน</h2><p>เครื่องสแกนของ PDA ส่วนใหญ่ทำงานเหมือนแป้นพิมพ์ — มันพิมพ์รหัสลงในช่องที่กำลังโฟกัสอยู่แล้วกด Enter ให้</p><p>ผลที่ตามมาต่อการออกแบบ layout</p><ol><li><strong>ต้องมีช่องรับที่โฟกัสอยู่เสมอ</strong> ไม่งั้นรหัสจะหายไปเฉย ๆ</li><li><strong>ต้องกลับไปโฟกัสเองหลังยิงเสร็จ</strong> เพื่อรับตัวถัดไปทันที</li><li><strong>ต้องมีปุ่มพิมพ์เองสำรอง</strong> สำหรับกรณีบาร์โค้ดเสียหาย</li><li><strong>ต้องบอกผลทันที</strong> ด้วยเสียง การสั่น และสี พร้อมกัน</li></ol><p>ข้อสี่สำคัญเพราะพนักงานไม่ได้จ้องหน้าจอตลอดเวลา เขากำลังมองของในมือ — เสียงกับการสั่นจึงเป็นช่องทางหลัก ส่วนสีบนหน้าจอเป็นการยืนยันเมื่อเงยหน้าขึ้นมาดู</p><p>รายละเอียดการทำเรื่องโฟกัสและเสียงตอบรับอยู่ใน Part 3 ทั้งหมด บทนี้แค่ชี้ว่ามันกระทบการวาง layout อย่างไร — เช่นช่องรับบาร์โค้ดควรอยู่ตำแหน่งที่ไม่โดนแป้นพิมพ์บัง และไม่ควรมีปุ่มอื่นที่แย่งโฟกัสไปโดยไม่ตั้งใจ</p></section>
+
+<section id="section-7"><h2>7. ข้อมูลสำหรับโปรแกรมอ่านหน้าจอ</h2><pre class="code-vs"><code>Semantics(
   button: true,
   label: 'รับสินค้าเข้า',
-  value: 'งานค้าง $count',
-  child: WarehouseTile(/* ... */),
-)</code></pre><p>กำหนด label สำหรับ SVG/icon, รวม semantics ของ tile ไม่ให้ screen reader อ่านชิ้นตกแต่งซ้ำ และจัด focus traversal ตามลำดับงาน ทดสอบ TalkBack และ keyboard/tab จริง</p></section>
-<section id="section-5"><h2>5. Feedback และ error recovery</h2><p>หลัง scan ต้องรู้ทันทีว่า accepted, duplicate หรือ error โดยไม่ต้องอ่านข้อความยาว ใช้เสียง/สั่นร่วมกับ banner ที่มีข้อความและ icon Error ต้องบอกวิธีแก้และรักษาค่าที่ผู้ใช้ต้องแก้ ไม่ล้าง form ทั้งหมด</p></section>
-<section id="section-6"><h2>6. Density แบบมีลำดับชั้น</h2><p>ลด decorative gap ก่อนลด touch target/ตัวอักษร ซ่อนข้อมูล secondary ก่อนซ่อน key identifier ใช้ progressive disclosure สำหรับรายละเอียด Absolute เลือก compact inset/gap และ tile composition ตาม height แต่ยังรักษาปุ่ม/ข้อมูลหลัก</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้า Picking ต้อง scan 100 ครั้งต่อกะ ออกแบบ loop หลัง scan สำเร็จและผิดพลาด</p><details><summary>แนวคำตอบ</summary><p>สำเร็จ: lock request → feedback เสียง/สั่น/สี → update count/list → clear/เลือก field → คืน focus อัตโนมัติ; ผิดพลาด: feedbackต่างกัน → เก็บ code ให้ตรวจ/แก้ → message สั้นพร้อม action retry → ไม่เปลี่ยน task โดยไม่ตั้งใจ ปุ่มยืนยันสุดท้ายใหญ่และแยกจาก cancel</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การทำ compact โดยลดปุ่มเหลือ 28px และ font 8px อาจ “ไม่ overflow” แต่ใช้จริงไม่ได้ วัด success ด้วยเวลา/ข้อผิดพลาดของผู้ปฏิบัติงาน, gloves, แสง, เสียง และ device จริง ไม่ใช่ screenshot สวยอย่างเดียว</div></section>
+  value: 'งานค้าง $count รายการ',
+  child: WarehouseTile(...),
+)</code></pre><p>นอกจากช่วยผู้ใช้ที่มองไม่เห็นแล้ว การใส่ข้อมูลนี้ยังมีประโยชน์ที่คนมักไม่คาดคิด — <strong>มันทำให้เขียนเทสต์ได้ง่ายขึ้น</strong> เพราะเทสต์ค้นหา widget ด้วยข้อความเหล่านี้ได้</p><p>สิ่งที่ต้องระวังคือ widget ที่เป็นแค่การตกแต่ง ไม่ควรถูกประกาศออกมา — เช่นจุดสถานะใน 2.5 ที่เราห่อด้วย <code>IgnorePointer</code> ไว้แล้ว</p></section>
+
+<section id="section-8"><h2>8. ลำดับการลดเมื่อพื้นที่ไม่พอ</h2><p>รวบจาก 2.10 และ 2.11 ให้เป็นลำดับเดียวที่ใช้ได้ทั้ง Part</p><ol><li><strong>ลดช่องว่างที่เป็นการตกแต่ง</strong> — ระยะขอบและช่องไฟที่ไม่มีความหมาย</li><li><strong>เปลี่ยนทิศการเรียง</strong> — จาก <code>Row</code> เป็น <code>Column</code></li><li><strong>ซ่อนข้อมูลรอง</strong> — คำอธิบาย ป้ายประกอบ</li><li><strong>ลดจำนวนบรรทัดของข้อความรอง</strong></li><li><strong>ลดขนาดตัวอักษรของข้อความรอง</strong> ในช่วงที่ยังอ่านออก</li></ol><div class="warn"><strong>สิ่งที่ห้ามลดไม่ว่ากรณีใด</strong> — ขนาดพื้นที่กดของปุ่มหลัก, ตัวระบุตัวตนอย่างรหัสพาเลท, จำนวน และตำแหน่งจัดเก็บ ถ้าลดทุกอย่างในรายการข้างบนแล้วยังไม่พอ แปลว่าหน้าจอนี้พยายามแสดงข้อมูลมากเกินไป ต้องแยกเป็นสองหน้าจอหรือใช้การแตะดูรายละเอียดแทน</div></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พนักงานบอกว่ากดปุ่มไม่ค่อยติด</td><td>พื้นที่กดเล็กกว่า 48</td><td>ครอบด้วย <code>ConstrainedBox</code> ที่มี <code>minHeight</code></td></tr>
+<tr><td>ทดสอบบนเครื่องพัฒนาแล้วกดได้ปกติ</td><td>ทดสอบด้วยเมาส์หรือมือเปล่า</td><td>ทดสอบด้วยถุงมือบน PDA จริง</td></tr>
+<tr><td>ยิงบาร์โค้ดแล้วไม่มีอะไรเกิดขึ้น</td><td>ไม่มีช่องที่โฟกัสอยู่</td><td>คืนโฟกัสให้ช่องรับเสมอ (Part 3)</td></tr>
+<tr><td>พนักงานกดยกเลิกงานโดยไม่ตั้งใจ</td><td>ปุ่มอยู่ตำแหน่งเดียวกับปุ่มที่กดบ่อย</td><td>ย้ายที่และเปลี่ยนสี</td></tr>
+<tr><td>อ่านหน้าจอไม่ออกกลางแดด</td><td>ใช้สีที่ความต่างต่ำ</td><td>ใช้สีจากธีมและทดสอบกลางแจ้ง</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่ายิงสำเร็จหรือไม่</td><td>บอกผลด้วยสีอย่างเดียว</td><td>เพิ่มเสียงและการสั่น</td></tr>
+<tr><td>ย่อทุกอย่างจนใส่ครบแล้วใช้งานไม่ได้</td><td>วัดผลจากภาพหน้าจอ ไม่ใช่การใช้งานจริง</td><td>ทำตามลำดับในหัวข้อ 8</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอหยิบสินค้าต้องใช้ยิงบาร์โค้ด 100 ครั้งต่อกะ ประกอบด้วย</p><ul><li>ช่องรับบาร์โค้ด</li><li>ข้อมูลงานปัจจุบัน — รหัสพาเลท ตำแหน่ง จำนวนที่ต้องหยิบ</li><li>รายการที่หยิบไปแล้ว</li><li>ปุ่มยืนยันจบงาน และปุ่มยกเลิกงาน</li></ul><ol><li>จัดวางอย่างไรบนจอ PDA กว้าง 320 สูง 640</li><li>ปุ่มยกเลิกควรอยู่ที่ไหนและทำไม</li><li>เมื่อยิงสำเร็จ ผู้ใช้ควรได้รับสัญญาณอะไรบ้าง</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — โครงหน้าจอ</strong></p><pre class="code-vs"><code>Scaffold(
+  appBar: AppBar(
+    title: const Text('หยิบสินค้า'),
+    actions: [
+      // ข้อ 2 — ปุ่มยกเลิกอยู่มุมบน ห่างจากนิ้วโป้ง
+      IconButton(
+        onPressed: _confirmCancel,      // ต้องยืนยันก่อน
+        icon: const Icon(Icons.close),
+        tooltip: 'ยกเลิกงาน',
+      ),
+    ],
+  ),
+  body: SafeArea(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ข้อมูลที่ห้ามตัด อยู่บนสุด เห็นตลอดเวลา
+        const CurrentTaskCard(),
+
+        // ช่องรับบาร์โค้ด อยู่ใกล้ข้อมูลงาน
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: ScanField(),
+        ),
+        const SizedBox(height: 8),
+
+        // รายการที่หยิบแล้ว กินที่เหลือ เลื่อนได้
+        Expanded(
+          child: ListView.builder(...),
+        ),
+      ],
+    ),
+  ),
+  // ปุ่มหลักอยู่ล่าง นอกพื้นที่เลื่อน กดได้ตลอด
+  bottomNavigationBar: SafeArea(
+    top: false,
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: SizedBox(
+        height: 54,                     // ใหญ่กว่าขั้นต่ำ เพราะเป็นปุ่มหลัก
+        child: FilledButton(
+          onPressed: _canConfirm ? _confirm : null,
+          child: const Text('ยืนยันจบงาน'),
+        ),
+      ),
+    ),
+  ),
+)</code></pre><p><strong>ข้อ 2 — ทำไมปุ่มยกเลิกอยู่มุมบน</strong></p><p>สามเหตุผลที่ทำงานร่วมกัน</p><ol><li><strong>อยู่ไกลจากนิ้วโป้ง</strong> — พนักงานถือ PDA มือเดียวและใช้นิ้วโป้งกด มุมบนขวาเป็นบริเวณที่ต้องตั้งใจเอื้อม จึงกดโดนโดยบังเอิญยาก</li><li><strong>อยู่คนละที่กับปุ่มที่กดบ่อย</strong> — ปุ่มยืนยันอยู่ล่าง ความเคยชินของนิ้วจึงไม่พาไปโดนปุ่มยกเลิก</li><li><strong>ยังต้องยืนยันอีกครั้ง</strong> — <code>_confirmCancel</code> เปิดกล่องถามก่อน เพราะการยกเลิกงานที่หยิบไปแล้วครึ่งทางมีผลกระทบจริงต่อสต็อก</li></ol><p>ที่ผิดคือวางปุ่มยกเลิกไว้ข้างปุ่มยืนยันด้านล่าง แม้จะทำสีต่างกันแล้วก็ตาม — เพราะเมื่อทำงานเร็ว ๆ ร้อยครั้งต่อกะ นิ้วจะไปที่แถบล่างโดยอัตโนมัติ และระยะห่างไม่กี่มิลลิเมตรไม่พอสำหรับมือที่ใส่ถุงมือ</p><p><strong>ข้อ 3 — สัญญาณเมื่อยิงสำเร็จ</strong></p><table><thead><tr><th>ช่องทาง</th><th>รายละเอียด</th><th>ทำไมจำเป็น</th></tr></thead><tbody>
+<tr><td>เสียง</td><td>เสียงสั้น ๆ หนึ่งครั้ง</td><td>พนักงานกำลังมองของในมือ ไม่ได้มองจอ</td></tr>
+<tr><td>การสั่น</td><td>สั่นสั้น</td><td>ในคลังที่เสียงดัง เสียงอาจไม่ได้ยิน</td></tr>
+<tr><td>สีและข้อความ</td><td>แถบเขียวพร้อมข้อความ + ไอคอน</td><td>ยืนยันเมื่อเงยหน้าขึ้นมาดู (2.12)</td></tr>
+<tr><td>ตัวเลขที่เปลี่ยน</td><td>จำนวนที่หยิบแล้วเพิ่มขึ้น</td><td>เห็นความคืบหน้าโดยไม่ต้องนับเอง</td></tr>
+<tr><td>ช่องรับว่างและพร้อมรับตัวถัดไป</td><td>ล้างข้อความและคืนโฟกัส</td><td>ยิงต่อได้ทันทีโดยไม่ต้องแตะจอ</td></tr>
+</tbody></table><p><strong>และที่สำคัญไม่แพ้กัน — เมื่อยิงผิดต้องต่างจากยิงถูกอย่างชัดเจน</strong> ใช้เสียงคนละแบบ สั่นยาวกว่า และ <strong>ไม่ล้างช่องรับ</strong> เพื่อให้พนักงานเห็นว่ายิงอะไรเข้าไป ซึ่งช่วยให้แก้ปัญหาได้เอง</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ตรวจว่าปุ่มยืนยันสูงอย่างน้อย 48 และปุ่มยกเลิกไม่ได้อยู่ใน <code>bottomNavigationBar</code> — ข้อกำหนดด้านการใช้งานที่เขียนเป็นเทสต์ได้ จะไม่ถูกลืมเมื่อมีคนใหม่เข้ามาแก้โค้ด</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>PDA ในคลังใช้งานต่างจากมือถือมาก — ถุงมือ แสงจ้า ความเร็ว และผลของการกดผิด</li><li>พื้นที่กดต้องอย่างน้อย 48 และปุ่มหลักควรใหญ่กว่านั้น</li><li>ปุ่มที่ย้อนกลับยากต้องอยู่ห่างจากปุ่มที่กดบ่อย และต้องยืนยันอีกครั้ง</li><li>เครื่องสแกนทำงานเหมือนแป้นพิมพ์ — ต้องมีช่องที่โฟกัสอยู่เสมอ</li><li>บอกผลด้วยเสียง การสั่น และภาพพร้อมกัน</li><li>ยิงผิดต้องให้สัญญาณต่างจากยิงถูกอย่างชัดเจน</li><li>ห้ามลดขนาดปุ่มหลักและข้อมูลที่ห้ามตัด ไม่ว่าพื้นที่จะน้อยแค่ไหน</li></ul></div><p><strong>บทถัดไป:</strong> 2.14 จะสอนวิธีอ่านและแก้แถบสีเหลืองดำอย่างเป็นระบบ ซึ่งเป็น error ที่เจอบ่อยที่สุดใน Part นี้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

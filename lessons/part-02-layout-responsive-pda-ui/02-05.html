@@ -4,31 +4,151 @@
 <title>Stack &amp; Positioned</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-05 · Flutter UI</span><h1>Stack &amp; Positioned</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Stack วัดลูกอย่างไร</a></li><li><a href="#section-2">Badge บน tile</a></li><li><a href="#section-3">Positioned และ Positioned.fill</a></li><li><a href="#section-4">Loading overlay ที่ปลอดภัย</a></li><li><a href="#section-5">clipBehavior และ hit testing</a></li><li><a href="#section-6">Overlay/Portal ต่างจาก Stack</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>Stack</code> เหมาะกับองค์ประกอบที่ซ้อนเชิงภาพและมี owner ของพื้นที่ชัด เช่น badge บนการ์ด, loading overlay หรือปุ่มลอย ไม่เหมาะกับการสร้าง layout ปกติทั้งหน้าด้วยพิกัดคงที่</div>
-<section id="section-1"><h2>1. Stack วัดลูกอย่างไร</h2><p>Non-positioned children มีส่วนกำหนดขนาด Stack ส่วน Positioned children ถูกวางหลัง Stack รู้ขนาดแล้ว ค่า <code>alignment</code> จัด non-positioned/partially positioned child และ <code>fit</code> ควบคุม constraints ที่ส่งให้ non-positioned children</p></section>
-<section id="section-2"><h2>2. Badge บน tile</h2><pre class="code-vs"><code>Stack(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กระดาษวางซ้อนกัน</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">Positioned: กำหนดกี่ด้านก็มีความหมายต่างกัน</a></li><li><a href="#section-6">การแตะกับส่วนที่วาดล้น</a></li><li><a href="#section-7">เมื่อไหร่ที่ไม่ควรใช้ Stack</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ซ้อน widget ทับกันอย่างถูกวิธี</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (กฎสามข้อ) และ 2.4 (<code>Align</code> และการจัดตำแหน่ง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>Stack</code> ซ้อนจุดแจ้งเตือน ป้าย และแผ่นบังระหว่างโหลด พร้อมรู้ว่าเมื่อไหร่ที่ <strong>ไม่</strong> ควรใช้</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p><code>Row</code> และ <code>Column</code> วางของเรียงกันโดยไม่ทับกัน แต่บาง UI ต้องซ้อนจริง ๆ</p><ul><li>จุดสีแดงแจ้งเตือนมุมบนขวาของไอคอน</li><li>ป้าย “ด่วน” ทับมุมการ์ด</li><li>แผ่นบังทั้งหน้าจอพร้อมวงกลมหมุนระหว่างบันทึกข้อมูล</li></ul><p>ทั้งสามอย่างมีลักษณะร่วมกันคือ <strong>ตัวที่ซ้อนอยู่ไม่ได้เบียดพื้นที่ของตัวอื่น</strong> ซึ่งเป็นเกณฑ์ตัดสินว่าควรใช้ <code>Stack</code> หรือไม่</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>non-positioned child</td><td>ลูกที่ไม่ได้ระบุตำแหน่ง — เป็นตัวกำหนดขนาดของ <code>Stack</code></td></tr>
+<tr><td><code>Positioned</code></td><td>ตัวห่อที่ระบุว่าลูกอยู่ห่างจากขอบเท่าไร</td></tr>
+<tr><td><code>clipBehavior</code></td><td>จะตัดส่วนที่ล้นออกนอกขอบหรือไม่</td></tr>
+<tr><td>hit test</td><td>การตัดสินว่าการแตะจอโดน widget ตัวไหน</td></tr>
+<tr><td>overlay</td><td>ชั้นที่ลอยอยู่เหนือหน้าจอทั้งหมด</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กระดาษวางซ้อนกัน</h2><p><code>Stack</code> คือกองกระดาษ — ตัวแรกในรายการอยู่ล่างสุด ตัวสุดท้ายอยู่บนสุด</p><pre class="code-vs"><code>Stack(
+  children: [
+    A,   // ล่างสุด
+    B,
+    C,   // บนสุด ทับ A และ B
+  ],
+)</code></pre><p>ขั้นตอนการทำงานมีสองรอบ</p><ol><li>วัด <strong>ลูกที่ไม่ได้ระบุตำแหน่ง</strong> ทั้งหมดก่อน → ตัวที่ใหญ่ที่สุดกำหนดขนาดของ <code>Stack</code></li><li>วาง <strong>ลูกที่ระบุตำแหน่ง</strong> ลงไปทีหลัง โดยอ้างขนาดที่ได้จากขั้นที่ 1</li></ol><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>Stack</code> ต้องมีลูกที่ไม่ได้ระบุตำแหน่งอย่างน้อยหนึ่งตัวเป็น “เจ้าของขนาด” เสมอ — ถ้าทุกตัวเป็น <code>Positioned</code> หมด <code>Stack</code> จะไม่รู้ว่าตัวเองใหญ่แค่ไหน</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><p>เปิด <code>lib/layout_basics/layout_basics_app.dart</code> ที่ส่วนไอคอนกับจุดแจ้งเตือน</p><pre class="code-vs"><code>Stack(
   clipBehavior: Clip.none,
   children: [
-    WarehouseTile(onTap: onTap),
-    if (count &gt; 0)
-      Positioned(top: -6, right: -6, child: CountBadge(count)),
-  ],
-)</code></pre><p>Tile ยังเป็น non-positioned owner ของขนาด Badge เป็น decoration ที่ไม่เปลี่ยน flow ต้องเผื่อไม่ให้ถูก parent clip และเพิ่ม semantics ให้ screen reader อ่านจำนวนด้วย</p></section>
-<section id="section-3"><h2>3. Positioned และ Positioned.fill</h2><p>กำหนด left+right จะบังคับ width, top+bottom จะบังคับ height; กำหนดเพียงด้านเดียว child เลือกขนาดอีกส่วน <code>Positioned.fill</code> เหมาะกับ overlay เต็มพื้นที่ เช่น absorb input ระหว่าง submit</p></section>
-<section id="section-4"><h2>4. Loading overlay ที่ปลอดภัย</h2><pre class="code-vs"><code>Stack(children: [
-  const WorkflowBody(),
-  if (busy)
-    const Positioned.fill(
-      child: ColoredBox(
-        color: Color(0x55000000),
-        child: Center(child: CircularProgressIndicator()),
+    const Icon(Icons.inventory_2_outlined, size: 32),   // เจ้าของขนาด
+    if (line.urgent)
+      Positioned(
+        right: -2,
+        top: -2,
+        child: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: theme.colorScheme.error,
+            shape: BoxShape.circle,
+          ),
+        ),
       ),
-    ),
-])</code></pre><p>ถ้าต้อง block tap ใช้ ModalBarrier หรือ AbsorbPointer อย่างชัดเจน พร้อม semantics/label และอย่าลืม error path ที่ปิด busy</p></section>
-<section id="section-5"><h2>5. clipBehavior และ hit testing</h2><p><code>Clip.none</code> ทำให้ภาพวาดล้นได้ แต่ส่วนที่อยู่นอก bounds ของ Stack อาจไม่ได้รับ hit ตามที่คาดและอาจชน sibling ถ้าต้องกดได้ให้ขยาย owner bounds/touch target ไม่ใช้การวาดล้นเป็นพื้นที่ปฏิสัมพันธ์หลัก</p></section>
-<section id="section-6"><h2>6. Overlay/Portal ต่างจาก Stack</h2><p>Dropdown, tooltip, toast และ menu ที่ต้องลอยเหนือ route หรือหนี clip ของ ancestor ควรใช้ Overlay, OverlayPortal หรือ API ของ Material เช่น showMenu/showDialog Stack ใช้ได้เฉพาะขอบเขต subtree ของมัน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จะแสดงวงกลมสถานะ online ที่มุม avatar และต้องกด avatar ได้เต็ม 48×48 ควรให้ใครรับ gesture?</p><details><summary>เฉลย</summary><p>ให้ Stack/SizedBox มีขนาด 48×48 และ avatar เป็นปุ่ม/InkWell เจ้าของ gesture วาง status เป็น Positioned ภายใน bounds หรือ IgnorePointer ถ้าเป็น decoration เท่านั้น เพิ่ม semantic value “ออนไลน์” ให้ avatar ไม่ทำวงกลมเล็กเป็น target แยก</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การวาง form ด้วย Positioned(top: 120, left: 16...) จะพังเมื่อ keyboard, rotation, tablet หรือ text scale เปลี่ยน ใช้ Flex/scroll/constraints สำหรับ flow ปกติ และใช้ Stack เฉพาะความสัมพันธ์การซ้อนจริง</div></section>
+  ],
+)</code></pre><p>สังเกตสามอย่าง</p><table><thead><tr><th>สิ่งที่เห็น</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Icon</code> ไม่มี <code>Positioned</code></td><td>มันเป็นเจ้าของขนาด — <code>Stack</code> จึงเป็น 32×32</td></tr>
+<tr><td><code>right: -2, top: -2</code></td><td>ค่าติดลบ = ล้นออกนอกขอบไปเล็กน้อย</td></tr>
+<tr><td><code>clipBehavior: Clip.none</code></td><td>อนุญาตให้วาดล้นออกนอกขอบได้</td></tr>
+</tbody></table><p>ถ้าไม่ใส่ <code>Clip.none</code> จุดสีแดงจะถูกตัดครึ่งตรงขอบไอคอน เพราะค่าเริ่มต้นของ <code>Stack</code> คือตัดส่วนที่ล้นทิ้ง</p><p>และสังเกตว่าเราใช้ <code>if (line.urgent)</code> ใน <code>children</code> โดยตรง — นั่นคือ collection if จาก D1.5 ที่ใช้จริง</p></section>
+
+<section id="section-5"><h2>5. Positioned: กำหนดกี่ด้านก็มีความหมายต่างกัน</h2><table><thead><tr><th>ระบุ</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>top</code> อย่างเดียว</td><td>ลูกเลือกความสูงเอง วางห่างจากบนตามที่ระบุ</td></tr>
+<tr><td><code>top</code> และ <code>bottom</code></td><td>ความสูงถูกบังคับตามพื้นที่ที่เหลือ</td></tr>
+<tr><td><code>left</code> และ <code>right</code></td><td>ความกว้างถูกบังคับ</td></tr>
+<tr><td><code>Positioned.fill</code></td><td>เต็มทั้งสี่ด้าน ใช้กับแผ่นบัง</td></tr>
+</tbody></table><pre class="code-vs"><code>Stack(
+  children: [
+    const WorkflowBody(),                 // เจ้าของขนาด
+    if (busy)
+      const Positioned.fill(
+        child: ColoredBox(
+          color: Color(0x55000000),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+  ],
+)</code></pre><div class="warn"><strong>แผ่นบังที่ทำครึ่ง ๆ กลาง ๆ อันตราย</strong> — แผ่นสีเทาโปร่งแสงบังตาได้ แต่ <strong>ไม่ได้กันการแตะ</strong> ผู้ใช้ยังกดปุ่มที่อยู่ข้างล่างได้ทะลุผ่านไป ทำให้เกิดรายการซ้ำทั้งที่หน้าจอดูเหมือนกำลังโหลดอยู่ ถ้าต้องกันการแตะจริงต้องใช้ <code>AbsorbPointer</code> หรือ <code>ModalBarrier</code> ครอบ</div></section>
+
+<section id="section-6"><h2>6. การแตะกับส่วนที่วาดล้น</h2><p>เมื่อใช้ <code>Clip.none</code> ส่วนที่วาดล้นออกนอกขอบ <strong>จะมองเห็นแต่กดไม่โดน</strong> เพราะการตัดสินว่าแตะโดนอะไรยังใช้ขอบเขตจริงของ <code>Stack</code></p><p>นี่ไม่ใช่ปัญหาสำหรับจุดแจ้งเตือนใน lab เพราะมันเป็นแค่การตกแต่ง ไม่ต้องกด แต่ถ้าวันหนึ่งอยากให้กดจุดนั้นแล้วเปิดรายละเอียด จะพบว่ากดไม่ได้ และหาสาเหตุยากมากเพราะตาเห็นอยู่ชัด ๆ</p><p>ทางแก้คือขยายขอบเขตของเจ้าของขนาดให้ครอบคลุมสิ่งที่ต้องกดได้ แทนที่จะพึ่งการวาดล้น</p><pre class="code-vs"><code>SizedBox(
+  width: 48, height: 48,          // ขอบเขตที่กดได้จริง
+  child: Stack(
+    alignment: Alignment.center,
+    children: [
+      const Icon(Icons.inventory_2_outlined, size: 32),
+      Positioned(top: 4, right: 4, child: badge),   // อยู่ในขอบเขต
+    ],
+  ),
+)</code></pre></section>
+
+<section id="section-7"><h2>7. เมื่อไหร่ที่ไม่ควรใช้ Stack</h2><table><thead><tr><th>สถานการณ์</th><th>ใช้ <code>Stack</code> ไหม</th><th>ควรใช้อะไรแทน</th></tr></thead><tbody>
+<tr><td>จุดแจ้งเตือนบนไอคอน</td><td>ใช่</td><td>—</td></tr>
+<tr><td>ป้ายทับมุมการ์ด</td><td>ใช่</td><td>—</td></tr>
+<tr><td>แผ่นบังระหว่างโหลดในหน้าจอเดียว</td><td>ใช่</td><td>—</td></tr>
+<tr><td>จัดวางฟอร์มทั้งหน้าด้วยพิกัดคงที่</td><td><strong>ไม่</strong></td><td><code>Column</code> + <code>Expanded</code></td></tr>
+<tr><td>กล่องโต้ตอบหรือเมนูที่ต้องลอยเหนือทั้งแอป</td><td><strong>ไม่</strong></td><td><code>showDialog</code>, <code>showMenu</code> (Part 5)</td></tr>
+<tr><td>ข้อความแจ้งเตือนชั่วคราวด้านล่าง</td><td><strong>ไม่</strong></td><td><code>ScaffoldMessenger</code> (5.10)</td></tr>
+</tbody></table><div class="warn">การจัดหน้าจอด้วย <code>Positioned(top: 120, left: 16)</code> ดูเหมือนควบคุมได้แม่นยำ แต่จะพังทันทีเมื่อแป้นพิมพ์ขึ้น เมื่อหมุนจอ เมื่อเปิดบนแท็บเล็ต หรือเมื่อผู้ใช้ตั้งขนาดตัวอักษรใหญ่ขึ้น — ใช้ระบบ constraint ตาม 2.1 สำหรับการจัดวางปกติเสมอ และเก็บ <code>Stack</code> ไว้ใช้เฉพาะเมื่อของซ้อนกันจริง</div></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>จุดแจ้งเตือนถูกตัดครึ่ง</td><td>ค่าเริ่มต้นตัดส่วนที่ล้น</td><td>ใส่ <code>clipBehavior: Clip.none</code></td></tr>
+<tr><td><code>Stack</code> มีขนาดเป็นศูนย์</td><td>ลูกทุกตัวเป็น <code>Positioned</code></td><td>ต้องมีลูกที่ไม่ระบุตำแหน่งอย่างน้อยหนึ่ง หรือกำหนดขนาดให้ <code>Stack</code></td></tr>
+<tr><td>เห็นอยู่แต่กดไม่โดน</td><td>ส่วนนั้นอยู่นอกขอบเขตจริง</td><td>ขยายขอบเขตของเจ้าของขนาด</td></tr>
+<tr><td>กดทะลุแผ่นบังได้ระหว่างโหลด</td><td>แผ่นบังไม่ได้กันการแตะ</td><td>ครอบด้วย <code>AbsorbPointer</code> หรือ <code>ModalBarrier</code></td></tr>
+<tr><td>เมนูถูกตัดโดยขอบการ์ด</td><td>ใช้ <code>Stack</code> กับสิ่งที่ต้องลอยเหนือทั้งแอป</td><td>ใช้ <code>showMenu</code> หรือ <code>Overlay</code></td></tr>
+<tr><td>หน้าจอเพี้ยนเมื่อแป้นพิมพ์ขึ้น</td><td>จัดวางด้วยพิกัดคงที่</td><td>เปลี่ยนไปใช้ <code>Column</code> และ <code>Expanded</code></td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>สร้าง <code>OperatorAvatar</code> ที่แสดงรูปพนักงานพร้อมจุดสถานะออนไลน์มุมล่างขวา โดย</p><ol><li>พื้นที่กดได้ต้องเป็น 48×48 เต็ม</li><li>จุดสถานะต้องอยู่ในขอบเขตที่กดได้ ไม่ล้นออกไป</li><li>กดที่ไหนก็ได้ในพื้นที่ 48×48 ต้องเรียก callback ตัวเดียวกัน</li><li>จุดสถานะไม่ใช่ปุ่มแยก</li></ol><p>แล้วอธิบายว่าทำไมข้อ 4 ถึงสำคัญ</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class OperatorAvatar extends StatelessWidget {
+  const OperatorAvatar({
+    super.key,
+    required this.initial,
+    required this.online,
+    required this.onTap,
+  });
+
+  final String initial;
+  final bool online;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: 48,
+      height: 48,                        // 1) ขอบเขตที่กดได้
+      child: InkWell(
+        onTap: onTap,                    // 3) ตัวเดียวคุมทั้งพื้นที่
+        customBorder: const CircleBorder(),
+        child: Stack(
+          children: [
+            // เจ้าของขนาด — เต็ม 48x48
+            Center(
+              child: CircleAvatar(radius: 20, child: Text(initial)),
+            ),
+            // 2) อยู่ในขอบเขต ไม่ใช้ค่าติดลบ
+            Positioned(
+              right: 2,
+              bottom: 2,
+              // 4) เป็นการตกแต่ง ไม่รับการแตะ
+              child: IgnorePointer(
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: online ? Colors.green : scheme.outline,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: scheme.surface, width: 2),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}</code></pre><p><strong>ทำไมข้อ 4 สำคัญ</strong></p><p>ถ้าจุดสถานะรับการแตะเอง จะเกิดปัญหาสามอย่าง</p><ol><li><strong>มีพื้นที่ตายเล็ก ๆ</strong> — เมื่อผู้ใช้กดโดนจุด 12×12 พอดี การแตะจะถูกจุดนั้นรับไว้และไม่ส่งต่อไปที่ <code>InkWell</code> ผลคือกดแล้วไม่มีอะไรเกิดขึ้น ซึ่งดูเหมือนแอปค้าง</li><li><strong>เกิดเฉพาะบางครั้ง</strong> — พื้นที่นั้นเล็กมาก จึงเกิดสุ่ม ๆ ทำให้ทั้งผู้ใช้และผู้ทดสอบอธิบายอาการไม่ได้ ยิ่งบน PDA ที่ผู้ใช้ใส่ถุงมือและกดไม่แม่น โอกาสโดนยิ่งสูง</li><li><strong>เสียความหมายทางความหมาย</strong> — จุดสถานะเป็นข้อมูล ไม่ใช่ปุ่ม ถ้าให้มันรับการแตะ โปรแกรมอ่านหน้าจอจะประกาศว่ามีปุ่มเพิ่มอีกหนึ่งปุ่มโดยไม่มีชื่อ</li></ol><p><code>IgnorePointer</code> แก้ทั้งสามข้อในบรรทัดเดียว โดยบอกว่า “ตัวนี้มีไว้ดู ไม่ต้องส่งการแตะมาที่ฉัน”</p><p><strong>ทำไมไม่ใช้ค่าติดลบเหมือนใน lab:</strong> เพราะ lab เป็นจุดแจ้งเตือนที่แค่ตกแต่งและอยู่บนไอคอนที่ไม่ต้องกด แต่ข้อนี้พื้นที่ทั้งหมดต้องกดได้ ถ้าให้จุดล้นออกไปนอก 48×48 ส่วนที่ล้นจะมองเห็นแต่กดไม่โดนตามที่อธิบายในหัวข้อ 6</p><p><strong>ทำไมมีเส้นขอบสีพื้นหลังรอบจุด:</strong> เพื่อให้จุดแยกออกจากรูปด้านหลังได้ชัดแม้สีใกล้กัน — รายละเอียดเล็ก ๆ แบบนี้สำคัญมากบนหน้าจอ PDA ที่ใช้กลางแดดในคลัง</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่แตะตรงตำแหน่งของจุดสถานะพอดี แล้วตรวจว่า <code>onTap</code> ยังถูกเรียก — ถ้าลบ <code>IgnorePointer</code> ออก เทสต์นี้จะล้มเหลว</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>Stack</code> ใช้เมื่อของซ้อนกันจริงและตัวที่ซ้อนไม่เบียดพื้นที่ใคร</li><li>ตัวแรกในรายการอยู่ล่างสุด ตัวสุดท้ายอยู่บนสุด</li><li>ต้องมีลูกที่ไม่ระบุตำแหน่งเป็นเจ้าของขนาดเสมอ</li><li><code>Clip.none</code> ให้วาดล้นได้ แต่ส่วนที่ล้นกดไม่โดน</li><li>แผ่นบังต้องกันการแตะด้วย ไม่ใช่แค่บังตา</li><li>อย่าจัดหน้าจอทั้งหน้าด้วยพิกัดคงที่</li><li>ใช้ <code>IgnorePointer</code> กับสิ่งที่เป็นการตกแต่ง</li></ul></div><p><strong>บทถัดไป:</strong> 2.6 จะตอบคำถามที่เจอทุกหน้าจอ — เมื่อเนื้อหายาวเกินจอ ควรใช้ <code>SingleChildScrollView</code> หรือ <code>ListView</code> และทำไมการเลือกผิดถึงทำให้แอปช้าลงอย่างมาก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
