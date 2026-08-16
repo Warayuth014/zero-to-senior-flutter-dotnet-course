@@ -1,34 +1,87 @@
-<div class="note">Function ใน Dart เป็น object: เก็บในตัวแปร ส่งเป็น argument คืนจาก function และมี type ได้ นี่คือฐานของ callback ทุกปุ่ม, builder, listener และ repository fake ใน Flutter</div>
-<section><h2>1. รูปแบบ parameter</h2><pre class="code-vs"><code>String normalize(String raw) =&gt; raw.trim().toUpperCase();
+<div class="meta"><span>ระดับ: เริ่มจากศูนย์</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เขียนฟังก์ชันและเลือกรูปแบบ parameter</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.2–D1.3 (ตัวแปร ชนิดข้อมูล และการเลือก <code>final</code>/<code>const</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนฟังก์ชันที่รับค่าและคืนค่า เลือกใช้ parameter แบบตำแหน่งหรือแบบมีชื่อได้ถูกที่ และเข้าใจว่า “ส่งฟังก์ชัน” ต่างจาก “เรียกฟังก์ชัน” อย่างไร</div>
 
-Future&lt;void&gt; submitScan({
-  required String barcode,
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>จนถึงตอนนี้โค้ดของเราเป็นคำสั่งเรียงกันยาว ๆ ใน <code>main()</code> ซึ่งใช้ได้กับโปรแกรม 10 บรรทัด แต่พออยากทำงานเดิมซ้ำในหลายที่ เราจะเริ่มคัดลอกโค้ด และเมื่อกฎเปลี่ยนก็ต้องไล่แก้ทุกจุด</p><p>ฟังก์ชันคือวิธีตั้งชื่อให้ “ชุดของงาน” หนึ่งชุด เพื่อให้เรียกใช้ซ้ำได้ และแก้ที่เดียวมีผลทุกที่ นี่ยังเป็นบทที่สำคัญเป็นพิเศษ เพราะ Flutter ทั้งเฟรมเวิร์กสร้างจากการส่งฟังก์ชันไปมา</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th><th>ชี้ที่ตรงไหนในโค้ด</th></tr></thead><tbody>
+<tr><td>function</td><td>ชุดคำสั่งที่มีชื่อ เรียกใช้ซ้ำได้</td><td><code>String labelOf(...) { }</code></td></tr>
+<tr><td>parameter</td><td>ช่องรับค่าที่ประกาศไว้ตอนเขียนฟังก์ชัน</td><td><code>String code</code> ในวงเล็บ</td></tr>
+<tr><td>argument</td><td>ค่าจริงที่ส่งเข้าไปตอนเรียก</td><td><code>'PAL-1001'</code> ตอนเรียก</td></tr>
+<tr><td>return type</td><td>ชนิดของค่าที่ฟังก์ชันคืนกลับมา</td><td><code>String</code> ที่อยู่หน้าชื่อ</td></tr>
+<tr><td><code>void</code></td><td>ทำงานแล้วไม่คืนค่าอะไรกลับ</td><td><code>void report(...)</code></td></tr>
+<tr><td>call site</td><td>บรรทัดที่เรียกใช้ฟังก์ชัน</td><td><code>labelOf('PAL-1001', 12)</code></td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เครื่องจักรที่มีช่องใส่และช่องออก</h2><p>ให้คิดว่าฟังก์ชันคือเครื่องจักรในสายพาน</p><ul><li><strong>ช่องใส่</strong> คือ parameter — ระบุว่าเครื่องนี้ต้องการวัตถุดิบอะไรบ้าง</li><li><strong>ช่องออก</strong> คือ return type — ระบุว่าเครื่องนี้ผลิตอะไรออกมา</li><li><strong>ข้างในเครื่อง</strong> คือรายละเอียดที่คนเรียกใช้ไม่จำเป็นต้องรู้</li></ul><p>อ่านบรรทัดแรกของฟังก์ชันแล้วต้องตอบได้สามข้อ: รับอะไร, คืนอะไร, ชื่อบอกว่าทำอะไร ถ้าตอบไม่ได้ แปลว่าฟังก์ชันนั้นตั้งชื่อไม่ดีหรือทำงานหลายอย่างเกินไป</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ฟังก์ชันที่ดีทำ “เรื่องเดียว” และชื่อของมันบอกได้ว่าเรื่องนั้นคืออะไร</div></section>
+
+<section><h2>4. โครงสร้างพื้นฐาน</h2><pre class="code-vs"><code>String labelOf(String code, int quantity) {
+  return '$code x $quantity';
+}</code></pre><p>อ่านทีละส่วนจากซ้ายไปขวา</p><table><thead><tr><th>ส่วน</th><th>คืออะไร</th></tr></thead><tbody>
+<tr><td><code>String</code> ตัวแรก</td><td>ฟังก์ชันนี้คืนค่าเป็นข้อความ</td></tr>
+<tr><td><code>labelOf</code></td><td>ชื่อฟังก์ชัน</td></tr>
+<tr><td><code>(String code, int quantity)</code></td><td>ช่องรับค่าสองช่อง พร้อมชนิด</td></tr>
+<tr><td><code>{ ... }</code></td><td>เนื้องานของฟังก์ชัน</td></tr>
+<tr><td><code>return</code></td><td>ส่งค่ากลับไปให้คนเรียก และจบฟังก์ชันทันที</td></tr>
+</tbody></table><p>ถ้าเนื้องานมีบรรทัดเดียว เขียนย่อด้วยลูกศรได้ ความหมายเหมือนกันทุกประการ</p><pre class="code-vs"><code>String labelOf(String code, int quantity) =&gt; '$code x $quantity';</code></pre></section>
+
+<section><h2>5. รูปแบบ parameter สามแบบ</h2><p>รันดูของจริงก่อน</p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_04_functions.dart</code></pre><table><thead><tr><th>แบบ</th><th>เขียนอย่างไร</th><th>เรียกอย่างไร</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>ตำแหน่ง (positional)</td><td><code>f(String code, int qty)</code></td><td><code>f('PAL-1', 12)</code></td><td>ค่า 1–2 ตัวที่ลำดับชัดเจน</td></tr>
+<tr><td>ตำแหน่งแบบไม่บังคับ</td><td><code>f(String code, [int keep = 3])</code></td><td><code>f('PAL-1')</code></td><td>ค่าเสริมที่มักใช้ค่าเริ่มต้น</td></tr>
+<tr><td>มีชื่อ (named)</td><td><code>f({required String code, int qty = 1})</code></td><td><code>f(code: 'PAL-1', qty: 5)</code></td><td>ค่าตั้งแต่ 3 ตัวขึ้นไป หรือค่าที่สลับกันแล้วไม่มีใครรู้</td></tr>
+</tbody></table><pre class="code-vs"><code>String pickLine({
+  required String code,
+  required String location,
   int quantity = 1,
-  String? serial,
-}) async { /* ... */ }
-
-submitScan(barcode: 'PAL-001', quantity: 2);</code></pre><p>Positional เหมาะกับค่าจำนวนน้อยที่ลำดับชัด Named parameter ทำ call site อ่านรู้เรื่องและลดการสลับค่า ใช้ <code>required</code> เมื่อไม่มี default ที่ถูกต้อง อย่าทำ required parameter เป็น nullable โดยไม่มีเหตุผล</p></section>
-<section><h2>2. Function type และ callback</h2><pre class="code-vs"><code>typedef ScanHandler = Future&lt;void&gt; Function(String barcode);
-
-class ScanButton extends StatelessWidget {
-  const ScanButton({super.key, required this.onScan});
-  final ScanHandler onScan;
-  // onPressed: () =&gt; onScan(controller.text)
-}</code></pre><p><code>VoidCallback</code> คือ <code>void Function()</code>, <code>ValueChanged&lt;T&gt;</code> คือ <code>void Function(T)</code> การระบุ signature ทำให้ parent/child ตกลง input-output กันโดยไม่รู้ implementation ของกันและกัน</p></section>
-<section><h2>3. ส่ง function ไม่ใช่เรียก function</h2><pre class="code-vs"><code>onPressed: submit,        // ส่ง tear-off ให้ Flutter เรียกภายหลัง
-onPressed: () =&gt; submit(code), // wrapper เมื่อมี argument
-// onPressed: submit(code),    // เรียกเดี๋ยวนี้และเอาผลลัพธ์ไปใส่: ผิด</code></pre><p>ถ้า callback คืน <code>Future&lt;void&gt;</code> แต่ API รับ <code>void Function()</code> Flutter จะไม่ await ให้อัตโนมัติ เจ้าของ action ต้องจัด loading, error และ duplicate tap เอง</p></section>
-<section><h2>4. Closure และค่าที่ capture</h2><pre class="code-vs"><code>for (final task in tasks) {
-  buttons.add(TaskButton(onTap: () =&gt; openTask(task.id)));
-}</code></pre><p>closure จำตัวแปรรอบข้างได้ สะดวกแต่ทำ dependency ซ่อนอยู่ ถ้า callback ใหญ่หรือจับ state หลายตัวให้ย้ายเป็น named method เพื่ออ่าน stack trace/test ง่ายขึ้น</p></section>
-<section><h2>5. ตัวอย่างจริง</h2><p><code>wmsapp/lib/services/signalr_service.dart</code> ประกาศ <code>typedef SignalRCallback = void Function(Map&lt;String, dynamic&gt; data)</code> แล้วเก็บ listener เป็น list ส่วน widget ในทั้งสองโปรเจกต์รับ <code>onTap</code>, <code>onChanged</code>, <code>onSubmitted</code> เพื่อส่ง event จาก child กลับ owner โดยไม่ให้ child รู้ business logic</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>เขียน function <code>validateQuantity</code> ที่รับ String และ optional max แล้วคืน String? สำหรับ Form validator จากนั้นส่งมันเป็น callback</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>String? validateQuantity(String? raw, {int? max}) {
-  final value = int.tryParse(raw?.trim() ?? '');
-  if (value == null || value &lt;= 0) return 'จำนวนไม่ถูกต้อง';
-  if (max != null &amp;&amp; value &gt; max) return 'เกินจำนวนคงเหลือ';
-  return null;
+  String? note,
+}) {
+  final suffix = note == null ? '' : ' ($note)';
+  return 'หยิบ $code จำนวน $quantity จาก $location$suffix';
 }
 
-TextFormField(validator: (value) =&gt; validateQuantity(value, max: 10));</code></pre></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn">callback async ที่ throw อาจกลายเป็น unhandled error ถ้าผู้เรียกไม่ await/catch และอย่าประกาศ callback เป็น <code>Function</code> กว้าง ๆ เพราะเสียการตรวจจำนวน/type ของ argument</div></section>
-<section><h2>8. เช็กความเข้าใจ</h2><p>อ่าน callback แล้วตอบให้ได้: ใครเรียก, เรียกเมื่อไร, รับค่าอะไร, คืน Future ไหม, error ไปไหน และมีโอกาสถูกเรียกซ้ำหรือหลัง dispose หรือไม่</p></section>
+pickLine(code: 'PAL-1001', location: 'A-01-02');
+pickLine(code: 'PAL-1003', location: 'C-02-04', quantity: 2, note: 'ของแตกง่าย');</code></pre><div class="note"><strong>ทำไม Flutter ถึงใช้ named parameter แทบทุกที่:</strong> เพราะ widget หนึ่งตัวมีค่าให้ตั้งสิบกว่าค่า ถ้าใช้ตำแหน่งล้วน ๆ จะไม่มีใครจำได้ว่าตัวที่เจ็ดคืออะไร — พอเห็น <code>padding:</code>, <code>onPressed:</code>, <code>child:</code> ในบทหลัง ๆ ให้รู้ว่านั่นคือรูปแบบเดียวกับที่เรียนวันนี้</div><p>กฎของ <code>required</code>: parameter แบบมีชื่อจะไม่บังคับส่งโดยปริยาย ดังนั้นแต่ละตัวต้องเข้าเงื่อนไขข้อใดข้อหนึ่งใน 3 ข้อนี้ — ใส่ <code>required</code>, มีค่าเริ่มต้น, หรือเป็นชนิดที่ว่างได้ (<code>String?</code>)</p></section>
+
+<section><h2>6. void กับการคืนค่า</h2><table><thead><tr><th></th><th>คืนค่า</th><th><code>void</code></th></tr></thead><tbody>
+<tr><td>จุดประสงค์</td><td>คำนวณแล้วส่งผลลัพธ์กลับ</td><td>ทำอะไรบางอย่าง เช่น พิมพ์ บันทึก ส่งข้อมูล</td></tr>
+<tr><td>เอาไปใส่ตัวแปรได้</td><td>ได้</td><td>ไม่ได้</td></tr>
+<tr><td>ทดสอบง่ายไหม</td><td>ง่าย เทียบค่าที่คืนได้เลย</td><td>ยากกว่า ต้องดูผลข้างเคียง</td></tr>
+</tbody></table><p>เวลาเขียนกฎทางธุรกิจ เช่น ตรวจว่าจำนวนถูกต้องหรือไม่ ให้ทำเป็นฟังก์ชันที่ <strong>คืนค่า</strong> แล้วค่อยให้ฟังก์ชัน <code>void</code> เป็นคนพาผลลัพธ์ไปแสดงผล วิธีนี้ทำให้เขียนเทสต์ได้โดยไม่ต้องมีหน้าจอ</p></section>
+
+<section><h2>7. ฟังก์ชันเป็น “ค่า” ได้</h2><p>นี่คือแนวคิดที่ทำให้ Flutter ทำงานได้ และเป็นจุดที่คนใหม่งงมากที่สุด ใน Dart ฟังก์ชันเก็บใส่ตัวแปรได้เหมือนตัวเลขหรือข้อความ</p><pre class="code-vs"><code>void report(String message) =&gt; print('  [report] $message');
+
+final printer = report;   // เก็บ "ตัวฟังก์ชัน" ไว้ในตัวแปร
+printer('ส่งฟังก์ชันไปทำงานทีหลัง');   // ค่อยเรียกทีหลัง</code></pre><div class="warn"><strong>จุดที่พลาดกันมากที่สุดทั้งคอร์ส:</strong> <code>report</code> คือ <em>ตัวฟังก์ชัน</em> ส่วน <code>report('hi')</code> คือ <em>การเรียกทันทีแล้วได้ผลลัพธ์</em> — ต่างกันแค่วงเล็บ แต่ความหมายคนละเรื่อง เมื่อถึงบทปุ่มใน Flutter การใส่วงเล็บผิดที่จะทำให้ปุ่มทำงานเองตั้งแต่หน้าจอเปิด แทนที่จะรอให้ผู้ใช้กด</div></section>
+
+<section><h2>8. Closure: ฟังก์ชันที่จำสิ่งรอบตัวได้</h2><pre class="code-vs"><code>int Function(int) makeAdder(int amount) {
+  return (int value) =&gt; value + amount;   // จำค่า amount เอาไว้
+}
+
+final addTax = makeAdder(7);
+print(addTax(100));   // 107
+print(addTax(250));   // 257</code></pre><p>ฟังก์ชันที่คืนออกมา “จำ” ค่า <code>amount</code> ไว้ได้ แม้ <code>makeAdder</code> จะทำงานจบไปแล้ว พฤติกรรมนี้เรียกว่า closure และเป็นเหตุผลว่าทำไมปุ่มแต่ละปุ่มในรายการถึงรู้ว่าตัวเองต้องเปิดงานใบไหน</p><p>ชนิด <code>int Function(int)</code> อ่านว่า “ฟังก์ชันที่รับ <code>int</code> หนึ่งตัวแล้วคืน <code>int</code>” — อ่านจากขวาไปซ้าย: คืน <code>int</code>, ชื่อชนิดคือ <code>Function</code>, รับ <code>int</code></p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>The parameter 'x' can't have a value of 'null'</code></td><td>parameter แบบมีชื่อไม่ได้ใส่ <code>required</code> และไม่มีค่าเริ่มต้น</td><td>เติม <code>required</code> ใส่ค่าเริ่มต้น หรือเปลี่ยนเป็นชนิด nullable</td></tr>
+<tr><td>ส่งค่าถูกแต่ผลลัพธ์สลับกัน</td><td>เรียงลำดับ argument แบบตำแหน่งผิด</td><td>เปลี่ยนไปใช้ named parameter</td></tr>
+<tr><td><code>This function has a return type of 'String', but doesn't end with a return</code></td><td>มีทางเดินบางเส้นที่ไม่ได้ <code>return</code></td><td>ตรวจทุกสาขาของ <code>if</code> ให้คืนค่าครบ</td></tr>
+<tr><td>ฟังก์ชันทำงานเองตั้งแต่ยังไม่ถึงเวลา</td><td>ใส่วงเล็บตอนที่ตั้งใจจะ “ส่ง” ฟังก์ชัน</td><td>ส่งชื่อฟังก์ชันเปล่า ๆ หรือห่อด้วย <code>() =&gt; f(x)</code></td></tr>
+<tr><td>ฟังก์ชันยาวเป็นร้อยบรรทัดจนแก้ไม่ไหว</td><td>ทำหลายเรื่องในฟังก์ชันเดียว</td><td>แยกตามชื่อ ถ้าตั้งชื่อไม่ได้ในคำเดียวแปลว่าควรแยก</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>เขียนฟังก์ชัน <code>validateQuantity</code> ที่</p><ol><li>รับข้อความจำนวนที่ผู้ใช้พิมพ์ (อาจว่างหรือไม่ใช่ตัวเลข)</li><li>รับจำนวนสูงสุดแบบไม่บังคับ ผ่าน named parameter</li><li>คืน <code>String?</code> — เป็นข้อความบอกเหตุผลเมื่อผิด และเป็น <code>null</code> เมื่อผ่าน</li></ol><p>แล้วเรียกใช้กับค่า <code>'5'</code>, <code>'0'</code>, <code>'abc'</code> และ <code>'99'</code> โดยกำหนดค่าสูงสุดเป็น 10</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>String? validateQuantity(String? raw, {int? max}) {
+  final value = int.tryParse(raw?.trim() ?? '');
+  if (value == null) return 'กรุณากรอกตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (max != null &amp;&amp; value &gt; max) return 'เกินจำนวนคงเหลือ ($max)';
+  return null;   // null = ผ่าน
+}
+
+void main() {
+  for (final input in ['5', '0', 'abc', '99']) {
+    final error = validateQuantity(input, max: 10);
+    print('$input -&gt; ${error ?? 'ผ่าน'}');
+  }
+}</code></pre><p><strong>ทำไมคืน <code>String?</code> แทน <code>bool</code>:</strong> เพราะผู้ใช้ต้องรู้ว่า “ผิดตรงไหน” ไม่ใช่แค่ “ผิด” และรูปแบบนี้ตรงกับสิ่งที่ฟอร์มของ Flutter ต้องการพอดี (จะเจอใน Part 3) การออกแบบให้ <code>null</code> แปลว่าผ่านอาจดูแปลกตอนแรก แต่ทำให้เขียน <code>if (error != null)</code> ได้ตรงไปตรงมา</p><p><strong>ลองต่อ:</strong> เก็บฟังก์ชันนี้ไว้ในตัวแปรชนิด <code>String? Function(String?)</code> แล้วส่งเข้าไปในฟังก์ชันอื่น — นั่นคือ callback ซึ่งจะเรียนเต็ม ๆ ใน D1.11</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ฟังก์ชันคือการตั้งชื่อให้ชุดของงาน เพื่อเรียกซ้ำและแก้ที่เดียว</li><li>บรรทัดแรกของฟังก์ชันต้องบอกได้ว่า รับอะไร คืนอะไร ทำอะไร</li><li>parameter มี 3 แบบ: ตำแหน่ง, ตำแหน่งไม่บังคับ, และมีชื่อ — Flutter ใช้แบบมีชื่อเป็นหลัก</li><li>ฟังก์ชันเป็นค่าได้: <code>f</code> คือตัวฟังก์ชัน ส่วน <code>f()</code> คือการเรียก</li><li>closure ทำให้ฟังก์ชันจำค่ารอบตัวไว้ได้</li></ul></div><p><strong>บทถัดไป:</strong> D1.5 จะสอนเก็บข้อมูลหลายค่าไว้ด้วยกัน ด้วย List, Set และ Map ซึ่งเป็นสิ่งที่หน้าจอรายการทุกหน้าในแอปจริงใช้</p></section>

@@ -4,36 +4,216 @@
 <title>JSON / dynamic / Cast</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-19 · Dart Core</span><h1>JSON / dynamic / Cast</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Decode แล้วแปลงทันที</a></li><li><a href="#section-2">Parser ที่ทน type เล็กน้อยแต่ไม่กลืนข้อมูลเสีย</a></li><li><a href="#section-3">Casing และ .NET contract</a></li><li><a href="#section-4">DateTime, number และ enum</a></li><li><a href="#section-5">ตัวอย่างจริงที่ควรเทียบ</a></li><li><a href="#section-6">Contract test</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">หลัง <code>jsonDecode</code> ข้อมูลยังไม่ปลอดภัย: JSON ไม่มี class/enum/DateTime และ server อาจส่ง shape, casing หรือ null ต่างจากที่คิด Parser คือ firewall ระหว่าง dynamic world กับ typed app</div>
-<section id="section-1"><h2>1. Decode แล้วแปลงทันที</h2><pre class="code-vs"><code>Object? decoded = jsonDecode(response.body);
-if (decoded is! Map) {
-  throw const FormatException('Expected JSON object');
-}
-final map = Map&lt;String, dynamic&gt;.from(decoded);
-final task = Task.fromJson(map);</code></pre><p>อย่า cast <code>as Map&lt;String,dynamic&gt;</code> ก่อนตรวจ shape เพราะ cast error จะให้ข้อความระดับภาษาแทน contract error ที่ควบคุมได้</p></section>
-<section id="section-2"><h2>2. Parser ที่ทน type เล็กน้อยแต่ไม่กลืนข้อมูลเสีย</h2><pre class="code-vs"><code>int requiredInt(Map&lt;String, dynamic&gt; json, String key) {
-  final raw = json[key];
-  final value = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
-  if (value == null) throw FormatException('$key must be an integer');
-  return value;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ด่านตรวจชายแดน</a></li><li><a href="#section-4">รันดูของจริง</a></li><li><a href="#section-5">โครงสร้าง parser ที่ใช้ได้จริง</a></li><li><a href="#section-6">ตัวช่วยที่ทนความต่างเล็กน้อย แต่ไม่กลืนข้อมูลเสีย</a></li><li><a href="#section-7">ปัญหาที่จะเจอกับ .NET จริง ๆ</a></li><li><a href="#section-8">แถวเสียหนึ่งแถว ควรล้มทั้งชุดไหม</a></li><li><a href="#section-9">ส่งข้อมูลกลับขึ้น API</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: แปลงข้อมูลจาก API ให้เป็น object ที่เชื่อถือได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6 (class และ factory constructor), D1.13 (null safety), D1.14 (exception) และ D1.12 (pattern matching)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แปลง JSON จาก .NET API เป็น model ที่มีชนิดชัดเจน กัก <code>dynamic</code> ไว้ที่จุดเดียว และตัดสินใจได้ว่าข้อมูลผิดรูปแบบควรพังตรงไหน</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>นี่คือรอยต่อที่สำคัญที่สุดของทั้งคอร์ส ระหว่างโลกสองใบที่มีกฎต่างกันสิ้นเชิง</p><table><thead><tr><th></th><th>ฝั่ง .NET API</th><th>ฝั่ง Dart</th></tr></thead><tbody>
+<tr><td>ข้อมูลที่วิ่งมา</td><td>ข้อความ JSON ล้วน ๆ</td><td>object ที่มีชนิดแน่นอน</td></tr>
+<tr><td>มี class ไหม</td><td>ไม่มี มีแค่ map, list, ข้อความ, ตัวเลข</td><td>มี</td></tr>
+<tr><td>มี enum ไหม</td><td>ไม่มี</td><td>มี</td></tr>
+<tr><td>มีวันที่ไหม</td><td>ไม่มี เป็นข้อความ</td><td>มี <code>DateTime</code></td></tr>
+<tr><td>ใครตรวจสอบ</td><td>ไม่มีใคร</td><td>compiler ตรวจให้</td></tr>
+</tbody></table><p>ถ้าเราปล่อยข้อมูลดิบไหลเข้าไปในแอปโดยไม่แปลง เราจะเสียประโยชน์ทุกอย่างที่เรียนมาตั้งแต่ D1.2 — บั๊กจะย้ายจากตอน compile ไปโผล่ตอนพนักงานกำลังสแกนของ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>JSON</td><td>รูปแบบข้อความมาตรฐานสำหรับส่งข้อมูลระหว่างระบบ</td></tr>
+<tr><td><code>jsonDecode</code></td><td>แปลงข้อความ JSON เป็นโครงสร้างใน Dart</td></tr>
+<tr><td><code>jsonEncode</code></td><td>แปลงกลับเป็นข้อความเพื่อส่งขึ้น API</td></tr>
+<tr><td>parser</td><td>โค้ดที่ทำหน้าที่แปลงข้อมูลดิบเป็น model</td></tr>
+<tr><td>payload</td><td>ข้อมูลที่ส่งมาในคำตอบของ API</td></tr>
+<tr><td>contract</td><td>ข้อตกลงว่าข้อมูลจะมีหน้าตาแบบไหน</td></tr>
+<tr><td>camelCase / PascalCase</td><td>รูปแบบการตั้งชื่อ — <code>palletCode</code> เทียบกับ <code>PalletCode</code></td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ด่านตรวจชายแดน</h2><p>ให้คิดว่า parser คือด่านตรวจที่ชายแดน ข้อมูลทุกชิ้นที่เข้าประเทศต้องผ่านด่านนี้และได้รับเอกสารรับรอง (ชนิดที่ถูกต้อง) ก่อนจะเดินทางต่อเข้าไปในแอปได้</p><pre class="code-vs"><code>ข้อความ JSON  ──jsonDecode──&gt;  Map/List ที่เป็น dynamic
+                                        │
+                                   [ ด่านตรวจ ]  &lt;- ที่นี่ที่เดียวที่แตะ dynamic
+                                        │
+                                  model ที่มีชนิด  ──&gt; หน้าจอ, ตรรกะ, ฐานข้อมูล</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>dynamic</code> ควรมีอายุสั้นที่สุดเท่าที่จะเป็นไปได้ — เกิดที่ <code>jsonDecode</code> และตายที่ parser ถ้ามันไหลไปถึงหน้าจอ แปลว่าด่านตรวจล้มเหลว</div></section>
+
+<section id="section-4"><h2>4. รันดูของจริง</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_19_json.dart</code></pre><p>ข้อมูลตัวอย่างจงใจมีปัญหาที่พบจริงทุกอย่าง — <code>quantity</code> ของแถวที่สองส่งมาเป็นข้อความ และมีค่า <code>null</code> ปนอยู่</p><pre class="code-vs"><code>{
+  "success": true,
+  "data": [
+    { "palletCode": "PAL-1001", "quantity": 12, "location": "A-01-02", "receivedAt": "2026-08-16T09:30:00" },
+    { "palletCode": "PAL-1002", "quantity": "4", "location": null, "receivedAt": null }
+  ]
+}</code></pre><pre class="code-vs"><code>ชนิดที่ได้ = _Map&lt;String, dynamic&gt;
+PAL-1001 x12 @ A-01-02 (2026)
+PAL-1002 x4 @ - (-)
+ผลรวม = 16 ชิ้น</code></pre><p>สังเกตว่า <code>"4"</code> ที่เป็นข้อความถูกแปลงเป็นเลข 4 จนบวกรวมได้ถูกต้อง — นั่นเป็นเพราะ parser จัดการให้ ไม่ใช่เพราะโชคดี</p></section>
+
+<section id="section-5"><h2>5. โครงสร้าง parser ที่ใช้ได้จริง</h2><pre class="code-vs"><code>class Pallet {
+  Pallet({
+    required this.palletCode,
+    required this.quantity,
+    this.location,
+    this.receivedAt,
+  });
+
+  // จุดเดียวในระบบที่ยอมแตะ dynamic
+  factory Pallet.fromJson(Map&lt;String, dynamic&gt; json) {
+    return Pallet(
+      palletCode: _asString(json['palletCode']),
+      quantity: _asInt(json['quantity']),
+      location: json['location'] as String?,
+      receivedAt: _asDate(json['receivedAt']),
+    );
+  }
+
+  final String palletCode;    // บังคับ ต้องมี
+  final int quantity;         // บังคับ ต้องมี
+  final String? location;     // ไม่มีได้จริง
+  final DateTime? receivedAt; // ไม่มีได้จริง
+}</code></pre><p>จุดที่ต้องคิดมากที่สุดคือ <strong>field ไหนบังคับ field ไหนว่างได้</strong> ซึ่งเป็นการตัดสินใจเชิงธุรกิจ ไม่ใช่เชิงเทคนิค</p><table><thead><tr><th>คำถามที่ต้องตอบ</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>“พาเลทที่ไม่มีรหัส มีอยู่จริงไหม”</td><td>ไม่มี → <code>String</code> บังคับ</td></tr>
+<tr><td>“พาเลทที่ยังไม่ถูกจัดเก็บ มีอยู่จริงไหม”</td><td>มี → <code>String?</code></td></tr>
+</tbody></table><div class="warn"><strong>กับดักที่พบบ่อยที่สุด:</strong> การทำให้ทุก field เป็น nullable เพราะ “กลัว API ส่งมาไม่ครบ” ผลคือหน้าจอทุกหน้าต้องเขียน <code>?.</code> และ <code>?? ''</code> ทุกบรรทัด และไม่มีใครรู้ว่าค่าไหนหายจริงหรือหายเพราะบั๊ก — ตรวจให้จบที่ด่าน แล้วให้ส่วนที่เหลือของแอปทำงานกับข้อมูลที่เชื่อถือได้</div></section>
+
+<section id="section-6"><h2>6. ตัวช่วยที่ทนความต่างเล็กน้อย แต่ไม่กลืนข้อมูลเสีย</h2><pre class="code-vs"><code>int _asInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) {
+    final parsed = int.tryParse(value);
+    if (parsed != null) return parsed;
+  }
+  throw FormatException('แปลงเป็นจำนวนเต็มไม่ได้: $value');
+}</code></pre><p>ฟังก์ชันนี้ทำสองอย่างที่ดูขัดกันแต่ถูกต้องทั้งคู่</p><ul><li><strong>ยืดหยุ่นกับความต่างที่ไม่สำคัญ</strong> — <code>12</code>, <code>12.0</code> และ <code>"12"</code> ล้วนหมายถึงสิบสอง</li><li><strong>เข้มงวดกับข้อมูลที่ผิดจริง</strong> — <code>"มาก"</code> หรือ <code>null</code> ต้องถูกปฏิเสธ ไม่ใช่แปลงเป็น 0 เงียบ ๆ</li></ul><p>ความต่างระหว่างสองอย่างนี้สำคัญมาก ถ้าเขียน <code>int.tryParse(...) ?? 0</code> ข้อมูลที่เสียจะกลายเป็นเลขศูนย์ที่ดูปกติ แล้วไหลเข้าไปในรายงานสต็อกโดยไม่มีใครรู้</p></section>
+
+<section id="section-7"><h2>7. ปัญหาที่จะเจอกับ .NET จริง ๆ</h2><table><thead><tr><th>ปัญหา</th><th>อาการ</th><th>ทางแก้</th></tr></thead><tbody>
+<tr><td>ชื่อ key ตัวพิมพ์ไม่ตรง</td><td><code>PalletCode</code> เทียบกับ <code>palletCode</code></td><td>ตกลงมาตรฐานกับทีม .NET แล้วรองรับทั้งสองแบบชั่วคราวที่ด่านเท่านั้น</td></tr>
+<tr><td>ตัวเลขส่งมาเป็นข้อความ</td><td><code>"quantity": "4"</code></td><td>ใช้ตัวช่วยแบบหัวข้อ 6</td></tr>
+<tr><td>วันที่ไม่มีเขตเวลา</td><td><code>"2026-08-16T09:30:00"</code></td><td>ตกลงว่าจะใช้ UTC หรือเวลาท้องถิ่น แล้วแปลงที่ด่านจุดเดียว</td></tr>
+<tr><td>ทศนิยมกับจำนวนเต็มปนกัน</td><td><code>12</code> บ้าง <code>12.0</code> บ้าง</td><td>ปรับให้เป็นชนิดเดียวที่ด่าน</td></tr>
+<tr><td>สถานะเป็นข้อความอิสระ</td><td><code>"PENDING"</code>, <code>"Pending"</code>, <code>"0"</code></td><td>แปลงเป็น enum ตามที่เรียนใน D1.10</td></tr>
+</tbody></table><pre class="code-vs"><code>final typo = &lt;String, dynamic&gt;{'PalletCode': 'PAL-1', 'quantity': 1};
+print(typo['palletCode']);   // null — ไม่มี error ไม่มีคำเตือน</code></pre><div class="warn">พิมพ์ชื่อ key ผิดหนึ่งตัวจะได้ <code>null</code> อย่างเงียบสนิท ไม่มีอะไรเตือนเลย นี่คือเหตุผลที่ต้องมีเทสต์ที่ใช้ข้อมูลจริงจาก API มาตรวจ ซึ่งจะทำใน Part 14</div><p><strong>สิ่งที่ห้ามทำเด็ดขาด:</strong> กระจายการรองรับหลายรูปแบบไปทั่วแอป เช่นเขียน <code>json['code'] ?? json['Code']</code> ในไฟล์หน้าจอ — ถ้าต้องรองรับ ให้รองรับที่ด่านตรวจจุดเดียว แล้วลบออกเมื่อฝั่ง .NET แก้เรียบร้อย</p></section>
+
+<section id="section-8"><h2>8. แถวเสียหนึ่งแถว ควรล้มทั้งชุดไหม</h2><p>คำถามนี้ไม่มีคำตอบที่ถูกเสมอ ต้องเลือกตามสถานการณ์และเขียนให้ชัดเจน</p><table><thead><tr><th>นโยบาย</th><th>เหมาะกับ</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>แถวเสียหนึ่งแถว ล้มทั้งชุด</td><td>ข้อมูลการเงิน หรือข้อมูลที่ต้องครบถ้วน</td><td>ผู้ใช้ทำงานไม่ได้เลยเพราะข้อมูลเสียแถวเดียว</td></tr>
+<tr><td>ข้ามแถวเสีย แสดงที่เหลือ</td><td>รายการงานทั่วไป</td><td>ของหายไปเงียบ ๆ ถ้าไม่รายงาน</td></tr>
+<tr><td>ข้ามแถวเสีย แต่รายงานจำนวน</td><td>เกือบทุกกรณีในงานคลัง</td><td>ต้องออกแบบวิธีแสดงผลเพิ่ม</td></tr>
+</tbody></table><p>ทางเลือกที่สามมักเป็นคำตอบที่ดีที่สุด และเราจะสร้างมันจริงใน D1.20</p></section>
+
+<section id="section-9"><h2>9. ส่งข้อมูลกลับขึ้น API</h2><pre class="code-vs"><code>Map&lt;String, dynamic&gt; toJson() =&gt; &lt;String, dynamic&gt;{
+      'palletCode': palletCode,
+      'quantity': quantity,
+      'location': location,
+      'receivedAt': receivedAt?.toIso8601String(),
+    };
+
+print(jsonEncode(pallet.toJson()));</code></pre><p>ทิศทางขาออกง่ายกว่าขาเข้ามาก เพราะเรารู้ชนิดของทุกค่าอยู่แล้ว สิ่งเดียวที่ต้องระวังคือค่าที่ Dart รู้จักแต่ JSON ไม่รู้จัก เช่น <code>DateTime</code> และ enum ต้องแปลงเป็นข้อความก่อนเสมอ</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>type '_Map&lt;String, dynamic&gt;' is not a subtype of type 'List'</code></td><td>cast ก่อนตรวจว่าเป็นอะไร</td><td>ตรวจด้วย <code>is</code> ก่อน แล้วโยน <code>FormatException</code> ที่อ่านรู้เรื่อง</td></tr>
+<tr><td>ค่าเป็น <code>null</code> ทั้งที่ API ส่งมาแน่</td><td>สะกดชื่อ key ผิด หรือตัวพิมพ์ไม่ตรง</td><td>พิมพ์ <code>json.keys</code> ออกมาดูของจริง</td></tr>
+<tr><td>ยอดรวมเพี้ยนโดยไม่มีข้อผิดพลาด</td><td>ใช้ <code>?? 0</code> กลบข้อมูลที่แปลงไม่ได้</td><td>ให้ปฏิเสธและรายงานแทนที่จะแทนด้วยศูนย์</td></tr>
+<tr><td>แอปพังใน build method</td><td>ปล่อย <code>dynamic</code> ไหลไปถึงหน้าจอ</td><td>แปลงให้เสร็จที่ parser</td></tr>
+<tr><td>เวลาที่แสดงคลาดไป 7 ชั่วโมง</td><td>ไม่ได้ตกลงเรื่องเขตเวลา</td><td>กำหนดนโยบายแล้วแปลงที่ด่านจุดเดียว</td></tr>
+<tr><td>model มี field nullable ทุกตัว</td><td>ไม่ได้ตัดสินใจว่าอะไรบังคับ</td><td>ไล่ถามทีละ field ว่า “ไม่มีค่านี้ แล้วยังมีความหมายไหม”</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>API ส่งข้อมูลรายการงานมาในรูปแบบนี้</p><pre class="code-vs"><code>{
+  "items": [
+    { "taskId": "T-01", "status": "PENDING", "quantity": 5 },
+    { "taskId": "T-02", "status": "pending", "quantity": "3" },
+    { "taskId": "T-03", "status": "TELEPORT", "quantity": 1 }
+  ],
+  "totalCount": "3"
+}</code></pre><p>จงเขียน parser ที่</p><ol><li>ปฏิเสธทั้งชุดถ้า <code>items</code> ไม่ใช่ list</li><li>รองรับ <code>totalCount</code> ที่เป็นทั้งตัวเลขและข้อความ</li><li>แปลง <code>status</code> เป็น enum โดยไม่สนใจตัวพิมพ์เล็กใหญ่</li><li>ข้ามแถวที่เสีย แต่รายงานว่าข้ามไปกี่แถวและเพราะอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>import 'dart:convert';
+
+enum TaskStatus {
+  pending('PENDING'),
+  done('DONE');
+
+  const TaskStatus(this.wireValue);
+  final String wireValue;
+
+  static TaskStatus? tryFromWire(String raw) {
+    for (final status in values) {
+      if (status.wireValue == raw.trim().toUpperCase()) return status;
+    }
+    return null;
+  }
 }
 
-List&lt;Map&lt;String, dynamic&gt;&gt; objectRows(Object? raw) =&gt; switch (raw) {
-  final List rows =&gt; rows.whereType&lt;Map&gt;()
-      .map((row) =&gt; Map&lt;String, dynamic&gt;.from(row)).toList(),
-  _ =&gt; const [],
-};</code></pre><p>ต้องตัดสินใจว่า field/list ขาดคือ empty ที่ถูกต้องหรือ contract error อย่า default ทุกอย่างเป็น empty โดยไม่ดู domain</p></section>
-<section id="section-3"><h2>3. Casing และ .NET contract</h2><p>บาง endpoint อาจส่ง <code>totalCount</code> หรือ <code>TotalCount</code> ช่วง migration ให้ parser boundary รองรับทั้งคู่ชั่วคราวและมี contract test แต่ควรกำหนด canonical JSON policy ฝั่ง .NET แล้วลบ fallback เมื่อพร้อม ไม่กระจาย <code>json['x'] ?? json['X']</code> ใน widget</p></section>
-<section id="section-4"><h2>4. DateTime, number และ enum</h2><ul><li>ใช้ ISO-8601 พร้อม timezone contract; parse แล้วตัดสินใจ UTC/local ที่ boundary</li><li>JSON number อาจ decode เป็น int/double ตามรูป ต้อง normalize ตาม domain</li><li>status parse เป็น enum/unknown strategy ก่อนเข้า UI</li><li>ไม่ใช้ <code>toString()</code> กลบ object/list ที่ผิด shape</li></ul></section>
-<section id="section-5"><h2>5. ตัวอย่างจริงที่ควรเทียบ</h2><ul><li><code>ConnectionProfile.fromJson(Object? raw)</code> ตรวจ Map, id, host, port range และคืน null สำหรับ saved row ที่เสีย</li><li><code>cycle_count_api.dart</code> มี helper รองรับ camel/Pascal และ <code>whereType</code></li><li><code>wmsapp/api_service.dart</code> มีจุด <code>decoded as Map&lt;String,dynamic&gt;</code> หลังแยก List ซึ่งอาจ throw หาก body เป็น scalar—เป็นจุดที่ควร harden</li></ul></section>
-<section id="section-6"><h2>6. Contract test</h2><pre class="code-vs"><code>test('parses production task fixture', () {
-  final json = jsonDecode(fixture) as Map&lt;String, dynamic&gt;;
-  final task = Task.fromJson(json);
-  expect(task.id, 'TASK-001');
-  expect(task.status, TaskStatus.pending);
-});</code></pre><p>เก็บ fixture ที่ sanitize จาก response จริง และเพิ่มเคส missing/null/wrong type/legacy casing</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ออกแบบ parser ของ <code>{"items": [...], "totalCount": 12}</code> ที่ items บังคับเป็น object list และ totalCount รับ int/numeric string</p><details><summary>แนวคำตอบ</summary><p>ตรวจ root Map → ตรวจ items เป็น List → แปลงแต่ละ row ผ่าน <code>Task.fromJson</code> โดยระบุนโยบายว่าจะ fail ทั้ง page หรือข้าม bad row → parse count ด้วย helper → คืน typed <code>PagedResult&lt;Task&gt;</code> ไม่คืน Map</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>dynamic</code> ควรมีอายุสั้นที่สุด: decode → validate → typed model เมื่อ dynamic ไหลถึง build method runtime cast bug จะกลายเป็น UI crash ที่หาต้นเหตุยาก</div></section>
+class WmsTask {
+  WmsTask({required this.taskId, required this.status, required this.quantity});
+
+  factory WmsTask.fromJson(Map&lt;String, Object?&gt; json) {
+    final id = json['taskId'];
+    if (id is! String || id.isEmpty) {
+      throw const FormatException('taskId ต้องเป็นข้อความที่ไม่ว่าง');
+    }
+    final rawStatus = json['status'];
+    if (rawStatus is! String) {
+      throw const FormatException('status ต้องเป็นข้อความ');
+    }
+    final status = TaskStatus.tryFromWire(rawStatus);
+    if (status == null) {
+      throw FormatException('ไม่รู้จักสถานะ "$rawStatus"');
+    }
+    return WmsTask(
+      taskId: id,
+      status: status,
+      quantity: _asInt(json['quantity']),
+    );
+  }
+
+  final String taskId;
+  final TaskStatus status;
+  final int quantity;
+
+  @override
+  String toString() =&gt; '$taskId ${status.name} x$quantity';
+}
+
+int _asInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) {
+    final parsed = int.tryParse(value.trim());
+    if (parsed != null) return parsed;
+  }
+  throw FormatException('แปลงเป็นจำนวนเต็มไม่ได้: $value');
+}
+
+typedef TaskPage = ({List&lt;WmsTask&gt; tasks, int totalCount, List&lt;String&gt; skipped});
+
+TaskPage parseTaskPage(String body) {
+  final root = jsonDecode(body);
+  if (root is! Map&lt;String, Object?&gt;) {
+    throw const FormatException('คาดว่าเป็น JSON object');
+  }
+  final items = root['items'];
+  if (items is! List) {
+    throw const FormatException('items ต้องเป็น list');   // ข้อ 1: ล้มทั้งชุด
+  }
+
+  final tasks = &lt;WmsTask&gt;[];
+  final skipped = &lt;String&gt;[];
+
+  for (var i = 0; i &lt; items.length; i++) {
+    final row = items[i];
+    if (row is! Map&lt;String, Object?&gt;) {
+      skipped.add('แถวที่ $i ไม่ใช่ object');
+      continue;
+    }
+    try {
+      tasks.add(WmsTask.fromJson(row));
+    } on FormatException catch (error) {
+      skipped.add('แถวที่ $i: ${error.message}');      // ข้อ 4: ข้ามแต่รายงาน
+    }
+  }
+
+  return (tasks: tasks, totalCount: _asInt(root['totalCount']), skipped: skipped);
+}</code></pre><pre class="code-vs"><code>อ่านได้ 2 จาก totalCount 3
+  T-01 pending x5
+  T-02 pending x3
+ข้ามไป 1 แถว:
+  - แถวที่ 2: ไม่รู้จักสถานะ "TELEPORT"</code></pre><p><strong>ทำไม <code>items</code> ผิดชนิดจึงล้มทั้งชุด แต่แถวเสียกลับข้ามได้:</strong> เพราะทั้งสองบอกคนละเรื่อง — <code>items</code> ที่ไม่ใช่ list แปลว่าเราเข้าใจ contract ผิดทั้งหมด ไม่มีทางกู้ได้ ส่วนแถวเดียวที่มีสถานะแปลกแปลว่าข้อมูลแถวนั้นมีปัญหา ที่เหลือยังใช้งานได้ — นี่คือการใช้ตารางในหัวข้อ 8 จริง</p><p><strong>ทำไมต้องเก็บ <code>skipped</code> ไว้ด้วย:</strong> เพราะถ้าข้ามเงียบ ๆ วันหนึ่งฝั่ง .NET เพิ่มสถานะใหม่แล้วงานครึ่งหนึ่งหายไปจากหน้าจอ โดยไม่มีใครรู้จนกว่าลูกค้าจะโทรมา การเก็บเหตุผลไว้ทำให้เราแสดงคำเตือนหรือส่ง log ได้</p><p><strong>ทำไมใช้ record เป็นผลลัพธ์:</strong> เพราะเป็นค่าสามตัวที่คืนพร้อมกันและใช้เฉพาะจุดนี้ ตรงกับเกณฑ์ใน D1.12 พอดี ถ้าผลลัพธ์นี้ต้องเดินทางไปหลายไฟล์และมีกฎของตัวเอง จึงค่อยทำเป็น class</p><p><strong>จุดที่คนมักตอบผิด:</strong> การเขียน <code>quantity: json['quantity'] as int</code> ตรง ๆ ซึ่งจะพังทั้งชุดเมื่อเจอ <code>"3"</code> ที่เป็นข้อความ — ความยืดหยุ่นตรงนี้ไม่ใช่การตามใจ API แต่เป็นการยอมรับความจริงว่าระบบสองฝั่งพัฒนาไม่พร้อมกัน</p><p><strong>ลองต่อ:</strong> เพิ่มกรณีที่ <code>totalCount</code> หายไปทั้ง key แล้วตัดสินใจว่าควรล้มทั้งชุด หรือใช้ <code>tasks.length</code> แทน — และเขียนเหตุผลกำกับไว้ในโค้ด</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>parser คือด่านตรวจระหว่างโลก JSON กับโลกที่มีชนิด</li><li><code>dynamic</code> ต้องเกิดที่ <code>jsonDecode</code> และตายที่ parser</li><li>ตัดสินใจให้ชัดว่า field ไหนบังคับ field ไหนว่างได้จริง</li><li>ยืดหยุ่นกับความต่างที่ไม่สำคัญ แต่เข้มงวดกับข้อมูลที่ผิดจริง</li><li>อย่าใช้ <code>?? 0</code> กลบข้อมูลที่แปลงไม่ได้</li><li>ชื่อ key ที่สะกดผิดจะได้ <code>null</code> เงียบ ๆ — ต้องมีเทสต์ด้วยข้อมูลจริง</li><li>เลือกนโยบายเรื่องแถวเสียอย่างตั้งใจ และรายงานเสมอเมื่อข้าม</li></ul></div><p><strong>บทถัดไป:</strong> D1.20 คือบทปิด Dart Foundation — เราจะสร้างโปรแกรมเล็ก ๆ ที่ใช้ทุกอย่างตั้งแต่ D1.1 ถึง D1.19 พร้อมเทสต์ที่รันผ่านจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

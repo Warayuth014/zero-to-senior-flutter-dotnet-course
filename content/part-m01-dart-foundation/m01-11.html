@@ -1,24 +1,141 @@
-<div class="note">Record รวมค่าหลายตัวเป็น value เดียวแบบมี static type โดยไม่ต้องสร้าง class เต็ม เหมาะกับผลลัพธ์ชั่วคราวที่มีความหมายเฉพาะจุด แต่ไม่แทน domain model ที่ต้องมี validation/behavior</div>
-<section><h2>1. Positional และ named record</h2><pre class="code-vs"><code>(String, int) scanSummary(String raw) =&gt; (raw.trim(), raw.length);
-({String palletId, bool continued}) suggestion() =&gt;
-    (palletId: 'PAL-001', continued: true);
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งฟังก์ชันให้คนอื่นเรียกทีหลัง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.4 (ฟังก์ชันและ closure) และ D1.6–D1.7 (class, private field)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบ class ที่รับ callback เข้ามา เข้าใจว่าทำไม Flutter ถึงเขียน <code>onPressed:</code>, <code>onChanged:</code> แบบนั้น และหลีกเลี่ยงกับดักเรื่องวงเล็บได้</div>
 
-final positional = scanSummary(' A ');
-print(positional.$1);
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>สมมติเราเขียนช่องรับบาร์โค้ดขึ้นมาหนึ่งตัว มันมีหน้าที่ตัดช่องว่าง แปลงเป็นตัวพิมพ์ใหญ่ และตรวจว่าไม่ว่าง แต่คำถามคือ <strong>เมื่ออ่านสำเร็จแล้วจะทำอะไรต่อ</strong></p><p>ปัญหาคือคำตอบต่างกันไปตามหน้าจอ — หน้ารับเข้าจะบันทึกลงรายการ หน้าหยิบของจะยิงไปหา server หน้าตรวจนับจะแค่เพิ่มตัวเลข ถ้าเราเขียนโค้ดเหล่านั้นลงไปในช่องรับบาร์โค้ดโดยตรง มันจะใช้ได้แค่หน้าจอเดียว</p><p><strong>callback</strong> คือคำตอบ: ช่องรับบาร์โค้ดไม่ต้องรู้ว่าจะทำอะไรต่อ มันแค่รับ “ฟังก์ชันที่จะเรียกเมื่อสแกนสำเร็จ” มาจากผู้ใช้งาน</p></section>
 
-final named = suggestion();
-print(named.palletId);</code></pre><p>ชื่อ field ของ named record เป็นส่วนของ type ส่วนชื่อ field positional ไม่ใช่ ระวังลำดับของ positional เมื่อมีหลายค่าชนิดเดียวกัน</p></section>
-<section><h2>2. Destructuring</h2><pre class="code-vs"><code>final (barcode, length) = scanSummary(input);
-final (:palletId, :continued) = suggestion();
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>callback</td><td>ฟังก์ชันที่เราส่งให้คนอื่นเก็บไว้ เพื่อให้เขาเรียกกลับมาเมื่อถึงเวลา</td></tr>
+<tr><td>function type</td><td>ชนิดของฟังก์ชัน เช่น <code>void Function(String)</code></td></tr>
+<tr><td>typedef</td><td>การตั้งชื่อเล่นให้ชนิดที่ยาว</td></tr>
+<tr><td>tear-off</td><td>การส่งชื่อฟังก์ชันไปโดยไม่ใส่วงเล็บ</td></tr>
+<tr><td>closure</td><td>ฟังก์ชันที่จำตัวแปรรอบตัวไว้ได้ (จาก D1.4)</td></tr>
+</tbody></table></section>
 
-for (final MapEntry(:key, :value) in quantities.entries) {
-  print('$key = $value');
-}</code></pre><p>pattern ด้านซ้ายตรวจรูปและ bind ตัวแปรในครั้งเดียว ทำให้ไม่ต้องใช้ <code>result.$1</code> กระจายไกลจากจุดคืนค่า</p></section>
-<section><h2>3. ตัวอย่างจริงสองแบบ</h2><ul><li><code>wmsapp/services/api/picking_api.dart</code> คืน <code>({String palletId, bool continued})?</code> จาก endpoint แนะนำ pallet เพราะมีเพียงสองค่าที่ใช้ร่วมกันเฉพาะ operation นี้</li><li><code>wms_absolute_mobile/.../warehouse_shell.dart</code> มี <code>(String, String) _titleSub()</code> เพื่อคืน title/subtitle ของ screen พร้อมกัน</li></ul></section>
-<section><h2>4. Record equality และ type</h2><p>Record เปรียบเทียบเชิงโครงสร้าง: shape และค่าตรงกันถือว่าเท่ากัน Named field order ไม่สำคัญ แต่ชื่อสำคัญ</p><pre class="code-vs"><code>final a = (id: 'T1', done: false);
-final b = (done: false, id: 'T1');
-assert(a == b);</code></pre></section>
-<section><h2>5. เมื่อควรสร้าง class แทน</h2><ul><li>ค่าข้ามหลาย layer หรือเป็น public API ระยะยาว</li><li>ต้อง validate, parse JSON, copyWith หรือมี behavior</li><li>ชื่อชนิดมีความหมายต่อโดเมน เช่น <code>AuthSession</code></li><li>ต้องเพิ่ม field โดยไม่ทำลาย call site จำนวนมาก</li></ul><p>Record เหมาะกับ local aggregate/return หลายค่า ส่วน <code>ConnectionProfile</code>, Task, Pallet ควรเป็น class</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>ออกแบบผลการ normalize barcode ที่ต้องคืน normalized value และเหตุผลที่ reject แบบใดควรเป็น record และแบบใดควรเป็น class?</p><details><summary>แนวคำตอบ</summary><p><code>({String value, String? warning})</code> ใช้ได้ถ้าอยู่ helper เดียวและไม่มี behavior ถ้าผลมีหลาย status, error code, metadata และไหลข้าม layer ให้สร้าง <code>BarcodeValidationResult</code> หรือ sealed result เพื่อไม่ให้ record โตแบบไร้ชื่อ</p></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn">อย่าคืน record positional 4–5 ค่า โดยเฉพาะชนิดซ้ำ เพราะ call site จะกลายเป็นการจำตำแหน่ง ใช้ named record หรือ class ที่สื่อโดเมน</div></section>
-<section><h2>8. สรุป</h2><p>Record คือ typed tuple ที่ดีสำหรับ “ค่ากลุ่มเล็กและชั่วคราว”; destructuring ช่วยแกะค่าใกล้จุดใช้; domain object ที่มีอายุและกติกายังต้องเป็น class</p></section>
+<section><h2>3. Mental model: ทิ้งเบอร์ไว้ให้โทรกลับ</h2><p>เวลาส่งของซ่อม เราไม่ยืนรอที่ร้าน แต่ทิ้งเบอร์โทรไว้แล้วกลับบ้าน ร้านเป็นคนโทรกลับเมื่อซ่อมเสร็จ</p><table><thead><tr><th>ในชีวิตจริง</th><th>ในโค้ด</th></tr></thead><tbody>
+<tr><td>เบอร์โทรที่เราให้ไว้</td><td>ฟังก์ชันที่เราส่งเข้าไป</td></tr>
+<tr><td>ร้านเก็บเบอร์ไว้</td><td>class เก็บ callback ไว้ใน field</td></tr>
+<tr><td>ร้านโทรกลับเมื่อเสร็จ</td><td>class เรียก callback เมื่อถึงเงื่อนไข</td></tr>
+<tr><td>ร้านไม่รู้ว่าเราจะทำอะไรต่อ</td><td>class ไม่ต้องรู้ตรรกะของผู้ใช้งาน</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ผู้ที่รู้ “ว่าเกิดอะไรขึ้น” กับผู้ที่รู้ “ว่าต้องทำอะไรต่อ” มักไม่ใช่คนเดียวกัน callback คือสะพานเชื่อมสองฝ่ายนี้</div></section>
+
+<section><h2>4. อ่านชนิดของฟังก์ชันให้ออก</h2><table><thead><tr><th>ชนิด</th><th>อ่านว่า</th></tr></thead><tbody>
+<tr><td><code>void Function()</code></td><td>ไม่รับอะไร ไม่คืนอะไร</td></tr>
+<tr><td><code>void Function(String code)</code></td><td>รับข้อความหนึ่งตัว ไม่คืนอะไร</td></tr>
+<tr><td><code>String? Function(int value)</code></td><td>รับจำนวนเต็ม คืนข้อความหรือ null</td></tr>
+<tr><td><code>Future&lt;void&gt; Function(String)</code></td><td>รับข้อความ แล้วทำงานที่ต้องรอ (D1.15)</td></tr>
+</tbody></table><p>อ่านจากซ้ายไปขวา: ส่วนหน้าสุดคือสิ่งที่คืน คำว่า <code>Function</code> คือตัวชนิด และในวงเล็บคือสิ่งที่รับ ชื่อ parameter ในวงเล็บใส่ไว้เพื่อให้อ่านง่ายเท่านั้น จะไม่ใส่ก็ได้</p></section>
+
+<section><h2>5. class ที่รับ callback</h2><pre class="code-vs"><code>class ScanField {
+  ScanField({
+    required this.onSubmitted,
+    this.onError,               // ไม่บังคับ
+  });
+
+  final void Function(String code) onSubmitted;
+  final void Function(String message)? onError;
+
+  void simulateScan(String raw) {
+    final code = raw.trim().toUpperCase();
+    if (code.isEmpty) {
+      onError?.call('บาร์โค้ดว่าง');   // ถ้าไม่มีคนฟัง ก็ไม่ต้องเรียก
+      return;
+    }
+    onSubmitted(code);
+  }
+}</code></pre><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_11_callbacks.dart</code></pre><pre class="code-vs"><code>final field = ScanField(
+  onSubmitted: (code) =&gt; print('  รับบาร์โค้ด: $code'),
+  onError: (message) =&gt; print('  ผิดพลาด: $message'),
+);
+field.simulateScan(' pal-1001 ');   // รับบาร์โค้ด: PAL-1001
+field.simulateScan('');             // ผิดพลาด: บาร์โค้ดว่าง</code></pre><p><code>onError?.call(...)</code> คือรูปแบบที่ต้องจำ — เครื่องหมาย <code>?</code> แปลว่า “ถ้า callback นี้เป็น <code>null</code> ให้ข้ามไปเลย” จึงไม่พังเมื่อผู้ใช้ไม่ได้ส่งมา เขียน <code>onError!(...)</code> ไม่ได้เพราะจะพังทันทีที่ไม่มีคนฟัง</p></section>
+
+<section><h2>6. typedef: ตั้งชื่อเล่นให้ชนิดที่ยาว</h2><pre class="code-vs"><code>typedef QuantityValidator = String? Function(int value);
+
+String? notNegative(int value) =&gt; value &lt; 0 ? 'จำนวนติดลบไม่ได้' : null;
+
+final QuantityValidator validate = notNegative;
+print(validate(-2));   // จำนวนติดลบไม่ได้</code></pre><p>ประโยชน์ไม่ใช่แค่ประหยัดตัวอักษร แต่คือการตั้งชื่อที่สื่อความหมาย — <code>QuantityValidator</code> บอกเจตนาชัดกว่า <code>String? Function(int)</code> และเมื่อจะเพิ่ม parameter ในอนาคตก็แก้ที่เดียว</p><p>Flutter ตั้งชื่อเล่นแบบนี้ไว้ให้เราหลายตัวแล้ว ที่จะเจอบ่อยคือ <code>VoidCallback</code> (คือ <code>void Function()</code>) และ <code>ValueChanged&lt;T&gt;</code> (คือ <code>void Function(T)</code>)</p></section>
+
+<section><h2>7. กับดักที่สำคัญที่สุดของบทนี้</h2><pre class="code-vs"><code>void logIt(String code) =&gt; print('  logIt: $code');
+
+// ถูก — ส่งตัวฟังก์ชันไปให้เรียกทีหลัง
+ScanField(onSubmitted: logIt);
+
+// ถูก — ห่อไว้ในฟังก์ชันใหม่ เมื่อต้องส่ง argument เพิ่มเอง
+ScanField(onSubmitted: (code) =&gt; logIt(code));
+
+// ผิด — เรียกทันที แล้วเอา "ผลลัพธ์" ไปใส่แทนที่จะใส่ฟังก์ชัน
+ScanField(onSubmitted: logIt('PAL-1'));</code></pre><div class="warn"><strong>อาการที่จะเจอเมื่อเขียนผิดแบบที่สาม:</strong> ในโค้ด Flutter จริง คุณจะเห็นปุ่มทำงานเองตั้งแต่หน้าจอเปิดขึ้นมา และกดแล้วไม่มีอะไรเกิดขึ้น เพราะคุณส่ง “ผลลัพธ์ของการเรียก” ไปแทนที่จะส่ง “ตัวฟังก์ชัน” — เป็นบั๊กที่คนใหม่เจอกันแทบทุกคน</div><table><thead><tr><th>เขียนแบบ</th><th>ความหมาย</th><th>เมื่อไหร่ที่ฟังก์ชันทำงาน</th></tr></thead><tbody>
+<tr><td><code>logIt</code></td><td>ตัวฟังก์ชัน</td><td>เมื่อผู้รับตัดสินใจเรียก</td></tr>
+<tr><td><code>() =&gt; logIt(x)</code></td><td>ฟังก์ชันใหม่ที่ห่อการเรียกไว้</td><td>เมื่อผู้รับตัดสินใจเรียก</td></tr>
+<tr><td><code>logIt(x)</code></td><td>ผลลัพธ์จากการเรียก</td><td>ทันทีที่บรรทัดนี้ถูกอ่าน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. closure ทำให้ callback มีประโยชน์จริง</h2><pre class="code-vs"><code>var received = 0;
+
+final counter = ScanField(
+  onSubmitted: (_) {
+    received++;                  // แก้ตัวแปรที่อยู่นอกฟังก์ชันได้
+    print('  สแกนสะสม $received รายการ');
+  },
+);
+counter.simulateScan('PAL-1001');   // สแกนสะสม 1 รายการ
+counter.simulateScan('PAL-1002');   // สแกนสะสม 2 รายการ</code></pre><p>ตัว <code>ScanField</code> ไม่รู้จักตัวแปร <code>received</code> เลยแม้แต่น้อย แต่ callback ที่เราส่งเข้าไปจำมันไว้ได้ ทำให้ผู้ใช้งานเก็บสถานะของตัวเองได้อย่างอิสระ นี่คือเหตุผลที่ callback ทรงพลังกว่าการส่งข้อมูลกลับด้วยค่า return ธรรมดา</p><p>ชื่อ <code>_</code> ที่ใช้แทนชื่อ parameter หมายถึง “มีค่าส่งมา แต่ฉันไม่ได้ใช้” เป็นธรรมเนียมที่ช่วยให้คนอ่านรู้ว่าไม่ได้ลืม</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>callback ทำงานทันทีที่สร้าง object</td><td>ใส่วงเล็บตอนส่ง</td><td>ส่งชื่อเปล่า หรือห่อด้วย <code>() =&gt; f(x)</code></td></tr>
+<tr><td><code>The argument type 'void' can't be assigned to ...</code></td><td>ส่งผลลัพธ์แทนตัวฟังก์ชัน</td><td>ถอดวงเล็บออก</td></tr>
+<tr><td><code>Null check operator used on a null value</code></td><td>เรียก <code>onError!(...)</code> ทั้งที่ไม่มีคนส่งมา</td><td>ใช้ <code>onError?.call(...)</code></td></tr>
+<tr><td>ประกาศชนิดเป็น <code>Function</code> เฉย ๆ แล้วส่งอะไรก็ผ่าน</td><td>ชนิดกว้างเกิน ไม่ตรวจจำนวน/ชนิด argument</td><td>ระบุให้ครบ เช่น <code>void Function(String)</code></td></tr>
+<tr><td>callback ที่เป็นงานรอผลแล้ว error หายไปเงียบ ๆ</td><td>ผู้เรียกไม่ได้รอผลและไม่ได้ดักข้อผิดพลาด</td><td>ประกาศชนิดเป็น <code>Future&lt;void&gt; Function(...)</code> แล้วให้ผู้เรียกจัดการ (D1.15)</td></tr>
+<tr><td>callback ยาวหลายสิบบรรทัดจนอ่าน stack trace ไม่ออก</td><td>เขียนตรรกะทั้งหมดไว้ในฟังก์ชันนิรนาม</td><td>แยกเป็น method ที่มีชื่อ แล้วส่งชื่อนั้นเข้าไป</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>สร้าง class <code>QuantityInput</code> ที่</p><ol><li>รับ callback <code>onAccepted</code> ที่ถูกเรียกพร้อมจำนวน เมื่อค่าที่กรอกถูกต้อง</li><li>รับ callback <code>onRejected</code> แบบไม่บังคับ ที่ถูกเรียกพร้อมเหตุผล เมื่อค่าไม่ถูกต้อง</li><li>รับ <code>validator</code> จากภายนอกได้ เพื่อให้แต่ละหน้าจอกำหนดกฎของตัวเองได้</li><li>มี method <code>submit(String raw)</code> ที่ทำงานทั้งหมดนี้</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>typedef QuantityValidator = String? Function(int value);
+
+class QuantityInput {
+  QuantityInput({
+    required this.onAccepted,
+    this.onRejected,
+    this.validator,
+  });
+
+  final void Function(int quantity) onAccepted;
+  final void Function(String reason)? onRejected;
+  final QuantityValidator? validator;
+
+  void submit(String raw) {
+    final value = int.tryParse(raw.trim());
+    if (value == null) {
+      onRejected?.call('กรุณากรอกตัวเลข');
+      return;
+    }
+    final error = validator?.call(value);
+    if (error != null) {
+      onRejected?.call(error);
+      return;
+    }
+    onAccepted(value);
+  }
+}
+
+void main() {
+  var total = 0;
+
+  final input = QuantityInput(
+    onAccepted: (quantity) {
+      total += quantity;
+      print('รับ $quantity ชิ้น (รวม $total)');
+    },
+    onRejected: (reason) =&gt; print('ปฏิเสธ: $reason'),
+    validator: (value) =&gt; value &gt; 50 ? 'เกิน 50 ชิ้นต่อครั้ง' : null,
+  );
+
+  input.submit('12');     // รับ 12 ชิ้น (รวม 12)
+  input.submit('abc');    // ปฏิเสธ: กรุณากรอกตัวเลข
+  input.submit('99');     // ปฏิเสธ: เกิน 50 ชิ้นต่อครั้ง
+  input.submit('8');      // รับ 8 ชิ้น (รวม 20)
+}</code></pre><p><strong>ทำไม <code>validator</code> ต้องรับจากภายนอก:</strong> เพราะกฎ “ไม่เกิน 50 ชิ้น” เป็นกฎของหน้าจอนั้น ไม่ใช่กฎของช่องกรอกตัวเลข ถ้าเขียนฝังไว้ข้างใน หน้าจออื่นที่มีเพดานต่างกันจะใช้ class นี้ไม่ได้ — สังเกตว่า <code>QuantityInput</code> รู้แค่ <em>ขั้นตอน</em> (แปลง → ตรวจ → แจ้งผล) ส่วน <em>กฎ</em> มาจากข้างนอกทั้งหมด</p><p><strong>ทำไม <code>onAccepted</code> บังคับ แต่ <code>onRejected</code> ไม่บังคับ:</strong> เพราะถ้าไม่มีใครสนใจผลสำเร็จ ก็ไม่มีเหตุผลที่จะใช้ class นี้ตั้งแต่แรก ส่วนการแจ้งข้อผิดพลาดเป็นสิ่งที่บางหน้าจออาจไม่ต้องการ การใช้ <code>required</code> จึงเป็นการสื่อสารว่าอะไรคือแก่นและอะไรคือส่วนเสริม</p><p><strong>ลองต่อ:</strong> ลองส่ง <code>validator</code> เป็น <code>null</code> แล้วสังเกตว่า <code>validator?.call(value)</code> คืน <code>null</code> ซึ่งแปลว่า “ไม่มีข้อผิดพลาด” พอดี — เป็นตัวอย่างที่ดีว่าการออกแบบให้ <code>null</code> มีความหมายเดียวกันทั้งสองกรณีช่วยลดจำนวน <code>if</code> ลงได้</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>callback คือฟังก์ชันที่เราส่งให้คนอื่นเรียกทีหลัง</li><li>ผู้ที่รู้ว่า “เกิดอะไรขึ้น” ส่งข่าวให้ผู้ที่รู้ว่า “ต้องทำอะไรต่อ”</li><li>อ่านชนิดฟังก์ชันจากซ้าย: คืนอะไร → <code>Function</code> → รับอะไร</li><li><code>f</code> คือตัวฟังก์ชัน, <code>f()</code> คือการเรียก — ต่างกันแค่วงเล็บแต่คนละความหมาย</li><li>callback ที่ไม่บังคับให้เรียกด้วย <code>?.call(...)</code> เสมอ</li><li>closure ทำให้ callback เข้าถึงสถานะของผู้เรียกได้</li></ul></div><p><strong>บทถัดไป:</strong> D1.12 จะสอน record ซึ่งเป็นวิธีคืนค่าหลายค่าพร้อมกันโดยไม่ต้องสร้าง class และ pattern matching ที่ทำให้แกะข้อมูลได้ในบรรทัดเดียว</p></section>

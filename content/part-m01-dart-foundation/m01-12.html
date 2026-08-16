@@ -1,32 +1,116 @@
-<div class="note">Pattern matching ไม่ใช่ switch syntax สวยขึ้นอย่างเดียว มันตรวจ shape, type และค่าพร้อม bind ตัวแปร จึงมีประโยชน์มากตรง JSON boundary และ workflow state</div>
-<section><h2>1. Switch expression กับ exhaustive cases</h2><pre class="code-vs"><code>String taskTypeLabel(TaskType type) =&gt; switch (type) {
-  TaskType.putaway =&gt; 'Putaway',
-  TaskType.retrieve =&gt; 'Retrieve',
-  TaskType.returning =&gt; 'Putaway',
-};</code></pre><p>expression คืนค่าโดยตรงและ compiler ตรวจ enum ครบ เหมาะกับ mapping ที่ไม่มี side effect ถ้าต้องทำหลาย statement ใช้ switch statement</p></section>
-<section><h2>2. OR pattern, wildcard และ guard</h2><pre class="code-vs"><code>String statusLabel(Object? raw) =&gt; switch (raw) {
-  'PENDING' || 0 =&gt; 'รอมอบหมาย',
-  final String s when s.trim().isEmpty =&gt; 'ไม่ระบุสถานะ',
-  final String s =&gt; s,
-  _ =&gt; 'UNKNOWN',
-};</code></pre><p><code>||</code> จับทางเลือก, <code>_</code> จับค่าใดก็ได้โดยไม่ bind และ <code>when</code> เพิ่มเงื่อนไขหลัง pattern match แล้ว ลำดับ case สำคัญ: case กว้างอยู่ก่อนจะบังกรณีแคบ</p></section>
-<section><h2>3. Object/List/Map pattern</h2><pre class="code-vs"><code>String parseLogin(Object? json) =&gt; switch (json) {
-  {'token': final String token} when token.isNotEmpty =&gt; token,
-  {'error': final String message} =&gt; throw ApiException(message),
-  _ =&gt; throw const FormatException('Invalid login payload'),
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: คืนค่าหลายค่าและแกะข้อมูลในบรรทัดเดียว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.4 (ฟังก์ชัน), D1.6 (class) และ D1.10 (enum กับ <code>switch</code> ที่ตรวจครบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> คืนค่าหลายค่าจากฟังก์ชันเดียวโดยไม่ต้องสร้าง class และใช้ pattern เพื่อตรวจรูปร่างข้อมูลพร้อมแกะค่าออกมาในขั้นตอนเดียว</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ฟังก์ชันคืนค่าได้ค่าเดียว แต่บ่อยครั้งเราอยากได้สองค่าพร้อมกัน เช่น “แกะบาร์โค้ดแล้วได้ทั้งรหัสและจำนวน” หรือ “ตรวจข้อมูลแล้วได้ทั้งผลผ่าน/ไม่ผ่านและเหตุผล”</p><p>ทางออกที่มีมาก่อนหน้านี้ล้วนมีข้อเสีย</p><table><thead><tr><th>วิธี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>สร้าง class ใหม่ทุกครั้ง</td><td>เยอะเกินไปสำหรับค่าที่ใช้แค่ในสองบรรทัด</td></tr>
+<tr><td>คืน <code>List</code></td><td>เสียชนิด ทุกตัวกลายเป็นชนิดร่วมที่กว้างที่สุด</td></tr>
+<tr><td>คืน <code>Map</code></td><td>สะกด key ผิดได้ และไม่มีอะไรตรวจให้</td></tr>
+<tr><td>ใช้ parameter แบบส่งค่ากลับ</td><td>อ่านยาก และ Dart ไม่รองรับตรง ๆ</td></tr>
+</tbody></table><p><strong>record</strong> แก้ปัญหานี้ได้ตรงจุด และ <strong>pattern matching</strong> ทำให้แกะค่าออกมาใช้ได้สะดวก</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>record</td><td>กลุ่มค่าหลายตัวที่มัดรวมเป็นค่าเดียว โดยไม่ต้องประกาศ class</td></tr>
+<tr><td>pattern</td><td>รูปร่างที่ใช้เทียบกับข้อมูล เช่น “เป็น map ที่มี key ชื่อ code”</td></tr>
+<tr><td>destructuring</td><td>การแกะค่าหลายตัวออกเป็นตัวแปรแยกในบรรทัดเดียว</td></tr>
+<tr><td>sealed class</td><td>class แม่ที่ประกาศไว้ว่า “ลูกมีเท่านี้เท่านั้น” ในไฟล์นี้</td></tr>
+<tr><td>guard</td><td>เงื่อนไขเพิ่มเติมที่ต่อท้าย pattern ด้วยคำว่า <code>when</code></td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: กล่องพัสดุที่ไม่ต้องตั้งชื่อ</h2><p>record คือกล่องที่มัดของหลายชิ้นไว้ด้วยกันชั่วคราว — ใช้เสร็จก็แกะทิ้ง ต่างจาก class ซึ่งเป็นสิ่งของที่มีชื่อ มีกฎ และอยู่ในระบบไปนาน</p><table><thead><tr><th></th><th>record</th><th>class</th></tr></thead><tbody>
+<tr><td>ประกาศล่วงหน้า</td><td>ไม่ต้อง</td><td>ต้อง</td></tr>
+<tr><td>ใส่ method / กฎได้</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>เทียบด้วยค่า</td><td>ได้เลย</td><td>ต้องเขียนเพิ่ม</td></tr>
+<tr><td>เหมาะกับ</td><td>ผลลัพธ์ชั่วคราวในฟังก์ชันเดียว</td><td>สิ่งของในระบบที่มีชื่อและกฎ</td></tr>
+</tbody></table><div class="note"><strong>เกณฑ์ตัดสิน:</strong> ถ้าค่านั้นต้องเดินทางข้ามหลายไฟล์ ต้องมี validation หรือมีชื่อที่คนในทีมเรียกกัน ให้ทำเป็น class — ถ้าเป็นแค่ “ค่าสองตัวที่คืนพร้อมกัน” ใช้ record</div></section>
+
+<section><h2>4. record แบบตำแหน่งและแบบมีชื่อ</h2><pre class="code-vs"><code>// แบบตำแหน่ง: เหมาะกับ 2 ค่าที่ชนิดต่างกันชัดเจน
+(String code, int quantity) parseScan(String raw) {
+  final parts = raw.split('|');
+  return (parts.first, int.tryParse(parts.last) ?? 0);
+}
+
+// แบบมีชื่อ: อ่านออกทันทีว่าค่าไหนคืออะไร
+({bool ok, String message}) validate(int quantity) {
+  if (quantity &lt;= 0) return (ok: false, message: 'จำนวนต้องมากกว่า 0');
+  if (quantity &gt; 99) return (ok: false, message: 'เกินขีดจำกัดต่อรอบ');
+  return (ok: true, message: 'ผ่าน');
+}</code></pre><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_12_records_patterns.dart</code></pre><pre class="code-vs"><code>final (code, quantity) = parseScan('PAL-1001|12');   // แกะเป็นสองตัวแปร
+print('code = $code, quantity = $quantity');
+
+final result = validate(12);
+print(result.ok);        // แบบมีชื่อ เข้าถึงด้วยชื่อ field
+
+final second = parseScan('PAL-1002|4');
+print(second.$1);        // แบบตำแหน่ง ใช้ $1, $2 ตามลำดับ
+print(second.$2);</code></pre><div class="warn"><strong>อย่าใช้ record แบบตำแหน่งเกินสองค่า</strong> โดยเฉพาะเมื่อชนิดซ้ำกัน เพราะ <code>result.$3</code> ไม่มีทางบอกได้ว่าคืออะไร ถ้ามีตั้งแต่สามค่าขึ้นไปให้ใช้แบบมีชื่อเสมอ</div></section>
+
+<section><h2>5. record เทียบด้วยค่า ไม่ใช่ตัวตน</h2><pre class="code-vs"><code>print((1, 'A') == (1, 'A'));   // true</code></pre><p>ทบทวนจาก D1.6: class ที่เราเขียนเองจะได้ <code>false</code> ในกรณีเดียวกัน เพราะเทียบตัวตน ส่วน record เทียบทีละค่าให้อัตโนมัติ นี่คือเหตุผลที่ record เหมาะกับการเป็นผลลัพธ์ที่ต้องเอาไปเปรียบเทียบหรือใส่ใน <code>Set</code></p><p>สำหรับ record แบบมีชื่อ ลำดับที่เขียนไม่สำคัญ แต่ชื่อสำคัญ — <code>(ok: true, message: 'x')</code> เท่ากับ <code>(message: 'x', ok: true)</code></p></section>
+
+<section><h2>6. Pattern matching: ตรวจรูปร่างพร้อมแกะค่า</h2><p>ต่อยอดจาก <code>switch</code> ใน D1.10 — คราวนี้ไม่ได้เทียบแค่ค่า แต่เทียบ “รูปร่าง” ของข้อมูลได้ด้วย</p><pre class="code-vs"><code>sealed class ScanEvent {}
+class ScanOk extends ScanEvent { ScanOk(this.code, this.quantity); ... }
+class ScanFailed extends ScanEvent { ScanFailed(this.reason); ... }
+class ScanIgnored extends ScanEvent {}
+
+String describe(ScanEvent event) =&gt; switch (event) {
+  ScanOk(code: final c, quantity: final q) when q &gt; 10 =&gt;
+    'สแกน $c จำนวนมาก ($q ชิ้น) ต้องยืนยันอีกครั้ง',
+  ScanOk(code: final c, quantity: final q) =&gt; 'สแกน $c จำนวน $q ชิ้น',
+  ScanFailed(reason: final r) =&gt; 'ล้มเหลว: $r',
+  ScanIgnored() =&gt; 'ข้ามรายการนี้',
+};</code></pre><p>สังเกตสามอย่างที่เกิดขึ้นพร้อมกันในบรรทัดเดียว: ตรวจว่าเป็นชนิดไหน, ดึง field ออกมาเป็นตัวแปร, และตรวจเงื่อนไขเพิ่มด้วย <code>when</code></p><p><strong><code>sealed</code> สำคัญตรงไหน:</strong> มันบอก Dart ว่าลูกของ <code>ScanEvent</code> มีเท่าที่ประกาศไว้ในไฟล์นี้เท่านั้น analyzer จึงตรวจได้ว่า <code>switch</code> ครอบคลุมครบไหม — ให้ผลเหมือน enum แต่แต่ละกรณีพกข้อมูลต่างกันได้ ซึ่ง enum ทำไม่ได้</p><table><thead><tr><th>เมื่อไหร่ใช้ enum</th><th>เมื่อไหร่ใช้ sealed class</th></tr></thead><tbody>
+<tr><td>ทุกกรณีมีข้อมูลเหมือนกันหรือไม่มีเลย</td><td>แต่ละกรณีพกข้อมูลคนละชุด</td></tr>
+<tr><td>เช่น สถานะ pending/done/cancelled</td><td>เช่น สำเร็จ(พร้อมข้อมูล) / ล้มเหลว(พร้อมเหตุผล)</td></tr>
+</tbody></table></section>
+
+<section><h2>7. pattern แบบอื่นที่ใช้บ่อย</h2><pre class="code-vs"><code>// map pattern: ตรวจว่ามี key และชนิดตรง แล้วแกะค่าเลย
+final raw = &lt;String, Object?&gt;{'code': 'PAL-1003', 'qty': 7};
+if (raw case {'code': final String c, 'qty': final int q}) {
+  print('$c จำนวน $q');
+}
+
+// ช่วงค่าและค่าที่เหลือ
+String classify(int quantity) =&gt; switch (quantity) {
+  0 =&gt; 'ไม่มีของ',
+  &lt; 100 =&gt; 'ปกติ',
+  _ =&gt; 'ต้องขออนุมัติ',
+};</code></pre><p><code>if (x case pattern)</code> ใช้เมื่อสนใจรูปแบบเดียว ไม่ต้องเขียน <code>switch</code> เต็มรูป — จะมีประโยชน์มากตอนแกะ JSON ใน D1.19</p><p><code>_</code> คือ pattern ที่จับได้ทุกอย่าง ใช้เป็นกรณีสุดท้าย แต่ระวังตามที่เตือนไว้ใน D1.10 ว่ามันปิดการตรวจสอบความครบถ้วน</p><div class="warn"><strong>ลำดับสำคัญ:</strong> <code>switch</code> เทียบจากบนลงล่างและหยุดที่กรณีแรกที่ตรง ดังนั้นกรณีที่แคบกว่า (มี <code>when</code>) ต้องอยู่ก่อนกรณีที่กว้างกว่าเสมอ ถ้าสลับกัน กรณีแคบจะไม่มีวันถูกใช้เลย</div></section>
+
+<section><h2>8. pattern ไม่ได้แทน validation</h2><p>pattern ตรวจได้ว่า “ข้อมูลรูปร่างถูก” แต่ไม่ได้ตรวจว่า “ข้อมูลสมเหตุสมผล”</p><table><thead><tr><th>pattern ตรวจได้</th><th>ต้องเขียนตรวจเอง</th></tr></thead><tbody>
+<tr><td>มี key ชื่อ <code>quantity</code> ไหม</td><td>จำนวนติดลบหรือเปล่า</td></tr>
+<tr><td>เป็น <code>int</code> หรือเปล่า</td><td>เกินจำนวนคงเหลือไหม</td></tr>
+<tr><td>เป็นชนิด <code>ScanOk</code> ไหม</td><td>สถานะเปลี่ยนตามลำดับที่ถูกต้องไหม</td></tr>
+</tbody></table><p>อย่าให้ parser ที่ดูเรียบร้อยหลอกเราว่าข้อมูลผ่านการตรวจแล้ว — กฎทางธุรกิจยังต้องเขียนแยกเสมอ</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>The type 'ScanEvent' is not exhaustively matched</code></td><td>ยังไม่ครอบคลุมลูกทุกตัวของ sealed class</td><td>เพิ่มกรณีที่ขาด</td></tr>
+<tr><td>บางกรณีใน <code>switch</code> ไม่เคยทำงานเลย</td><td>เขียนกรณีกว้างไว้ก่อนกรณีแคบ</td><td>ย้ายกรณีที่มี <code>when</code> ขึ้นไปข้างบน</td></tr>
+<tr><td>ไม่รู้ว่า <code>result.$2</code> คืออะไร</td><td>ใช้ record แบบตำแหน่งกับค่าหลายตัว</td><td>เปลี่ยนเป็น record แบบมีชื่อ</td></tr>
+<tr><td>record โตขึ้นเรื่อย ๆ จนมี 5–6 ค่า</td><td>ใช้ record แทนสิ่งที่ควรเป็น class</td><td>ตั้งชื่อให้มันแล้วสร้างเป็น class</td></tr>
+<tr><td><code>if (x case ...)</code> ไม่เข้าเงื่อนไขทั้งที่ข้อมูลดูถูก</td><td>ชนิดใน pattern ไม่ตรง เช่นข้อมูลเป็น <code>String</code> แต่เขียน <code>final int</code></td><td>ตรวจชนิดจริงด้วย <code>runtimeType</code> ก่อน</td></tr>
+<tr><td>ผ่าน pattern แล้วแต่ข้อมูลยังผิดเชิงธุรกิจ</td><td>เข้าใจว่า pattern ตรวจให้ทุกอย่าง</td><td>เขียนกฎธุรกิจตรวจเพิ่มหลัง pattern</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>เขียนฟังก์ชัน <code>parseQuantity</code> ที่รับค่าซึ่งอาจมาในหลายรูปแบบจาก API</p><ol><li>ถ้าเป็น <code>int</code> ที่ไม่ติดลบ ให้คืนเลขนั้น</li><li>ถ้าเป็นข้อความที่แปลงเป็นเลขไม่ติดลบได้ ให้คืนเลขนั้น</li><li>ถ้าเป็น <code>null</code> ให้คืน 0</li><li>กรณีอื่นให้โยน <code>FormatException</code> พร้อมบอกค่าที่ได้รับ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>int parseQuantity(Object? raw) =&gt; switch (raw) {
+  null =&gt; 0,
+  final int n when n &gt;= 0 =&gt; n,
+  final String s when (int.tryParse(s) ?? -1) &gt;= 0 =&gt; int.parse(s),
+  _ =&gt; throw FormatException('จำนวนไม่ถูกต้อง: $raw'),
 };
 
-final [first, ...rest] = tasks;</code></pre><p>Map pattern ไม่ได้บังคับว่าห้ามมี key อื่น แต่บังคับ key ที่ระบุต้อง match Shape validation แบบนี้ลด cast ต่อกันหลายชั้น</p></section>
-<section><h2>4. if-case สำหรับทางเดียว</h2><pre class="code-vs"><code>if (payload case {'items': final List&lt;Object?&gt; rows}) {
-  // rows ถูก promotion แล้ว
-} else {
-  throw const FormatException('items is required');
-}</code></pre></section>
-<section><h2>5. ตัวอย่างจริง</h2><p><code>workflow_definitions.dart</code> ใช้ OR pattern รองรับ status ใหม่/legacy เช่น <code>'PENDING' || '0'</code>; <code>connection_profile.dart</code> ใช้ switch parse environment; <code>warehouse_shell.dart</code> ใช้ switch expression เลือก widget/title จาก state ปัจจุบัน</p></section>
-<section><h2>6. Pattern ไม่แทน validation ทั้งหมด</h2><p>Pattern ตรวจ shape/type ได้ แต่ rule อย่าง port 1–65535, quantity ไม่เกินคงเหลือ หรือ transition ถูกลำดับยังต้องตรวจ domain invariant อย่าให้ parser ที่ดูสวยผ่านค่าที่ semantic ผิด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน parser ที่ยอมรับ quantity เป็น int หรือ numeric String แต่ปฏิเสธค่าติดลบ</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>int parseQuantity(Object? raw) =&gt; switch (raw) {
-  final int n when n &gt;= 0 =&gt; n,
-  final String s when int.tryParse(s) case final int n when n &gt;= 0 =&gt; n,
-  _ =&gt; throw const FormatException('Invalid quantity'),
-};</code></pre></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใส่ wildcard เพื่อให้ analyzer เงียบใน switch ของ enum/sealed state ถ้าค่าใหม่ควรบังคับให้ทุก UI ตัดสินใจ ให้รักษา exhaustive checking</div></section>
+void main() {
+  for (final input in &lt;Object?&gt;[12, '8', null, -3, 'มาก', 4.5]) {
+    try {
+      print('$input -&gt; ${parseQuantity(input)}');
+    } on FormatException catch (error) {
+      print('$input -&gt; ${error.message}');
+    }
+  }
+}</code></pre><pre class="code-vs"><code>12 -&gt; 12
+8 -&gt; 8
+null -&gt; 0
+-3 -&gt; จำนวนไม่ถูกต้อง: -3
+มาก -&gt; จำนวนไม่ถูกต้อง: มาก
+4.5 -&gt; จำนวนไม่ถูกต้อง: 4.5</code></pre><p><strong>ทำไม <code>null</code> ต้องอยู่บนสุด:</strong> เพราะถ้าอยู่ล่างกว่า <code>_</code> มันจะไม่มีวันถูกใช้ และในกรณีนี้ <code>null</code> เป็นค่าที่เจาะจงที่สุด จึงควรอยู่ก่อนทุกอย่าง</p><p><strong>จุดที่น่าสังเกตที่สุด:</strong> <code>-3</code> เป็น <code>int</code> จริง แต่ไม่ผ่าน <code>when n &gt;= 0</code> จึงตกลงไปที่กรณีสุดท้ายและถูกปฏิเสธ — นี่คือความต่างระหว่าง “ตรวจรูปร่าง” (เป็น int ไหม) กับ “ตรวจความสมเหตุสมผล” (ติดลบหรือเปล่า) ตามที่อธิบายไว้ในหัวข้อ 8 และ pattern จัดการทั้งสองอย่างได้ในบรรทัดเดียวเพราะมี <code>when</code></p><p><strong>ข้อควรระวังในคำตอบนี้:</strong> <code>4.5</code> เป็น <code>double</code> ซึ่งถูกปฏิเสธ ถ้า API ของคุณส่งทศนิยมมาจริงแล้วต้องการปัดลง ต้องเพิ่มกรณี <code>final double d when d &gt;= 0 =&gt; d.toInt()</code> — ประเด็นคือคุณต้อง <em>ตัดสินใจ</em> ว่าจะรับหรือปฏิเสธ ไม่ใช่ปล่อยให้มันพังโดยไม่ตั้งใจ</p><p><strong>ลองต่อ:</strong> ลบบรรทัด <code>_ =&gt; throw ...</code> ออกแล้วรัน <code>flutter analyze</code> — จะได้ error เพราะ <code>Object?</code> มีค่าที่เป็นไปได้ไม่จำกัด จึงต้องมีกรณีปิดท้ายเสมอ ต่างจาก enum และ sealed class ที่ปิดชุดค่าไว้แล้ว</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>record คือกลุ่มค่าชั่วคราวที่ไม่ต้องประกาศ class ล่วงหน้า</li><li>แบบมีชื่ออ่านง่ายกว่าเสมอเมื่อมีตั้งแต่สามค่าขึ้นไป</li><li>record เทียบด้วยค่า ต่างจาก class ที่เทียบด้วยตัวตน</li><li>pattern ตรวจชนิดและรูปร่างพร้อมแกะค่าออกมาในขั้นตอนเดียว</li><li><code>sealed class</code> ให้การตรวจครบถ้วนแบบ enum แต่แต่ละกรณีพกข้อมูลต่างกันได้</li><li>กรณีที่แคบกว่าต้องเขียนไว้ก่อนกรณีที่กว้างกว่า</li><li>pattern ไม่ได้ตรวจกฎทางธุรกิจให้ ต้องเขียนเพิ่มเสมอ</li></ul></div><p><strong>บทถัดไป:</strong> D1.13 จะจัดการเรื่อง <code>null</code> อย่างเป็นระบบ ซึ่งเป็นสิ่งที่เราแตะมาเรื่อย ๆ ตั้งแต่ D1.2 และเป็นจุดที่ Dart แตกต่างจากภาษาเก่า ๆ มากที่สุด</p></section>

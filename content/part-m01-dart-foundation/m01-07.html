@@ -1,24 +1,99 @@
-<div class="note">Abstract/interface กำหนดสัญญา, inheritance reuse ความเป็นชนิดเดียวกัน และ mixin เติมพฤติกรรมหลาย class ได้ ทั้งสามอย่างหน้าตาคล้ายแต่แก้คนละปัญหา</div>
-<section><h2>1. Interface เพื่อสลับ implementation</h2><pre class="code-vs"><code>abstract interface class TasksRepository {
-  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();
-  Future&lt;void&gt; complete(String id);
+<div class="meta"><span>ระดับ: เริ่มจากศูนย์</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ปิดข้อมูลไม่ให้คนนอกแก้ข้าม method</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6 (สร้าง class, field, method, constructor)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>_</code> ปิดข้อมูล เขียน getter/setter ที่ควบคุมกฎ และรู้ว่าเมื่อไหร่ควรใช้ getter แทนการเก็บ field เพิ่ม</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน D1.6 เราเขียน method <code>receive</code> ที่ปฏิเสธจำนวนติดลบ แต่กฎนั้นยังหลบเลี่ยงได้ง่ายมาก</p><pre class="code-vs"><code>pallet.receive(-5);      // ถูกปฏิเสธ ตามที่ตั้งใจ
+pallet.quantity = -5;    // ผ่านฉลุย! กฎที่เขียนไว้ไร้ความหมาย</code></pre><p>ถ้าใครก็แก้ field ได้โดยตรง กฎทั้งหมดที่เราเขียนใน method ก็เป็นแค่ข้อเสนอแนะ บทนี้คือวิธีทำให้กฎเป็นกฎจริง ๆ</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>encapsulation</td><td>การห่อข้อมูลไว้ข้างใน แล้วเปิดเฉพาะทางเข้าออกที่เราควบคุม</td></tr>
+<tr><td>public</td><td>คนอื่นเห็นและใช้ได้</td></tr>
+<tr><td>private</td><td>ใช้ได้เฉพาะภายใน — ใน Dart คือขึ้นต้นชื่อด้วย <code>_</code></td></tr>
+<tr><td>getter</td><td>ทางอ่านค่า ที่หน้าตาเหมือน field แต่คำนวณให้</td></tr>
+<tr><td>setter</td><td>ทางเขียนค่า ที่แทรกการตรวจสอบได้ก่อนยอมให้เปลี่ยน</td></tr>
+<tr><td>derived value</td><td>ค่าที่คำนวณจากค่าอื่นได้ ไม่ต้องเก็บซ้ำ</td></tr>
+<tr><td>invariant</td><td>กฎที่ต้องเป็นจริงเสมอ เช่น “จำนวนต้องไม่ติดลบ”</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เคาน์เตอร์รับของ</h2><p>คิดถึงห้องเก็บของที่มีเคาน์เตอร์กั้น</p><ul><li><strong>ของในห้อง</strong> = field ที่ขึ้นต้นด้วย <code>_</code> — คนนอกเข้าไปหยิบเองไม่ได้</li><li><strong>ช่องยื่นของเข้า</strong> = method ที่ตรวจของก่อนรับ</li><li><strong>ช่องดูรายการ</strong> = getter ที่ให้ดูได้แต่แก้ไม่ได้</li></ul><p>ประโยชน์ที่แท้จริงไม่ใช่ “ความลับ” แต่คือ <strong>ทุกการเปลี่ยนแปลงต้องผ่านจุดที่เราตรวจสอบได้</strong> เมื่อเกิดข้อมูลผิด เรารู้ทันทีว่าต้องไปดูโค้ดตรงไหน</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ยิ่งมีทางเข้าถึงข้อมูลน้อย ยิ่งหาสาเหตุของบั๊กได้เร็ว</div></section>
+
+<section><h2>4. underscore = private ต่อ “ไฟล์” ไม่ใช่ต่อ class</h2><pre class="code-vs"><code>class ScanSession {
+  final List&lt;String&gt; _scanned = &lt;String&gt;[];   // คนนอกไฟล์นี้มองไม่เห็นเลย
+  bool _closed = false;
+}</code></pre><div class="warn"><strong>จุดที่ต่างจากภาษาอื่นอย่าง C# หรือ Java:</strong> ใน Dart <code>_</code> ทำให้ private ต่อ <strong>ไฟล์</strong> (เรียกว่า library) ไม่ใช่ต่อ class ดังนั้นสอง class ที่อยู่ไฟล์เดียวกันจะเห็นของ private ของกันและกัน — ตั้งใจออกแบบมาแบบนี้ และเราจะใช้ประโยชน์จากมันใน D1.18</div></section>
+
+<section><h2>5. Getter: ทางอ่านที่ปลอดภัย</h2><pre class="code-vs"><code>int get count =&gt; _scanned.length;
+bool get isEmpty =&gt; _scanned.isEmpty;
+List&lt;String&gt; get scanned =&gt; List.unmodifiable(_scanned);</code></pre><p>เรียกใช้เหมือน field ไม่ต้องใส่วงเล็บ</p><pre class="code-vs"><code>print(session.count);     // ไม่ใช่ session.count()
+print(session.isEmpty);</code></pre><p>สังเกต <code>scanned</code> ที่คืน <code>List.unmodifiable</code> — ถ้าคืน <code>_scanned</code> ตรง ๆ คนนอกจะ <code>add</code> เข้ามาได้ทันที ซึ่งข้ามกฎทั้งหมดที่เราเขียนไว้ใน method <code>add</code></p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_07_encapsulation.dart</code></pre><pre class="code-vs"><code>=== list ที่คืนออกไปแก้ไม่ได้ ===
+ถูกปฏิเสธ: คนนอกเพิ่มข้อมูลเองไม่ได้</code></pre></section>
+
+<section><h2>6. เมื่อไหร่ควรใช้ getter แทนการเก็บ field</h2><p>กฎง่าย ๆ: <strong>ถ้าคำนวณจากค่าอื่นได้ อย่าเก็บซ้ำ</strong></p><table><thead><tr><th></th><th>เก็บเป็น field</th><th>คำนวณด้วย getter</th></tr></thead><tbody>
+<tr><td>ตัวอย่าง</td><td><code>int _count = 0;</code></td><td><code>int get count =&gt; _scanned.length;</code></td></tr>
+<tr><td>ความเสี่ยง</td><td>ลืมอัปเดตแล้วค่าไม่ตรงกับความจริง</td><td>ไม่มีทางไม่ตรง เพราะคำนวณสด</td></tr>
+<tr><td>ความเร็ว</td><td>เร็วกว่าเล็กน้อย</td><td>ช้ากว่าเล็กน้อย (แทบไม่รู้สึก)</td></tr>
+<tr><td>ควรเลือกเมื่อ</td><td>คำนวณแพงมากจริง ๆ และวัดแล้ว</td><td>เกือบทุกกรณี</td></tr>
+</tbody></table><div class="warn"><strong>สิ่งที่ getter ไม่ควรทำ:</strong> อย่าให้ getter มีผลข้างเคียง เช่น ยิง API เปลี่ยนค่าอื่น หรือโยน error แบบไม่คาดคิด เพราะคนอ่านโค้ดเห็น <code>session.count</code> แล้วคิดว่าเป็นการอ่านค่าธรรมดา ถ้างานหนักหรือเป็นงานที่ต้องรอ ให้ทำเป็น method ที่มีวงเล็บเพื่อส่งสัญญาณว่า “นี่มีค่าใช้จ่าย”</div></section>
+
+<section><h2>7. Setter: ทางเขียนที่มีเงื่อนไข</h2><pre class="code-vs"><code>bool get closed =&gt; _closed;
+
+set closed(bool value) {
+  if (_closed &amp;&amp; !value) {
+    throw StateError('ปิดรอบไปแล้ว เปิดซ้ำไม่ได้');
+  }
+  _closed = value;
+}</code></pre><p>ใช้งานเหมือนกำหนดค่าให้ field ปกติ แต่มีการตรวจสอบซ่อนอยู่</p><pre class="code-vs"><code>session.closed = true;    // ผ่าน setter จึงตรวจกฎให้อัตโนมัติ</code></pre><p>ในทางปฏิบัติ setter ถูกใช้น้อยกว่า method ที่ตั้งชื่อชัด ๆ เพราะการเปลี่ยนสถานะสำคัญมักมีความหมายมากกว่าแค่ “ใส่ค่า” เช่น <code>closeSession()</code> อ่านแล้วเข้าใจกว่า <code>closed = true</code> แต่ควรรู้จักไว้เพราะจะเจอในโค้ดของคนอื่น</p></section>
+
+<section><h2>8. รวมร่าง: class ที่ปกป้องกฎของตัวเองได้</h2><pre class="code-vs"><code>void add(String code) {
+  if (_closed) {
+    throw StateError('รอบนี้ปิดแล้ว สแกนเพิ่มไม่ได้');
+  }
+  final normalized = code.trim().toUpperCase();
+  if (normalized.isEmpty || _scanned.contains(normalized)) return;
+  _scanned.add(normalized);
+}</code></pre><p>ลองไล่ผลลัพธ์จาก lab: เราสแกน 4 ครั้งด้วย <code>'pal-1001'</code>, <code>'  PAL-1001  '</code>, <code>'PAL-1002'</code> และ <code>'   '</code> แต่ได้ผลเพียง 2 รายการ</p><pre class="code-vs"><code>scanned = [PAL-1001, PAL-1002]
+count   = 2</code></pre><p>เพราะ <code>add</code> จัดรูปแบบข้อความ ตัดตัวซ้ำ และปฏิเสธค่าว่างให้ทั้งหมด — โดยที่คนเรียกไม่ต้องรู้กฎเหล่านี้เลย นี่คือหน้าตาของ class ที่ออกแบบดี</p></section>
+
+<section><h2>9. Extension: เพิ่มมุมมองโดยไม่แก้ต้นฉบับ</h2><p>บางครั้งเราอยากเพิ่มความสะดวกให้ชนิดที่มีอยู่แล้ว โดยไม่อยากไปแก้ class ต้นทาง (หรือแก้ไม่ได้เพราะเป็นของ Dart เอง)</p><pre class="code-vs"><code>extension ScanSessionSummary on ScanSession {
+  String get summary =&gt; '$operator สแกนแล้ว $count รายการ';
 }
 
-class TasksApi implements TasksRepository { /* เรียก .NET */ }
-class FakeTasksRepository implements TasksRepository { /* ใช้ใน test */ }</code></pre><p><code>implements</code> รับเฉพาะ contract ต้อง implement สมาชิกเอง ไม่รับ implementation เดิม เหมาะกับ boundary ที่ production ใช้ network แต่ test ต้องควบคุมผล</p></section>
-<section><h2>2. Abstract class กับ extends</h2><p>abstract class มีทั้ง abstract member และ implementation/shared state ได้ ส่วน <code>extends</code> รับ implementation และมี superclass เดียว ตัวอย่างสำคัญใน Flutter คือ <code>StatefulWidget</code>/<code>State&lt;T&gt;</code>: framework กำหนด lifecycle และ subclass เติม <code>build</code>, <code>initState</code>, <code>dispose</code></p><div class="warn">ใช้ inheritance เพื่อความสัมพันธ์ “is-a” และรักษา Liskov contract ไม่ใช้เพียงเพราะอยากยืม method สองตัว</div></section>
-<section><h2>3. Mixin เติม capability</h2><pre class="code-vs"><code>class _WarehouseShellState extends State&lt;WarehouseShell&gt;
-    with WidgetsBindingObserver {
+print(session.summary);   // สมชาย สแกนแล้ว 2 รายการ</code></pre><p><code>extension</code> เพิ่มได้เฉพาะ getter และ method — เพิ่ม field ใหม่ไม่ได้ ซึ่งเป็นข้อจำกัดที่ดี เพราะมันบังคับให้ส่วนที่เพิ่มเข้ามาเป็นเพียง “มุมมองใหม่ของข้อมูลเดิม” ไม่ใช่สถานะที่ซ่อนอยู่</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>คนนอก <code>add</code> เข้า list ของเราได้ ทั้งที่เป็น private field</td><td>getter คืน list ตัวจริงออกไป</td><td>คืน <code>List.unmodifiable(...)</code> หรือสำเนา <code>[..._list]</code></td></tr>
+<tr><td><code>Unsupported operation: Cannot add to an unmodifiable list</code></td><td>เผลอเรียก <code>add</code> บน list ที่เราตั้งใจล็อกไว้</td><td>เรียกผ่าน method ของ class แทน — นั่นคือเจตนาของโค้ด</td></tr>
+<tr><td>ค่า <code>count</code> ไม่ตรงกับจำนวนรายการจริง</td><td>เก็บ <code>_count</code> เป็น field แล้วลืมอัปเดตบางเส้นทาง</td><td>เปลี่ยนเป็น getter ที่คำนวณจาก <code>_scanned.length</code></td></tr>
+<tr><td>เรียก <code>session.count()</code> แล้ว error</td><td>getter ไม่ต้องใส่วงเล็บ</td><td>เขียน <code>session.count</code></td></tr>
+<tr><td>class อื่นในไฟล์เดียวกันแก้ <code>_field</code> ได้</td><td>เข้าใจว่า <code>_</code> เป็น private ต่อ class</td><td>ถ้าอยากกันจริง ให้แยกคนละไฟล์ (D1.18)</td></tr>
+<tr><td>getter ทำงานช้าหรือค้าง</td><td>ใส่งานหนัก/งานเครือข่ายไว้ใน getter</td><td>ย้ายไปเป็น method ที่คืน <code>Future</code> (D1.15)</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ปรับปรุง <code>StorageBin</code> จาก D1.6 ให้ปกป้องกฎของตัวเองได้จริง</p><ol><li>ทำให้คนนอกแก้ <code>used</code> ตรง ๆ ไม่ได้</li><li>เปิดให้อ่านจำนวนที่ใช้ไป จำนวนที่เหลือ และสถานะเต็มหรือยัง</li><li>ห้ามเก็บ “จำนวนที่เหลือ” เป็น field</li><li>เพิ่ม method <code>take(int amount)</code> ที่ปฏิเสธเมื่อของไม่พอ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class StorageBin {
+  StorageBin({required this.code, required this.capacity});
+
+  final String code;
+  final int capacity;
+  int _used = 0;
+
+  int get used =&gt; _used;
+  int get remaining =&gt; capacity - _used;   // คำนวณสด ไม่เก็บซ้ำ
+  bool get isFull =&gt; remaining == 0;
+
+  bool put(int amount) {
+    if (amount &lt;= 0 || amount &gt; remaining) return false;
+    _used += amount;
+    return true;
+  }
+
+  bool take(int amount) {
+    if (amount &lt;= 0 || amount &gt; _used) return false;
+    _used -= amount;
+    return true;
+  }
+
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) { /* ... */ }
-}</code></pre><p>ตัวอย่างนี้อยู่ใน <code>wms_absolute_mobile/.../warehouse_shell.dart</code> State ยังเป็น State เหมือนเดิม แต่รับ capability สังเกต lifecycle ของแอป ต้อง add/remove observer ตาม lifecycle ด้วย—mixin ไม่ได้จัด ownership ให้อัตโนมัติ</p></section>
-<section><h2>4. Dart class มี implicit interface</h2><p>ทุก class สามารถถูก implements ได้ แม้ไม่ได้ประกาศ interface แยก แต่การสร้าง interface เฉพาะ use case มักชัดกว่า implement class ใหญ่ เพราะ consumer ไม่ควรผูกกับสมาชิกที่ไม่ใช้</p></section>
-<section><h2>5. ตัวอย่างจากสอง codebase</h2><ul><li><code>absolute/api/receiving_api.dart</code>, <code>inventory_api.dart</code>, <code>tasks_api.dart</code> แยก repository interface ทำ fake ได้</li><li><code>wmsapp</code> ใช้ singleton <code>ApiService</code> โดยตรงมากกว่า จึงสลับ dependency ใน unit test ยากกว่า</li><li>State class จำนวนมาก <code>extends State&lt;Screen&gt;</code> เพราะ framework contract ไม่ใช่ business inheritance</li></ul></section>
-<section><h2>6. Decision guide</h2><ol><li>ต้องสลับ API/fake → interface</li><li>ต้องแชร์ invariant/implementation และ subtype จริง → abstract base + extends</li><li>หลาย hierarchy ต้องมี capability เดียวกัน → mixin</li><li>แค่ต้องใช้ object อีกตัว → composition/injection</li></ol></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ scanner ที่ production อ่าน hardware แต่ test คืนค่ากำหนดเอง</p><details><summary>เฉลย</summary><pre class="code-vs"><code>abstract interface class BarcodeSource {
-  Stream&lt;String&gt; get scans;
-}
+  String toString() =&gt; '$code [$_used/$capacity]';
+}</code></pre><p><strong>ทำไม <code>remaining</code> ต้องเป็น getter:</strong> ถ้าเก็บเป็น field เราจะต้องจำอัปเดตมันทั้งใน <code>put</code> และ <code>take</code> วันหนึ่งจะมี method ที่สามที่ลืมอัปเดต แล้วเกิดสถานะที่ <code>used + remaining != capacity</code> ซึ่งเป็นไปไม่ได้ในโลกจริงแต่เป็นไปได้ในโค้ด — บั๊กแบบนี้หาสาเหตุยากมากเพราะเลขดูสมเหตุสมผลจนกว่าจะเอามาบวกกัน</p><p><strong>ทำไม <code>put</code> เช็คด้วย <code>remaining</code>:</strong> อ่านแล้วตรงกับภาษาคนว่า “ใส่ได้ไม่เกินที่เหลือ” ชัดกว่าการเขียน <code>_used + amount &gt; capacity</code></p><p><strong>ลองต่อ:</strong> ลองเรียก <code>bin.used = 99</code> ดู — analyzer จะปฏิเสธทันทีเพราะ getter อย่างเดียวไม่มี setter นั่นคือเป้าหมายของบทนี้</p></details></section>
 
-class HardwareBarcodeSource implements BarcodeSource { /* platform */ }
-class FakeBarcodeSource implements BarcodeSource { /* StreamController */ }</code></pre></details></section>
-<section><h2>8. เช็กความเข้าใจ</h2><p>เมื่อเห็น <code>extends</code>, <code>implements</code>, <code>with</code> ให้ถามตามลำดับ: รับ state/implementation อะไร, สัญญาอะไรที่ต้องทำให้ครบ และ lifecycle/resource ใหม่ใครเป็นเจ้าของ</p></section>
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>_</code> ทำให้ชื่อเป็น private ต่อไฟล์ ไม่ใช่ต่อ class</li><li>ทุกการเปลี่ยนข้อมูลควรผ่าน method ที่ตรวจกฎได้ที่เดียว</li><li>getter คืนค่าที่คำนวณสด และไม่ควรมีผลข้างเคียง</li><li>อย่าเก็บค่าที่คำนวณจากค่าอื่นได้ ให้ใช้ getter แทน</li><li>คืน collection ออกนอก class ให้คืนแบบแก้ไม่ได้เสมอ</li><li><code>extension</code> เพิ่มมุมมองใหม่ได้โดยไม่แตะต้นฉบับ</li></ul></div><p><strong>บทถัดไป:</strong> D1.8 จะเปิดเรื่องความสัมพันธ์ระหว่าง class หลายตัว — เมื่อไหร่ควรสืบทอด เมื่อไหร่ควรใช้แค่สัญญาร่วมกัน และ mixin คืออะไร</p></section>

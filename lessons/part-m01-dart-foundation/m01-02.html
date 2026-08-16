@@ -4,34 +4,88 @@
 <title>Variables &amp; Data Types</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-02 · Dart Core</span><h1>Variables &amp; Data Types</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ชนิดข้อมูลที่ต้องอ่านออกทันที</a></li><li><a href="#section-2">Inference ไม่เท่ากับ dynamic</a></li><li><a href="#section-3">Assignment กับ object identity</a></li><li><a href="#section-4">ตัวอย่างใน WMS</a></li><li><a href="#section-5">กฎเลือก type สำหรับโค้ดงานจริง</a></li><li><a href="#section-6">แบบฝึกหัด</a></li><li><a href="#section-7">จุดพลาด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
-<div class="note"><strong>หัวใจของ Dart:</strong> ตัวแปรทุกตัวมี static type แม้เขียนด้วย <code>var</code> ก็ตาม Type inference ช่วยลดคำซ้ำ แต่ไม่ได้ปิด type checking แบบ <code>dynamic</code></div>
-<section id="section-1"><h2>1. ชนิดข้อมูลที่ต้องอ่านออกทันที</h2><ul><li><code>int</code>, <code>double</code>, <code>num</code>: จำนวนเต็ม ทศนิยม และชนิดแม่ของทั้งคู่</li><li><code>String</code>, <code>bool</code>: ข้อความและจริง/เท็จ</li><li><code>Object</code>/<code>Object?</code>: รับค่าได้กว้างแต่ยังต้องตรวจ type ก่อนใช้</li><li><code>dynamic</code>: เลื่อนการตรวจสมาชิกไป runtime—ใช้เฉพาะ boundary ที่หลีกเลี่ยงไม่ได้</li><li><code>Never</code>: function ไม่มีวันคืนค่าปกติ เช่น throw เสมอ</li></ul></section>
-<section id="section-2"><h2>2. Inference ไม่เท่ากับ dynamic</h2><pre class="code-vs"><code>var palletId = 'PAL-001'; // inferred เป็น String
-palletId = 'PAL-002';     // ได้
-// palletId = 42;          // compile-time error
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กล่องที่มีป้ายกำกับ</a></li><li><a href="#section-4">ชนิดพื้นฐานที่ใช้จริง 90% ของเวลา</a></li><li><a href="#section-5">รันดูของจริง</a></li><li><a href="#section-6">เขียนชนิดเอง หรือให้ Dart เดาด้วย var</a></li><li><a href="#section-7">แปลงข้อความให้เป็นตัวเลข</a></li><li><a href="#section-8">String interpolation: ประกอบข้อความ</a></li><li><a href="#section-9">Object? ปลอดภัยกว่า dynamic</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มจากศูนย์</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ประกาศตัวแปรและอ่านชนิดข้อมูล</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.1 (รัน <code>dart run</code> ได้และรู้ว่า <code>main()</code> คือจุดเริ่ม) เท่านั้น ยังไม่ต้องรู้จัก Flutter หรือ class<br><strong>จบบทนี้แล้วจะทำได้:</strong> ประกาศตัวแปรให้ถูกชนิด อ่านออกว่าค่าหนึ่ง ๆ เป็นชนิดอะไร และแปลงข้อความจากเครื่องสแกนให้เป็นตัวเลขได้อย่างปลอดภัย</div>
 
-Object? raw = response['count'];
-if (raw is int) {
-  print(raw + 1);          // promotion เป็น int ใน branch นี้
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในบทที่แล้วเราเก็บชื่อคลังและจำนวนสินค้าไว้ในตัวแปร โดยยังไม่ได้ถามว่า “ตัวแปรนี้เก็บอะไรได้บ้าง” คำถามนี้สำคัญมาก เพราะ Dart จะปฏิเสธโค้ดที่ใส่ค่าผิดชนิด <strong>ตั้งแต่ก่อนโปรแกรมจะรัน</strong> ซึ่งเป็นข้อดี ไม่ใช่ความจุกจิก — bug ที่ควรเจอตอนพิมพ์โค้ด ดีกว่าเจอตอนพนักงานยืนสแกนของอยู่หน้าแร็ค</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมายแบบสั้นที่สุด</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>ตัวแปร (variable)</td><td>กล่องที่มีชื่อ ใช้เก็บค่าหนึ่งค่า</td><td><code>quantity</code></td></tr>
+<tr><td>ชนิด (type)</td><td>ป้ายบอกว่ากล่องนี้รับค่าแบบไหน</td><td><code>int</code>, <code>String</code></td></tr>
+<tr><td>ประกาศ (declare)</td><td>สร้างตัวแปรขึ้นมาครั้งแรก</td><td><code>int quantity = 0;</code></td></tr>
+<tr><td>กำหนดค่า (assign)</td><td>ใส่ค่าใหม่ลงกล่องเดิม</td><td><code>quantity = 5;</code></td></tr>
+<tr><td>อนุมานชนิด (type inference)</td><td>Dart เดาชนิดให้จากค่าที่เราใส่</td><td><code>var code = 'PAL-1';</code></td></tr>
+<tr><td>compile-time error</td><td>ผิดตั้งแต่ยังไม่รัน</td><td>ใส่ตัวเลขลงกล่อง <code>String</code></td></tr>
+<tr><td>runtime error</td><td>ผิดตอนโปรแกรมกำลังทำงาน</td><td>แปลงคำว่า “มาก” เป็นตัวเลข</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กล่องที่มีป้ายกำกับ</h2><p>ให้คิดว่าตัวแปรคือกล่องพลาสติกในคลัง แต่ละกล่องมี <strong>ชื่อ</strong> (ใช้เรียก) และมี <strong>ป้ายกำกับ</strong> ติดอยู่บอกว่ากล่องนี้ใส่อะไรได้</p><ul><li>กล่องชื่อ <code>quantity</code> ป้ายเขียนว่า <code>int</code> → ใส่ได้เฉพาะจำนวนเต็ม</li><li>กล่องชื่อ <code>barcode</code> ป้ายเขียนว่า <code>String</code> → ใส่ได้เฉพาะข้อความ</li><li>ป้ายกำกับ <strong>ติดตายตั้งแต่วันประกาศ</strong> เปลี่ยนของข้างในได้ แต่เปลี่ยนชนิดไม่ได้</li></ul><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ค่าในกล่องเปลี่ยนได้ ป้ายชนิดของกล่องเปลี่ยนไม่ได้</div></section>
+
+<section id="section-4"><h2>4. ชนิดพื้นฐานที่ใช้จริง 90% ของเวลา</h2><table><thead><tr><th>ชนิด</th><th>เก็บอะไร</th><th>ตัวอย่างค่า</th><th>ใช้ตอนไหนในงานคลัง</th></tr></thead><tbody>
+<tr><td><code>String</code></td><td>ข้อความ</td><td><code>'PAL-1001'</code></td><td>บาร์โค้ด, ชื่อช่องเก็บ</td></tr>
+<tr><td><code>int</code></td><td>จำนวนเต็ม</td><td><code>12</code></td><td>จำนวนชิ้น, จำนวนกล่อง</td></tr>
+<tr><td><code>double</code></td><td>ทศนิยม</td><td><code>3.5</code></td><td>น้ำหนัก, ปริมาตร</td></tr>
+<tr><td><code>bool</code></td><td>จริง/เท็จ</td><td><code>true</code></td><td>ตรวจแล้วหรือยัง</td></tr>
+<tr><td><code>num</code></td><td>ตัวเลขแบบใดก็ได้</td><td><code>7</code> หรือ <code>7.5</code></td><td>เมื่อรับได้ทั้งสองแบบ</td></tr>
+</tbody></table><p><code>num</code> คือชนิดแม่ของ <code>int</code> และ <code>double</code> — ใช้เมื่อ “ยังไม่แน่ว่าจะเป็นจำนวนเต็มหรือทศนิยม” แต่ถ้ารู้แน่ให้เลือกชนิดที่แคบกว่าเสมอ</p></section>
+
+<section id="section-5"><h2>5. รันดูของจริง</h2><p>เปิด Terminal ที่โฟลเดอร์ lab แล้วรัน:</p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_02_variables.dart</code></pre><p>ผลลัพธ์สี่บรรทัดแรกจะเป็นแบบนี้ สังเกตวงเล็บท้ายบรรทัด นั่นคือชนิดจริงที่ Dart มองเห็น</p><pre class="code-vs"><code>barcode  = PAL-1001  (String)
+quantity = 12  (int)
+weightKg = 3.5  (double)
+isChecked= false  (bool)</code></pre><p><code>runtimeType</code> คือวิธีถาม Dart ตรง ๆ ว่า “ค่านี้ชนิดอะไร” มีไว้เรียนรู้และ debug ไม่ใช่สิ่งที่ควรใช้ตัดสินใจในโค้ดจริง</p></section>
+
+<section id="section-6"><h2>6. เขียนชนิดเอง หรือให้ Dart เดาด้วย var</h2><pre class="code-vs"><code>String barcode = 'PAL-1001';  // เขียนชนิดเอง
+var location = 'A-01-02';     // ให้ Dart เดา -> ได้ String เหมือนกัน
+
+location = 'A-01-03';  // เปลี่ยนค่าได้ เพราะยังเป็นข้อความ
+// location = 5;       // ผิดตั้งแต่ยังไม่รัน เพราะกล่องนี้ป้ายว่า String</code></pre><div class="warn"><strong>เข้าใจผิดที่พบบ่อยที่สุดของบทนี้:</strong> <code>var</code> ไม่ได้แปลว่า “ไม่มีชนิด” และไม่ได้แปลว่า “ใส่อะไรก็ได้” — มันแปลว่า “ชนิดชัดอยู่แล้วจากค่าด้านขวา ไม่ต้องพิมพ์ซ้ำ” ผลลัพธ์เข้มงวดเท่าการเขียนชนิดเองทุกประการ</div><p>กฎง่าย ๆ ที่ทีมส่วนใหญ่ใช้: ถ้าอ่านบรรทัดเดียวแล้วเดาชนิดออก ใช้ <code>var</code>; ถ้าเดาไม่ออกหรือเป็นค่าสำคัญ ให้เขียนชนิดกำกับไว้ให้คนอ่านสบายใจ</p></section>
+
+<section id="section-7"><h2>7. แปลงข้อความให้เป็นตัวเลข</h2><p>เครื่องสแกนและ API ส่งค่ามาเป็น <strong>ข้อความ</strong> เสมอ ถ้าจะเอาไปบวกลบต้องแปลงก่อน และการแปลงมีสองแบบที่ต่างกันมาก</p><table><thead><tr><th>วิธี</th><th>เจอค่าที่แปลงไม่ได้</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>int.parse('25')</code></td><td>โยน error โปรแกรมหยุด</td><td>มั่นใจว่าข้อมูลถูกแน่นอน</td></tr>
+<tr><td><code>int.tryParse('ยี่สิบห้า')</code></td><td>คืน <code>null</code> อย่างสงบ</td><td>รับค่าจากผู้ใช้หรือเครือข่าย</td></tr>
+</tbody></table><pre class="code-vs"><code>final scannedQty = int.parse('25');        // ได้ 25
+final maybeQty = int.tryParse('ยี่สิบห้า');  // ได้ null
+final safeQty = int.tryParse('abc') ?? 0;  // ถ้าแปลงไม่ได้ให้ใช้ 0</code></pre><p>เครื่องหมาย <code>??</code> อ่านว่า “ถ้าฝั่งซ้ายเป็น null ให้ใช้ฝั่งขวาแทน” เราจะเจอมันบ่อยมากตั้งแต่บทนี้เป็นต้นไป</p></section>
+
+<section id="section-8"><h2>8. String interpolation: ประกอบข้อความ</h2><pre class="code-vs"><code>print('$barcode มี $quantity ชิ้น');
+print('น้ำหนักรวม ${weightKg * quantity} kg');</code></pre><table><thead><tr><th>เขียนแบบ</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>$ชื่อตัวแปร</code></td><td>แทรกค่าตัวแปรตรง ๆ</td></tr>
+<tr><td><code>${นิพจน์}</code></td><td>ต้องคำนวณหรือเรียก method ก่อน</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. Object? ปลอดภัยกว่า dynamic</h2><p>บางครั้งเราได้ค่าที่ยังไม่รู้ชนิด เช่นข้อมูลที่เพิ่งมาจาก server มีสองทางเลือก และทางที่ถูกมีแค่ทางเดียว</p><pre class="code-vs"><code>Object? fromServer = 42;
+if (fromServer is int) {
+  print(fromServer + 1);  // ผ่าน if แล้ว Dart รู้ว่าเป็น int
 }
 
-dynamic unchecked = response['count'];
-unchecked.missingMethod(); // compile ผ่าน แต่พังตอน runtime</code></pre><p>เลือก <code>var</code> เมื่อ type ด้านขวาชัด เลือกเขียน type เมื่อเป็น public API, ค่าเริ่มต้นไม่บอก intent หรืออยากรับ interface ที่กว้างกว่าคลาสจริง</p></section>
-<section id="section-3"><h2>3. Assignment กับ object identity</h2><p>ตัวแปรเก็บ reference ไปยัง object ไม่ได้คัดลอก object ทุกครั้ง การ assign list ให้ตัวแปรใหม่จึงยังชี้ list เดิม:</p><pre class="code-vs"><code>final first = &lt;String&gt;['A'];
-final second = first;
-second.add('B');
-print(first); // [A, B]
+dynamic unchecked = 42;
+unchecked.methodThatDoesNotExist();  // ผ่านการ compile แต่พังตอนรัน</code></pre><table><thead><tr><th></th><th><code>Object?</code></th><th><code>dynamic</code></th></tr></thead><tbody>
+<tr><td>รับค่าได้กว้าง</td><td>ได้</td><td>ได้</td></tr>
+<tr><td>บังคับให้ตรวจชนิดก่อนใช้</td><td>บังคับ</td><td>ไม่บังคับ</td></tr>
+<tr><td>พิมพ์ชื่อ method ผิด</td><td>รู้ทันทีตอน compile</td><td>รู้ตอนโปรแกรมพัง</td></tr>
+</tbody></table><div class="warn">ตอนนี้ยังไม่ต้องใช้ทั้งสองตัว แค่จำไว้ว่าถ้าจำเป็นต้องเลือก ให้เลือก <code>Object?</code> เพราะมันบังคับให้เราตรวจก่อน ส่วน <code>dynamic</code> เก็บไว้ใช้เฉพาะจุดที่แกะ JSON เท่านั้น (D1.19)</div></section>
 
-final copied = [...first]; // list คนละตัว</code></pre><p>เรื่องนี้สำคัญต่อ state: mutate list เดิมอาจทำให้ listener ที่เทียบ identity ไม่รู้ว่าค่าเปลี่ยน การสร้าง collection/object ใหม่ทำให้ flow ชัดและ test ง่ายกว่า</p></section>
-<section id="section-4"><h2>4. ตัวอย่างใน WMS</h2><p>เปิด <code>wms_absolute_mobile/lib/core/api_client.dart</code> จะเห็น JSON เริ่มเป็น <code>Map&lt;String, dynamic&gt;</code> เพราะข้อมูลเพิ่งข้าม network จากนั้นไฟล์ model/API แปลงเป็น <code>String</code>, <code>int</code>, enum หรือ class ที่แน่นอน ส่วน <code>PdaMetrics.minTapTarget</code> เป็น <code>double</code> ที่มีความหมายด้าน UI ชัดเจน</p></section>
-<section id="section-5"><h2>5. กฎเลือก type สำหรับโค้ดงานจริง</h2><ol><li>ใช้ type ที่แคบที่สุดซึ่งรองรับค่าที่ถูกต้อง</li><li>ถ้า “ไม่มีค่า” เป็นสถานะจริง ใช้ <code>T?</code> ไม่ใช้ค่าวิเศษอย่าง <code>''</code> หรือ <code>-1</code></li><li>กัก <code>dynamic</code> ไว้ใน parser แล้วคืน typed model</li><li>อย่า cast เพียงเพื่อให้ analyzer เงียบ ต้อง validate รูป payload ด้วย</li></ol></section>
-<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>กำหนด type ให้ข้อมูลสแกน: barcode, quantity, optional serial, loading flag และ raw JSON จาก server แล้วอธิบายว่าทำไม</p><details><summary>เฉลย</summary><pre class="code-vs"><code>String barcode = '';
-int quantity = 0;
-String? serial;
-bool isLoading = false;
-Map&lt;String, dynamic&gt; rawJson = &lt;String, dynamic&gt;{};</code></pre><p>หลัง parse แล้วไม่ควรส่ง <code>rawJson</code> เข้า widget แต่สร้าง model ที่มีชนิดแทน</p></details></section>
-<section id="section-7"><h2>7. จุดพลาด</h2><div class="warn"><code>var</code> ไม่ได้ทำให้ตัวแปรเปลี่ยนชนิดได้ และ <code>Object?</code> ปลอดภัยกว่า <code>dynamic</code> เพราะ compiler บังคับให้ตรวจ type ก่อนเรียกสมาชิก</div></section>
-<section id="section-8"><h2>8. สรุป</h2><p>อ่าน declaration แล้วตอบให้ได้สามข้อ: ค่าชนิดใดถูกต้อง, null ได้ไหม, และใครมีสิทธิ์เปลี่ยน object นั้น จากสามคำตอบนี้ bug ของ model/state จำนวนมากจะเห็นก่อนรันแอป</p></section>
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>A value of type 'int' can't be assigned to a variable of type 'String'</code></td><td>ใส่ค่าผิดชนิดลงกล่อง</td><td>แปลงชนิดก่อน หรือแก้ชนิดของตัวแปร</td></tr>
+<tr><td><code>FormatException: Invalid radix-10 number</code></td><td>ใช้ <code>int.parse</code> กับข้อความที่ไม่ใช่ตัวเลข</td><td>เปลี่ยนไปใช้ <code>int.tryParse</code> แล้วรองรับ <code>null</code></td></tr>
+<tr><td>บวกเลขแล้วได้ข้อความต่อกัน เช่น <code>'12' + '1'</code> → <code>121</code></td><td>ลืมแปลงข้อความเป็นตัวเลข</td><td>แปลงด้วย <code>int.tryParse</code> ก่อนบวก</td></tr>
+<tr><td>ผลหารได้ทศนิยมทั้งที่อยากได้จำนวนเต็ม</td><td><code>/</code> คืน <code>double</code> เสมอ</td><td>ใช้ <code>~/</code> เมื่อต้องการหารแบบปัดลง</td></tr>
+<tr><td><code>The name 'x' isn't defined</code></td><td>สะกดชื่อตัวแปรไม่ตรง</td><td>Dart แยกตัวพิมพ์เล็ก–ใหญ่ ตรวจให้ตรงเป๊ะ</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>เขียนไฟล์ใหม่ชื่อ <code>my_scan.dart</code> ที่ทำสามอย่างนี้</p><ol><li>รับค่าจำลองจากเครื่องสแกนเป็นข้อความ <code>'PAL-2001'</code> และ <code>'8'</code></li><li>แปลงจำนวนเป็น <code>int</code> โดยถ้าแปลงไม่ได้ให้ใช้ 0 แทน</li><li>แสดงผลว่า <code>PAL-2001 จำนวน 8 ชิ้น น้ำหนักรวม 20.0 kg</code> เมื่อของหนักชิ้นละ 2.5 kg โดยต้องคำนวณจริง ห้ามพิมพ์เลข 20.0 ลงไปตรง ๆ</li></ol><details class="answer"><summary>ดูแนวคำตอบหลังจากลองเองแล้ว</summary><pre class="code-vs"><code>void main() {
+  final scannedCode = 'PAL-2001';
+  final scannedQtyText = '8';
+  const weightPerItem = 2.5;
+
+  final quantity = int.tryParse(scannedQtyText) ?? 0;
+  final totalWeight = quantity * weightPerItem;
+
+  print('$scannedCode จำนวน $quantity ชิ้น น้ำหนักรวม $totalWeight kg');
+}</code></pre><p><strong>ทำไมต้องเขียนแบบนี้:</strong> ใช้ <code>tryParse</code> เพราะค่าที่มาจากเครื่องสแกนไม่รับประกันว่าถูกเสมอ; ใช้ <code>const</code> กับน้ำหนักต่อชิ้นเพราะเป็นค่าคงที่ที่รู้ตั้งแต่เขียนโค้ด; และคำนวณ <code>totalWeight</code> จริงเพื่อให้แก้จำนวนแล้วผลลัพธ์เปลี่ยนตาม</p><p><strong>ลองต่อ:</strong> เปลี่ยน <code>'8'</code> เป็น <code>'แปด'</code> แล้วรันใหม่ ควรได้ 0 ชิ้นและ 0.0 kg โดยโปรแกรมไม่พัง</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ตัวแปรทุกตัวใน Dart มีชนิดเสมอ แม้เราจะเขียน <code>var</code></li><li>ชนิดพื้นฐานที่ใช้บ่อยคือ <code>String</code>, <code>int</code>, <code>double</code>, <code>bool</code></li><li><code>int.tryParse</code> ปลอดภัยกว่า <code>int.parse</code> เมื่อค่ามาจากผู้ใช้หรือเครือข่าย</li><li><code>??</code> ใช้ใส่ค่าสำรองเมื่อฝั่งซ้ายเป็น <code>null</code></li><li>ถ้าจำเป็นต้องรับค่าที่ยังไม่รู้ชนิด ให้ใช้ <code>Object?</code> ไม่ใช่ <code>dynamic</code></li></ul></div><p><strong>บทถัดไป:</strong> D1.3 จะตอบคำถามที่ค้างจากบทนี้ว่า ควรใช้ <code>var</code>, <code>final</code> หรือ <code>const</code> ตอนไหน และทำไม Flutter ถึงชอบ <code>const</code> เป็นพิเศษ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

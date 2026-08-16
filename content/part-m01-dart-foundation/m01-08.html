@@ -1,28 +1,126 @@
-<div class="note">Generic เก็บความสัมพันธ์ของ type ระหว่าง input และ output เช่น <code>Future&lt;Task&gt;</code>, <code>List&lt;Task&gt;</code>, <code>ApiResult&lt;Task&gt;</code> ดีกว่าคืน Object/dynamic แล้วให้ caller เดา</div>
-<section><h2>1. Type parameter สื่ออะไร</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
-  const ApiResult.success(this.data) : error = null;
-  const ApiResult.failure(this.error) : data = null;
-  final T? data;
-  final String? error;
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: สร้าง class แม่-ลูก, interface และ mixin</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6–D1.7 (class, constructor, field, method, getter, private)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านออกว่า <code>extends</code>, <code>implements</code> และ <code>with</code> ต่างกันอย่างไร และเลือกใช้ได้ถูกสถานการณ์ — ซึ่งเป็นความรู้ที่จำเป็นก่อนอ่านโค้ด Flutter บรรทัดแรก</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในคลังมีงานหลายชนิด: จัดเก็บ หยิบออก ตรวจนับ ทั้งสามมีสิ่งที่เหมือนกัน (มีรหัสงาน มีชื่อ ต้องรายงานผล) และมีสิ่งที่ต่างกัน (ขั้นตอนการทำงาน) ถ้าเขียนเป็นสาม class ที่ไม่เกี่ยวข้องกันเลย เราจะคัดลอกโค้ดส่วนที่เหมือนกันสามรอบ และไม่สามารถเก็บทั้งสามชนิดไว้ใน list เดียวกันได้</p><p>บทนี้คือเครื่องมือสามอย่างสำหรับจัดการความสัมพันธ์แบบนี้</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>inheritance / สืบทอด</td><td>class ลูกได้ทั้งข้อมูลและพฤติกรรมของแม่มาใช้ต่อ</td></tr>
+<tr><td>abstract class</td><td>แบบพิมพ์เขียวที่ยังไม่สมบูรณ์ สร้าง object ตรง ๆ ไม่ได้</td></tr>
+<tr><td>interface / สัญญา</td><td>รายการว่า “ต้องมี method อะไรบ้าง” โดยไม่ให้โค้ดมาด้วย</td></tr>
+<tr><td>mixin</td><td>ก้อนความสามารถที่แปะให้ class ไหนก็ได้</td></tr>
+<tr><td>override</td><td>ลูกเขียนทับพฤติกรรมของแม่</td></tr>
+<tr><td>polymorphism</td><td>เรียกชื่อ method เดียวกัน แต่ได้พฤติกรรมต่างกันตามชนิดจริง</td></tr>
+<tr><td><code>super</code></td><td>อ้างถึงส่วนที่เป็นของแม่</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เปรียบเทียบสามคำด้วยประโยคเดียว</h2><table><thead><tr><th>คำ</th><th>ประโยคที่ใช้จำ</th><th>ได้โค้ดของแม่มาด้วยไหม</th><th>มีได้กี่ตัว</th></tr></thead><tbody>
+<tr><td><code>extends</code></td><td>“ฉัน<strong>เป็น</strong>ชนิดหนึ่งของสิ่งนั้น”</td><td>ได้</td><td>แม่ได้ตัวเดียว</td></tr>
+<tr><td><code>implements</code></td><td>“ฉัน<strong>ทำได้</strong>ตามสัญญานั้น”</td><td>ไม่ได้ ต้องเขียนเองทั้งหมด</td><td>กี่สัญญาก็ได้</td></tr>
+<tr><td><code>with</code></td><td>“ฉัน<strong>มีความสามารถ</strong>ก้อนนั้นแถมมา”</td><td>ได้</td><td>กี่ก้อนก็ได้</td></tr>
+</tbody></table><div class="note"><strong>วิธีตัดสินใจแบบเร็ว:</strong> ถ้าประโยค “ลูกเป็นชนิดหนึ่งของแม่” ฟังแล้วเป็นจริงในโลกจริง ให้ใช้ <code>extends</code>; ถ้าแค่ต้องการให้สลับตัวกันได้ ใช้ <code>implements</code>; ถ้าเป็นความสามารถเสริมที่หลาย class ต้องการเหมือนกัน ใช้ <code>with</code></div></section>
+
+<section><h2>4. extends: แม่-ลูกที่แชร์โค้ดกัน</h2><pre class="code-vs"><code>abstract class WarehouseTask {
+  WarehouseTask(this.id);
+
+  final String id;
+
+  String get title;   // ไม่มีตัว = ลูกต้องเขียนเอง
+  String run();       // ไม่มีตัว = ลูกต้องเขียนเอง
+
+  String describe() =&gt; '[$id] $title -&gt; ${run()}';   // แชร์ให้ลูกทุกตัว
 }
 
-Future&lt;ApiResult&lt;List&lt;WmsTask&gt;&gt;&gt; loadTasks() async { /* ... */ }</code></pre><p>จาก signature คนอ่านรู้ทันทีว่า async, อาจสำเร็จ/ล้มเหลว และ success data เป็นรายการ Task โดยไม่เปิด body</p></section>
-<section><h2>2. Generic function</h2><pre class="code-vs"><code>T? firstWhereOrNull&lt;T&gt;(Iterable&lt;T&gt; items, bool Function(T) test) {
-  for (final item in items) {
-    if (test(item)) return item;
-  }
-  return null;
-}</code></pre><p>นี่ใกล้กับ helper <code>_firstOrNull&lt;T&gt;</code> ใน <code>warehouse_store.dart</code> ความสัมพันธ์สำคัญคือชนิดที่รับเข้าและคืนออกเป็น T เดียวกัน</p></section>
-<section><h2>3. Constraint</h2><pre class="code-vs"><code>abstract interface class Entity { String get id; }
+class PutawayTask extends WarehouseTask {
+  PutawayTask(super.id, this.location);
 
-T? byId&lt;T extends Entity&gt;(Iterable&lt;T&gt; items, String id) =&gt;
-    firstWhereOrNull(items, (item) =&gt; item.id == id);</code></pre><p><code>extends Entity</code> ทำให้ body เรียก <code>item.id</code> ได้โดยไม่ cast และยังรักษา subtype จริงไว้ในค่าที่คืน</p></section>
-<section><h2>4. Variance ที่ต้องรู้พอใช้งาน</h2><p><code>List&lt;Dog&gt;</code> ไม่ควรถูกใช้เป็น list ที่เพิ่ม Animal ใดก็ได้ มิฉะนั้นอาจใส่ Cat ลง list ของ Dog Dart มี runtime checks บางกรณี แต่หลักปฏิบัติคืออย่า cast collection เพื่อฝืน type ให้ map/copy ไปชนิดเป้าหมายอย่างชัดเจน</p></section>
-<section><h2>5. Generic ใน Flutter</h2><ul><li><code>State&lt;WarehouseShell&gt;</code> ทำให้ <code>widget</code> มีชนิด WarehouseShell</li><li><code>ValueNotifier&lt;ThemeMode&gt;</code> จำกัด value เป็น ThemeMode</li><li><code>FutureBuilder&lt;Task&gt;</code> ทำให้ snapshot data เป็น Task?</li><li>helper <code>_segmented&lt;T&gt;</code> ใน connection settings รับ <code>Map&lt;T,String&gt;</code> และ <code>ValueChanged&lt;T&gt;</code> โดยรักษาชนิด choice</li></ul></section>
-<section><h2>6. เมื่อ generic มากเกินไป</h2><p>ถ้า type parameter ไม่สร้างความสัมพันธ์ที่มีประโยชน์ หรือมี parameter 4–5 ตัวจน call site อ่านไม่ออก อาจเหมาะกับ class/domain type เฉพาะมากกว่า Generic เป็นเครื่องมือรักษา type ไม่ใช่เป้าหมายของ abstraction</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน cache ที่เก็บ model ตาม id โดยไม่เสีย type และกำหนด constraint ว่าทุก model ต้องมี id</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>class EntityCache&lt;T extends Entity&gt; {
-  final Map&lt;String, T&gt; _items = {};
-  T? get(String id) =&gt; _items[id];
-  void put(T item) =&gt; _items[item.id] = item;
-}</code></pre></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ generic mismatch ด้วย <code>as dynamic</code>; ตรวจว่าความสัมพันธ์ type ผิดที่ declaration, parser หรือ collection transformation แล้วแก้ต้นทาง</div></section>
+  final String location;
+
+  @override
+  String get title =&gt; 'จัดเก็บเข้าช่อง';
+
+  @override
+  String run() =&gt; 'นำพาเลทไปที่ $location';
+}</code></pre><p><strong><code>abstract</code> แปลว่าอะไร:</strong> แปลว่า “แบบนี้ยังไม่สมบูรณ์ สร้างของจริงจากมันตรง ๆ ไม่ได้” — เขียน <code>WarehouseTask('T-01')</code> จะ error ทันที ต้องสร้างจากลูกเท่านั้น สมเหตุสมผลเพราะ “งานในคลัง” แบบลอย ๆ ที่ไม่ระบุว่างานอะไร ไม่มีอยู่จริง</p><p><strong><code>super.id</code> คืออะไร:</strong> เป็นทางลัดที่แปลว่า “รับค่ามาแล้วส่งต่อให้ constructor ของแม่” ประหยัดกว่าการเขียน <code>PutawayTask(String id, this.location) : super(id);</code></p></section>
+
+<section><h2>5. Polymorphism: ประโยชน์ที่แท้จริงของ extends</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_08_inheritance.dart</code></pre><pre class="code-vs"><code>final tasks = &lt;WarehouseTask&gt;[
+  PutawayTask('T-01', 'A-01-02'),
+  PickTask('T-02', 5),
+  CountTask('T-03', 30),
+];
+
+for (final task in tasks) {
+  print(task.describe());   // เรียกชื่อเดียว ได้ผลต่างกันตามชนิดจริง
+}</code></pre><pre class="code-vs"><code>[T-01] จัดเก็บเข้าช่อง -&gt; นำพาเลทไปที่ A-01-02
+[T-02] หยิบสินค้า -&gt; หยิบ 5 ชิ้นออกจากช่องเก็บ
+[T-03] ตรวจนับ -&gt; นับให้ครบ 30 ชิ้น</code></pre><p>นี่คือหัวใจของบทนี้ — โค้ดที่วน <code>for</code> ไม่รู้จักงานทั้งสามชนิดเลย มันรู้แค่ว่า “ทุกตัวใน list นี้เป็น <code>WarehouseTask</code> ซึ่งเรียก <code>describe()</code> ได้” เมื่อเพิ่มงานชนิดที่สี่ในอนาคต โค้ดตรงนี้ไม่ต้องแก้แม้แต่บรรทัดเดียว</p></section>
+
+<section><h2>6. implements: สัญญาที่ไม่แถมโค้ดมาด้วย</h2><pre class="code-vs"><code>abstract interface class Printable {
+  String toReceipt();
+}
+
+class CountTask extends WarehouseTask implements Printable {
+  // ...
+  @override
+  String toReceipt() =&gt; 'ใบตรวจนับ $id เวลา $stamp';
+}</code></pre><p>ต่างจาก <code>extends</code> ตรงที่ <code>implements</code> ไม่ได้อะไรมาให้เลย — ต้องเขียนทุก method ที่สัญญาระบุไว้เองทั้งหมด แลกกับความยืดหยุ่นสองอย่าง</p><ol><li>class หนึ่งทำสัญญาได้หลายอันพร้อมกัน (แต่มีแม่ได้แค่ตัวเดียว)</li><li>ผู้ใช้สัญญาไม่ผูกกับ class ตัวใดตัวหนึ่ง — สลับตัวจริงได้</li></ol><p>ข้อสองนี้สำคัญมากในงานจริง เพราะมันคือวิธีที่เราจะเขียนเทสต์ได้โดยไม่ต้องต่อ server จริง: ประกาศสัญญาว่า “ต้องดึงรายการงานได้” แล้วสลับระหว่างตัวที่ยิง API จริงกับตัวที่คืนข้อมูลปลอม (จะทำจริงใน Part 9 และ Part 14)</p><div class="warn"><strong>ข้อจำกัดที่ต้องรู้:</strong> ถ้า <code>Printable</code> ไม่ใช่แม่ของ <code>WarehouseTask</code> การเขียน <code>if (task is Printable) task.toReceipt()</code> จะไม่ผ่าน analyzer เพราะ Dart เลื่อนชนิดให้เฉพาะเมื่อชนิดใหม่เป็นลูกของชนิดเดิม ทางออกที่อ่านง่ายที่สุดคือใช้ <code>whereType</code></div><pre class="code-vs"><code>for (final printable in tasks.whereType&lt;Printable&gt;()) {
+  print(printable.toReceipt());
+}</code></pre></section>
+
+<section><h2>7. mixin: ความสามารถที่แปะข้ามสายพันธุ์ได้</h2><pre class="code-vs"><code>mixin Timestamped {
+  final DateTime createdAt = DateTime(2026, 1, 1, 9, 0);
+  String get stamp =&gt; '${createdAt.hour}:${createdAt.minute}';
+}
+
+class CountTask extends WarehouseTask with Timestamped implements Printable {
+  // ได้ createdAt และ stamp มาใช้ทันที
+}</code></pre><p>อ่านบรรทัดประกาศจากซ้ายไปขวาได้เป็นประโยค: “<code>CountTask</code> เป็นชนิดหนึ่งของ <code>WarehouseTask</code> มีความสามารถ <code>Timestamped</code> แถมมา และรับปากว่าทำตามสัญญา <code>Printable</code> ได้”</p><p>เหตุผลที่ต้องมี mixin ทั้งที่มี <code>extends</code> อยู่แล้ว: เพราะ class มีแม่ได้ตัวเดียว ถ้าความสามารถ “บันทึกเวลาสร้าง” ต้องใช้ทั้งในงานคลังและในใบสั่งซื้อซึ่งคนละสายพันธุ์กัน การยัดมันไว้ในแม่ร่วมจะทำให้ลำดับชั้นบิดเบี้ยว mixin แก้ปัญหานี้พอดี</p><p>ใน Flutter เราจะเจอ mixin บ่อยมาก โดยเฉพาะเวลาต้องการให้หน้าจอรับรู้เหตุการณ์บางอย่าง เช่นแอปถูกย่อลงพื้นหลัง</p></section>
+
+<section><h2>8. ตารางตัดสินใจ</h2><table><thead><tr><th>สถานการณ์</th><th>ใช้</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>งานหลายชนิดที่มีขั้นตอนร่วมกัน</td><td><code>abstract class</code> + <code>extends</code></td><td>แชร์โค้ดส่วนกลางได้จริง</td></tr>
+<tr><td>ต้องสลับระหว่างของจริงกับของปลอมตอนเทสต์</td><td><code>implements</code></td><td>ผู้ใช้ไม่ผูกกับตัวใดตัวหนึ่ง</td></tr>
+<tr><td>ความสามารถเดียวกันที่ class คนละสายต้องใช้</td><td><code>mixin</code> + <code>with</code></td><td>ข้ามข้อจำกัดแม่ตัวเดียวได้</td></tr>
+<tr><td>แค่อยากเรียกใช้ความสามารถของอีก class</td><td>เก็บเป็น field ธรรมดา</td><td>เรียบง่ายที่สุดและยืดหยุ่นที่สุด</td></tr>
+</tbody></table><div class="note"><strong>คำแนะนำที่ใช้ได้ทั้งอาชีพ:</strong> ทางเลือกสุดท้ายในตารางคือทางที่ควรลองก่อนเสมอ ถ้าเก็บอีก object ไว้เป็น field แล้วเรียกใช้ได้ ก็ไม่ต้องสืบทอดอะไรเลย ลำดับชั้นที่ลึกเกินสองชั้นมักเป็นสัญญาณว่าออกแบบผิดตั้งแต่ต้น</div></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Missing concrete implementation of 'X.run'</code></td><td>ลูกยังไม่ได้เขียน method ที่แม่บังคับไว้</td><td>เพิ่ม method พร้อม <code>@override</code></td></tr>
+<tr><td><code>X can't be instantiated because it's abstract</code></td><td>พยายามสร้าง object จาก abstract class</td><td>สร้างจาก class ลูกแทน</td></tr>
+<tr><td><code>The method 'toReceipt' isn't defined for the type 'WarehouseTask'</code></td><td>คาดว่า <code>is</code> จะเลื่อนชนิดให้ แต่ชนิดใหม่ไม่ใช่ลูก</td><td>ใช้ <code>whereType&lt;T&gt;()</code> หรือ cast อย่างชัดเจน</td></tr>
+<tr><td><code>Classes can only extend other classes</code></td><td>ใช้ <code>extends</code> กับสองตัว</td><td>เลือกแม่ตัวเดียว ที่เหลือใช้ <code>implements</code> หรือ <code>with</code></td></tr>
+<tr><td>เขียนทับ method แล้วพฤติกรรมไม่เปลี่ยน</td><td>สะกดชื่อ method ผิด</td><td>ใส่ <code>@override</code> เสมอ เพื่อให้ analyzer จับให้</td></tr>
+<tr><td>สืบทอดเพียงเพื่อยืม method สองสามตัว</td><td>ใช้ inheritance ผิดจุดประสงค์</td><td>เก็บอีก object เป็น field แล้วเรียกใช้แทน</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ออกแบบระบบอ่านบาร์โค้ดที่ต้องทำงานได้สองแบบ</p><ol><li>ตอนใช้งานจริง อ่านจากเครื่องสแกนของ PDA</li><li>ตอนทดสอบ ต้องป้อนบาร์โค้ดที่เรากำหนดเองได้ โดยไม่ต้องมีเครื่องจริง</li></ol><p>จงเขียนโครงว่าควรใช้ <code>extends</code>, <code>implements</code> หรือ <code>with</code> พร้อมเหตุผล และเขียนฟังก์ชันที่รับตัวอ่านบาร์โค้ดเข้าไปใช้งานได้ทั้งสองแบบ</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>// สัญญา: สนใจแค่ว่า "อ่านบาร์โค้ดถัดไปได้"
+abstract interface class BarcodeSource {
+  String? readNext();
+}
+
+class HardwareScanner implements BarcodeSource {
+  @override
+  String? readNext() =&gt; null;   // ของจริงจะคุยกับอุปกรณ์
+}
+
+class FakeScanner implements BarcodeSource {
+  FakeScanner(this._queue);
+  final List&lt;String&gt; _queue;
+
+  @override
+  String? readNext() =&gt; _queue.isEmpty ? null : _queue.removeAt(0);
+}
+
+// โค้ดงานจริงพึ่งพา "สัญญา" ไม่ใช่ตัวใดตัวหนึ่ง
+int countScans(BarcodeSource source) {
+  var count = 0;
+  while (source.readNext() != null) {
+    count++;
+  }
+  return count;
+}
+
+void main() {
+  print(countScans(FakeScanner(['PAL-1001', 'PAL-1002'])));   // 2
+}</code></pre><p><strong>ทำไมต้อง <code>implements</code> ไม่ใช่ <code>extends</code>:</strong> เพราะเครื่องสแกนจริงกับตัวปลอมไม่มีโค้ดอะไรที่แชร์กันได้เลย — ตัวหนึ่งคุยกับฮาร์ดแวร์ อีกตัวอ่านจาก list ในหน่วยความจำ สิ่งเดียวที่เหมือนกันคือ “สัญญา” ว่าเรียก <code>readNext()</code> ได้ ซึ่งตรงกับความหมายของ <code>implements</code> พอดี</p><p><strong>ทำไมไม่ใช้ mixin:</strong> mixin มีไว้แจกโค้ดที่ทำงานได้จริง แต่ที่นี่เราไม่มีโค้ดจะแจก มีแต่ข้อกำหนด</p><p><strong>สิ่งที่ควรสังเกตที่สุด:</strong> <code>countScans</code> เขียนครั้งเดียวแล้วใช้ได้ทั้งของจริงและของปลอม นี่คือเหตุผลที่ทีมซอฟต์แวร์ยอมลงทุนสร้าง interface — ไม่ใช่เพื่อความสวยงาม แต่เพื่อให้เทสต์รันได้บนเครื่องที่ไม่มีอุปกรณ์</p><p><strong>ลองต่อ:</strong> เพิ่ม mixin <code>Counting</code> ที่นับจำนวนครั้งที่ <code>readNext</code> ถูกเรียก แล้วแปะให้ <code>FakeScanner</code> เท่านั้น</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>extends</code> = เป็นชนิดหนึ่งของ ได้โค้ดแม่มาด้วย มีแม่ได้ตัวเดียว</li><li><code>implements</code> = รับปากว่าทำได้ ต้องเขียนเองทั้งหมด ทำได้หลายสัญญา</li><li><code>with</code> = แปะความสามารถเสริม ข้ามสายพันธุ์ได้</li><li><code>abstract</code> = แบบที่ยังไม่สมบูรณ์ สร้าง object ตรง ๆ ไม่ได้</li><li>ประโยชน์หลักคือเขียนโค้ดที่ทำงานกับ “ชนิดแม่” แล้วรองรับลูกใหม่ได้โดยไม่ต้องแก้</li><li>ถ้าเก็บเป็น field ธรรมดาแล้วจบ ก็ไม่ต้องสืบทอดอะไรเลย</li></ul></div><p><strong>บทถัดไป:</strong> D1.9 จะสอน generic ซึ่งคือวิธีเขียนโค้ดที่ทำงานได้กับหลายชนิด โดยยังรู้ชนิดที่แน่นอน — คุณเห็นมันมาตลอดแล้วในรูป <code>List&lt;String&gt;</code></p></section>

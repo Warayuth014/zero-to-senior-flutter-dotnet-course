@@ -1,31 +1,97 @@
-<div class="note">Enum ทำให้ชุดสถานะปิดและตรวจครบได้ เหมาะกับ workflow/state ที่มีจำนวนกรณีชัด ดีกว่า string กระจายทั่วแอปซึ่งสะกดผิดได้และไม่มี exhaustive checking</div>
-<section><h2>1. Enum พื้นฐานและ enhanced enum</h2><pre class="code-vs"><code>enum ScanPhase {
-  idle('รอสแกน'),
-  validating('กำลังตรวจสอบ'),
-  confirmed('สำเร็จ'),
-  failed('ผิดพลาด');
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เขียนฟังก์ชันและ class ที่ใช้ได้กับหลายชนิด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.5 (collection) และ D1.6–D1.8 (class และความสัมพันธ์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านออกว่า <code>&lt;T&gt;</code> ที่เห็นอยู่ทั่วโค้ด Flutter แปลว่าอะไร และเขียนฟังก์ชัน/class ที่ใช้ซ้ำได้กับหลายชนิดโดยไม่เสียการตรวจสอบชนิด</div>
 
-  const ScanPhase(this.thaiLabel);
-  final String thaiLabel;
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>สมมติเราต้องการฟังก์ชันที่คืนสมาชิกตัวแรกของรายการ หรือคืน <code>null</code> ถ้ารายการว่าง ถ้าไม่มี generic เราจะต้องเขียนซ้ำทุกชนิด</p><pre class="code-vs"><code>String? firstStringOrNull(List&lt;String&gt; items) { ... }
+int? firstIntOrNull(List&lt;int&gt; items) { ... }
+Pallet? firstPalletOrNull(List&lt;Pallet&gt; items) { ... }   // ไม่จบสักที</code></pre><p>ทางออกที่ผิดคือรับ <code>List&lt;dynamic&gt;</code> แล้วคืน <code>dynamic</code> — เขียนสั้นลงจริง แต่เสียการตรวจสอบชนิดทั้งหมด บั๊กจะย้ายจากตอน compile ไปโผล่ตอนผู้ใช้กำลังใช้งาน</p><p><strong>Generic</strong> ให้ทั้งสองอย่าง: เขียนครั้งเดียว และยังรู้ชนิดที่แน่นอน</p></section>
 
-  bool get canSubmit =&gt; this == idle || this == failed;
-}</code></pre><p>Enhanced enum มี field, constructor, getter/method ได้ แต่ instance เป็นค่าคงที่ตามรายการที่ประกาศ</p></section>
-<section><h2>2. Enum ทำให้ switch ตรวจครบ</h2><pre class="code-vs"><code>Color phaseColor(ScanPhase phase) =&gt; switch (phase) {
-  ScanPhase.idle =&gt; Colors.grey,
-  ScanPhase.validating =&gt; Colors.blue,
-  ScanPhase.confirmed =&gt; Colors.green,
-  ScanPhase.failed =&gt; Colors.red,
-};</code></pre><p>เมื่อเพิ่ม phase ใหม่ analyzer ชี้ตำแหน่ง switch ที่ยังไม่รองรับ ถ้าใส่ wildcard <code>_</code> ทั้งที่ทุก case ควรชัด คุณจะเสียประโยชน์นี้</p></section>
-<section><h2>3. แยก wire value จาก enum</h2><p>.NET อาจส่ง <code>"PENDING"</code>, เลข <code>0</code> หรือ legacy value อย่ากระจายการเปรียบเทียบใน UI ให้ parse ที่ boundary:</p><pre class="code-vs"><code>enum TaskStatus { pending, inProgress, completed, unknown }
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>generic</td><td>โค้ดที่เว้น “ช่องว่างของชนิด” ไว้ให้ผู้เรียกเติม</td></tr>
+<tr><td>type parameter</td><td>ตัวอักษรที่แทนช่องว่างนั้น เช่น <code>T</code>, <code>K</code>, <code>V</code>, <code>R</code></td></tr>
+<tr><td>type argument</td><td>ชนิดจริงที่ถูกเติมลงไป เช่น <code>String</code> ใน <code>List&lt;String&gt;</code></td></tr>
+<tr><td>constraint</td><td>ข้อจำกัดว่าชนิดที่เติมได้ต้องเป็นอะไร</td></tr>
+</tbody></table><p><code>T</code> ย่อมาจาก Type เป็นเพียงธรรมเนียมการตั้งชื่อ จะใช้ตัวอักษรอะไรก็ได้ แต่ที่นิยมคือ <code>T</code> สำหรับชนิดทั่วไป, <code>K</code>/<code>V</code> สำหรับ key/value ใน Map และ <code>R</code> สำหรับผลลัพธ์ที่แปลงแล้ว</p></section>
 
-TaskStatus parseTaskStatus(Object? raw) =&gt; switch (raw?.toString().toUpperCase()) {
-  'PENDING' || '0' =&gt; TaskStatus.pending,
-  'RUNNING' || '1' =&gt; TaskStatus.inProgress,
-  'COMPLETE' || '4' =&gt; TaskStatus.completed,
-  _ =&gt; TaskStatus.unknown,
-};</code></pre></section>
-<section><h2>4. ตัวอย่างจริง</h2><ul><li><code>workflow_definitions.dart</code> มี <code>TaskType</code>, <code>TaskStatus</code>, <code>DispatchMode</code> และ map step ตาม TaskType</li><li><code>connection_profile.dart</code> มี protocol/environment/status พร้อม parse และ label</li><li><code>wmsapp/packing_screen.dart</code> ใช้ private <code>_PackState</code> เป็น state machine ของหน้าจอ</li></ul></section>
-<section><h2>5. เมื่อไม่ควรใช้ enum</h2><p>ถ้าค่าถูกเพิ่มจาก server ได้โดยไม่ release แอป หรือเป็นข้อมูลอิสระจำนวนมาก enum จะทำให้ client เก่าไม่รู้จัก ต้องมี <code>unknown</code>/raw fallback หรือใช้ model/config ที่ server ขับเคลื่อนแทน</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>เปลี่ยน bool <code>isLoading</code> + <code>hasError</code> + <code>isDone</code> เป็น enum และอธิบายว่าป้องกัน state ใด</p><details><summary>เฉลย</summary><p><code>LoadState { initial, loading, success, empty, failure }</code> ป้องกันค่าขัดกันเช่น loading=true พร้อม done=true และบังคับ UI render หนึ่งสถานะต่อครั้ง อาจเก็บ data/error แยกหรือใช้ sealed state ในบท architecture</p></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn"><code>enum.name</code> เป็น contract ได้เฉพาะเมื่อ client/server ตกลงและรับผลกระทบจากการ rename แล้ว ถ้าเป็น external contract ให้ mapping ชัดเจนและมี test fixture</div></section>
-<section><h2>8. สรุป</h2><p>ใช้ enum เมื่อ domain มี finite states, parse ที่ boundary, switch แบบ exhaustive และตัดสินใจ unknown strategy ก่อน deploy กับ server ที่เปลี่ยนได้</p></section>
+<section><h2>3. Mental model: แบบฟอร์มที่เว้นช่องไว้</h2><p>คุณใช้ generic มาตั้งแต่ D1.5 แล้วโดยไม่รู้ตัว</p><table><thead><tr><th>ที่เคยเขียน</th><th>ช่องว่างถูกเติมด้วย</th><th>ผลคือ</th></tr></thead><tbody>
+<tr><td><code>List&lt;String&gt;</code></td><td><code>String</code></td><td>list ที่ใส่ได้เฉพาะข้อความ</td></tr>
+<tr><td><code>Map&lt;String, int&gt;</code></td><td><code>String</code> และ <code>int</code></td><td>key เป็นข้อความ value เป็นจำนวนเต็ม</td></tr>
+<tr><td><code>Set&lt;String&gt;</code></td><td><code>String</code></td><td>ชุดข้อความที่ไม่ซ้ำ</td></tr>
+</tbody></table><p>ทีมที่เขียน Dart ไม่ได้เขียน <code>ListOfString</code>, <code>ListOfInt</code> แยกกัน — เขาเขียน <code>List&lt;T&gt;</code> ครั้งเดียว แล้วเราเป็นคนบอกว่า <code>T</code> คืออะไรตอนใช้ บทนี้คือการเรียนวิธีสร้างแบบฟอร์มแบบนั้นเอง</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> generic คือการเลื่อนการตัดสินใจเรื่องชนิดจาก “ตอนเขียน” ไปเป็น “ตอนใช้” โดยไม่ทิ้งการตรวจสอบ</div></section>
+
+<section><h2>4. Generic function</h2><pre class="code-vs"><code>T? firstOrNull&lt;T&gt;(List&lt;T&gt; items) =&gt; items.isEmpty ? null : items.first;</code></pre><p>อ่านทีละส่วน: <code>&lt;T&gt;</code> หลังชื่อฟังก์ชันประกาศว่า “ฟังก์ชันนี้มีช่องว่างชื่อ <code>T</code>” จากนั้น <code>List&lt;T&gt;</code> และ <code>T?</code> ใช้ช่องว่างเดียวกัน ซึ่งเป็นการบอก Dart ว่า <strong>ชนิดที่รับเข้ากับชนิดที่คืนออกต้องเป็นตัวเดียวกัน</strong></p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_09_generics.dart</code></pre><pre class="code-vs"><code>firstCode  = PAL-1001  (String)
+firstCount = 10  (int)
+empty      = null</code></pre><p>สังเกตว่าเราไม่ได้บอก Dart เลยว่า <code>T</code> คืออะไร มันดูจาก argument แล้วเติมให้เอง เรียกว่า type inference — ตัวเดียวกับที่ทำให้ <code>var</code> ทำงานใน D1.2</p></section>
+
+<section><h2>5. Generic class</h2><p>รูปแบบที่จะใช้บ่อยที่สุดในงานจริงคือ “กล่องผลลัพธ์” ที่บอกได้ทั้งสำเร็จและล้มเหลว</p><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
+  const ApiResult.success(this.data) : error = null, isSuccess = true;
+  const ApiResult.failure(this.error) : data = null, isSuccess = false;
+
+  final T? data;
+  final String? error;
+  final bool isSuccess;
+}
+
+final ok = ApiResult&lt;Pallet&gt;.success(Pallet('PAL-1001', 12));
+final bad = ApiResult&lt;Pallet&gt;.failure('เชื่อมต่อ server ไม่ได้');</code></pre><p>ประโยชน์ที่เห็นได้ทันที: เมื่ออ่านชนิด <code>ApiResult&lt;Pallet&gt;</code> เราตอบได้สามข้อโดยไม่ต้องเปิดโค้ดข้างใน — งานนี้อาจสำเร็จหรือล้มเหลว, ถ้าสำเร็จจะได้ <code>Pallet</code>, และถ้าล้มเหลวจะมีข้อความบอกเหตุผล</p><p>ยิ่งไปกว่านั้น ชนิดสามารถเปลี่ยนได้ระหว่างทางโดยไม่เสียสถานะ</p><pre class="code-vs"><code>ApiResult&lt;R&gt; map&lt;R&gt;(R Function(T value) convert) { ... }
+
+print(ok.map((pallet) =&gt; pallet.quantity));    // สำเร็จ: 12
+print(bad.map((pallet) =&gt; pallet.quantity));   // ล้มเหลว: เชื่อมต่อ server ไม่ได้</code></pre><p><code>map</code> มีช่องว่างของตัวเองชื่อ <code>R</code> เพราะผลลัพธ์ที่แปลงแล้วเป็นคนละชนิดกับของเดิม ส่วนความล้มเหลวถูกส่งต่อไปโดยไม่ต้องเขียน <code>if</code> ที่ทุกจุดเรียก</p></section>
+
+<section><h2>6. Constraint: จำกัดว่าเติมอะไรลงช่องได้บ้าง</h2><pre class="code-vs"><code>num sumAll&lt;T extends num&gt;(List&lt;T&gt; values) =&gt;
+    values.fold&lt;num&gt;(0, (total, value) =&gt; total + value);
+
+sumAll(&lt;int&gt;[10, 4, 7]);       // 21
+sumAll(&lt;double&gt;[1.5, 2.25]);   // 3.75
+// sumAll(&lt;String&gt;['a']);      // error ตั้งแต่ยังไม่รัน</code></pre><p>ถ้าไม่ใส่ <code>extends num</code> เราจะบวก <code>value</code> ไม่ได้เลย เพราะ Dart ไม่รู้ว่าชนิดที่จะถูกเติมเข้ามารองรับเครื่องหมาย <code>+</code> หรือเปล่า constraint จึงทำสองหน้าที่พร้อมกัน — ปฏิเสธการใช้ที่ผิด และเปิดให้เราใช้ความสามารถของชนิดนั้นภายในฟังก์ชัน</p></section>
+
+<section><h2>7. Generic ที่จะเจอใน Flutter</h2><p>ยังไม่ต้องเข้าใจรายละเอียด แค่ให้ตาคุ้นว่า <code>&lt;T&gt;</code> ที่จะเห็นในบทต่อ ๆ ไปคือเรื่องเดียวกับที่เรียนวันนี้</p><table><thead><tr><th>ที่จะเห็น</th><th>ช่องว่างหมายถึง</th><th>เรียนใน</th></tr></thead><tbody>
+<tr><td><code>Future&lt;String&gt;</code></td><td>ค่าที่จะได้ในอนาคตเป็นข้อความ</td><td>D1.15</td></tr>
+<tr><td><code>Stream&lt;String&gt;</code></td><td>ค่าที่ทยอยมาเรื่อย ๆ เป็นข้อความ</td><td>D1.16</td></tr>
+<tr><td><code>State&lt;MyScreen&gt;</code></td><td>สถานะที่ผูกกับหน้าจอชื่อ MyScreen</td><td>Part 1</td></tr>
+<tr><td><code>ValueChanged&lt;int&gt;</code></td><td>ฟังก์ชันที่รับ <code>int</code> เมื่อค่าเปลี่ยน</td><td>Part 3</td></tr>
+<tr><td><code>FutureBuilder&lt;Task&gt;</code></td><td>ตัวช่วยวาดหน้าจอที่รอ <code>Task</code></td><td>Part 4</td></tr>
+</tbody></table></section>
+
+<section><h2>8. เมื่อ generic มากเกินพอดี</h2><div class="warn">Generic เป็นเครื่องมือ <strong>รักษาชนิด</strong> ไม่ใช่เป้าหมายในตัวเอง ถ้าเขียนแล้วมี type parameter สามสี่ตัวจนอ่านไม่ออก หรือช่องว่างนั้นถูกเติมด้วยชนิดเดียวเสมอตลอดทั้งโปรเจกต์ ให้เขียนเป็น class เฉพาะเรื่องไปเลยจะอ่านง่ายกว่า</div><p>เกณฑ์ตัดสินง่าย ๆ: <em>“ช่องว่างนี้จะถูกเติมด้วยชนิดที่ต่างกันจริง ๆ อย่างน้อยสองแบบไหม”</em> ถ้าตอบว่าไม่ ก็ยังไม่ต้องใช้ generic</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>The operator '+' isn't defined for the type 'T'</code></td><td>ใช้ความสามารถของชนิดที่ยังไม่รู้ว่ามี</td><td>เพิ่ม constraint เช่น <code>&lt;T extends num&gt;</code></td></tr>
+<tr><td><code>type 'List&lt;dynamic&gt;' is not a subtype of type 'List&lt;String&gt;'</code></td><td>สร้าง collection โดยไม่ระบุชนิด แล้วเอาไปใช้ที่ต้องการชนิดแน่นอน</td><td>เขียน <code>&lt;String&gt;[]</code> ตั้งแต่ตอนสร้าง</td></tr>
+<tr><td>ได้ <code>dynamic</code> ทั้งที่คิดว่าจะได้ชนิดที่ต้องการ</td><td>Dart เดาไม่ออกจากบริบท</td><td>ระบุชนิดตอนเรียก เช่น <code>firstOrNull&lt;Pallet&gt;(items)</code></td></tr>
+<tr><td>แก้ error ด้วยการเติม <code>as dynamic</code></td><td>ปิดปาก analyzer แทนที่จะแก้ต้นเหตุ</td><td>ไล่ย้อนกลับไปว่าชนิดเริ่มเพี้ยนตั้งแต่จุดไหน แล้วแก้ตรงนั้น</td></tr>
+<tr><td>ลืมใส่ <code>&lt;T&gt;</code> หลังชื่อฟังก์ชัน</td><td>ประกาศช่องว่างไม่ครบ</td><td><code>T? firstOrNull&lt;T&gt;(...)</code> ต้องมีทั้งสองที่</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>เขียน class <code>Cache&lt;T&gt;</code> ที่</p><ol><li>เก็บของตามรหัสข้อความ</li><li>มี <code>put(String id, T item)</code> และ <code>T? get(String id)</code></li><li>มี <code>getOrAdd(String id, T Function() create)</code> ที่คืนของเดิมถ้ามี และสร้างใหม่เก็บไว้ถ้ายังไม่มี</li><li>มี getter <code>count</code></li></ol><p>แล้วทดสอบกับทั้ง <code>Cache&lt;String&gt;</code> และ <code>Cache&lt;int&gt;</code></p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class Cache&lt;T&gt; {
+  final Map&lt;String, T&gt; _items = &lt;String, T&gt;{};
+
+  int get count =&gt; _items.length;
+
+  T? get(String id) =&gt; _items[id];
+
+  void put(String id, T item) =&gt; _items[id] = item;
+
+  T getOrAdd(String id, T Function() create) {
+    final existing = _items[id];
+    if (existing != null) return existing;
+    final created = create();
+    _items[id] = created;
+    return created;
+  }
+}
+
+void main() {
+  final names = Cache&lt;String&gt;();
+  names.put('A-01', 'โซนรับเข้า');
+  print(names.get('A-01'));            // โซนรับเข้า
+  print(names.get('ไม่มี'));            // null
+
+  var built = 0;
+  final counts = Cache&lt;int&gt;();
+  print(counts.getOrAdd('x', () { built++; return 42; }));   // 42
+  print(counts.getOrAdd('x', () { built++; return 99; }));   // 42 (ของเดิม)
+  print('สร้างจริง $built ครั้ง');                             // 1
+}</code></pre><p><strong>จุดที่ generic ทำงานให้:</strong> <code>names.get('A-01')</code> คืน <code>String?</code> ส่วน <code>counts.get('x')</code> คืน <code>int?</code> โดยเราเขียน class เดียว ถ้าใช้ <code>Map&lt;String, dynamic&gt;</code> แทน โค้ดจะสั้นเท่ากันแต่ผู้ใช้ต้อง cast เองทุกครั้งและพลาดได้</p><p><strong>ข้อควรระวังในคำตอบนี้:</strong> <code>getOrAdd</code> ใช้ <code>existing != null</code> ตรวจว่ามีของอยู่แล้วหรือไม่ ซึ่งจะทำงานผิดถ้า <code>T</code> เป็นชนิดที่ยอมให้เก็บ <code>null</code> ได้ (เช่น <code>Cache&lt;String?&gt;</code>) ทางแก้ที่ถูกต้องคือใช้ <code>_items.containsKey(id)</code> — เป็นตัวอย่างที่ดีว่า generic บังคับให้เราคิดถึงกรณีที่กว้างกว่าที่ตั้งใจไว้ตอนแรก</p><p><strong>ลองต่อ:</strong> เพิ่ม constraint ให้ <code>Cache&lt;T extends Object&gt;</code> แล้วสังเกตว่า <code>Cache&lt;String?&gt;</code> จะถูกปฏิเสธตั้งแต่ตอน compile ซึ่งทำให้โค้ดข้างในปลอดภัยขึ้นทันที</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>generic คือช่องว่างของชนิดที่ผู้เรียกเป็นคนเติม</li><li>เขียนครั้งเดียว ใช้ได้หลายชนิด โดยไม่เสียการตรวจสอบตอน compile</li><li>ช่องว่างเดียวกันที่ใช้ทั้งขาเข้าและขาออก คือการประกาศความสัมพันธ์ระหว่างชนิด</li><li><code>extends</code> ในวงเล็บมุมคือ constraint ไม่ใช่การสืบทอด</li><li><code>List</code>, <code>Map</code>, <code>Future</code>, <code>Stream</code> ล้วนเป็น generic ที่เราใช้อยู่แล้ว</li><li>ถ้าช่องว่างจะถูกเติมด้วยชนิดเดียวเสมอ ก็ยังไม่ต้องใช้ generic</li></ul></div><p><strong>บทถัดไป:</strong> D1.10 จะสอน enum ซึ่งเป็นวิธีบอก Dart ว่า “สถานะที่เป็นไปได้มีเท่านี้เท่านั้น” และเป็นเครื่องมือที่ทำให้ analyzer ช่วยเราตรวจว่าจัดการครบทุกกรณีหรือยัง</p></section>

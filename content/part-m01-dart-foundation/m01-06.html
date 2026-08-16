@@ -1,34 +1,115 @@
-<div class="note">Class ที่ดีไม่ได้เป็นแค่ถุงใส่ field แต่บังคับให้ object อยู่ในสถานะที่ถูกต้องตั้งแต่ constructor และเปิดเฉพาะ operation ที่รักษากติกาของโดเมน</div>
-<section><h2>1. Anatomy ของ class</h2><pre class="code-vs"><code>class ScanItem {
-  const ScanItem({
-    required this.barcode,
-    required this.quantity,
-  }) : assert(quantity &gt; 0);
+<div class="meta"><span>ระดับ: เริ่มจากศูนย์</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: สร้าง class แรกและ constructor สามแบบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.2–D1.5 (ตัวแปร ฟังก์ชัน และ collection)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้าง class ของตัวเอง อธิบายได้ว่า class ต่างจาก object อย่างไร และเลือก constructor ให้ถูกแบบระหว่าง constructor หลัก, named และ factory</div>
 
-  final String barcode;
-  final int quantity;
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตอนนี้ถ้าจะเก็บข้อมูลพาเลทหนึ่งใบ เราต้องใช้ตัวแปรสามตัวลอย ๆ</p><pre class="code-vs"><code>final code = 'PAL-1001';
+final location = 'A-01-02';
+var quantity = 12;</code></pre><p>พอมีสองใบก็ต้องเป็นหกตัวแปร และไม่มีอะไรผูกไว้ว่าสามตัวไหนเป็นของใบเดียวกัน เมื่อส่งเข้าฟังก์ชันก็ต้องส่งทีละสามค่าและมีโอกาสสลับกัน</p><p><strong>class</strong> คือวิธีบอก Dart ว่า “ข้อมูลชุดนี้กับพฤติกรรมชุดนี้อยู่ด้วยกัน” แล้วเรียกมันเป็นสิ่งเดียว</p></section>
 
-  bool get isPallet =&gt; barcode.startsWith('PAL-');
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th><th>เปรียบเทียบ</th></tr></thead><tbody>
+<tr><td>class</td><td>แบบพิมพ์เขียว</td><td>แบบแปลนบ้าน</td></tr>
+<tr><td>object / instance</td><td>ของจริงที่สร้างจากแบบ</td><td>บ้านที่สร้างเสร็จแล้วหนึ่งหลัง</td></tr>
+<tr><td>field</td><td>ข้อมูลที่ object เก็บไว้</td><td>สีบ้าน จำนวนห้อง</td></tr>
+<tr><td>method</td><td>สิ่งที่ object ทำได้</td><td>เปิดไฟ ปิดประตู</td></tr>
+<tr><td>constructor</td><td>ขั้นตอนสร้าง object</td><td>วันที่สร้างบ้านเสร็จและส่งมอบ</td></tr>
+<tr><td><code>this</code></td><td>ตัว object ที่กำลังทำงานอยู่</td><td>“บ้านหลังนี้”</td></tr>
+</tbody></table><div class="note">แบบแปลนเขียนครั้งเดียว แต่สร้างบ้านจากแบบเดียวกันได้ไม่จำกัด — class เขียนครั้งเดียว สร้าง object ได้ไม่จำกัดเช่นกัน</div></section>
 
-  ScanItem copyWith({String? barcode, int? quantity}) =&gt; ScanItem(
-    barcode: barcode ?? this.barcode,
-    quantity: quantity ?? this.quantity,
+<section><h2>3. Mental model: แบบพิมพ์เขียวกับของจริง</h2><pre class="code-vs"><code>class Pallet {              // แบบพิมพ์เขียว เขียนครั้งเดียว
+  Pallet({
+    required this.code,
+    required this.location,
+    this.quantity = 0,
+  });
+
+  final String code;        // field: ข้อมูลที่ทุกใบต้องมี
+  final String location;
+  int quantity;             // ไม่ใส่ final เพราะจำนวนเปลี่ยนได้
+
+  void receive(int amount) {   // method: สิ่งที่พาเลททำได้
+    if (amount &lt;= 0) return;
+    quantity += amount;
+  }
+}
+
+final a = Pallet(code: 'PAL-1001', location: 'A-01-02', quantity: 10); // ของจริงใบที่ 1
+final b = Pallet(code: 'PAL-1002', location: 'B-03-01');              // ของจริงใบที่ 2</code></pre><p><code>this.code</code> ในวงเล็บ constructor เป็นทางลัดที่แปลว่า “รับค่าเข้ามาแล้วเก็บลง field ชื่อ <code>code</code> ให้เลย” ถ้าไม่มีทางลัดนี้เราต้องเขียนยาวกว่านี้สองเท่า</p></section>
+
+<section><h2>4. รันดูของจริง</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_06_class.dart</code></pre><pre class="code-vs"><code>=== สร้าง object จาก class ===
+Pallet(PAL-1001 @ A-01-02, 10 ชิ้น)
+
+=== named constructor ===
+Pallet(PAL-1002 @ ยังไม่จัดเก็บ, 0 ชิ้น)</code></pre><p>ที่พิมพ์ออกมาสวยแบบนี้ได้เพราะเราเขียน <code>toString()</code> ทับของเดิม</p><pre class="code-vs"><code>@override
+String toString() =&gt; 'Pallet($code @ $location, $quantity ชิ้น)';</code></pre><p><code>@override</code> คือป้ายบอก Dart ว่า “ตั้งใจเขียนทับของที่มีอยู่แล้ว” ถ้าสะกดชื่อผิด Dart จะเตือนทันที ถ้าไม่เขียนทับ <code>print(a)</code> จะได้ข้อความไร้ประโยชน์อย่าง <code>Instance of 'Pallet'</code></p></section>
+
+<section><h2>5. Constructor สามแบบและใช้ตอนไหน</h2><table><thead><tr><th>แบบ</th><th>หน้าตา</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td>constructor หลัก</td><td><code>Pallet({required this.code, ...})</code></td><td>ทางเข้าปกติ มีข้อมูลครบอยู่แล้ว</td></tr>
+<tr><td>named constructor</td><td><code>Pallet.empty(String code)</code></td><td>ทางเข้าเพิ่มเติมที่มีความหมายต่างออกไป</td></tr>
+<tr><td>factory constructor</td><td><code>factory Pallet.fromScan(String raw)</code></td><td>ต้องตัดสินใจหรือแปลงข้อมูลก่อนว่าจะสร้าง object แบบไหน</td></tr>
+</tbody></table><pre class="code-vs"><code>// named: เรียกต่อไปยัง constructor หลักด้วย : this(...)
+Pallet.empty(String code) : this(code: code, location: 'ยังไม่จัดเก็บ');
+
+// factory: มีตรรกะได้ และเลือกได้ว่าจะคืนอะไร
+factory Pallet.fromScan(String rawText) {
+  final parts = rawText.split('|');
+  if (parts.length &lt; 3) {
+    return Pallet.empty(parts.first);   // ข้อมูลไม่ครบ
+  }
+  return Pallet(
+    code: parts[0],
+    location: parts[1],
+    quantity: int.tryParse(parts[2]) ?? 0,
   );
-}</code></pre><p>constructor สร้าง invariant, field เก็บ state, getter คำนวณค่าที่ derive ได้ และ method เปลี่ยน/คืนผลตาม behavior ไม่ควรเก็บ <code>isPallet</code> ซ้ำเพราะคำนวณจาก barcode ได้</p></section>
-<section><h2>2. Constructor แบบต่าง ๆ</h2><ul><li><strong>Generative:</strong> สร้าง instance ใหม่ตามปกติ</li><li><strong>Named:</strong> เช่น <code>ApiResult.success</code>/<code>ApiResult.error</code> สื่อ intent ต่างกัน</li><li><strong>Factory:</strong> คืน subtype, cache/singleton หรือ parse ก่อนเลือก object ได้ แต่ไม่มี <code>this</code> สำหรับกำหนด field โดยตรง</li><li><strong>Const:</strong> สร้าง compile-time instance เมื่อ field และ argument รองรับ</li></ul><p><code>wmsapp/lib/services/api_service.dart</code> ใช้ factory constructor คืน singleton เดิม ส่วน model <code>ConnectionProfile</code> ใช้ const constructor และ static <code>fromJson</code> ที่คืน null เมื่อข้อมูลไม่น่าเชื่อถือ</p></section>
-<section><h2>3. Encapsulation และ privacy</h2><pre class="code-vs"><code>class Session {
-  String? _token;
-  bool get isSignedIn =&gt; _token != null;
+}</code></pre><p>ความต่างที่สำคัญ: constructor ปกติ <strong>ต้อง</strong> สร้าง object ใหม่เสมอ ส่วน <code>factory</code> จะคืน object ที่มีอยู่แล้ว คืน object ชนิดลูก หรือเลือกเส้นทางตามข้อมูลก็ได้ — จึงเหมาะกับการ “แปลงข้อมูลดิบเป็นสิ่งของ” ซึ่งเราจะใช้หนักมากตอนแปลง JSON จาก API ใน D1.19</p></section>
 
-  void start(String token) {
-    if (token.isEmpty) throw ArgumentError.value(token, 'token');
-    _token = token;
+<section><h2>6. Method: พฤติกรรมที่ปกป้องข้อมูลของตัวเอง</h2><pre class="code-vs"><code>void receive(int amount) {
+  if (amount &lt;= 0) return;   // ปฏิเสธค่าที่ไม่สมเหตุสมผล
+  quantity += amount;
+}</code></pre><p>ประโยชน์คือกฎ “จำนวนที่รับต้องมากกว่าศูนย์” ถูกเก็บไว้ <strong>ที่เดียว</strong> ใครเรียกก็ได้กฎเดียวกัน ต่างจากการเขียน <code>a.quantity += x</code> กระจายทั่วโปรแกรม ซึ่งวันหนึ่งจะมีจุดที่ลืมตรวจ</p><p>นี่คือแก่นของการออกแบบ class ที่ดี: <strong>ข้อมูลกับกฎที่คุ้มครองข้อมูลนั้นต้องอยู่ด้วยกัน</strong> เราจะขยายเรื่องนี้ต่อใน D1.7</p></section>
+
+<section><h2>7. object สองตัวที่ค่าเท่ากัน ยังเป็นคนละตัว</h2><pre class="code-vs"><code>final a = Pallet(code: 'PAL-1001', location: 'A-01-02', quantity: 15);
+final c = Pallet(code: 'PAL-1001', location: 'A-01-02', quantity: 15);
+
+print(a == c);              // false
+print(a.code == c.code);    // true</code></pre><div class="warn"><strong>เข้าใจผิดที่พบบ่อย:</strong> <code>==</code> บน class ที่เราเขียนเองจะเทียบว่า “เป็นวัตถุชิ้นเดียวกันหรือเปล่า” ไม่ใช่ “ข้อมูลเหมือนกันหรือเปล่า” — จึงได้ <code>false</code> ทั้งที่ค่าทุกตัวตรงกัน อาการนี้ทำให้ค้นของใน List ไม่เจอทั้งที่มั่นใจว่ามี</div><p>มีสามทางแก้ ซึ่งจะเรียนตามลำดับในบทถัด ๆ ไป</p><table><thead><tr><th>ทางแก้</th><th>เรียนที่</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>เทียบด้วย field ที่เป็นรหัส เช่น <code>a.code == c.code</code></td><td>ใช้ได้ตั้งแต่วันนี้</td><td>กรณีง่ายที่มีรหัสไม่ซ้ำอยู่แล้ว</td></tr>
+<tr><td>ใช้ <code>record</code> ซึ่งเทียบด้วยค่าให้เอง</td><td>D1.12</td><td>ข้อมูลชั่วคราวที่ไม่ต้องมี method</td></tr>
+<tr><td>ให้เครื่องมือสร้างโค้ดเทียบค่าให้ (freezed)</td><td>Part 30</td><td>model จริงในแอปที่ต้องเทียบบ่อย</td></tr>
+</tbody></table></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>The parameter 'code' can't have a value of 'null'</code></td><td>ลืม <code>required</code> หน้า named parameter ที่ไม่มีค่าเริ่มต้น</td><td>เติม <code>required</code> หรือใส่ค่าเริ่มต้น</td></tr>
+<tr><td><code>'quantity' can't be used as a setter because it's final</code></td><td>ประกาศ field เป็น <code>final</code> แล้วพยายามแก้ทีหลัง</td><td>ตัดสินใจว่าค่านี้เปลี่ยนได้จริงไหม ถ้าใช่ให้เอา <code>final</code> ออก</td></tr>
+<tr><td><code>print(object)</code> ได้ <code>Instance of 'Pallet'</code></td><td>ยังไม่ได้เขียน <code>toString()</code></td><td>เขียน <code>@override String toString()</code></td></tr>
+<tr><td><code>==</code> คืน <code>false</code> ทั้งที่ค่าเท่ากัน</td><td>Dart เทียบด้วยตัวตน ไม่ใช่ค่า</td><td>เทียบด้วย field ที่เป็นรหัส หรือใช้เครื่องมือใน Part 30</td></tr>
+<tr><td>เขียน <code>Pallet.fromScan</code> เป็น constructor ปกติแล้วมี <code>if</code> ข้างใน</td><td>constructor ปกติเลือกไม่ได้ว่าจะคืนอะไร</td><td>เติมคำว่า <code>factory</code> นำหน้า</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>สร้าง class <code>StorageBin</code> ที่</p><ol><li>เก็บรหัสช่อง (<code>String</code>) และความจุสูงสุด (<code>int</code>) ซึ่งทั้งคู่เปลี่ยนไม่ได้หลังสร้าง</li><li>เก็บจำนวนที่วางอยู่จริง ซึ่งเปลี่ยนได้ เริ่มต้นที่ 0</li><li>มี method <code>put(int amount)</code> ที่ปฏิเสธถ้าใส่แล้วเกินความจุ และคืน <code>bool</code> ว่าใส่สำเร็จหรือไม่</li><li>มี named constructor <code>StorageBin.small(String code)</code> ที่กำหนดความจุเป็น 10</li><li>พิมพ์ออกมาอ่านได้ว่า <code>A-01-02 [3/10]</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class StorageBin {
+  StorageBin({required this.code, required this.capacity});
+
+  StorageBin.small(String code) : this(code: code, capacity: 10);
+
+  final String code;
+  final int capacity;
+  int used = 0;
+
+  bool put(int amount) {
+    if (amount &lt;= 0) return false;
+    if (used + amount &gt; capacity) return false;
+    used += amount;
+    return true;
   }
 
-  void clear() =&gt; _token = null;
-}</code></pre><p>underscore ทำให้ชื่อ private ต่อ <em>library</em> ไม่ใช่ private ต่อ class อย่าง C# ดังนั้นไฟล์ที่เป็น <code>part</code> ของ library เดียวกันยังเห็นสมาชิก private กันได้</p></section>
-<section><h2>4. Getter ไม่ใช่ function ที่ควรมี side effect</h2><p>Getter ควรเร็วและคืน derived value เช่น <code>ConnectionProfile.baseUrl</code> ไม่ควรยิง HTTP, mutate state หรือ throw แบบคาดไม่ถึง เพราะ call site อ่านเหมือนการเข้าถึงข้อมูลธรรมดา งาน async ต้องเป็น method ที่คืน Future</p></section>
-<section><h2>5. Composition ก่อน inheritance</h2><p><code>WarehouseStore</code> มี receiving/tasks repositories เป็น field นี่คือ composition: store ใช้ capability โดยไม่ “เป็น” repository การสืบทอดเหมาะเมื่อ subtype เป็นชนิดเดียวกันจริงและต้องรักษาสัญญาของ base type</p></section>
-<section><h2>6. แบบฝึกหัด</h2><p>ออกแบบ <code>ConnectionProfile</code> ย่อส่วนที่ห้าม port นอก 1–65535 และคืน baseUrl โดยไม่ให้ caller ต่อ string เอง</p><details><summary>แนวคำตอบ</summary><p>validate ใน factory/named constructor แล้วเก็บ protocol, host, port เป็น final; ใช้ getter คำนวณ <code>${protocol.name}://$host:$port</code>; ไม่ expose setter เพื่อกัน object เข้าสถานะครึ่งถูกครึ่งผิด</p></details></section>
-<section><h2>7. จุดพลาด</h2><div class="warn">อย่าสร้าง model ที่ field ทุกตัว nullable เพียงเพราะ JSON อาจเสีย ให้ parser ปฏิเสธ payload ที่ขาดข้อมูลบังคับ แล้วคง domain object ให้ใช้งานง่ายและปลอดภัย</div></section>
-<section><h2>8. สรุป</h2><p>constructor กำหนด “เข้าได้อย่างไร”, private field กำหนด “ใครแตะได้”, method กำหนด “เปลี่ยนได้อย่างไร” และ getter อธิบายค่าที่ derive—นี่คือกำแพงกัน invalid state ชั้นแรก</p></section>
+  @override
+  String toString() =&gt; '$code [$used/$capacity]';
+}
+
+void main() {
+  final bin = StorageBin.small('A-01-02');
+  print(bin.put(3));    // true
+  print(bin.put(9));    // false เพราะจะเกิน 10
+  print(bin);           // A-01-02 [3/10]
+}</code></pre><p><strong>ทำไม <code>put</code> ต้องคืน <code>bool</code>:</strong> เพราะคนเรียกต้องรู้ผลเพื่อไปแสดงข้อความให้ผู้ใช้ ถ้าเขียนเป็น <code>void</code> แล้วเงียบ ๆ ไม่ทำอะไร ผู้ใช้จะกดแล้วไม่เกิดอะไรขึ้นโดยไม่รู้สาเหตุ ซึ่งเป็นบั๊กที่หาสาเหตุยากมากในงานจริง</p><p><strong>ทำไม <code>capacity</code> เป็น <code>final</code> แต่ <code>used</code> ไม่เป็น:</strong> ความจุของช่องเก็บเป็นคุณสมบัติทางกายภาพที่ไม่เปลี่ยน ส่วนจำนวนที่วางอยู่คือสถานะที่เปลี่ยนตลอดวัน — ตรงกับหลักจาก D1.3 ว่าเริ่มจากล็อกไว้ก่อน แล้วผ่อนเฉพาะที่ต้องเปลี่ยนจริง</p><p><strong>ลองต่อ:</strong> เพิ่ม getter <code>isFull</code> ที่คืน <code>used &gt;= capacity</code> — แล้วสังเกตว่าเราไม่ควรเก็บ <code>isFull</code> เป็น field เพราะมันคำนวณจากค่าอื่นได้ (เหตุผลเต็ม ๆ อยู่ใน D1.7)</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>class คือแบบพิมพ์เขียว object คือของจริงที่สร้างจากแบบนั้น</li><li>field เก็บข้อมูล method คือสิ่งที่ object ทำได้ และทั้งสองควรอยู่ด้วยกัน</li><li><code>this.x</code> ใน constructor คือทางลัดของ “รับค่าแล้วเก็บลง field”</li><li>named constructor เพิ่มทางเข้าที่สื่อความหมาย ส่วน <code>factory</code> ใช้เมื่อต้องตัดสินใจก่อนสร้าง</li><li><code>==</code> เทียบตัวตน ไม่ได้เทียบค่า</li></ul></div><p><strong>บทถัดไป:</strong> D1.7 จะตอบคำถามที่ค้างจากบทนี้ว่า จะกันไม่ให้คนนอกแก้ข้อมูลข้าม method ของเราได้อย่างไร ด้วย private field และ getter</p></section>

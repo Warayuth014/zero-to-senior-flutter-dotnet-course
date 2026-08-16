@@ -4,30 +4,112 @@
 <title>List / Set / Map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-05 · Dart Core</span><h1>List / Set / Map</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เลือก collection จากคำถาม</a></li><li><a href="#section-2">Typed collection และ operators</a></li><li><a href="#section-3">Mutation กับ state</a></li><li><a href="#section-4">Equality และ uniqueness</a></li><li><a href="#section-5">ตัวอย่างจริง</a></li><li><a href="#section-6">Collection pitfalls</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
-<div class="note"><code>List</code> เก็บลำดับและค่าซ้ำ, <code>Set</code> เก็บสมาชิกไม่ซ้ำ, <code>Map</code> จับคู่ key-value การเลือกผิดทำให้ทั้ง intent และ complexity ของ workflow อ่านยาก</div>
-<section id="section-1"><h2>1. เลือก collection จากคำถาม</h2><table><thead><tr><th>ต้องการ</th><th>ใช้</th><th>ตัวอย่าง WMS</th></tr></thead><tbody><tr><td>รายการเรียงลำดับ/ซ้ำได้</td><td><code>List&lt;T&gt;</code></td><td>รายการ part ใน pallet</td></tr><tr><td>ตรวจสมาชิกไม่ซ้ำ</td><td><code>Set&lt;T&gt;</code></td><td>serial ที่สแกนแล้ว</td></tr><tr><td>หา value ด้วย key</td><td><code>Map&lt;K,V&gt;</code></td><td>task ตาม taskId, step ตาม TaskType</td></tr></tbody></table></section>
-<section id="section-2"><h2>2. Typed collection และ operators</h2><pre class="code-vs"><code>final scannedSerials = &lt;String&gt;{'SN-001'};
-final quantities = &lt;String, int&gt;{'PART-A': 2};
-final pending = tasks.where((t) =&gt; !t.done).toList();
-final ids = tasks.map((t) =&gt; t.id).toSet();
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: เลือกจากคำถาม ไม่ใช่เลือกจากความคุ้นมือ</a></li><li><a href="#section-4">รันดูของจริง</a></li><li><a href="#section-5">Map: จับคู่รหัสกับค่า</a></li><li><a href="#section-6">แปลง กรอง รวม โดยไม่ต้องเขียน for</a></li><li><a href="#section-7">กับดักที่สำคัญที่สุด: ตัวแปรสองตัวอาจชี้ก้อนเดียวกัน</a></li><li><a href="#section-8">สร้าง collection แบบมีเงื่อนไข</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มจากศูนย์</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เก็บและกรองข้อมูลหลายรายการ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.2–D1.4 (ตัวแปร ชนิดข้อมูล และฟังก์ชัน — โดยเฉพาะเรื่องฟังก์ชันเป็นค่าได้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกได้ว่าข้อมูลชุดหนึ่งควรเก็บเป็น List, Set หรือ Map และกรอง/แปลง/รวมข้อมูลได้โดยไม่ต้องเขียน <code>for</code> ทุกครั้ง</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตัวแปรหนึ่งตัวเก็บได้หนึ่งค่า แต่งานจริงคือ “พาเลททั้งหมดที่สแกนวันนี้” หรือ “จำนวนคงเหลือของสินค้าแต่ละรหัส” เราต้องการกล่องที่เก็บได้หลายค่า และต้องเลือกกล่องให้ตรงกับคำถามที่จะถามข้อมูลนั้นบ่อยที่สุด</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>collection</td><td>คำรวมของโครงสร้างที่เก็บได้หลายค่า</td></tr>
+<tr><td>element / สมาชิก</td><td>ค่าหนึ่งค่าที่อยู่ใน collection</td></tr>
+<tr><td>index</td><td>เลขตำแหน่งใน List เริ่มนับจาก 0</td></tr>
+<tr><td>key / value</td><td>คู่ “กุญแจ → ค่า” ที่ใช้ใน Map</td></tr>
+<tr><td>iterate / วน</td><td>ไล่อ่านสมาชิกทีละตัว</td></tr>
+<tr><td>lazy</td><td>ยังไม่คำนวณจนกว่าจะมีคนขออ่านผลจริง</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: เลือกจากคำถาม ไม่ใช่เลือกจากความคุ้นมือ</h2><p>ก่อนประกาศตัวแปร ให้ถามสามคำถามนี้</p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>“ลำดับสำคัญไหม และค่าซ้ำได้ไหม”</td><td>ใช้ <code>List</code></td></tr>
+<tr><td>“ต้องกันค่าซ้ำเป็นหลักไหม”</td><td>ใช้ <code>Set</code></td></tr>
+<tr><td>“จะค้นด้วยรหัสอะไรบางอย่างไหม”</td><td>ใช้ <code>Map</code></td></tr>
+</tbody></table><table><thead><tr><th></th><th>List</th><th>Set</th><th>Map</th></tr></thead><tbody>
+<tr><td>เปรียบเทียบ</td><td>รายการสแกนเรียงตามเวลา</td><td>ทะเบียนซีเรียลที่เคยเจอ</td><td>สมุดสต็อกที่เปิดหาตามรหัส</td></tr>
+<tr><td>เก็บค่าซ้ำ</td><td>ได้</td><td>ไม่ได้</td><td>key ซ้ำไม่ได้</td></tr>
+<tr><td>รักษาลำดับ</td><td>รักษา</td><td>ไม่รับประกัน</td><td>ตามลำดับที่ใส่</td></tr>
+<tr><td>ค้นหาเร็ว</td><td>ช้า ต้องไล่ทีละตัว</td><td>เร็ว</td><td>เร็ว</td></tr>
+<tr><td>เขียนอย่างไร</td><td><code>&lt;String&gt;[]</code></td><td><code>&lt;String&gt;{}</code></td><td><code>&lt;String, int&gt;{}</code></td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าคุณกำลังจะเขียน <code>for</code> เพื่อค้นหาของใน List บ่อย ๆ แปลว่าคุณควรใช้ Map ตั้งแต่แรก</div></section>
+
+<section id="section-4"><h2>4. รันดูของจริง</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_05_collections.dart</code></pre><pre class="code-vs"><code>scans        = [PAL-1001, PAL-1002, PAL-1001, PAL-1003]
+ตัวแรก        = PAL-1001
+จำนวนทั้งหมด  = 4
+มี PAL-1002?  = true
+uniqueScans  = {PAL-1001, PAL-1002, PAL-1003} (3 ตัว)</code></pre><p>สังเกตว่า <code>toSet()</code> ตัดตัวซ้ำออกให้เอง จาก 4 เหลือ 3 และวงเล็บก็เปลี่ยนจาก <code>[ ]</code> เป็น <code>{ }</code> ซึ่งเป็นวิธีดูด้วยตาเปล่าว่าเรากำลังถือ List หรือ Set</p></section>
+
+<section id="section-5"><h2>5. Map: จับคู่รหัสกับค่า</h2><pre class="code-vs"><code>final stockByCode = &lt;String, int&gt;{
+  'PAL-1001': 12,
+  'PAL-1002': 4,
+};
+stockByCode['PAL-1003'] = 9;          // เพิ่มคู่ใหม่
+
+print(stockByCode['PAL-1002']);        // 4
+print(stockByCode['PAL-9999']);        // null  &lt;- ไม่มี key นี้
+print(stockByCode['PAL-9999'] ?? 0);   // 0     &lt;- ใส่ค่าสำรอง</code></pre><div class="warn"><strong>สิ่งที่ต้องจำให้ขึ้นใจ:</strong> การอ่าน Map ด้วย key ที่ไม่มีอยู่จะได้ <code>null</code> ไม่ใช่ error — โปรแกรมจะไม่เตือนอะไรเลย แล้วไปพังทีหลังตอนเอาค่าไปใช้ นี่เป็นสาเหตุอันดับต้น ๆ ของบั๊ก “ข้อมูลหายไปเฉย ๆ” ตอนต่อกับ API (จะเจอเต็ม ๆ ใน D1.19)</div><p>วนอ่านทั้ง Map ด้วย <code>entries</code> ซึ่งให้ทั้ง key และ value</p><pre class="code-vs"><code>for (final entry in stockByCode.entries) {
+  print('${entry.key} -&gt; ${entry.value} ชิ้น');
+}</code></pre></section>
+
+<section id="section-6"><h2>6. แปลง กรอง รวม โดยไม่ต้องเขียน for</h2><p>ตรงนี้คือจุดที่บทที่แล้วออกดอกออกผล — เราส่ง <strong>ฟังก์ชัน</strong> เข้าไปบอกว่าจะทำอะไรกับสมาชิกแต่ละตัว</p><table><thead><tr><th>คำสั่ง</th><th>แปลว่า</th><th>ได้อะไรกลับ</th></tr></thead><tbody>
+<tr><td><code>where(...)</code></td><td>เก็บเฉพาะตัวที่เงื่อนไขเป็นจริง</td><td>Iterable</td></tr>
+<tr><td><code>map(...)</code></td><td>แปลงทุกตัวเป็นอย่างอื่น</td><td>Iterable</td></tr>
+<tr><td><code>fold(...)</code></td><td>ยุบทั้งหมดให้เหลือค่าเดียว</td><td>ค่าเดียว</td></tr>
+<tr><td><code>any(...)</code> / <code>every(...)</code></td><td>มีอย่างน้อยหนึ่งตัว / ทุกตัว</td><td><code>bool</code></td></tr>
+<tr><td><code>toList()</code> / <code>toSet()</code></td><td>เก็บผลลัพธ์เป็นก้อนจริง</td><td>List / Set</td></tr>
+</tbody></table><pre class="code-vs"><code>final lowStock = stockByCode.entries
+    .where((entry) =&gt; entry.value &lt; 10)   // กรองของใกล้หมด
+    .map((entry) =&gt; entry.key)            // เอาเฉพาะรหัส
+    .toList();
+
+final totalStock = stockByCode.values
+    .fold&lt;int&gt;(0, (sum, value) =&gt; sum + value);</code></pre><p><code>where</code> และ <code>map</code> เป็น <strong>lazy</strong> คือยังไม่ทำงานจริงจนกว่าจะมีคนอ่านผล การเติม <code>toList()</code> คือการบอกว่า “คำนวณเดี๋ยวนี้ แล้วเก็บผลไว้” ซึ่งควรทำเมื่อจะใช้ผลลัพธ์ซ้ำหลายครั้ง</p></section>
+
+<section id="section-7"><h2>7. กับดักที่สำคัญที่สุด: ตัวแปรสองตัวอาจชี้ก้อนเดียวกัน</h2><pre class="code-vs"><code>final a = &lt;String&gt;['A'];
+final b = a;        // ไม่ได้คัดลอก แค่ตั้งชื่อเล่นให้ก้อนเดิม
+b.add('B');
+print(a);           // [A, B]  &lt;- a เปลี่ยนไปด้วย
+
+final copied = [...a];   // spread operator = สร้างก้อนใหม่จริง ๆ
+copied.add('C');
+print(a);                // [A, B]      ไม่กระทบ
+print(copied);           // [A, B, C]</code></pre><p>ทบทวนจาก D1.3: ตัวแปรเก็บ “ที่อยู่” ของข้อมูล ไม่ใช่ตัวข้อมูล การกำหนดค่าให้ตัวแปรใหม่จึงเป็นการจดที่อยู่เดียวกันลงกระดาษอีกใบ ไม่ใช่การย้ายของ</p><p>เรื่องนี้จะกลายเป็นเรื่องใหญ่ตอนทำ state ในแอปจริง เพราะโค้ดบางแบบตรวจว่าข้อมูลเปลี่ยนโดยดูว่า “เป็นก้อนใหม่หรือเปล่า” ถ้าเราแก้ก้อนเดิมตลอด หน้าจออาจไม่อัปเดต ตอนนี้ยังไม่ต้องแก้อะไร แค่จำอาการนี้ไว้</p></section>
+
+<section id="section-8"><h2>8. สร้าง collection แบบมีเงื่อนไข</h2><pre class="code-vs"><code>const isSupervisor = true;
 
 final menu = &lt;String&gt;[
-  'Home',
-  if (canReceive) 'Receiving',
-  for (final role in extraRoles) role.label,
-  ...customMenus,
-];</code></pre><p><code>where</code>/<code>map</code> คืน lazy <code>Iterable</code>; ใช้ <code>toList()</code> เมื่ออยาก snapshot หรือ API ต้องการ List จริง ระวัง enumerate ซ้ำถ้าข้างในแพงหรือ source เปลี่ยนได้</p></section>
-<section id="section-3"><h2>3. Mutation กับ state</h2><pre class="code-vs"><code>// mutation เดิม: listener บางแบบอาจไม่เห็น identity ใหม่
-items.add(newItem);
+  'รับเข้า',
+  'หยิบสินค้า',
+  if (isSupervisor) 'ตรวจนับ',        // ใส่เฉพาะเมื่อเงื่อนไขจริง
+  ...['ตั้งค่า', 'ออกจากระบบ'],        // แตก list อื่นเข้ามาต่อท้าย
+];</code></pre><p>รูปแบบ <code>if</code> และ <code>...</code> ภายในวงเล็บนี้เรียกว่า collection if และ spread — Flutter ใช้ท่านี้ตลอดเวลาเพื่อประกอบรายการเมนูหรือรายการปุ่มตามสิทธิ์ผู้ใช้ ถ้าคุ้นตั้งแต่วันนี้ ตอนอ่านโค้ดหน้าจอจริงจะไม่สะดุด</p></section>
 
-// immutable-style update: intent ชัดและ rollback ง่าย
-items = [...items, newItem];
-items = [for (final x in items) if (x.id == id) x.complete() else x];</code></pre><p><code>final List</code> ยังแก้สมาชิกได้ ถ้า expose list จาก store ให้ใช้ unmodifiable view/copy เพื่อไม่ให้ UI ข้าม command แล้วแก้ state โดยตรง</p></section>
-<section id="section-4"><h2>4. Equality และ uniqueness</h2><p>Set/Map ใช้ <code>==</code> กับ <code>hashCode</code> ของ key ถ้า model ไม่ override equality วัตถุสองตัวที่ข้อมูลเหมือนกันอาจยังเป็นคนละสมาชิก สำหรับ barcode มัก normalize เป็น String ก่อนใส่ Set ง่ายและชัดกว่าใช้ object ดิบ</p></section>
-<section id="section-5"><h2>5. ตัวอย่างจริง</h2><ul><li><code>wms_absolute_mobile/lib/features/warehouse/workflow_definitions.dart</code> ใช้ <code>Map&lt;TaskType, List&lt;StepDef&gt;&gt;</code> เพราะต้อง lookup flow จากชนิดงาน</li><li><code>wmsapp/lib/services/signalr_service.dart</code> ใช้ <code>List&lt;SignalRCallback&gt;</code> เพราะ event หนึ่งมีผู้ฟังหลายราย</li><li>parser ใน API ใช้ <code>whereType&lt;Map&lt;String,dynamic&gt;&gt;()</code> กรอง element ก่อนสร้าง model</li></ul></section>
-<section id="section-6"><h2>6. Collection pitfalls</h2><div class="warn"><code>firstWhere</code> จะ throw ถ้าไม่พบ, <code>single</code> จะ throw ถ้าจำนวนไม่ใช่หนึ่ง, และแก้ list ระหว่าง iterate อาจพัง ใช้ helper ที่คืน nullable, ตรวจ invariant หรือสร้าง list ใหม่ตามความหมายของงาน</div></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>รับ serial ต่อเนื่อง ต้องไม่ยิง API เมื่อซ้ำ และต้องรักษาลำดับแสดงผล ควรใช้โครงสร้างใด?</p><details><summary>เฉลย</summary><p>ใช้ทั้ง <code>List&lt;String&gt;</code> สำหรับลำดับ UI และ <code>Set&lt;String&gt;</code> สำหรับ membership O(1) โดย normalize ก่อนตรวจ เพิ่มทั้งสองภายใต้ command เดียวเพื่อรักษา invariant; หรือใช้ LinkedHashSet หากไม่ต้องเก็บข้อมูลอื่นและยอมให้ Set เป็น source เดียว</p></details></section>
-<section id="section-8"><h2>8. สรุป</h2><p>ก่อนเขียน loop ให้ตอบว่า ordering, duplicate และ lookup สำคัญอย่างไร แล้วเลือก collection จาก invariant ไม่ใช่เลือก List เพราะคุ้นมือ</p></section>
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Bad state: No element</code></td><td>เรียก <code>.first</code> บน collection ว่าง</td><td>ตรวจ <code>isEmpty</code> ก่อน หรือใช้ <code>firstWhere</code> พร้อม <code>orElse</code></td></tr>
+<tr><td><code>Bad state: No element</code> จาก <code>firstWhere</code></td><td>ไม่มีสมาชิกตรงเงื่อนไข</td><td>ใส่ <code>orElse: () =&gt; ...</code> หรือใช้ <code>where(...).firstOrNull</code></td></tr>
+<tr><td><code>RangeError: Invalid value</code></td><td>อ่าน index เกินขนาด</td><td>จำไว้ว่า index สุดท้ายคือ <code>length - 1</code></td></tr>
+<tr><td><code>ConcurrentModificationError</code></td><td>เพิ่มหรือลบสมาชิกระหว่างที่กำลังวนอ่าน</td><td>สร้าง list ใหม่จากผลลัพธ์ แทนการแก้ของเดิมกลางคัน</td></tr>
+<tr><td>แก้ list หนึ่ง แล้วอีกตัวเปลี่ยนตาม</td><td>สองตัวแปรชี้ก้อนเดียวกัน</td><td>คัดลอกด้วย <code>[...list]</code></td></tr>
+<tr><td>ค่าที่คิดว่าซ้ำ กลับไม่ถูกตัดออกจาก Set</td><td>ข้อความมีช่องว่างหรือตัวพิมพ์ต่างกัน</td><td>จัดรูปแบบก่อนใส่ เช่น <code>.trim().toUpperCase()</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>พนักงานสแกนซีเรียลต่อเนื่องทั้งกะ ระบบต้องทำสองอย่างพร้อมกัน</p><ol><li>แสดงรายการบนหน้าจอ <strong>เรียงตามเวลาที่สแกน</strong></li><li>ไม่ยิงข้อมูลซ้ำขึ้น server ถ้าซีเรียลนั้นเคยสแกนไปแล้วในกะนี้</li></ol><p>จงเขียนฟังก์ชัน <code>addScan</code> ที่รับซีเรียลดิบ แล้วคืน <code>bool</code> ว่ารับเข้าใหม่หรือไม่ พร้อมบอกว่าใช้โครงสร้างข้อมูลอะไรและเพราะอะไร</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>final displayOrder = &lt;String&gt;[];   // ลำดับสำหรับหน้าจอ
+final seen = &lt;String&gt;{};           // ตรวจซ้ำแบบเร็ว
+
+bool addScan(String raw) {
+  final serial = raw.trim().toUpperCase();
+  if (serial.isEmpty) return false;
+  if (!seen.add(serial)) return false;   // add คืน false ถ้ามีอยู่แล้ว
+  displayOrder.add(serial);
+  return true;
+}
+
+void main() {
+  for (final raw in [' sn-001 ', 'SN-002', 'SN-001', '', 'sn-003']) {
+    print('$raw -&gt; ${addScan(raw) ? 'รับเข้า' : 'ข้าม'}');
+  }
+  print(displayOrder);   // [SN-001, SN-002, SN-003]
+}</code></pre><p><strong>ทำไมต้องใช้ทั้งสองอย่าง:</strong> คำถามมีสองข้อที่ขัดกัน — “ลำดับ” ต้องใช้ List ส่วน “ไม่ซ้ำ” ต้องใช้ Set การใช้ List อย่างเดียวแล้วเช็คด้วย <code>contains</code> ก็ได้คำตอบถูก แต่ต้องไล่อ่านทั้งรายการทุกครั้ง พอสแกนหลักพันรายการจะเริ่มหน่วง</p><p><strong>เกร็ดที่ควรรู้:</strong> <code>seen.add(serial)</code> คืน <code>bool</code> อยู่แล้วว่าเพิ่มสำเร็จหรือไม่ จึงไม่ต้องเรียก <code>contains</code> ก่อนแล้วค่อย <code>add</code> ซึ่งเป็นการอ่านสองรอบโดยไม่จำเป็น</p><p><strong>ลองต่อ:</strong> เพิ่มการนับว่าซีเรียลไหนถูกยิงซ้ำกี่ครั้ง คำใบ้คือคุณจะต้องใช้ <code>Map&lt;String, int&gt;</code></p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>เลือก collection จากคำถามที่จะถามข้อมูลบ่อยที่สุด ไม่ใช่จากความคุ้นมือ</li><li>List = ลำดับ, Set = ไม่ซ้ำ, Map = ค้นด้วย key</li><li>อ่าน Map ด้วย key ที่ไม่มี จะได้ <code>null</code> เงียบ ๆ ไม่ใช่ error</li><li><code>where</code>/<code>map</code>/<code>fold</code> ทำงานร่วมกับฟังก์ชันที่เราส่งเข้าไป และเป็น lazy จนกว่าจะ <code>toList()</code></li><li>การกำหนดค่า collection ให้ตัวแปรใหม่ไม่ได้คัดลอก ต้องใช้ <code>[...list]</code></li></ul></div><p><strong>บทถัดไป:</strong> D1.6 จะรวมค่าหลาย ๆ ตัวที่เกี่ยวข้องกันให้กลายเป็น “สิ่งของ” หนึ่งชิ้นด้วย class ซึ่งเป็นก้าวสำคัญก่อนเข้าสู่โลกของ Flutter</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

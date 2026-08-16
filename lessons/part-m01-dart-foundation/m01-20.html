@@ -4,22 +4,157 @@
 <title>Dart Mini Project</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-20 · Dart Core</span><h1>Dart Mini Project</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คำสั่งประจำวัน</a></li><li><a href="#section-2">analysis_options.yaml</a></li><li><a href="#section-3">Checklist ระดับ declaration</a></li><li><a href="#section-4">Checklist async/resource</a></li><li><a href="#section-5">Checklist boundary</a></li><li><a href="#section-6">อ่าน warning เป็นหลักฐาน</a></li><li><a href="#section-7">แบบฝึกหัดปิด Part</a></li><li><a href="#section-8">Part -1 Exit Test</a></li></ol></nav>
-<div class="note">Analyzer, lints, formatter และ tests เป็น feedback loop ไม่ใช่งานเก็บกวาดท้ายโปรเจกต์ เป้าหมายคือทำให้ความผิดที่ตรวจอัตโนมัติได้ไม่ต้องรอ code review หรือ production</div>
-<section id="section-1"><h2>1. คำสั่งประจำวัน</h2><pre class="code-vs"><code>dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test</code></pre><p>ระหว่างพัฒนาใช้ <code>dart format .</code> เพื่อแก้รูปแบบ ก่อน commit ให้ analyze/test ผ่าน ถ้า repo มี generated code หรือ target เพิ่มให้ยึด script/CI ของ repo เป็นหลัก</p></section>
-<section id="section-2"><h2>2. analysis_options.yaml</h2><p>ไฟล์นี้ include rule set และปรับ lint/error severity ให้ทีม Lint ควรสะท้อน bug/maintainability ที่ทีมยอมทำตาม ไม่ใช่เปิดทุก rule แล้วกระจาย ignore ทั้ง repo เมื่อจำเป็นต้อง ignore ให้เล็กที่สุดและใส่เหตุผล</p><pre class="code-vs"><code>include: package:flutter_lints/flutter.yaml
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สิ่งที่เราจะสร้าง</a></li><li><a href="#section-2">ทุกบทมาบรรจบกันตรงไหน</a></li><li><a href="#section-3">รันของจริงก่อน</a></li><li><a href="#section-4">ด่านตรวจ: แปลงข้อมูลดิบเป็น model</a></li><li><a href="#section-5">นโยบายแถวเสีย</a></li><li><a href="#section-6">ส่งงานแบบ async พร้อม callback</a></li><li><a href="#section-7">เทสต์: พิสูจน์แทนที่จะเชื่อ</a></li><li><a href="#section-8">คำสั่งที่ต้องรันทุกครั้งก่อนถือว่าเสร็จ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อยตอนทำโปรเจกต์นี้</a></li><li><a href="#section-10">แบบฝึกหัดปิด Part</a></li><li><a href="#section-11">แบบทดสอบตัวเองก่อนไป Part 0</a></li><li><a href="#section-12">สรุปท้าย Dart Foundation</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–90 นาที</span><span>ลงมือทำ: สร้างโปรแกรมจริงและทำให้เทสต์ผ่าน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.1–D1.19 ทั้งหมด — บทนี้จะใช้เกือบทุกอย่างที่เรียนมา<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนโปรแกรม Dart ที่รับข้อมูลดิบ ตรวจสอบ แปลงเป็น model สรุปผล และส่งต่อ พร้อมเทสต์ที่พิสูจน์ว่าทำงานถูกจริง — และพร้อมเข้าสู่ Flutter ใน Part 1</div>
 
-linter:
-  rules:
-    avoid_print: true
-    unawaited_futures: true</code></pre></section>
-<section id="section-3"><h2>3. Checklist ระดับ declaration</h2><ul><li>public function มี type ชัด; ไม่ใช้ dynamic/Function กว้างโดยไม่จำเป็น</li><li>nullability สื่อ domain; ไม่มี <code>!</code> จากการเดา</li><li>final/const ใช้ตาม ownership และ immutability จริง</li><li>collection มี type และไม่ expose mutable state ข้าม owner</li><li>ชื่อบอก intent/domain ไม่ใช่ <code>data</code>, <code>temp2</code>, <code>doIt</code></li></ul></section>
-<section id="section-4"><h2>4. Checklist async/resource</h2><ul><li>Future ถูก await หรือประกาศ <code>unawaited</code> พร้อม error policy</li><li>Timer, StreamSubscription, controller, FocusNode และ observer ถูก dispose/cancel</li><li>ตรวจ mounted/context หลัง await เมื่อ owner คือ widget</li><li>กัน duplicate action และ stale response</li><li>ไม่ log password/token/PII</li></ul></section>
-<section id="section-5"><h2>5. Checklist boundary</h2><ul><li>HTTP timeout/non-2xx/malformed JSON แยกจาก empty success</li><li>dynamic ถูกกักใน parser และมี contract test</li><li>URI/query ใช้ API ของ Uri ไม่ต่อ string ที่ไม่ encode</li><li>status/date/timezone/null มีข้อตกลงกับ .NET</li><li>ข้อความ UI actionable ส่วน technical detail อยู่ log ที่ sanitize</li></ul></section>
-<section id="section-6"><h2>6. อ่าน warning เป็นหลักฐาน</h2><p>ตัวอย่าง <code>use_build_context_synchronously</code> ไม่ได้บอกให้ใส่ ignore แต่บอกว่ามี async gap และ context อาจหมดอายุ ต้องย้าย navigation ก่อน await, ตรวจ <code>context.mounted</code> หรือย้าย side effect ไป owner ที่อายุเหมาะสม</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัดปิด Part</h2><p>เลือกไฟล์ Dart จริงหนึ่งไฟล์แล้ว review ด้วย checklist 5 มิติ: type/null, ownership/mutation, async/lifecycle, boundary/error, testability จากนั้นจัด finding เป็น Bug risk / Design debt / Style</p><details><summary>เกณฑ์ผ่าน</summary><p>ต้องชี้ symbol/บรรทัดและอธิบาย failure scenario ได้ ไม่ผ่านถ้ามีเพียง “ควร clean code”; เสนอ fix ที่เล็กและ test ที่พิสูจน์ behavior เดิมอย่างน้อยหนึ่งข้อ</p></details></section>
-<section id="section-8"><h2>8. Part -1 Exit Test</h2><div class="success"><p>พร้อมไป Part 0 เมื่อคุณทำได้ครบ:</p><ul><li>อ่าน signature ที่มี nullable/generic/Future ได้โดยไม่เดา</li><li>อธิบาย final/const/late และ collection mutation ได้</li><li>อ่าน class/interface/extension/record/switch จากสอง codebase ออก</li><li>trace JSON dynamic เข้าสู่ typed model และ failure ออกสู่ UI ได้</li><li>รัน format/analyze/test และแก้ต้นเหตุของ warning ได้</li></ul></div></section>
+<section id="section-1"><h2>1. สิ่งที่เราจะสร้าง</h2><p>โปรแกรมรับใบงานจากคลัง ซึ่งทำหกขั้นตอน</p><ol><li>รับ JSON ดิบที่มีทั้งแถวดีและแถวเสียปนกัน</li><li>ตรวจและแปลงเป็น model โดยแถวเสียไม่ล้มทั้งชุด</li><li>หางานที่ข้อมูลยังไม่ครบ</li><li>สรุปจำนวนตามชนิดงาน</li><li>ส่งงานขึ้น server ทีละใบแบบ async</li><li>พิสูจน์ทุกอย่างด้วยเทสต์</li></ol><p>ยังไม่มี Flutter ไม่มีหน้าจอ ไม่มีเครือข่ายจริง — แต่โครงสร้างเหมือนที่แอปจริงใช้ทุกประการ</p></section>
+
+<section id="section-2"><h2>2. ทุกบทมาบรรจบกันตรงไหน</h2><table><thead><tr><th>บท</th><th>ใช้ตรงไหนในโปรเจกต์นี้</th></tr></thead><tbody>
+<tr><td>D1.2–D1.3</td><td>เลือกชนิดและ <code>final</code>/<code>const</code> ให้ทุก field</td></tr>
+<tr><td>D1.4</td><td>ฟังก์ชันที่รับ named parameter</td></tr>
+<tr><td>D1.5</td><td><code>Map</code> สรุปยอดตามชนิดงาน</td></tr>
+<tr><td>D1.6–D1.7</td><td><code>class WarehouseTask</code> พร้อม factory และ getter</td></tr>
+<tr><td>D1.10</td><td><code>enum TaskType</code> ที่พก <code>wireValue</code> และ <code>label</code></td></tr>
+<tr><td>D1.11</td><td>callback <code>send</code> และ <code>onResult</code></td></tr>
+<tr><td>D1.12</td><td><code>switch</code> pattern แปลง quantity และ record เป็นผลลัพธ์</td></tr>
+<tr><td>D1.13</td><td><code>location</code> ที่เป็น nullable อย่างมีความหมาย</td></tr>
+<tr><td>D1.14</td><td><code>TaskFormatException</code> ของโดเมนนี้เอง</td></tr>
+<tr><td>D1.15</td><td><code>dispatchAll</code> ที่ส่งงานแบบ async</td></tr>
+<tr><td>D1.18</td><td>แยกไฟล์ระหว่างตรรกะกับตัวโปรแกรมที่รัน</td></tr>
+<tr><td>D1.19</td><td>parser ที่เป็นด่านตรวจ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. รันของจริงก่อน</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_20_mini_project.dart</code></pre><pre class="code-vs"><code>=== ขั้นที่ 1: อ่านข้อมูลดิบ แถวเสียไม่ล้มทั้งชุด ===
+  อ่านสำเร็จ 3 ใบ, มีปัญหา 3 แถว
+    - แถวที่ 3: ไม่รู้จักงานชนิด "TELEPORT"
+    - แถวที่ 4: quantity ต้องมากกว่า 0 (ได้ 0)
+    - แถวที่ 5: quantity ไม่ใช่จำนวนเต็ม: มาก</code></pre><p>ตรรกะทั้งหมดอยู่ที่ <code>lib/dart_foundation/mini_project.dart</code> ส่วนไฟล์ใน <code>tool/</code> เป็นเพียงตัวเรียกใช้ — การแยกแบบนี้ตามหลัก D1.18 และมีเหตุผลสำคัญข้อหนึ่ง: ตรรกะที่อยู่ใน <code>lib/</code> เอาไปเขียนเทสต์ได้ ส่วนโค้ดที่ปนกับการพิมพ์ออกหน้าจอทำไม่ได้</p></section>
+
+<section id="section-4"><h2>4. ด่านตรวจ: แปลงข้อมูลดิบเป็น model</h2><pre class="code-vs"><code>factory WarehouseTask.fromJson(Map&lt;String, dynamic&gt; json) {
+  final id = json['id'];
+  final type = json['type'];
+  final palletCode = json['palletCode'];
+  if (id is! String || type is! String || palletCode is! String) {
+    throw TaskFormatException('ฟิลด์ id/type/palletCode ต้องเป็นข้อความ');
+  }
+
+  final rawQuantity = json['quantity'];
+  final quantity = switch (rawQuantity) {
+    final int value =&gt; value,
+    final String value when int.tryParse(value) != null =&gt; int.parse(value),
+    _ =&gt; throw TaskFormatException('quantity ไม่ใช่จำนวนเต็ม: $rawQuantity'),
+  };
+  if (quantity &lt;= 0) {
+    throw TaskFormatException('quantity ต้องมากกว่า 0 (ได้ $quantity)');
+  }
+
+  return WarehouseTask(
+    id: id,
+    type: TaskType.fromWire(type),
+    palletCode: palletCode.trim().toUpperCase(),
+    quantity: quantity,
+    location: json['location'] as String?,
+  );
+}</code></pre><p>สังเกตว่า <code>switch</code> ทำงานสามอย่างในก้อนเดียว: ยอมรับ <code>int</code>, ยอมรับข้อความที่แปลงได้, และปฏิเสธที่เหลือ — ตรงกับหลัก “ยืดหยุ่นกับความต่างที่ไม่สำคัญ เข้มงวดกับข้อมูลที่ผิดจริง” จาก D1.19</p><p>และสังเกตว่าการตรวจ <code>quantity &lt;= 0</code> อยู่ <strong>แยกออกมา</strong> จาก <code>switch</code> เพราะเป็นกฎทางธุรกิจ ไม่ใช่การตรวจรูปร่าง — ตรงกับที่เตือนไว้ใน D1.12 ว่า pattern ไม่ได้ตรวจกฎธุรกิจให้</p></section>
+
+<section id="section-5"><h2>5. นโยบายแถวเสีย</h2><pre class="code-vs"><code>typedef ParseReport = ({List&lt;WarehouseTask&gt; tasks, List&lt;String&gt; errors});
+
+ParseReport parseTasks(String rawJson) {
+  final tasks = &lt;WarehouseTask&gt;[];
+  final errors = &lt;String&gt;[];
+  // ... วนทีละแถว: สำเร็จใส่ tasks, ล้มเหลวใส่ errors พร้อมเลขแถว
+  return (tasks: tasks, errors: errors);
+}</code></pre><p>นี่คือทางเลือกที่สามจากตารางใน D1.19 — ข้ามแถวเสีย แต่รายงานเสมอ ผลคือผู้ใช้ทำงานต่อได้ และทีมพัฒนายังรู้ว่ามีอะไรผิดพลาด</p><p>ส่วน JSON ที่เสียทั้งก้อนถือเป็นคนละเรื่อง จึงคืนรายงานที่มี error เดียวและไม่มีงานเลย</p></section>
+
+<section id="section-6"><h2>6. ส่งงานแบบ async พร้อม callback</h2><pre class="code-vs"><code>Future&lt;int&gt; dispatchAll(
+  List&lt;WarehouseTask&gt; tasks, {
+  required Future&lt;bool&gt; Function(WarehouseTask task) send,
+  void Function(WarehouseTask task, bool accepted)? onResult,
+}) async {
+  var accepted = 0;
+  for (final task in tasks) {
+    final ok = await send(task);
+    if (ok) accepted++;
+    onResult?.call(task, ok);
+  }
+  return accepted;
+}</code></pre><p>จุดออกแบบที่สำคัญที่สุดของฟังก์ชันนี้คือ <strong>มันไม่รู้จักเครือข่ายเลย</strong> — วิธีส่งถูกส่งเข้ามาเป็น callback ตามหลัก D1.11 ผลคือ</p><ul><li>ตอนใช้งานจริง ส่ง callback ที่ยิง HTTP</li><li>ตอนเขียนเทสต์ ส่ง callback ที่คืนคำตอบที่เรากำหนดเอง</li></ul><p>และสังเกตว่าใช้ <code>for</code> กับ <code>await</code> ทีละใบ ไม่ใช่ <code>Future.wait</code> — ตั้งใจ เพราะนี่เป็นคำสั่งที่เปลี่ยนข้อมูลบน server ตามที่เตือนไว้ใน D1.15</p></section>
+
+<section id="section-7"><h2>7. เทสต์: พิสูจน์แทนที่จะเชื่อ</h2><pre class="code-vs"><code>flutter test test/dart_foundation_mini_project_test.dart</code></pre><pre class="code-vs"><code>test('แถวเสียถูกรายงาน แต่แถวดีต้องรอด', () {
+  final report = parseTasks('''
+    [
+      { "id": "T-01", "type": "PUTAWAY",  "palletCode": "PAL-1001", "quantity": 1, "location": "A-01-02" },
+      { "id": "T-02", "type": "TELEPORT", "palletCode": "PAL-1002", "quantity": 1 },
+      { "id": "T-03", "type": "RETRIEVE", "palletCode": "PAL-1003", "quantity": 0 }
+    ]
+  ''');
+
+  expect(report.tasks.map((task) =&gt; task.id), &lt;String&gt;['T-01']);
+  expect(report.errors, hasLength(2));
+});</code></pre><p>อ่านเทสต์แล้วจะเห็นโครงสามส่วนเสมอ: เตรียมข้อมูล, เรียกฟังก์ชัน, ตรวจผลลัพธ์ ส่วน <code>expect(ค่าที่ได้, ค่าที่คาดหวัง)</code> คือหัวใจ</p><p>เทสต์ที่มีค่าที่สุดไม่ใช่เทสต์เส้นทางปกติ แต่คือเทสต์ที่พิสูจน์ว่า <strong>ระบบรับมือกับข้อมูลเสียได้อย่างที่ออกแบบไว้</strong> เพราะเส้นทางปกติเราทดสอบด้วยมือทุกวันอยู่แล้ว ส่วนเส้นทางผิดพลาดแทบไม่มีใครลอง</p></section>
+
+<section id="section-8"><h2>8. คำสั่งที่ต้องรันทุกครั้งก่อนถือว่าเสร็จ</h2><pre class="code-vs"><code>dart format .              # จัดรูปแบบให้เป็นมาตรฐานเดียวกัน
+flutter analyze --no-pub   # ตรวจโค้ดโดยไม่ต้องรัน
+flutter test --no-pub      # รันเทสต์ทั้งหมด</code></pre><table><thead><tr><th>คำสั่ง</th><th>จับอะไรได้</th><th>จับไม่ได้</th></tr></thead><tbody>
+<tr><td><code>format</code></td><td>รูปแบบการเขียนไม่สม่ำเสมอ</td><td>ตรรกะผิด</td></tr>
+<tr><td><code>analyze</code></td><td>ชนิดผิด, null ที่ไม่ได้ตรวจ, <code>switch</code> ไม่ครบ, ตัวแปรไม่ได้ใช้</td><td>ตรรกะที่ผิดแต่ชนิดถูก</td></tr>
+<tr><td><code>test</code></td><td>พฤติกรรมที่ผิดจากที่ตั้งใจ</td><td>สิ่งที่ไม่ได้เขียนเทสต์ไว้</td></tr>
+</tbody></table><div class="warn"><strong>คำเตือนของ analyzer เป็นหลักฐาน ไม่ใช่เสียงรบกวน</strong> — เมื่อเจอเส้นสีเหลืองหรือแดง ให้อ่านและแก้ต้นเหตุ อย่าใส่คำสั่งปิดคำเตือนเพื่อให้เงียบ เพราะคำเตือนแต่ละอันมีอยู่เพราะเคยมีคนเจอบั๊กจากเรื่องนั้นมาก่อน</div></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อยตอนทำโปรเจกต์นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แถวเสียแถวเดียวทำให้ไม่ได้งานเลย</td><td>ไม่ได้ครอบ <code>try/catch</code> รอบการแปลงแต่ละแถว</td><td>ย้าย <code>try</code> เข้าไปในลูป</td></tr>
+<tr><td>ข้อมูลเสียหายไปเงียบ ๆ</td><td>ดักข้อผิดพลาดแล้วไม่เก็บเหตุผล</td><td>เก็บลง <code>errors</code> พร้อมเลขแถว</td></tr>
+<tr><td>เทสต์เขียนไม่ได้เพราะต้องต่อเน็ต</td><td>ผูกวิธีส่งไว้ในฟังก์ชันโดยตรง</td><td>รับวิธีส่งเข้ามาเป็น callback</td></tr>
+<tr><td><code>quantity</code> ที่เป็น <code>"3"</code> ทำให้ทั้งชุดพัง</td><td>ใช้ <code>as int</code> ตรง ๆ</td><td>ใช้ <code>switch</code> pattern ที่รองรับหลายรูปแบบ</td></tr>
+<tr><td>งานหลายใบถูกส่งซ้ำ</td><td>ใช้ <code>Future.wait</code> กับคำสั่งที่เปลี่ยนข้อมูล</td><td>วนส่งทีละใบด้วย <code>for</code> + <code>await</code></td></tr>
+<tr><td><code>analyze</code> เตือนเรื่อง <code>print</code></td><td>โค้ดใน <code>lib/</code> ไม่ควรพิมพ์ออกหน้าจอ</td><td>ให้ <code>lib/</code> คืนค่า แล้วให้ไฟล์ที่รันเป็นคนพิมพ์</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัดปิด Part</h2><p>ต่อยอดโปรเจกต์นี้ด้วยสามงาน ทำทีละข้อและรัน <code>flutter analyze</code> กับ <code>flutter test</code> ทุกครั้ง</p><ol><li>เพิ่มงานชนิดใหม่ <code>COUNT</code> (ตรวจนับ) ที่ไม่ต้องระบุช่องเก็บ</li><li>เพิ่มฟังก์ชัน <code>tasksNeedingAttention</code> ที่คืนงานซึ่งจำนวนเกิน 50 ชิ้น หรือยังไม่ระบุช่องเก็บ</li><li>เขียนเทสต์อย่างน้อยสองข้อสำหรับแต่ละงานข้างต้น รวมทั้งเทสต์กรณีข้อมูลเสีย</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>// 1) เพิ่มค่าใน enum — สิ่งเดียวที่ต้องแก้ในไฟล์นี้
+enum TaskType {
+  putaway('PUTAWAY', 'จัดเก็บ'),
+  retrieve('RETRIEVE', 'หยิบออก'),
+  count('COUNT', 'ตรวจนับ');       // &lt;- เพิ่มบรรทัดเดียว
+
+  const TaskType(this.wireValue, this.label);
+  final String wireValue;
+  final String label;
+  ...
+}
+
+// 2) ฟังก์ชันใหม่
+List&lt;WarehouseTask&gt; tasksNeedingAttention(List&lt;WarehouseTask&gt; tasks) =&gt; tasks
+    .where((task) =&gt; task.quantity &gt; 50 || task.needsLocation)
+    .toList();</code></pre><pre class="code-vs"><code>// 3) เทสต์
+test('รองรับงานชนิด COUNT และไม่บังคับช่องเก็บ', () {
+  final report = parseTasks(
+    '[{ "id": "T-10", "type": "count", "palletCode": "PAL-2001", "quantity": 30 }]',
+  );
+
+  expect(report.errors, isEmpty);
+  expect(report.tasks.single.type, TaskType.count);
+  expect(report.tasks.single.needsLocation, isFalse);
+});
+
+test('tasksNeedingAttention จับทั้งจำนวนมากและช่องเก็บที่ยังว่าง', () {
+  final report = parseTasks('''
+    [
+      { "id": "T-01", "type": "PUTAWAY",  "palletCode": "PAL-1", "quantity": 99, "location": "A-01-02" },
+      { "id": "T-02", "type": "PUTAWAY",  "palletCode": "PAL-2", "quantity": 5 },
+      { "id": "T-03", "type": "RETRIEVE", "palletCode": "PAL-3", "quantity": 5 }
+    ]
+  ''');
+
+  expect(
+    tasksNeedingAttention(report.tasks).map((task) =&gt; task.id),
+    &lt;String&gt;['T-01', 'T-02'],
+  );
+});</code></pre><p><strong>สิ่งที่ควรสังเกตมากที่สุดในข้อ 1:</strong> การเพิ่มงานชนิดใหม่แก้ไฟล์เดียวบรรทัดเดียว เพราะ <code>fromWire</code> วนอ่านจาก <code>values</code> อยู่แล้ว และ <code>needsLocation</code> คำนวณจาก <code>type == TaskType.putaway</code> — ถ้าตอนออกแบบเราเขียนเป็นชุด <code>if</code> กระจายไปตามไฟล์ต่าง ๆ การเพิ่มชนิดใหม่จะต้องไล่แก้หลายจุดและมีโอกาสลืม นี่คือผลตอบแทนของ enhanced enum จาก D1.10</p><p><strong>ทำไมข้อ 2 ต้องคืน list ใหม่ ไม่แก้ของเดิม:</strong> ตามหลัก D1.5 — <code>where(...).toList()</code> สร้างก้อนใหม่ ทำให้ผู้เรียกมั่นใจว่า list ต้นทางไม่ถูกแตะต้อง</p><p><strong>ทำไมเทสต์ข้อ 3 ต้องเช็คทั้งสองเงื่อนไขในเทสต์เดียว:</strong> เพราะสิ่งที่เราต้องการพิสูจน์คือ <em>ตรรกะ “หรือ”</em> ทำงานถูก ไม่ใช่แค่แต่ละเงื่อนไขทำงานได้ — สังเกตว่า T-03 ที่ไม่เข้าเงื่อนไขใดเลยต้องไม่ติดมาด้วย ซึ่งเป็นการพิสูจน์ฝั่งลบที่มักถูกลืม</p><p><strong>ลองต่อ:</strong> เพิ่มกฎว่างาน <code>COUNT</code> ห้ามมีจำนวนเกิน 500 แล้วสังเกตว่าคุณควรใส่กฎนี้ตรงไหน — ใน <code>fromJson</code> (ปฏิเสธตั้งแต่ด่าน) หรือใน <code>tasksNeedingAttention</code> (เตือนแต่ยังรับ) คำตอบขึ้นกับว่าธุรกิจมองว่ามันคือข้อมูลผิดหรือข้อมูลที่ต้องตรวจสอบ</p></details></section>
+
+<section id="section-11"><h2>11. แบบทดสอบตัวเองก่อนไป Part 0</h2><div class="success"><p>คุณพร้อมเข้าสู่ Flutter เมื่อทำสิ่งเหล่านี้ได้โดยไม่ต้องเปิดดูเฉลย</p><ul><li>อ่านบรรทัดประกาศฟังก์ชันแล้วบอกได้ว่ารับอะไร คืนอะไร และอาจเป็น <code>null</code> ตรงไหน</li><li>อธิบายได้ว่าทำไม <code>final</code> list ยัง <code>add</code> ได้</li><li>บอกได้ว่าเมื่อไหร่ใช้ <code>extends</code> เมื่อไหร่ใช้ <code>implements</code></li><li>เขียน <code>switch</code> บน enum ให้ analyzer ไม่บ่นได้</li><li>แยกได้ว่าปัญหาไหนแก้ด้วย <code>await</code> และปัญหาไหนต้องใช้ isolate</li><li>เขียน parser ที่แปลง JSON เป็น model และปฏิเสธข้อมูลเสียได้</li><li>รัน <code>analyze</code> กับ <code>test</code> แล้วแก้ต้นเหตุของคำเตือนได้</li></ul></div><p>ถ้าข้อไหนยังไม่มั่นใจ ให้กลับไปรัน lab ของบทนั้นแล้วแก้โค้ดทดลองดู — การอ่านซ้ำช่วยได้น้อยกว่าการลองผิดแล้วอ่าน error</p></section>
+
+<section id="section-12"><h2>12. สรุปท้าย Dart Foundation</h2><div class="success"><ul><li>โปรแกรมที่ดีมีด่านตรวจชัดเจนระหว่างข้อมูลดิบกับข้อมูลที่เชื่อถือได้</li><li>ความล้มเหลวต้องมีเหตุผลติดตัวเสมอ และต้องไม่หายไปเงียบ ๆ</li><li>ตรรกะที่ไม่ผูกกับหน้าจอหรือเครือข่าย คือตรรกะที่เขียนเทสต์ได้</li><li>ชนิดข้อมูลที่ออกแบบดีทำให้สถานะที่ผิดเขียนออกมาไม่ได้เลย</li><li>เครื่องมือ <code>format</code>, <code>analyze</code>, <code>test</code> คือเพื่อนร่วมงานที่ตรวจให้ตลอดเวลา</li></ul></div><p><strong>ต่อจากนี้:</strong> Part 0 จะพาไปติดตั้งเครื่องมือและสร้างแอป Flutter ตัวแรก จากนั้น Part 1 จะเริ่มเรื่อง widget — และคุณจะพบว่าทุกอย่างที่เห็นในนั้น ไม่ว่าจะเป็น named parameter, callback, generic หรือ <code>const</code> ล้วนเป็นสิ่งที่คุณเรียนมาแล้วทั้งหมดใน 20 บทนี้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

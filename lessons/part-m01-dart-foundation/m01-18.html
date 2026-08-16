@@ -4,26 +4,165 @@
 <title>Library / Import / Privacy</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-18 · Dart Core</span><h1>Library / Import / Privacy</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Import ที่อ่านง่าย</a></li><li><a href="#section-2">Underscore private ต่อ library</a></li><li><a href="#section-3">part/part of ใน wmsapp</a></li><li><a href="#section-4">Export และ public API</a></li><li><a href="#section-5">Dependency direction</a></li><li><a href="#section-6">Generated files</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Library คือหน่วย visibility ของ Dart; file มักเป็น library หนึ่งหน่วย, <code>import</code> ใช้ library อื่น, <code>part</code> รวมหลายไฟล์เป็น library เดียว จึงมีผลต่อ underscore privacy โดยตรง</div>
-<section id="section-1"><h2>1. Import ที่อ่านง่าย</h2><pre class="code-vs"><code>import 'dart:async';
-import 'package:flutter/material.dart';
-import '../../core/connection_profile.dart' show ConnectionStatus;
-import 'package:http/http.dart' as http;</code></pre><p>ใช้ relative import ภายใน feature ตาม convention ของ repo, package import สำหรับ package, alias เมื่อชื่อชนหรือช่วยสื่อ namespace และ <code>show/hide</code> เมื่อต้องจำกัด surface ที่มองเห็น</p></section>
-<section id="section-2"><h2>2. Underscore private ต่อ library</h2><pre class="code-vs"><code>class ApiClient {
-  Map&lt;String, dynamic&gt; _decode(Response response) { /* ... */ }
-}</code></pre><p>ไฟล์ library อื่นเรียก <code>_decode</code> ไม่ได้ แต่ทุก part ของ library เดียวกันเห็นได้ นี่ต่างจาก C# private ซึ่งผูกกับ type</p></section>
-<section id="section-3"><h2>3. part/part of ใน wmsapp</h2><pre class="code-vs"><code>// services/api_service.dart
-part 'api/receiving_api.dart';
-part 'api/picking_api.dart';
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: หนึ่งไฟล์คือหนึ่งห้องที่มีประตู</a></li><li><a href="#section-4">ลองของจริง</a></li><li><a href="#section-5">import สี่รูปแบบที่ต้องใช้เป็น</a></li><li><a href="#section-6">private กลายเป็นกำแพงจริงเมื่อแยกไฟล์</a></li><li><a href="#section-7">export: หน้าร้านของโฟลเดอร์</a></li><li><a href="#section-8">ทิศทางการพึ่งพา</a></li><li><a href="#section-9">part: เมื่อหลายไฟล์ต้องเป็น library เดียวกัน</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แยกโค้ดเป็นหลายไฟล์อย่างมีระเบียบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6–D1.7 (class และการใช้ <code>_</code> ปิดข้อมูล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกโค้ดเป็นหลายไฟล์ ใช้ <code>import</code> ทั้งสี่รูปแบบเป็น และออกแบบว่าจะเปิดอะไรให้ไฟล์อื่นใช้บ้าง</div>
 
-// services/api/picking_api.dart
-part of '../api_service.dart';
-extension PickingApi on ApiService { /* เรียก _get ได้ */ }</code></pre><p>ข้อดีคือแบ่งไฟล์แต่แชร์ private transport ข้อเสียคือ part ไม่ได้เป็น library อิสระ, import ของ part มาจาก parent และ coupling สูง เวลาย้ายไฟล์/ทดสอบแยกต้องเข้าใจหน่วย library นี้</p></section>
-<section id="section-4"><h2>4. Export และ public API</h2><p>package สามารถมี barrel library ที่ <code>export</code> model/interface ที่ต้องการเปิด แต่การ export ทุกไฟล์ทำให้ dependency มองไม่เห็นและชื่อชนง่าย สำหรับแอป feature-first มัก import interface/model ที่ใช้ตรง ๆ ชัดกว่า barrel ใหญ่</p></section>
-<section id="section-5"><h2>5. Dependency direction</h2><p>ถ้า core import feature UI กลับขึ้นมา หรือ model import screen แสดงว่าทิศทางผิด Library/import graph ควรไหลจาก presentation → domain/data abstraction และ implementation → abstraction ตาม architecture ที่เลือก โดยไม่เกิด cycle</p></section>
-<section id="section-6"><h2>6. Generated files</h2><p>แพ็กเกจ codegen มักใช้ <code>part 'model.g.dart'</code> เพื่อให้ generated code เข้าถึง private member ตาม convention ห้ามแก้ generated part ตรง ๆ ให้แก้ source/annotation แล้ว generate ใหม่</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>PickingApi</code> เรียก <code>ApiService._get</code> ได้ แต่ repository ใน absolute เรียก private method ของ ApiClient คนละไฟล์ไม่ได้?</p><details><summary>เฉลย</summary><p>PickingApi เป็น part ของ library <code>api_service.dart</code> เดียวกัน จึงแชร์ privacy ส่วนไฟล์ปกติใน absolute เป็นคนละ library และต้องเรียก public method ของ ApiClient นี่เป็น design boundary ที่ compiler บังคับ</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ part เพียงเพื่อหลบ private แล้วเข้าถึงทุกอย่าง มันขยายขอบเขต coupling; หากอีกไฟล์เป็น component จริงควรออกแบบ public/interface API ที่เล็กและชัด</div></section>
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ทุกอย่างที่เขียนมาตั้งแต่ D1.1 อยู่ในไฟล์เดียว ซึ่งใช้ได้ดีกับโปรแกรมร้อยบรรทัด แต่แอปจริงอย่าง <code>wms_absolute_mobile</code> มีไฟล์นับร้อย ถ้าอยู่ไฟล์เดียวจะเกิดสามปัญหาทันที: หาโค้ดไม่เจอ, แก้พร้อมกันหลายคนไม่ได้, และทุกอย่างเข้าถึงกันได้หมดจนไม่มีขอบเขต</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>library</td><td>หน่วยขอบเขตของ Dart — โดยปกติหนึ่งไฟล์คือหนึ่ง library</td></tr>
+<tr><td><code>import</code></td><td>ขอใช้ของจาก library อื่น</td></tr>
+<tr><td><code>export</code></td><td>ส่งต่อของจาก library อื่นให้คนที่ import เรา</td></tr>
+<tr><td>package</td><td>ชุดโค้ดที่ติดตั้งจากภายนอกหรือจาก SDK</td></tr>
+<tr><td>relative path</td><td>เส้นทางไฟล์เทียบกับไฟล์ปัจจุบัน</td></tr>
+<tr><td>dependency direction</td><td>ทิศทางว่าใครพึ่งพาใคร</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: หนึ่งไฟล์คือหนึ่งห้องที่มีประตู</h2><p>แต่ละไฟล์เป็นห้องที่มีของอยู่ข้างใน ของที่ชื่อขึ้นต้นด้วย <code>_</code> คือของที่ล็อกไว้ในห้อง ส่วนของอื่นวางไว้หน้าประตูให้ใครมาหยิบก็ได้ — แต่ต้องเดินมาที่ห้องนี้เอง ซึ่งก็คือการ <code>import</code></p><div class="note"><strong>ทบทวนจาก D1.7:</strong> <code>_</code> ทำให้ private ต่อ <strong>ไฟล์</strong> ไม่ใช่ต่อ class — บทนี้คือจุดที่ความจริงข้อนั้นเริ่มมีประโยชน์จริง เพราะเมื่อแยกไฟล์แล้ว <code>_</code> จึงกลายเป็นกำแพงที่แท้จริง</div></section>
+
+<section id="section-4"><h2>4. ลองของจริง</h2><p>ใน lab มีโฟลเดอร์ตัวอย่างที่แยกไฟล์ไว้แล้ว</p><pre class="code-vs"><code>tool/dart_foundation/
+├── d1_18_library.dart          &lt;- ไฟล์ที่เราจะรัน
+└── warehouse/
+    ├── pallet.dart             &lt;- class Pallet + ฟังก์ชัน private
+    ├── location.dart           &lt;- class StorageLocation
+    └── warehouse.dart          &lt;- "หน้าร้าน" ที่ export สองไฟล์บน</code></pre><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_18_library.dart</code></pre><pre class="code-vs"><code>PAL-1001 (0 ชิ้น) เก็บที่ A-01-02
+เข้าถึงได้ทางเดียวคือ Pallet.parse() ซึ่งตรวจข้อมูลให้เสมอ
+ถูกปฏิเสธ: รหัสพาเลทไม่ถูกรูปแบบ: ABC</code></pre></section>
+
+<section id="section-5"><h2>5. import สี่รูปแบบที่ต้องใช้เป็น</h2><pre class="code-vs"><code>// 1) ไฟล์ในโปรเจกต์เดียวกัน ใช้เส้นทางสัมพัทธ์
+import 'warehouse/warehouse.dart';
+
+// 2) ตั้งชื่อ namespace ด้วย as กันชื่อชนและบอกที่มา
+import 'dart:math' as math;
+
+// 3) เอามาเฉพาะที่ใช้ ด้วย show
+import 'dart:convert' show jsonEncode;
+
+// 4) เอามาทั้งหมดยกเว้นบางตัว ด้วย hide
+import 'dart:convert' hide jsonDecode;</code></pre><table><thead><tr><th>รูปแบบ</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td>ธรรมดา</td><td>กรณีทั่วไป</td></tr>
+<tr><td><code>as</code></td><td>ชื่อชนกัน หรืออยากให้อ่านออกว่าของมาจากไหน เช่น <code>math.max</code></td></tr>
+<tr><td><code>show</code></td><td>ต้องการแค่หนึ่งสองตัวจาก library ใหญ่</td></tr>
+<tr><td><code>hide</code></td><td>ต้องการเกือบทั้งหมด ยกเว้นตัวที่ชนกับของเรา</td></tr>
+</tbody></table><p>นอกจากนี้ยังมีการ import จาก package ซึ่งขึ้นต้นด้วย <code>package:</code> เช่น <code>package:http/http.dart</code> สำหรับโค้ดที่ติดตั้งเพิ่ม และ <code>dart:</code> สำหรับสิ่งที่มากับภาษาเอง</p></section>
+
+<section id="section-6"><h2>6. private กลายเป็นกำแพงจริงเมื่อแยกไฟล์</h2><pre class="code-vs"><code>// pallet.dart
+class Pallet {
+  Pallet._(this.code, this.quantity);     // constructor private
+
+  factory Pallet.parse(String raw) {      // ทางเข้าเดียวที่เปิดไว้
+    final normalized = _normalize(raw);
+    if (!_isValidCode(normalized)) {
+      throw FormatException('รหัสพาเลทไม่ถูกรูปแบบ: $raw');
+    }
+    return Pallet._(normalized, 0);
+  }
+  ...
+}
+
+String _normalize(String raw) =&gt; raw.trim().toUpperCase();   // ซ่อนสนิท
+bool _isValidCode(String code) =&gt; code.startsWith('PAL-') &amp;&amp; code.length == 8;</code></pre><p>จากไฟล์อื่น <code>Pallet._(...)</code> และ <code>_normalize(...)</code> มองไม่เห็นเลยแม้จะ <code>import</code> แล้ว ผลคือ <strong>ไม่มีทางสร้าง <code>Pallet</code> ที่รหัสผิดรูปแบบได้เลย</strong> เพราะทางเข้าเดียวคือ <code>parse</code> ซึ่งตรวจให้เสมอ</p><p>นี่คือการยกระดับหลักการจาก D1.7 ขึ้นไปอีกขั้น — ตอนนั้นเราปกป้องข้อมูลจากคนที่อยู่ใน class อื่น ตอนนี้เราปกป้องมันจากทั้งโปรเจกต์</p></section>
+
+<section id="section-7"><h2>7. export: หน้าร้านของโฟลเดอร์</h2><pre class="code-vs"><code>// warehouse/warehouse.dart
+export 'location.dart';
+export 'pallet.dart';</code></pre><p>ไฟล์นี้ไม่มีโค้ดของตัวเองเลย มีหน้าที่เดียวคือรวมของจากไฟล์ข้างในแล้วเปิดให้คนนอกใช้ ผู้ใช้จึงเขียน <code>import 'warehouse/warehouse.dart'</code> บรรทัดเดียวแทนที่จะต้อง import ทีละไฟล์</p><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เขียน import สั้นลง</td><td>มองไม่เห็นว่าจริง ๆ แล้วใช้ของจากไฟล์ไหน</td></tr>
+<tr><td>เราคุมได้ว่าจะเปิดอะไรบ้าง</td><td>ถ้า export ทุกอย่าง ชื่อจะชนกันง่ายขึ้น</td></tr>
+<tr><td>ย้ายไฟล์ข้างในได้โดยผู้ใช้ไม่กระทบ</td><td>เสี่ยงดึงโค้ดที่ไม่ได้ใช้เข้ามา</td></tr>
+</tbody></table><p>คำแนะนำ: ใช้ <code>export</code> เมื่อโฟลเดอร์นั้นเป็น “หน่วยที่สมบูรณ์” ที่คนนอกควรมองเป็นก้อนเดียว ไม่ใช่ใช้กับทุกโฟลเดอร์โดยอัตโนมัติ</p></section>
+
+<section id="section-8"><h2>8. ทิศทางการพึ่งพา</h2><p>เรื่องนี้สำคัญกว่าไวยากรณ์ทั้งหมดในบทนี้ กฎมีข้อเดียว: <strong>การพึ่งพาต้องไหลไปทางเดียว ห้ามวนกลับ</strong></p><pre class="code-vs"><code>d1_18_library.dart  ──import──&gt;  warehouse/warehouse.dart
+                                        │
+                                        ├──&gt; pallet.dart
+                                        └──&gt; location.dart</code></pre><p>สังเกตว่า <code>warehouse/</code> ไม่รู้จักไฟล์ที่เรียกใช้มันเลย ถ้าวันหนึ่ง <code>pallet.dart</code> ต้อง import กลับมาที่ไฟล์บนสุด นั่นคือสัญญาณว่าแบ่งหน้าที่ผิด</p><table><thead><tr><th>อาการ</th><th>แปลว่า</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>สองไฟล์ import กันไปมา</td><td>หน้าที่ปนกัน</td><td>แยกส่วนที่ใช้ร่วมกันออกเป็นไฟล์ที่สาม</td></tr>
+<tr><td>ไฟล์ model ต้อง import ไฟล์หน้าจอ</td><td>ทิศทางกลับด้าน</td><td>ให้หน้าจอเป็นฝ่ายรู้จัก model ไม่ใช่กลับกัน</td></tr>
+<tr><td>ต้อง import สิบไฟล์เพื่อใช้ของชิ้นเดียว</td><td>ของชิ้นนั้นผูกกับทุกอย่างเกินไป</td><td>ลดสิ่งที่มันต้องรู้จัก</td></tr>
+</tbody></table><p>เมื่อถึง Part 9 เรื่องสถาปัตยกรรม กฎข้อนี้จะกลายเป็นเครื่องมือหลักในการตัดสินว่าโค้ดควรอยู่โฟลเดอร์ไหน</p></section>
+
+<section id="section-9"><h2>9. part: เมื่อหลายไฟล์ต้องเป็น library เดียวกัน</h2><p>มีอีกกลไกหนึ่งที่จะเจอในโค้ดจริง คือการรวมหลายไฟล์เป็น library เดียว</p><pre class="code-vs"><code>// ไฟล์หลัก
+part 'model.g.dart';
+
+// ไฟล์ที่ถูกรวม
+part of 'model.dart';</code></pre><p>ผลคือทุกไฟล์ที่เป็น <code>part</code> ของกันและกันจะเห็นของ private ของกันหมด เหมือนอยู่ไฟล์เดียวกัน</p><div class="warn"><strong>อย่าใช้ <code>part</code> เพียงเพื่อเข้าถึงของ private ของไฟล์อื่น</strong> เพราะมันขยายขอบเขตที่ทุกอย่างเข้าถึงกันได้ ทำให้กำแพงที่เราสร้างไว้หายไป — การใช้งานที่ถูกต้องส่วนใหญ่คือให้เครื่องมือสร้างโค้ดอัตโนมัติเขียนไฟล์ <code>.g.dart</code> ซึ่งจะเจอจริงใน Part 30</div></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Target of URI doesn't exist</code></td><td>เส้นทางไฟล์ผิด</td><td>ตรวจเส้นทางเทียบกับไฟล์ปัจจุบัน</td></tr>
+<tr><td><code>The name 'X' is defined in the libraries ... and ...</code></td><td>สอง library มีชื่อชนกัน</td><td>ใช้ <code>as</code> หรือ <code>show</code>/<code>hide</code></td></tr>
+<tr><td>เรียก method ที่มีอยู่แน่ ๆ ไม่ได้</td><td>ชื่อขึ้นต้นด้วย <code>_</code> จึงมองไม่เห็นข้ามไฟล์</td><td>ถ้าตั้งใจให้ใช้ได้ ให้เอา <code>_</code> ออก</td></tr>
+<tr><td>แก้ไฟล์ <code>.g.dart</code> แล้วการแก้หายไป</td><td>ไฟล์นั้นถูกสร้างอัตโนมัติ</td><td>แก้ไฟล์ต้นทางแล้วสั่งสร้างใหม่</td></tr>
+<tr><td>import ไม่ได้เพราะวนกัน</td><td>ทิศทางการพึ่งพาผิด</td><td>แยกส่วนกลางออกเป็นไฟล์ที่สาม</td></tr>
+<tr><td>โฟลเดอร์มี barrel file แต่ยังต้อง import ทีละไฟล์</td><td>ลืมใส่ <code>export</code> ให้ครบ</td><td>เพิ่มบรรทัด <code>export</code> ที่ขาด</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>จัดระเบียบโค้ดจากบทก่อน ๆ ใหม่ตามโครงนี้</p><pre class="code-vs"><code>my_wms/
+├── main.dart
+└── domain/
+    ├── domain.dart        &lt;- barrel
+    ├── task_type.dart     &lt;- enum จาก D1.10
+    └── warehouse_task.dart</code></pre><ol><li><code>warehouse_task.dart</code> ต้องสร้าง object ได้ทางเดียวคือผ่านการตรวจข้อมูล</li><li>ฟังก์ชันช่วยตรวจข้อมูลต้องมองไม่เห็นจากไฟล์อื่น</li><li><code>main.dart</code> ต้อง import แค่ไฟล์เดียว</li><li>ไฟล์ใน <code>domain/</code> ห้าม import <code>main.dart</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>// domain/task_type.dart
+enum TaskType {
+  putaway('PUTAWAY', 'จัดเก็บ'),
+  retrieve('RETRIEVE', 'หยิบออก');
+
+  const TaskType(this.wireValue, this.label);
+  final String wireValue;
+  final String label;
+
+  static TaskType? tryFromWire(String raw) {
+    for (final type in values) {
+      if (type.wireValue == raw.toUpperCase()) return type;
+    }
+    return null;
+  }
+}</code></pre><pre class="code-vs"><code>// domain/warehouse_task.dart
+import 'task_type.dart';
+
+class WarehouseTask {
+  WarehouseTask._(this.id, this.type, this.quantity);
+
+  factory WarehouseTask.create({
+    required String id,
+    required String type,
+    required int quantity,
+  }) {
+    final parsedType = TaskType.tryFromWire(type);
+    if (parsedType == null) {
+      throw FormatException('ไม่รู้จักงานชนิด "$type"');
+    }
+    if (!_isValidId(id)) {
+      throw FormatException('รหัสงานไม่ถูกรูปแบบ: $id');
+    }
+    if (quantity &lt;= 0) {
+      throw FormatException('จำนวนต้องมากกว่า 0');
+    }
+    return WarehouseTask._(id, parsedType, quantity);
+  }
+
+  final String id;
+  final TaskType type;
+  final int quantity;
+
+  @override
+  String toString() =&gt; '[$id] ${type.label} x$quantity';
+}
+
+bool _isValidId(String id) =&gt; id.startsWith('T-') &amp;&amp; id.length &gt;= 4;</code></pre><pre class="code-vs"><code>// domain/domain.dart
+export 'task_type.dart';
+export 'warehouse_task.dart';</code></pre><pre class="code-vs"><code>// main.dart
+import 'domain/domain.dart';
+
+void main() {
+  print(WarehouseTask.create(id: 'T-01', type: 'putaway', quantity: 5));
+  try {
+    WarehouseTask.create(id: 'X1', type: 'putaway', quantity: 5);
+  } on FormatException catch (error) {
+    print('ถูกปฏิเสธ: ${error.message}');
+  }
+}</code></pre><p><strong>ทำไม <code>_isValidId</code> ต้องอยู่นอก class:</strong> เพราะมันไม่ต้องใช้ข้อมูลของ object ใด ๆ การวางไว้ระดับไฟล์ทำให้เห็นชัดว่าเป็นเครื่องมือภายในของไฟล์นี้ล้วน ๆ และ <code>_</code> ทำให้ไฟล์อื่นเรียกไม่ได้เลย</p><p><strong>ทำไม <code>tryFromWire</code> คืน <code>TaskType?</code> ไม่โยน error:</strong> เพราะ <code>task_type.dart</code> ไม่ควรตัดสินว่าค่าที่ไม่รู้จักคือความผิดพลาดร้ายแรงแค่ไหน — หน้าที่นั้นเป็นของผู้ใช้ ในที่นี้คือ <code>WarehouseTask.create</code> ซึ่งเลือกโยน <code>FormatException</code> ตามหลักที่เรียนใน D1.14</p><p><strong>ทิศทางการพึ่งพาในคำตอบนี้:</strong> <code>main.dart → domain.dart → warehouse_task.dart → task_type.dart</code> ไหลไปทางเดียวตลอด ไม่มีลูกศรย้อนกลับ ถ้าวันหนึ่ง <code>task_type.dart</code> ต้องรู้จัก <code>WarehouseTask</code> แสดงว่าโครงเริ่มผิด และคำตอบมักคือย้ายสิ่งที่ทั้งคู่ต้องใช้ออกมาเป็นไฟล์ที่สาม</p><p><strong>ลองต่อ:</strong> ลองเรียก <code>WarehouseTask._('T-01', TaskType.putaway, 5)</code> จาก <code>main.dart</code> — analyzer จะปฏิเสธ นั่นคือหลักฐานว่ากำแพงทำงานจริง</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>หนึ่งไฟล์คือหนึ่ง library ซึ่งเป็นหน่วยของขอบเขตใน Dart</li><li><code>_</code> กลายเป็นกำแพงจริงเมื่อแยกไฟล์แล้ว</li><li>import มีสี่รูปแบบ: ธรรมดา, <code>as</code>, <code>show</code>, <code>hide</code></li><li><code>export</code> ทำให้โฟลเดอร์มีหน้าร้านเดียว แต่อย่าใช้กับทุกโฟลเดอร์</li><li>การพึ่งพาต้องไหลทางเดียว ห้ามวนกลับ</li><li>อย่าใช้ <code>part</code> เพียงเพื่อทะลุกำแพง private</li></ul></div><p><strong>บทถัดไป:</strong> D1.19 จะเป็นบทที่รวมทุกอย่างเข้าด้วยกัน — การแปลง JSON จาก .NET API ให้กลายเป็น object ที่มีชนิดชัดเจน ซึ่งเป็นรอยต่อที่สำคัญที่สุดของทั้งคอร์ส</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

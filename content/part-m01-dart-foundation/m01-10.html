@@ -1,31 +1,100 @@
-<div class="note">Extension method เพิ่ม API ที่เรียกเหมือน member โดยไม่แก้ class ต้นฉบับ ใน <code>wmsapp</code> ใช้แบ่ง ApiService ตามโดเมน 9 ชุด แต่ state/dependency ยังคงเป็นของ object เดิม</div>
-<section><h2>1. รูปแบบพื้นฐาน</h2><pre class="code-vs"><code>extension BarcodeText on String {
-  String get normalizedBarcode =&gt; trim().toUpperCase();
-  bool get looksLikePallet =&gt; normalizedBarcode.startsWith('PAL-');
-}
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แทนที่ข้อความสถานะด้วย enum ที่ตรวจครบได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6 (class และ constructor) และ D1.9 (พอเข้าใจว่าชนิดช่วยเราตรวจสอบอย่างไร)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ประกาศ enum ที่มีข้อมูลติดตัว แปลงค่าจาก API เป็น enum อย่างปลอดภัย และใช้ <code>switch</code> ให้ analyzer เตือนเมื่อจัดการไม่ครบทุกกรณี</div>
 
-final code = input.normalizedBarcode;</code></pre><p>extension ถูก resolve แบบ static จาก type ที่ compiler เห็น ไม่ได้แก้ String จริงและไม่มี runtime polymorphism แบบ virtual method</p></section>
-<section><h2>2. โครงจริงของ wmsapp</h2><pre class="code-vs"><code>// api_service.dart
-part 'api/receiving_api.dart';
-part 'api/picking_api.dart';
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>สถานะของงานหนึ่งใบมีได้ไม่กี่แบบ: รอเริ่ม, กำลังทำ, เสร็จ, ยกเลิก วิธีที่คนใหม่มักเขียนคือใช้ข้อความ</p><pre class="code-vs"><code>String status = 'inProgress';
 
-// api/picking_api.dart
-part of '../api_service.dart';
-extension PickingApi on ApiService {
-  Future&lt;ApiResult&lt;List&lt;PickOrderListItem&gt;&gt;&gt; getPickOrdersList() async {
-    final response = await _get('/picking/orders-list');
-    // parse แล้วคืน typed result
+if (status == 'inprogress') { ... }   // สะกดไม่ตรง -> เงื่อนไขไม่เคยเป็นจริง
+if (status == 'in_progress') { ... }  // อีกคนเขียนอีกแบบ
+status = 'กำลังทำ';                    // ใครก็ใส่อะไรก็ได้</code></pre><p>ปัญหาคือ compiler ช่วยอะไรไม่ได้เลย เพราะทุกอย่างเป็นข้อความที่ถูกต้องทั้งหมดในสายตาของมัน บั๊กจะไปโผล่ตอนผู้ใช้กดปุ่มแล้วไม่มีอะไรเกิดขึ้น</p><p><strong>enum</strong> คือการบอก Dart ว่า “ค่าที่เป็นไปได้มีเท่านี้เท่านั้น” แล้วให้เครื่องมือช่วยตรวจแทนเรา</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>enum</td><td>ชนิดที่มีค่าเป็นไปได้จำกัดและระบุไว้ครบตั้งแต่ตอนเขียนโค้ด</td></tr>
+<tr><td>enhanced enum</td><td>enum ที่มี field, constructor และ method ได้เหมือน class</td></tr>
+<tr><td>exhaustive</td><td>ครบทุกกรณี ไม่มีทางเดินไหนหลุด</td></tr>
+<tr><td>wire value</td><td>ค่าจริงที่วิ่งอยู่บนสายเครือข่าย เช่นข้อความที่ .NET ส่งมา</td></tr>
+<tr><td>switch expression</td><td><code>switch</code> รูปแบบที่ให้ค่ากลับมา ใช้เครื่องหมาย <code>=&gt;</code></td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: รายชื่อที่ปิดแล้ว</h2><p>enum คือรายชื่อที่ “ปิดรับสมัคร” แล้ว — เพิ่มไม่ได้ตอนโปรแกรมทำงาน มีได้เฉพาะที่เราเขียนไว้เท่านั้น ประโยชน์ที่ตามมาคือสามอย่าง</p><table><thead><tr><th>ประโยชน์</th><th>เทียบกับใช้ข้อความ</th></tr></thead><tbody>
+<tr><td>สะกดผิดไม่ได้</td><td>ข้อความสะกดผิดได้ตลอดเวลา</td></tr>
+<tr><td>เครื่องมือเติมคำให้อัตโนมัติ</td><td>ต้องจำเองว่ามีค่าอะไรบ้าง</td></tr>
+<tr><td>เพิ่มสถานะใหม่แล้วรู้ทันทีว่าต้องไปแก้ตรงไหน</td><td>ไม่มีอะไรเตือน ต้องไล่หาเอง</td></tr>
+</tbody></table><div class="note"><strong>ประโยชน์ข้อสามคือของจริง:</strong> วันที่ธุรกิจเพิ่มสถานะ “พักไว้ชั่วคราว” เข้ามา ถ้าใช้ enum analyzer จะขีดเส้นแดงทุกจุดที่ยังไม่รองรับให้ทันที ถ้าใช้ข้อความ คุณจะรู้ตอนลูกค้าโทรมา</div></section>
+
+<section><h2>4. enum แบบพื้นฐาน</h2><pre class="code-vs"><code>enum PickStatus { pending, inProgress, done, cancelled }</code></pre><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_10_enum.dart</code></pre><pre class="code-vs"><code>ค่าทั้งหมด = [PickStatus.pending, PickStatus.inProgress, PickStatus.done, PickStatus.cancelled]
+ชื่อ        = inProgress
+ลำดับ       = 1</code></pre><table><thead><tr><th>สิ่งที่ enum ให้มาฟรี</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>.values</code></td><td>รายการค่าทั้งหมด ใช้วนสร้างตัวเลือกในหน้าจอ</td></tr>
+<tr><td><code>.name</code></td><td>ชื่อของค่าในรูปข้อความ ใช้ debug</td></tr>
+<tr><td><code>.index</code></td><td>ลำดับเริ่มจาก 0</td></tr>
+</tbody></table><div class="warn"><strong>อย่าใช้ <code>.index</code> เก็บลงฐานข้อมูลหรือส่งขึ้น API</strong> เพราะวันที่มีคนแทรกค่าใหม่ไว้กลางรายการ ตัวเลขของทุกค่าที่อยู่หลังมันจะเลื่อนหมด ข้อมูลเก่าที่เก็บไว้จะแปลความหมายผิดทันที ให้ใช้ค่าข้อความที่กำหนดเองแทน (หัวข้อถัดไป)</div></section>
+
+<section><h2>5. switch ที่บังคับให้จัดการครบ</h2><pre class="code-vs"><code>String messageFor(PickStatus status) =&gt; switch (status) {
+  PickStatus.pending =&gt; 'รอเริ่มงาน',
+  PickStatus.inProgress =&gt; 'กำลังหยิบ',
+  PickStatus.done =&gt; 'เสร็จแล้ว',
+  PickStatus.cancelled =&gt; 'ยกเลิก',
+};</code></pre><p>ลองลบบรรทัดใดบรรทัดหนึ่งออกแล้วรัน <code>flutter analyze</code> — จะได้ error ทันทีว่ายังจัดการไม่ครบ นี่คือคุณสมบัติที่มีค่าที่สุดของ enum</p><div class="warn"><strong>สิ่งที่ทำลายประโยชน์นี้:</strong> การเติม <code>_ =&gt; 'อื่น ๆ'</code> ปิดท้าย เพราะมันบอก Dart ว่า “ที่เหลือฉันจัดการหมดแล้ว” ทำให้ไม่มีอะไรเตือนเมื่อเพิ่มสถานะใหม่ ใช้ <code>_</code> เฉพาะเมื่อคุณตั้งใจให้ค่าที่ไม่รู้จักถูกจัดการแบบเดียวกันจริง ๆ</div></section>
+
+<section><h2>6. Enhanced enum: enum ที่พกข้อมูลติดตัว</h2><p>นี่คือจุดที่ enum ของ Dart ทรงพลังกว่าหลายภาษา — แต่ละค่ามี field และ method ของตัวเองได้</p><pre class="code-vs"><code>enum TaskType {
+  putaway('PUTAWAY', 'จัดเก็บ', true),
+  retrieve('RETRIEVE', 'หยิบออก', true),
+  ret('RETURN', 'คืนของ', false);
+
+  const TaskType(this.wireValue, this.label, this.needsLocation);
+
+  final String wireValue;      // ค่าที่ API ใช้
+  final String label;          // ข้อความที่ผู้ใช้เห็น
+  final bool needsLocation;    // กฎของงานชนิดนี้
+}</code></pre><p>สังเกตสามอย่าง</p><ol><li>รายการค่าต้องอยู่บนสุด และปิดท้ายด้วย <strong>เซมิโคลอน</strong> ก่อนจะเขียนส่วนอื่น</li><li>constructor ต้องเป็น <code>const</code> เพราะค่า enum ทุกตัวเป็นค่าคงที่</li><li>ชื่อ <code>ret</code> ใช้แทน <code>return</code> เพราะ <code>return</code> เป็นคำสงวนของภาษา</li></ol><pre class="code-vs"><code>PUTAWAY   | จัดเก็บ   | ต้องระบุช่องเก็บ: true
+RETRIEVE  | หยิบออก  | ต้องระบุช่องเก็บ: true
+RETURN    | คืนของ   | ต้องระบุช่องเก็บ: false</code></pre><p>ผลคือกฎ “งานจัดเก็บต้องระบุช่องเก็บ” ถูกเก็บไว้ที่เดียวคือในนิยามของ enum แทนที่จะกระจายเป็น <code>if</code> ตามหน้าจอต่าง ๆ</p></section>
+
+<section><h2>7. แยกค่าที่ API ใช้ ออกจากชื่อที่เราใช้</h2><p>นี่เป็นแนวปฏิบัติที่สำคัญมากเมื่อต้องคุยกับ .NET API</p><pre class="code-vs"><code>static TaskType fromWire(String raw) {
+  for (final type in TaskType.values) {
+    if (type.wireValue == raw.toUpperCase()) return type;
   }
-}</code></pre><p>เพราะไฟล์เป็น part ของ library เดียว extension จึงเรียก private <code>_get/_post</code> ได้ ผลคือ call site ใช้ <code>ApiService().getPickOrdersList()</code> แต่ไฟล์แยกตามโดเมน</p></section>
-<section><h2>3. ข้อดีและต้นทุนของแบบนี้</h2><ul><li><strong>ดี:</strong> ลดไฟล์ ApiService ยักษ์, ชื่อ method discover ได้จาก object เดียว, reuse transport/error handling</li><li><strong>ต้นทุน:</strong> ทุกโดเมนยังผูก singleton เดียว, extension เก็บ instance state ของตัวเองไม่ได้, mock เฉพาะ Picking ยากกว่า inject <code>PickingRepository</code></li></ul><p>จึงเป็น organization technique ไม่ใช่ dependency boundary โดยอัตโนมัติ</p></section>
-<section><h2>4. Extension กับ nullable และ generic</h2><pre class="code-vs"><code>extension NullableString on String? {
-  bool get isBlank =&gt; this == null || this!.trim().isEmpty;
+  throw ArgumentError('ไม่รู้จักงานชนิด "$raw"');
+}</code></pre><table><thead><tr><th></th><th>ใช้ <code>.name</code> ตรง ๆ</th><th>แยก <code>wireValue</code></th></tr></thead><tbody>
+<tr><td>เปลี่ยนชื่อตัวแปรในโค้ด</td><td>สัญญากับ server พังทันที</td><td>ไม่กระทบ</td></tr>
+<tr><td>API ส่งค่าตัวพิมพ์ใหญ่</td><td>ต้องแปลงกระจายทุกที่</td><td>แปลงที่เดียวใน <code>fromWire</code></td></tr>
+<tr><td>API ใช้ค่าเก่าที่ตั้งชื่อไม่สวย</td><td>ต้องทนตั้งชื่อตาม</td><td>ตั้งชื่อในโค้ดตามใจได้</td></tr>
+</tbody></table><p><strong>คำถามสำคัญ:</strong> เมื่อ API ส่งค่าที่เราไม่รู้จักมา ควรทำอย่างไร มีสองทางและต้องเลือกอย่างตั้งใจ</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ได้</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>โยน error ทันที</td><td>รู้ปัญหาเร็ว ข้อมูลไม่เพี้ยน</td><td>ค่าที่เพิ่มใหม่ต้องอัปเดตแอปอยู่แล้ว</td></tr>
+<tr><td>มีค่า <code>unknown</code> รองรับ</td><td>แอปเก่ายังใช้งานต่อได้</td><td>server เพิ่มค่าได้โดยไม่ปล่อยแอปใหม่</td></tr>
+</tbody></table><p>ทั้งสองทางถูก แต่ที่ผิดคือการไม่ตัดสินใจแล้วปล่อยให้โปรแกรมพังแบบไม่ตั้งใจ</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>The type 'PickStatus' is not exhaustively matched</code></td><td><code>switch</code> ยังไม่ครอบคลุมทุกค่า</td><td>เพิ่มกรณีที่ขาด — อย่ารีบเติม <code>_</code></td></tr>
+<tr><td><code>Expected to find ';'</code> ใน enhanced enum</td><td>ลืมเซมิโคลอนหลังรายการค่าสุดท้าย</td><td>ปิดรายการด้วย <code>;</code> ก่อนเขียน constructor</td></tr>
+<tr><td><code>Const constructors can't have a body</code></td><td>เขียนตรรกะใน constructor ของ enum</td><td>ย้ายไปเป็น getter หรือ method</td></tr>
+<tr><td>ข้อมูลเก่าในฐานข้อมูลแปลความหมายผิดหลังอัปเดตแอป</td><td>เก็บ <code>.index</code> ลงฐานข้อมูล</td><td>เก็บ <code>wireValue</code> ที่เป็นข้อความแทน</td></tr>
+<tr><td>แอปพังเมื่อ server เพิ่มสถานะใหม่</td><td>ไม่ได้ตัดสินใจเรื่องค่าที่ไม่รู้จัก</td><td>เลือกระหว่างโยน error กับมี <code>unknown</code> แล้วเขียนเทสต์ยืนยัน</td></tr>
+<tr><td>ใช้ <code>enum</code> กับข้อมูลที่เพิ่มได้เรื่อย ๆ เช่นรายชื่อคลัง</td><td>ข้อมูลนั้นไม่ใช่ชุดปิด</td><td>ใช้ข้อมูลจาก server เป็น list ธรรมดาแทน</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หน้าจอหนึ่งใช้ตัวแปรสามตัวเก็บสถานะการโหลด</p><pre class="code-vs"><code>bool isLoading = false;
+bool hasError = false;
+bool isDone = false;</code></pre><ol><li>อธิบายว่าการเขียนแบบนี้เปิดช่องให้เกิดสถานะที่เป็นไปไม่ได้อย่างไร ยกตัวอย่างมาอย่างน้อยสองแบบ</li><li>แปลงเป็น enum พร้อมข้อความภาษาไทยติดตัวแต่ละค่า</li><li>เขียน <code>switch</code> ที่คืนข้อความสำหรับแสดงผล</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สถานะที่เป็นไปไม่ได้:</strong> ตัวแปร <code>bool</code> สามตัวสร้างชุดค่าที่ต่างกันได้ 8 แบบ แต่มีเพียง 4 แบบที่มีความหมายจริง ตัวอย่างที่ผิดพลาดได้</p><ul><li><code>isLoading = true</code> พร้อม <code>isDone = true</code> — กำลังโหลดและเสร็จแล้วพร้อมกัน</li><li><code>hasError = true</code> พร้อม <code>isDone = true</code> — สำเร็จและล้มเหลวพร้อมกัน</li><li>ทั้งสามเป็น <code>false</code> — หน้าจอจะแสดงอะไร ไม่มีใครตอบได้</li></ul><p>อาการจริงที่ตามมาคือหน้าจอแสดงวงกลมหมุนทับข้อความ error หรือค้างอยู่ที่หน้าว่างเปล่า</p><pre class="code-vs"><code>enum LoadState {
+  initial('เริ่มต้น'),
+  loading('กำลังโหลด...'),
+  success('โหลดสำเร็จ'),
+  empty('ไม่พบข้อมูล'),
+  failure('โหลดไม่สำเร็จ');
+
+  const LoadState(this.message);
+  final String message;
+
+  bool get canRetry =&gt; this == failure;
 }
 
-extension FirstOrNull&lt;T&gt; on Iterable&lt;T&gt; {
-  T? get firstOrNull =&gt; isEmpty ? null : first;
-}</code></pre><p>อย่าใส่ business rule สำคัญใน extension ทั่วไปจน owner หาย เช่น <code>String.completePicking()</code> ไม่สมเหตุผล เพราะ String ไม่ใช่เจ้าของ workflow</p></section>
-<section><h2>5. Name conflict และ import</h2><p>ถ้า extension หลายตัวมี member ชื่อเดียวและมองเห็นพร้อมกัน compiler อาจเลือกไม่ได้ แก้ด้วย import <code>show/hide</code>, ตั้งชื่อไม่ชน หรือเรียก explicit extension override เช่น <code>BarcodeText(raw).normalizedBarcode</code></p></section>
-<section><h2>6. Decision guide</h2><ol><li>utility ที่เป็นธรรมชาติของ type และไม่มี state → extension</li><li>ต้อง inject/mock หรือมี lifecycle → service/repository class</li><li>ต้องเป็น polymorphic behavior → interface + implementation</li><li>ต้องแชร์ private member ข้ามไฟล์ → ทบทวน library/part และ coupling ก่อน</li></ol></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปิด extension <code>ReceivingApi</code> แล้วจำแนกแต่ละ method: transport, contract parsing, business rule หรือ UI concern ถ้าพบสองอย่างหลังให้อธิบายว่าควรย้ายไปที่ใด</p><details><summary>แนวตรวจคำตอบ</summary><p>extension ควรสร้าง request และแปลง response เป็น model; workflow rule อยู่ store/use case; ข้อความ/สีอยู่ presentation หาก parser ซ้ำมากให้ย้ายเข้า model/parser helper</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ไฟล์แยกไม่เท่ากับ architecture แยก ถ้าทุก extension ใช้ singleton/private transport เดียวกัน test seam และ ownership ยังอยู่จุดเดียว</div></section>
+String display(LoadState state) =&gt; switch (state) {
+  LoadState.initial =&gt; 'กดปุ่มเพื่อเริ่ม',
+  LoadState.loading =&gt; state.message,
+  LoadState.success =&gt; state.message,
+  LoadState.empty =&gt; 'ยังไม่มีงานในกะนี้',
+  LoadState.failure =&gt; '${state.message} — ลองอีกครั้ง',
+};</code></pre><p><strong>ทำไมต้องแยก <code>empty</code> ออกจาก <code>success</code>:</strong> เพราะ “โหลดสำเร็จแต่ไม่มีข้อมูล” กับ “โหลดสำเร็จและมีข้อมูล” ต้องแสดงหน้าจอคนละแบบ ถ้ารวมกันเป็นสถานะเดียว โค้ดหน้าจอจะต้องกลับไปเช็ค <code>list.isEmpty</code> อีกที ซึ่งเป็นการกระจายตรรกะออกไปอีกจุด</p><p><strong>ผลลัพธ์ที่ได้:</strong> จาก 8 ชุดค่าที่เป็นไปได้ เหลือ 5 ที่มีความหมายทั้งหมด ไม่มีทางเข้าสถานะที่ขัดแย้งกันเองได้อีก — นี่คือการ “ทำให้สถานะที่ผิดเขียนออกมาไม่ได้เลย” ซึ่งเป็นหลักคิดที่จะใช้ต่อไปทั้งคอร์ส</p><p><strong>ลองต่อ:</strong> เพิ่มค่า <code>refreshing</code> เข้าไป แล้วรัน <code>flutter analyze</code> — จะเห็นว่ามันชี้จุดที่ต้องแก้ให้ทันที ลองเทียบกับกรณีที่ใช้ <code>bool</code> สามตัวว่าคุณจะรู้ได้อย่างไรว่าต้องแก้ตรงไหนบ้าง</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>enum ใช้กับ “ชุดค่าที่ปิดแล้ว” — รู้ครบตั้งแต่ตอนเขียนโค้ด</li><li>ประโยชน์ที่ใหญ่ที่สุดคือ <code>switch</code> ที่เตือนเมื่อจัดการไม่ครบ</li><li>enhanced enum เก็บ label, ค่าสำหรับ API และกฎของแต่ละค่าไว้ในที่เดียว</li><li>อย่าเก็บ <code>.index</code> ลงฐานข้อมูล ให้ใช้ค่าข้อความที่กำหนดเอง</li><li>ตัดสินใจล่วงหน้าว่าจะทำอย่างไรกับค่าที่ไม่รู้จักจาก server</li><li>แทน <code>bool</code> หลายตัวด้วย enum เพื่อกำจัดสถานะที่ขัดแย้งกันเอง</li></ul></div><p><strong>บทถัดไป:</strong> D1.11 จะกลับไปต่อยอดเรื่อง “ฟังก์ชันเป็นค่าได้” จาก D1.4 ให้กลายเป็น callback ซึ่งเป็นกลไกที่ปุ่มทุกปุ่มใน Flutter ใช้</p></section>

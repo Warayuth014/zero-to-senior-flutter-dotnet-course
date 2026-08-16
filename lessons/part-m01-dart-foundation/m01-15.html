@@ -4,37 +4,147 @@
 <title>Future / async / await</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-15 · Dart Core</span><h1>Future / async / await</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">async เปลี่ยน return type</a></li><li><a href="#section-2">Sequential กับ concurrent</a></li><li><a href="#section-3">Event loop และงาน CPU</a></li><li><a href="#section-4">Fire-and-forget อย่างมีเจตนา</a></li><li><a href="#section-5">Lifecycle หลัง await</a></li><li><a href="#section-6">Timeout และ duplicate command</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>Future&lt;T&gt;</code> คือผลลัพธ์หนึ่งค่าที่จะสำเร็จหรือผิดพลาดภายหลัง <code>await</code> หยุดเฉพาะ async function ปัจจุบัน ไม่ block UI isolate แต่โค้ดหลัง await จะรันต่อในอนาคตเมื่อโลกอาจเปลี่ยนแล้ว</div>
-<section id="section-1"><h2>1. async เปลี่ยน return type</h2><pre class="code-vs"><code>Future&lt;Task&gt; loadTask(String id) async {
-  final json = await client.get('/tasks/$id');
-  return Task.fromJson(json);
-}</code></pre><p>function async คืน Future ทันที แล้ว complete ด้วย Task หรือ error ภายหลัง Error ก่อน/หลัง await จะกลายเป็น failed Future ให้ caller await/catch</p></section>
-<section id="section-2"><h2>2. Sequential กับ concurrent</h2><pre class="code-vs"><code>// ต่อกัน: B ต้องรอ A
-final profile = await loadProfile();
-final tasks = await loadTasks(profile.siteId);
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ใบรับของ ไม่ใช่ตัวของ</a></li><li><a href="#section-4">โครงสร้างพื้นฐาน</a></li><li><a href="#section-5">เรียงทีละตัว หรือ ยิงพร้อมกัน</a></li><li><a href="#section-6">จัดการข้อผิดพลาดและการหมดเวลา</a></li><li><a href="#section-7">กันการกดซ้ำ</a></li><li><a href="#section-8">สิ่งที่เปลี่ยนไประหว่างที่เรารอ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เขียนโค้ดที่ต้องรอผลโดยไม่ทำให้แอปค้าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.4 (ฟังก์ชัน), D1.9 (generic — เพราะ <code>Future&lt;T&gt;</code> คือ generic) และ D1.14 (exception)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านและเขียน <code>async</code>/<code>await</code> ได้ถูกต้อง แยกได้ว่างานไหนควรรอต่อคิวและงานไหนควรยิงพร้อมกัน และกันไม่ให้ผู้ใช้กดปุ่มซ้ำจนเกิดรายการซ้ำ</div>
 
-// อิสระ: เริ่มทั้งคู่ก่อนรอ
-final results = await Future.wait([loadBadges(), loadAnnouncements()]);</code></pre><p>อย่าใช้ Future.wait กับ command ที่ต้องรักษาลำดับหรือมี side effect ชนกัน เช่น validate → confirm stock ต้องต่อกัน</p></section>
-<section id="section-3"><h2>3. Event loop และงาน CPU</h2><p>HTTP/timer ปล่อย event loop ไปทำ frame อื่นได้ จึงไม่ต้องใช้ isolate เพียงเพราะมี await แต่งาน parse/loop CPU หนักยังบล็อก UI แม้อยู่ใน async function—async ไม่สร้าง thread ใหม่</p></section>
-<section id="section-4"><h2>4. Fire-and-forget อย่างมีเจตนา</h2><pre class="code-vs"><code>unawaited(store.loadAll());</code></pre><p><code>warehouse_shell.dart</code> ใช้ <code>unawaited</code> เพื่อประกาศชัดว่าไม่รอ bootstrap ก่อน render แต่ method ที่ถูกปล่อยต้องจัด error ภายใน มิฉะนั้นเกิด unhandled async error อย่าละ await เงียบ ๆ</p></section>
-<section id="section-5"><h2>5. Lifecycle หลัง await</h2><pre class="code-vs"><code>final result = await repository.submit(code);
-if (!mounted) return;
-setState(() =&gt; message = result.message);</code></pre><p>ระหว่างรอผู้ใช้อาจ back ออกจากหน้า Context/State จึงหมดอายุ นอกจากนี้ response เก่าอาจกลับหลัง query ใหม่ ต้องมี request token/cancellation ในบท state</p></section>
-<section id="section-6"><h2>6. Timeout และ duplicate command</h2><p>Timeout หมายถึง client เลิกรอ ไม่ได้พิสูจน์ว่า server ไม่ทำงาน ถ้า retry command เช่น confirm pick อาจทำซ้ำ ต้องออกแบบ idempotency key/backend rule และ disable submit ระหว่าง request</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เขียน submit ที่กันกดซ้ำ คืน loading ใน finally และไม่แตะ widget หลัง dispose</p><details><summary>เฉลยตัวอย่าง</summary><pre class="code-vs"><code>Future&lt;void&gt; submit() async {
-  if (_submitting) return;
-  setState(() =&gt; _submitting = true);
-  try {
-    final result = await repository.submit(controller.text.trim());
-    if (!mounted) return;
-    setState(() =&gt; _message = result.message);
-  } catch (e) {
-    if (mounted) setState(() =&gt; _message = readableError(e));
-  } finally {
-    if (mounted) setState(() =&gt; _submitting = false);
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดทุกบรรทัดที่เขียนมาตั้งแต่ D1.1 ทำงานเสร็จทันที แต่งานจริงไม่เป็นแบบนั้น — การถาม server ว่าพาเลทนี้มีของกี่ชิ้นอาจใช้เวลา 300 มิลลิวินาที หรือ 5 วินาทีถ้าสัญญาณ WiFi ในคลังไม่ดี</p><p>คำถามคือระหว่างที่รอ โปรแกรมควรทำอะไร ถ้าเลือกผิด หน้าจอจะค้าง แตะไม่ได้ และผู้ใช้จะกดซ้ำจนเกิดรายการซ้ำในระบบ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>synchronous</td><td>ทำเสร็จทันทีก่อนไปบรรทัดถัดไป</td></tr>
+<tr><td>asynchronous</td><td>เริ่มงานไว้ แล้วไปทำอย่างอื่นต่อ ค่อยกลับมารับผลทีหลัง</td></tr>
+<tr><td><code>Future&lt;T&gt;</code></td><td>คำมั่นว่าจะได้ค่าชนิด <code>T</code> ในอนาคต (หรือได้ข้อผิดพลาด)</td></tr>
+<tr><td><code>async</code></td><td>ป้ายบอกว่าฟังก์ชันนี้มีการรอ และคืน <code>Future</code></td></tr>
+<tr><td><code>await</code></td><td>รอให้ <code>Future</code> เสร็จ แล้วเอาค่าข้างในออกมา</td></tr>
+<tr><td>event loop</td><td>คิวที่ Dart ใช้จัดลำดับงานที่พร้อมทำ</td></tr>
+<tr><td>concurrent</td><td>หลายงานดำเนินไปคาบเกี่ยวกัน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ใบรับของ ไม่ใช่ตัวของ</h2><p>เวลาส่งเสื้อไปซัก ร้านให้ <strong>ใบรับของ</strong> มาทันที ไม่ใช่เสื้อที่ซักเสร็จแล้ว ใบรับของนั้นคือ <code>Future</code></p><table><thead><tr><th>ชีวิตจริง</th><th>ในโค้ด</th></tr></thead><tbody>
+<tr><td>ใบรับของที่ได้ทันที</td><td><code>Future&lt;String&gt;</code> ที่ฟังก์ชันคืนกลับมา</td></tr>
+<tr><td>เอาใบรับไปแลกของ (แล้วยืนรอ)</td><td><code>await</code></td></tr>
+<tr><td>ระหว่างรอ ไปทำธุระอื่นได้</td><td>โปรแกรมส่วนอื่นยังทำงานต่อ</td></tr>
+<tr><td>ร้านทำเสื้อเสียหาย</td><td><code>Future</code> จบด้วยข้อผิดพลาด</td></tr>
+</tbody></table><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_15_async.dart</code></pre><pre class="code-vs"><code>ชนิดที่ได้ทันที = Future&lt;String&gt;
+[   4ms] ยังไม่ await — โค้ดบรรทัดถัดไปทำงานต่อได้
+[ 306ms] ได้ข้อมูลแล้ว: PAL-1001 (โหลดใน 300ms)</code></pre><div class="warn"><strong>เข้าใจผิดที่พบบ่อยที่สุด:</strong> คนใหม่มักคิดว่า <code>async</code> สร้าง thread ใหม่หรือทำให้เร็วขึ้น — ไม่ใช่ทั้งสองอย่าง มันแค่บอกว่า “ระหว่างที่รออยู่นี้ ให้ไปทำงานอื่นในคิวก่อน” งานที่ใช้ CPU หนักจริง ๆ ยังทำให้แอปค้างอยู่ดี (ทางแก้อยู่ใน D1.17)</div></section>
+
+<section id="section-4"><h2>4. โครงสร้างพื้นฐาน</h2><pre class="code-vs"><code>Future&lt;String&gt; fetchPallet(String code) async {
+  await Future&lt;void&gt;.delayed(const Duration(milliseconds: 300));
+  return '$code โหลดเสร็จแล้ว';
+}</code></pre><table><thead><tr><th>ส่วน</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Future&lt;String&gt;</code></td><td>สุดท้ายจะได้ข้อความ แต่ยังไม่ใช่ตอนนี้</td></tr>
+<tr><td><code>async</code></td><td>ข้างในฟังก์ชันนี้มีการรอ</td></tr>
+<tr><td><code>await</code></td><td>หยุดฟังก์ชันนี้ไว้จนกว่างานจะเสร็จ</td></tr>
+<tr><td><code>return '...'</code></td><td>เขียนแค่ <code>String</code> ก็พอ Dart ห่อเป็น <code>Future</code> ให้เอง</td></tr>
+</tbody></table><p><strong>กฎที่ต้องจำ:</strong> ใช้ <code>await</code> ได้เฉพาะในฟังก์ชันที่มี <code>async</code> เท่านั้น และเมื่อใส่ <code>async</code> แล้ว ชนิดที่คืนต้องเป็น <code>Future</code> เสมอ (ถ้าไม่คืนอะไรก็เป็น <code>Future&lt;void&gt;</code>)</p></section>
+
+<section id="section-5"><h2>5. เรียงทีละตัว หรือ ยิงพร้อมกัน</h2><p>นี่คือการตัดสินใจที่ส่งผลต่อความเร็วของแอปมากที่สุดในบทนี้</p><pre class="code-vs"><code>// เรียงทีละตัว: ใช้เวลารวมกัน
+final a = await fetchPallet('PAL-A');   // รอ 300ms
+final b = await fetchPallet('PAL-B');   // แล้วรออีก 300ms
+// รวม ~600ms
+
+// ยิงพร้อมกัน: ใช้เวลาเท่าตัวที่ช้าที่สุด
+final both = await Future.wait&lt;String&gt;([
+  fetchPallet('PAL-A'),
+  fetchPallet('PAL-B'),
+]);
+// รวม ~300ms</code></pre><p>ผลจริงจาก lab แสดงความต่างชัดเจน</p><pre class="code-vs"><code>=== เรียงทีละตัว (sequential): ช้ากว่าเพราะรอต่อคิว ===
+  [ 602ms] PAL-A (โหลดใน 300ms), PAL-B (โหลดใน 300ms)
+
+=== ยิงพร้อมกัน (concurrent) ด้วย Future.wait ===
+  [ 303ms] PAL-A (โหลดใน 300ms) + PAL-B (โหลดใน 300ms)</code></pre><p>ตัวเลขบนเครื่องคุณจะไม่ตรงเป๊ะ แต่สัดส่วนจะเหมือนกันคือประมาณสองเท่า</p><table><thead><tr><th>ใช้แบบเรียงทีละตัวเมื่อ</th><th>ใช้ <code>Future.wait</code> เมื่อ</th></tr></thead><tbody>
+<tr><td>ผลของงานแรกเป็นข้อมูลเข้าของงานที่สอง</td><td>งานทั้งสองไม่เกี่ยวข้องกัน</td></tr>
+<tr><td>ลำดับมีความหมาย เช่น ตรวจสิทธิ์ก่อนบันทึก</td><td>แค่ต้องการข้อมูลหลายชุดมาแสดงพร้อมกัน</td></tr>
+<tr><td>มีผลข้างเคียงที่ชนกันได้</td><td>เป็นการอ่านข้อมูลล้วน ๆ</td></tr>
+</tbody></table><div class="warn"><strong>อย่าใช้ <code>Future.wait</code> กับคำสั่งที่เปลี่ยนข้อมูล</strong> เช่นยืนยันการหยิบของหลายรายการพร้อมกัน เพราะถ้าตัวใดตัวหนึ่งล้มเหลว คุณจะไม่รู้ว่าตัวไหนสำเร็จไปแล้วบ้าง และย้อนกลับได้ยากมาก</div></section>
+
+<section id="section-6"><h2>6. จัดการข้อผิดพลาดและการหมดเวลา</h2><pre class="code-vs"><code>try {
+  await fetchPallet('PAL-BROKEN');
+} on StateError catch (error) {
+  print('จับได้: ${error.message}');
+}</code></pre><p>ข่าวดีคือ <code>try/catch</code> จาก D1.14 ใช้กับงาน async ได้เหมือนเดิมทุกประการ ขอแค่มี <code>await</code> อยู่ในบล็อก <code>try</code></p><pre class="code-vs"><code>try {
+  await fetchPallet('PAL-SLOW', ms: 2000)
+      .timeout(const Duration(milliseconds: 400));
+} on TimeoutException {
+  print('เกินเวลา 400ms -&gt; บอกผู้ใช้ว่าเครือข่ายช้า');
+}</code></pre><div class="warn"><strong>ความจริงที่ต้องเข้าใจเรื่อง timeout:</strong> การหมดเวลาแปลว่า <em>เราเลิกรอ</em> ไม่ได้แปลว่า <em>server ไม่ได้ทำงาน</em> — คำสั่งนั้นอาจสำเร็จไปแล้วก็ได้ ดังนั้นการลองใหม่อัตโนมัติกับคำสั่งที่บันทึกข้อมูลอาจสร้างรายการซ้ำ เรื่องนี้ต้องออกแบบร่วมกับฝั่ง .NET (ดูต่อใน Part 7)</div></section>
+
+<section id="section-7"><h2>7. กันการกดซ้ำ</h2><p>ปัญหาที่พบทุกโปรเจกต์: ผู้ใช้กดปุ่มบันทึก ไม่เห็นอะไรเกิดขึ้นทันที เลยกดอีกสามครั้ง</p><pre class="code-vs"><code>class PalletLoader {
+  bool _loading = false;
+
+  Future&lt;void&gt; load(String code) async {
+    if (_loading) {
+      print('ปฏิเสธ $code เพราะกำลังโหลดอยู่');
+      return;
+    }
+    _loading = true;
+    try {
+      final result = await fetchPallet(code);
+      print('โหลดสำเร็จ: $result');
+    } finally {
+      _loading = false;   // ปลดล็อกเสมอ แม้จะพัง
+    }
   }
-}</code></pre></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">await ไม่ทำให้ operation ถูกยกเลิกเมื่อ widget dispose และ async ไม่ทำให้งาน CPU หนักลื่นขึ้น ต้องออกแบบ lifecycle, stale response และ cancellation แยกต่างหาก</div></section>
+}</code></pre><p>สามจุดที่ต้องทำให้ครบ</p><ol><li>ตรวจสถานะ <strong>ก่อน</strong> เริ่มงาน แล้วออกไปเลยถ้ายังไม่ว่าง</li><li>ตั้งสถานะเป็นไม่ว่าง <strong>ก่อน</strong> บรรทัด <code>await</code> แรก</li><li>ปลดล็อกใน <code>finally</code> เพื่อไม่ให้ค้างเมื่อเกิดข้อผิดพลาด</li></ol><p>ถ้าทำไม่ครบสามข้อ จะได้บั๊กที่ทดสอบเจอยากมาก เพราะบนเครื่องพัฒนาที่เน็ตเร็วจะไม่มีทางกดทันเลย แต่ในคลังที่สัญญาณอ่อนจะเกิดทุกวัน</p></section>
+
+<section id="section-8"><h2>8. สิ่งที่เปลี่ยนไประหว่างที่เรารอ</h2><p>ความจริงที่สำคัญที่สุดของบทนี้: โค้ดหลัง <code>await</code> ทำงานใน “อนาคต” ซึ่งโลกอาจเปลี่ยนไปแล้ว</p><table><thead><tr><th>สิ่งที่อาจเกิดขึ้นระหว่างรอ</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ผู้ใช้กดย้อนกลับออกจากหน้าจอ</td><td>อัปเดตหน้าจอที่ไม่มีอยู่แล้ว → error</td></tr>
+<tr><td>ผู้ใช้พิมพ์คำค้นใหม่</td><td>ผลเก่ากลับมาทีหลังแล้วทับผลใหม่</td></tr>
+<tr><td>ผู้ใช้ออกจากระบบ</td><td>ข้อมูลของคนเก่าโผล่มาให้คนใหม่เห็น</td></tr>
+</tbody></table><p>ตอนนี้ยังไม่ต้องแก้อะไร เพราะเรายังไม่มีหน้าจอ แต่ให้จำอาการทั้งสามไว้ — Part 4 จะสอนวิธีป้องกันอย่างเป็นระบบ สิ่งที่ทำได้ตั้งแต่วันนี้คือ <strong>ตั้งคำถามทุกครั้งที่เขียน <code>await</code> ว่า “ถ้าตอนที่ผลกลับมา สถานการณ์เปลี่ยนไปแล้ว โค้ดบรรทัดถัดไปยังถูกต้องอยู่ไหม”</strong></p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พิมพ์ค่าออกมาได้ <code>Instance of 'Future&lt;String&gt;'</code></td><td>ลืม <code>await</code></td><td>เติม <code>await</code> หน้าการเรียก</td></tr>
+<tr><td><code>await</code> can only be used in 'async' functions</td><td>ฟังก์ชันยังไม่มี <code>async</code></td><td>เติม <code>async</code> และเปลี่ยนชนิดที่คืนเป็น <code>Future</code></td></tr>
+<tr><td>ข้อผิดพลาดหลุดออกมาเป็น unhandled exception</td><td>เรียกฟังก์ชัน async โดยไม่ <code>await</code> และไม่ดักไว้</td><td><code>await</code> หรือดักข้อผิดพลาดภายในฟังก์ชันนั้นเอง</td></tr>
+<tr><td>หน้าจอค้างทั้งที่ใส่ <code>async</code> แล้ว</td><td>งานนั้นเป็นการคำนวณหนัก ไม่ใช่การรอ</td><td>ย้ายไปทำที่อื่น (D1.17)</td></tr>
+<tr><td>เกิดรายการซ้ำในระบบ</td><td>ไม่ได้กันการกดซ้ำ</td><td>ใช้รูปแบบในหัวข้อ 7</td></tr>
+<tr><td>ปุ่มค้างกดไม่ได้หลังเกิดข้อผิดพลาด</td><td>ปลดสถานะไว้ท้าย <code>try</code></td><td>ย้ายไป <code>finally</code></td></tr>
+<tr><td>โหลดข้อมูลสองชุดที่ไม่เกี่ยวกันแต่ช้ามาก</td><td><code>await</code> เรียงกันทั้งที่ยิงพร้อมกันได้</td><td>ใช้ <code>Future.wait</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>เขียนฟังก์ชัน <code>loadDashboard</code> ที่</p><ol><li>โหลดข้อมูลผู้ใช้ก่อน เพราะต้องใช้รหัสคลังจากผู้ใช้ในขั้นถัดไป</li><li>จากนั้นโหลด “รายการงาน” และ “จำนวนแจ้งเตือน” ซึ่งไม่เกี่ยวข้องกัน</li><li>กำหนดเวลาสูงสุดรวม 2 วินาที ถ้าเกินให้แจ้งว่าเครือข่ายช้า</li><li>ไม่ว่าจะสำเร็จหรือล้มเหลว ต้องพิมพ์ว่าโหลดจบแล้ว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>import 'dart:async';
+
+Future&lt;String&gt; loadUser() async {
+  await Future&lt;void&gt;.delayed(const Duration(milliseconds: 200));
+  return 'BKK-DC';
+}
+
+Future&lt;List&lt;String&gt;&gt; loadTasks(String site) async {
+  await Future&lt;void&gt;.delayed(const Duration(milliseconds: 300));
+  return ['T-01', 'T-02'];
+}
+
+Future&lt;int&gt; loadAlerts(String site) async {
+  await Future&lt;void&gt;.delayed(const Duration(milliseconds: 300));
+  return 3;
+}
+
+Future&lt;void&gt; loadDashboard() async {
+  final clock = Stopwatch()..start();
+  try {
+    final site = await loadUser();            // ต้องมาก่อน
+
+    final results = await Future.wait&lt;Object&gt;([ // สองงานนี้ยิงพร้อมกันได้
+      loadTasks(site),
+      loadAlerts(site),
+    ]).timeout(const Duration(seconds: 2));
+
+    final tasks = results[0] as List&lt;String&gt;;
+    final alerts = results[1] as int;
+    print('คลัง $site: งาน ${tasks.length} รายการ, แจ้งเตือน $alerts');
+  } on TimeoutException {
+    print('เครือข่ายช้า กรุณาลองใหม่');
+  } finally {
+    print('โหลดจบใน ${clock.elapsedMilliseconds}ms');
+  }
+}
+
+Future&lt;void&gt; main() =&gt; loadDashboard();</code></pre><pre class="code-vs"><code>คลัง BKK-DC: งาน 2 รายการ, แจ้งเตือน 3
+โหลดจบใน 518ms</code></pre><p>สังเกตว่า 518ms ≈ 200 + 300 ไม่ใช่ 200 + 300 + 300</p><p><strong>ทำไม <code>loadUser</code> ต้องแยกออกมา:</strong> เพราะ <code>loadTasks</code> และ <code>loadAlerts</code> ต้องใช้ค่า <code>site</code> ที่ได้จากมัน — นี่คือกรณีที่ลำดับมีความหมายจริง ไม่ใช่แค่ความเคยชิน</p><p><strong>ทำไมสองงานหลังใช้ <code>Future.wait</code>:</strong> เพราะไม่เกี่ยวข้องกันและเป็นการอ่านข้อมูลล้วน ๆ ถ้าเขียน <code>await</code> เรียงกันจะใช้เวลา 800ms แทนที่จะเป็น 500ms — ต่างกัน 300ms ซึ่งผู้ใช้รู้สึกได้</p><p><strong>จุดที่ต้องระวังในคำตอบนี้:</strong> <code>Future.wait&lt;Object&gt;</code> ทำให้ต้อง cast ผลลัพธ์กลับเอง ซึ่งเป็นจุดที่พลาดได้ ในโค้ดจริงมักใช้ record จาก D1.12 แทน</p><pre class="code-vs"><code>final (tasks, alerts) = await (loadTasks(site), loadAlerts(site)).wait;</code></pre><p>เขียนแบบนี้ได้ทั้งความเร็วและชนิดที่ถูกต้อง โดยไม่ต้อง cast เลย — เป็นตัวอย่างที่ดีว่าความรู้จากบทก่อน ๆ มาบรรจบกันอย่างไร</p><p><strong>ลองต่อ:</strong> เปลี่ยน <code>loadAlerts</code> ให้ใช้เวลา 3 วินาที แล้วสังเกตว่า <code>timeout</code> ทำงาน และ <code>finally</code> ยังพิมพ์ออกมาตามปกติ</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>Future&lt;T&gt;</code> คือใบรับของ ไม่ใช่ตัวข้อมูล</li><li><code>async</code> ทำให้ฟังก์ชันคืน <code>Future</code> ส่วน <code>await</code> รอเอาค่าออกมา</li><li><code>async</code> ไม่ได้สร้าง thread ใหม่และไม่ได้ทำให้เร็วขึ้น</li><li>ใช้ <code>Future.wait</code> เมื่องานไม่เกี่ยวข้องกันและเป็นการอ่านข้อมูล</li><li>timeout แปลว่าเราเลิกรอ ไม่ได้แปลว่า server ไม่ได้ทำงาน</li><li>กันการกดซ้ำด้วยธง 3 ขั้น: ตรวจก่อน ตั้งก่อน await ปลดใน <code>finally</code></li><li>โลกอาจเปลี่ยนไปแล้วเมื่อโค้ดหลัง <code>await</code> ทำงาน</li></ul></div><p><strong>บทถัดไป:</strong> D1.16 จะขยายจาก “ค่าเดียวในอนาคต” เป็น “ค่าหลายค่าที่ทยอยมาเรื่อย ๆ” ด้วย Stream ซึ่งเป็นสิ่งที่เครื่องสแกนบาร์โค้ดและการแจ้งเตือนแบบ realtime ใช้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

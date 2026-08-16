@@ -4,33 +4,140 @@
 <title>Exception Handling</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-14 · Dart Core</span><h1>Exception Handling</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">throw, catch, finally และ stack trace</a></li><li><a href="#section-2">Typed exception</a></li><li><a href="#section-3">Result type</a></li><li><a href="#section-4">Error boundary ตามชั้น</a></li><li><a href="#section-5">ไม่เปิดข้อมูลลับ</a></li><li><a href="#section-6">แบบฝึกหัด</a></li><li><a href="#section-7">จุดพลาด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
-<div class="note">Exception เหมาะกับ failure ที่ตัด flow ปกติ ส่วน Result ทำ failure เป็นข้อมูลที่ caller ต้องเปิดดู สองโปรเจกต์ใช้คนละแนวและเราต้องอ่านข้อแลกเปลี่ยนให้ออก</div>
-<section id="section-1"><h2>1. throw, catch, finally และ stack trace</h2><pre class="code-vs"><code>try {
-  final task = await repository.load(id);
-  show(task);
-} on ApiException catch (error, stackTrace) {
-  log(error.message, stackTrace: stackTrace);
-  showError(error.message);
-} finally {
-  setLoading(false);
-}</code></pre><p>จับเฉพาะ error ที่ชั้นนี้แปลงเป็นการตัดสินใจได้ <code>finally</code> เหมาะคืน loading/resource หาก rethrow ใช้ <code>rethrow</code> เพื่อรักษา stack เดิม ไม่ใช้ <code>throw error</code> โดยไม่จำเป็น</p></section>
-<section id="section-2"><h2>2. Typed exception</h2><pre class="code-vs"><code>class ApiException implements Exception {
-  const ApiException(this.message, {this.statusCode});
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: สายด่วนที่ข้ามหัวหน้าไปหาคนที่แก้ได้</a></li><li><a href="#section-4">สร้าง exception ของตัวเอง</a></li><li><a href="#section-5">จับแบบระบุชนิด</a></li><li><a href="#section-6">finally: ทำความสะอาดที่ต้องเกิดขึ้นเสมอ</a></li><li><a href="#section-7">Stack trace และ rethrow</a></li><li><a href="#section-8">โยน หรือ คืนเป็นข้อมูล</a></li><li><a href="#section-9">อย่ากลืนข้อผิดพลาด</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำให้โปรแกรมล้มเหลวอย่างมีข้อมูล</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6–D1.8 (class และ interface) และ D1.13 (โดยเฉพาะหัวข้อ “แยกไม่พบข้อมูล ออกจากระบบผิดพลาด”)<br><strong>จบบทนี้แล้วจะทำได้:</strong> โยนและจับข้อผิดพลาดแบบระบุชนิด อ่าน stack trace เป็น และตัดสินใจได้ว่าความล้มเหลวแบบไหนควรโยน แบบไหนควรคืนเป็นข้อมูล</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน D1.13 เราค้างคำถามไว้ว่า เมื่องานล้มเหลวควรบอกผู้เรียกอย่างไร การคืน <code>null</code> บอกได้แค่ “ไม่มีค่า” แต่บอกไม่ได้ว่า</p><ul><li>บาร์โค้ดว่างเปล่า</li><li>ไม่พบพาเลทนี้ในระบบ</li><li>ของในสต็อกไม่พอ</li><li>เชื่อมต่อ server ไม่ได้</li></ul><p>ทั้งสี่กรณีต้องการการตอบสนองคนละแบบจากผู้ใช้ ถ้าเราตอบเหมือนกันหมด พนักงานจะไม่รู้ว่าควรสแกนใหม่ เดินไปหาของ หรือเรียกช่างไอที</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>exception</td><td>วัตถุที่บอกว่า “งานนี้ทำไม่สำเร็จ เพราะเหตุนี้”</td></tr>
+<tr><td><code>throw</code></td><td>โยนข้อผิดพลาดออกไป และหยุดการทำงานตรงนั้นทันที</td></tr>
+<tr><td><code>try</code> / <code>catch</code></td><td>ล้อมโค้ดที่อาจพัง แล้วดักไว้จัดการ</td></tr>
+<tr><td><code>on</code></td><td>ระบุว่าจะดักเฉพาะข้อผิดพลาดชนิดไหน</td></tr>
+<tr><td><code>finally</code></td><td>บล็อกที่ทำงานเสมอ ไม่ว่าจะสำเร็จหรือพัง</td></tr>
+<tr><td><code>rethrow</code></td><td>จัดการบางส่วนแล้วส่งต่อให้ชั้นบน</td></tr>
+<tr><td>stack trace</td><td>รายการว่าโปรแกรมเดินผ่านฟังก์ชันใดมาบ้างก่อนพัง</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: สายด่วนที่ข้ามหัวหน้าไปหาคนที่แก้ได้</h2><p>เมื่อฟังก์ชันชั้นในเจอปัญหาที่ตัวเองแก้ไม่ได้ มันไม่ต้องคืนค่าประหลาด ๆ กลับไปให้คนเรียกเดา แต่ “โยน” ปัญหาขึ้นไปตามสายบังคับบัญชา จนกว่าจะเจอชั้นที่รู้ว่าต้องทำอะไร</p><table><thead><tr><th>ชั้น</th><th>รู้อะไร</th><th>ทำอะไรกับข้อผิดพลาด</th></tr></thead><tbody>
+<tr><td>ฟังก์ชันที่ตรวจข้อมูล</td><td>ข้อมูลผิดตรงไหน</td><td>โยนพร้อมเหตุผลที่ชัดเจน</td></tr>
+<tr><td>ฟังก์ชันกลาง</td><td>กำลังทำงานอะไรอยู่</td><td>ส่งผ่านไป หรือเพิ่มบริบทแล้วส่งต่อ</td></tr>
+<tr><td>หน้าจอ</td><td>ผู้ใช้กำลังทำอะไร</td><td>ดักไว้ แล้วแสดงข้อความที่ผู้ใช้ทำอะไรต่อได้</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> จับข้อผิดพลาดเฉพาะในชั้นที่ “ตัดสินใจอะไรบางอย่างได้จริง” — ถ้าจับแล้วไม่รู้จะทำอะไรต่อ แสดงว่ายังไม่ใช่ชั้นของคุณ</div></section>
+
+<section id="section-4"><h2>4. สร้าง exception ของตัวเอง</h2><pre class="code-vs"><code>class ScanException implements Exception {
+  ScanException(this.message);
   final String message;
-  final int? statusCode;
-}</code></pre><p><code>wms_absolute_mobile/core/api_client.dart</code> ใช้แนวนี้: client decode และ throw; repository ปล่อยหรือแปลง; screen/store catch ที่ boundary ของ user action ข้อดีคือ happy path ตรง ข้อเสียคือ caller ต้องรู้ว่า operation throw อะไร</p></section>
-<section id="section-3"><h2>3. Result type</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
-  ApiResult.success(this.data) : success = true, error = null;
-  ApiResult.error(this.error) : success = false, data = null;
-  final bool success;
-  final T? data;
-  final String? error;
-}</code></pre><p><code>wmsapp/services/api_service.dart</code> ใช้แนวนี้ ทุก call site ตรวจ <code>success</code> ข้อดีคือ failure เห็นใน return type ข้อเสียของโครง bool+nullable คือ compiler ยังยอมให้เขียน <code>data!</code> ผิด branch ได้ Sealed success/failure จะบังคับได้มากกว่า</p></section>
-<section id="section-4"><h2>4. Error boundary ตามชั้น</h2><ol><li>transport แยก timeout/socket/non-2xx/malformed body</li><li>repository แปลง payload เป็น domain หรือโยน contract error</li><li>store/action แปลง failure เป็น state และตัดสิน retry/rollback</li><li>widget แสดงข้อความ/action โดยไม่ parse exception string</li></ol><p>อย่า catch ทุกอย่างแล้วคืน list ว่าง เพราะผู้ใช้จะแยก “ไม่มีงาน” จาก “server ล่ม” ไม่ได้</p></section>
-<section id="section-5"><h2>5. ไม่เปิดข้อมูลลับ</h2><p>ข้อความ UI ควร actionable แต่ไม่แสดง token, password, SQL หรือ stack trace เก็บ technical context ใน log ที่เหมาะสมและ sanitize request header/body ก่อน log</p></section>
-<section id="section-6"><h2>6. แบบฝึกหัด</h2><p>ออกแบบ load tasks ให้แยก success-empty, 401, timeout และ malformed JSON แล้วบอกแต่ละกรณี UI ทำอะไร</p><details><summary>แนวคำตอบ</summary><ul><li>empty: แสดง empty state</li><li>401: clear session/ไป login</li><li>timeout: error พร้อม Retry โดยไม่ทำรายการซ้ำ</li><li>malformed: generic contract error + log correlation detail</li></ul></details></section>
-<section id="section-7"><h2>7. จุดพลาด</h2><div class="warn">อย่าผสม Result และ exception แบบไร้กติกาจน caller ต้องทั้งตรวจ bool และ try/catch เลือก policy ต่อ boundary แล้ว document ว่า failure ใดเป็น data และ failure ใด throw</div></section>
-<section id="section-8"><h2>8. สรุป</h2><p>Failure ที่ดีต้องรักษาสาเหตุ, มี owner ที่แปลงเป็น state, ไม่ถูกกลืนเป็นข้อมูลปกติ และไม่เปิดความลับต่อผู้ใช้</p></section>
+  @override
+  String toString() =&gt; 'ScanException: $message';
+}
+
+class OutOfStockException implements Exception {
+  OutOfStockException(this.code, this.available);
+  final String code;
+  final int available;   // พกข้อมูลที่คนแก้ปัญหาต้องใช้ไปด้วย
+}</code></pre><p>สังเกตว่าเราใช้ <code>implements Exception</code> ตามที่เรียนใน D1.8 — <code>Exception</code> ใน Dart เป็นเพียงสัญญาที่ไม่มีโค้ดอะไรมาให้ หน้าที่ของมันคือบอกคนอ่านว่า “class นี้มีไว้แทนความล้มเหลว”</p><p><strong>จุดสำคัญคือ <code>OutOfStockException</code> พก <code>available</code> ติดตัวมาด้วย</strong> ทำให้หน้าจอบอกได้ว่า “เหลือ 3 ชิ้น” แทนที่จะบอกแค่ “ของไม่พอ” นี่คือความต่างระหว่าง exception ที่มีประโยชน์กับที่ไม่มี</p></section>
+
+<section id="section-5"><h2>5. จับแบบระบุชนิด</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_14_exceptions.dart</code></pre><pre class="code-vs"><code>String attempt(String code, int requested) {
+  try {
+    final left = pick(code, requested);
+    return 'สำเร็จ: $code เหลือ $left ชิ้น';
+  } on OutOfStockException catch (error) {
+    return 'ของไม่พอ: ${error.code} มีแค่ ${error.available} ชิ้น';
+  } on ScanException catch (error) {
+    return 'สแกนผิดพลาด: ${error.message}';
+  } catch (error) {
+    return 'ข้อผิดพลาดที่ไม่คาดคิด: $error';
+  }
+}</code></pre><pre class="code-vs"><code>สำเร็จ: PAL-1001 เหลือ 7 ชิ้น
+ของไม่พอ: PAL-1002 มีแค่ 0 ชิ้น
+สแกนผิดพลาด: ไม่พบพาเลท PAL-9999
+สแกนผิดพลาด: บาร์โค้ดว่าง</code></pre><div class="warn"><strong>ลำดับสำคัญ</strong> เช่นเดียวกับ <code>switch</code> ใน D1.12 — Dart เทียบจากบนลงล่างและหยุดที่ตัวแรกที่ตรง ถ้าเขียน <code>catch (error)</code> แบบกว้างไว้บนสุด บล็อก <code>on</code> ที่เจาะจงกว่าจะไม่มีวันทำงานเลย</div></section>
+
+<section id="section-6"><h2>6. finally: ทำความสะอาดที่ต้องเกิดขึ้นเสมอ</h2><pre class="code-vs"><code>void runWithCleanup({required bool shouldFail}) {
+  print('เปิดรอบทำงาน');
+  try {
+    if (shouldFail) throw ScanException('จำลองความผิดพลาด');
+    print('  ทำงานสำเร็จ');
+  } on ScanException catch (error) {
+    print('  จับได้: ${error.message}');
+  } finally {
+    print('  ปิดรอบทำงาน (finally ทำงานเสมอ)');
+  }
+}</code></pre><p><code>finally</code> ใช้กับสิ่งที่ต้องเกิดขึ้นไม่ว่าอะไรจะเกิด เช่น ปิดสถานะกำลังโหลด ปลดล็อกปุ่ม หรือคืนทรัพยากร ถ้าเขียนโค้ดเหล่านี้ไว้ท้าย <code>try</code> เฉย ๆ มันจะถูกข้ามเมื่อเกิดข้อผิดพลาด แล้วปุ่มจะค้างอยู่ในสถานะกดไม่ได้ตลอดไป</p></section>
+
+<section id="section-7"><h2>7. Stack trace และ rethrow</h2><pre class="code-vs"><code>try {
+  pick('PAL-9999', 1);
+} catch (error, stackTrace) {
+  print('error = $error');
+  print(stackTrace.toString().split('\n').first);
+}</code></pre><p><code>catch</code> รับได้สองค่า ค่าที่สองคือ stack trace ซึ่งบอกว่าโปรแกรมเดินผ่านฟังก์ชันไหนมาบ้าง — บรรทัดแรกสุดคือจุดที่พังจริง ให้อ่านจากบนลงล่างเสมอ</p><pre class="code-vs"><code>void logThenRethrow() {
+  try {
+    pick('', 1);
+  } on ScanException catch (error) {
+    print('บันทึก log ไว้ก่อน: ${error.message}');
+    rethrow;   // ส่งต่อพร้อม stack trace เดิม
+  }
+}</code></pre><div class="warn">ใช้ <code>rethrow</code> ไม่ใช่ <code>throw error</code> — การเขียน <code>throw error</code> จะรีเซ็ต stack trace ทำให้เห็นแค่ว่าพังตรงจุดที่โยนใหม่ ไม่เห็นต้นตอจริง ซึ่งทำให้หาสาเหตุยากขึ้นมาก</div></section>
+
+<section id="section-8"><h2>8. โยน หรือ คืนเป็นข้อมูล</h2><p>มีสองแนวทางในการรายงานความล้มเหลว และทั้งสองถูกต้อง แต่ต้องเลือกอย่างมีกติกา</p><table><thead><tr><th></th><th>โยน exception</th><th>คืนผลลัพธ์ที่มีสถานะ</th></tr></thead><tbody>
+<tr><td>หน้าตา</td><td><code>Pallet load(String id)</code></td><td><code>ApiResult&lt;Pallet&gt; load(String id)</code></td></tr>
+<tr><td>เส้นทางปกติ</td><td>อ่านง่าย ไม่มี <code>if</code> คั่น</td><td>ต้องตรวจสถานะทุกครั้ง</td></tr>
+<tr><td>มองเห็นจาก signature</td><td>ไม่เห็น ต้องอ่านเอกสาร</td><td>เห็นชัดในชนิดที่คืน</td></tr>
+<tr><td>ลืมจัดการ</td><td>โปรแกรมพัง (รู้แน่)</td><td>เงียบ ๆ ผ่านไป (อันตรายกว่า)</td></tr>
+<tr><td>เหมาะกับ</td><td>ความผิดปกติที่ไม่ควรเกิด</td><td>ความล้มเหลวที่คาดไว้แล้วและเกิดบ่อย</td></tr>
+</tbody></table><p>คำแนะนำที่ใช้ได้ทั่วไป: <strong>ความผิดปกติของระบบให้โยน ความล้มเหลวที่เป็นส่วนหนึ่งของงานให้คืนเป็นข้อมูล</strong> เช่น “เน็ตหลุด” ควรโยน ส่วน “ของไม่พอ” เป็นเรื่องปกติในคลังจึงควรคืนเป็นข้อมูลให้หน้าจอตัดสินใจ</p><p>สิ่งที่ห้ามทำคือผสมสองแบบโดยไม่มีกติกา จนผู้เรียกต้องทั้ง <code>try/catch</code> และตรวจสถานะไปพร้อมกัน</p></section>
+
+<section id="section-9"><h2>9. อย่ากลืนข้อผิดพลาด</h2><pre class="code-vs"><code>// แย่ที่สุด: ปัญหาหายไปโดยไม่มีใครรู้
+try {
+  await loadTasks();
+} catch (_) {}
+
+// แย่เช่นกัน: ผู้ใช้แยกไม่ออกว่า "ไม่มีงาน" หรือ "server ล่ม"
+try {
+  return await loadTasks();
+} catch (_) {
+  return &lt;Task&gt;[];
+}</code></pre><p>รูปแบบที่สองอันตรายเป็นพิเศษ เพราะหน้าจอจะแสดง “ไม่มีงานในกะนี้” อย่างมั่นใจทั้งที่ระบบล่ม พนักงานก็จะกลับบ้าน ทั้งที่มีของรออยู่ — เป็นตัวอย่างชัดเจนของบั๊กที่โค้ดไม่พังแต่ธุรกิจเสียหาย</p><p>อีกเรื่องที่ต้องระวังคือ <strong>อย่าแสดงรายละเอียดทางเทคนิคให้ผู้ใช้เห็น</strong> ข้อความอย่าง token, คำสั่งฐานข้อมูล หรือ stack trace ควรอยู่ใน log เท่านั้น ส่วนผู้ใช้ควรเห็นข้อความที่บอกว่าต้องทำอะไรต่อ</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>บล็อก <code>on X</code> ไม่เคยทำงาน</td><td>มี <code>catch</code> แบบกว้างอยู่ก่อนหน้า</td><td>เรียงจากเจาะจงไปกว้างเสมอ</td></tr>
+<tr><td>ปุ่มค้างอยู่ในสถานะกดไม่ได้</td><td>รีเซ็ตสถานะไว้ท้าย <code>try</code> ซึ่งถูกข้ามเมื่อพัง</td><td>ย้ายไปไว้ใน <code>finally</code></td></tr>
+<tr><td>stack trace ชี้ไปที่ <code>catch</code> ของเราเอง</td><td>ใช้ <code>throw error</code> แทน <code>rethrow</code></td><td>เปลี่ยนเป็น <code>rethrow</code></td></tr>
+<tr><td>ผู้ใช้เห็นข้อความอย่าง <code>SocketException: Failed host lookup</code></td><td>เอา <code>error.toString()</code> ไปแสดงตรง ๆ</td><td>แปลงเป็นข้อความที่ผู้ใช้เข้าใจก่อนแสดง</td></tr>
+<tr><td>หน้าจอบอกว่าไม่มีข้อมูล ทั้งที่ระบบล่ม</td><td>ดักข้อผิดพลาดแล้วคืนรายการว่าง</td><td>แยกสถานะ “ว่าง” ออกจาก “ล้มเหลว” (ทบทวน D1.10 ข้อ 9)</td></tr>
+<tr><td>ดัก <code>Exception</code> แล้วแอปยังพังอยู่ดี</td><td>บางความผิดพลาดเป็น <code>Error</code> ไม่ใช่ <code>Exception</code></td><td><code>Error</code> คือบั๊กของโปรแกรมเมอร์ ให้แก้โค้ด ไม่ใช่ดักไว้</td></tr>
+</tbody></table><p>ความต่างข้อสุดท้ายสำคัญ: <code>Exception</code> คือสิ่งที่คาดว่าจะเกิดได้ในสภาพแวดล้อมจริง เช่นเน็ตหลุด ส่วน <code>Error</code> เช่น <code>TypeError</code> หรือ <code>RangeError</code> แปลว่าโค้ดเราเขียนผิด ให้ไปแก้ต้นเหตุ ไม่ใช่ดักไว้แล้วทำเป็นไม่มีอะไรเกิดขึ้น</p></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ระบบต้องโหลดรายการงานจาก server และมีสี่กรณีที่ต้องแยกให้ออก</p><ol><li>โหลดสำเร็จแต่ไม่มีงาน</li><li>ผู้ใช้หมดสิทธิ์ (session หมดอายุ)</li><li>เชื่อมต่อไม่ได้ภายในเวลาที่กำหนด</li><li>server ตอบมาแต่ข้อมูลผิดรูปแบบ</li></ol><p>จงออกแบบว่าแต่ละกรณีควรโยนหรือคืนเป็นข้อมูล และหน้าจอควรทำอะไร</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>กรณี</th><th>วิธีรายงาน</th><th>หน้าจอทำอะไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ไม่มีงาน</td><td>คืนรายการว่างตามปกติ</td><td>แสดง “ยังไม่มีงานในกะนี้”</td><td>ไม่ใช่ความล้มเหลว เป็นผลลัพธ์ที่ถูกต้อง</td></tr>
+<tr><td>หมดสิทธิ์</td><td>โยน <code>UnauthorizedException</code></td><td>ล้าง session แล้วพากลับหน้าล็อกอิน</td><td>ต้องการการกระทำเฉพาะที่ต่างจากทุกกรณี</td></tr>
+<tr><td>เชื่อมต่อไม่ได้</td><td>โยน <code>NetworkException</code></td><td>แสดงข้อความพร้อมปุ่มลองใหม่</td><td>แก้ได้ด้วยการลองใหม่ ไม่ต้องเปลี่ยนอะไร</td></tr>
+<tr><td>ข้อมูลผิดรูป</td><td>โยน <code>ContractException</code></td><td>แสดงข้อความทั่วไป และบันทึก log รายละเอียด</td><td>ผู้ใช้แก้เองไม่ได้ ต้องให้ทีมพัฒนารู้</td></tr>
+</tbody></table><pre class="code-vs"><code>class UnauthorizedException implements Exception {}
+class NetworkException implements Exception {}
+class ContractException implements Exception {
+  ContractException(this.detail);
+  final String detail;
+}
+
+String handleLoad(void Function() load) {
+  try {
+    load();
+    return 'โหลดสำเร็จ';
+  } on UnauthorizedException {
+    return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่';
+  } on NetworkException {
+    return 'เชื่อมต่อไม่ได้ กรุณาลองใหม่อีกครั้ง';
+  } on ContractException catch (error) {
+    // รายละเอียดเข้า log เท่านั้น ไม่แสดงให้ผู้ใช้
+    print('[log] ข้อมูลผิดรูปแบบ: ${error.detail}');
+    return 'ระบบขัดข้องชั่วคราว กรุณาแจ้งผู้ดูแล';
+  }
+}</code></pre><p><strong>จุดที่คนมักตอบผิด:</strong> หลายคนรวมกรณีที่ 1 เข้ากับความล้มเหลว โดยคิดว่า “ไม่มีข้อมูล = ผิดพลาด” แต่ในความจริง “กะนี้ยังไม่มีงาน” เป็นคำตอบที่ถูกต้องสมบูรณ์ ถ้าปฏิบัติกับมันเหมือนข้อผิดพลาด ผู้ใช้จะเห็นข้อความเตือนสีแดงทุกเช้าก่อนงานเข้า</p><p><strong>จุดที่คนมักตอบผิดอีกข้อ:</strong> การเอาข้อความจาก <code>ContractException</code> ไปแสดงตรง ๆ ผู้ใช้ในคลังไม่ได้ประโยชน์อะไรจากคำว่า “field palletCode expected String but got int” — เขาต้องการรู้แค่ว่าควรทำอะไรต่อ</p><p><strong>ลองต่อ:</strong> เพิ่มกรณีที่ห้า “ผู้ใช้กดยกเลิกระหว่างโหลด” แล้วคิดว่าควรจัดอยู่กลุ่มไหน — คำใบ้: นี่ไม่ใช่ความล้มเหลวเลย และไม่ควรแสดงข้อความอะไรทั้งสิ้น</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>สร้าง exception ของตัวเองที่พกข้อมูลซึ่งคนแก้ปัญหาต้องใช้</li><li>จับด้วย <code>on</code> เรียงจากเจาะจงไปกว้าง</li><li><code>finally</code> ใช้กับสิ่งที่ต้องเกิดขึ้นเสมอ เช่นปลดสถานะกำลังโหลด</li><li>ใช้ <code>rethrow</code> เพื่อรักษา stack trace เดิม</li><li>จับข้อผิดพลาดเฉพาะในชั้นที่ตัดสินใจอะไรได้จริง</li><li>ห้ามกลืนข้อผิดพลาดเป็นรายการว่าง เพราะผู้ใช้จะแยกไม่ออกจากกรณีไม่มีข้อมูล</li><li><code>Error</code> คือบั๊กของเรา ให้แก้โค้ด ส่วน <code>Exception</code> คือสิ่งที่ต้องรับมือ</li></ul></div><p><strong>บทถัดไป:</strong> D1.15 จะเข้าสู่โลกของงานที่ต้องรอ — การเรียก API ทุกครั้งจะใช้ <code>Future</code>, <code>async</code> และ <code>await</code> ซึ่งเป็นสิ่งที่แอปจริงใช้ในแทบทุกหน้าจอ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

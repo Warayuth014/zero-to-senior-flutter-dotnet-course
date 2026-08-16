@@ -4,24 +4,97 @@
 <title>Null Safety</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">m01-13 · Dart Core</span><h1>Null Safety</h1><p>Dart Foundation: Dart Basics</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เครื่องมือหลัก</a></li><li><a href="#section-2">Promotion และเหตุที่บางครั้ง promote ไม่ได้</a></li><li><a href="#section-3">Nullable ไม่เท่ากับ error</a></li><li><a href="#section-4">Required + nullable</a></li><li><a href="#section-5">ตัวอย่างจริง</a></li><li><a href="#section-6">หลีกเลี่ยง null cascade</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Sound null safety แยก “มีค่า T” จาก “อาจไม่มี T?” ตั้งแต่ type system เป้าหมายไม่ใช่กำจัด null แต่ทำให้ทุก absence ถูกออกแบบและตรวจใกล้จุดกำเนิด</div>
-<section id="section-1"><h2>1. เครื่องมือหลัก</h2><pre class="code-vs"><code>String? serial;
-final display = serial?.trim().isNotEmpty == true ? serial! : 'ไม่มี Serial';
-final quantity = int.tryParse(raw) ?? 0;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กล่องที่อาจว่าง</a></li><li><a href="#section-4">เครื่องมือสี่ตัวที่ต้องใช้เป็น</a></li><li><a href="#section-5">Type promotion: วิธีที่ถูกต้องที่สุด</a></li><li><a href="#section-6">เมื่อไหร่ที่ห้ามใช้ !</a></li><li><a href="#section-7">อย่าใช้ค่าวิเศษแทน null</a></li><li><a href="#section-8">nullable ไม่ใช่ทางเดียวในการบอกว่า “ไม่มี”</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: จัดการค่าที่อาจไม่มีอย่างเป็นระบบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.2 (ชนิดข้อมูล), D1.5 (Map คืน <code>null</code> เมื่อไม่มี key) และ D1.6–D1.7 (class, getter)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านและเขียนชนิดที่ลงท้ายด้วย <code>?</code> ได้อย่างมั่นใจ ใช้ <code>?.</code>, <code>??</code>, <code>??=</code> ถูกที่ และรู้ว่าเมื่อไหร่ที่ห้ามใช้ <code>!</code></div>
 
-void submit(String? barcode) {
-  if (barcode == null || barcode.trim().isEmpty) return;
-  print(barcode.toUpperCase()); // promoted เป็น String
-}</code></pre><ul><li><code>?.</code> เรียกเมื่อไม่ null</li><li><code>??</code> ใช้ fallback เมื่อ null</li><li><code>??=</code> assign เมื่อเดิม null</li><li><code>!</code> assertion ว่าไม่ null—ผิดแล้วพัง runtime</li></ul></section>
-<section id="section-2"><h2>2. Promotion และเหตุที่บางครั้ง promote ไม่ได้</h2><p>local final variable promote ได้ง่าย ส่วน mutable field อาจถูกเปลี่ยนระหว่างตรวจและใช้ โดยเฉพาะมี getter override/async boundary ให้ copy เป็น local:</p><pre class="code-vs"><code>final session = auth.session;
-if (session == null) return;
-useToken(session.token);</code></pre><p>นี่ชัดกว่ากระจาย <code>auth.session!</code> หลายจุดและบันทึก snapshot ที่กำลังใช้งาน</p></section>
-<section id="section-3"><h2>3. Nullable ไม่เท่ากับ error</h2><p><code>T?</code> เหมาะเมื่อ “ไม่พบ/ยังไม่มี” เป็นผลปกติ เช่น suggested pallet ไม่มี แต่ถ้าการขาดค่านั้นแปลว่า payload เสียหรือ request ล้มเหลว ให้คืน Result/throw typed exception ไม่ควรคืน null แล้วทำให้ caller เดาสาเหตุ</p></section>
-<section id="section-4"><h2>4. Required + nullable</h2><pre class="code-vs"><code>Widget buildRow({required String? subtitle}) { /* ... */ }</code></pre><p>ความหมายคือ caller ต้องตัดสินใจส่ง argument แต่ value อาจ null ใช้ได้เมื่อ “explicit absence” สำคัญ หากไม่มีเหตุผลมักควรเป็น <code>String subtitle</code> หรือ optional parameter ที่มี default</p></section>
-<section id="section-5"><h2>5. ตัวอย่างจริง</h2><ul><li><code>ConnectionProfile.fromJson(Object? raw)</code> คืน null เมื่อ saved row เสียเพื่อไม่ให้หนึ่งแถวทำลายทุก profile</li><li><code>AuthRepository.session?</code> แทนสถานะก่อน/หลัง login</li><li><code>ApiResult&lt;T&gt;</code> มี data? และ error? แต่ constructor พยายามรักษาว่าควรมีอย่างใดอย่างหนึ่ง—บท architecture จะปรับให้ type บังคับ invariant ได้แข็งขึ้น</li></ul></section>
-<section id="section-6"><h2>6. หลีกเลี่ยง null cascade</h2><p>ถ้า DTO ทุก field nullable แล้ว UI ต้อง <code>?. ?? ''</code> ทุกบรรทัด แปลว่า boundary ไม่ได้ทำงาน แยก required/optional ตาม contract, validate required fields ใน parser และใช้ default เฉพาะค่าที่ domain ยอมรับจริง</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>API คืน palletId ที่อาจไม่พบ ออกแบบ signature และ UI ทั้งกรณีไม่พบกับ payload ผิด</p><details><summary>แนวคำตอบ</summary><p><code>Future&lt;Pallet?&gt; findPallet(String id)</code> ใช้ null สำหรับ 404 ที่เป็นผลปกติ; malformed JSON/500 ให้ throw <code>ApiException</code> หรือคืน failure result UI จึงแยก “ไม่พบ pallet” จาก “ระบบผิดพลาด” ได้</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>!</code> ไม่ได้แก้ null มันเพียงสั่ง compiler ให้เชื่อเรา ใช้หลัง invariant ที่พิสูจน์ได้ใกล้ ๆ เท่านั้น ถ้าใช้เพราะ “น่าจะมี” ให้เปลี่ยน flow/type</div></section>
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p><code>null</code> แปลว่า “ไม่มีค่า” ซึ่งเป็นสถานะที่เกิดขึ้นจริงตลอดเวลาในงานคลัง — พาเลทที่ยังไม่ถูกจัดเก็บยังไม่มีช่องเก็บ ผู้ใช้ที่ยังไม่ล็อกอินยังไม่มีชื่อ สินค้าที่ยังไม่ตรวจยังไม่มีผลตรวจ</p><p>ในภาษาเก่า ๆ ปัญหาคือ <strong>ทุกตัวแปรเป็น <code>null</code> ได้หมด</strong> โดยไม่มีอะไรเตือน จึงเกิดข้อผิดพลาดที่เรียกว่า null pointer ซึ่งเป็นสาเหตุของแอปพังอันดับหนึ่งมานานหลายสิบปี</p><p>Dart แก้ปัญหานี้ด้วยการแยกให้ชัดตั้งแต่ชนิด: <code>String</code> คือ “มีข้อความแน่นอน” ส่วน <code>String?</code> คือ “อาจมีหรือไม่มีก็ได้” และบังคับให้เราตรวจก่อนใช้เสมอ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>null</td><td>ค่าที่แปลว่า “ไม่มีค่า” ไม่ใช่ศูนย์ ไม่ใช่ข้อความว่าง</td></tr>
+<tr><td>nullable</td><td>ชนิดที่ยอมให้เป็น <code>null</code> ได้ เขียนด้วย <code>?</code> ต่อท้าย</td></tr>
+<tr><td>non-nullable</td><td>ชนิดที่เป็น <code>null</code> ไม่ได้เด็ดขาด</td></tr>
+<tr><td>type promotion</td><td>Dart เลื่อนชนิดให้เองหลังเราตรวจแล้วว่าไม่ใช่ <code>null</code></td></tr>
+<tr><td>null assertion (<code>!</code>)</td><td>การยืนยันกับ Dart ว่า “เชื่อฉัน ตัวนี้ไม่ null แน่”</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กล่องที่อาจว่าง</h2><table><thead><tr><th></th><th><code>String</code></th><th><code>String?</code></th></tr></thead><tbody>
+<tr><td>เปรียบเทียบ</td><td>กล่องที่รับประกันว่ามีของ</td><td>กล่องที่อาจว่าง ต้องเปิดดูก่อน</td></tr>
+<tr><td>ใช้ได้ทันทีไหม</td><td>ได้เลย</td><td>ต้องตรวจก่อน</td></tr>
+<tr><td>เป็น <code>null</code> ได้ไหม</td><td>ไม่ได้ Dart ปฏิเสธตั้งแต่ compile</td><td>ได้</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เป้าหมายของ null safety ไม่ใช่การกำจัด <code>null</code> ให้หมด แต่คือการทำให้ทุกจุดที่ค่าอาจหายไป <strong>ถูกมองเห็นและถูกจัดการอย่างตั้งใจ</strong></div></section>
+
+<section id="section-4"><h2>4. เครื่องมือสี่ตัวที่ต้องใช้เป็น</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_13_null_safety.dart</code></pre><table><thead><tr><th>เครื่องมือ</th><th>อ่านว่า</th><th>ตัวอย่าง</th><th>ผลเมื่อฝั่งซ้ายเป็น null</th></tr></thead><tbody>
+<tr><td><code>??</code></td><td>ถ้าไม่มีให้ใช้ค่านี้แทน</td><td><code>location ?? 'ยังไม่จัดเก็บ'</code></td><td>ได้ค่าสำรอง</td></tr>
+<tr><td><code>?.</code></td><td>ถ้ามีค่อยเรียกต่อ</td><td><code>location?.length</code></td><td>ได้ <code>null</code> ทั้งนิพจน์</td></tr>
+<tr><td><code>??=</code></td><td>ใส่ค่าเมื่อยังว่างเท่านั้น</td><td><code>note ??= 'ไม่มีหมายเหตุ'</code></td><td>ใส่ค่าให้</td></tr>
+<tr><td><code>!</code></td><td>ยืนยันว่าไม่ null</td><td><code>value!.length</code></td><td><strong>โปรแกรมพังทันที</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>for (final pallet in pallets) {
+  print('${pallet.code} อยู่ที่ ${pallet.location ?? 'ยังไม่จัดเก็บ'}');
+}</code></pre><pre class="code-vs"><code>PAL-1001 อยู่ที่ A-01-02
+PAL-1002 อยู่ที่ ยังไม่จัดเก็บ</code></pre></section>
+
+<section id="section-5"><h2>5. Type promotion: วิธีที่ถูกต้องที่สุด</h2><pre class="code-vs"><code>final location = target.location;   // ชนิด String?
+if (location != null) {
+  print(location.toUpperCase());    // ตรงนี้เป็น String แล้ว ไม่ต้องใส่ ! เลย
+}</code></pre><p>หลังผ่าน <code>if</code> Dart รู้เองว่าในบล็อกนั้นค่าไม่ใช่ <code>null</code> แน่นอน จึงยอมให้เรียก method ได้ตามปกติ นี่คือทางที่ควรใช้เป็นค่าเริ่มต้นเสมอ เพราะมันปลอดภัยโดยไม่มีต้นทุนอะไรเลย</p><p><strong>แต่บางครั้ง promotion ทำงานไม่ได้</strong> และเป็นจุดที่คนใหม่งงมาก</p><pre class="code-vs"><code>class ScanBox {
+  String? code;   // field ที่เปลี่ยนค่าได้
+}
+
+final box = ScanBox()..code = 'PAL-1003';
+if (box.code != null) {
+  // box.code.toUpperCase();   // error! ทั้งที่เพิ่งตรวจไปเอง
+  final local = box.code!;      // ดึงลงตัวแปร local ก่อน
+  print(local.toUpperCase());   // แล้วค่อยใช้
+}</code></pre><p><strong>เหตุผล:</strong> <code>box.code</code> เป็น field ที่เปลี่ยนค่าได้ ระหว่างบรรทัดที่ตรวจกับบรรทัดที่ใช้ อาจมีโค้ดอื่นเปลี่ยนมันเป็น <code>null</code> ได้ Dart จึงไม่กล้ารับประกัน</p><p><strong>วิธีแก้ที่ดีที่สุด:</strong> คัดลอกลงตัวแปร <code>final</code> ในเครื่องก่อนเสมอ เพราะตัวแปร local ที่เป็น <code>final</code> ไม่มีใครแก้ได้ Dart จึง promote ให้</p><pre class="code-vs"><code>final code = box.code;      // สำเนาที่ไม่มีใครแก้ได้
+if (code == null) return;
+print(code.toUpperCase());  // ปลอดภัยและไม่ต้องใช้ ! เลย</code></pre></section>
+
+<section id="section-6"><h2>6. เมื่อไหร่ที่ห้ามใช้ !</h2><pre class="code-vs"><code>String? empty;
+print(empty!.length);   // TypeError: Null check operator used on a null value</code></pre><div class="warn"><code>!</code> ไม่ได้ทำให้ค่าไม่เป็น <code>null</code> — มันแค่สั่งให้ Dart หยุดเตือน ถ้าเราคิดผิด โปรแกรมจะพังตอนผู้ใช้กำลังใช้งานอยู่ ซึ่งแย่กว่าการเจอ error ตอน compile มาก</div><table><thead><tr><th>สถานการณ์</th><th>ใช้ <code>!</code> ได้ไหม</th></tr></thead><tbody>
+<tr><td>เพิ่งตรวจในบรรทัดก่อนหน้า และค่าเป็น field ที่เปลี่ยนได้</td><td>ได้ แต่ควรคัดลอกลง local แทน</td></tr>
+<tr><td>“น่าจะมีค่านะ” / “ปกติมันไม่ null หรอก”</td><td><strong>ห้ามเด็ดขาด</strong></td></tr>
+<tr><td>ใส่เพื่อให้ analyzer หยุดขึ้นเส้นแดง</td><td><strong>ห้ามเด็ดขาด</strong></td></tr>
+<tr><td>ค่ามาจาก API ที่เราควบคุมไม่ได้</td><td>ห้าม — ต้องตรวจจริง</td></tr>
+</tbody></table><p>ถ้าพบว่าตัวเองอยากใช้ <code>!</code> บ่อย ๆ แสดงว่าปัญหาอยู่ที่การออกแบบชนิด ไม่ใช่ที่ตัวโค้ดตรงนั้น ให้ย้อนไปถามว่า “ค่านี้ควรเป็น nullable จริงหรือเปล่า”</p></section>
+
+<section id="section-7"><h2>7. อย่าใช้ค่าวิเศษแทน null</h2><table><thead><tr><th>วิธีที่แย่</th><th>ปัญหาที่ตามมา</th><th>วิธีที่ดี</th></tr></thead><tbody>
+<tr><td><code>int quantity = -1</code> แปลว่าไม่รู้</td><td>ต้องจำเองทั้งทีมว่า -1 มีความหมายพิเศษ และเผลอเอาไปบวกได้</td><td><code>int? quantity</code></td></tr>
+<tr><td><code>String location = ''</code> แปลว่ายังไม่จัดเก็บ</td><td>แยกไม่ออกจาก “จัดเก็บแล้วแต่ชื่อช่องว่างเปล่า”</td><td><code>String? location</code></td></tr>
+<tr><td><code>DateTime(1900)</code> แปลว่ายังไม่เคยตรวจ</td><td>เอาไปเรียงลำดับหรือคำนวณอายุแล้วได้ผลเพี้ยน</td><td><code>DateTime? checkedAt</code></td></tr>
+</tbody></table><p>ข้อดีของ <code>null</code> คือ Dart <strong>บังคับ</strong> ให้ทุกคนตรวจก่อนใช้ ส่วนค่าวิเศษไม่มีอะไรบังคับเลย</p></section>
+
+<section id="section-8"><h2>8. nullable ไม่ใช่ทางเดียวในการบอกว่า “ไม่มี”</h2><p>เมื่อฟังก์ชันคืน <code>null</code> ผู้เรียกจะไม่รู้ว่าเพราะอะไร ให้แยกสองกรณีนี้ออกจากกันตั้งแต่ออกแบบ</p><table><thead><tr><th>สถานการณ์</th><th>ควรทำอย่างไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ค้นหาแล้วไม่พบ — เป็นผลลัพธ์ปกติ</td><td>คืน <code>T?</code></td><td>ผู้เรียกแค่ต้องแสดง “ไม่พบข้อมูล”</td></tr>
+<tr><td>เชื่อมต่อไม่ได้ / ข้อมูลเสีย — เป็นความผิดปกติ</td><td>โยน exception หรือคืนผลลัพธ์ที่บอกเหตุผล</td><td>ผู้เรียกต้องแสดงข้อความและให้ลองใหม่ได้</td></tr>
+</tbody></table><p>ถ้าใช้ <code>null</code> กับทั้งสองกรณี หน้าจอจะแสดง “ไม่พบพาเลท” ทั้งที่จริง ๆ แล้วเน็ตหลุด ซึ่งทำให้พนักงานเดินไปหาของผิดที่ เรื่องนี้จะกลับมาอีกครั้งใน D1.14 และ Part 7</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Null check operator used on a null value</code></td><td>ใช้ <code>!</code> กับค่าที่เป็น <code>null</code> จริง</td><td>เปลี่ยนไปตรวจด้วย <code>if</code> แล้วใช้ promotion</td></tr>
+<tr><td><code>The property 'length' can't be unconditionally accessed</code></td><td>ใช้ค่า nullable โดยยังไม่ตรวจ</td><td>ใช้ <code>?.</code> หรือตรวจด้วย <code>if</code> ก่อน</td></tr>
+<tr><td>ตรวจ <code>!= null</code> แล้วยัง error อยู่</td><td>เป็น field ที่เปลี่ยนได้ จึง promote ไม่ได้</td><td>คัดลอกลงตัวแปร <code>final</code> ในเครื่องก่อน</td></tr>
+<tr><td>โค้ดเต็มไปด้วย <code>?.</code> และ <code>?? ''</code> ทุกบรรทัด</td><td>ปล่อยให้ทุก field ของ model เป็น nullable</td><td>ตรวจข้อมูลที่ชั้นแปลง JSON แล้วให้ model มีค่าแน่นอน (D1.19)</td></tr>
+<tr><td>แสดง “ไม่พบข้อมูล” ทั้งที่เน็ตหลุด</td><td>ใช้ <code>null</code> แทนทั้ง “ไม่พบ” และ “ผิดพลาด”</td><td>แยกสองกรณีตามตารางหัวข้อ 8</td></tr>
+<tr><td>ใช้ <code>late</code> ทุกที่เพื่อเลี่ยง <code>?</code></td><td>ย้าย error ไป runtime แทนที่จะแก้จริง</td><td>ยอมรับว่าค่าอาจไม่มี แล้วใช้ nullable (ทบทวน D1.3)</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>ระบบต้องแสดงข้อมูลผู้รับผิดชอบพาเลทบนหน้าจอ โดยมีเงื่อนไขดังนี้</p><ol><li>พาเลทอาจยังไม่มีผู้รับผิดชอบ</li><li>ถ้ามี ให้แสดงชื่อเป็นตัวพิมพ์ใหญ่</li><li>ถ้าไม่มี ให้แสดง <code>รอมอบหมาย</code></li><li>ถ้ามีแต่เป็นข้อความว่างหรือมีแต่ช่องว่าง ให้ถือว่าไม่มี</li></ol><p>จงเขียนฟังก์ชัน <code>ownerLabel</code> โดย <strong>ห้ามใช้เครื่องหมาย <code>!</code> เลย</strong></p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>String ownerLabel(String? owner) {
+  final name = owner?.trim();
+  if (name == null || name.isEmpty) return 'รอมอบหมาย';
+  return name.toUpperCase();
+}
+
+void main() {
+  for (final input in &lt;String?&gt;[null, '', '   ', 'somchai', ' malee ']) {
+    print('${input == null ? 'null' : '"$input"'} -&gt; ${ownerLabel(input)}');
+  }
+}</code></pre><pre class="code-vs"><code>null -&gt; รอมอบหมาย
+"" -&gt; รอมอบหมาย
+"   " -&gt; รอมอบหมาย
+"somchai" -&gt; SOMCHAI
+" malee " -&gt; MALEE</code></pre><p><strong>ทำไมเขียน <code>owner?.trim()</code> ก่อน:</strong> เพราะมันรวมสองงานไว้ในบรรทัดเดียว — ถ้าเป็น <code>null</code> ก็ได้ <code>null</code> ต่อไป ถ้ามีค่าก็ตัดช่องว่างให้เลย จากนั้นเหลือเงื่อนไขเดียวที่ต้องตรวจ</p><p><strong>ทำไมต้องเก็บลงตัวแปร <code>name</code>:</strong> เพราะเมื่อเป็นตัวแปร <code>final</code> ในเครื่องแล้ว Dart จะ promote ให้หลัง <code>if</code> ทำให้บรรทัดสุดท้ายเรียก <code>toUpperCase()</code> ได้โดยไม่ต้องใช้ <code>!</code> — ถ้าเขียน <code>owner?.trim()</code> ซ้ำในบรรทัดล่าง จะ promote ไม่ได้และต้องพึ่ง <code>!</code> ทันที</p><p><strong>บทเรียนที่สำคัญที่สุด:</strong> การเขียนโดยไม่ใช้ <code>!</code> ได้เลย ไม่ใช่เพราะเก่ง แต่เพราะจัด <em>ลำดับ</em> การตรวจให้ถูก — ตรวจให้เสร็จก่อน แล้วค่อยใช้ ในโค้ดจริงถ้าคุณต้องใช้ <code>!</code> ให้ลองจัดลำดับใหม่ก่อนเสมอ</p><p><strong>ลองต่อ:</strong> เปลี่ยนโจทย์เป็น “ถ้าไม่มีผู้รับผิดชอบและพาเลทอยู่ในโซนเร่งด่วน ให้แสดง <code>ต้องมอบหมายด่วน</code>” แล้วสังเกตว่าคุณต้องรับ parameter เพิ่มโดยที่โครงเดิมยังใช้ได้</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>T</code> คือมีค่าแน่นอน ส่วน <code>T?</code> คืออาจไม่มี — Dart บังคับให้ตรวจก่อนใช้</li><li><code>??</code> ใส่ค่าสำรอง, <code>?.</code> เรียกต่อเมื่อมีค่า, <code>??=</code> ใส่เมื่อยังว่าง</li><li>ตรวจด้วย <code>if</code> แล้วให้ Dart promote ให้ คือทางที่ปลอดภัยที่สุด</li><li>field ที่เปลี่ยนค่าได้ promote ไม่ได้ ให้คัดลอกลงตัวแปร <code>final</code> ในเครื่องก่อน</li><li><code>!</code> ไม่ได้แก้ปัญหา แค่ปิดปาก compiler — ใช้เมื่อพิสูจน์ได้จริงเท่านั้น</li><li>อย่าใช้ค่าวิเศษอย่าง <code>-1</code> หรือ <code>''</code> แทน “ไม่มีค่า”</li><li>แยก “ไม่พบข้อมูล” ออกจาก “ระบบผิดพลาด” ตั้งแต่ออกแบบ</li></ul></div><p><strong>บทถัดไป:</strong> D1.14 จะจัดการกับกรณี “ระบบผิดพลาด” ที่ค้างไว้จากหัวข้อ 8 ด้วย exception ซึ่งเป็นวิธีบอกว่างานล้มเหลวพร้อมเหตุผลที่ชัดเจน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,36 +1,124 @@
-<div class="note"><code>Future</code> ให้ผลครั้งเดียว ส่วน <code>Stream</code> ให้เหตุการณ์ 0..หลายครั้งตามเวลา ทุก stream listener จึงต้องมีคำตอบเรื่อง subscribe, error, done และ cancel</div>
-<section><h2>1. สร้างและฟัง Stream</h2><pre class="code-vs"><code>Stream&lt;String&gt; normalizedScans(Stream&lt;String&gt; raw) async* {
-  await for (final value in raw) {
-    final code = value.trim().toUpperCase();
-    if (code.isNotEmpty) yield code;
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: รับข้อมูลที่ทยอยเข้ามาเรื่อย ๆ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.11 (callback) และ D1.15 (<code>Future</code>, <code>async</code>, <code>await</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านและสร้าง <code>Stream</code> เลือกได้ระหว่างแบบผู้ฟังคนเดียวกับหลายคน และรู้ว่าใครมีหน้าที่ปิดอะไรเพื่อไม่ให้ทรัพยากรรั่ว</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p><code>Future</code> ใน D1.15 ตอบคำถาม “ค่าหนึ่งค่าที่จะได้ในอนาคต” ได้ดี แต่งานจริงหลายอย่างไม่ใช่แบบนั้น</p><table><thead><tr><th>สถานการณ์</th><th>ได้ค่ากี่ครั้ง</th><th>ใช้อะไร</th></tr></thead><tbody>
+<tr><td>ถาม server ว่าพาเลทนี้มีกี่ชิ้น</td><td>ครั้งเดียว</td><td><code>Future</code></td></tr>
+<tr><td>พนักงานยิงบาร์โค้ดทั้งกะ</td><td>หลายครั้ง ไม่รู้ว่ากี่ครั้ง</td><td><code>Stream</code></td></tr>
+<tr><td>server แจ้งเตือนงานใหม่แบบ realtime</td><td>เรื่อย ๆ ตลอดเวลาที่เชื่อมต่อ</td><td><code>Stream</code></td></tr>
+<tr><td>สถานะการเชื่อมต่อเน็ตเปลี่ยน</td><td>ทุกครั้งที่เปลี่ยน</td><td><code>Stream</code></td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Stream&lt;T&gt;</code></td><td>ลำดับของค่าชนิด <code>T</code> ที่ทยอยส่งออกมาตามเวลา</td></tr>
+<tr><td>event</td><td>ค่าหนึ่งค่าที่ถูกส่งออกมาจาก stream</td></tr>
+<tr><td>listen / subscribe</td><td>บอกว่า “ฉันจะฟัง stream นี้”</td></tr>
+<tr><td><code>StreamSubscription</code></td><td>ใบเสร็จของการฟัง ใช้ยกเลิกทีหลัง</td></tr>
+<tr><td><code>StreamController</code></td><td>เครื่องมือที่ให้เราเป็นคนป้อน event เอง</td></tr>
+<tr><td><code>async*</code> / <code>yield</code></td><td>รูปแบบเขียนฟังก์ชันที่ผลิต stream ทีละค่า</td></tr>
+<tr><td>broadcast</td><td>stream ที่มีผู้ฟังพร้อมกันได้หลายคน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สายพานกับกล่องพัสดุ</h2><p>ถ้า <code>Future</code> คือใบรับของหนึ่งใบ <code>Stream</code> ก็คือสายพานลำเลียง — ของทยอยไหลมาเรื่อย ๆ เราตั้งคนเฝ้าไว้หนึ่งคน และสายพานจะหยุดเมื่อเจ้าของสั่งปิด</p><table><thead><tr><th></th><th><code>Future&lt;T&gt;</code></th><th><code>Stream&lt;T&gt;</code></th></tr></thead><tbody>
+<tr><td>ให้ค่ากี่ครั้ง</td><td>หนึ่งครั้งเท่านั้น</td><td>ศูนย์ถึงไม่จำกัดครั้ง</td></tr>
+<tr><td>รับค่าด้วย</td><td><code>await</code></td><td><code>await for</code> หรือ <code>listen</code></td></tr>
+<tr><td>จบเมื่อ</td><td>ได้ค่าหรือได้ข้อผิดพลาด</td><td>ผู้ผลิตสั่งปิด หรือผู้ฟังยกเลิก</td></tr>
+<tr><td>ต้องคืนทรัพยากรไหม</td><td>ไม่ต้อง</td><td><strong>ต้อง</strong></td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุก stream มีสองความรับผิดชอบเสมอ — ใครสร้างต้องปิด ใครฟังต้องยกเลิก ถ้าลืมข้อใดข้อหนึ่ง จะเกิดหน่วยความจำรั่วหรือโค้ดทำงานซ้ำหลังผู้ใช้ออกจากหน้าจอไปแล้ว</div></section>
+
+<section><h2>4. สร้างและอ่าน stream</h2><pre class="code-vs"><code>Stream&lt;String&gt; scanFeed() async* {
+  for (final code in &lt;String&gt;['PAL-1001', 'PAL-1002', 'PAL-1003']) {
+    await Future&lt;void&gt;.delayed(const Duration(milliseconds: 120));
+    yield code;   // ส่งออกทีละตัว แล้วทำงานต่อ
   }
+}</code></pre><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+dart run tool/dart_foundation/d1_16_streams.dart</code></pre><pre class="code-vs"><code>await for (final code in scanFeed()) {
+  print('ได้รับ $code');
+}</code></pre><pre class="code-vs"><code>ได้รับ PAL-1001
+ได้รับ PAL-1002
+ได้รับ PAL-1003</code></pre><p>เทียบกับสิ่งที่เรารู้แล้ว: <code>async</code> คู่กับ <code>return</code> ให้ค่าเดียว ส่วน <code>async*</code> คู่กับ <code>yield</code> ให้ค่าหลายค่า และ <code>await for</code> คือ <code>for</code> ธรรมดาที่รอค่าถัดไปได้</p></section>
+
+<section><h2>5. แปลงและกรองก่อนถึงผู้ใช้</h2><pre class="code-vs"><code>final bigOnly = scanFeed()
+    .map((code) =&gt; code.replaceFirst('PAL-', ''))
+    .where((number) =&gt; int.parse(number) &gt;= 1002);</code></pre><p><code>map</code> และ <code>where</code> ทำงานเหมือนตอนใช้กับ <code>List</code> ใน D1.5 ทุกประการ ต่างกันแค่ข้อมูลมาทีละตัวตามเวลาแทนที่จะมีอยู่ครบตั้งแต่แรก</p><p>ตัวช่วยที่ใช้บ่อยเพิ่มเติมคือ <code>distinct()</code> ซึ่งกันค่าซ้ำ <strong>ที่ติดกัน</strong> — มีประโยชน์มากกับเครื่องสแกนที่บางรุ่นยิงซ้ำสองครั้งเมื่อกดค้าง แต่ต้องเข้าใจข้อจำกัด: มันไม่กันค่าที่เคยเจอเมื่อสิบนาทีก่อน ถ้าต้องกันทั้งกะต้องใช้ <code>Set</code> ตามที่ทำในแบบฝึกหัด D1.5</p></section>
+
+<section><h2>6. StreamController: เมื่อเราเป็นคนป้อนเอง</h2><pre class="code-vs"><code>final controller = StreamController&lt;String&gt;();
+
+final subscription = controller.stream.listen(
+  (event) =&gt; print('ผู้ฟังได้รับ: $event'),
+  onError: (Object error) =&gt; print('จับ error: $error'),
+  onDone: () =&gt; print('ปิด stream แล้ว'),
+);
+
+controller.add('เริ่มรอบตรวจนับ');
+await controller.close();       // ผู้สร้างปิด
+await subscription.cancel();    // ผู้ฟังยกเลิก</code></pre><p><code>listen</code> รับ callback ได้สามตัวตามที่เรียนใน D1.11 — ตัวแรกรับข้อมูล, <code>onError</code> รับข้อผิดพลาด, <code>onDone</code> ทำงานเมื่อ stream ปิด</p><p>สิ่งสำคัญคือ <strong>ข้อผิดพลาดใน stream ไม่ทำให้ stream จบ</strong> ถ้ามี <code>onError</code> ดักไว้ ข้อมูลตัวถัดไปจะยังส่งมาตามปกติ</p><pre class="code-vs"><code>ค่า: 1
+จับ error: เครื่องสแกนหลุด
+ค่า: 2</code></pre></section>
+
+<section><h2>7. ผู้ฟังคนเดียว หรือ หลายคน</h2><pre class="code-vs"><code>// แบบปกติ: ฟังได้คนเดียว
+final single = StreamController&lt;int&gt;();
+single.stream.listen(...);
+single.stream.listen(...);   // StateError: ถูกปฏิเสธ
+
+// แบบ broadcast: ฟังพร้อมกันได้หลายคน
+final bus = StreamController&lt;String&gt;.broadcast();
+bus.stream.listen((e) =&gt; print('หน้าจอรายการ: $e'));
+bus.stream.listen((e) =&gt; print('แถบแจ้งเตือน: $e'));</code></pre><table><thead><tr><th></th><th>ผู้ฟังคนเดียว (ค่าเริ่มต้น)</th><th>broadcast</th></tr></thead><tbody>
+<tr><td>จำนวนผู้ฟัง</td><td>หนึ่งคน</td><td>กี่คนก็ได้</td></tr>
+<tr><td>ค่าที่ส่งก่อนมีคนฟัง</td><td>เก็บไว้รอ</td><td><strong>หายไปเลย</strong></td></tr>
+<tr><td>เหมาะกับ</td><td>ข้อมูลที่ต้องประมวลผลครบทุกตัว เช่นอ่านไฟล์</td><td>เหตุการณ์ที่ใครสนใจก็มาฟัง เช่นแจ้งเตือน</td></tr>
+</tbody></table><div class="warn"><strong>อย่าเปลี่ยนเป็น broadcast เพียงเพื่อให้ error หายไป</strong> เมื่อเจอ <code>StateError: Stream has already been listened to</code> ให้ถามก่อนว่าทำไมถึงมีคนฟังสองคน — บ่อยครั้งคำตอบคือลืมยกเลิกการฟังครั้งก่อน ซึ่งการเปลี่ยนเป็น broadcast จะซ่อนปัญหาไว้แทนที่จะแก้ และทำให้ข้อมูลที่ส่งก่อนมีคนฟังหายไปโดยไม่มีใครรู้</div></section>
+
+<section><h2>8. ใครปิดอะไร</h2><table><thead><tr><th>บทบาท</th><th>ความรับผิดชอบ</th><th>ถ้าลืม</th></tr></thead><tbody>
+<tr><td>ผู้สร้าง <code>StreamController</code></td><td>เรียก <code>close()</code></td><td>ทรัพยากรค้าง และ <code>onDone</code> ไม่เคยทำงาน</td></tr>
+<tr><td>ผู้เรียก <code>listen()</code></td><td>เรียก <code>cancel()</code></td><td>callback ยังทำงานหลังผู้ใช้ออกจากหน้าจอ</td></tr>
+</tbody></table><p>ในแอป Flutter จริง อาการของการลืมยกเลิกจะปรากฏเป็น “กดย้อนกลับแล้วแอปพัง” หรือ “ข้อมูลของหน้าจอเก่าโผล่มาทับหน้าจอใหม่” ซึ่งเป็นบั๊กที่หาสาเหตุยาก เพราะเกิดเฉพาะตอนสลับหน้าจอเร็ว ๆ</p><p>ตอนนี้ยังไม่มีหน้าจอให้จัดการ แต่ให้ติดนิสัยตั้งแต่วันนี้ว่า <strong>ทุกครั้งที่พิมพ์ <code>.listen(</code> ให้คิดทันทีว่าจะ <code>cancel()</code> ที่ไหน</strong></p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Bad state: Stream has already been listened to</code></td><td>ฟัง stream แบบผู้ฟังคนเดียวซ้ำ</td><td>หาว่าใครฟังค้างไว้ แล้วยกเลิก — อย่ารีบเปลี่ยนเป็น broadcast</td></tr>
+<tr><td><code>Bad state: Cannot add event after closing</code></td><td>ส่งค่าเข้า controller ที่ปิดไปแล้ว</td><td>ตรวจ <code>isClosed</code> หรือแก้ลำดับการปิด</td></tr>
+<tr><td>event หายไปเฉย ๆ ใน broadcast</td><td>ส่งก่อนที่จะมีคนฟัง</td><td>ฟังให้เรียบร้อยก่อนเริ่มส่ง</td></tr>
+<tr><td>callback ทำงานหลังปิดหน้าจอไปแล้ว</td><td>ลืม <code>cancel()</code></td><td>เก็บ <code>StreamSubscription</code> ไว้แล้วยกเลิกเมื่อเลิกใช้</td></tr>
+<tr><td>ข้อผิดพลาดใน stream ทำให้แอปพังทั้งแอป</td><td>ไม่ได้ใส่ <code>onError</code></td><td>ใส่ <code>onError</code> ทุกครั้งที่ <code>listen</code></td></tr>
+<tr><td><code>distinct()</code> ไม่กันค่าซ้ำอย่างที่คิด</td><td>มันกันเฉพาะค่าซ้ำที่ติดกัน</td><td>ถ้าต้องกันทั้ง session ให้ใช้ <code>Set</code></td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>สร้าง <code>ScanBus</code> ที่จำลองเครื่องสแกนของ PDA โดย</p><ol><li>ให้หลายส่วนของแอปฟังพร้อมกันได้</li><li>ตัดช่องว่างและแปลงเป็นตัวพิมพ์ใหญ่ก่อนส่งออก</li><li>ไม่ส่งค่าว่างออกไป</li><li>ไม่ส่งค่าเดิมซ้ำติดกัน</li><li>มี <code>dispose()</code> สำหรับปิดให้เรียบร้อย</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>import 'dart:async';
+
+class ScanBus {
+  final _controller = StreamController&lt;String&gt;.broadcast();
+
+  Stream&lt;String&gt; get scans =&gt; _controller.stream
+      .map((raw) =&gt; raw.trim().toUpperCase())
+      .where((code) =&gt; code.isNotEmpty)
+      .distinct();
+
+  void emit(String raw) {
+    if (_controller.isClosed) return;
+    _controller.add(raw);
+  }
+
+  Future&lt;void&gt; dispose() =&gt; _controller.close();
 }
 
-late final StreamSubscription&lt;String&gt; subscription;
-subscription = normalizedScans(scanner.scans).listen(
-  onScan,
-  onError: onScannerError,
-);
-// await subscription.cancel(); เมื่อ owner จบ</code></pre></section>
-<section><h2>2. Single-subscription กับ broadcast</h2><p>single-subscription เหมาะกับลำดับข้อมูลที่ควรมี consumer เดียวและฟังย้อนหลังไม่ได้ ส่วน broadcast เหมาะกับ event ที่ผู้ฟังหลายรายเข้าร่วม/ออกได้ แต่คนมาทีหลังไม่เห็น event เก่า อย่าเปลี่ยนเป็น broadcast เพียงเพื่อแก้ “ถูกฟังสองครั้ง” โดยไม่เข้าใจ semantics</p></section>
-<section><h2>3. Controller และ ownership</h2><pre class="code-vs"><code>class FakeBarcodeSource implements BarcodeSource {
-  final _controller = StreamController&lt;String&gt;.broadcast();
-  @override Stream&lt;String&gt; get scans =&gt; _controller.stream;
-  void emit(String code) =&gt; _controller.add(code);
-  Future&lt;void&gt; dispose() =&gt; _controller.close();
-}</code></pre><p>ผู้สร้าง controller เป็นเจ้าของ close ส่วน subscriber เป็นเจ้าของ subscription/cancel การสลับหน้าจอโดยไม่ cancel ทำ callback ซ้ำและอาจแตะ State ที่ dispose แล้ว</p></section>
-<section><h2>4. Operators และ backpressure เชิงงาน</h2><p><code>map</code>, <code>where</code>, <code>distinct</code>, <code>asyncMap</code> ช่วยสร้าง pipeline แต่ scanner อาจส่งเร็วกว่าการเรียก API การใช้ <code>asyncMap</code> ไม่ได้แทน policy เสมอไป ต้องตัดสินใจว่าจะ queue, drop duplicate, ignore ระหว่าง busy หรือ cancel request เก่า</p></section>
-<section><h2>5. SignalR ใน wmsapp</h2><p><code>signalr_service.dart</code> ไม่ expose Dart Stream แต่เก็บ <code>List&lt;SignalRCallback&gt;</code> และ add/remove listener เอง Mental model ยังเหมือน stream: connection เป็น producer, screen subscribe ใน init, unsubscribe ใน dispose, event อาจซ้ำ/มาผิดลำดับ และ reconnect อาจทำ event หาย</p></section>
-<section><h2>6. StreamBuilder ใช้เมื่อใด</h2><p>ใช้เมื่อ UI derive จาก snapshot ของ stream โดยตรงและ lifecycle ผูกกับ widget ได้ แต่ business workflow ที่ต้อง merge event กับ command/state หลายชนิดควรให้ store/service subscribe แล้ว expose state ที่ตีความแล้ว ไม่ควรย้าย business rule ทั้งหมดเข้า builder</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ stream scan ให้ trim, ตัดค่าว่าง, กัน serial ซ้ำติดกัน และหยุดฟังเมื่อหน้าออก</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>subscription = scanner.scans
-    .map((x) =&gt; x.trim().toUpperCase())
-    .where((x) =&gt; x.isNotEmpty)
-    .distinct()
-    .listen(_submitScan);
+Future&lt;void&gt; main() async {
+  final bus = ScanBus();
 
-@override
-void dispose() {
-  subscription.cancel();
-  super.dispose();
-}</code></pre><p><code>distinct</code> กันเฉพาะค่าซ้ำติดกัน ถ้าต้องกันทั้ง session ต้องใช้ Set/domain rule</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าคิดว่า realtime event คือ authoritative state เสมอ Event อาจหายช่วง disconnect ให้ refresh จาก HTTP เมื่อ reconnect หรือเมื่อ sequence ไม่แน่ใจ</div></section>
+  final a = bus.scans.listen((code) =&gt; print('หน้าจอรายการ: $code'));
+  final b = bus.scans.listen((code) =&gt; print('ตัวนับ: $code'));
+
+  bus.emit(' pal-1001 ');
+  bus.emit('PAL-1001');    // ซ้ำติดกัน -&gt; ถูกตัด
+  bus.emit('   ');         // ว่าง -&gt; ถูกตัด
+  bus.emit('pal-1002');
+
+  await Future&lt;void&gt;.delayed(Duration.zero);
+  await a.cancel();
+  await b.cancel();
+  await bus.dispose();
+}</code></pre><pre class="code-vs"><code>หน้าจอรายการ: PAL-1001
+ตัวนับ: PAL-1001
+หน้าจอรายการ: PAL-1002
+ตัวนับ: PAL-1002</code></pre><p><strong>ทำไม <code>_controller</code> ต้อง private และเปิดเฉพาะ getter <code>scans</code>:</strong> ตามหลักจาก D1.7 — ถ้าเปิด controller ออกไปตรง ๆ ใครก็ปิดมันได้ หรือส่งค่าดิบที่ยังไม่ผ่านการกรองเข้ามาได้ การเปิดเฉพาะ <code>Stream</code> ทำให้คนนอกทำได้อย่างเดียวคือฟัง</p><p><strong>ทำไมต้องเป็น broadcast:</strong> เพราะโจทย์ข้อ 1 บอกว่าต้องมีหลายส่วนฟังพร้อมกัน ถ้าใช้แบบปกติ ผู้ฟังคนที่สองจะถูกปฏิเสธทันที</p><p><strong>จุดที่ต้องเข้าใจให้ลึก:</strong> <code>.distinct()</code> อยู่ใน getter จึงถูกสร้างใหม่ทุกครั้งที่มีคนเรียก <code>scans</code> แปลว่าผู้ฟังแต่ละคนมีตัวจำค่าล่าสุดของตัวเอง ในตัวอย่างนี้ผลออกมาเหมือนกันจึงไม่เห็นความต่าง แต่ถ้าผู้ฟังคนหนึ่งมาทีหลัง ค่าที่มันถือว่า “ซ้ำ” จะไม่ตรงกับอีกคน — ถ้าต้องการให้ทุกคนเห็นเหมือนกันเป๊ะ ต้องกรองก่อนเข้า controller แทน</p><p><strong>ทำไมต้อง <code>Future.delayed(Duration.zero)</code> ก่อนยกเลิก:</strong> เพราะ event ที่ <code>add</code> เข้าไปถูกส่งแบบไม่ทันที ถ้ายกเลิกทันทีจะไม่มีใครได้รับอะไรเลย — เป็นตัวอย่างของ “โลกเปลี่ยนไประหว่างที่เรารอ” จาก D1.15</p><p><strong>ลองต่อ:</strong> ย้าย <code>.map</code>, <code>.where</code>, <code>.distinct()</code> ไปทำก่อนเรียก <code>_controller.add</code> แทน แล้วเทียบว่าพฤติกรรมต่างกันอย่างไรเมื่อมีผู้ฟังเข้ามาทีหลัง</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>Future</code> ให้ค่าเดียว <code>Stream</code> ให้หลายค่าตามเวลา</li><li><code>async*</code> คู่กับ <code>yield</code> ใช้ผลิต stream ทีละค่า</li><li><code>map</code>/<code>where</code>/<code>distinct</code> ทำงานเหมือนกับที่ใช้บน collection</li><li>ข้อผิดพลาดใน stream ไม่ทำให้ stream จบ ถ้ามี <code>onError</code> ดักไว้</li><li>แบบผู้ฟังคนเดียวเป็นค่าเริ่มต้น ส่วน broadcast ทำให้ค่าที่ส่งก่อนมีคนฟังหายไป</li><li>ใครสร้างต้อง <code>close()</code> ใครฟังต้อง <code>cancel()</code></li><li><code>distinct()</code> กันเฉพาะค่าซ้ำที่ติดกัน</li></ul></div><p><strong>บทถัดไป:</strong> D1.17 จะจัดการปัญหาที่ <code>async</code> แก้ไม่ได้ นั่นคืองานที่กิน CPU จริง ๆ จนหน้าจอค้าง</p></section>
