@@ -1,21 +1,120 @@
-<div class="note"><code>Row</code> และ <code>Column</code> คือ Flex คนละทิศ: main axis อยู่ตามทิศวางลูก ส่วน cross axis ตั้งฉากกัน การอ่าน layout ให้เริ่มจากทิศ ไม่เริ่มจากชื่อ property</div>
-<section><h2>1. แผนที่แกน</h2><table><thead><tr><th>Widget</th><th>Main axis</th><th>Cross axis</th></tr></thead><tbody><tr><td>Row</td><td>ซ้าย→ขวา (ตาม text direction)</td><td>บน→ล่าง</td></tr><tr><td>Column</td><td>บน→ล่าง</td><td>ซ้าย→ขวา</td></tr></tbody></table><p><code>MainAxisAlignment</code> แจกพื้นที่ตามแนววางลูก; <code>CrossAxisAlignment</code> จัดลูกข้ามแนว การตั้ง stretch ต้องมี cross-axis constraint ที่ชัดเจน</p></section>
-<section><h2>2. Row สำหรับข้อมูลหนึ่งบรรทัด</h2><pre class="code-vs"><code>Row(children: [
-  const Icon(Icons.inventory_2),
-  const SizedBox(width: 8),
-  Expanded(child: Text(partName, overflow: TextOverflow.ellipsis)),
-  Text(quantity.toString()),
-])</code></pre><p>ข้อความกลางรับพื้นที่ที่เหลือผ่าน Expanded จึงเป็นผู้ยอมตัดก่อน quantity สำคัญทางขวา นี่คือการกำหนด priority ไม่ใช่แค่ตกแต่ง</p></section>
-<section><h2>3. Column สำหรับโครงหน้าจอ</h2><pre class="code-vs"><code>Column(
-  crossAxisAlignment: CrossAxisAlignment.stretch,
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เรียง widget เป็นแถวและเป็นคอลัมน์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (กฎสามข้อของ layout)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>Row</code> และ <code>Column</code> ได้คล่อง จัดตำแหน่งลูกในทั้งสองแกน และรู้ว่าทำไม <code>spaceBetween</code> ไม่ได้ป้องกันเนื้อหาล้น</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p><code>Row</code> และ <code>Column</code> คือสอง widget ที่ใช้บ่อยที่สุดในทุกหน้าจอ และก็เป็นต้นเหตุของแถบสีเหลืองดำเกือบทุกครั้งเช่นกัน</p><p>ปัญหาหลักคือ property ของทั้งคู่มีชื่อว่า <code>mainAxisAlignment</code> และ <code>crossAxisAlignment</code> ซึ่งไม่ได้บอกตรง ๆ ว่าเป็นแนวตั้งหรือแนวนอน ทำให้เดาผิดกันบ่อย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>main axis</td><td>แกนที่ลูกเรียงตาม</td></tr>
+<tr><td>cross axis</td><td>แกนที่ตั้งฉากกับแกนหลัก</td></tr>
+<tr><td>flex</td><td>ความสามารถในการยืดหดตามพื้นที่ที่มี</td></tr>
+<tr><td><code>mainAxisSize</code></td><td>ตัวเองจะกินพื้นที่เต็มแกนหลักหรือแค่พอดีลูก</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: จำแค่ทิศที่ลูกเรียงตาม</h2><table><thead><tr><th></th><th><code>Row</code></th><th><code>Column</code></th></tr></thead><tbody>
+<tr><td>ลูกเรียงตาม</td><td>แนวนอน ซ้ายไปขวา</td><td>แนวตั้ง บนลงล่าง</td></tr>
+<tr><td>main axis คือ</td><td>แนวนอน</td><td>แนวตั้ง</td></tr>
+<tr><td>cross axis คือ</td><td>แนวตั้ง</td><td>แนวนอน</td></tr>
+<tr><td><code>mainAxisAlignment</code> จัด</td><td>ซ้าย/กลาง/ขวา</td><td>บน/กลาง/ล่าง</td></tr>
+<tr><td><code>crossAxisAlignment</code> จัด</td><td>บน/กลาง/ล่าง</td><td>ซ้าย/กลาง/ขวา</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> main axis คือทิศที่ลูก <em>เรียงตาม</em> เสมอ — ถ้าจำข้อนี้ได้ ที่เหลืออนุมานเองได้หมด ไม่ต้องท่อง</div></section>
+
+<section><h2>4. Row: ข้อมูลหนึ่งบรรทัด</h2><p>ดูตัวอย่างจาก lab <code>layout_basics_app.dart</code></p><pre class="code-vs"><code>Row(
   children: [
-    const ScanHeader(),
-    Expanded(child: ResultList()),
-    const ConfirmButton(),
+    Stack(...),                              // ไอคอน ขนาดคงที่
+    const SizedBox(width: 12),               // ระยะห่าง
+    Expanded(                                // ยอมยืดหด
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(line.palletCode),
+          Text(line.productName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    ),
+    const SizedBox(width: 8),
+    Text('${line.quantity}'),                // จำนวน ขนาดตามเนื้อหา
   ],
-)</code></pre><p>Header และปุ่มใช้ intrinsic/fixed height; list เป็น flex child กินพื้นที่ที่เหลือ CrossAxis stretch ทำให้ลูกที่ยอมรับ constraint เต็มความกว้าง</p></section>
-<section><h2>4. mainAxisSize และพื้นที่ขั้นต่ำ</h2><p><code>MainAxisSize.max</code> พยายามใช้ main-axis สูงสุดที่ bounded; <code>min</code> หดเท่าผลรวมลูก เหมาะกับ dialog/card แต่ถ้า parent ส่ง main-axis tight ค่า min ไม่สามารถฝ่าฝืน constraint ได้ อย่าสับสนว่า min ทำให้ widget เล็กเสมอ</p></section>
-<section><h2>5. Baseline และข้อความหลายภาษา</h2><p>การจัด <code>CrossAxisAlignment.center</code> ไม่เท่ากับ baseline ของตัวอักษร ถ้าต้องจัด text ต่าง font size บนฐานเดียว ใช้ baseline พร้อม <code>textBaseline</code> แต่ UI ไทย/อังกฤษหลายบรรทัดมักปลอดภัยกว่าด้วย start + explicit line height และทดสอบข้อความจริง</p></section>
-<section><h2>6. จากสอง WMS</h2><p>wmsapp ใช้ Row + Expanded เป็นคู่การ์ดหน้า Home ทำให้แต่ละใบกว้างเท่ากัน แต่ชื่อยาวอาจทำความสูงไม่เท่ากันจึงครอบ <code>IntrinsicHeight</code> ซึ่งมี cost เพิ่ม ส่วน Absolute ใช้ Row ใน summary โดยซ่อน status เมื่อ <code>narrow</code> และให้ label เป็น Expanded เพื่อรักษาค่าตัวเลขทางขวา</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Header มีชื่อคลังยาว, connection chip และปุ่ม logout บน PDA กว้าง 320 ควรกำหนดลำดับการยอมเสียพื้นที่อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ให้ชื่อคลังอยู่ Expanded + maxLines 1 + ellipsis, chip จำกัดขนาด/ใช้ icon เมื่อ narrow, logout มี touch target คงที่ ใช้ SizedBox gap ที่ชัด ไม่ใช้ <code>spaceBetween</code> เป็นตัวแก้ชื่อยาวเพราะมันไม่จำกัด child</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn"><code>mainAxisAlignment: spaceBetween</code> ไม่ได้ป้องกัน overflow มันแจกเฉพาะพื้นที่ “ที่เหลือหลังวัดลูก” ถ้าผลรวมลูกใหญ่กว่า Row ก็ยังล้น ต้องทำให้ child ที่ยืดหยุ่นได้รับ bounded width ด้วย Expanded/Flexible</div></section>
+)</code></pre><p>สังเกตว่าเราตัดสินใจเรื่อง <strong>ลำดับความสำคัญ</strong> ไปแล้วในโค้ดนี้ — ไอคอนกับจำนวนได้ขนาดที่ต้องการเสมอ ส่วนชื่อสินค้าเป็นตัวที่ยอมหดและตัดข้อความเมื่อพื้นที่ไม่พอ</p><p>นี่ไม่ใช่แค่การจัดหน้าให้สวย แต่เป็นการตัดสินใจเชิงธุรกิจ: บนหน้าจอรับเข้าสินค้า พนักงานต้องเห็น <em>จำนวน</em> ครบถ้วนเสมอ ส่วนชื่อสินค้าที่ยาวเกินอ่านไม่ครบก็ยังทำงานได้</p></section>
+
+<section><h2>5. Column: โครงของหน้าจอ</h2><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,   // ลูกกว้างเต็ม
+  children: [
+    SummaryBar(...),                 // สูงตามเนื้อหา
+    const SizedBox(height: 12),
+    Expanded(child: ListView.builder(...)),   // กินที่เหลือ
+  ],
+)</code></pre><p><code>CrossAxisAlignment.stretch</code> ใน <code>Column</code> แปลว่า “ให้ลูกกว้างเต็มพื้นที่” ซึ่งเป็นสิ่งที่ต้องการเกือบทุกครั้งสำหรับโครงหน้าจอ เพราะไม่ต้องไปห่อ <code>SizedBox(width: double.infinity)</code> ทีละตัว</p></section>
+
+<section><h2>6. mainAxisAlignment แจกเฉพาะพื้นที่ที่เหลือ</h2><table><thead><tr><th>ค่า</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>start</code></td><td>ชิดต้นแกน (ค่าเริ่มต้น)</td></tr>
+<tr><td><code>center</code></td><td>อยู่กลาง</td></tr>
+<tr><td><code>end</code></td><td>ชิดท้ายแกน</td></tr>
+<tr><td><code>spaceBetween</code></td><td>ตัวแรกชิดต้น ตัวท้ายชิดท้าย ที่เหลือแบ่งช่องว่างเท่ากัน</td></tr>
+<tr><td><code>spaceAround</code></td><td>แบ่งช่องว่างรอบแต่ละตัว</td></tr>
+<tr><td><code>spaceEvenly</code></td><td>ช่องว่างทุกช่องเท่ากันหมด</td></tr>
+</tbody></table><div class="warn"><strong>ความเข้าใจผิดที่ทำให้เสียเวลามากที่สุดในบทนี้:</strong> <code>spaceBetween</code> ไม่ได้ป้องกันเนื้อหาล้น — มันแจกเฉพาะ “พื้นที่ที่เหลือหลังวัดลูกครบแล้ว” ถ้าผลรวมของลูกใหญ่กว่าพื้นที่ตั้งแต่ต้น ก็ไม่มีอะไรให้แจก และยังล้นเหมือนเดิม</div><p>ทางแก้ที่ถูกคือทำให้ลูกที่ยืดได้ <strong>ได้รับขอบเขต</strong> ผ่าน <code>Expanded</code> หรือ <code>Flexible</code> ซึ่งเป็นเรื่องของบทหน้า</p><p>ใน lab มีการใช้ <code>Spacer()</code> ซึ่งคือ <code>Expanded</code> ที่ว่างเปล่า ใช้ดันของไปคนละฝั่ง</p><pre class="code-vs"><code>Row(
+  children: [
+    Chip(label: Text(line.location)),
+    const Spacer(),                    // ดันปุ่มไปขวาสุด
+    FilledButton(onPressed: () {}, child: const Text('ยืนยัน')),
+  ],
+)</code></pre></section>
+
+<section><h2>7. mainAxisSize: กินเต็มหรือพอดีลูก</h2><pre class="code-vs"><code>Column(
+  mainAxisSize: MainAxisSize.min,   // สูงแค่พอดีลูก
+  children: [...],
+)</code></pre><table><thead><tr><th>ค่า</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>max</code> (ค่าเริ่มต้น)</td><td>เป็นโครงของหน้าจอ ต้องการเต็มพื้นที่</td></tr>
+<tr><td><code>min</code></td><td>อยู่ในกล่องโต้ตอบหรือการ์ด ที่ควรหดตามเนื้อหา</td></tr>
+</tbody></table><p>ข้อควรจำ: <code>min</code> ไม่ได้ทำให้เล็กลงเสมอ ถ้าแม่ส่ง tight constraint มา (ตาม 2.1) ค่านี้จะไม่มีผลเลย เพราะลูกไม่มีสิทธิ์เลือกขนาด</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ใส่ <code>spaceBetween</code> แล้วยังล้น</td><td>เข้าใจว่ามันบีบลูกให้เล็กลง</td><td>ห่อลูกที่ยืดได้ด้วย <code>Expanded</code></td></tr>
+<tr><td>ข้อความยาวทำให้ทั้งแถวล้น</td><td>ข้อความไม่มีขอบเขต จึงกว้างตามเนื้อหา</td><td>ห่อ <code>Expanded</code> + <code>overflow: TextOverflow.ellipsis</code></td></tr>
+<tr><td><code>CrossAxisAlignment.stretch</code> ไม่ยืด</td><td>แกนขวางไม่มีขอบเขต</td><td>ทำให้แม่มีขอบเขตก่อน (2.1)</td></tr>
+<tr><td>ใส่ <code>mainAxisSize: min</code> แล้วไม่หด</td><td>แม่ส่ง tight constraint</td><td>ไปแก้ที่แม่</td></tr>
+<tr><td>ใช้ <code>Row</code> ใน <code>Row</code> แล้วงงว่าแกนไหนคือแกนไหน</td><td>สับสนระหว่างชั้น</td><td>อ่านทีละชั้น ถามว่าลูกของชั้นนี้เรียงทิศไหน</td></tr>
+<tr><td>ใส่ <code>Expanded</code> ใน <code>Column</code> ที่อยู่ในที่เลื่อนได้</td><td>ไม่มีขอบเขตให้แบ่ง</td><td>ดู 2.1 หัวข้อ 5</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>สร้างแถบหัวข้อของหน้าจอ PDA ความกว้าง 320 ที่มีสามส่วนในแถวเดียว</p><ul><li>ชื่อคลัง ซึ่งอาจยาวมาก เช่น “ศูนย์กระจายสินค้าบางนา อาคาร 3 โซนเย็น”</li><li>ป้ายสถานะการเชื่อมต่อ</li><li>ปุ่มออกจากระบบ ที่ต้องกดได้เสมอ</li></ul><ol><li>เขียนโค้ด และระบุว่าใครยอมเสียพื้นที่ก่อน</li><li>อธิบายว่าทำไมใช้ <code>spaceBetween</code> อย่างเดียวไม่พอ</li><li>บอกว่าถ้าจอแคบกว่านี้อีก ควรตัดอะไรออกก่อน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>Row(
+  children: [
+    // ยอมเสียพื้นที่ก่อน — ตัดข้อความเมื่อไม่พอ
+    Expanded(
+      child: Text(
+        warehouseName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+    ),
+    const SizedBox(width: 8),
+
+    // ขนาดตามเนื้อหา แต่จำกัดไม่ให้ยาวเกินไป
+    ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 90),
+      child: Chip(
+        label: Text(online ? 'ออนไลน์' : 'ออฟไลน์', overflow: TextOverflow.ellipsis),
+        visualDensity: VisualDensity.compact,
+      ),
+    ),
+    const SizedBox(width: 8),
+
+    // ได้ขนาดที่ต้องการเสมอ กดได้ด้วยมือที่ใส่ถุงมือ
+    SizedBox(
+      width: 48,
+      height: 48,
+      child: IconButton(
+        onPressed: onLogout,
+        icon: const Icon(Icons.logout),
+        tooltip: 'ออกจากระบบ',
+      ),
+    ),
+  ],
+)</code></pre><p><strong>ลำดับการยอมเสียพื้นที่</strong></p><table><thead><tr><th>ลำดับ</th><th>ใคร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ยอมก่อน</td><td>ชื่อคลัง</td><td>อ่านไม่ครบก็ยังทำงานได้ และผู้ใช้รู้อยู่แล้วว่าตัวเองอยู่คลังไหน</td></tr>
+<tr><td>ยอมทีหลัง</td><td>ป้ายสถานะ</td><td>มีขนาดจำกัดไว้ ไม่โตเกินควบคุม</td></tr>
+<tr><td>ไม่ยอมเลย</td><td>ปุ่มออกจากระบบ</td><td>ถ้ากดไม่ได้ ผู้ใช้ติดอยู่ในระบบ</td></tr>
+</tbody></table><p><strong>ข้อ 2 — ทำไม <code>spaceBetween</code> ไม่พอ</strong></p><p>เพราะชื่อคลังยาว ๆ จะกว้างตามเนื้อหาของมันเอง เมื่อรวมกับป้ายและปุ่มแล้วเกิน 320 ก็ไม่มี “พื้นที่ที่เหลือ” ให้ <code>spaceBetween</code> แจกตั้งแต่ต้น ผลคือได้แถบเหลืองดำเหมือนเดิม — <code>Expanded</code> ต่างออกไปเพราะมันบังคับให้ชื่อคลังรับขอบเขตที่แคบลงจริง ๆ แล้ว <code>ellipsis</code> จึงทำงานได้</p><p><strong>ข้อ 3 — ถ้าจอแคบกว่านี้อีก</strong></p><p>ตัดตามลำดับความสำคัญที่ต่ำสุดก่อน: เปลี่ยนป้ายสถานะจากข้อความเป็นไอคอนจุดสีเล็ก ๆ ซึ่งสื่อความหมายเดิมแต่กินพื้นที่น้อยกว่ามาก และห้ามตัดปุ่มออกจากระบบหรือย่อให้เล็กกว่า 48 เด็ดขาด เพราะบน PDA ที่ผู้ใช้ใส่ถุงมือ ปุ่มที่เล็กกว่านั้นกดไม่โดน — เรื่องนี้จะลงลึกใน 2.13</p><p><strong>จุดที่คนมักพลาด:</strong> ใช้ <code>Flexible</code> กับทั้งสามตัวเพื่อ “ให้มันจัดการเอง” ผลคือปุ่มถูกบีบจนเล็กเกินกดบนจอแคบ — การตัดสินใจว่าใครยอมเสียพื้นที่ก่อนเป็นหน้าที่ของเรา ไม่ใช่ของเฟรมเวิร์ก</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ตั้งความกว้างจอเป็น 320 แล้วตรวจว่าปุ่มยังสูง 48 และไม่มี exception เกิดขึ้น — ดูรูปแบบได้จาก <code>test/layout_basics_test.dart</code></p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>main axis คือทิศที่ลูกเรียงตาม — จำข้อนี้ข้อเดียวพอ</li><li><code>Row</code> เรียงแนวนอน <code>Column</code> เรียงแนวตั้ง</li><li><code>mainAxisAlignment</code> แจกเฉพาะพื้นที่ที่เหลือ ไม่ได้บีบลูก</li><li><code>spaceBetween</code> ไม่ป้องกันเนื้อหาล้น</li><li><code>CrossAxisAlignment.stretch</code> ทำให้ลูกกว้างเต็มใน <code>Column</code></li><li><code>Spacer()</code> คือ <code>Expanded</code> ที่ว่างเปล่า ใช้ดันของไปคนละฝั่ง</li><li>ตัดสินใจล่วงหน้าว่าใครยอมเสียพื้นที่ก่อนเมื่อจอแคบ</li></ul></div><p><strong>บทถัดไป:</strong> 2.3 จะลงลึกที่ <code>Expanded</code>, <code>Flexible</code> และ <code>Spacer</code> ซึ่งเป็นเครื่องมือหลักในการควบคุมว่าใครได้พื้นที่เท่าไร</p></section>

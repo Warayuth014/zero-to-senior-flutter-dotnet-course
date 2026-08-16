@@ -4,31 +4,84 @@
 <title>Flutter Constraints</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-01 · Flutter UI</span><h1>Flutter Constraints</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">BoxConstraints บอกช่วง ไม่ใช่ขนาดตายตัว</a></li><li><a href="#section-2">Constraints go down, sizes go up, parents set positions</a></li><li><a href="#section-3">ตัวอย่างจาก HomeView</a></li><li><a href="#section-4">Tight กับ loose ที่พบบ่อย</a></li><li><a href="#section-5">Unbounded ไม่ใช่ infinity ทุกทิศ</a></li><li><a href="#section-6">วิธี debug constraints</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><strong>กฎแกนกลางของ Flutter layout:</strong> parent ส่ง <em>constraints</em> ลงไป, child เลือกขนาดภายในกรอบนั้น, แล้ว parent เลือกตำแหน่งให้ child หากเข้าใจกฎนี้จะวิเคราะห์ overflow, unbounded size และหน้าจอ PDA ที่ผิดสัดส่วนได้โดยไม่เดาสุ่ม</div>
-<section id="section-1"><h2>1. BoxConstraints บอกช่วง ไม่ใช่ขนาดตายตัว</h2><pre class="code-vs"><code>BoxConstraints(
-  minWidth: 0,
-  maxWidth: 360,
-  minHeight: 0,
-  maxHeight: 640,
-)</code></pre><p>Child เลือกได้เฉพาะขนาดที่อยู่ในช่วง min–max ถ้า min เท่ากับ max เรียกว่า tight constraint; ถ้ายังมีช่วงให้เลือกเรียกว่า loose constraint ค่า <code>double.infinity</code> ใน child ไม่ได้แปลว่าใหญ่ไม่สิ้นสุด แต่แปลว่าเอา max ที่ parent อนุญาต</p></section>
-<section id="section-2"><h2>2. Constraints go down, sizes go up, parents set positions</h2><ol><li>Scaffold/viewport กำหนดพื้นที่ให้ body</li><li>Column ส่ง constraint ให้ลูกแต่ละตัว</li><li>ลูกคำนวณและส่ง size กลับ</li><li>Column รวม size แล้วจัดตำแหน่งตาม main/cross axis</li></ol><p>Layout เป็นคนละ phase กับ build: build สร้าง configuration tree ส่วน layout เจรจาขนาดบน render tree จึงแก้ layout bug ด้วยการดู parent chain ไม่ใช่เพิ่ม Container แบบสุ่ม</p></section>
-<section id="section-3"><h2>3. ตัวอย่างจาก HomeView</h2><pre class="code-vs"><code>LayoutBuilder(
-  builder: (context, page) {
-    final compact = page.maxHeight &lt; 650;
-    final narrow = page.maxWidth &lt;= 400;
-    return WarehouseHome(compact: compact, narrow: narrow);
-  },
-)</code></pre><p>Absolute ใช้พื้นที่ที่ parent ส่งให้จริง ไม่ใช่ขนาดจอทั้งเครื่อง จากนั้น LayoutBuilder ชั้นในคำนวณ <code>extent = (maxHeight - gaps) / 3</code> ทำให้กริดพอดีสามแถวในพื้นที่ที่เหลือหลัง banner</p></section>
-<section id="section-4"><h2>4. Tight กับ loose ที่พบบ่อย</h2><ul><li><code>SizedBox(width: 48)</code> ส่ง tight width ให้ลูก</li><li><code>Center</code> คลาย constraint ให้ลูกเลือกขนาด แล้วจัดกลาง</li><li><code>Expanded</code> ส่ง tight constraint ตามพื้นที่ flex ที่ได้รับ</li><li><code>Flexible(fit: FlexFit.loose)</code> ให้พื้นที่สูงสุดแต่ child ไม่จำเป็นต้องใช้หมด</li><li><code>ConstrainedBox</code> เพิ่ม/ผสานข้อจำกัดกับของ parent</li></ul></section>
-<section id="section-5"><h2>5. Unbounded ไม่ใช่ infinity ทุกทิศ</h2><p>Scrollable มักส่ง main-axis แบบไม่จำกัดให้ลูก เช่น Column ใน vertical SingleChildScrollView ไม่มี maxHeight ที่ใช้ได้ จึงห้ามวาง Expanded ในนั้นโดยตรง เพราะ Expanded ต้องแบ่ง “พื้นที่ที่เหลือ” แต่พื้นที่เลื่อนไม่มีปลายทาง ส่วน cross-axis ยังอาจถูกบังคับเต็มความกว้างตาม viewport</p></section>
-<section id="section-6"><h2>6. วิธี debug constraints</h2><p>เริ่มจากข้อความ exception และ widget ที่เป็น nearest relevant ancestor เปิด Flutter Inspector ดู constraints/size แล้วไล่ขึ้นจนพบจุดที่ constraint เปลี่ยน ใช้ <code>debugPrintConstraints</code> ผ่าน LayoutBuilder ชั่วคราวหรือ DevTools Layout Explorer และทดสอบอย่างน้อยจอ 320×568, PDA เป้าหมาย, tablet และ text scale สูง</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Column สูงเต็มจอมี header 72, action 56 และ list ที่ต้องกินพื้นที่ที่เหลือ ควรประกอบอย่างไร?</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>Column(children: [
-  const Header(),
-  const SizedBox(height: 8),
-  Expanded(child: ListView.builder(/* ... */)),
-  const ActionBar(),
-])</code></pre><p>Expanded ทำให้ list ได้ bounded height ที่เหลือและเลื่อนภายในตัวเอง ไม่ต้องคำนวณ MediaQuery height ลบเลข magic หลายชุด</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ overflow ด้วย <code>SingleChildScrollView</code> ครอบทุกอย่างทันที มันอาจซ่อนปัญหา ownership ของพื้นที่, ทำ list ซ้อน scroll และสร้าง child ทั้งหมด ให้ระบุว่าอะไรต้องตรึง อะไรต้องยืด และอะไรต้องเลื่อนก่อนเลือก widget</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กฎสามข้อที่อธิบายทุกอย่าง</a></li><li><a href="#section-4">tight กับ loose</a></li><li><a href="#section-5">unbounded: ที่มาของ error ที่งงที่สุด</a></li><li><a href="#section-6">ดูของจริงใน lab</a></li><li><a href="#section-7">วิธีไล่หาสาเหตุอย่างเป็นระบบ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: เข้าใจกฎเดียวที่อธิบาย layout ทั้งหมด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 1 ทั้งหมด โดยเฉพาะ 1.3 (Widget/Element/RenderObject และความต่างระหว่าง build กับ layout)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายได้ว่า Flutter ตัดสินขนาดของ widget อย่างไร และวิเคราะห์ปัญหา layout ได้โดยไม่ต้องลองสุ่มไปเรื่อย ๆ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน Part 1 เราไม่เคยกำหนดขนาดอะไรเลย ปล่อยให้ Flutter จัดการ พอเริ่มทำหน้าจอจริงจะเจอสองอาการทันที</p><ul><li>แถบสีเหลืองดำพาดหน้าจอพร้อมข้อความ <code>RenderFlex overflowed by 42 pixels</code></li><li>ข้อความว่า <code>Vertical viewport was given unbounded height</code></li></ul><p>ทั้งสองมาจากกฎเดียวกัน และเมื่อเข้าใจกฎนี้แล้ว ปัญหา layout ทั้งหมดใน Part นี้จะกลายเป็นเรื่องที่วิเคราะห์ได้ ไม่ใช่เรื่องที่ต้องเดา</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>constraint</td><td>ข้อจำกัดที่แม่บอกลูกว่า “เธอมีขนาดได้ในช่วงนี้”</td></tr>
+<tr><td>size</td><td>ขนาดที่ลูกเลือกจริง</td></tr>
+<tr><td>tight</td><td>ช่วงที่บีบจนเหลือค่าเดียว — ลูกไม่มีทางเลือก</td></tr>
+<tr><td>loose</td><td>ช่วงที่ยังเลือกได้ — ลูกจะเล็กกว่าก็ได้</td></tr>
+<tr><td>unbounded</td><td>ไม่มีขีดจำกัดด้านนั้น เช่นในพื้นที่ที่เลื่อนได้</td></tr>
+<tr><td>overflow</td><td>ลูกใหญ่เกินพื้นที่ที่แม่มีให้</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กฎสามข้อที่อธิบายทุกอย่าง</h2><div class="note"><strong>จำสามประโยคนี้ให้ขึ้นใจ</strong><ol><li><strong>ข้อจำกัดไหลลง</strong> — แม่บอกลูกว่ามีพื้นที่ได้เท่าไร</li><li><strong>ขนาดไหลขึ้น</strong> — ลูกเลือกขนาดของตัวเองแล้วบอกกลับ</li><li><strong>แม่เป็นคนวางตำแหน่ง</strong> — ลูกไม่มีสิทธิ์เลือกว่าตัวเองอยู่ตรงไหน</li></ol></div><p>เปรียบเทียบกับการจัดของในคลัง: หัวหน้าบอกว่า “ชั้นนี้กว้างไม่เกิน 2 เมตร” (ข้อจำกัดไหลลง) พนักงานจัดของแล้วรายงานว่าใช้ไป 1.5 เมตร (ขนาดไหลขึ้น) จากนั้นหัวหน้าตัดสินว่าจะวางกองนี้ชิดซ้ายหรือกลาง (แม่วางตำแหน่ง)</p><p>ผลที่ตามมาซึ่งสำคัญมาก: <strong>widget ไม่มีทางรู้ว่าตัวเองอยู่ตรงไหนบนหน้าจอ</strong> และไม่มีทางบังคับให้ตัวเองใหญ่เกินที่แม่อนุญาต ถ้าอยากเปลี่ยนขนาด ต้องไปแก้ที่แม่ ไม่ใช่ที่ตัวมันเอง</p></section>
+
+<section id="section-4"><h2>4. tight กับ loose</h2><pre class="code-vs"><code>BoxConstraints(
+  minWidth: 0,     maxWidth: 360,     // loose — เลือกได้ 0 ถึง 360
+  minHeight: 100,  maxHeight: 100,    // tight — ต้องเป็น 100 เท่านั้น
+)</code></pre><table><thead><tr><th>widget</th><th>ส่งข้อจำกัดแบบไหนให้ลูก</th></tr></thead><tbody>
+<tr><td><code>SizedBox(width: 48, height: 48)</code></td><td>tight ทั้งสองด้าน — ลูกต้องเป็น 48×48</td></tr>
+<tr><td><code>Center</code></td><td>loose — ลูกจะเล็กแค่ไหนก็ได้ แล้วจัดกลางให้</td></tr>
+<tr><td><code>Expanded</code></td><td>tight ตามพื้นที่ที่เหลือ</td></tr>
+<tr><td><code>Padding</code></td><td>ส่งต่อของแม่ แต่หักระยะขอบออก</td></tr>
+<tr><td><code>ConstrainedBox</code></td><td>เพิ่มข้อจำกัดของตัวเองเข้าไปผสม</td></tr>
+</tbody></table><p>นี่อธิบายเรื่องที่คนใหม่งงบ่อยที่สุด — ทำไมใส่ <code>width</code> ให้ <code>Container</code> แล้วบางทีไม่มีผล คำตอบคือถ้าแม่ส่ง tight constraint มา <code>Container</code> ไม่มีสิทธิ์เลือกขนาดเอง ค่าที่เราใส่จึงถูกละเลย</p></section>
+
+<section id="section-5"><h2>5. unbounded: ที่มาของ error ที่งงที่สุด</h2><p>พื้นที่ที่เลื่อนได้ (เช่น <code>ListView</code>) ส่งข้อจำกัดแบบ “ไม่จำกัด” ในทิศที่เลื่อน เพราะเนื้อหาจะยาวเท่าไรก็ได้</p><pre class="code-vs"><code>SingleChildScrollView(
+  child: Column(
+    children: [
+      Expanded(child: Text('...')),   // พังทันที
+    ],
+  ),
+)</code></pre><p><strong>เหตุผล:</strong> <code>Expanded</code> แปลว่า “ขอพื้นที่ที่เหลือทั้งหมด” แต่ในพื้นที่ที่เลื่อนได้ ความสูงไม่มีปลายทาง จึงไม่มี “ที่เหลือ” ให้คำนวณ Flutter จึงโยน error แทนที่จะเดาให้</p><table><thead><tr><th>ข้อความ error</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td><code>Vertical viewport was given unbounded height</code></td><td>เอาสิ่งที่เลื่อนได้ไปใส่ในที่ที่ความสูงไม่จำกัด</td></tr>
+<tr><td><code>RenderFlex children have non-zero flex but incoming height constraints are unbounded</code></td><td>ใช้ <code>Expanded</code> ในที่ที่ไม่มีขอบเขต</td></tr>
+</tbody></table><p>ทางแก้คือทำให้มีขอบเขต — ครอบด้วย <code>Expanded</code> หรือ <code>SizedBox</code> ที่ระบุความสูง หรือใช้ <code>ListView</code> ตัวเดียวแทนการซ้อนกัน</p></section>
+
+<section id="section-6"><h2>6. ดูของจริงใน lab</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter run -d chrome -t lib/layout_basics/layout_basics_app.dart</code></pre><p>เปิด <code>lib/layout_basics/layout_basics_app.dart</code> แล้วดูโครงหลัก</p><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    SummaryBar(...),                    // สูงเท่าที่เนื้อหาต้องการ
+    const SizedBox(height: 12),         // ระยะห่างคงที่
+    Expanded(                           // กินพื้นที่ที่เหลือทั้งหมด
+      child: ListView.builder(...),
+    ),
+  ],
+)</code></pre><p>อ่านตามกฎสามข้อ: <code>Column</code> วัดลูกสองตัวแรกก่อน (แถบสรุปกับช่องว่าง) แล้วจึงรู้ว่าเหลือพื้นที่เท่าไร จากนั้นส่ง tight constraint ตามพื้นที่ที่เหลือให้ <code>Expanded</code> — ซึ่งทำให้ <code>ListView</code> ได้ความสูงที่แน่นอนและเลื่อนภายในตัวเองได้</p><div class="warn">ถ้าลบ <code>Expanded</code> ออก จะได้ error <code>unbounded height</code> ทันที เพราะ <code>Column</code> ในทิศแนวตั้งไม่ได้จำกัดความสูงให้ลูกโดยอัตโนมัติ ลองทำดูเพื่อเห็นด้วยตา</div></section>
+
+<section id="section-7"><h2>7. วิธีไล่หาสาเหตุอย่างเป็นระบบ</h2><ol><li><strong>อ่านชื่อ widget ในข้อความ error</strong> — Flutter บอกตัวที่มีปัญหาและตัวที่เกี่ยวข้องมาให้</li><li><strong>ถามว่าใครเป็นคนกำหนดขนาด</strong> ไล่ขึ้นไปตามสายแม่จนเจอตัวที่ตัดสิน</li><li><strong>ถามว่าอะไรควรตรึง อะไรควรยืด อะไรควรเลื่อน</strong> ตอบสามข้อนี้ก่อนแล้วค่อยเลือก widget</li><li><strong>ทดสอบบนขนาดที่แคบที่สุดที่ต้องรองรับ</strong> ไม่ใช่บนหน้าต่างเบราว์เซอร์กว้าง ๆ</li></ol><div class="warn"><strong>สิ่งที่ไม่ควรทำเป็นทางแก้แรก:</strong> ครอบทุกอย่างด้วย <code>SingleChildScrollView</code> เพื่อให้แถบเหลืองหายไป — มันซ่อนปัญหาว่าใครควรเป็นเจ้าของพื้นที่ และทำให้เกิดพื้นที่เลื่อนซ้อนกันซึ่งใช้งานยากมากบน PDA</div></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>RenderFlex overflowed by N pixels</code></td><td>ผลรวมลูกใหญ่กว่าพื้นที่</td><td>ให้ลูกที่ยืดได้ห่อด้วย <code>Expanded</code> (2.3)</td></tr>
+<tr><td><code>Vertical viewport was given unbounded height</code></td><td>ที่เลื่อนได้อยู่ในที่ที่ไม่มีขอบเขต</td><td>ครอบด้วย <code>Expanded</code> หรือกำหนดความสูง</td></tr>
+<tr><td>ใส่ <code>width</code> ให้ <code>Container</code> แล้วไม่มีผล</td><td>แม่ส่ง tight constraint มา</td><td>ไปแก้ที่แม่ หรือใช้ <code>Align</code>/<code>Center</code> คั่น</td></tr>
+<tr><td><code>CrossAxisAlignment.stretch</code> แล้วไม่ยืด</td><td>ไม่มีขอบเขตในแกนขวาง</td><td>ทำให้แกนขวางมีขอบเขตก่อน</td></tr>
+<tr><td>ทำงานดีบนเบราว์เซอร์ แต่ล้นบน PDA</td><td>ทดสอบบนจอกว้างอย่างเดียว</td><td>ทดสอบที่ความกว้าง 320–360 เสมอ</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>หน้าจอหนึ่งต้องมีสามส่วนเรียงจากบนลงล่าง</p><ul><li>หัวข้อ สูงตามเนื้อหา</li><li>รายการที่เลื่อนได้ กินพื้นที่ที่เหลือทั้งหมด</li><li>แถบปุ่มด้านล่าง สูง 56 ตรึงอยู่กับที่เสมอ</li></ul><ol><li>เขียนโครงโค้ด</li><li>อธิบายว่าทำไมไม่ควรคำนวณความสูงเองด้วยการเอาความสูงจอมาลบ</li><li>ถ้าเปลี่ยนรายการเป็น <code>Column</code> ธรรมดาแทน <code>ListView</code> จะเกิดอะไรขึ้น</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    const ScreenHeader(),                  // สูงตามเนื้อหา
+    Expanded(                              // กินที่เหลือ
+      child: ListView.builder(
+        itemCount: lines.length,
+        itemBuilder: (context, index) =&gt; LineCard(line: lines[index]),
+      ),
+    ),
+    const SizedBox(
+      height: 56,
+      child: ActionBar(),                  // ตรึงความสูง
+    ),
+  ],
+)</code></pre><p><strong>ข้อ 2 — ทำไมไม่คำนวณเอง</strong></p><p>วิธีที่คนใหม่มักทำคือ <code>height: MediaQuery.of(context).size.height - 72 - 56</code> ซึ่งดูเหมือนได้ผล แต่จะพังทันทีเมื่อ</p><ul><li>แป้นพิมพ์ขึ้นมาบังจอ — พื้นที่จริงเล็กลงแต่ตัวเลขไม่เปลี่ยน</li><li>อุปกรณ์มีรอยบากหรือแถบล่างของระบบ</li><li>ผู้ใช้ตั้งขนาดตัวอักษรใหญ่ขึ้น หัวข้อจึงสูงกว่า 72</li><li>หน้าจอนี้ถูกเอาไปใส่ในแท็บบางส่วนของจอ ไม่ได้เต็มจอ</li></ul><p>ส่วน <code>Expanded</code> ถามพื้นที่จริงที่ได้รับมาตามกฎข้อ 1 จึงถูกต้องเสมอในทุกกรณีข้างต้นโดยไม่ต้องแก้อะไร — นี่คือความหมายของการทำงานร่วมกับระบบ constraint แทนที่จะสู้กับมัน</p><p><strong>ข้อ 3 — ถ้าใช้ <code>Column</code> แทน <code>ListView</code></strong></p><p>จะเกิดสองปัญหา ปัญหาแรกคือเมื่อรายการยาวเกินพื้นที่จะเกิด <code>RenderFlex overflowed</code> เพราะ <code>Column</code> เลื่อนไม่ได้ ปัญหาที่สองที่ร้ายกว่าคือ <code>Column</code> สร้างลูกทุกตัวพร้อมกัน ถ้ามีห้าพันรายการก็สร้างครบห้าพันชิ้นทันที ในขณะที่ <code>ListView.builder</code> สร้างเฉพาะที่มองเห็น — เรื่องนี้จะลงลึกใน 2.6 และ 2.7</p><p><strong>ลองต่อ:</strong> ใน lab ให้ลบ <code>Expanded</code> ที่ครอบ <code>ListView</code> ออก แล้วรัน อ่านข้อความ error ให้ครบทั้งย่อหน้า จะเห็นว่า Flutter บอกทั้งชื่อ widget ที่มีปัญหาและแนะนำทางแก้มาให้ — การอ่าน error ให้จบเป็นทักษะที่ประหยัดเวลาได้มากที่สุดใน Part นี้</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>ข้อจำกัดไหลลง ขนาดไหลขึ้น แม่เป็นคนวางตำแหน่ง</li><li>widget ไม่มีทางบังคับให้ตัวเองใหญ่เกินที่แม่อนุญาต</li><li>tight คือไม่มีทางเลือก loose คือเลือกได้</li><li>ที่เลื่อนได้ส่งขอบเขตแบบไม่จำกัดในทิศที่เลื่อน</li><li><code>Expanded</code> ต้องอยู่ในที่ที่มีขอบเขต ไม่งั้นพัง</li><li>อย่าคำนวณความสูงเองจากขนาดจอ ให้ใช้ <code>Expanded</code></li><li>ตอบให้ได้ว่าอะไรตรึง อะไรยืด อะไรเลื่อน ก่อนเลือก widget</li></ul></div><p><strong>บทถัดไป:</strong> 2.2 จะลงรายละเอียด <code>Row</code> และ <code>Column</code> ซึ่งเป็นสองตัวที่ใช้บ่อยที่สุด และเป็นต้นเหตุของแถบสีเหลืองดำเกือบทุกครั้ง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

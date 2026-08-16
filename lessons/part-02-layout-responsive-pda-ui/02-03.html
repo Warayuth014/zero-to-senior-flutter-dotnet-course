@@ -4,32 +4,122 @@
 <title>Expanded / Flexible / Spacer</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">02-03 · Flutter UI</span><h1>Expanded / Flexible / Spacer</h1><p>Part 2: Layout &amp; Responsive UI</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Flex algorithm แบบใช้งานจริง</a></li><li><a href="#section-2">Expanded คือ tight flex</a></li><li><a href="#section-3">Flexible คือเพดาน ไม่จำเป็นต้องเต็ม</a></li><li><a href="#section-4">Spacer คือช่องว่างแบบ flex</a></li><li><a href="#section-5">ParentDataWidget rule</a></li><li><a href="#section-6">Expanded กับ scrollable</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>Expanded</code>, <code>Flexible</code> และ <code>Spacer</code> ใช้ได้เมื่อเป็นลูกโดยตรงของ Flex และแก้ปัญหา “แบ่งพื้นที่ที่ Flex มีอยู่” ไม่ใช่เครื่องมือกำหนดขนาดทั่วไป</div>
-<section id="section-1"><h2>1. Flex algorithm แบบใช้งานจริง</h2><ol><li>วัด non-flex children ก่อน</li><li>หักพื้นที่และ spacing ออกจาก main axis</li><li>แบ่งพื้นที่ที่เหลือตามค่า flex</li><li>วัด flex children ด้วยส่วนแบ่งนั้น</li><li>จัดตำแหน่งผลลัพธ์</li></ol><p>ดังนั้น overflow มักเกิดจาก non-flex children ใช้พื้นที่เกินก่อนถึงขั้นแบ่ง flex</p></section>
-<section id="section-2"><h2>2. Expanded คือ tight flex</h2><pre class="code-vs"><code>Row(children: [
-  Expanded(flex: 2, child: PickingPane()),
-  const SizedBox(width: 8),
-  Expanded(child: SummaryPane()),
-])</code></pre><p>พื้นที่ที่เหลือแบ่ง 2:1 และแต่ละ child ต้องใช้ส่วนแบ่งเต็ม เหมาะกับ columns/panes ที่ต้องเติมพื้นที่</p></section>
-<section id="section-3"><h2>3. Flexible คือเพดาน ไม่จำเป็นต้องเต็ม</h2><pre class="code-vs"><code>Row(children: [
-  const Icon(Icons.warehouse),
-  const SizedBox(width: 8),
-  Flexible(child: Text(label, maxLines: 2)),
-])</code></pre><p>ค่าเริ่มต้น <code>FlexFit.loose</code> ให้ child เล็กกว่าส่วนแบ่งได้ Absolute ใช้ Flexible กับ label ในปุ่ม PDA เพื่อให้ข้อความ wrap โดยไม่ผลัก icon/ขอบปุ่มออก</p></section>
-<section id="section-4"><h2>4. Spacer คือช่องว่างแบบ flex</h2><p><code>Spacer()</code> เทียบเท่า Expanded ที่มี SizedBox ว่าง ใช้ผลัก action ไปท้าย Row ได้ แต่ถ้ามี <code>MainAxisAlignment.spaceBetween/spaceAround</code> อยู่ Spacer จะกินพื้นที่ที่เหลือก่อน ทำให้ alignment นั้นแทบไม่มีผล</p></section>
-<section id="section-5"><h2>5. ParentDataWidget rule</h2><p>Expanded/Flexible เขียน ParentData ให้ RenderFlex จึงต้องมีเส้นทางจากมันถึง Row/Column/Flex ที่มีแต่ Stateless/Stateful wrappers ห้ามมี Container/Padding render widget คั่น เช่น <code>Padding(child: Expanded(...))</code> ผิด ให้สลับเป็น <code>Expanded(child: Padding(...))</code></p></section>
-<section id="section-6"><h2>6. Expanded กับ scrollable</h2><p>ใน Column ที่สูง bounded ให้ Expanded(ListView) ถูกต้อง แต่ใน Column ภายใน SingleChildScrollView main axis ไม่ bounded จึงเกิด “non-zero flex but incoming height constraints are unbounded” เลือกเอา scrollable ชั้นเดียว, ใช้ shrinkWrap เฉพาะรายการเล็ก หรือกำหนด bounded height ให้ช่วงนั้น</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แถว summary ต้องให้ label ใช้พื้นที่มากที่สุด, status กึ่งกลางไม่เกิน 100 และ value กว้างตามตัวเลข จะเขียนอย่างไร?</p><details><summary>เฉลย</summary><pre class="code-vs"><code>Row(children: [
-  Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
-  const SizedBox(width: 6),
-  Flexible(child: ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 100),
-    child: Text(status, textAlign: TextAlign.center),
-  )),
-  const SizedBox(width: 6),
-  Text(value),
-])</code></pre></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าครอบทุก child ด้วย Expanded เพื่อหยุด overflow เพราะจะทำให้ความหมายของขนาดหาย เช่น icon/button ถูกบังคับกว้างเท่ากับข้อความ ให้เลือกเฉพาะ child ที่เป็นเจ้าของพื้นที่ยืดหยุ่นและกำหนด priority อย่างตั้งใจ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: วัดของที่ตายตัวก่อน แล้วค่อยแบ่งที่เหลือ</a></li><li><a href="#section-4">Expanded: ต้องใช้ส่วนแบ่งให้เต็ม</a></li><li><a href="#section-5">Flexible: ไม่เกินส่วนแบ่ง แต่ไม่ต้องเต็ม</a></li><li><a href="#section-6">Spacer: ช่องว่างที่ยืดได้</a></li><li><a href="#section-7">กฎที่ทำให้พังบ่อยที่สุด: ต้องเป็นลูกโดยตรง</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ควบคุมว่าใครได้พื้นที่เท่าไร</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.1 (tight กับ loose) และ 2.2 (<code>Row</code> และ <code>Column</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แก้แถบสีเหลืองดำได้ถูกจุด และเลือกระหว่าง <code>Expanded</code>, <code>Flexible</code>, <code>Spacer</code> ได้อย่างมีเหตุผล</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 2.2 เราพบว่า <code>spaceBetween</code> ไม่ช่วยเมื่อเนื้อหาล้น และบอกว่าทางแก้คือทำให้ลูกที่ยืดได้ “ได้รับขอบเขต” บทนี้คือเครื่องมือสามตัวที่ทำหน้าที่นั้น</p><p>สิ่งสำคัญที่ต้องเข้าใจตั้งแต่ต้น: ทั้งสามตัวใช้ได้เฉพาะเมื่อเป็น <strong>ลูกโดยตรง</strong> ของ <code>Row</code> หรือ <code>Column</code> เท่านั้น ไม่ใช่เครื่องมือกำหนดขนาดที่ใช้ได้ทั่วไป</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>flex child</td><td>ลูกที่ยอมยืดหดตามพื้นที่ที่เหลือ</td></tr>
+<tr><td>non-flex child</td><td>ลูกที่ขอขนาดตามเนื้อหาของตัวเอง</td></tr>
+<tr><td><code>flex</code></td><td>ตัวเลขสัดส่วนว่าจะได้ส่วนแบ่งเท่าไร</td></tr>
+<tr><td><code>FlexFit.tight</code></td><td>ต้องใช้ส่วนแบ่งให้เต็ม</td></tr>
+<tr><td><code>FlexFit.loose</code></td><td>ใช้ไม่เกินส่วนแบ่ง แต่จะน้อยกว่าก็ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: วัดของที่ตายตัวก่อน แล้วค่อยแบ่งที่เหลือ</h2><p><code>Row</code> และ <code>Column</code> ทำงานตามลำดับนี้เสมอ</p><pre class="code-vs"><code>1. วัดลูกที่ไม่ยืดหยุ่นทั้งหมดก่อน   (ไอคอน ปุ่ม ช่องว่างคงที่)
+2. เอาพื้นที่ทั้งหมด ลบด้วยผลรวมข้างบน  → ได้ "พื้นที่ที่เหลือ"
+3. แบ่งพื้นที่ที่เหลือให้ลูกที่ยืดหยุ่น ตามค่า flex
+4. วางทุกคนตามตำแหน่ง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เนื้อหาล้นเกิดขึ้นเมื่อ <em>ขั้นที่ 1 กินพื้นที่หมดตั้งแต่ยังไม่ถึงขั้นที่ 3</em> — จึงต้องหาให้เจอว่าใครในขั้นที่ 1 กินเยอะเกิน แล้วย้ายมันมาเป็นลูกที่ยืดหยุ่น</div></section>
+
+<section id="section-4"><h2>4. Expanded: ต้องใช้ส่วนแบ่งให้เต็ม</h2><pre class="code-vs"><code>Row(
+  children: [
+    Expanded(flex: 2, child: LeftPane()),    // ได้ 2 ส่วน
+    const SizedBox(width: 8),
+    Expanded(child: RightPane()),            // ได้ 1 ส่วน (flex เริ่มต้น = 1)
+  ],
+)</code></pre><p>พื้นที่ที่เหลือหลังหักช่องว่าง 8 จะถูกแบ่ง 2:1 และทั้งคู่ <strong>ต้อง</strong> ใช้ส่วนแบ่งเต็ม แม้เนื้อหาจะสั้นกว่านั้น</p><p>ดูของจริงใน lab — แถบสรุปเมื่อจอกว้าง</p><pre class="code-vs"><code>Row(
+  children: [
+    Expanded(child: cells[0]),
+    const SizedBox(width: 8),
+    Expanded(child: cells[1]),
+  ],
+)</code></pre><p>ผลคือการ์ดสองใบกว้างเท่ากันเสมอ ไม่ว่าข้อความข้างในจะสั้นยาวต่างกันแค่ไหน ซึ่งเป็นสิ่งที่ต้องการสำหรับแถบสรุป</p></section>
+
+<section id="section-5"><h2>5. Flexible: ไม่เกินส่วนแบ่ง แต่ไม่ต้องเต็ม</h2><pre class="code-vs"><code>Row(
+  children: [
+    const Icon(Icons.warehouse),
+    const SizedBox(width: 8),
+    Flexible(child: Text(label, maxLines: 2)),
+  ],
+)</code></pre><table><thead><tr><th></th><th><code>Expanded</code></th><th><code>Flexible</code></th></tr></thead><tbody>
+<tr><td>ใช้ส่วนแบ่ง</td><td>เต็มเสมอ</td><td>ไม่เกิน แต่น้อยกว่าได้</td></tr>
+<tr><td>เนื้อหาสั้น</td><td>ยังกว้างเต็มส่วนแบ่ง</td><td>หดตามเนื้อหา</td></tr>
+<tr><td>เนื้อหายาว</td><td>จำกัดที่ส่วนแบ่ง</td><td>จำกัดที่ส่วนแบ่ง</td></tr>
+<tr><td>เหมาะกับ</td><td>แผงหรือการ์ดที่ต้องกว้างเท่ากัน</td><td>ข้อความหรือป้ายที่ควรพอดีเนื้อหา</td></tr>
+</tbody></table><p>วิธีจำ: <code>Expanded</code> คือ <code>Flexible</code> ที่ตั้ง <code>fit: FlexFit.tight</code> ไว้ให้แล้ว — ทั้งคู่ทำหน้าที่ “ป้องกันการล้น” ได้เหมือนกัน ต่างกันแค่ตอนที่เนื้อหาสั้นกว่าพื้นที่</p></section>
+
+<section id="section-6"><h2>6. Spacer: ช่องว่างที่ยืดได้</h2><pre class="code-vs"><code>Row(
+  children: [
+    Chip(label: Text(line.location)),
+    const Spacer(),          // ดันทุกอย่างหลังจากนี้ไปขวาสุด
+    FilledButton(onPressed: () {}, child: const Text('ยืนยัน')),
+  ],
+)</code></pre><p><code>Spacer()</code> คือ <code>Expanded</code> ที่ไม่มีเนื้อหา ใช้ดันของไปคนละฝั่งโดยไม่ต้องคำนวณระยะเอง</p><div class="warn">ถ้าใช้ <code>Spacer</code> พร้อมกับ <code>mainAxisAlignment: MainAxisAlignment.spaceBetween</code> ค่า alignment จะแทบไม่มีผล เพราะ <code>Spacer</code> กินพื้นที่ที่เหลือไปหมดแล้วตั้งแต่ขั้นที่ 3 ไม่เหลืออะไรให้ alignment แจก — เลือกใช้อย่างใดอย่างหนึ่ง</div></section>
+
+<section id="section-7"><h2>7. กฎที่ทำให้พังบ่อยที่สุด: ต้องเป็นลูกโดยตรง</h2><pre class="code-vs"><code>// ผิด — มี Padding คั่นอยู่
+Row(
+  children: [
+    Padding(
+      padding: const EdgeInsets.all(8),
+      child: Expanded(child: Text(name)),    // error!
+    ),
+  ],
+)
+
+// ถูก — สลับลำดับ ให้ Expanded อยู่นอกสุด
+Row(
+  children: [
+    Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Text(name),
+      ),
+    ),
+  ],
+)</code></pre><p><strong>เหตุผล:</strong> <code>Expanded</code> ไม่ได้กำหนดขนาดด้วยตัวเอง มันเพียง <em>ติดป้ายบอก <code>Row</code></em> ว่า “ลูกคนนี้ยืดได้” ป้ายนั้นจะสื่อสารได้ก็ต่อเมื่อ <code>Row</code> เห็นมันโดยตรง ถ้ามีอะไรคั่นอยู่ ป้ายก็ไปไม่ถึง</p><p>ข้อความ error ที่จะเจอคือ <code>Incorrect use of ParentDataWidget</code> ซึ่งอ่านแล้วไม่รู้เรื่อง แต่ทุกครั้งที่เจอ ให้ตรวจข้อเดียวนี้ก่อน — มีอะไรคั่นระหว่าง <code>Expanded</code> กับ <code>Row</code>/<code>Column</code> หรือเปล่า</p><p>ข้อยกเว้นที่คั่นได้คือ widget ที่เราเขียนเองแบบ <code>StatelessWidget</code> ที่คืน <code>Expanded</code> ออกมาโดยตรง เพราะมันไม่ได้สร้างชั้นในการจัดวางจริง</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Incorrect use of ParentDataWidget</code></td><td>มี widget คั่นระหว่าง <code>Expanded</code> กับ <code>Row</code></td><td>สลับให้ <code>Expanded</code> อยู่นอกสุด</td></tr>
+<tr><td><code>RenderFlex overflowed</code> ทั้งที่ใส่ <code>Expanded</code> แล้ว</td><td>ใส่ผิดตัว — ตัวที่กินพื้นที่จริงยังไม่ยืดหยุ่น</td><td>หาว่าใครในขั้นที่ 1 กินเยอะแล้วห่อตัวนั้น</td></tr>
+<tr><td>ครอบ <code>Expanded</code> ทุกตัวแล้วไอคอนยืดผิดรูป</td><td>บังคับให้ทุกคนกว้างเท่ากัน</td><td>ห่อเฉพาะตัวที่ควรยืดจริง</td></tr>
+<tr><td><code>non-zero flex but incoming height constraints are unbounded</code></td><td>ใช้ <code>Expanded</code> ในที่ที่เลื่อนได้</td><td>ดู 2.1 หัวข้อ 5</td></tr>
+<tr><td>ใช้ <code>Spacer</code> แล้ว <code>spaceBetween</code> ไม่ทำงาน</td><td>ทั้งคู่แย่งพื้นที่ที่เหลือกัน</td><td>เลือกใช้อย่างใดอย่างหนึ่ง</td></tr>
+<tr><td>สองการ์ดกว้างไม่เท่ากันทั้งที่อยากให้เท่า</td><td>ใช้ <code>Flexible</code> แทน <code>Expanded</code></td><td>เปลี่ยนเป็น <code>Expanded</code></td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>โค้ดนี้เกิดแถบสีเหลืองดำบนจอกว้าง 320 จงหาสาเหตุและแก้</p><pre class="code-vs"><code>Row(
+  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  children: [
+    const Icon(Icons.inventory_2_outlined, size: 32),
+    Text('กล่องกระดาษลูกฟูก ขนาดใหญ่พิเศษ สำหรับงานส่งออก'),
+    Text('12'),
+    FilledButton(onPressed: () {}, child: const Text('ยืนยัน')),
+  ],
+)</code></pre><ol><li>อธิบายว่าทำไมถึงล้น โดยอ้างขั้นตอนทั้งสี่ในหัวข้อ 3</li><li>แก้โดยให้ชื่อสินค้าเป็นตัวที่ยอมเสียพื้นที่</li><li>อธิบายว่าทำไมไม่ควรห่อทุกตัวด้วย <code>Expanded</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ทำไมล้น</strong></p><p>ในขั้นที่ 1 <code>Row</code> วัดลูกทั้งสี่ตัว และไม่มีตัวไหนเป็นลูกที่ยืดหยุ่นเลย ข้อความชื่อสินค้าจึงขอความกว้างตามเนื้อหาเต็ม ๆ ซึ่งอาจเป็น 400 พิกเซล เมื่อรวมกับไอคอน 32 จำนวน และปุ่ม ผลรวมเกิน 320 ไปแล้วตั้งแต่ขั้นที่ 1</p><p>พอถึงขั้นที่ 2 “พื้นที่ที่เหลือ” จึงติดลบ ขั้นที่ 3 ไม่มีอะไรให้แบ่ง และ <code>spaceBetween</code> ในขั้นที่ 4 ก็ไม่มีพื้นที่ให้จัดการ — จบด้วยแถบสีเหลืองดำ</p><p><strong>ข้อ 2 — วิธีแก้</strong></p><pre class="code-vs"><code>Row(
+  children: [
+    const Icon(Icons.inventory_2_outlined, size: 32),
+    const SizedBox(width: 12),
+    Expanded(                                   // ตัวเดียวที่ยอมเสียพื้นที่
+      child: Text(
+        'กล่องกระดาษลูกฟูก ขนาดใหญ่พิเศษ สำหรับงานส่งออก',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    ),
+    const SizedBox(width: 8),
+    const Text('12'),
+    const SizedBox(width: 8),
+    FilledButton(onPressed: () {}, child: const Text('ยืนยัน')),
+  ],
+)</code></pre><p>สังเกตสามอย่างที่เปลี่ยนไป</p><ul><li>เอา <code>spaceBetween</code> ออก เพราะเราคุมช่องว่างเองด้วย <code>SizedBox</code> ซึ่งคาดเดาได้กว่า</li><li>ห่อชื่อสินค้าด้วย <code>Expanded</code> ทำให้มันได้ขอบเขตที่แคบลงจริง</li><li>เพิ่ม <code>overflow: TextOverflow.ellipsis</code> เพราะแค่ <code>Expanded</code> อย่างเดียวจะได้แถบเหลืองที่ตัว <code>Text</code> แทน — ต้องบอกด้วยว่าให้ตัดข้อความอย่างไร (รายละเอียดใน 2.11)</li></ul><p><strong>ข้อ 3 — ทำไมไม่ห่อทุกตัว</strong></p><p>ถ้าห่อทุกตัวด้วย <code>Expanded</code> พื้นที่จะถูกแบ่งเท่า ๆ กันสี่ส่วน ผลคือ</p><table><thead><tr><th>ตัว</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ไอคอน 32 พิกเซล</td><td>ถูกยืดให้กว้าง 80 พิกเซล เหลือช่องว่างรอบตัวเยอะผิดปกติ</td></tr>
+<tr><td>จำนวน “12”</td><td>ได้พื้นที่ 80 ทั้งที่ต้องการแค่ 20</td></tr>
+<tr><td>ปุ่มยืนยัน</td><td>ถูกบีบเหลือ 80 ซึ่งอาจแคบเกินไปจนข้อความถูกตัด</td></tr>
+<tr><td>ชื่อสินค้า</td><td>ได้แค่ 80 ทั้งที่เป็นตัวที่ควรได้มากที่สุด</td></tr>
+</tbody></table><p>แถบเหลืองหายไปจริง แต่หน้าตาผิดหมด — นี่คือความหมายของประโยคใน 2.2 ที่ว่า <strong>การตัดสินใจว่าใครยอมเสียพื้นที่เป็นหน้าที่ของเรา ไม่ใช่ของเฟรมเวิร์ก</strong></p><p><strong>ลองต่อ:</strong> ในไฟล์ lab ให้ลบ <code>Expanded</code> ที่ห่อ <code>Column</code> ของชื่อสินค้าออก แล้วรันเทสต์ <code>flutter test --no-pub test/layout_basics_test.dart</code> — เทสต์ “ชื่อสินค้ายาวไม่ทำให้ layout ล้น” จะล้มเหลวทันที นั่นคือตัวอย่างของเทสต์ที่จับปัญหา layout ได้จริง</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>Flex วัดลูกที่ไม่ยืดหยุ่นก่อน แล้วค่อยแบ่งพื้นที่ที่เหลือ</li><li>เนื้อหาล้นเกิดเมื่อลูกที่ไม่ยืดหยุ่นกินพื้นที่หมดตั้งแต่ต้น</li><li><code>Expanded</code> ใช้ส่วนแบ่งเต็มเสมอ</li><li><code>Flexible</code> ใช้ไม่เกินส่วนแบ่ง แต่หดตามเนื้อหาได้</li><li><code>Spacer</code> คือช่องว่างที่ยืดได้ ใช้ดันของไปคนละฝั่ง</li><li>ทั้งสามตัวต้องเป็นลูกโดยตรงของ <code>Row</code>/<code>Column</code></li><li>ห่อเฉพาะตัวที่ควรยืดจริง อย่าห่อทุกตัว</li></ul></div><p><strong>บทถัดไป:</strong> 2.4 จะดูเครื่องมือจัดระยะและตำแหน่งที่ใช้บ่อยที่สุด — <code>Padding</code>, <code>Align</code> และ <code>SizedBox</code> รวมถึงข้อควรระวังเรื่องระยะขอบที่ซ้อนกัน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
