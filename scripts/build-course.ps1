@@ -56,9 +56,15 @@ function AddLessonToc([string]$body) {
     $attrs = [string]$match.Groups['attrs'].Value
     $idMatch = [regex]::Match($attrs, '\bid="(?<id>[^"]+)"')
     $id = if ($idMatch.Success) { $idMatch.Groups['id'].Value } else { "section-$sectionNumber" }
-    $plainTitle = HtmlEncode ([Net.WebUtility]::HtmlDecode(
+    $decodedTitle = [Net.WebUtility]::HtmlDecode(
         [regex]::Replace($match.Groups['title'].Value, '<[^>]+>', '')
-      ))
+      )
+    # หัวข้อ <h2> ในไฟล์ content ใส่เลขลำดับมาเองแล้ว (เช่น "1. Dart คืออะไร")
+    # ส่วนสารบัญเรนเดอร์ด้วย <ol> ซึ่งใส่เลขให้อีกชั้น จึงต้องตัดเลขนำหน้าออก
+    # ไม่งั้นจะได้ "1. 1. Dart คืออะไร"
+    $strippedTitle = [regex]::Replace($decodedTitle.Trim(), '^\d+(?:\.\d+)*\s*[.)]?\s+', '')
+    if ([string]::IsNullOrWhiteSpace($strippedTitle)) { $strippedTitle = $decodedTitle.Trim() }
+    $plainTitle = HtmlEncode $strippedTitle
     $encodedId = HtmlEncode $id
     $items.Add("<li><a href=`"#$encodedId`">$plainTitle</a></li>")
     $sectionStart = if ($idMatch.Success) { "<section$attrs>" } else { "<section$attrs id=`"$id`">" }
