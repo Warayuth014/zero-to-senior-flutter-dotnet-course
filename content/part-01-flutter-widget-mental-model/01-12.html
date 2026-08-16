@@ -1,31 +1,174 @@
-<div class="note">Data/config ไหล parent → child ผ่าน constructor ส่วน event ไหล child → owner ผ่าน typed callback นี่คือ unidirectional UIพื้นฐานที่ทำให้ child reusableและ business mutationมีจุดเดียว</div>
-<section><h2>1. Typed callback</h2><pre class="code-vs"><code>class QuantityEditor extends StatelessWidget {
-  const QuantityEditor({
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ให้ลูกแจ้งเหตุการณ์กลับไปหาแม่</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.11 (callback) และ 1.11 (การแตก widget)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบ widget ลูกที่แจ้งเหตุการณ์กลับขึ้นไปโดยไม่รู้จักตรรกะธุรกิจ ซึ่งเป็นสิ่งที่ทำให้ widget นำกลับมาใช้ซ้ำและทดสอบได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.11 เราแตก <code>TaskTile</code> ออกมาจากหน้าจอ แต่มีคำถามค้างอยู่ — เมื่อผู้ใช้กดที่แถวนั้น ใครเป็นคนเปลี่ยนข้อมูล</p><p>ถ้าให้ <code>TaskTile</code> เปลี่ยนเอง มันจะต้องรู้จักที่เก็บข้อมูลของทั้งหน้าจอ และจะใช้ในหน้าจออื่นไม่ได้อีกเลย คำตอบคือ <strong>ให้มันแค่บอกว่าเกิดอะไรขึ้น แล้วให้แม่ตัดสินใจ</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>VoidCallback</code></td><td>ชื่อเล่นของ <code>void Function()</code></td></tr>
+<tr><td><code>ValueChanged&lt;T&gt;</code></td><td>ชื่อเล่นของ <code>void Function(T)</code></td></tr>
+<tr><td>unidirectional</td><td>ข้อมูลไหลลง เหตุการณ์ไหลขึ้น ทางเดียวทั้งคู่</td></tr>
+<tr><td>intent</td><td>เจตนาของผู้ใช้ เช่น “อยากทำเครื่องหมายว่าเสร็จ”</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ข้อมูลไหลลง เหตุการณ์ไหลขึ้น</h2><pre class="code-vs"><code>          ┌──────────────┐
+          │  หน้าจอ (แม่) │  ← เก็บข้อมูล ตัดสินใจ
+          └──────┬───────┘
+     ข้อมูล ↓         ↑ เหตุการณ์
+          ┌──────┴───────┐
+          │  TaskTile     │  ← แค่แสดงและแจ้ง
+          └──────────────┘</code></pre><table><thead><tr><th>ทิศทาง</th><th>ผ่านอะไร</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>ลง</td><td>constructor</td><td><code>task: task, done: true</code></td></tr>
+<tr><td>ขึ้น</td><td>callback</td><td><code>onToggle: () =&gt; ...</code></td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ลูกบอกว่า “<em>เกิดอะไรขึ้น</em>” ไม่ใช่ “<em>ต้องทำอะไรต่อ</em>” — การตัดสินใจว่าจะทำอะไรเป็นหน้าที่ของเจ้าของข้อมูล</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>class TaskTile extends StatelessWidget {
+  const TaskTile({
     super.key,
-    required this.value,
-    required this.onChanged,
-    required this.onConfirm,
+    required this.task,
+    required this.done,
+    required this.onToggle,
   });
-  final int value;
-  final ValueChanged&lt;int&gt; onChanged;
-  final Future&lt;void&gt; Function() onConfirm;
-}</code></pre><p>อย่าใช้ <code>Function</code> กว้างเพราะ compilerตรวจ argument/returnไม่ได้ Signatureบอก async/error ownershipให้เห็น</p></section>
-<section><h2>2. Child แจ้ง intent ไม่แก้ parent state</h2><pre class="code-vs"><code>QuantityEditor(
-  value: store.quantity,
-  onChanged: store.setQuantity,
-  onConfirm: store.confirmPick,
-)</code></pre><p>Childไม่ต้องรู้ setState/ChangeNotifier/API Parent/storeตรวจ invariantและ notifyกลับลงมาเป็น valueใหม่</p></section>
-<section><h2>3. Closure เพิ่ม argument</h2><pre class="code-vs"><code>_Tile(
-  title: 'Receiving',
-  onTap: () =&gt; store.nav('receive'),
-)</code></pre><p>HomeViewใช้ patternนี้ Closureเหมาะ adapterสั้น ๆ แต่ถ้าจับ stateหลายตัว/logicยาวให้ใช้ named methodเพื่อ stack trace/test/อ่านง่าย</p></section>
-<section><h2>4. Async callback และ duplicate tap</h2><p>Widget button APIรับ void callbackจึงไม่ await Futureอัตโนมัติ Ownerต้องกัน busy, catch errorและแสดง loading Childอาจ disableด้วย <code>onPressed: busy ? null : onConfirm</code> อย่าให้ทั้ง childและparentมี busyคนละค่า</p></section>
-<section><h2>5. Result จาก dialog/route</h2><p>บาง eventเหมาะ request-responseผ่าน Future เช่น <code>showDialog&lt;bool&gt;</code> หรือ Navigator.pushคืน result Parent awaitแล้วตรวจ mountedก่อน commit state ทำให้ dialogเป็น presentation componentไม่เรียก repositoryเอง</p></section>
-<section><h2>6. Callback identity/performance</h2><p>closureใหม่ทุก buildปกติไม่ใช่ปัญหาหลัก อย่า optimizeด้วย cache callbackก่อนวัด ให้สนใจ side effectและ rebuild scopeก่อน แต่ listener APIที่ removeต้องใช้ callback instanceเดียวกับตอน add จึงเก็บ method/fieldตาม lifecycle</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ออกแบบ ScanBoxที่แจ้ง barcode submitและไม่รู้ API/store</p><details><summary>เฉลย</summary><pre class="code-vs"><code>class ScanBox extends StatelessWidget {
-  const ScanBox({super.key, required this.busy, required this.onSubmitted});
+
+  final DashboardTask task;
+  final bool done;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(done ? Icons.check_circle : Icons.radio_button_unchecked),
+      title: Text(task.title),
+      onTap: onToggle,        // แค่ส่งต่อ ไม่ตัดสินใจอะไร
+    );
+  }
+}</code></pre><p>ฝั่งแม่เป็นคนตัดสินใจว่าการกดนั้นแปลว่าอะไร</p><pre class="code-vs"><code>TaskTile(
+  key: ValueKey&lt;String&gt;(task.id),
+  task: task,
+  done: _doneIds.contains(task.id),
+  onToggle: () =&gt; _toggleDone(task.id),   // แม่รู้ว่าต้องทำอะไร
+)
+
+void _toggleDone(String id) {
+  setState(() {
+    if (!_doneIds.remove(id)) _doneIds.add(id);
+  });
+  _tapCount.value++;
+}</code></pre><p>สังเกตว่า <code>TaskTile</code> ไม่รู้เลยว่าการกดจะทำให้เกิดการสลับสถานะ การนับจำนวนครั้ง หรือแม้แต่จะเกิดอะไรขึ้นหรือเปล่า — จึงเอาไปใช้ในหน้าจออื่นที่การกดมีความหมายต่างไปได้ทันที</p></section>
+
+<section><h2>5. ระบุชนิดของ callback ให้ชัด</h2><table><thead><tr><th>เขียนแบบ</th><th>ผลที่ได้</th></tr></thead><tbody>
+<tr><td><code>final VoidCallback onToggle;</code></td><td>ชัดเจน — ไม่รับอะไร ไม่คืนอะไร</td></tr>
+<tr><td><code>final ValueChanged&lt;int&gt; onChanged;</code></td><td>ชัดเจน — รับจำนวนเต็ม</td></tr>
+<tr><td><code>final Future&lt;void&gt; Function(String) onSubmit;</code></td><td>ชัดเจน — เป็นงานที่ต้องรอ</td></tr>
+<tr><td><code>final Function onTap;</code></td><td><strong>แย่</strong> — compiler ตรวจอะไรไม่ได้เลย</td></tr>
+</tbody></table><p>ทบทวนจาก D1.11: การเขียน <code>Function</code> เปล่า ๆ ทำให้ส่ง argument ผิดจำนวนหรือผิดชนิดได้โดยไม่มีใครเตือน แล้วไปพังตอนผู้ใช้กด</p><p>ชนิดของ callback ยังบอกข้อมูลสำคัญให้ผู้ใช้งานด้วย — <code>Future&lt;void&gt; Function()</code> บอกว่านี่เป็นงานที่ใช้เวลา ผู้เรียกจึงรู้ว่าควรแสดงสถานะกำลังทำงาน</p></section>
+
+<section><h2>6. ห่อ callback เพื่อเพิ่มข้อมูล</h2><pre class="code-vs"><code>// TaskTile ประกาศว่ารับ VoidCallback ธรรมดา
+final VoidCallback onToggle;
+
+// แม่ห่อไว้เพื่อผูกกับงานใบที่ถูกต้อง
+onToggle: () =&gt; _toggleDone(task.id),</code></pre><p>นี่คือ closure จาก D1.4 ที่ใช้งานจริง — ฟังก์ชันที่สร้างขึ้นจำค่า <code>task.id</code> ของแถวนั้นไว้ ทำให้แต่ละแถวรู้ว่าตัวเองต้องแจ้งงานใบไหน โดยที่ <code>TaskTile</code> ไม่ต้องรับ id เพิ่ม</p><p>ทางเลือกอีกแบบคือให้ลูกส่งข้อมูลกลับมาเอง</p><pre class="code-vs"><code>final ValueChanged&lt;String&gt; onToggle;   // ลูกส่ง id กลับมา
+
+// ในลูก
+onTap: () =&gt; onToggle(task.id),
+
+// ในแม่
+onToggle: _toggleDone,   // ส่งชื่อ method ไปตรง ๆ ได้เลย</code></pre><table><thead><tr><th>แบบ</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>แม่ห่อด้วย closure</td><td>ลูกไม่จำเป็นต้องรู้ว่า id คืออะไร</td></tr>
+<tr><td>ลูกส่งค่ากลับ</td><td>ลูกมีข้อมูลที่แม่ยังไม่รู้ เช่นข้อความที่ผู้ใช้พิมพ์</td></tr>
+</tbody></table></section>
+
+<section><h2>7. callback ที่เป็นงานต้องรอ</h2><p>ปุ่มของ Flutter รับ callback ที่ไม่คืนค่า จึง <strong>ไม่รอ</strong> ให้งานเสร็จ ผลคือถ้าไม่ระวังจะเกิดการกดซ้ำ</p><pre class="code-vs"><code>class SubmitButton extends StatelessWidget {
+  const SubmitButton({super.key, required this.busy, required this.onSubmit});
+
   final bool busy;
+  final Future&lt;void&gt; Function() onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton(
+      onPressed: busy ? null : onSubmit,   // ปิดปุ่มระหว่างทำงาน
+      child: busy
+          ? const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Text('บันทึก'),
+    );
+  }
+}</code></pre><div class="warn"><strong>สถานะ <code>busy</code> ต้องมีแหล่งเดียว</strong> — ให้แม่เป็นเจ้าของแล้วส่งลงมา ห้ามให้ลูกเก็บ <code>busy</code> ของตัวเองอีกชุด เพราะเมื่อสองค่าไม่ตรงกัน ปุ่มจะกดได้ทั้งที่งานยังไม่เสร็จ ซึ่งเป็นบั๊กที่เกิดเฉพาะตอนเน็ตช้าและทดสอบเจอยาก</div><p>ส่วนการกันกดซ้ำที่ฝั่งตรรกะยังต้องมีตามที่เรียนใน D1.15 หัวข้อ 7 — การปิดปุ่มเป็นเพียงการสื่อสารกับผู้ใช้ ไม่ใช่การป้องกันจริง</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปุ่มทำงานเองตั้งแต่หน้าจอเปิด</td><td>ใส่วงเล็บตอนส่ง เช่น <code>onTap: _toggle()</code></td><td>ส่งชื่อเปล่า หรือห่อด้วย <code>() =&gt; _toggle(x)</code></td></tr>
+<tr><td>ส่ง argument ผิดแล้วไม่มีใครเตือน</td><td>ประกาศชนิดเป็น <code>Function</code> เปล่า</td><td>ระบุให้ครบ เช่น <code>ValueChanged&lt;String&gt;</code></td></tr>
+<tr><td>กดปุ่มรัวแล้วเกิดรายการซ้ำ</td><td>ไม่ได้กันการกดซ้ำ</td><td>ปิดปุ่มด้วย <code>busy</code> และกันที่ตรรกะด้วย</td></tr>
+<tr><td>ปุ่มยังกดได้ทั้งที่กำลังทำงาน</td><td>มีสถานะ <code>busy</code> สองชุด</td><td>ให้แม่เป็นเจ้าของแหล่งเดียว</td></tr>
+<tr><td>ลูกไปเรียก API เอง</td><td>ให้ลูกตัดสินใจแทนที่จะแจ้ง</td><td>ลูกแจ้งเจตนา แม่เรียก API</td></tr>
+<tr><td>ต้องส่ง callback ผ่านห้าชั้น</td><td>เจ้าของข้อมูลอยู่ไกลจากผู้ใช้เกินไป</td><td>ย้ายเจ้าของให้ใกล้ขึ้น หรือใช้เครื่องมือใน 1.14 และ Part 27</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ออกแบบ <code>ScanBox</code> ที่ใช้ได้ทั้งหน้ารับเข้าและหน้าหยิบของ โดย</p><ol><li>รับบาร์โค้ดจากผู้ใช้แล้วแจ้งกลับเมื่อกดยืนยัน</li><li>ต้องไม่รู้จัก API หรือที่เก็บข้อมูลใด ๆ</li><li>รองรับสถานะกำลังทำงาน โดยห้ามเก็บสถานะนั้นเอง</li><li>ตัดช่องว่างและแปลงเป็นตัวพิมพ์ใหญ่ก่อนแจ้ง</li></ol><p>แล้วเขียนตัวอย่างการใช้จากฝั่งแม่</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class ScanBox extends StatefulWidget {
+  const ScanBox({
+    super.key,
+    required this.busy,
+    required this.onSubmitted,
+    this.hintText = 'สแกนบาร์โค้ด',
+  });
+
+  final bool busy;                                       // รับมา ไม่เก็บเอง
   final Future&lt;void&gt; Function(String barcode) onSubmitted;
-  // normalizeขั้น presentationขั้นต่ำ; owner validate/domain/API
-}</code></pre><p>Ownerส่ง <code>(code) =&gt; store.submitScan(code)</code> และ busyจาก sourceเดียว</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Callback chainผ่าน 5ชั้นอาจบอกว่า state ownerอยู่ไกลเกิน ควรย้าย feature container/storeใกล้ consumersหรือใช้ inherited/providerอย่างมีขอบเขต ไม่แก้ด้วย global singletonทันที</div></section>
+  final String hintText;
+
+  @override
+  State&lt;ScanBox&gt; createState() =&gt; _ScanBoxState();
+}
+
+class _ScanBoxState extends State&lt;ScanBox&gt; {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();     // ของที่เราสร้าง เราคืน (1.6)
+    super.dispose();
+  }
+
+  void _submit() {
+    final code = _controller.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+    _controller.clear();
+    widget.onSubmitted(code);   // แจ้งขึ้นไป ไม่ตัดสินใจเอง
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _controller,
+            enabled: !widget.busy,
+            decoration: InputDecoration(hintText: widget.hintText),
+            onSubmitted: (_) =&gt; _submit(),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(
+          onPressed: widget.busy ? null : _submit,
+          child: const Text('ยืนยัน'),
+        ),
+      ],
+    );
+  }
+}</code></pre><pre class="code-vs"><code>// ฝั่งแม่ — หน้ารับเข้า
+ScanBox(
+  busy: _submitting,
+  onSubmitted: (code) =&gt; _receive(code),
+)
+
+// ฝั่งแม่ — หน้าหยิบของ ใช้ widget ตัวเดียวกัน คนละความหมาย
+ScanBox(
+  busy: _submitting,
+  hintText: 'สแกนพาเลทที่จะหยิบ',
+  onSubmitted: (code) =&gt; _pick(code),
+)</code></pre><p><strong>ทำไม <code>ScanBox</code> ต้องเป็น <code>StatefulWidget</code>:</strong> เพราะมันเป็นเจ้าของ <code>TextEditingController</code> ซึ่งต้องคืนใน <code>dispose</code> — นี่คือ “มีของที่ต้องดูแลเอง” ตามเกณฑ์ใน 1.11 ส่วนสถานะ <code>busy</code> ไม่ใช่ของมัน จึงรับมาจากแม่</p><p><strong>ทำไมการตัดช่องว่างถึงทำในลูกได้:</strong> เพราะมันเป็นการจัดรูปแบบข้อมูลนำเข้าขั้นพื้นฐาน ไม่ใช่กฎทางธุรกิจ — ส่วนกฎอย่าง “บาร์โค้ดต้องขึ้นต้นด้วย PAL-” หรือ “ห้ามซ้ำในกะนี้” ต้องอยู่ที่แม่ เพราะแต่ละหน้าจอมีกฎต่างกัน</p><p><strong>ทำไมล้างช่องกรอกก่อนแจ้ง:</strong> เพราะบน PDA เครื่องสแกนยิงต่อเนื่อง ถ้าไม่ล้าง บาร์โค้ดถัดไปจะต่อท้ายอันเดิม การล้างทันทีทำให้พร้อมรับตัวถัดไปเสมอ — เป็นรายละเอียดที่รู้ได้จากการเข้าใจอุปกรณ์ปลายทาง และจะลงลึกใน Part 3</p><p><strong>จุดที่คนมักพลาด:</strong> ให้ <code>ScanBox</code> เก็บ <code>bool _busy</code> ของตัวเองแล้วตั้งค่าเมื่อเรียก <code>onSubmitted</code> ซึ่งดูสมเหตุสมผลแต่จะเพี้ยนทันทีเมื่อแม่มีปุ่มอื่นที่ทำให้ระบบไม่ว่างด้วย — ค่าสองชุดจะไม่ตรงกัน และปุ่มจะกดได้ทั้งที่ไม่ควร</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ประกอบ <code>ScanBox</code> เดี่ยว ๆ พิมพ์ <code>' pal-1001 '</code> แล้วตรวจว่า callback ได้รับ <code>'PAL-1001'</code> — ทำได้โดยไม่ต้องมี API เลย นั่นคือผลตอบแทนของการออกแบบตามบทนี้</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>ข้อมูลไหลลงผ่าน constructor เหตุการณ์ไหลขึ้นผ่าน callback</li><li>ลูกบอกว่า “เกิดอะไรขึ้น” ไม่ใช่ “ต้องทำอะไรต่อ”</li><li>ระบุชนิด callback ให้ชัด อย่าใช้ <code>Function</code> เปล่า</li><li>ใช้ closure ห่อเพื่อผูก callback กับข้อมูลของแถวนั้น</li><li>callback ที่เป็นงานต้องรอ ให้ประกาศชนิดเป็น <code>Future</code> เพื่อสื่อสาร</li><li>สถานะ <code>busy</code> ต้องมีแหล่งเดียว และเป็นของแม่</li><li>ลูกจัดรูปแบบข้อมูลได้ แต่กฎธุรกิจอยู่ที่แม่</li></ul></div><p><strong>บทถัดไป:</strong> 1.13 จะแก้ปัญหาที่เริ่มเห็นแล้วในบทนี้ — เมื่อข้อมูลเปลี่ยน เราจะวาดใหม่เฉพาะส่วนที่เกี่ยวข้องได้อย่างไร โดยไม่ต้อง <code>setState</code> ทั้งหน้าจอ</p></section>

@@ -4,19 +4,114 @@
 <title>const &amp; Rebuild Cost</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-10 · Flutter UI</span><h1>const &amp; Rebuild Cost</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ใช้เมื่อ argumentคงที่</a></li><li><a href="#section-2">ประโยชน์จริง</a></li><li><a href="#section-3">สิ่งที่ const ไม่ทำ</a></li><li><a href="#section-4">ตัวอย่างจริง</a></li><li><a href="#section-5">Rebuild scope สำคัญกว่า constจำนวน</a></li><li><a href="#section-6">Measure ก่อน optimize</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>const</code> widget สร้าง configuration คงที่และอาจ reuse instance ทำให้ framework short-circuit subtreeบางส่วนได้ แต่ไม่ใช่กำแพงห้าม parent build และไม่แก้ layout/paint/data workที่แพงโดยอัตโนมัติ</div>
-<section id="section-1"><h2>1. ใช้เมื่อ argumentคงที่</h2><pre class="code-vs"><code>const SizedBox(height: 12)
-const Icon(Icons.refresh)
-const EdgeInsets.symmetric(horizontal: 16)
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: const คือคำสัญญา ไม่ใช่ยาวิเศษ</a></li><li><a href="#section-4">ใส่ได้เมื่อไหร่</a></li><li><a href="#section-5">สิ่งที่ const ไม่ได้ทำ</a></li><li><a href="#section-6">สิ่งที่สำคัญกว่ามาก: ขอบเขตของการ rebuild</a></li><li><a href="#section-7">ลำดับที่ควรทำเมื่อแอปช้า</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: เข้าใจว่าอะไรทำให้แอปลื่นจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.3 (Widget/Element/RenderObject), 1.9 (build ต้องเบา) และ D1.3 (<code>const</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใส่ <code>const</code> ได้ถูกที่และรู้ว่ามันช่วยอะไรจริง ๆ พร้อมรู้ว่าอะไรคือตัวชี้ขาดของประสิทธิภาพที่สำคัญกว่ามาก</div>
 
-Text(task.id) // runtime data จึงไม่ const</code></pre><p>constructorต้องประกาศ constและค่าทุก argumentอยู่ใน constant context</p></section>
-<section id="section-2"><h2>2. ประโยชน์จริง</h2><ul><li>สื่อว่าค่า/โครงนี้ไม่ขึ้นกับ stateปัจจุบัน</li><li>ลดการสร้าง config instanceซ้ำในบางกรณี</li><li>เมื่อ child widget instance identical frameworkอาจข้าม update subtree</li><li>analyzerช่วยแนะนำและจับสิ่งที่ควรคงที่</li></ul></section>
-<section id="section-3"><h2>3. สิ่งที่ const ไม่ทำ</h2><p>ถ้า const child depend on inherited Themeผ่าน buildของตน มันยัง rebuildเมื่อ dependencyเปลี่ยน; render objectยัง layout/paintเมื่อ constraints/propertyต้องเปลี่ยน; listใหญ่/image decode/API callไม่หายเพราะใส่ constรอบ icon</p></section>
-<section id="section-4"><h2>4. ตัวอย่างจริง</h2><p>สองแอปใช้ constกับ Colors, EdgeInsets, SizedBox, icons, delegatesและ WmsApp/Login widgetsที่ configคงที่ ส่วน HomeView Tilesบางส่วนไม่ constเพราะ badge, language text, store callbackและ responsive valuesเป็น runtime</p></section>
-<section id="section-5"><h2>5. Rebuild scope สำคัญกว่า constจำนวน</h2><p>Absolute shellมี ListenableBuilder bodyและ bottom navigationแยกกัน นี่ควบคุม dependency/rebuild scopeเชิงสถาปัตยกรรม ส่วน constเป็น micro optimization/clarityใน subtree อย่าสลับลำดับความสำคัญ</p></section>
-<section id="section-6"><h2>6. Measure ก่อน optimize</h2><p>ใช้ DevToolsดู frame/build profile ระบุ widgetที่ rebuildและงานแพง จากนั้นแยก builder/child, ย้าย state owner, lazy list, ลด parsing/image work แล้วค่อยตรวจ const/repaint boundary</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>const Text('WMS')</code> ยังอาจถูก layoutใหม่เมื่อหมุนจอ?</p><details><summary>เฉลย</summary><p>Widget configเดิมคงที่ แต่ parent constraints/layout treeเปลี่ยน RenderObjectจึงต้อง layoutตามขนาดใหม่ Constเกี่ยวกับ configuration identity ไม่ได้ freeze render geometry</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแตก widget/ใส่ constทุกจุดเพื่อคะแนน lintโดยไม่อ่าน dependency tree เป้าหมายคือ correctnessและขอบเขต rebuildชัด ไม่ใช่จำนวนคำ constสูงสุด</div></section>
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตั้งแต่ 1.1 เราบอกให้ “เติม <code>const</code> ทุกครั้งที่ analyzer แนะนำ” โดยยังไม่อธิบายเหตุผล และหลายคนพอรู้ว่ามันเกี่ยวกับความเร็วก็เริ่มใส่ทุกที่ด้วยความเชื่อว่ายิ่งเยอะยิ่งเร็ว</p><p>ความจริงคือ <code>const</code> ช่วยได้จริงแต่เป็นเรื่องเล็ก ส่วนสิ่งที่ทำให้แอปช้าหรือลื่นจริง ๆ เป็นคนละเรื่อง บทนี้จะจัดลำดับความสำคัญให้ถูก</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>rebuild scope</td><td>ขอบเขตว่าเมื่อข้อมูลเปลี่ยน ส่วนไหนของหน้าจอถูกวาดใหม่บ้าง</td></tr>
+<tr><td>frame</td><td>ภาพหนึ่งภาพ — แอปลื่นคือวาดได้ 60 ภาพต่อวินาที</td></tr>
+<tr><td>micro optimization</td><td>การปรับเล็ก ๆ ที่วัดผลได้ยาก</td></tr>
+<tr><td>profiling</td><td>การวัดว่าเวลาหมดไปกับอะไรจริง ๆ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: const คือคำสัญญา ไม่ใช่ยาวิเศษ</h2><p>ทบทวนจาก D1.3: <code>const</code> แปลว่า “ค่านี้รู้ได้ตั้งแต่ยังไม่รันโปรแกรม” เมื่อใช้กับ widget มันให้ผลสองอย่าง</p><ol><li><strong>Flutter สร้าง object นั้นชิ้นเดียวแล้วใช้ซ้ำ</strong> ทุกครั้งที่ <code>build</code> ทำงาน</li><li>เมื่อ Flutter เห็นว่า widget ตัวเดิมเป๊ะ ๆ (ชิ้นเดียวกัน) มันข้ามการตรวจกิ่งนั้นได้</li></ol><pre class="code-vs"><code>const SizedBox(height: 12)     // ทั้งแอปใช้ object ชิ้นเดียวกัน
+SizedBox(height: 12)           // สร้างใหม่ทุกครั้งที่ build</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>const</code> บอกว่า “ชิ้นนี้ไม่ขึ้นกับข้อมูลอะไรเลย” — ประโยชน์ด้านความเร็วเป็นของแถม ส่วนประโยชน์หลักคือ <em>สื่อสารกับคนอ่าน</em> ว่าตรงนี้ไม่มีอะไรเปลี่ยน</div></section>
+
+<section id="section-4"><h2>4. ใส่ได้เมื่อไหร่</h2><pre class="code-vs"><code>const SizedBox(height: 12)              // ได้ — ตัวเลขตายตัว
+const Icon(Icons.inventory_2_outlined)  // ได้
+const EdgeInsets.all(16)                // ได้
+const Text('เพิ่มสินค้า')                 // ได้ — ข้อความตายตัว
+
+Text('$_itemCount รายการ')               // ไม่ได้ — ค่ามาจากตัวแปร
+Text(task.title)                        // ไม่ได้
+Icon(done ? Icons.check : Icons.close)  // ไม่ได้ — ขึ้นกับเงื่อนไข</code></pre><p>กฎเดียวกับ D1.3: ทุก argument ต้องเป็นค่าคงที่หมด ถ้ามีตัวใดตัวหนึ่งมาจากตัวแปร ทั้งก้อนก็เป็น <code>const</code> ไม่ได้ — และตัวที่ครอบมันก็เป็นไม่ได้ตามไปด้วย</p><p>ข้อดีที่สังเกตได้ทันที: analyzer จะขีดเส้นแนะนำให้เอง ไม่ต้องเดา ถ้ามันไม่แนะนำแปลว่าใส่ไม่ได้</p></section>
+
+<section id="section-5"><h2>5. สิ่งที่ const ไม่ได้ทำ</h2><table><thead><tr><th>เข้าใจผิดว่า</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>ทำให้ widget ไม่ถูกวาดใหม่เลย</td><td>ยังถูกจัดวางและวาดใหม่ได้ถ้าขนาดหน้าจอเปลี่ยน</td></tr>
+<tr><td>ทำให้ API ที่เรียกผิดที่ไม่ถูกเรียกซ้ำ</td><td>ไม่เกี่ยวกันเลย — นั่นคือเรื่องของ 1.9</td></tr>
+<tr><td>แก้ปัญหารายการยาวที่กระตุก</td><td>ต้องใช้รายการแบบสร้างทีละแถวแทน</td></tr>
+<tr><td>ยิ่งใส่เยอะยิ่งเร็ว</td><td>ผลตอบแทนน้อยมากเมื่อเทียบกับการจำกัดขอบเขต rebuild</td></tr>
+</tbody></table><p>ตัวอย่างที่ชัด: <code>const Text('WMS')</code> ยังต้องถูกจัดวางใหม่เมื่อหมุนอุปกรณ์ เพราะแม้คำอธิบายจะเหมือนเดิม แต่พื้นที่ที่มันต้องอยู่เปลี่ยนไป — <code>const</code> ล็อกที่ระดับ Widget ไม่ได้ล็อกที่ระดับ RenderObject (ทบทวน 1.3)</p></section>
+
+<section id="section-6"><h2>6. สิ่งที่สำคัญกว่ามาก: ขอบเขตของการ rebuild</h2><p>คำถามที่ให้ผลตอบแทนสูงกว่า <code>const</code> หลายเท่าคือ <em>“เมื่อข้อมูลชิ้นนี้เปลี่ยน มีอะไรถูกวาดใหม่บ้าง”</em></p><pre class="code-vs"><code>// แบบที่ 1 — ทั้งหน้าจอวาดใหม่เมื่อตัวนับเปลี่ยน
+setState(() =&gt; _tapCount++);
+
+// แบบที่ 2 — เฉพาะข้อความบรรทัดเดียววาดใหม่
+_tapCount.value++;   // ValueNotifier</code></pre><p>ดูของจริงใน lab <code>widget_basics_app.dart</code></p><pre class="code-vs"><code>// ส่วนนี้เท่านั้นที่ rebuild เมื่อ _tapCount เปลี่ยน
+ValueListenableBuilder&lt;int&gt;(
+  valueListenable: _tapCount,
+  builder: (context, count, child) {
+    return Text('กดไปแล้ว $count ครั้ง', key: const Key('tap-count'));
+  },
+),</code></pre><p>เทียบกันตรง ๆ: การใส่ <code>const</code> ให้ <code>SizedBox</code> สิบตัวช่วยประหยัดการสร้าง object สิบชิ้นที่เบามาก ส่วนการจำกัดขอบเขต rebuild อาจช่วยไม่ให้ทั้งรายการร้อยแถวถูกวาดใหม่ — ต่างกันคนละระดับ</p><p>เครื่องมือสำหรับจำกัดขอบเขตจะเรียนใน 1.13 และเต็มรูปแบบใน Part 4</p></section>
+
+<section id="section-7"><h2>7. ลำดับที่ควรทำเมื่อแอปช้า</h2><ol><li><strong>วัดก่อน</strong> — อย่าเดา ใช้เครื่องมือดูว่าเวลาหมดไปกับอะไร</li><li><strong>ดูว่าอะไรถูกวาดใหม่โดยไม่จำเป็น</strong> แล้วจำกัดขอบเขต</li><li><strong>ดูว่ามีงานหนักอยู่ใน <code>build</code> ไหม</strong> (1.9)</li><li><strong>ใช้รายการแบบสร้างทีละแถว</strong> แทนการสร้างทุกแถวพร้อมกัน</li><li><strong>ลดปริมาณข้อมูล</strong> ที่ต้องประมวลผล (D1.17)</li><li><strong>ค่อยมาดู <code>const</code></strong> เป็นลำดับท้าย ๆ</li></ol><div class="warn">ที่จัด <code>const</code> ไว้ท้ายสุดไม่ได้แปลว่าไม่ต้องใส่ — ให้ใส่ตั้งแต่แรกทุกครั้งที่ analyzer แนะนำ เพราะมันฟรีและช่วยสื่อความหมาย แต่เมื่อแอปช้าจริง อย่าเสียเวลาไล่เติม <code>const</code> เป็นทางแก้แรก เพราะจะไม่ได้อะไรกลับมา</div></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Invalid constant value</code></td><td>ใส่ <code>const</code> กับสิ่งที่มีค่ามาจากตัวแปร</td><td>เอาออก — ให้ analyzer เป็นคนบอกว่าตรงไหนใส่ได้</td></tr>
+<tr><td>ใส่ <code>const</code> เต็มไปหมดแล้วแอปยังกระตุก</td><td>ต้นเหตุจริงอยู่ที่ขอบเขต rebuild หรืองานใน <code>build</code></td><td>ทำตามลำดับในหัวข้อ 7</td></tr>
+<tr><td>เติม <code>const</code> ที่ตัวนอกไม่ได้เพราะตัวในมีตัวแปร</td><td><code>const</code> ต้องเป็นตลอดสาย</td><td>แยกส่วนที่คงที่ออกมาเป็น widget ของตัวเอง แล้วใส่ <code>const</code> เฉพาะส่วนนั้น</td></tr>
+<tr><td>รายการยาวกระตุกทั้งที่ใส่ <code>const</code> ครบ</td><td>สร้างทุกแถวพร้อมกัน</td><td>ใช้ <code>ListView.builder</code> (Part 2)</td></tr>
+<tr><td>แตก widget ย่อยเยอะมากเพื่อให้ใส่ <code>const</code> ได้</td><td>ปรับตามคะแนน lint แทนที่จะปรับตามความหมาย</td><td>แตกตามเกณฑ์ใน 1.4 และ 1.11 เท่านั้น</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ดูโค้ดนี้แล้วตอบสามข้อ</p><pre class="code-vs"><code>Widget build(BuildContext context) {
+  return Column(
+    children: [
+      Padding(
+        padding: EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.inventory_2_outlined),
+            SizedBox(width: 8),
+            Text('รายการสินค้า'),
+          ],
+        ),
+      ),
+      SizedBox(height: 12),
+      Text('พบ $count รายการ'),
+    ],
+  );
+}</code></pre><ol><li>บรรทัดไหนใส่ <code>const</code> ได้บ้าง</li><li>ทำไม <code>Column</code> ตัวนอกสุดถึงใส่ <code>const</code> ไม่ได้</li><li>ถ้าอยากให้ส่วนหัว (<code>Padding</code> ทั้งก้อน) เป็น <code>const</code> ได้ ควรทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>return Column(
+  children: [
+    const Padding(                          // ← ได้ทั้งก้อน
+      padding: EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Icon(Icons.inventory_2_outlined),
+          SizedBox(width: 8),
+          Text('รายการสินค้า'),
+        ],
+      ),
+    ),
+    const SizedBox(height: 12),             // ← ได้
+    Text('พบ $count รายการ'),                // ← ไม่ได้
+  ],
+);</code></pre><p>สังเกตว่าเมื่อใส่ <code>const</code> ที่ <code>Padding</code> ตัวนอกแล้ว ตัวข้างในทั้งหมดไม่ต้องใส่ซ้ำ เพราะอยู่ในบริบทที่เป็น <code>const</code> อยู่แล้ว — การใส่ซ้ำไม่ผิด แต่รกโดยไม่จำเป็น</p><p><strong>ข้อ 2</strong></p><p>เพราะลูกคนสุดท้ายคือ <code>Text('พบ $count รายการ')</code> ซึ่งใช้ค่าจากตัวแปร เมื่อลูกตัวใดตัวหนึ่งไม่เป็น <code>const</code> แม่ก็เป็นไม่ได้ — เหมือนกฎใน D1.3 ที่ว่า <code>const</code> ต้องเป็นตลอดสายลงไปถึงข้างใน</p><p><strong>ข้อ 3</strong></p><p>ก้อนนั้น <em>เป็น</em> <code>const</code> ได้อยู่แล้วตามข้อ 1 เพราะข้างในไม่มีอะไรมาจากตัวแปรเลย ประเด็นที่แท้จริงของคำถามนี้คือ ถ้าวันหนึ่งส่วนหัวต้องแสดงชื่อคลังที่มาจากข้อมูล เราจะทำอย่างไร คำตอบคือ <strong>แยกเฉพาะส่วนที่เปลี่ยนออกมา</strong> ไม่ใช่ยอมให้ทั้งก้อนหลุดจาก <code>const</code></p><pre class="code-vs"><code>// แยกส่วนหัวที่คงที่ออกมาเป็น widget ของตัวเอง
+class _ListHeader extends StatelessWidget {
+  const _ListHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Icon(Icons.inventory_2_outlined),
+          SizedBox(width: 8),
+          Text('รายการสินค้า'),
+        ],
+      ),
+    );
+  }
+}
+
+// เรียกใช้
+const _ListHeader(),</code></pre><p><strong>ประโยชน์ที่แท้จริงของการแยกแบบนี้:</strong> ไม่ใช่แค่ได้ <code>const</code> แต่คือหัวข้อนี้กลายเป็นสิ่งของที่มีชื่อ อ่านง่ายขึ้น และถ้าวันหน้าต้องใช้ในหน้าจออื่นก็หยิบไปใช้ได้ทันที — ตรงกับเกณฑ์การแตก widget ใน 1.4</p><p><strong>สิ่งที่ต้องระวัง:</strong> อย่าแตก widget ย่อยเพียงเพื่อให้ตัวเลข <code>const</code> ในโปรเจกต์สูงขึ้น ถ้าแยกออกมาแล้วตั้งชื่อไม่ได้ว่ามันคืออะไร แสดงว่ายังไม่ควรแยก</p><p><strong>ลองต่อ:</strong> เพิ่ม <code>print</code> ใน <code>build</code> ของ <code>_ListHeader</code> แล้วกดปุ่มที่เปลี่ยน <code>count</code> — จะเห็นว่ามันยังถูกเรียกอยู่ เพราะ <code>const</code> ไม่ได้หยุด <code>build</code> ของแม่ ประเด็นนี้คือหัวใจของหัวข้อ 5 และเป็นเหตุผลว่าทำไมขอบเขต rebuild ถึงสำคัญกว่า</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>const</code> บอกว่าชิ้นนี้ไม่ขึ้นกับข้อมูลใด ๆ และให้ Flutter ใช้ object ซ้ำได้</li><li>ใส่ทุกครั้งที่ analyzer แนะนำ — ฟรีและช่วยสื่อความหมาย</li><li>ทุก argument ต้องคงที่หมด และต้องเป็น <code>const</code> ตลอดสาย</li><li><code>const</code> ไม่ได้หยุดการ build ของแม่ และไม่ได้หยุดการจัดวางใหม่</li><li>ตัวชี้ขาดของความลื่นคือ <strong>ขอบเขตของ rebuild</strong> ไม่ใช่จำนวน <code>const</code></li><li>เมื่อแอปช้า ให้วัดก่อนเสมอ แล้วไล่แก้ตามลำดับความสำคัญ</li></ul></div><p><strong>บทถัดไป:</strong> 1.11 จะลงลึกเรื่องการแตก widget ที่เราแตะไว้ใน 1.4 — เกณฑ์ที่ใช้ตัดสินจริงในโปรเจกต์ และกับดักของการแตกมากเกินไป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

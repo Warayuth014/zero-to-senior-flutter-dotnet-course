@@ -1,19 +1,143 @@
-<div class="note"><code>ListenableBuilder</code> rebuild subtreeเมื่อ Listenable notify; <code>ValueListenableBuilder&lt;T&gt;</code> ส่ง current valueเข้า builderและรองรับ childคงที่ ทั้งสองเป็นสะพานจาก mutable notifierสู่ declarative widget tree</div>
-<section><h2>1. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
-  valueListenable: themeProvider,
-  builder: (context, mode, child) =&gt; MaterialApp(
-    themeMode: mode,
-    home: child,
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: วาดใหม่เฉพาะส่วนที่เปลี่ยน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.5 (<code>setState</code>), 1.6 (การคืนทรัพยากร) และ 1.10 (ขอบเขต rebuild สำคัญที่สุด)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>ValueNotifier</code> คู่กับตัวสร้างที่ฟังมัน เพื่อจำกัดการวาดใหม่ให้เหลือเฉพาะส่วนที่เกี่ยวข้องจริง</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.10 เราสรุปว่าตัวชี้ขาดของความลื่นคือ <strong>ขอบเขตของ rebuild</strong> แต่ยังไม่ได้บอกว่าจะควบคุมมันอย่างไร</p><p>ปัญหาของ <code>setState</code> คือมันวาดใหม่ทั้ง <code>build</code> ของ <code>State</code> นั้น ถ้าหน้าจอมีรายการร้อยแถวและเราแค่อยากอัปเดตตัวเลขบรรทัดเดียว รายการทั้งร้อยแถวก็ถูกวาดใหม่ไปด้วย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Listenable</code></td><td>สิ่งที่ประกาศว่า “ฉันเปลี่ยนแล้วนะ” ให้คนที่ฟังรู้</td></tr>
+<tr><td><code>ValueNotifier&lt;T&gt;</code></td><td>กล่องเก็บค่าหนึ่งค่า ที่แจ้งเมื่อค่าเปลี่ยน</td></tr>
+<tr><td><code>ValueListenableBuilder</code></td><td>widget ที่ฟังกล่องนั้นแล้ววาดใหม่เฉพาะตัวเอง</td></tr>
+<tr><td><code>ListenableBuilder</code></td><td>แบบเดียวกันแต่ใช้กับสิ่งที่มีหลายค่า</td></tr>
+<tr><td>notify</td><td>การส่งสัญญาณว่าค่าเปลี่ยน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ป้ายประกาศที่มีคนตามอ่าน</h2><p>ทบทวนจาก D1.16: <code>Stream</code> คือสายพานที่ส่งค่าทยอยมา — <code>ValueNotifier</code> ก็คล้ายกัน แต่เรียบง่ายกว่ามาก</p><table><thead><tr><th></th><th><code>setState</code></th><th><code>ValueNotifier</code> + builder</th></tr></thead><tbody>
+<tr><td>ใครถูกวาดใหม่</td><td>ทั้ง <code>build</code> ของ <code>State</code></td><td>เฉพาะข้างใน builder</td></tr>
+<tr><td>ตั้งค่าอย่างไร</td><td>ห่อการเปลี่ยนค่าไว้</td><td>กำหนดค่าที่ <code>.value</code> เฉย ๆ</td></tr>
+<tr><td>ต้องคืนทรัพยากรไหม</td><td>ไม่ต้อง</td><td>ต้อง <code>dispose</code></td></tr>
+<tr><td>เหมาะกับ</td><td>ค่าที่เปลี่ยนแล้วกระทบทั้งหน้าจอ</td><td>ค่าที่กระทบเฉพาะจุดเล็ก ๆ</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> วาง builder ให้ <em>ต่ำที่สุดที่ยังครอบทุกคนที่ต้องใช้ค่านั้น</em> — เป็นกฎเดียวกับการวางข้อมูลใน 1.5 แค่คนละมิติ</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><p>เปิด <code>lib/widget_basics/widget_basics_app.dart</code></p><pre class="code-vs"><code>// ประกาศกล่องเก็บค่า
+final ValueNotifier&lt;int&gt; _tapCount = ValueNotifier&lt;int&gt;(0);
+
+@override
+void dispose() {
+  _tapCount.dispose();   // ใครสร้าง คนนั้นต้องคืน (1.6)
+  super.dispose();
+}</code></pre><pre class="code-vs"><code>// ส่วนนี้เท่านั้นที่ rebuild เมื่อ _tapCount เปลี่ยน
+ValueListenableBuilder&lt;int&gt;(
+  valueListenable: _tapCount,
+  builder: (context, count, child) {
+    return Text('กดไปแล้ว $count ครั้ง', key: const Key('tap-count'));
+  },
+),</code></pre><pre class="code-vs"><code>// เปลี่ยนค่า — ไม่ต้องเรียก setState เลย
+_tapCount.value++;</code></pre><p>ผลคือเมื่อกดงานหนึ่งใบ จะมีสองอย่างเกิดขึ้นพร้อมกันแต่คนละขอบเขต</p><table><thead><tr><th>สิ่งที่เปลี่ยน</th><th>วิธีแจ้ง</th><th>ใครวาดใหม่</th></tr></thead><tbody>
+<tr><td>งานใบไหนเสร็จแล้ว</td><td><code>setState</code></td><td>ทั้งหน้าจอ (เพราะการ์ดสรุปกับรายการต้องเปลี่ยนพร้อมกัน)</td></tr>
+<tr><td>จำนวนครั้งที่กด</td><td><code>_tapCount.value++</code></td><td>เฉพาะข้อความบรรทัดเดียว</td></tr>
+</tbody></table><p>ตัวอย่างนี้จงใจใช้ทั้งสองแบบในหน้าจอเดียว เพื่อให้เห็นว่าเลือกใช้ตามความหมายของข้อมูล ไม่ใช่เลือกอันใดอันหนึ่งไปทั้งไฟล์</p></section>
+
+<section><h2>5. เมื่อมีหลายค่า ใช้ ListenableBuilder</h2><p><code>ValueNotifier</code> เก็บได้ค่าเดียว ถ้าต้องการหลายค่าที่เปลี่ยนพร้อมกัน ให้สร้าง class ที่แจ้งได้เอง</p><pre class="code-vs"><code>class ScanCounter extends ChangeNotifier {
+  int _scanned = 0;
+  int _rejected = 0;
+
+  int get scanned =&gt; _scanned;
+  int get rejected =&gt; _rejected;
+
+  void accept() {
+    _scanned++;
+    notifyListeners();      // แจ้งครั้งเดียวหลังเปลี่ยนครบ
+  }
+
+  void reject() {
+    _rejected++;
+    notifyListeners();
+  }
+}</code></pre><pre class="code-vs"><code>ListenableBuilder(
+  listenable: counter,
+  builder: (context, child) =&gt; Text(
+    'สแกน ${counter.scanned} ปฏิเสธ ${counter.rejected}',
   ),
-  child: const HomeScreen(),
-)</code></pre><p>wmsapp rootใช้ ThemeProviderที่ extends ValueNotifier ทำให้ builderได้ typed valueโดยไม่อ่าน globalซ้ำ</p></section>
-<section><h2>2. ListenableBuilder</h2><pre class="code-vs"><code>ListenableBuilder(
-  listenable: store,
-  builder: (context, child) =&gt; WarehouseBody(store: store),
-)</code></pre><p>เหมาะ ChangeNotifier/หลาย fields Builderอ่าน snapshotจาก object Absoluteใช้กับ language controller, WarehouseStore, ConnectionController</p></section>
-<section><h2>3. Rebuild scope</h2><p>วาง builderต่ำสุดที่ครอบทุก consumerแต่ไม่ครอบของคงที่ Absolute shellแยก bodyกับ bottom navigation listeners แม้ฟัง storeเดียวกัน เพื่อชัดว่าแต่ละ subtree renderอะไร ส่วน app-wide languageอยู่เหนือ MaterialAppเพราะ localeกระทบทั้งแอป</p></section>
-<section><h2>4. child optimization</h2><p>ถ้า subtreeไม่ขึ้นกับ listenableให้สร้างครั้งเดียวใน <code>child</code> แล้วส่งเข้า builder ลดการ rebuild config แต่ต้องแน่ใจว่า childไม่อ่าน stateนั้นทาง context/global มิฉะนั้น optimizationผิดความหมาย</p></section>
-<section><h2>5. Notify เป็น contract</h2><p>Mutationใน ChangeNotifierต้องรักษา invariantแล้วเรียก notifyListenersหนึ่งครั้งที่เหมาะ Public mutable fieldsที่ UIแก้เองอาจลืม notify ให้ expose getters/commands และ batch updateก่อน notify</p></section>
-<section><h2>6. Ownership/dispose</h2><p>Builderเพิ่ม/ถอด listenerตาม element lifecycle แต่ไม่ได้ dispose listenableให้ Listenables singleton/app ownerอยู่ต่อ ส่วน storeที่ shellสร้างต้อง shell.dispose ดังโค้ดจริง ห้ามคิดว่า builderจัดการ resourceทั้งหมด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Connection statusเปลี่ยนเฉพาะจุดสีบน header ควรวาง builderตรงไหน?</p><details><summary>เฉลย</summary><p>ครอบ status indicator/ส่วน headerที่ dependเท่านั้น ไม่ครอบ MaterialAppหรือทั้ง workflow screen หาก language/themeไม่เกี่ยว ใช้ Listenable/ValueListenableเฉพาะ connection controllerและ childคงที่รอบข้าง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Nested buildersจำนวนมากไม่จำเป็นอาจ rebuildซ้ำและซ่อน dependency ให้รวม listenablesหรือสร้าง view model snapshotเมื่อหลายค่าต้องเปลี่ยน atomically แต่อย่า notifyทั้ง God Storeทุก eventแล้วหวัง constช่วย</div></section>
+)</code></pre><div class="warn"><strong>กฎที่ห้ามลืม:</strong> ถ้าเปลี่ยนค่าแล้วไม่เรียก <code>notifyListeners()</code> หน้าจอจะไม่อัปเดต และไม่มี error อะไรเตือนเลย — เป็นสาเหตุอันดับหนึ่งของอาการ “ข้อมูลเปลี่ยนแล้วแต่จอไม่เปลี่ยน” เมื่อเริ่มใช้รูปแบบนี้ ทางกันคือทำ field เป็น private แล้วเปิดเฉพาะ getter กับ method ตามหลัก D1.7</div><p>ถ้าเปลี่ยนหลายค่าในการกระทำเดียว ให้เปลี่ยนให้ครบก่อนแล้วค่อยแจ้งครั้งเดียว ไม่ใช่แจ้งทีละค่า เพราะจะทำให้หน้าจอวาดใหม่หลายรอบและอาจเห็นสถานะกลางที่ไม่ถูกต้อง</p></section>
+
+<section><h2>6. child: ส่วนที่ไม่ต้องวาดใหม่</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;int&gt;(
+  valueListenable: _tapCount,
+  child: const Icon(Icons.touch_app),      // สร้างครั้งเดียว
+  builder: (context, count, child) =&gt; Row(
+    children: [
+      child!,                              // ใช้ตัวเดิมซ้ำ ไม่สร้างใหม่
+      Text('กดไปแล้ว $count ครั้ง'),
+    ],
+  ),
+)</code></pre><p>สิ่งที่ส่งผ่าน <code>child</code> จะถูกสร้างครั้งเดียวและส่งเข้ามาให้ใช้ซ้ำทุกครั้งที่วาดใหม่ ใช้เมื่อมีส่วนที่ไม่ขึ้นกับค่าที่ฟังอยู่และสร้างแพง</p><p>ในทางปฏิบัติ ถ้าส่วนนั้นเป็น <code>const</code> ได้อยู่แล้ว ประโยชน์จะน้อยมาก — ให้ใช้เมื่อวัดแล้วเห็นว่าคุ้มจริงตามลำดับใน 1.10</p></section>
+
+<section><h2>7. builder ไม่ได้คืนทรัพยากรให้</h2><table><thead><tr><th>สิ่งที่ builder จัดการให้</th><th>สิ่งที่เราต้องจัดการเอง</th></tr></thead><tbody>
+<tr><td>เริ่มฟังเมื่อเข้าหน้าจอ</td><td>สร้าง <code>ValueNotifier</code></td></tr>
+<tr><td>เลิกฟังเมื่อออกจากหน้าจอ</td><td><code>dispose</code> ตัว <code>ValueNotifier</code></td></tr>
+</tbody></table><p>เชื่อมกับกฎความเป็นเจ้าของใน 1.6 โดยตรง</p><ul><li>ถ้า <code>ValueNotifier</code> ถูกสร้างใน <code>State</code> ของเรา → เราต้อง <code>dispose</code></li><li>ถ้ามันถูกส่งเข้ามาจากข้างนอก → เราห้าม <code>dispose</code></li></ul></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนค่าแล้วหน้าจอไม่อัปเดต</td><td>ลืม <code>notifyListeners()</code></td><td>เปิดเฉพาะ method ที่แจ้งให้เสมอ</td></tr>
+<tr><td>เปลี่ยนค่าใน list แล้วไม่อัปเดต</td><td>แก้ list ก้อนเดิม <code>.value</code> จึงเท่าเดิม</td><td>กำหนด list ก้อนใหม่ <code>notifier.value = [...old, x]</code> (D1.5)</td></tr>
+<tr><td>หน่วยความจำรั่วเมื่อเข้าออกหน้าจอซ้ำ</td><td>ไม่ได้ <code>dispose</code></td><td>คืนใน <code>dispose</code> ของ <code>State</code></td></tr>
+<tr><td><code>A ValueNotifier was used after being disposed</code></td><td>คืนของที่ยืมมาจากข้างนอก</td><td>คืนเฉพาะที่สร้างเอง</td></tr>
+<tr><td>ใช้ builder แล้วยังวาดใหม่ทั้งหน้าจอ</td><td>วาง builder ไว้สูงเกินไป</td><td>ย้ายลงมาให้ครอบเฉพาะส่วนที่ใช้ค่านั้น</td></tr>
+<tr><td>หน้าจอกระพริบเห็นค่ากลาง ๆ</td><td>เรียก <code>notifyListeners</code> หลายครั้งต่อการกระทำเดียว</td><td>เปลี่ยนค่าให้ครบก่อน แล้วแจ้งครั้งเดียว</td></tr>
+</tbody></table><p>แถวที่สองเป็นกับดักที่เจอบ่อยมากและงงที่สุด เพราะโค้ดดูถูกทุกอย่าง — <code>ValueNotifier</code> ตรวจว่าค่าเปลี่ยนโดยเทียบว่าเป็นก้อนเดียวกันหรือเปล่า เมื่อเราแก้ข้างใน list ก้อนเดิม มันจึงเห็นว่า “ไม่เปลี่ยน” ตรงกับเรื่องที่เรียนใน D1.5 หัวข้อ 7 พอดี</p></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หน้าจอสแกนมีสามส่วน</p><ul><li>หัวข้อและคำแนะนำ — ไม่เปลี่ยนเลย</li><li>จุดสถานะการเชื่อมต่อ — เปลี่ยนทุกไม่กี่วินาที</li><li>รายการที่สแกนแล้ว 200 แถว — เปลี่ยนเมื่อสแกนใหม่เท่านั้น</li></ul><ol><li>ถ้าใช้ <code>setState</code> ทั้งหมด จะเกิดอะไรขึ้นเมื่อสถานะการเชื่อมต่อเปลี่ยน</li><li>ควรวาง builder ตรงไหน</li><li>เขียนโครงโค้ด</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><p>ทุกครั้งที่สถานะการเชื่อมต่อเปลี่ยน — ซึ่งเกิดทุกไม่กี่วินาที — รายการทั้ง 200 แถวจะถูกสร้างคำอธิบายใหม่หมด ทั้งที่ข้อมูลของมันไม่ได้เปลี่ยนเลยแม้แต่แถวเดียว บนเดสก์ท็อปอาจไม่รู้สึก แต่บน PDA ที่ CPU ช้ากว่ามาก จะเห็นรายการกระตุกเป็นจังหวะขณะเลื่อน</p><p><strong>ข้อ 2</strong></p><p>วาง builder ให้ครอบ <strong>เฉพาะจุดสถานะ</strong> เท่านั้น ส่วนหัวข้อไม่ต้องอยู่ในนั้นเพราะไม่เปลี่ยน และรายการก็ไม่ต้องอยู่ในนั้นเพราะเปลี่ยนคนละจังหวะ</p><pre class="code-vs"><code>class _ScanScreenState extends State&lt;ScanScreen&gt; {
+  final ValueNotifier&lt;bool&gt; _online = ValueNotifier&lt;bool&gt;(true);
+  List&lt;String&gt; _scanned = &lt;String&gt;[];
+
+  @override
+  void dispose() {
+    _online.dispose();
+    super.dispose();
+  }
+
+  void _addScan(String code) {
+    setState(() =&gt; _scanned = [..._scanned, code]);   // รายการเปลี่ยนจริง
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // ไม่เปลี่ยนเลย — เป็น const ได้
+        const Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('สแกนบาร์โค้ดเพื่อบันทึก'),
+        ),
+
+        // เปลี่ยนบ่อย แต่กระทบแค่จุดเดียว
+        ValueListenableBuilder&lt;bool&gt;(
+          valueListenable: _online,
+          builder: (context, online, child) =&gt; Row(
+            children: [
+              Icon(
+                online ? Icons.wifi : Icons.wifi_off,
+                color: online ? Colors.green : Colors.red,
+              ),
+              const SizedBox(width: 8),
+              Text(online ? 'เชื่อมต่ออยู่' : 'ออฟไลน์'),
+            ],
+          ),
+        ),
+
+        // เปลี่ยนเฉพาะตอนสแกนใหม่
+        Expanded(
+          child: ListView.builder(
+            itemCount: _scanned.length,
+            itemBuilder: (context, index) =&gt; ListTile(
+              key: ValueKey&lt;String&gt;(_scanned[index]),
+              title: Text(_scanned[index]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}</code></pre><p><strong>ทำไม <code>_addScan</code> ยังใช้ <code>setState</code>:</strong> เพราะรายการเป็นข้อมูลที่กระทบส่วนใหญ่ของหน้าจออยู่แล้ว และเกิดไม่บ่อย (เฉพาะตอนสแกน) การใช้ <code>setState</code> จึงตรงไปตรงมาและอ่านง่ายกว่า — ไม่ใช่ทุกอย่างต้องเป็น <code>ValueNotifier</code></p><p><strong>ทำไมเขียน <code>_scanned = [..._scanned, code]</code> แทน <code>_scanned.add(code)</code>:</strong> ทั้งสองแบบทำงานได้กับ <code>setState</code> แต่การสร้าง list ก้อนใหม่เป็นนิสัยที่ปลอดภัยกว่า และจำเป็นทันทีถ้าวันหนึ่งย้ายไปใช้ <code>ValueNotifier</code> ตามที่เตือนไว้ในตารางหัวข้อ 8</p><p><strong>ผลลัพธ์:</strong> เมื่อสถานะเชื่อมต่อเปลี่ยน มีเพียง <code>Row</code> เล็ก ๆ ที่ถูกวาดใหม่ ส่วนรายการ 200 แถวและหัวข้อไม่ถูกแตะเลย — นี่คือความหมายของ “ขอบเขต rebuild” ที่ 1.10 บอกว่าสำคัญกว่า <code>const</code></p><p><strong>ลองต่อ:</strong> ใส่ <code>print</code> ไว้ใน <code>itemBuilder</code> ของรายการ แล้วสลับ <code>_online.value</code> ไปมา — จะเห็นว่าไม่มีอะไรพิมพ์ออกมาเลย จากนั้นลองย้ายรายการเข้าไปอยู่ใน builder แล้วทำแบบเดิม เพื่อเห็นความต่างด้วยตา</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>setState</code> วาดใหม่ทั้ง <code>build</code> ส่วน builder วาดใหม่เฉพาะข้างในตัวเอง</li><li><code>ValueNotifier</code> เก็บค่าเดียว ส่วน <code>ChangeNotifier</code> เก็บได้หลายค่า</li><li>ลืม <code>notifyListeners()</code> = หน้าจอไม่อัปเดตโดยไม่มี error</li><li>แก้ข้างใน list ก้อนเดิมจะไม่ถูกมองว่าเปลี่ยน — ต้องสร้างก้อนใหม่</li><li>วาง builder ต่ำที่สุดที่ยังครอบทุกคนที่ต้องใช้ค่านั้น</li><li>builder เลิกฟังให้ แต่ไม่ได้ <code>dispose</code> ให้ — เจ้าของต้องคืนเอง</li><li>ไม่ใช่ทุกอย่างต้องเป็น <code>ValueNotifier</code> — เลือกตามความหมายของข้อมูล</li></ul></div><p><strong>บทถัดไป:</strong> 1.14 จะแนะนำแนวคิดที่อยู่เบื้องหลัง <code>Theme.of(context)</code> ที่เราใช้มาตลอด — วิธีที่ Flutter ส่งข้อมูลลงไปให้ลูกหลานทุกชั้นโดยไม่ต้องส่งผ่าน constructor ทีละชั้น</p></section>

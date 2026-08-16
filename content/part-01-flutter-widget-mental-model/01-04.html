@@ -1,23 +1,118 @@
-<div class="note"><code>StatelessWidget</code> ไม่มี State object ของตัวเอง แต่ rebuild ได้เมื่อ parent update หรือ inherited dependency ที่มันใช้เปลี่ยน คำว่า stateless ไม่ได้แปลว่า “build ครั้งเดียว”</div>
-<section><h2>1. Configuration จาก constructor</h2><pre class="code-vs"><code>class TaskTile extends StatelessWidget {
-  const TaskTile({
-    super.key,
-    required this.task,
-    required this.onTap,
-  });
-  final WmsTask task;
-  final VoidCallback onTap;
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เขียน widget ตัวแรกของตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.1–1.3 (widget tree และความต่างระหว่าง Widget กับ Element) และ D1.6–D1.8 (class, constructor, <code>extends</code>, <code>@override</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้าง widget ของตัวเองด้วย <code>StatelessWidget</code> รับข้อมูลผ่าน constructor และเข้าใจว่าคำว่า “stateless” หมายถึงอะไรจริง ๆ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>จนถึงตอนนี้เราใช้แต่ widget สำเร็จรูปของ Flutter อย่าง <code>Text</code> และ <code>Center</code> แต่หน้าจอจริงมีชิ้นส่วนที่ซ้ำกัน เช่นการ์ดแสดงตัวเลขสถิติที่มีสามใบเรียงกัน ถ้าเขียนซ้ำสามรอบ พอต้องแก้รูปแบบก็ต้องแก้สามที่</p><p>ทางออกคือสร้าง widget ของเราเอง ซึ่งก็คือการเขียน class ธรรมดาที่สืบทอดจาก <code>StatelessWidget</code> — ทุกอย่างที่เรียนใน D1.8 ใช้ได้ตรง ๆ</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>StatelessWidget</code></td><td>widget ที่ไม่ถือข้อมูลที่เปลี่ยนได้ของตัวเอง</td></tr>
+<tr><td><code>build</code></td><td>method ที่คืนว่าหน้าตาควรเป็นอย่างไร</td></tr>
+<tr><td><code>BuildContext</code></td><td>ข้อมูลว่า widget นี้อยู่ตรงไหนของ tree (เต็ม ๆ ใน 1.7)</td></tr>
+<tr><td><code>super.key</code></td><td>ส่ง key ต่อให้แม่ (เต็ม ๆ ใน 1.8)</td></tr>
+<tr><td>derived value</td><td>ค่าที่คำนวณจากค่าอื่นได้ ไม่ต้องเก็บซ้ำ (จาก D1.7)</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ฟังก์ชันที่คืนหน้าตา</h2><p>ให้คิดว่า <code>StatelessWidget</code> คือ <strong>ฟังก์ชันที่รับข้อมูลแล้วคืนหน้าตา</strong></p><pre class="code-vs"><code>ข้อมูลเข้า  →  [ StatelessWidget ]  →  หน้าตาที่ควรเป็น
+(label, value)                        (การ์ดหนึ่งใบ)</code></pre><p>คุณสมบัติที่สำคัญคือ <strong>ข้อมูลเข้าชุดเดิม ต้องได้หน้าตาชุดเดิมเสมอ</strong> ซึ่งแปลว่ามันไม่มีความจำ ไม่มีอารมณ์ ไม่ขึ้นกับว่าถูกเรียกเป็นครั้งที่เท่าไร</p><div class="warn"><strong>เข้าใจผิดที่พบบ่อยที่สุด:</strong> คำว่า “stateless” ไม่ได้แปลว่า “สร้างครั้งเดียวแล้วไม่เปลี่ยนอีก” — มันแปลว่า “ไม่ถือข้อมูลที่เปลี่ยนได้ของตัวเอง” widget แบบนี้ถูก build ใหม่บ่อยมาก และควรถูก build ใหม่ด้วย เพราะนั่นคือวิธีที่มันแสดงข้อมูลใหม่</div></section>
+
+<section><h2>4. เขียน widget ตัวแรก</h2><p>เปิด <code>lib/widget_basics/widget_basics_app.dart</code> ใน lab แล้วดู <code>StatCard</code></p><pre class="code-vs"><code>class StatCard extends StatelessWidget {
+  const StatCard({super.key, required this.label, required this.value});
+
+  final String label;
+  final String value;
 
   @override
-  Widget build(BuildContext context) =&gt; ListTile(
-    title: Text(task.id),
-    onTap: onTap,
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        child: Column(
+          children: [
+            Text(value, style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 4),
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}</code></pre><p>อ่านทีละส่วน — ทุกอย่างคือ Dart ที่เรียนมาแล้ว</p><table><thead><tr><th>ส่วน</th><th>คืออะไร</th><th>เรียนมาจาก</th></tr></thead><tbody>
+<tr><td><code>extends StatelessWidget</code></td><td>สืบทอดเพื่อรับสัญญาว่าต้องมี <code>build</code></td><td>D1.8</td></tr>
+<tr><td><code>const StatCard({...})</code></td><td>constructor แบบ named parameter</td><td>D1.4, D1.6</td></tr>
+<tr><td><code>required this.label</code></td><td>ทางลัดรับค่าแล้วเก็บลง field</td><td>D1.6</td></tr>
+<tr><td><code>final String label</code></td><td>field ที่ตั้งครั้งเดียวแล้วห้ามเปลี่ยน</td><td>D1.3</td></tr>
+<tr><td><code>@override Widget build</code></td><td>เขียนทับ method ที่แม่บังคับไว้</td><td>D1.8</td></tr>
+</tbody></table><p>ใช้งานเหมือนเรียก widget สำเร็จรูปทุกประการ</p><pre class="code-vs"><code>StatCard(label: 'งานทั้งหมด', value: '3')</code></pre></section>
+
+<section><h2>5. ทำไม field ต้องเป็น final ทั้งหมด</h2><p>ทบทวนจาก 1.3: widget ถูกทิ้งและสร้างใหม่ตลอดเวลา ถ้าเราแอบเปลี่ยนค่าใน field ของมัน</p><ul><li>ไม่มีใครรู้ว่าค่าเปลี่ยน หน้าจอจึงไม่อัปเดต</li><li>รอบถัดไปที่ widget ถูกสร้างใหม่ ค่านั้นหายไปทันที</li></ul><p>Flutter จึงบังคับให้ทุก field เป็น <code>final</code> ตั้งแต่ตอน compile ซึ่งเป็นการป้องกันที่ดี ไม่ใช่ข้อจำกัดที่น่ารำคาญ</p><p>ถ้าคุณรู้สึกอยากเปลี่ยนค่าใน <code>StatelessWidget</code> แสดงว่าข้อมูลนั้นควรอยู่ที่อื่น — คำตอบว่าที่ไหนอยู่ในบทหน้า</p></section>
+
+<section><h2>6. ค่าที่คำนวณได้ อย่าเก็บซ้ำ</h2><pre class="code-vs"><code>// ดี — คำนวณตอน build
+@override
+Widget build(BuildContext context) {
+  final isEmpty = value == '0';
+  return Card(
+    color: isEmpty ? Colors.grey.shade200 : null,
+    ...
   );
-}</code></pre><p>fields เป็น final และ widget แสดงผลจาก input/context Parent เป็น owner ของ mutable state แล้วส่ง snapshot/callback ลงมา</p></section>
-<section><h2>2. เหตุที่ Stateless rebuild</h2><ul><li>parent build คืน instance/config ใหม่</li><li><code>Theme.of</code>, <code>MediaQuery</code>, Localizations ที่ depend เปลี่ยน</li><li>Element ถูก reinsert/update ตาม identity</li></ul><p>จึงห้าม cacheค่าจาก context ใน global หรือทำ API ใน build เพราะ build ถูกเรียกได้บ่อย</p></section>
-<section><h2>3. ตัวอย่างจริง</h2><p><code>HomeView</code>, <code>_Tile</code>, <code>_HomeIcon</code> เป็น StatelessWidget รับ WarehouseStore/snapshot properties/callback แล้วประกอบ UI ส่วน <code>WmsApp</code> ก็ stateless แม้แอปรองรับภาษา/theme เปลี่ยน เพราะ mutable owner อยู่ Listenable ภายนอก</p></section>
-<section><h2>4. ส่ง store เข้า Stateless ได้ แต่ต้องฟังให้ถูก</h2><p>การมี field <code>WarehouseStore store</code> ไม่ทำ widget rebuildเองเมื่อ store mutate ต้องมี ListenableBuilder เหนือ HomeView หรือ builder ภายใน ถ้า parent shell กำลังฟัง store และ rebuild body ก็พอ แต่ dependency scope ต้องอ่านจาก tree จริง</p></section>
-<section><h2>5. Derived UI ไม่ต้องเก็บ state</h2><p>ค่าพวก <code>hasBadge = count &gt; 0</code>, label จาก enum, color จาก status ควรคำนวณใน build/helper pure ไม่ย้ายเป็น mutable state ที่ต้อง sync สองจุด</p></section>
-<section><h2>6. เมื่อควร Stateful</h2><p>เมื่อ widget เป็น owner ของ lifecycle state เช่น controller, focus, animation, subscription หรือ local selection ที่ต้องอยู่ข้าม rebuild หาก state เป็นของ workflow/shared ให้ย้ายไป store ไม่ใช่เปลี่ยนทุกอย่างเป็น StatefulWidget</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Card แสดง status จาก task และกดแล้วเรียก parent ต้องเป็น Stateful ไหม?</p><details><summary>เฉลย</summary><p>ไม่จำเป็น ใช้ Stateless รับ task/status และ callback ถ้า hover/animation/local expand ต้องอยู่ข้าม buildจึงค่อย Stateful หรือ widget animationสำเร็จรูป แต่ business status ยังเป็นของ parent/store</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าใส่ mutable collection/controller ใน Stateless แล้วแก้เงียบ ๆ เพราะไม่มี lifecycle/dispose และไม่มี signal rebuild ให้ state owner ชัดหรือสร้างค่าชั่วคราวใน buildเท่านั้น</div></section>
+}
+
+// แย่ — เก็บเป็น field ที่ต้องคอยอัปเดตให้ตรง
+final bool isEmpty;   // วันหนึ่งจะไม่ตรงกับ value</code></pre><p>หลักการเดียวกับ getter ใน D1.7: <strong>ถ้าคำนวณจากค่าอื่นได้ อย่าเก็บซ้ำ</strong> เพราะข้อมูลสองชุดที่ต้อง “ตรงกัน” จะมีวันที่ไม่ตรงกันเสมอ</p><p>ตัวอย่างค่าที่ควรคำนวณใน <code>build</code> ไม่ใช่เก็บไว้: สีตามสถานะ, ข้อความจาก enum, ป้ายแจ้งเตือนจากจำนวนที่มากกว่าศูนย์</p></section>
+
+<section><h2>7. เมื่อไหร่ที่ StatelessWidget ถูก build ใหม่</h2><table><thead><tr><th>สาเหตุ</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>widget แม่ถูก build ใหม่</td><td>หน้าจอเปลี่ยนจำนวนที่นับได้</td></tr>
+<tr><td>ธีมเปลี่ยน</td><td>ผู้ใช้สลับโหมดมืด</td></tr>
+<tr><td>ขนาดหน้าจอเปลี่ยน</td><td>หมุนอุปกรณ์</td></tr>
+<tr><td>ภาษาเปลี่ยน</td><td>ผู้ใช้เปลี่ยนเป็นภาษาอังกฤษ</td></tr>
+</tbody></table><div class="warn">เพราะ <code>build</code> ถูกเรียกได้บ่อยและคาดเดาเวลาไม่ได้ จึง <strong>ห้ามทำงานที่มีผลข้างเคียงใน <code>build</code></strong> เช่นยิง API บันทึกข้อมูล หรือเริ่มจับเวลา — เหตุผลเต็ม ๆ และตัวอย่างจริงอยู่ใน 1.9</div></section>
+
+<section><h2>8. แตก widget ย่อยเมื่อไหร่</h2><p>เกณฑ์ที่ใช้ได้จริงมีสามข้อ ถ้าเข้าข้อใดข้อหนึ่งก็ควรแตก</p><ol><li><strong>ใช้ซ้ำ</strong> — ชิ้นส่วนเดียวกันปรากฏมากกว่าหนึ่งที่ เช่น <code>StatCard</code> ที่ใช้สองใบ</li><li><strong>ตั้งชื่อได้</strong> — ถ้าเรียกส่วนนั้นด้วยคำเดียวได้ เช่น “แถวงาน” แปลว่ามันเป็นสิ่งของหนึ่งชิ้น</li><li><strong>อ่านยาก</strong> — <code>build</code> ยาวจนต้องเลื่อนจอเพื่อดูให้จบ</li></ol><p>ข้อดีที่ตามมาซึ่งคนมักไม่คาดคิด: widget ที่แตกออกมาแล้ว <strong>ทดสอบแยกได้</strong> ดูตัวอย่างจากเทสต์ของ lab</p><pre class="code-vs"><code>await tester.pumpWidget(
+  MaterialApp(
+    home: Scaffold(
+      body: TaskTile(
+        task: const DashboardTask(id: 'T-99', title: 'งานทดสอบ', quantity: 7),
+        done: true,
+        onToggle: () =&gt; toggled++,
+      ),
+    ),
+  ),
+);</code></pre><p>เราทดสอบ <code>TaskTile</code> ใบเดียวได้โดยไม่ต้องเปิดแดชบอร์ดทั้งหน้า เพราะมันรับทุกอย่างที่ต้องใช้ผ่าน constructor ไม่ได้ไปหยิบข้อมูลมาเอง</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>This class inherits from a class marked as @immutable</code></td><td>มี field ที่ไม่ใช่ <code>final</code></td><td>ทำให้เป็น <code>final</code> ทั้งหมด</td></tr>
+<tr><td><code>Missing concrete implementation of 'StatelessWidget.build'</code></td><td>ยังไม่ได้เขียน <code>build</code></td><td>เพิ่ม <code>@override Widget build(BuildContext context)</code></td></tr>
+<tr><td>เปลี่ยนค่าใน widget แล้วหน้าจอไม่อัปเดต</td><td>ข้อมูลนั้นควรอยู่กับ Element ไม่ใช่ widget</td><td>ใช้ <code>StatefulWidget</code> หรือย้ายขึ้นไปที่แม่ (1.5, 4.3)</td></tr>
+<tr><td>analyzer เตือนให้เติม <code>const</code> ที่ constructor</td><td>widget ที่ไม่มีค่าเปลี่ยนควรเป็น <code>const</code> ได้</td><td>เติม <code>const</code> หน้า constructor</td></tr>
+<tr><td>widget ทำงานตอนทดสอบไม่ได้ ต้องเปิดทั้งหน้าจอ</td><td>ไปหยิบข้อมูลมาเองแทนที่จะรับผ่าน constructor</td><td>รับทุกอย่างที่ต้องใช้เป็น parameter</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>สร้าง <code>StatelessWidget</code> ชื่อ <code>StockBadge</code> ที่</p><ol><li>รับจำนวนคงเหลือ (<code>int</code>) และจำนวนขั้นต่ำ (<code>int</code> ค่าเริ่มต้น 10)</li><li>แสดงข้อความ <code>เหลือ N ชิ้น</code></li><li>ถ้าจำนวนต่ำกว่าขั้นต่ำ ให้พื้นหลังเป็นสีเตือน ถ้าไม่ใช่ให้ใช้สีปกติ</li><li>ถ้าจำนวนเป็นศูนย์ ให้แสดงข้อความ <code>ของหมด</code> แทน</li><li>ห้ามเก็บสีหรือข้อความเป็น field</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class StockBadge extends StatelessWidget {
+  const StockBadge({super.key, required this.quantity, this.minimum = 10});
+
+  final int quantity;
+  final int minimum;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isOut = quantity == 0;
+    final isLow = quantity &lt; minimum;
+
+    final label = isOut ? 'ของหมด' : 'เหลือ $quantity ชิ้น';
+    final background = isOut
+        ? scheme.errorContainer
+        : isLow
+            ? scheme.tertiaryContainer
+            : scheme.surfaceContainerHighest;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label),
+    );
+  }
+}</code></pre><p><strong>ทำไม <code>label</code> และ <code>background</code> ถึงเป็นตัวแปรใน <code>build</code> ไม่ใช่ field:</strong> เพราะทั้งคู่คำนวณได้จาก <code>quantity</code> และ <code>minimum</code> ทั้งหมด ถ้าเก็บเป็น field เราต้องรับประกันเองว่ามันตรงกับ <code>quantity</code> เสมอ ซึ่งวันหนึ่งจะไม่ตรง — เป็นหลักเดียวกับ <code>remaining</code> ในแบบฝึกหัด D1.7</p><p><strong>ทำไม <code>minimum</code> มีค่าเริ่มต้นแทนที่จะ <code>required</code>:</strong> เพราะ 10 เป็นค่าที่ใช้ได้ในกรณีส่วนใหญ่ การบังคับให้ทุกจุดเรียกส่งค่านี้ทำให้โค้ดยาวโดยไม่ได้อะไร — ตรงกับกฎการเลือกรูปแบบ parameter ใน D1.4</p><p><strong>ทำไมใช้สีจากธีม:</strong> ถ้าเขียน <code>Colors.red</code> ตรง ๆ พอทำโหมดมืดสีจะแสบตาและตัวอักษรอาจอ่านไม่ออก การใช้ <code>colorScheme.errorContainer</code> ได้สีที่คู่กับตัวอักษรอย่างถูกต้องในทุกโหมด (ทบทวน 1.2)</p><p><strong>จุดที่คนมักพลาด:</strong> การเขียน <code>if (isOut) return Container(...)</code> แล้ว <code>if (isLow) return Container(...)</code> เป็นสามชุดแยกกัน ซึ่งได้ผลถูกต้องแต่โครงสร้างซ้ำสามรอบ พอต้องแก้ระยะขอบก็ต้องแก้สามที่ — ให้แยกเฉพาะ <em>ค่า</em> ที่ต่างกัน แล้วใช้โครงเดียว</p><p><strong>ลองต่อ:</strong> เพิ่มไอคอนหน้าข้อความที่เปลี่ยนตามสถานะ แล้วสังเกตว่าคุณเพิ่มตัวแปรอีกหนึ่งตัวใน <code>build</code> ไม่ใช่ field อีกหนึ่งตัว</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>StatelessWidget</code> คือฟังก์ชันที่รับข้อมูลแล้วคืนหน้าตา</li><li>“stateless” แปลว่าไม่ถือข้อมูลที่เปลี่ยนได้ ไม่ได้แปลว่าไม่ถูก build ใหม่</li><li>field ทุกตัวต้องเป็น <code>final</code> — Flutter บังคับ และเป็นการป้องกันที่ดี</li><li>ค่าที่คำนวณได้ ให้คำนวณใน <code>build</code> อย่าเก็บเป็น field</li><li>ห้ามทำงานที่มีผลข้างเคียงใน <code>build</code></li><li>แตก widget เมื่อใช้ซ้ำ ตั้งชื่อได้ หรืออ่านยาก — และได้ผลพลอยได้คือทดสอบแยกได้</li></ul></div><p><strong>บทถัดไป:</strong> 1.5 จะตอบคำถามที่ค้างไว้ว่า ถ้า widget ถือข้อมูลที่เปลี่ยนได้ไม่ได้ แล้วจำนวนที่นับได้ในแอป lab เก็บอยู่ที่ไหน</p></section>

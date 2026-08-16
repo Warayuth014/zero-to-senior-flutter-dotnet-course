@@ -1,13 +1,144 @@
-<div class="note"><code>BuildContext</code> คือ handle ของ Element ตำแหน่งหนึ่งใน tree ไม่ใช่ global application context การหา Theme/Navigator/MediaQuery เดินจากตำแหน่งนั้นขึ้น ancestor และ context มีอายุเท่า Element</div>
-<section><h2>1. ตำแหน่งเป็นตัวกำหนดผล</h2><pre class="code-vs"><code>final theme = Theme.of(context);
-final media = MediaQuery.of(context);
-final navigator = Navigator.of(context);</code></pre><p>context สองตัวใน methodเดียวกันอาจเห็น ancestors ต่างกัน Dialog builder ให้ <code>ctx</code> ที่อยู่ใต้ dialog route จึงใช้ <code>Navigator.pop(ctx)</code> ปิด dialog ได้ตรงตัว</p></section>
-<section><h2>2. Builder สร้าง context ใต้ widget ใหม่</h2><p>ถ้าสร้าง Scaffold แล้วใช้ context ของ widget ที่อยู่เหนือ Scaffold เรียก ScaffoldMessenger/Theme ที่เพิ่งสร้าง อาจหาไม่เจอ ใช้ Builder หรือแยก child widget เพื่อได้ context ใต้ ancestor นั้น</p></section>
-<section><h2>3. Async gap</h2><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(...);
-if (!context.mounted || confirmed != true) return;
-Navigator.of(context).pop();</code></pre><p>ระหว่าง await Element อาจ unmount จาก back/logout/rebuild route Absolute/wmsapp ตรวจ <code>mounted</code> หรือ <code>context.mounted</code> ก่อน navigation/setState หลายจุด นี่ไม่ใช่ lint cosmetic แต่กัน lookup บน context ที่หมดอายุ</p></section>
-<section><h2>4. context ไม่ควรถูกเก็บใน service</h2><p>Service/repository มี lifetime ยาวและไม่ควรขึ้นกับ UI tree ส่งข้อมูล/errorกลับให้ owner แล้ว widget แสดง dialog/navigation หากต้อง dispatch app-level navigationจริงให้ใช้ navigation abstraction/key อย่างจำกัดและทดสอบได้</p></section>
-<section><h2>5. Inherited dependency กับ rebuild</h2><p>การเรียก <code>Theme.of(context)</code> ลงทะเบียน Element เป็น dependent เมื่อ themeเปลี่ยน Element นี้ rebuild ส่วนการเข้าถึง inherited แบบไม่ depend มี API/กรณีพิเศษ แต่ปกติใช้ of ตาม declarative model</p></section>
-<section><h2>6. ตัวอย่างจริง</h2><ul><li>wmsapp ใช้ <code>Theme.of(context)</code> เลือกสี dark/light</li><li>scan dialogs ใช้ MediaQuery ของ dialog context สำหรับ keyboard inset/bottom safe area</li><li>connection settings รอ confirm แล้วตรวจ <code>context.mounted</code> ก่อนใช้ contextต่อ</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ทำไม <code>if (!mounted) return</code> กับ <code>if (!context.mounted) return</code> อาจใช้ต่างกัน?</p><details><summary>เฉลย</summary><p><code>mounted</code> เป็น property ของ State ปัจจุบัน ส่วน context parameter/local อาจเป็นคนละ Element เช่น dialog/child builder จึงตรวจ contextนั้นโดยตรง ใช้ตัวที่คุณกำลังจะเรียก ไม่ใช่ใส่เชิงพิธี</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">GlobalKey/currentContext ไม่ใช่ทางลัดแทนการส่ง callback/state มันสร้าง coupling กับตำแหน่ง tree และมี lifecycle null ได้ ใช้เฉพาะ operation ที่ต้องเข้าถึง Element/State จริง</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ใช้ context ให้ถูกตัวและถูกเวลา</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.3 (Element) และ 1.6 (<code>mounted</code> กับงานที่ต้องรอ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายได้ว่า <code>BuildContext</code> คืออะไร แก้ปัญหา “หา Scaffold ไม่เจอ” ได้ และรู้ว่าเมื่อไหร่ที่ context หมดอายุ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เราพิมพ์คำว่า <code>context</code> มาตั้งแต่ 1.2 โดยไม่รู้ว่ามันคืออะไร — ทั้ง <code>Theme.of(context)</code> และ parameter ของ <code>build</code></p><p>ความไม่เข้าใจตรงนี้ทำให้เกิด error สองแบบที่คนใหม่เจอกันทุกคน และแก้ไม่ถูกจนกว่าจะเข้าใจว่า context คืออะไรจริง ๆ</p><ul><li><code>No Scaffold widget found</code> ทั้งที่มี <code>Scaffold</code> อยู่ในไฟล์ชัด ๆ</li><li><code>Don't use BuildContext across async gaps</code> ที่ analyzer เตือน</li></ul></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>BuildContext</code></td><td>ตัวชี้ตำแหน่งของ widget นี้ใน tree</td></tr>
+<tr><td>ancestor</td><td>widget ที่อยู่ <strong>เหนือ</strong> เราขึ้นไป</td></tr>
+<tr><td>descendant</td><td>widget ที่อยู่ <strong>ใต้</strong> เราลงไป</td></tr>
+<tr><td><code>.of(context)</code></td><td>รูปแบบการค้นหาของจาก ancestor</td></tr>
+<tr><td><code>Builder</code></td><td>widget ที่สร้าง context ใหม่ที่ต่ำลงไปหนึ่งชั้น</td></tr>
+<tr><td>async gap</td><td>ช่วงเวลาที่โค้ดหยุดรอ <code>await</code></td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: หมุดปักตำแหน่งบนต้นไม้</h2><p>ทบทวนจาก 1.3: Element คือตัวจริงที่รู้ว่าตัวเองอยู่ตำแหน่งไหนใน tree — <code>BuildContext</code> ก็คือหมุดที่ปักอยู่ที่ Element ตัวนั้นเอง</p><p>เมื่อเราเขียน <code>Theme.of(context)</code> Flutter จะ <strong>เดินขึ้นไปตามต้นไม้จากหมุดนั้น</strong> จนกว่าจะเจอธีมตัวแรก</p><pre class="code-vs"><code>MaterialApp          ← มีธีมอยู่ตรงนี้
+└── Scaffold
+    └── Center
+        └── Text     ← เราอยู่ตรงนี้ เดินขึ้นไปหาธีมเจอ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>.of(context)</code> หาได้เฉพาะของที่อยู่ <em>เหนือ</em> ตำแหน่งของ context นั้น — มันมองลงล่างไม่ได้ และมองข้างไม่ได้</div></section>
+
+<section><h2>4. ปัญหาคลาสสิก: หา Scaffold ไม่เจอ</h2><pre class="code-vs"><code>class MyScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: ElevatedButton(
+        onPressed: () {
+          // พังตรงนี้ — หา ScaffoldMessenger ไม่เจอ
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('บันทึกแล้ว')),
+          );
+        },
+        child: const Text('บันทึก'),
+      ),
+    );
+  }
+}</code></pre><p>เหตุผล: <code>context</code> ตัวนี้เป็นของ <code>MyScreen</code> ซึ่งอยู่ <strong>เหนือ</strong> <code>Scaffold</code> ที่เพิ่งสร้าง เมื่อเดินขึ้นไปจึงไม่มีทางเจอ</p><pre class="code-vs"><code>MyScreen        ← context ที่เราใช้ อยู่ตรงนี้
+└── Scaffold    ← สิ่งที่เราตามหา อยู่ข้างล่าง — หาไม่เจอ
+    └── Button</code></pre><p><strong>ทางแก้ที่ 1 — ใช้ <code>Builder</code></strong> เพื่อสร้าง context ที่ต่ำลงไป</p><pre class="code-vs"><code>Scaffold(
+  body: Builder(
+    builder: (innerContext) =&gt; ElevatedButton(
+      onPressed: () =&gt; ScaffoldMessenger.of(innerContext).showSnackBar(...),
+      child: const Text('บันทึก'),
+    ),
+  ),
+)</code></pre><p><strong>ทางแก้ที่ 2 — แยกเป็น widget ของตัวเอง</strong> ซึ่งมักดีกว่าเพราะได้ประโยชน์ตาม 1.4 ไปด้วย</p><pre class="code-vs"><code>class SaveButton extends StatelessWidget {
+  const SaveButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {   // context นี้อยู่ใต้ Scaffold แล้ว
+    return ElevatedButton(
+      onPressed: () =&gt; ScaffoldMessenger.of(context).showSnackBar(...),
+      child: const Text('บันทึก'),
+    );
+  }
+}</code></pre></section>
+
+<section><h2>5. context คนละตัวใน method เดียวกัน</h2><p>เรื่องนี้สำคัญมากเมื่อเปิดกล่องโต้ตอบ</p><pre class="code-vs"><code>void _confirm(BuildContext context) {
+  showDialog&lt;void&gt;(
+    context: context,
+    builder: (dialogContext) =&gt; AlertDialog(
+      content: const Text('ยืนยันการบันทึก?'),
+      actions: [
+        TextButton(
+          // ต้องใช้ dialogContext เพื่อปิดกล่อง ไม่ใช่ context ข้างนอก
+          onPressed: () =&gt; Navigator.pop(dialogContext),
+          child: const Text('ยกเลิก'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><table><thead><tr><th>ตัวแปร</th><th>ชี้ไปที่</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>context</code></td><td>หน้าจอที่เปิดกล่อง</td><td>บอกว่าจะเปิดกล่องบน Navigator ไหน</td></tr>
+<tr><td><code>dialogContext</code></td><td>ตัวกล่องเอง</td><td>ปิดกล่องนั้น</td></tr>
+</tbody></table><p>ถ้าใช้ <code>context</code> ตัวนอกไปปิด อาจปิดทั้งหน้าจอแทนที่จะปิดแค่กล่อง — ซึ่งเป็นบั๊กที่ผู้ใช้เจอแล้วงงมาก</p></section>
+
+<section><h2>6. context มีวันหมดอายุ</h2><p>เชื่อมกับ 1.6 โดยตรง: <code>context</code> ผูกกับ Element ถ้า Element ถูกทิ้ง context ก็ใช้ไม่ได้อีก</p><pre class="code-vs"><code>Future&lt;void&gt; _save() async {
+  await api.save(data);              // ระหว่างนี้ผู้ใช้อาจกดย้อนกลับ
+  if (!context.mounted) return;      // ต้องตรวจก่อนใช้ต่อ
+  Navigator.of(context).pop();
+}</code></pre><table><thead><tr><th>ใช้ตัวไหน</th><th>เมื่อ</th></tr></thead><tbody>
+<tr><td><code>mounted</code></td><td>อยู่ใน <code>State</code> และกำลังจะเรียก <code>setState</code></td></tr>
+<tr><td><code>context.mounted</code></td><td>กำลังจะใช้ <code>context</code> ตัวนั้นโดยเฉพาะ</td></tr>
+</tbody></table><div class="warn">เมื่อมี context หลายตัวในฟังก์ชันเดียว ให้ตรวจ <strong>ตัวที่กำลังจะใช้</strong> ไม่ใช่ใส่ <code>mounted</code> ไปเรื่อย ๆ เพื่อให้ analyzer เงียบ — เพราะ <code>State</code> อาจยังอยู่ ในขณะที่กล่องโต้ตอบถูกปิดไปแล้ว</div></section>
+
+<section><h2>7. อย่าเก็บ context ไว้ใช้ทีหลัง</h2><table><thead><tr><th>ทำแบบนี้</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>เก็บ <code>context</code> ไว้ใน field ของ service</td><td>service อยู่ยาวกว่าหน้าจอ จึงถือ context ที่ตายแล้ว</td></tr>
+<tr><td>ส่ง <code>context</code> เข้าไปใน class ที่จัดการข้อมูล</td><td>ทดสอบไม่ได้เพราะต้องมีหน้าจอจริง</td></tr>
+<tr><td>ใช้ <code>context</code> ใน callback ที่ยิงหลังหลายวินาที</td><td>อาจใช้ตอนที่หน้าจอไปแล้ว</td></tr>
+</tbody></table><p>วิธีที่ถูกคือให้ส่วนที่จัดการข้อมูล <strong>คืนผลลัพธ์กลับมา</strong> แล้วให้หน้าจอเป็นคนตัดสินใจว่าจะแสดงอะไร — ซึ่งเป็นรูปแบบ callback จาก D1.11 ที่เราจะใช้เต็มรูปแบบใน 1.12</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>No Scaffold widget found</code></td><td>ใช้ context ที่อยู่เหนือ <code>Scaffold</code></td><td>ใช้ <code>Builder</code> หรือแยกเป็น widget ย่อย</td></tr>
+<tr><td><code>No MaterialLocalizations found</code></td><td>ไม่มี <code>MaterialApp</code> อยู่เหนือขึ้นไป</td><td>ครอบด้วย <code>MaterialApp</code> (เจอบ่อยในเทสต์)</td></tr>
+<tr><td><code>Don't use BuildContext across async gaps</code></td><td>ใช้ context หลัง <code>await</code> โดยไม่ตรวจ</td><td>ใส่ <code>if (!context.mounted) return;</code></td></tr>
+<tr><td>กดปิดกล่องแล้วออกจากหน้าจอไปเลย</td><td>ใช้ context ตัวนอกไปปิดกล่อง</td><td>ใช้ context ที่ <code>builder</code> ให้มา</td></tr>
+<tr><td>เปลี่ยนธีมแล้ว widget บางตัวไม่เปลี่ยนสี</td><td>ไม่ได้อ่านสีผ่าน <code>Theme.of(context)</code></td><td>เลิกเขียนสีตรง ๆ</td></tr>
+<tr><td>ทดสอบ class ที่จัดการข้อมูลไม่ได้</td><td>มันรับ <code>context</code> เข้าไป</td><td>ให้มันคืนผลลัพธ์ แล้วหน้าจอจัดการ UI</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>โค้ดนี้พังตอนกดปุ่ม จงบอกสาเหตุและแก้สองวิธี</p><pre class="code-vs"><code>class ScanScreen extends StatelessWidget {
+  const ScanScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('สแกน')),
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('สแกนสำเร็จ')),
+            );
+          },
+          child: const Text('สแกน'),
+        ),
+      ),
+    );
+  }
+}</code></pre><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>สาเหตุ</strong></p><p><code>context</code> ที่ใช้เป็น parameter ของ <code>build</code> ใน <code>ScanScreen</code> ซึ่งอยู่ <em>เหนือ</em> <code>Scaffold</code> ที่บรรทัดถัดไปเพิ่งสร้างขึ้น เมื่อ <code>ScaffoldMessenger.of</code> เดินขึ้นไปตามต้นไม้ มันจึงไม่มีทางเจอ <code>Scaffold</code> ที่อยู่ข้างล่าง</p><p><strong>วิธีที่ 1 — <code>Builder</code></strong></p><pre class="code-vs"><code>body: Builder(
+  builder: (innerContext) =&gt; Center(
+    child: ElevatedButton(
+      onPressed: () =&gt; ScaffoldMessenger.of(innerContext).showSnackBar(
+        const SnackBar(content: Text('สแกนสำเร็จ')),
+      ),
+      child: const Text('สแกน'),
+    ),
+  ),
+),</code></pre><p><strong>วิธีที่ 2 — แยกเป็น widget ย่อย (แนะนำ)</strong></p><pre class="code-vs"><code>class _ScanButton extends StatelessWidget {
+  const _ScanButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: () =&gt; ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('สแกนสำเร็จ')),
+      ),
+      child: const Text('สแกน'),
+    );
+  }
+}
+
+// ใน ScanScreen
+body: const Center(child: _ScanButton()),</code></pre><p><strong>ทำไมวิธีที่ 2 ดีกว่า:</strong> เพราะได้ประโยชน์สามอย่างพร้อมกัน — แก้ปัญหา context, ปุ่มกลายเป็น <code>const</code> ได้จึงไม่ถูกสร้างใหม่ทุกรอบ (1.10) และทดสอบปุ่มแยกได้โดยไม่ต้องเปิดทั้งหน้าจอ (1.4) ส่วน <code>Builder</code> เหมาะเมื่อโค้ดสั้นมากจนไม่คุ้มที่จะตั้งชื่อให้</p><p><strong>จุดที่คนมักเข้าใจผิด:</strong> หลายคนคิดว่า “ก็ <code>Scaffold</code> อยู่ในไฟล์เดียวกัน มองเห็นชัด ๆ ทำไมหาไม่เจอ” — เพราะ Flutter ไม่ได้ค้นหาจากไฟล์ แต่ค้นจาก <em>ตำแหน่งใน tree ตอนรัน</em> ซึ่งเป็นคนละเรื่องกับที่ตาเราเห็นในโค้ด</p><p><strong>ลองต่อ:</strong> เพิ่มการรอด้วย <code>await Future.delayed(const Duration(seconds: 3))</code> ก่อนแสดงข้อความ แล้วกดปุ่มและรีบกดย้อนกลับ — จะเห็น error เรื่อง context หมดอายุ จากนั้นแก้ด้วย <code>if (!context.mounted) return;</code></p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>BuildContext</code> คือตำแหน่งของ widget ใน tree ไม่ใช่ตัวแปรกลางของแอป</li><li><code>.of(context)</code> หาได้เฉพาะของที่อยู่เหนือขึ้นไปเท่านั้น</li><li>ใช้ <code>Builder</code> หรือแยก widget ย่อย เมื่อต้องการ context ที่ต่ำลงไป</li><li>กล่องโต้ตอบมี context ของตัวเอง ใช้ตัวนั้นในการปิด</li><li>context หมดอายุได้ — ตรวจ <code>context.mounted</code> หลัง <code>await</code></li><li>อย่าเก็บ context ไว้ในส่วนที่จัดการข้อมูล</li></ul></div><p><strong>บทถัดไป:</strong> 1.8 จะอธิบาย key ที่เราเลื่อนไว้ตั้งแต่ 1.3 — เครื่องมือที่บอก Flutter ว่า “ถึงจะย้ายที่ ก็ยังเป็นตัวเดิม” และแก้บั๊กข้อมูลสลับกันในรายการ</p></section>

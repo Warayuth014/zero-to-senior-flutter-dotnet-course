@@ -4,43 +4,161 @@
 <title>Widget Lifecycle</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-06 · Flutter UI</span><h1>Widget Lifecycle</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ลำดับหลัก</a></li><li><a href="#section-2">initState</a></li><li><a href="#section-3">didChangeDependencies</a></li><li><a href="#section-4">didUpdateWidget</a></li><li><a href="#section-5">dispose แบบสมมาตร</a></li><li><a href="#section-6">Resource ที่ส่งเข้ามาไม่ใช่เจ้าของเสมอ</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Lifecycle คือสัญญาว่าเมื่อไร State มี context/widget พร้อม, เมื่อไร dependency เปลี่ยน และเมื่อไรต้องคืน resource การจำชื่อ method โดยไม่รู้ owner ทำให้ listener ซ้ำและใช้ object หลัง dispose</div>
-<section id="section-1"><h2>1. ลำดับหลัก</h2><pre class="code-vs"><code>createState
-→ initState
-→ didChangeDependencies
-→ build (เกิดซ้ำได้)
-→ didUpdateWidget (เมื่อ config ใหม่ type/key เดิม)
-→ build ...
-→ deactivate (อาจย้าย/reinsert)
-→ dispose (จบถาวร)</code></pre></section>
-<section id="section-2"><h2>2. initState</h2><p>รันครั้งเดียวต่อ State ใช้สร้าง controller, subscribe resource ที่ไม่ต้อง depend on inherited context และเริ่มงานจาก initial config เรียก <code>super.initState()</code> ตาม convention/framework contract</p><pre class="code-vs"><code>@override
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: เข้ากะ ทำงาน เลิกกะ</a></li><li><a href="#section-4">initState: เตรียมของครั้งเดียว</a></li><li><a href="#section-5">dispose: คืนของให้ครบ</a></li><li><a href="#section-6">กฎความเป็นเจ้าของ</a></li><li><a href="#section-7">didUpdateWidget: เมื่อแม่ส่งของชิ้นใหม่มา</a></li><li><a href="#section-8">mounted: กันการทำงานหลังออกจากหน้าจอ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: เริ่มงานและคืนทรัพยากรให้ถูกจังหวะ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.5 (<code>StatefulWidget</code> และ <code>setState</code>) และ D1.16 (ใครสร้างต้องปิด ใครฟังต้องยกเลิก)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าโค้ดแต่ละแบบควรวางไว้ตรงไหนของวงจรชีวิต และเขียนคู่ “เริ่ม–คืน” ให้ครบเสมอ เพื่อไม่ให้ทรัพยากรรั่ว</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.5 เราเก็บแค่ตัวเลขไว้ใน <code>State</code> ซึ่งไม่ต้องดูแลอะไร แต่หน้าจอจริงถือของที่ต้องคืน</p><ul><li>ตัวควบคุมช่องกรอกข้อความ</li><li>การฟังเหตุการณ์จากเครื่องสแกน</li><li>ตัวจับเวลาที่ยิงซ้ำทุกวินาที</li></ul><p>ถ้าไม่คืนของเหล่านี้ตอนออกจากหน้าจอ จะเกิดอาการที่หาสาเหตุยากมาก — แอปกินหน่วยความจำเพิ่มเรื่อย ๆ หรือโค้ดของหน้าจอเก่ายังทำงานอยู่หลังผู้ใช้ออกไปแล้ว</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>lifecycle</td><td>ลำดับเหตุการณ์ตั้งแต่ <code>State</code> เกิดจนตาย</td></tr>
+<tr><td><code>initState</code></td><td>เรียกครั้งเดียวตอนเกิด</td></tr>
+<tr><td><code>dispose</code></td><td>เรียกครั้งเดียวตอนตาย</td></tr>
+<tr><td><code>didUpdateWidget</code></td><td>เรียกเมื่อแม่ส่งค่าใหม่มา แต่ <code>State</code> ตัวเดิมยังอยู่</td></tr>
+<tr><td><code>mounted</code></td><td>บอกว่า <code>State</code> นี้ยังอยู่ในหน้าจอหรือยัง</td></tr>
+<tr><td>ownership</td><td>ใครเป็นเจ้าของของชิ้นนั้น และต้องเป็นคนคืน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: เข้ากะ ทำงาน เลิกกะ</h2><pre class="code-vs"><code>createState()            สร้าง State ครั้งเดียว
+      ↓
+initState()              เข้ากะ — เตรียมของ เริ่มฟัง
+      ↓
+build()                  ทำงาน — เกิดซ้ำได้ไม่จำกัดครั้ง
+      ↕
+didUpdateWidget()        แม่ส่งข้อมูลชุดใหม่มา
+      ↓
+dispose()                เลิกกะ — คืนของให้ครบ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกอย่างที่ทำใน <code>initState</code> ต้องมีคู่ตรงข้ามใน <code>dispose</code> — สร้างคู่กับคืน, เริ่มฟังคู่กับเลิกฟัง, เริ่มจับเวลาคู่กับหยุด</div></section>
+
+<section id="section-4"><h2>4. initState: เตรียมของครั้งเดียว</h2><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();                      // ต้องเรียกก่อนเสมอ
+  _controller = TextEditingController();
+  _scanner.addListener(_onScan);
+}</code></pre><table><thead><tr><th>เหมาะกับ</th><th>ไม่เหมาะกับ</th></tr></thead><tbody>
+<tr><td>สร้างตัวควบคุม</td><td>งานที่ต้องใช้ธีมหรือขนาดหน้าจอ (ใช้ <code>didChangeDependencies</code>)</td></tr>
+<tr><td>เริ่มฟังเหตุการณ์</td><td>งานที่ต้องทำซ้ำเมื่อข้อมูลเปลี่ยน</td></tr>
+<tr><td>เริ่มโหลดข้อมูลครั้งแรก</td><td>งานที่ต้องรอผลก่อนวาดหน้าจอ (จะทำให้จอค้าง)</td></tr>
+</tbody></table><p>การโหลดข้อมูลครั้งแรกใน <code>initState</code> เป็นรูปแบบที่ถูกต้องและใช้กันทั่วไป โดยไม่ต้องรอผลตรงนั้น</p><pre class="code-vs"><code>@override
 void initState() {
   super.initState();
-  controller = TextEditingController();
-  service.addListener(_onChanged);
+  _load();            // ปล่อยให้ทำงานไป หน้าจอวาดสถานะกำลังโหลดก่อน
+}
+
+Future&lt;void&gt; _load() async {
+  final result = await api.fetchTasks();
+  if (!mounted) return;             // ผู้ใช้อาจออกไปแล้วระหว่างรอ
+  setState(() =&gt; _tasks = result);
 }</code></pre></section>
-<section id="section-3"><h2>3. didChangeDependencies</h2><p>รันหลัง initState และเมื่อ inherited dependency ที่ State depend เปลี่ยน เหมาะงานที่ต้องใช้ Localizations/Theme/MediaQuery แล้วต้อง cache/subscribeตาม dependency แต่ต้อง guard ไม่ทำ side effect ซ้ำทุกครั้งโดยไม่ยกเลิกของเดิม</p></section>
-<section id="section-4"><h2>4. didUpdateWidget</h2><p>เมื่อ parent ส่ง widget config ใหม่แต่ State เดิมอยู่ต่อ ถ้า subscriptionขึ้นกับ <code>widget.source</code> ต้องถอด oldWidget.source แล้วต่อ widget.source ใหม่:</p><pre class="code-vs"><code>@override
-void didUpdateWidget(covariant ScanPanel oldWidget) {
-  super.didUpdateWidget(oldWidget);
-  if (oldWidget.source != widget.source) {
-    oldWidget.source.removeListener(_sync);
-    widget.source.addListener(_sync);
-  }
+
+<section id="section-5"><h2>5. dispose: คืนของให้ครบ</h2><pre class="code-vs"><code>@override
+void dispose() {
+  _scanner.removeListener(_onScan);   // คู่กับ addListener
+  _controller.dispose();              // คู่กับ TextEditingController()
+  _timer?.cancel();                   // คู่กับ Timer.periodic
+  super.dispose();                    // เรียกท้ายสุดเสมอ
+}</code></pre><p>สังเกตลำดับ: <code>super.initState()</code> เรียก <strong>ก่อน</strong> ส่วน <code>super.dispose()</code> เรียก <strong>ท้ายสุด</strong> — เหมือนการเข้าและออกจากห้อง เข้าต้องเปิดประตูก่อน ออกต้องปิดประตูทีหลัง</p><p>ดูตัวอย่างจริงใน lab <code>widget_basics_app.dart</code></p><pre class="code-vs"><code>final ValueNotifier&lt;int&gt; _tapCount = ValueNotifier&lt;int&gt;(0);
+
+@override
+void dispose() {
+  _tapCount.dispose();   // ใครสร้าง คนนั้นต้องคืน
+  super.dispose();
 }</code></pre></section>
-<section id="section-5"><h2>5. dispose แบบสมมาตร</h2><p>ทุก add/listen/create ต้องมี remove/cancel/dispose โดย owner เดียวกัน Absolute WarehouseShell add WidgetsBindingObserver, สร้าง timers/store แล้ว remove/cancel/dispose ก่อน super.dispose; Login/packing/scan screens dispose controller/focus ของตน</p></section>
-<section id="section-6"><h2>6. Resource ที่ส่งเข้ามาไม่ใช่เจ้าของเสมอ</h2><p><code>pda_widgets.dart</code> มีแนวคิดชัด: controller ภายนอกเป็นของ caller จึง dispose เฉพาะ controller ที่ widget สร้างเอง กฎคือผู้สร้าง/รับ ownership ตาม contract เป็นคนคืน ไม่ dispose dependency ที่ยืมมา</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Widget รับ optional external controller ถ้าไม่ส่งให้สร้างเอง เขียน ownership lifecycle</p><details><summary>เฉลย</summary><pre class="code-vs"><code>TextEditingController? _owned;
-TextEditingController get controller =&gt; widget.controller ?? _owned!;
-@override void initState() {
+
+<section id="section-6"><h2>6. กฎความเป็นเจ้าของ</h2><p>คำถามสำคัญเมื่อจะเขียน <code>dispose</code>: ของชิ้นนี้เป็นของเราหรือแค่ยืมมา</p><table><thead><tr><th>สถานการณ์</th><th>ใครคืน</th></tr></thead><tbody>
+<tr><td>เราสร้างเองใน <code>initState</code></td><td><strong>เรา</strong> ต้องคืนใน <code>dispose</code></td></tr>
+<tr><td>แม่ส่งเข้ามาผ่าน constructor</td><td><strong>แม่</strong> — เราห้ามคืน</td></tr>
+<tr><td>เราเป็นคนเริ่มฟัง</td><td><strong>เรา</strong> ต้องเลิกฟัง</td></tr>
+</tbody></table><div class="warn"><strong>อาการเมื่อคืนของที่ยืมมา:</strong> จะได้ error ว่า <code>A TextEditingController was used after being disposed</code> ตอนที่แม่หรือหน้าจออื่นพยายามใช้มันต่อ — เป็นบั๊กที่โผล่ห่างจากจุดที่เขียนผิดมาก จึงหายาก</div><p>รูปแบบที่รองรับทั้งสองกรณี — รับตัวควบคุมจากภายนอกได้ ถ้าไม่ส่งมาก็สร้างเอง</p><pre class="code-vs"><code>TextEditingController? _owned;
+
+TextEditingController get _controller =&gt; widget.controller ?? _owned!;
+
+@override
+void initState() {
   super.initState();
   if (widget.controller == null) _owned = TextEditingController();
 }
-@override void dispose() {
-  _owned?.dispose();
+
+@override
+void dispose() {
+  _owned?.dispose();    // คืนเฉพาะตัวที่เราสร้างเอง
   super.dispose();
-}</code></pre><p>ถ้า external controller เปลี่ยนต้องพิจารณา didUpdateWidget ด้วย</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่ายิง API ใน build และอย่า subscribe ใน build เพราะทุก rebuild จะสร้าง side effect ใหม่ ใช้ lifecycle/store command ที่มี idempotency และ cancellation ชัด</div></section>
+}</code></pre></section>
+
+<section id="section-7"><h2>7. didUpdateWidget: เมื่อแม่ส่งของชิ้นใหม่มา</h2><p>ทบทวนจาก 1.3: เมื่อแม่ build ใหม่ widget เป็น object ใหม่ แต่ <code>State</code> ตัวเดิมยังอยู่ ปัญหาเกิดเมื่อ <code>State</code> ไปฟังสิ่งที่แม่ส่งมา</p><pre class="code-vs"><code>@override
+void didUpdateWidget(covariant ScanPanel oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (oldWidget.source != widget.source) {
+    oldWidget.source.removeListener(_sync);   // เลิกฟังตัวเก่า
+    widget.source.addListener(_sync);         // เริ่มฟังตัวใหม่
+  }
+}</code></pre><p>ถ้าไม่เขียนส่วนนี้ เราจะยังฟังตัวเก่าอยู่ทั้งที่แม่เปลี่ยนไปใช้ตัวใหม่แล้ว ผลคือหน้าจอไม่อัปเดต และตัวเก่าถูกยึดไว้ไม่ให้คืนหน่วยความจำ</p><p>คำว่า <code>covariant</code> เป็นเพียงการบอก Dart ว่าเรารับ parameter ชนิดที่แคบกว่าที่แม่ประกาศไว้ ไม่ต้องคิดมาก เขียนตามรูปแบบนี้ได้เลย</p></section>
+
+<section id="section-8"><h2>8. mounted: กันการทำงานหลังออกจากหน้าจอ</h2><p>นี่คือปัญหาที่ค้างไว้ตั้งแต่ 1.5 และ D1.15 — โลกเปลี่ยนไปแล้วระหว่างที่เรารอ</p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  final result = await api.submit(code);
+  if (!mounted) return;              // ผู้ใช้กดย้อนกลับไปแล้ว หยุดตรงนี้
+  setState(() =&gt; _message = result.message);
+}</code></pre><table><thead><tr><th>สิ่งที่เกิดถ้าไม่ตรวจ</th><th>ข้อความ error</th></tr></thead><tbody>
+<tr><td>เรียก <code>setState</code> หลังหน้าจอถูกทำลาย</td><td><code>setState() called after dispose()</code></td></tr>
+<tr><td>ใช้ <code>context</code> ที่หมดอายุ</td><td>error เกี่ยวกับ <code>deactivated widget's ancestor</code></td></tr>
+</tbody></table><div class="warn">อย่ามอง <code>if (!mounted) return</code> เป็นพิธีกรรมที่ใส่เพื่อให้ analyzer เงียบ ให้ใส่ <strong>ทุกครั้งที่มี <code>await</code> คั่นก่อนจะแตะหน้าจอ</strong> เพราะระหว่างนั้นผู้ใช้ทำอะไรก็ได้ — เรื่องนี้จะลงลึกอีกครั้งใน 3.13 และ 4.9</div></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปกินหน่วยความจำเพิ่มเรื่อย ๆ เมื่อเข้าออกหน้าจอซ้ำ</td><td>ลืมคืนของใน <code>dispose</code></td><td>ไล่ดูว่าทุก <code>addListener</code>/<code>Timer</code>/<code>Controller</code> มีคู่ครบ</td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>งานที่รออยู่ทำงานเสร็จหลังออกจากหน้าจอ</td><td>ใส่ <code>if (!mounted) return;</code> หลัง <code>await</code></td></tr>
+<tr><td><code>A TextEditingController was used after being disposed</code></td><td>คืนของที่ยืมมาจากแม่</td><td>คืนเฉพาะที่สร้างเอง</td></tr>
+<tr><td>ยิง API ซ้ำหลายรอบโดยไม่ตั้งใจ</td><td>เริ่มโหลดใน <code>build</code></td><td>ย้ายไป <code>initState</code></td></tr>
+<tr><td>แม่เปลี่ยนข้อมูลแล้วหน้าจอไม่ตาม</td><td>ไม่ได้เขียน <code>didUpdateWidget</code></td><td>เทียบค่าเก่ากับใหม่แล้วย้ายการฟัง</td></tr>
+<tr><td>คัดลอกค่าจากแม่มาเก็บใน <code>initState</code> แล้วค่าไม่อัปเดต</td><td><code>initState</code> ทำงานครั้งเดียว</td><td>อ่านจาก <code>widget.xxx</code> ตรง ๆ หรือซิงก์ใน <code>didUpdateWidget</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>สร้าง <code>StatefulWidget</code> ชื่อ <code>ShiftClock</code> ที่</p><ol><li>แสดงจำนวนวินาทีที่ผ่านไปตั้งแต่เปิดหน้าจอ</li><li>อัปเดตทุกหนึ่งวินาที</li><li>ต้องไม่ทำงานต่อหลังผู้ใช้ออกจากหน้าจอ</li><li>รับ <code>onTick</code> แบบไม่บังคับ ที่ถูกเรียกทุกวินาทีพร้อมค่าปัจจุบัน</li></ol><p>แล้วตอบว่าจะพิสูจน์ได้อย่างไรว่าข้อ 3 ทำงานจริง</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>import 'dart:async';
+import 'package:flutter/material.dart';
+
+class ShiftClock extends StatefulWidget {
+  const ShiftClock({super.key, this.onTick});
+
+  final void Function(int seconds)? onTick;
+
+  @override
+  State&lt;ShiftClock&gt; createState() =&gt; _ShiftClockState();
+}
+
+class _ShiftClockState extends State&lt;ShiftClock&gt; {
+  Timer? _timer;
+  int _seconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() =&gt; _seconds++);
+      widget.onTick?.call(_seconds);    // อ่านจาก widget เสมอ ไม่คัดลอกมาเก็บ
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();      // คู่ตรงข้ามของ Timer.periodic
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =&gt; Text('ผ่านไป $_seconds วินาที');
+}</code></pre><p><strong>ทำไมต้องเก็บ <code>Timer</code> ไว้ในตัวแปร:</strong> เพราะถ้าไม่เก็บ เราจะไม่มีทางยกเลิกมันได้ใน <code>dispose</code> ตัวจับเวลาจะยิงต่อไปเรื่อย ๆ ตลอดอายุแอป และแต่ละครั้งที่ผู้ใช้เข้าหน้าจอนี้ใหม่ก็จะเพิ่มอีกตัวสะสมไปเรื่อย ๆ</p><p><strong>ทำไมมี <code>if (!mounted) return;</code> ทั้งที่มี <code>cancel</code> แล้ว:</strong> เพราะมีช่วงเวลาสั้น ๆ ที่ตัวจับเวลาอาจยิงพอดีระหว่างที่หน้าจอกำลังถูกทำลาย การป้องกันสองชั้นทำให้ไม่พังในกรณีที่จังหวะไม่เข้าข้างเรา ซึ่งบนอุปกรณ์ช้าอย่าง PDA เกิดได้จริง</p><p><strong>ทำไมเรียก <code>widget.onTick</code> ไม่ใช่คัดลอกมาเก็บใน <code>initState</code>:</strong> เพราะแม่อาจส่ง callback ตัวใหม่มาระหว่างทาง ถ้าเราคัดลอกไว้ตอนเริ่ม เราจะเรียกตัวเก่าตลอดไป — การอ่านจาก <code>widget.</code> ทุกครั้งได้ค่าล่าสุดเสมอโดยไม่ต้องเขียน <code>didUpdateWidget</code></p><p><strong>ข้อ 5 — พิสูจน์อย่างไร</strong></p><p>วิธีที่ตรงที่สุดคือเขียนเทสต์ที่ประกอบ widget ขึ้นมา ปล่อยเวลาผ่านไป ถอด widget ออก แล้วปล่อยเวลาผ่านไปอีก จากนั้นตรวจว่าจำนวนครั้งที่ <code>onTick</code> ถูกเรียกหยุดนิ่ง</p><pre class="code-vs"><code>testWidgets('หยุดทำงานหลังถูกถอดออกจากหน้าจอ', (tester) async {
+  var ticks = 0;
+  await tester.pumpWidget(MaterialApp(
+    home: ShiftClock(onTick: (_) =&gt; ticks++),
+  ));
+
+  await tester.pump(const Duration(seconds: 3));
+  expect(ticks, 3);
+
+  await tester.pumpWidget(const MaterialApp(home: SizedBox()));  // ถอดออก
+  await tester.pump(const Duration(seconds: 3));
+  expect(ticks, 3);      // ต้องไม่เพิ่ม
+});</code></pre><p>ถ้าลืม <code>_timer?.cancel()</code> เทสต์นี้จะฟ้องทันที — และถ้าไม่มีเทสต์ คุณจะรู้ตัวก็ต่อเมื่อแอปทำงานยาว ๆ แล้วเริ่มหน่วง ซึ่งสายเกินไป</p><p><strong>ลองต่อ:</strong> ลบบรรทัด <code>_timer?.cancel()</code> ออกแล้วรันเทสต์ดู เพื่อยืนยันด้วยตาว่าเทสต์จับได้จริง จากนั้นใส่กลับ</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>initState</code> เตรียมของครั้งเดียว, <code>dispose</code> คืนของครั้งเดียว</li><li>ทุกอย่างที่เริ่มไว้ต้องมีคู่ตรงข้ามที่ปิด</li><li><code>super.initState()</code> เรียกก่อน, <code>super.dispose()</code> เรียกท้ายสุด</li><li>คืนเฉพาะของที่เราสร้างเอง อย่าคืนของที่แม่ส่งมา</li><li><code>didUpdateWidget</code> ใช้ย้ายการฟังเมื่อแม่ส่งของชิ้นใหม่มา</li><li>ใส่ <code>if (!mounted) return;</code> ทุกครั้งที่มี <code>await</code> คั่นก่อนแตะหน้าจอ</li><li>อ่านค่าจากแม่ผ่าน <code>widget.xxx</code> เสมอ อย่าคัดลอกมาเก็บ</li></ul></div><p><strong>บทถัดไป:</strong> 1.7 จะอธิบาย <code>BuildContext</code> ที่เราใช้มาตลอดโดยยังไม่รู้ว่ามันคืออะไร และทำไมการใช้ผิดตัวถึงทำให้หา <code>Theme</code> หรือ <code>Navigator</code> ไม่เจอ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,11 +1,59 @@
-<div class="note">Widget คือ immutable configuration, Element คือ instance/ตำแหน่งที่มี identity ใน tree และ RenderObject คือวัตถุ layout/paint/hit-test ของ render widgets การ build ใหม่จึงไม่เท่ากับสร้างทุกอย่างใหม่</div>
-<section><h2>1. สาม tree ที่ต้องแยก</h2><table><thead><tr><th>ชั้น</th><th>เก็บอะไร</th><th>เปลี่ยนเมื่อ</th></tr></thead><tbody><tr><td>Widget</td><td>configuration ชั่วคราว immutable</td><td>parent build คืน config ใหม่</td></tr><tr><td>Element</td><td>ตำแหน่ง, identity, lifecycle, inherited dependencies</td><td>mount/update/deactivate/unmount</td></tr><tr><td>RenderObject</td><td>constraints, size, paint, hit test</td><td>property/layout/paint ต้องอัปเดต</td></tr></tbody></table></section>
-<section><h2>2. Reconciliation</h2><p>เมื่อ parent build คืน widget ใหม่ Flutter เทียบ <code>runtimeType</code> และ <code>key</code> กับ widget เดิม ถ้าตรง Element เดิมถูก update และ State/RenderObject ที่เหมาะสมอยู่ต่อ ถ้าไม่ตรง subtree เดิมถูกถอดและ mount ใหม่</p><pre class="code-vs"><code>Old: Tile(key: ValueKey('receive'), badge: 2)
-New: Tile(key: ValueKey('receive'), badge: 3)
-     → Element เดิม, configuration ใหม่, render เฉพาะที่จำเป็น</code></pre></section>
-<section><h2>3. Component widget กับ render widget</h2><p>Stateless/StatefulWidget ประกอบ widgets อื่นและไม่มี RenderObject ของตัวเองโดยตรง ส่วน Container แตกเป็น render-capable widgets หลายชั้น เช่น padding/decoration/constraints การดู Inspector ช่วยเห็น tree จริงที่ shorthand สร้าง</p></section>
-<section><h2>4. Build ≠ layout ≠ paint</h2><p>Build คำนวณ configuration tree, layout ส่ง constraints/เลือก size, paint วาด การแก้ overflow ต้องดู layout; การ rebuild มากต้องดู state dependency; paint แพงอาจใช้ repaint boundary/caching หลังวัด อย่าเรียกรวมว่า “render ช้า”</p></section>
-<section><h2>5. ตัวอย่าง dashboard</h2><p><code>HomeView</code> เป็น StatelessWidget ที่ build LayoutBuilder → Padding → Column → DispatchTile/Grid/SummaryCard Tiles เป็น component widgets; ภายใน Material/Ink/Stack/LayoutBuilder ลงไปถึง render objects ที่ layout/paint จริง</p></section>
-<section><h2>6. State อยู่กับ Element</h2><p>StatefulWidget object ถูกสร้างใหม่ได้บ่อย แต่ State อยู่กับ StatefulElement ตาม identity นี่คือเหตุผล reorder list โดยไม่มี key อาจทำ state ติดตำแหน่งแทน entity</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Parent เปลี่ยน badge 2 → 3 แต่ Tile type/key เดิม อธิบายแต่ละ tree เกิดอะไร</p><details><summary>เฉลย</summary><p>สร้าง Tile widget config ใหม่; Element เดิม update เพราะ type/key ตรง; child widgets ที่ build คืนถูก reconcile; render object รับ property ใหม่และ mark layout/paint เฉพาะที่เกี่ยว ไม่ mount ทั้งแอปใหม่</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า optimize ด้วยการกลัว “สร้าง Widget object” ก่อนวัด ปกติ widgets เบา ปัญหามักเป็นงาน side effect ใน build, subtree dependency กว้าง, layout/paint แพง หรือ list/image ไม่ lazy</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เข้าใจว่าทำไมสร้าง widget ใหม่แล้วแอปไม่ช้า</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.1–1.2 (อ่าน widget tree ออก) และ D1.6 (class กับ object)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายได้ว่า Flutter เก็บอะไรไว้ที่ไหน และตอบคำถามที่คนใหม่สงสัยมากที่สุดว่า “สร้าง widget ใหม่ทุกครั้ง ทำไมไม่ช้า”</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในบทหน้า ๆ เราจะเจอคำว่า “rebuild” ตลอดเวลา และจะเห็นว่าเมื่อข้อมูลเปลี่ยนหนึ่งค่า Flutter จะเรียกฟังก์ชันที่สร้าง widget ทั้งหน้าจอใหม่หมด</p><p>คำถามที่ตามมาทันทีคือ <em>“สร้างทุกอย่างใหม่ทุกครั้งแบบนี้ แอปจะไม่ช้าเหรอ”</em> — คำตอบคือไม่ช้า และเหตุผลอยู่ในบทนี้ ถ้าเข้าใจตรงนี้ บทที่เหลือทั้ง Part จะง่ายขึ้นมาก</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>Widget</td><td>คำอธิบายว่าอยากได้อะไร — เบามาก สร้างทิ้งได้</td></tr>
+<tr><td>Element</td><td>ตัวจริงที่อยู่ในหน้าจอ จำได้ว่าตัวเองอยู่ตำแหน่งไหน</td></tr>
+<tr><td>RenderObject</td><td>ตัวที่คำนวณขนาด ตำแหน่ง และวาดจริง — หนักที่สุด</td></tr>
+<tr><td>rebuild</td><td>การเรียกฟังก์ชัน <code>build</code> เพื่อสร้างคำอธิบายชุดใหม่</td></tr>
+<tr><td>immutable</td><td>สร้างแล้วแก้ไม่ได้ (จาก D1.3)</td></tr>
+<tr><td>reconcile</td><td>การเทียบของใหม่กับของเก่าเพื่อหาว่าอะไรเปลี่ยนจริง</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ใบสั่งงาน ช่าง และของจริง</h2><p>ให้คิดถึงการสั่งจัดชั้นวางของในคลัง</p><table><thead><tr><th>ในคลัง</th><th>ใน Flutter</th><th>ราคาในการสร้างใหม่</th></tr></thead><tbody>
+<tr><td><strong>ใบสั่งงาน</strong> ที่เขียนว่า “ชั้นนี้ป้าย A-01 สินค้า 12 ชิ้น”</td><td>Widget</td><td>ถูกมาก — แค่กระดาษหนึ่งใบ</td></tr>
+<tr><td><strong>ช่างประจำชั้นนั้น</strong> ที่รู้ว่าตัวเองดูแลชั้นไหน</td><td>Element</td><td>แพง — ไม่สร้างใหม่ถ้าไม่จำเป็น</td></tr>
+<tr><td><strong>ชั้นวางจริง</strong> ที่ตั้งอยู่ในคลัง</td><td>RenderObject</td><td>แพงมาก — ยิ่งไม่สร้างใหม่</td></tr>
+</tbody></table><p>เมื่อจำนวนสินค้าเปลี่ยนจาก 12 เป็น 13 เราไม่ได้รื้อชั้นทิ้งแล้วสร้างใหม่ เราแค่เขียนใบสั่งงานใบใหม่ส่งให้ช่างคนเดิม แล้วช่างไปเปลี่ยนป้ายตัวเลข</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เราสร้าง <em>ใบสั่งงาน</em> ใหม่ทุกครั้ง แต่ Flutter ไม่ได้สร้าง <em>ของจริง</em> ใหม่ — นี่คือเหตุผลทั้งหมดว่าทำไม rebuild ถึงไม่แพง</div></section>
+
+<section><h2>4. Widget ถูกทิ้งได้เพราะมันเบา</h2><pre class="code-vs"><code>Text('$_itemCount รายการ')</code></pre><p>บรรทัดนี้สร้าง object ใหม่ทุกครั้งที่หน้าจอวาดใหม่ ซึ่งฟังดูน่ากลัว แต่ object นี้เก็บแค่ข้อความหนึ่งชุดกับรูปแบบตัวอักษร — พอ ๆ กับการสร้างตัวแปรธรรมดา ไม่ได้แตะหน้าจอเลย</p><p>ทบทวนจาก D1.3: widget ทุกตัวมี field เป็น <code>final</code> ทั้งหมด สร้างแล้วแก้ไม่ได้ นั่นคือเหตุผลที่มันปลอดภัยจะทิ้งแล้วสร้างใหม่ เพราะไม่มีใครถือสถานะอะไรไว้ในนั้น</p></section>
+
+<section><h2>5. Element ตัดสินใจว่าจะเก็บหรือทิ้ง</h2><p>เมื่อได้ใบสั่งงานใหม่มา Flutter เทียบกับใบเดิมด้วยคำถามสองข้อ</p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่า “เหมือน”</th><th>ถ้าตอบว่า “ต่าง”</th></tr></thead><tbody>
+<tr><td>เป็น widget <strong>ชนิดเดียวกัน</strong> ไหม</td><td>เก็บ Element เดิมไว้</td><td>ทิ้งของเดิมทั้งกิ่ง สร้างใหม่</td></tr>
+<tr><td>มี <strong>key</strong> ตรงกันไหม (ถ้ามี)</td><td>เก็บ Element เดิมไว้</td><td>ทิ้งของเดิมทั้งกิ่ง สร้างใหม่</td></tr>
+</tbody></table><pre class="code-vs"><code>เดิม:  Text('12 รายการ')
+ใหม่:  Text('13 รายการ')
+       → ชนิดเดียวกัน (Text) → ใช้ Element เดิม แค่เปลี่ยนข้อความ
+
+เดิม:  Text('12 รายการ')
+ใหม่:  Icon(Icons.check)
+       → คนละชนิด → ทิ้งของเดิม สร้างใหม่</code></pre><p>เรื่อง key จะอธิบายเต็ม ๆ ใน 1.8 ตอนนี้แค่รู้ว่ามันคือวิธีบอก Flutter ว่า “ถึงจะย้ายที่ ก็ยังเป็นตัวเดิมนะ”</p></section>
+
+<section><h2>6. State ผูกกับ Element ไม่ใช่ Widget</h2><p>นี่คือข้อที่สำคัญที่สุดในบทนี้ และเป็นรากของบั๊กที่งงที่สุดใน Flutter</p><p>เมื่อหน้าจอมีข้อมูลที่เปลี่ยนได้ เช่นจำนวนที่นับได้ในแอป lab ข้อมูลนั้นไม่ได้เก็บไว้ใน widget (ซึ่งถูกทิ้งทุกรอบ) แต่เก็บไว้กับ <strong>Element</strong> ซึ่งอยู่ยาว</p><pre class="code-vs"><code>Widget ถูกสร้างใหม่:   ครั้งที่ 1 → ครั้งที่ 2 → ครั้งที่ 3 ...
+Element อยู่ตัวเดิม:   ────────────────────────────────→
+ข้อมูล _itemCount:     อยู่กับ Element จึงไม่หายไปตอน rebuild</code></pre><p>ผลที่ตามมาคือ <strong>ถ้า Element ถูกทิ้ง ข้อมูลจะหายไปด้วย</strong> ซึ่งเป็นสาเหตุของอาการอย่าง “ตัวเลขที่นับไว้รีเซ็ตเป็นศูนย์เอง” หรือ “ข้อความที่พิมพ์ในช่องกรอกหายไป” เมื่อสลับหน้าจอ — เราจะเจอตัวอย่างจริงและวิธีป้องกันใน 1.8</p></section>
+
+<section><h2>7. build ไม่เท่ากับวาด</h2><p>คำที่คนมักใช้ปนกันคือ “build”, “layout” และ “paint” ซึ่งเป็นคนละขั้นตอนและแก้ปัญหาคนละแบบ</p><table><thead><tr><th>ขั้นตอน</th><th>ทำอะไร</th><th>ปัญหาที่เกี่ยวข้อง</th><th>เรียนใน</th></tr></thead><tbody>
+<tr><td>build</td><td>สร้างใบสั่งงานชุดใหม่</td><td>ทำงานหนักผิดที่ใน <code>build</code></td><td>1.9</td></tr>
+<tr><td>layout</td><td>คำนวณว่าแต่ละชิ้นใหญ่แค่ไหน อยู่ตรงไหน</td><td>เนื้อหาล้นจอ แถบสีเหลืองดำ</td><td>Part 2</td></tr>
+<tr><td>paint</td><td>วาดสีและเส้นลงจริง</td><td>อนิเมชันกระตุก</td><td>Part 14</td></tr>
+</tbody></table><p>เวลาเจออาการช้า อย่ารีบสรุปว่า “Flutter ช้า” ให้ถามก่อนว่าช้าที่ขั้นไหน เพราะทางแก้ต่างกันสิ้นเชิง</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ความเข้าใจผิด</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>“ต้องเลี่ยง rebuild ให้ได้มากที่สุด”</td><td>rebuild เป็นเรื่องปกติและถูก — สิ่งที่ต้องเลี่ยงคือทำงานหนักใน <code>build</code></td></tr>
+<tr><td>“สร้าง widget ใหม่ = สร้างหน้าจอใหม่”</td><td>สร้างแค่คำอธิบาย ส่วนของจริงถูกใช้ซ้ำ</td></tr>
+<tr><td>“ข้อมูลเก็บไว้ใน widget”</td><td>เก็บกับ Element — widget ถูกทิ้งทุกรอบ</td></tr>
+<tr><td>“ใส่ <code>const</code> เยอะ ๆ แล้วแอปจะเร็ว”</td><td>ช่วยได้บ้าง แต่ตัวชี้ขาดคือ <em>ขอบเขต</em> ของ rebuild (1.10)</td></tr>
+<tr><td>“แอปกระตุก แปลว่า rebuild เยอะ”</td><td>อาจเป็น layout หรือ paint ก็ได้ — ต้องวัดก่อน</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>เปิด lab แล้วรัน</p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter run -d chrome -t lib/beginner_main.dart</code></pre><ol><li>กดปุ่ม “เพิ่มสินค้า” หลายครั้ง แล้วอธิบายว่าเกิดอะไรขึ้นกับ Widget, Element และ RenderObject ในแต่ละครั้ง</li><li>ตอบว่าทำไมค่าที่นับไว้ถึงไม่รีเซ็ตทุกครั้งที่กด ทั้งที่ <code>build</code> ถูกเรียกใหม่ทั้งหมด</li><li>คาดเดาว่าถ้าเปลี่ยน <code>Text</code> ที่แสดงจำนวนให้กลายเป็น <code>Icon</code> เมื่อจำนวนเกิน 5 จะเกิดอะไรขึ้นกับ Element ตัวนั้น</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แต่ละครั้งที่กด</strong></p><table><thead><tr><th>ชั้น</th><th>เกิดอะไรขึ้น</th></tr></thead><tbody>
+<tr><td>Widget</td><td>สร้างใหม่ทั้งหน้าจอ — <code>Scaffold</code>, <code>Column</code>, <code>Text</code>, ปุ่มทุกตัว เป็น object ชุดใหม่หมด</td></tr>
+<tr><td>Element</td><td>ไม่มีตัวไหนถูกทิ้งเลย เพราะชนิดของ widget ทุกตัวเหมือนเดิมทุกตำแหน่ง</td></tr>
+<tr><td>RenderObject</td><td>เกือบทั้งหมดอยู่เฉย ๆ มีเฉพาะตัวที่วาดข้อความจำนวนที่ถูกสั่งให้วาดใหม่ เพราะข้อความเปลี่ยนจริง</td></tr>
+</tbody></table><p><strong>ข้อ 2 — ทำไมค่าไม่รีเซ็ต</strong></p><p>เพราะ <code>_itemCount</code> ไม่ได้อยู่ใน widget แต่อยู่กับ Element ซึ่งไม่ถูกทิ้ง — widget ที่ถูกสร้างใหม่เป็นเพียงคำอธิบายว่า “ให้แสดงตัวเลขที่ Element ถืออยู่ตอนนี้” ถ้าค่าอยู่ใน widget จริง มันจะรีเซ็ตเป็นศูนย์ทุกครั้งที่กด และแอปนี้จะใช้งานไม่ได้เลย</p><p><strong>ข้อ 3 — เปลี่ยนชนิด widget</strong></p><p>เมื่อ <code>Text</code> กลายเป็น <code>Icon</code> ในตำแหน่งเดิม Flutter เห็นว่าชนิดไม่ตรง จึง <strong>ทิ้ง Element เดิมทั้งกิ่งแล้วสร้างใหม่</strong> ในกรณีนี้ไม่มีผลเสียอะไร เพราะ <code>Text</code> ไม่ได้ถือข้อมูลอะไรไว้</p><p>แต่ถ้าตำแหน่งนั้นเป็นช่องกรอกข้อความที่ผู้ใช้พิมพ์ไว้แล้ว หรือรายการที่เลื่อนไปครึ่งทาง การสลับชนิดจะทำให้ข้อมูลเหล่านั้นหายทันที — นี่คือเหตุผลที่ต้องเข้าใจ Element ก่อนจะไปเรียนเรื่อง key ใน 1.8</p><p><strong>ลองพิสูจน์ด้วยตัวเอง:</strong> เพิ่ม <code>print('build ทำงาน')</code> ไว้บรรทัดแรกของ <code>build</code> ใน <code>_WarehouseCounterScreenState</code> แล้วดู console ตอนกดปุ่ม — จะเห็นว่ามันถูกเรียกทุกครั้ง แต่หน้าจอยังลื่นและค่าไม่หาย</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>Widget = คำอธิบาย เบามาก สร้างทิ้งได้ตลอด</li><li>Element = ตัวจริงในหน้าจอ อยู่ยาว และถือข้อมูลไว้</li><li>RenderObject = ตัวคำนวณขนาดและวาด แพงที่สุด</li><li>Flutter เทียบชนิดและ key เพื่อตัดสินว่าจะเก็บ Element เดิมไว้ไหม</li><li>ข้อมูลอยู่กับ Element — ถ้า Element ถูกทิ้ง ข้อมูลหายด้วย</li><li>build, layout, paint เป็นคนละขั้น และแก้ปัญหาคนละแบบ</li></ul></div><p><strong>บทถัดไป:</strong> 1.4 จะเริ่มเขียน widget ของเราเอง โดยเริ่มจากแบบที่ง่ายที่สุดคือ <code>StatelessWidget</code> — widget ที่ไม่ถือข้อมูลอะไรเลย</p></section>

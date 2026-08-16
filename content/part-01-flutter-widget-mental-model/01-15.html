@@ -1,32 +1,121 @@
-<div class="note"><strong>Lab:</strong> อ่าน Dashboard widget tree ของ <code>wms_absolute_mobile</code> จาก runtime ownerลงถึง responsive tiles แล้วพิสูจน์ identity/rebuild/local stateด้วย Inspectorและ widget tests ไม่ใช่แค่วาดกล่องจากภาพ</div>
-<section><h2>1. Root-to-dashboard trace</h2><pre class="code-vs"><code>main
-└─ WmsApp (ListenableBuilder: language)
-   └─ MaterialApp + app-wide SafeArea
-      └─ LoginScreen
-         └─ WarehouseShell (State + WarehouseStore owner)
-            └─ Scaffold
-               ├─ ListenableBuilder(store): body
-               │  └─ AnimatedSwitcher
-               │     └─ KeyedSubtree(ValueKey(store.screen))
-               │        └─ HomeView
-               └─ ListenableBuilder(store): bottom nav</code></pre></section>
-<section><h2>2. HomeView tree</h2><pre class="code-vs"><code>HomeView (Stateless, receives store)
-└─ LayoutBuilder(page constraints)
-   └─ Padding → Column
-      ├─ DispatchTile(callback → store.nav)
-      ├─ Expanded
-      │  └─ LayoutBuilder(grid constraints)
-      │     └─ GridView → Tile[] → HomeIcon/AutoSizeText
-      └─ SummaryCard (Stateful: list/chart local mode)</code></pre><p>Responsiveค่ามาจาก constraints; business counts/navigationมาจาก store; list/chartเป็น local presentation state นี่คือ ownerสามระดับที่ต้องแยก</p></section>
-<section><h2>3. Identity map</h2><ul><li><code>ValueKey(store.screen)</code>: screen identityสำหรับ AnimatedSwitcher</li><li>title/sub ValueKeys: identityของ responsive AutoSizeText</li><li>dashboard list/chart keys: AnimatedSwitcher state/animationและ test finder</li><li>GlobalKey Formอยู่ Loginไม่ใช่ Dashboard เพราะ operation validateอยู่ที่นั่น</li></ul></section>
-<section><h2>4. Rebuild experiment</h2><ol><li>เปิด Inspector/track rebuilds</li><li>สลับภาษา: root MaterialApp/inherited localization subtreeเปลี่ยน</li><li>store notify badge: shell listenersและ dependent body/nav build</li><li>สลับ list/chart: SummaryCard setState subtreeเฉพาะ card</li><li>resize Windows/PDA: LayoutBuildersคำนวณ compact/narrow/extentใหม่</li></ol><p>บันทึกสิ่งที่สังเกตจริง ไม่สรุปจากทฤษฎีอย่างเดียว</p></section>
-<section><h2>5. Code reading questions</h2><ul><li>เหตุใด HomeViewยัง statelessทั้งที่ badgeเปลี่ยน?</li><li>ทำไม SummaryCard stateไม่ย้ายเข้า WarehouseStore?</li><li>ถ้าลบ ValueKey(store.screen) transition/stateจะต่างอย่างไร?</li><li>ใคร dispose store/timers/observer?</li><li>API ถูกยิงใน buildหรือ lifecycleใด?</li></ul></section>
-<section><h2>6. Widget test assignment</h2><pre class="code-vs"><code>testWidgets('dashboard switches list to chart', (tester) async {
-  await tester.pumpWidget(buildDashboard(fakeStore));
-  expect(find.byKey(const ValueKey('dashboard-list')), findsOneWidget);
-  await tester.tap(find.byKey(const ValueKey('dashboard-mode-chart')));
-  await tester.pumpAndSettle();
-  expect(find.byKey(const ValueKey('dashboard-chart')), findsOneWidget);
-});</code></pre><p>เพิ่ม test badge/store notifyและ narrow constraintอีกอย่างละหนึ่งเคส โดยใช้ fakeไม่ต่อ network</p></section>
-<section><h2>7. เปรียบเทียบ wmsapp</h2><p>วาด root <code>ValueListenableBuilder(theme) → MaterialApp → HomeScreen</code> แล้วเลือก menu cardหนึ่งใบ trace callback → Navigator → screen เปรียบเทียบว่า stateอยู่ screen-localมากกว่า absolute store-centricอย่างไร ยังไม่ตัดสินว่าแบบใดดีกว่าจนดู testability/flowใน Part architecture</p></section>
-<section><h2>8. Part 1 Exit Test</h2><div class="success"><ul><li>แยก Widget/Element/RenderObjectและ build/layout/paintได้</li><li>วาง state/resourceใน Stateless/State/storeตาม lifetimeได้</li><li>ใช้ context/key/callback/listenableโดยอธิบาย identity/dependencyได้</li><li>trace Dashboardจาก mainถึง tileและกลับจาก tapถึง storeได้</li><li>เขียน widget testพิสูจน์ local stateกับ store rebuildได้</li></ul></div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–90 นาที</span><span>ลงมือทำ: ไล่อ่าน แก้ และทดสอบแอปจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.1–1.14 ทั้งหมด — บทนี้ไม่มีเนื้อหาใหม่ แต่ใช้ทุกอย่างที่ผ่านมา<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน widget tree ของแอปที่ไม่ได้เขียนเองออก บอกได้ว่าข้อมูลแต่ละชิ้นอยู่ที่ไหน แก้โค้ดได้อย่างมั่นใจ และเขียนเทสต์พิสูจน์ว่าไม่พัง</div>
+
+<section><h2>1. เป้าหมายของ lab นี้</h2><p>ตลอด Part 1 เราเรียนทีละแนวคิด บทนี้จะรวมทุกอย่างเข้าด้วยกันกับโค้ดจริงที่มีมากกว่าหนึ่งชิ้นส่วน</p><p>ทักษะที่จะได้คือทักษะที่ใช้จริงในงาน — <strong>เปิดโค้ดที่คนอื่นเขียนแล้วเข้าใจภายในสิบนาที</strong> ไม่ใช่แค่เขียนโค้ดใหม่เองได้</p><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter run -d chrome -t lib/widget_basics/widget_basics_app.dart</code></pre></section>
+
+<section><h2>2. ขั้นที่ 1: วาด widget tree จากโค้ด</h2><p>เปิด <code>lib/widget_basics/widget_basics_app.dart</code> แล้ววาดโครงสร้างออกมาบนกระดาษก่อนอ่านคำตอบข้างล่าง</p><details class="answer"><summary>เทียบกับโครงที่ควรได้</summary><pre class="code-vs"><code>WidgetBasicsApp (Stateless)
+└─ MaterialApp                      ← ธีมและ Navigator (1.2)
+   └─ DashboardScreen (Stateful)    ← เจ้าของข้อมูล (1.5)
+      └─ Scaffold
+         ├─ AppBar
+         └─ Padding → Column
+            ├─ Row
+            │  ├─ StatCard 'งานทั้งหมด'    (Stateless, 1.4)
+            │  └─ StatCard 'ยังไม่เสร็จ'
+            ├─ ValueListenableBuilder&lt;int&gt;  ← ขอบเขต rebuild แคบ (1.13)
+            │  └─ Text 'กดไปแล้ว N ครั้ง'
+            └─ Expanded → ListView.builder
+               └─ TaskTile × 3               (มี ValueKey, 1.8)</code></pre></details></section>
+
+<section><h2>3. ขั้นที่ 2: ตอบคำถามจากโค้ด</h2><p>ตอบให้ได้ทุกข้อโดยดูจากโค้ดเท่านั้น ห้ามเดา</p><ol><li>ข้อมูล “งานใบไหนเสร็จแล้ว” เก็บอยู่ที่ไหน และทำไมถึงไม่เก็บใน <code>TaskTile</code></li><li>เมื่อกดที่แถวหนึ่งใบ มีอะไรถูกวาดใหม่บ้าง</li><li>ทำไม <code>_tapCount</code> ถึงไม่ใช้ <code>setState</code> เหมือนตัวอื่น</li><li>ใครเป็นคน <code>dispose</code> อะไร และทำไม</li><li>ถ้าลบ <code>key: ValueKey(task.id)</code> ออก จะเกิดอะไรขึ้นตอนนี้ และจะเกิดอะไรขึ้นถ้าเพิ่มช่องกรอกในแต่ละแถว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><p>เก็บใน <code>_DashboardScreenState._doneIds</code> เพราะข้อมูลนี้มีสองฝ่ายที่ต้องใช้ — <code>TaskTile</code> ใช้ตัดสินว่าจะขีดฆ่าหรือไม่ และ <code>StatCard</code> ใบ “ยังไม่เสร็จ” ใช้คำนวณตัวเลข ตามกฎใน 1.5 ข้อมูลจึงต้องอยู่ที่แม่ร่วมที่ต่ำที่สุดของทั้งสอง</p><p>ถ้าเก็บไว้ใน <code>TaskTile</code> เอง จะเกิดอาการที่ 1.5 เตือนไว้พอดี: กดแล้วแถวขีดฆ่าถูกต้อง แต่ตัวเลขด้านบนไม่ลด เพราะไม่มีใครบอกมัน</p><p><strong>ข้อ 2</strong></p><p>เมื่อกด <code>_toggleDone</code> ทำสองอย่างที่มีขอบเขตต่างกัน</p><table><thead><tr><th>คำสั่ง</th><th>ผลกระทบ</th></tr></thead><tbody>
+<tr><td><code>setState</code></td><td><code>build</code> ของ <code>DashboardScreen</code> ทำงานใหม่ทั้งหมด — การ์ดสองใบและรายการทั้งหมดถูกสร้างคำอธิบายใหม่</td></tr>
+<tr><td><code>_tapCount.value++</code></td><td>เฉพาะ <code>Text</code> ข้างใน <code>ValueListenableBuilder</code></td></tr>
+</tbody></table><p>แต่ตามที่เรียนใน 1.3 การสร้างคำอธิบายใหม่ไม่ได้แปลว่าสร้างของจริงใหม่ — Element และ RenderObject ของแถวที่ไม่เปลี่ยนถูกใช้ซ้ำ</p><p><strong>ข้อ 3</strong></p><p>เพราะจำนวนครั้งที่กดถูกใช้ที่เดียวคือข้อความบรรทัดนั้น การใช้ <code>setState</code> จะทำให้รายการทั้งหมดถูกวาดใหม่โดยไม่จำเป็น ซึ่งเป็นการสาธิตหลักใน 1.10 และ 1.13 ว่าเลือกเครื่องมือตาม <em>ขอบเขตที่ข้อมูลกระทบ</em></p><p><strong>ข้อ 4</strong></p><p><code>_DashboardScreenState</code> เป็นคน <code>dispose</code> เฉพาะ <code>_tapCount</code> เพราะมันสร้างเอง ส่วน <code>_doneIds</code> เป็น <code>Set</code> ธรรมดาที่ไม่ต้องคืนอะไร และ <code>_allTasks</code> เป็น <code>const</code> จึงไม่มีเจ้าของให้คืน — ตรงกับกฎความเป็นเจ้าของใน 1.6</p><p><strong>ข้อ 5</strong></p><p><strong>ตอนนี้:</strong> ไม่เกิดอะไรเลย เพราะรายการไม่เคยเรียงใหม่และแต่ละแถวไม่มีสถานะภายใน</p><p><strong>ถ้าเพิ่มช่องกรอก:</strong> เมื่อรายการเรียงใหม่หรือมีการลบแถว ข้อความที่ผู้ใช้พิมพ์จะติดอยู่กับตำแหน่งแทนที่จะติดกับงาน — คือบั๊กที่อธิบายไว้ใน 1.8 หัวข้อ 4 ทุกประการ</p><p>นี่เป็นบทเรียนสำคัญ: key ที่ “ยังไม่จำเป็นตอนนี้” เป็นการเตรียมไว้สำหรับสิ่งที่จะเกิดแน่นอนเมื่อหน้าจอโตขึ้น</p></details></section>
+
+<section><h2>4. ขั้นที่ 3: ทดลองแล้วสังเกต</h2><p>ทำทีละข้อ รันดูจริง แล้วบันทึกสิ่งที่เห็น อย่าอ่านแล้วเชื่อ</p><table><thead><tr><th>การทดลอง</th><th>สิ่งที่ควรสังเกต</th></tr></thead><tbody>
+<tr><td>ใส่ <code>print('build screen')</code> ต้น <code>build</code> ของ <code>_DashboardScreenState</code> แล้วกดแถว</td><td>ถูกเรียกทุกครั้ง</td></tr>
+<tr><td>ใส่ <code>print('build tile')</code> ใน <code>TaskTile.build</code> แล้วกดแถว</td><td>ถูกเรียกทุกแถว ไม่ใช่แค่แถวที่กด</td></tr>
+<tr><td>เปลี่ยน <code>_tapCount.value++</code> ให้เกิดอย่างเดียวโดยไม่มี <code>setState</code></td><td>ข้อความเปลี่ยน แต่ไม่มี <code>print</code> ใดถูกเรียกเลย</td></tr>
+<tr><td>เปลี่ยนสีหลักใน <code>ThemeData</code></td><td>ทั้งแอปเปลี่ยนโดยไม่แตะโค้ดหน้าจอ</td></tr>
+<tr><td>ลบ <code>_tapCount.dispose()</code> แล้วเข้าออกหน้าจอซ้ำ ๆ</td><td>ยังไม่เห็นอาการทันที — เป็นเหตุผลว่าทำไมต้องมีเทสต์</td></tr>
+</tbody></table><p>ผลจากแถวที่สองคือหลักฐานตรง ๆ ของ 1.13: <code>setState</code> ทำให้ทั้ง <code>build</code> ทำงาน จึงต้องมีเครื่องมือจำกัดขอบเขตเมื่อจำเป็น</p></section>
+
+<section><h2>5. ขั้นที่ 4: แก้โค้ดจริง</h2><p>ทำทั้งสามข้อ โดยรัน <code>flutter analyze --no-pub</code> และ <code>flutter test --no-pub</code> ทุกครั้งหลังแก้</p><ol><li><strong>เพิ่มการ์ดใบที่สาม</strong> แสดง “เสร็จแล้ว” โดยห้ามเพิ่ม field ใหม่ใน <code>State</code></li><li><strong>เพิ่มปุ่มล้างทั้งหมด</strong> ที่คืนทุกงานเป็นยังไม่เสร็จ และต้องกดไม่ได้เมื่อยังไม่มีงานไหนเสร็จ</li><li><strong>เพิ่มจำนวนรวมทุกงาน</strong> แสดงต่อท้ายข้อความนับจำนวนครั้ง โดยห้ามให้มันวาดใหม่เมื่อจำนวนครั้งเปลี่ยน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>// ใน _DashboardScreenState — เป็น getter ไม่ใช่ field (1.4, D1.7)
+int get _doneCount =&gt; _doneIds.length;
+
+// ใน build
+Expanded(
+  child: StatCard(
+    key: const Key('stat-done'),
+    label: 'เสร็จแล้ว',
+    value: '$_doneCount',
+  ),
+),</code></pre><p>ห้ามเพิ่ม field เพราะค่านี้คำนวณจาก <code>_doneIds</code> ได้ — ถ้าเก็บแยก วันหนึ่งจะมี method ที่ลืมอัปเดตแล้วตัวเลขสามใบไม่ตรงกัน</p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>bool get _hasDone =&gt; _doneIds.isNotEmpty;
+
+void _clearAll() {
+  if (!_hasDone) return;              // กันที่ตรรกะด้วย ไม่ใช่แค่ที่ปุ่ม (1.5)
+  setState(_doneIds.clear);
+}
+
+// ใน build
+TextButton(
+  key: const Key('clear-all'),
+  onPressed: _hasDone ? null : null,  // &lt;- ผิด! ดูคำอธิบายด้านล่าง
+  child: const Text('ล้างทั้งหมด'),
+),</code></pre><p>บรรทัดนั้นเขียนผิดโดยตั้งใจ เพื่อชี้จุดที่คนพลาดบ่อย — เงื่อนไขต้องกลับด้าน</p><pre class="code-vs"><code>onPressed: _hasDone ? _clearAll : null,   // มีงานเสร็จ -&gt; กดได้</code></pre><p>จำหลักจาก 1.5: <code>null</code> แปลว่า “ไม่มีอะไรให้ทำ” ปุ่มจึงจางและกดไม่ได้เอง</p><p><strong>ข้อ 3</strong></p><pre class="code-vs"><code>ValueListenableBuilder&lt;int&gt;(
+  valueListenable: _tapCount,
+  // ส่วนนี้ไม่ขึ้นกับ _tapCount จึงสร้างครั้งเดียวแล้วใช้ซ้ำ (1.13 หัวข้อ 6)
+  child: Text('ทั้งหมด ${_allTasks.length} งาน'),
+  builder: (context, count, child) =&gt; Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Text('กดไปแล้ว $count ครั้ง', key: const Key('tap-count')),
+      const SizedBox(width: 12),
+      child!,
+    ],
+  ),
+),</code></pre><p>ข้อนี้คือการใช้ <code>child</code> ตามที่อธิบายไว้ใน 1.13 — ส่วนที่ไม่ขึ้นกับค่าที่ฟังอยู่ถูกสร้างครั้งเดียวและส่งเข้ามาใช้ซ้ำ ไม่ถูกสร้างใหม่ทุกครั้งที่ตัวนับเปลี่ยน</p></details></section>
+
+<section><h2>6. ขั้นที่ 5: เขียนเทสต์พิสูจน์</h2><p>เพิ่มเทสต์ในไฟล์ <code>test/widget_basics_test.dart</code> อย่างน้อยสองข้อสำหรับสิ่งที่แก้ในขั้นที่ 5</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>testWidgets('การ์ดเสร็จแล้วนับตามงานที่กด', (tester) async {
+  await tester.pumpWidget(const WidgetBasicsApp());
+
+  expect(
+    tester.widget&lt;StatCard&gt;(find.byKey(const Key('stat-done'))).value,
+    '0',
+  );
+
+  await tester.tap(find.text('จัดเก็บ PAL-1001'));
+  await tester.pump();
+
+  expect(
+    tester.widget&lt;StatCard&gt;(find.byKey(const Key('stat-done'))).value,
+    '1',
+  );
+});
+
+testWidgets('ปุ่มล้างทั้งหมดกดไม่ได้เมื่อยังไม่มีงานเสร็จ', (tester) async {
+  await tester.pumpWidget(const WidgetBasicsApp());
+
+  final before = tester.widget&lt;TextButton&gt;(find.byKey(const Key('clear-all')));
+  expect(before.onPressed, isNull);          // ปิดอยู่
+
+  await tester.tap(find.text('จัดเก็บ PAL-1001'));
+  await tester.pump();
+
+  final after = tester.widget&lt;TextButton&gt;(find.byKey(const Key('clear-all')));
+  expect(after.onPressed, isNotNull);        // เปิดแล้ว
+
+  await tester.tap(find.byKey(const Key('clear-all')));
+  await tester.pump();
+
+  expect(
+    tester.widget&lt;StatCard&gt;(find.byKey(const Key('stat-done'))).value,
+    '0',
+  );
+});</code></pre><p><strong>ทำไมตรวจ <code>onPressed</code> แทนที่จะลองกดดู:</strong> เพราะการกดปุ่มที่ปิดอยู่ไม่ทำให้เทสต์ล้มเหลว มันแค่ไม่เกิดอะไรขึ้น ถ้าเราตรวจแค่ผลลัพธ์ เทสต์จะผ่านทั้งที่ปุ่มอาจกดได้ตอนที่ไม่ควร — การตรวจ <code>onPressed</code> ว่าเป็น <code>null</code> จึงพิสูจน์เจตนาได้ตรงกว่า</p><p><strong>ทำไมใช้ <code>find.byKey</code> แทนข้อความ:</strong> ตามที่เรียนใน 1.8 หัวข้อ 5 — ข้อความอาจเปลี่ยนเมื่อรองรับหลายภาษา แต่ key ไม่เปลี่ยน</p><p><strong>ทำไมต้อง <code>await tester.pump()</code> หลังกด:</strong> เพราะ <code>setState</code> เพียงทำเครื่องหมายว่าต้องวาดใหม่ การวาดจริงเกิดในรอบถัดไป ตามที่อธิบายใน 1.5 หัวข้อ 5 — ถ้าไม่ <code>pump</code> เราจะตรวจสถานะก่อนวาดใหม่และเทสต์จะล้มเหลวโดยที่โค้ดถูกต้อง</p></details></section>
+
+<section><h2>7. ขั้นที่ 6: หาคำตอบว่าอยู่บทไหน</h2><p>จับคู่อาการกับบทที่ให้คำตอบ ทำโดยไม่เปิดดูสารบัญ</p><table><thead><tr><th>อาการ</th><th>บทที่ตอบ</th></tr></thead><tbody>
+<tr><td>กดปุ่มแล้วไม่มีอะไรเกิดขึ้น</td><td>1.5</td></tr>
+<tr><td><code>No Scaffold widget found</code></td><td>1.7</td></tr>
+<tr><td>เรียงรายการแล้วข้อความในช่องกรอกสลับแถว</td><td>1.8</td></tr>
+<tr><td>API ถูกเรียกรัวไม่หยุด</td><td>1.9</td></tr>
+<tr><td>แอปกินหน่วยความจำเพิ่มเรื่อย ๆ</td><td>1.6</td></tr>
+<tr><td>เปลี่ยนค่าเล็ก ๆ แล้วรายการร้อยแถววาดใหม่</td><td>1.10, 1.13</td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>1.6</td></tr>
+<tr><td>widget ลูกต้องรับข้อมูลที่ตัวเองไม่ได้ใช้</td><td>1.14</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบทดสอบตัวเองก่อนไป Part 2</h2><div class="success"><p>คุณพร้อมไปต่อเมื่อทำสิ่งเหล่านี้ได้โดยไม่เปิดดูเฉลย</p><ul><li>อธิบายความต่างของ Widget, Element และ RenderObject ด้วยภาษาของตัวเอง</li><li>บอกได้ว่าข้อมูลชิ้นหนึ่งควรอยู่ที่ widget ไหน และให้เหตุผลได้</li><li>เลือกระหว่าง <code>StatelessWidget</code> กับ <code>StatefulWidget</code> ได้ถูก</li><li>เขียนคู่ <code>initState</code>/<code>dispose</code> ให้ครบทุกทรัพยากร</li><li>แก้ปัญหา context ที่หาของไม่เจอได้สองวิธี</li><li>บอกได้ว่าเมื่อไหร่ต้องใส่ <code>key</code> และเมื่อไหร่ไม่ต้อง</li><li>ชี้ได้ว่าโค้ดชิ้นไหนไม่ควรอยู่ใน <code>build</code> และควรย้ายไปไหน</li><li>จำกัดขอบเขต rebuild ด้วย <code>ValueNotifier</code> ได้</li><li>เขียน widget test ที่พิสูจน์พฤติกรรม ไม่ใช่แค่ตรวจว่ามีข้อความ</li></ul></div><p>ข้อไหนยังไม่มั่นใจ ให้กลับไปทำแบบฝึกหัดของบทนั้นซ้ำ — การอ่านซ้ำช่วยได้น้อยกว่าการลองแก้แล้วรัน</p></section>
+
+<section><h2>9. สรุปปิด Part 1</h2><div class="success"><ul><li>Flutter รับคำอธิบายจากเรา แล้วจัดการของจริงให้เอง</li><li>สร้าง widget ใหม่บ่อยไม่ใช่ปัญหา — สิ่งที่เป็นปัญหาคือทำงานหนักผิดที่</li><li>คำถามสำคัญที่สุดของทุกหน้าจอคือ “ข้อมูลนี้เป็นของใคร”</li><li>ข้อมูลไหลลงผ่าน constructor เหตุการณ์ไหลขึ้นผ่าน callback</li><li>ทุกอย่างที่เริ่มไว้ต้องมีคนคืน</li><li>ขอบเขตของ rebuild สำคัญกว่ารายละเอียดปลีกย่อยเรื่องประสิทธิภาพ</li><li>โค้ดที่แตกดีคือโค้ดที่ทดสอบทีละชิ้นได้</li></ul></div><p><strong>ต่อจากนี้:</strong> Part 2 จะตอบคำถามที่เราหลบมาตลอด — Flutter ตัดสินใจอย่างไรว่า widget แต่ละตัวควรมีขนาดเท่าไรและอยู่ตรงไหน ซึ่งเป็นที่มาของแถบสีเหลืองดำที่คุณจะได้เจอแน่นอน</p></section>

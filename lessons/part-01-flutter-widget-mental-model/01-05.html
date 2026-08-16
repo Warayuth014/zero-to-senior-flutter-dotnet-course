@@ -4,28 +4,132 @@
 <title>StatefulWidget</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-05 · Flutter UI</span><h1>StatefulWidget</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คู่ widget/state</a></li><li><a href="#section-2">ใครเปลี่ยนอะไร</a></li><li><a href="#section-3">setState มีความหมาย</a></li><li><a href="#section-4">ตัวอย่างจริง</a></li><li><a href="#section-5">Identity กำหนด State อยู่ต่อ</a></li><li><a href="#section-6">Local vs lifted state</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>StatefulWidget</code> เองยัง immutable; mutable data อยู่ใน <code>State&lt;T&gt;</code> ที่ framework ผูกกับตำแหน่ง/type/key ใน tree การแยก config กับ state ทำให้ parent เปลี่ยน input โดยรักษา lifecycle เดิมได้</div>
-<section id="section-1"><h2>1. คู่ widget/state</h2><pre class="code-vs"><code>class SummaryCard extends StatefulWidget {
-  const SummaryCard({super.key, required this.store});
-  final WarehouseStore store;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ทำไมต้องแยกเป็นสอง class</a></li><li><a href="#section-4">โครงสร้างที่ต้องเขียนทุกครั้ง</a></li><li><a href="#section-5">setState ทำอะไรกันแน่</a></li><li><a href="#section-6">งานที่ต้องรอ ให้รอให้เสร็จก่อน แล้วค่อย setState</a></li><li><a href="#section-7">ข้อมูลควรอยู่ที่ widget ไหน</a></li><li><a href="#section-8">Stateless หรือ Stateful — ตัดสินอย่างไร</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำให้หน้าจอเปลี่ยนตามการกดปุ่ม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.3 (ข้อมูลอยู่กับ Element) และ 1.4 (<code>StatelessWidget</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้าง widget ที่มีข้อมูลเปลี่ยนได้ ใช้ <code>setState</code> ถูกวิธี และตัดสินใจได้ว่าข้อมูลชิ้นไหนควรอยู่ที่ widget ไหน</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.4 เราเจอกำแพงว่า <code>StatelessWidget</code> เก็บข้อมูลที่เปลี่ยนได้ไม่ได้เลย แต่แอปทุกตัวต้องมีข้อมูลที่เปลี่ยน — จำนวนที่นับได้ ข้อความที่ผู้ใช้พิมพ์ รายการที่ถูกเลือก</p><p><code>StatefulWidget</code> คือคำตอบ และกลไกของมันตรงกับสิ่งที่เรียนไปแล้วใน 1.3 พอดี</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>StatefulWidget</code></td><td>widget ที่มีข้อมูลเปลี่ยนได้ผูกอยู่ด้วย</td></tr>
+<tr><td><code>State&lt;T&gt;</code></td><td>class คู่กันที่เก็บข้อมูลจริงและมี <code>build</code></td></tr>
+<tr><td><code>createState()</code></td><td>method ที่สร้าง <code>State</code> ให้ครั้งเดียวตอนเริ่ม</td></tr>
+<tr><td><code>setState</code></td><td>บอก Flutter ว่า “ข้อมูลเปลี่ยนแล้ว ช่วยวาดใหม่”</td></tr>
+<tr><td><code>widget.xxx</code></td><td>วิธีที่ <code>State</code> อ่านค่าที่แม่ส่งมา</td></tr>
+<tr><td>lifting state up</td><td>การย้ายข้อมูลขึ้นไปเก็บที่แม่ (เต็ม ๆ ใน 4.3)</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ทำไมต้องแยกเป็นสอง class</h2><p>คนใหม่มักงงว่าทำไม <code>StatefulWidget</code> ต้องเขียนสอง class คำตอบอยู่ใน 1.3 ทั้งหมด</p><table><thead><tr><th></th><th><code>StatefulWidget</code></th><th><code>State</code></th></tr></thead><tbody>
+<tr><td>เทียบกับ 1.3</td><td>ใบสั่งงาน</td><td>ความจำของช่าง</td></tr>
+<tr><td>ถูกสร้างใหม่</td><td>ทุกครั้งที่ rebuild</td><td>ครั้งเดียวตอนเริ่ม</td></tr>
+<tr><td>เก็บอะไร</td><td>ค่าที่แม่ส่งมา (final ทั้งหมด)</td><td>ข้อมูลที่เปลี่ยนได้</td></tr>
+<tr><td>อยู่นานแค่ไหน</td><td>ชั่วครู่</td><td>ตราบที่ Element ยังอยู่</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ที่ต้องแยกสอง class เพราะของสองอย่างนี้มี <em>อายุ</em> ต่างกัน — widget ตายทุกรอบ ส่วนข้อมูลต้องอยู่รอด</div></section>
+
+<section id="section-4"><h2>4. โครงสร้างที่ต้องเขียนทุกครั้ง</h2><p>เปิด <code>lib/beginner_main.dart</code> ใน lab</p><pre class="code-vs"><code>class WarehouseCounterScreen extends StatefulWidget {
+  const WarehouseCounterScreen({super.key});
 
   @override
-  State&lt;SummaryCard&gt; createState() =&gt; _SummaryCardState();
+  State&lt;WarehouseCounterScreen&gt; createState() =&gt; _WarehouseCounterScreenState();
 }
 
-class _SummaryCardState extends State&lt;SummaryCard&gt; {
-  DashboardMode mode = DashboardMode.list;
+class _WarehouseCounterScreenState extends State&lt;WarehouseCounterScreen&gt; {
+  int _itemCount = 0;          // ข้อมูลที่เปลี่ยนได้ อยู่ตรงนี้
+
+  void _addItem() {
+    setState(() {
+      _itemCount++;
+    });
+  }
 
   @override
-  Widget build(BuildContext context) { /* widget.store + mode */ }
-}</code></pre></section>
-<section id="section-2"><h2>2. ใครเปลี่ยนอะไร</h2><p>Parent เปลี่ยน configuration ผ่าน constructor → State อ่านจาก <code>widget</code>; State เปลี่ยน local value ผ่าน <code>setState</code>; shared/business state เปลี่ยนผ่าน store command แล้ว listener rebuild อย่าคัดลอก <code>widget.store.value</code> มา field local โดยไม่มี sync policy</p></section>
-<section id="section-3"><h2>3. setState มีความหมาย</h2><p><code>setState</code> รัน callback ทันทีแล้ว mark Element นี้ dirty เพื่อ build รอบถัดไป มันไม่ได้ทำ mutationให้เองและไม่ได้ rerender synchronous ทุกบรรทัด</p><pre class="code-vs"><code>setState(() =&gt; mode = DashboardMode.chart);</code></pre><p>เก็บเฉพาะ mutation synchronous สั้น ๆ ใน callback งาน async ทำก่อน/หลังแล้วเรียก setState เมื่อมี snapshot ใหม่</p></section>
-<section id="section-4"><h2>4. ตัวอย่างจริง</h2><p><code>_SummaryCardState</code> ใน absolute ถือ list/chart mode ซึ่งเป็น local presentation state เหมาะสม ส่วน <code>WarehouseShellState</code> สร้าง WarehouseStore และถือ timers/flash/toast lifecycle ส่วน LoginScreen ถือ controllers/focus/submitting/error</p></section>
-<section id="section-5"><h2>5. Identity กำหนด State อยู่ต่อ</h2><p>ถ้า parent สร้าง widget type/key เดิมใน slot เดิม State อยู่ต่อ แม้ constructor instance ใหม่ หาก key/typeเปลี่ยน State เดิม dispose และสร้างใหม่ ดังนั้นอย่าใช้ UniqueKey ทุก build เพื่อ “แก้ refresh” เพราะทำลาย state/lifecycle</p></section>
-<section id="section-6"><h2>6. Local vs lifted state</h2><p>mode ของ card ไม่มีใครนอก cardใช้ → local State; current warehouse screen/badges/tasks หลาย widgetsใช้ → WarehouseStore; auth sessionอยู่ระดับ session repository การวาง owner ตามผู้ใช้ข้อมูลช่วยลด callback/global ซ้ำซ้อน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จำแนก owner ของ password visibility, JWT session, dashboard list/chart และ current warehouse task</p><details><summary>เฉลย</summary><ul><li>password visibility: Login State</li><li>JWT session: Auth/session repository ระดับกว้าง</li><li>list/chart: SummaryCard State</li><li>current task: WarehouseStore/feature workflow state</li></ul></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ถ้า State มีทั้ง controllers, API calls, parsing, business transitions และ widget codeจำนวนมาก แปลว่า StatefulWidget กลายเป็น architecture ทั้งระบบ ต้องแยก store/repository/model ไม่ใช่แค่แตก helper methods</div></section>
+  Widget build(BuildContext context) {
+    return Scaffold(/* ใช้ _itemCount ตรงนี้ */);
+  }
+}</code></pre><table><thead><tr><th>สังเกต</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>build</code> อยู่ใน <code>State</code> ไม่ใช่ใน widget</td><td>เพราะต้องเข้าถึงข้อมูลที่เปลี่ยนได้</td></tr>
+<tr><td>ชื่อ <code>State</code> ขึ้นต้นด้วย <code>_</code></td><td>เป็นรายละเอียดภายในไฟล์ ไม่ให้ใครนอกไฟล์แตะ (D1.7, D1.18)</td></tr>
+<tr><td><code>_itemCount</code> ไม่ใช่ <code>final</code></td><td>เพราะมันคือสิ่งที่ต้องเปลี่ยนได้</td></tr>
+<tr><td><code>State&lt;WarehouseCounterScreen&gt;</code></td><td>generic บอกว่าผูกกับ widget ตัวไหน (D1.9)</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. setState ทำอะไรกันแน่</h2><pre class="code-vs"><code>setState(() {
+  _itemCount++;
+});</code></pre><p>มันทำสองอย่างตามลำดับ</p><ol><li>เรียกฟังก์ชันที่เราส่งเข้าไปทันที — ตรงนี้คือที่ที่เราเปลี่ยนค่า</li><li>ทำเครื่องหมายว่า “ตรงนี้ต้องวาดใหม่” แล้ว Flutter จะมา <code>build</code> ให้ในรอบถัดไป</li></ol><div class="warn"><strong>สิ่งที่ <code>setState</code> ไม่ได้ทำ:</strong> มันไม่ได้เปลี่ยนค่าให้เราเอง เราต้องเปลี่ยนเองในฟังก์ชันที่ส่งไป และมันไม่ได้วาดหน้าจอทันทีในบรรทัดถัดไป — การวาดเกิดขึ้นทีหลัง</div><table><thead><tr><th>เขียนแบบ</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td><code>setState(() =&gt; _itemCount++);</code></td><td>ถูก — เปลี่ยนค่าและแจ้งครบ</td></tr>
+<tr><td><code>_itemCount++;</code> เฉย ๆ</td><td>ค่าเปลี่ยนจริง แต่หน้าจอไม่อัปเดต</td></tr>
+<tr><td><code>_itemCount++; setState(() {});</code></td><td>ได้ผลเหมือนกัน แต่อ่านยากกว่าและเสี่ยงลืมภายหลัง</td></tr>
+</tbody></table><p>อาการ “กดปุ่มแล้วไม่มีอะไรเกิดขึ้น” ที่คนใหม่เจอกันเกือบทุกคน มาจากแถวที่สองในตารางนี้</p></section>
+
+<section id="section-6"><h2>6. งานที่ต้องรอ ให้รอให้เสร็จก่อน แล้วค่อย setState</h2><pre class="code-vs"><code>// ผิด — ใส่งานที่ต้องรอไว้ข้างใน
+setState(() async {
+  final result = await api.load();
+  _items = result;
+});
+
+// ถูก — รอให้เสร็จก่อน แล้วค่อยแจ้ง
+Future&lt;void&gt; _load() async {
+  final result = await api.load();
+  setState(() {
+    _items = result;
+  });
+}</code></pre><p>เหตุผลตรงกับ D1.15: ฟังก์ชันใน <code>setState</code> ควรทำงานเสร็จทันที ถ้าใส่งานที่ต้องรอเข้าไป Flutter จะทำเครื่องหมายและวาดใหม่ตั้งแต่ก่อนข้อมูลจะมาถึง</p><p>ยังมีเรื่องสำคัญอีกข้อที่ค้างไว้ — ระหว่างที่เรารอ ผู้ใช้อาจกดย้อนกลับออกจากหน้าจอไปแล้ว การเรียก <code>setState</code> ตอนนั้นจะเกิด error เรื่องนี้จะแก้อย่างเป็นระบบใน 1.6 และ 3.13</p></section>
+
+<section id="section-7"><h2>7. ข้อมูลควรอยู่ที่ widget ไหน</h2><p>คำถามนี้สำคัญกว่าไวยากรณ์ทั้งหมดในบทนี้ ใช้กฎข้อเดียว</p><div class="note"><strong>เก็บข้อมูลไว้ที่ widget ที่ต่ำที่สุด ซึ่งยังครอบคลุมทุกคนที่ต้องใช้ข้อมูลนั้น</strong></div><p>ดูตัวอย่างจริงจาก lab <code>widget_basics_app.dart</code></p><table><thead><tr><th>ข้อมูล</th><th>ใครต้องใช้</th><th>เก็บที่ไหน</th></tr></thead><tbody>
+<tr><td>งานใบไหนเสร็จแล้วบ้าง</td><td>แถวงานทุกแถว และการ์ดสรุปยอด</td><td><code>_DashboardScreenState</code> ซึ่งเป็นแม่ของทั้งสอง</td></tr>
+<tr><td>ชื่อและจำนวนของงานหนึ่งใบ</td><td>เฉพาะแถวนั้น</td><td>ส่งผ่าน constructor ไม่ต้องเก็บ</td></tr>
+<tr><td>สีของแถวเมื่อทำเสร็จ</td><td>เฉพาะแถวนั้น และคำนวณได้</td><td>คำนวณใน <code>build</code> ไม่เก็บ</td></tr>
+</tbody></table><p>สังเกตว่า <code>TaskTile</code> เป็น <code>StatelessWidget</code> ทั้งที่มันมีสถานะ “เสร็จ/ไม่เสร็จ” — เพราะสถานะนั้น <strong>ไม่ใช่ของมัน</strong> การ์ดสรุปยอดก็ต้องรู้ด้วย ข้อมูลจึงต้องอยู่ที่แม่ แล้วส่งลงมาเป็นค่า พร้อม callback สำหรับแจ้งกลับขึ้นไป (เรื่อง callback อยู่ใน 1.12)</p><p>ถ้าเก็บไว้ที่ <code>TaskTile</code> เอง จะเกิดอาการคลาสสิก: กดแล้วแถวเปลี่ยนเป็นขีดฆ่า แต่ตัวเลข “ยังไม่เสร็จ” ด้านบนไม่ลด เพราะไม่มีใครบอกมัน</p></section>
+
+<section id="section-8"><h2>8. Stateless หรือ Stateful — ตัดสินอย่างไร</h2><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>widget นี้ต้องจำอะไรระหว่าง rebuild ไหม</td><td>Stateful</td></tr>
+<tr><td>มันเป็นเจ้าของตัวควบคุมที่ต้องคืนทรัพยากรไหม (ช่องกรอก, อนิเมชัน)</td><td>Stateful</td></tr>
+<tr><td>ข้อมูลที่ใช้มาจากแม่ทั้งหมดไหม</td><td>Stateless</td></tr>
+<tr><td>ค่าที่ต้องการคำนวณจากค่าที่ได้รับได้ไหม</td><td>Stateless</td></tr>
+</tbody></table><p>ค่าเริ่มต้นควรเป็น <code>StatelessWidget</code> เสมอ แล้วค่อยเปลี่ยนเมื่อมีเหตุผลชัดเจน — เพราะมันทดสอบง่ายกว่า อ่านง่ายกว่า และไม่มีเรื่องวงจรชีวิตให้พลาด</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดปุ่มแล้วไม่มีอะไรเกิดขึ้น</td><td>เปลี่ยนค่าโดยไม่เรียก <code>setState</code></td><td>ห่อการเปลี่ยนค่าไว้ใน <code>setState</code></td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>เรียกหลังผู้ใช้ออกจากหน้าจอไปแล้ว</td><td>ตรวจสถานะก่อนเรียก (1.6, 3.13)</td></tr>
+<tr><td><code>setState() called during build</code></td><td>เรียก <code>setState</code> ใน <code>build</code></td><td>ย้ายไปเรียกจาก callback ของผู้ใช้แทน</td></tr>
+<tr><td>แถวเปลี่ยนแต่ยอดสรุปไม่เปลี่ยน</td><td>ข้อมูลเก็บต่ำเกินไป</td><td>ย้ายขึ้นไปที่แม่ร่วมของทั้งสอง</td></tr>
+<tr><td>คัดลอกค่าจากแม่มาเก็บใน <code>State</code> แล้วค่าไม่อัปเดต</td><td>คัดลอกครั้งเดียวตอนเริ่ม</td><td>อ่านจาก <code>widget.xxx</code> ตรง ๆ หรือดูวิธีซิงก์ใน 1.6</td></tr>
+<tr><td>ทุก widget ในโปรเจกต์เป็น <code>StatefulWidget</code></td><td>เปลี่ยนเป็น Stateful เพื่อความสบายใจ</td><td>เริ่มจาก Stateless เสมอ</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>ในแอป lab <code>beginner_main.dart</code> ให้เพิ่มความสามารถ</p><ol><li>ปุ่ม “ลดหนึ่งรายการ” ที่ลดจำนวนลงทีละหนึ่ง</li><li>จำนวนต้องไม่ติดลบ</li><li>ปุ่มต้องกดไม่ได้เมื่อจำนวนเป็นศูนย์</li><li>แสดงข้อความ <code>ครบเป้าแล้ว</code> เมื่อจำนวนถึง 10 หรือมากกว่า โดยห้ามเก็บข้อความนี้เป็น field</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class _WarehouseCounterScreenState extends State&lt;WarehouseCounterScreen&gt; {
+  int _itemCount = 0;
+
+  // ค่าที่คำนวณได้ ไม่เก็บซ้ำ — หลักเดียวกับ D1.7 และ 1.4
+  bool get _isEmpty =&gt; _itemCount == 0;
+  bool get _reachedGoal =&gt; _itemCount &gt;= 10;
+
+  void _addItem() =&gt; setState(() =&gt; _itemCount++);
+
+  void _removeItem() {
+    if (_isEmpty) return;              // กันไว้ที่ตรรกะด้วย ไม่ใช่แค่ที่ปุ่ม
+    setState(() =&gt; _itemCount--);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(
+        children: [
+          Text('$_itemCount รายการ'),
+          if (_reachedGoal) const Text('ครบเป้าแล้ว'),
+          FilledButton(onPressed: _addItem, child: const Text('เพิ่มสินค้า')),
+          OutlinedButton(
+            // ส่ง null เพื่อปิดปุ่ม — Flutter จะทำให้เป็นสีจางและกดไม่ได้เอง
+            onPressed: _isEmpty ? null : _removeItem,
+            child: const Text('ลดหนึ่งรายการ'),
+          ),
+        ],
+      ),
+    );
+  }
+}</code></pre><p><strong>ทำไมต้องกันค่าติดลบสองที่:</strong> ปุ่มที่ปิดอยู่ป้องกันได้แค่การกดด้วยนิ้ว แต่ <code>_removeItem</code> อาจถูกเรียกจากที่อื่นในอนาคต เช่นจากปุ่มลัดบนแป้นพิมพ์หรือจากเทสต์ — กฎทางธุรกิจต้องอยู่ในตรรกะ ส่วนการปิดปุ่มเป็นเพียงการสื่อสารกับผู้ใช้</p><p><strong>ทำไม <code>onPressed: null</code> ถึงปิดปุ่ม:</strong> Flutter ใช้ข้อตกลงว่า callback ที่เป็น <code>null</code> แปลว่า “ไม่มีอะไรให้ทำ” จึงทำให้ปุ่มเป็นสีจางและไม่ตอบสนองโดยอัตโนมัติ — เป็นการใช้ nullable callback จาก D1.11 ที่ตรงไปตรงมาและอ่านง่ายกว่าการมี field <code>isEnabled</code> แยกต่างหาก</p><p><strong>ทำไม <code>_reachedGoal</code> เป็น getter ไม่ใช่ field:</strong> เพราะถ้าเก็บเป็น field เราต้องอัปเดตมันทั้งใน <code>_addItem</code> และ <code>_removeItem</code> วันที่มีคนเพิ่ม method ที่สามเข้ามาแล้วลืมอัปเดต หน้าจอจะแสดง “ครบเป้าแล้ว” ทั้งที่จำนวนเหลือ 3 — บั๊กแบบนี้หาสาเหตุยากเพราะตัวเลขที่แสดงยังถูกต้อง</p><p><strong>จุดที่คนมักพลาด:</strong> เขียน <code>if (_itemCount &gt; 0) setState(() =&gt; _itemCount--);</code> ซึ่งถูกต้องเช่นกัน แต่การแยกเงื่อนไขออกมาเป็น <code>_isEmpty</code> ทำให้ปุ่มกับตรรกะใช้เกณฑ์เดียวกันแน่นอน ไม่มีทางเขียนไม่ตรงกันได้</p><p><strong>ลองต่อ:</strong> ย้าย <code>_itemCount</code> ออกไปเป็นตัวแปรระดับไฟล์นอก class แล้วรันดู — จะเห็นว่าค่ายังคงอยู่ข้าม rebuild เหมือนกัน แต่ถ้าเปิดหน้าจอนี้สองครั้งพร้อมกันจะใช้ค่าร่วมกันโดยไม่ตั้งใจ นั่นคือเหตุผลที่ข้อมูลควรอยู่ใน <code>State</code></p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>StatefulWidget</code> แยกเป็นสอง class เพราะ widget กับข้อมูลมีอายุต่างกัน</li><li>ข้อมูลที่เปลี่ยนได้อยู่ใน <code>State</code> และรอดจากการ rebuild</li><li><code>setState</code> ไม่ได้เปลี่ยนค่าให้ เราต้องเปลี่ยนเอง แล้วมันแจ้งให้วาดใหม่</li><li>งานที่ต้องรอ ให้รอเสร็จก่อน แล้วค่อย <code>setState</code></li><li>เก็บข้อมูลไว้ที่ widget ต่ำที่สุดที่ยังครอบคลุมทุกคนที่ต้องใช้</li><li>เริ่มจาก <code>StatelessWidget</code> เสมอ แล้วค่อยเปลี่ยนเมื่อมีเหตุผล</li></ul></div><p><strong>บทถัดไป:</strong> 1.6 จะดูวงจรชีวิตของ <code>State</code> ตั้งแต่เกิดจนตาย ซึ่งเป็นที่ที่เราจะจัดการเรื่องการเริ่มงานและการคืนทรัพยากรอย่างถูกต้อง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

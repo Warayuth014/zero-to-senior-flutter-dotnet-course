@@ -1,18 +1,84 @@
-<div class="note">InheritedWidget ส่งข้อมูลลง treeและบันทึกว่า Elementใด depend เมื่อค่าเปลี่ยน framework rebuildเฉพาะ dependents เป็นฐานของ <code>Theme.of</code>, <code>MediaQuery</code>, Localizations และ state packagesหลายตัว</div>
-<section><h2>1. Conceptual API</h2><pre class="code-vs"><code>class SessionScope extends InheritedWidget {
-  const SessionScope({super.key, required this.session, required super.child});
-  final AuthSession session;
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งข้อมูลลงไปหลายชั้นโดยไม่ผ่าน constructor</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.7 (<code>BuildContext</code> และการเดินขึ้นหา ancestor) และ 1.12 (ส่งข้อมูลผ่าน constructor)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายได้ว่า <code>Theme.of(context)</code> ทำงานอย่างไร และตัดสินได้ว่าเมื่อไหร่ควรส่งผ่าน constructor เมื่อไหร่ควรใช้กลไกนี้</div>
 
-  static SessionScope of(BuildContext context) =&gt;
-      context.dependOnInheritedWidgetOfExactType&lt;SessionScope&gt;()!;
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.12 เราส่งข้อมูลจากแม่ลงลูกผ่าน constructor ซึ่งใช้ได้ดีเมื่อห่างกันชั้นเดียว แต่ถ้าข้อมูลต้องเดินทางลึกลงไปหลายชั้นล่ะ</p><pre class="code-vs"><code>หน้าจอ (มีข้อมูลผู้ใช้)
+└── Column
+    └── Card
+        └── Padding
+            └── Row
+                └── ชื่อผู้ใช้   ← ต้องใช้ข้อมูล</code></pre><p>ถ้าส่งผ่าน constructor ทุกชั้น widget กลาง ๆ ทั้งสี่ตัวต้องรับข้อมูลที่ตัวเองไม่ได้ใช้ เพียงเพื่อส่งต่อ — เรียกว่าปัญหา “ส่งของผ่านมือ”</p><p>Flutter แก้ปัญหานี้ด้วยกลไกที่เราใช้มาตลอดโดยไม่รู้ตัว: <code>Theme.of(context)</code></p></section>
 
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>InheritedWidget</code></td><td>widget ที่วางข้อมูลไว้ให้ลูกหลานทุกชั้นหยิบใช้ได้</td></tr>
+<tr><td>scope</td><td>ขอบเขตที่ข้อมูลนั้นมีผล คือทุกอย่างที่อยู่ใต้มัน</td></tr>
+<tr><td>dependent</td><td>widget ที่ลงทะเบียนไว้ว่าใช้ข้อมูลนั้น</td></tr>
+<tr><td><code>updateShouldNotify</code></td><td>method ที่ตัดสินว่าค่าใหม่ต่างพอที่จะแจ้งไหม</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ป้ายที่ติดผนังห้อง</h2><p>ทบทวนจาก 1.7: <code>.of(context)</code> คือการ <strong>เดินขึ้นไปตามต้นไม้เพื่อหาของ</strong></p><pre class="code-vs"><code>MaterialApp          ← ติดป้าย "ธีม" ไว้ที่นี่
+└── Scaffold
+    └── Card
+        └── Text     ← เดินขึ้นไปอ่านป้าย เจอที่ MaterialApp</code></pre><p>ความพิเศษที่มากกว่าการอ่านเฉย ๆ คือ <strong>มันจดชื่อคนที่มาอ่านไว้ด้วย</strong> เมื่อป้ายเปลี่ยน คนที่เคยอ่านจะถูกเรียกให้มาวาดใหม่ ส่วนคนที่ไม่เคยอ่านจะไม่ถูกรบกวนเลย</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การเรียก <code>.of(context)</code> ไม่ใช่แค่การอ่านค่า แต่เป็นการ <em>สมัครรับข่าว</em> — นี่คือเหตุผลที่เปลี่ยนธีมแล้วทั้งแอปเปลี่ยนตามได้เองโดยไม่มีใครเขียนโค้ดสั่ง</div></section>
+
+<section><h2>4. สิ่งที่ใช้กลไกนี้อยู่แล้ว</h2><table><thead><tr><th>เรียกอย่างไร</th><th>ให้อะไร</th><th>ใช้มาตั้งแต่</th></tr></thead><tbody>
+<tr><td><code>Theme.of(context)</code></td><td>ชุดสีและตัวอักษร</td><td>1.2</td></tr>
+<tr><td><code>MediaQuery.of(context)</code></td><td>ขนาดหน้าจอ ระยะปลอดภัย</td><td>Part 2</td></tr>
+<tr><td><code>Navigator.of(context)</code></td><td>ตัวจัดการหน้าจอ</td><td>Part 5</td></tr>
+<tr><td><code>ScaffoldMessenger.of(context)</code></td><td>ตัวแสดงข้อความแจ้งเตือน</td><td>1.7</td></tr>
+</tbody></table><p>ทั้งหมดนี้ทำงานแบบเดียวกัน — และปัญหา “หา <code>Scaffold</code> ไม่เจอ” ใน 1.7 ก็คือกรณีที่เดินขึ้นไปแล้วไม่พบป้าย เพราะป้ายอยู่ข้างล่าง</p></section>
+
+<section><h2>5. เขียนของตัวเอง</h2><pre class="code-vs"><code>class SessionScope extends InheritedWidget {
+  const SessionScope({
+    super.key,
+    required this.userName,
+    required super.child,
+  });
+
+  final String userName;
+
+  // ทางเข้ามาตรฐานที่คนอื่นเรียกใช้
+  static SessionScope of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType&lt;SessionScope&gt;();
+    assert(scope != null, 'ต้องมี SessionScope อยู่เหนือขึ้นไป');
+    return scope!;
+  }
+
+  // ค่าใหม่ต่างจากเดิมพอที่จะแจ้งไหม
   @override
-  bool updateShouldNotify(SessionScope old) =&gt; old.session != session;
-}</code></pre></section>
-<section><h2>2. of(context) ทำ dependency</h2><p>เมื่อ childเรียก <code>SessionScope.of(context)</code> Elementนั้นถูกลงทะเบียน หาก scope widgetใหม่ตัดสิน notify child buildใหม่ ไม่ต้องส่ง sessionผ่าน constructorทุกระดับที่ไม่ใช้มัน</p></section>
-<section><h2>3. ตัวอย่าง built-inจริง</h2><ul><li><code>Theme.of(context)</code>: color/text/theme</li><li><code>MediaQuery.of(context)</code>: size/padding/viewInsets</li><li><code>Localizations</code>: locale/resources</li><li><code>Navigator.of(context)</code>: หา stateของ ancestor navigator (กลไกภายในสัมพันธ์กับ tree)</li></ul><p>wmsappอ่าน Themeในหลาย widgets; scan sheetsอ่าน MediaQueryของ contextเฉพาะตำแหน่ง</p></section>
-<section><h2>4. InheritedWidget เองไม่ได้ mutate</h2><p>มันเป็น immutable configเหมือน widgetอื่น Mutable sourceมักอยู่ StatefulWidget/ChangeNotifier แล้วใช้ InheritedNotifier/Providerครอบ การออกแบบต้องแยก ownerจาก distribution mechanism</p></section>
-<section><h2>5. Granularity ของ updateShouldNotify</h2><p>คืน trueทุกครั้งทำ dependentsกว้าง rebuild; เทียบไม่ครบทำ UI stale ถ้า stateใหญ่และ consumersใช้คนละ sliceให้แยก scopes/aspects/selectorsหรือ view models แทน God scopeหนึ่งก้อน</p></section>
-<section><h2>6. Constructor injection vs inherited</h2><p>ส่ง constructorเมื่อ dependencyตรง/ใกล้และอยากเห็นชัด; inheritedเมื่อ descendantจำนวนมากข้าม intermediate widgetsและ lifetimeเป็น subtree policy เช่น theme/session อย่าใช้ inheritedเพียงลด parameterสองชั้นจน dependencyซ่อนหมด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>AuthRepositoryต้องใช้ LoginและShellหลาย descendants ควรเลือกอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอนนี้ constructor injectionใน absoluteชัดและจำนวนชั้นไม่มากจึงเหมาะ หากหลาย featureลึกต้องใช้ session/read-only authอาจสร้าง AuthScope/Providerที่ app/session root แต่ commandและlifetimeยังอยู่ AuthRepository พร้อม tests ไม่ให้ widgetsแก้ tokenตรง</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ถ้าเรียก <code>of(context)</code> จาก contextเหนือ scopeจะหาไม่พบ ต้องเข้าใจตำแหน่ง Element และใช้ Builder/child context ไม่แก้ด้วย global variableทันที</div></section>
+  bool updateShouldNotify(SessionScope oldWidget) =&gt;
+      oldWidget.userName != userName;
+}</code></pre><pre class="code-vs"><code>// วางไว้ชั้นบน
+SessionScope(
+  userName: 'สมชาย',
+  child: const DashboardScreen(),
+)
+
+// ลูกหลานชั้นไหนก็หยิบใช้ได้ โดยชั้นกลางไม่ต้องรู้เรื่อง
+Text(SessionScope.of(context).userName)</code></pre><p><code>updateShouldNotify</code> คือจุดที่ควบคุมประสิทธิภาพ — ถ้าคืน <code>true</code> เสมอ ทุกคนที่อ่านจะวาดใหม่ทุกครั้งแม้ค่าจะเท่าเดิม ถ้าเทียบไม่ครบ บางคนจะแสดงค่าเก่า</p></section>
+
+<section><h2>6. ตัวมันเองเปลี่ยนค่าไม่ได้</h2><p><code>InheritedWidget</code> เป็น widget จึง immutable ตามกฎใน 1.4 — มันแค่ <strong>ส่งต่อ</strong> ข้อมูล ไม่ใช่ <strong>เจ้าของ</strong> ข้อมูล</p><pre class="code-vs"><code>StatefulWidget          ← เจ้าของข้อมูลจริง เปลี่ยนค่าด้วย setState
+└── SessionScope        ← ตัวส่งต่อ สร้างใหม่ทุกครั้งที่ค่าเปลี่ยน
+    └── ลูกหลานทั้งหมด    ← หยิบใช้</code></pre><p>ดังนั้นการใช้งานจริงต้องมีสองส่วนเสมอ: ส่วนที่เก็บข้อมูล (ตามที่เรียนใน 1.5 และ 1.13) กับส่วนที่กระจายข้อมูล ซึ่งเป็นบทนี้</p><p>ในโปรเจกต์จริงเรามักไม่เขียน <code>InheritedWidget</code> เองเพราะต้องเขียนสองส่วนนี้ทุกครั้ง แต่ใช้เครื่องมือสำเร็จรูปที่ห่อทั้งสองส่วนไว้ให้แล้ว ซึ่งจะเรียนใน Part 27 — สิ่งสำคัญคือรู้ว่าข้างในมันคือกลไกนี้</p></section>
+
+<section><h2>7. constructor หรือ scope — เลือกอย่างไร</h2><table><thead><tr><th>สถานการณ์</th><th>ใช้</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ห่างกันหนึ่งถึงสองชั้น</td><td>constructor</td><td>เห็นชัดว่าใครใช้อะไร</td></tr>
+<tr><td>ข้อมูลเฉพาะของ widget นั้น</td><td>constructor</td><td>ไม่มีใครอื่นต้องใช้</td></tr>
+<tr><td>ลูกหลานจำนวนมากข้ามหลายชั้นต้องใช้</td><td>scope</td><td>ชั้นกลางไม่ต้องรับของที่ไม่ใช้</td></tr>
+<tr><td>เป็นค่าระดับแอปหรือระดับส่วนงาน เช่น ธีม ผู้ใช้ ภาษา</td><td>scope</td><td>เป็นนโยบายของทั้งขอบเขต</td></tr>
+</tbody></table><div class="warn"><strong>อย่าใช้ scope เพียงเพื่อลด parameter สองชั้น</strong> เพราะข้อเสียคือ dependency หายไปจากสายตา — เมื่ออ่าน constructor ของ widget เราจะไม่รู้อีกต่อไปว่ามันต้องใช้อะไรบ้าง ต้องไล่อ่านทั้ง <code>build</code> ผลคือทดสอบยากขึ้นเพราะต้องรู้ว่าต้องเตรียม scope อะไรครอบไว้</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เรียก <code>of(context)</code> แล้วได้ <code>null</code> หรือ assert ล้มเหลว</td><td>context อยู่เหนือ scope</td><td>ใช้ <code>Builder</code> หรือแยก widget ย่อย (1.7)</td></tr>
+<tr><td>ค่าเปลี่ยนแล้วหน้าจอไม่อัปเดต</td><td><code>updateShouldNotify</code> คืน <code>false</code> ผิด</td><td>เทียบให้ครบทุก field ที่มีคนใช้</td></tr>
+<tr><td>ทั้งแอปวาดใหม่ทุกครั้งที่ค่าเล็ก ๆ เปลี่ยน</td><td><code>updateShouldNotify</code> คืน <code>true</code> เสมอ</td><td>เทียบค่าจริง หรือแยกเป็นหลาย scope</td></tr>
+<tr><td>เทสต์ล้มเหลวเพราะหา scope ไม่เจอ</td><td>ลืมครอบ scope ในเทสต์</td><td>ครอบให้ครบ หรือเปลี่ยนมาส่งผ่าน constructor</td></tr>
+<tr><td>ไม่รู้ว่า widget ต้องใช้อะไรบ้าง</td><td>ใช้ scope มากเกินไป</td><td>ส่งผ่าน constructor เมื่อใกล้กัน</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>แอปมีข้อมูลสามชุด จงเลือกวิธีส่งให้แต่ละชุดพร้อมเหตุผล</p><ol><li>ชื่อและสิทธิ์ของผู้ใช้ที่ล็อกอิน — ใช้ในเกือบทุกหน้าจอ ลึกหลายชั้น</li><li>ข้อมูลงานหนึ่งใบที่ส่งให้แถวในรายการ</li><li>โหมดมืด/สว่าง ที่ผู้ใช้สลับได้</li></ol><p>แล้วอธิบายว่าถ้าเลือกผิด จะเกิดปัญหาอะไร</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>ข้อ</th><th>วิธี</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td>scope</td><td>ลูกหลานจำนวนมากข้ามหลายชั้นต้องใช้ และเป็นค่าระดับ session</td></tr>
+<tr><td>2</td><td>constructor</td><td>แถวนั้นใช้คนเดียว ห่างชั้นเดียว และต้องเห็นชัดว่าแถวนี้แสดงงานใบไหน</td></tr>
+<tr><td>3</td><td>scope (ใช้ของที่มีอยู่แล้ว)</td><td>เป็นนโยบายทั้งแอป และ <code>Theme.of(context)</code> ทำให้อยู่แล้ว</td></tr>
+</tbody></table><p><strong>ถ้าข้อ 1 เลือกผิดเป็น constructor</strong></p><p>widget กลางทางทุกตัวต้องรับ <code>user</code> เข้ามาแล้วส่งต่อ ทั้งที่ตัวเองไม่ได้ใช้ พอเพิ่ม field ใหม่ในข้อมูลผู้ใช้ ต้องไล่แก้ทุกชั้น และเมื่ออ่าน <code>Padding(user: user, ...)</code> คนอ่านจะสับสนว่าทำไม <code>Padding</code> ต้องรู้จักผู้ใช้</p><p><strong>ถ้าข้อ 2 เลือกผิดเป็น scope</strong></p><p>จะพังทันที เพราะ scope ให้ค่าเดียวกับทุกคนที่อยู่ใต้มัน แต่รายการมีร้อยแถวที่ต้องแสดงงานคนละใบ — ถ้าจะทำจริงต้องสร้าง scope หนึ่งอันต่อแถว ซึ่งซับซ้อนกว่าการส่งผ่าน constructor มาก และไม่ได้อะไรกลับมาเลย</p><p><strong>บทเรียนจากข้อ 2:</strong> scope เหมาะกับข้อมูลที่ <em>เหมือนกันทั้งขอบเขต</em> ไม่ใช่ข้อมูลที่ต่างกันไปตามแต่ละชิ้น — นี่คือเกณฑ์ที่ใช้ตัดสินได้เร็วที่สุด</p><p><strong>ถ้าข้อ 3 เลือกผิดเป็น constructor</strong></p><p>ทุก widget ที่ต้องใช้สีจะต้องรับสีเข้ามา และเมื่อผู้ใช้สลับโหมด เราต้องไล่ส่งค่าใหม่ลงไปทุกชั้นด้วยตัวเอง ซึ่งเป็นงานที่ Flutter ทำให้อยู่แล้วผ่าน <code>Theme</code> — การเขียนเองใหม่จึงเป็นการทำงานซ้ำและมีโอกาสลืมบางจุด</p><p><strong>ลองต่อ:</strong> เขียน <code>SessionScope</code> ตามหัวข้อ 5 แล้วลองเรียก <code>SessionScope.of(context)</code> จาก <code>build</code> ของ widget ที่อยู่ <em>เหนือ</em> scope — จะเห็น assert ล้มเหลว ซึ่งเป็นอาการเดียวกับ “หา <code>Scaffold</code> ไม่เจอ” ใน 1.7 เพราะเป็นกลไกเดียวกัน</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>InheritedWidget</code> วางข้อมูลไว้ให้ลูกหลานทุกชั้นหยิบใช้</li><li><code>.of(context)</code> ไม่ใช่แค่อ่านค่า แต่เป็นการสมัครรับข่าวด้วย</li><li><code>Theme</code>, <code>MediaQuery</code>, <code>Navigator</code> ล้วนใช้กลไกนี้</li><li>ตัวมันเองเปลี่ยนค่าไม่ได้ — ต้องมีเจ้าของข้อมูลอยู่เหนือขึ้นไป</li><li><code>updateShouldNotify</code> เป็นตัวควบคุมว่าใครต้องวาดใหม่</li><li>ใช้ scope กับข้อมูลที่เหมือนกันทั้งขอบเขต ใช้ constructor กับข้อมูลที่ต่างกันไปตามชิ้น</li><li>ใช้ scope มากเกินไปทำให้ dependency หายไปจากสายตาและทดสอบยาก</li></ul></div><p><strong>บทถัดไป:</strong> 1.15 คือ lab ปิด Part — เราจะเอาทุกอย่างใน 14 บทนี้ไปไล่อ่านและแก้แอปแดชบอร์ดจริง พร้อมเขียนเทสต์พิสูจน์</p></section>

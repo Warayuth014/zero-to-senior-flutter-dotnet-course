@@ -4,21 +4,157 @@
 <title>Pure build()</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-09 · Flutter UI</span><h1>Pure build()</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สิ่งที่ทำใน buildได้</a></li><li><a href="#section-2">สิ่งที่ไม่ควรทำ</a></li><li><a href="#section-3">Build อาจรันบ่อยเพราะอะไร</a></li><li><a href="#section-4">API load pattern</a></li><li><a href="#section-5">ตัวอย่าง absolute shell</a></li><li><a href="#section-6">Derived work ที่แพง</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>build()</code> ต้องเป็นการแปลง current configuration/state/context → widgets ที่ทำซ้ำได้ ปราศจาก side effect ที่ต้องเกิดครั้งเดียว เพราะ framework เรียก buildเมื่อไรก็ได้ตาม dependency/frame scheduling</div>
-<section id="section-1"><h2>1. สิ่งที่ทำใน buildได้</h2><ul><li>คำนวณ derived valuesเร็ว ๆ</li><li>เลือก widgetจาก enum/state</li><li>สร้าง callbacksที่เรียก commandภายหลัง</li><li>อ่าน Theme/MediaQuery/Localizations</li><li>ประกอบ widgets/collections</li></ul></section>
-<section id="section-2"><h2>2. สิ่งที่ไม่ควรทำ</h2><pre class="code-vs"><code>@override
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: build คือการถ่ายรูป ไม่ใช่การลงมือทำ</a></li><li><a href="#section-4">สิ่งที่ทำได้และทำไม่ได้</a></li><li><a href="#section-5">ย้ายไปไว้ที่ไหน</a></li><li><a href="#section-6">ทำไม build ถึงถูกเรียกบ่อยกว่าที่คิด</a></li><li><a href="#section-7">งานคำนวณที่หนัก</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ย้ายงานออกจาก build ให้ถูกที่</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.3 (build เกิดซ้ำได้), 1.4 (ค่าที่คำนวณได้), 1.6 (<code>initState</code> และ <code>dispose</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> บอกได้ทันทีว่าโค้ดชิ้นหนึ่งควรอยู่ใน <code>build</code> หรือไม่ และย้ายไปวางที่ถูกต้องได้</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>บทก่อน ๆ เตือนเรื่องนี้ไว้หลายครั้งแล้ว — 1.4 บอกว่าห้ามทำงานที่มีผลข้างเคียงใน <code>build</code>, 1.6 บอกว่าอย่ายิง API ใน <code>build</code> บทนี้จะรวบให้เป็นกฎเดียวที่ใช้ตัดสินใจได้ทุกกรณี</p><p>เหตุที่ต้องมีกฎ เพราะ <code>build</code> ถูกเรียกเมื่อไหร่ก็ได้ กี่ครั้งก็ได้ และเราควบคุมไม่ได้ โค้ดที่ “เห็นว่ารันครั้งเดียว” ในวันนี้ อาจรันร้อยครั้งพรุ่งนี้เมื่อมีคนเพิ่มอนิเมชันเข้ามา</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>pure</td><td>ให้ผลเหมือนเดิมเสมอเมื่อข้อมูลเข้าเหมือนเดิม และไม่ไปเปลี่ยนอะไรข้างนอก</td></tr>
+<tr><td>side effect / ผลข้างเคียง</td><td>การเปลี่ยนแปลงที่ค้างอยู่หลังฟังก์ชันจบ เช่นบันทึกข้อมูล เริ่มจับเวลา</td></tr>
+<tr><td>idempotent</td><td>ทำซ้ำกี่ครั้งก็ได้ผลเหมือนทำครั้งเดียว</td></tr>
+<tr><td>snapshot</td><td>ภาพนิ่งของข้อมูล ณ ขณะนั้น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: build คือการถ่ายรูป ไม่ใช่การลงมือทำ</h2><p><code>build</code> ควรตอบคำถามเดียวคือ <em>“ด้วยข้อมูลที่มีอยู่ตอนนี้ หน้าจอควรมีหน้าตาอย่างไร”</em></p><p>การถ่ายรูปห้องไม่ได้ทำให้ห้องเปลี่ยน — ถ่ายกี่ครั้งห้องก็เหมือนเดิม ถ้าการถ่ายรูปทำให้ของในห้องขยับ นั่นแปลว่าเราทำอะไรผิด</p><table><thead><tr><th>คำถามทดสอบ</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>ถ้าเรียกฟังก์ชันนี้ 100 ครั้งติดกัน จะมีอะไรเสียหายไหม</td><td>ห้ามอยู่ใน <code>build</code></td></tr>
+<tr><td>มันเปลี่ยนอะไรที่อยู่นอกฟังก์ชันไหม</td><td>ห้ามอยู่ใน <code>build</code></td></tr>
+<tr><td>มันแค่คำนวณแล้วคืนค่าใช่ไหม</td><td>อยู่ใน <code>build</code> ได้</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าเรียกซ้ำแล้วเสียหาย มันไม่ควรอยู่ใน <code>build</code></div></section>
+
+<section id="section-4"><h2>4. สิ่งที่ทำได้และทำไม่ได้</h2><table><thead><tr><th>ทำได้ใน <code>build</code></th><th>ห้ามทำใน <code>build</code></th></tr></thead><tbody>
+<tr><td>คำนวณค่าจากข้อมูลที่มี</td><td>เรียก API</td></tr>
+<tr><td>เลือก widget ตามสถานะ</td><td>บันทึกข้อมูลลงเครื่อง</td></tr>
+<tr><td>สร้าง callback ที่จะถูกเรียกทีหลัง</td><td>เริ่มจับเวลา</td></tr>
+<tr><td>อ่านธีมและขนาดหน้าจอ</td><td>เริ่มฟังเหตุการณ์</td></tr>
+<tr><td>ประกอบ widget เข้าด้วยกัน</td><td>เรียก <code>setState</code></td></tr>
+<tr><td></td><td>สร้างตัวควบคุมที่ต้องคืนทีหลัง</td></tr>
+</tbody></table><pre class="code-vs"><code>// ผิดทั้งหมด
+@override
 Widget build(BuildContext context) {
-  repository.loadTasks(); // ผิด: ทุก rebuild ยิงใหม่
-  timer = Timer(...);     // ผิด: resource ซ้ำ
-  store.addListener(...); // ผิด: listener ทวีคูณ
+  repository.loadTasks();          // ยิง API ทุกครั้งที่วาดใหม่
+  _timer = Timer.periodic(...);    // สะสมตัวจับเวลาไปเรื่อย ๆ
+  store.addListener(_onChange);    // ผู้ฟังทวีคูณ
+  final controller = TextEditingController();   // สร้างแล้วไม่มีใครคืน
   return const SizedBox();
-}</code></pre><p>ย้ายครั้งแรกไป initState/store load command; dependencyเปลี่ยนใช้ didUpdateWidget/didChangeDependencies; user actionไป callback</p></section>
-<section id="section-3"><h2>3. Build อาจรันบ่อยเพราะอะไร</h2><p>setState, parent update, Listenable builder, inherited dependency, animation และ hot reload ล้วนเรียก buildได้ โค้ดที่ “ตอนนี้เห็นรันครั้งเดียว” ไม่มีสัญญาว่าจะเป็นเช่นนั้น</p></section>
-<section id="section-4"><h2>4. API load pattern</h2><p>State ownerถือ loading/data/error แล้วเริ่ม loadครั้งเดียวตาม lifecycle หรือ event; buildอ่าน snapshotและเลือก Loading/Error/Empty/Data อย่าสร้าง Futureใหม่ทุก buildให้ FutureBuilder ถ้าจะใช้ให้ cache Futureใน Stateและเปลี่ยนเมื่อ inputเปลี่ยน</p></section>
-<section id="section-5"><h2>5. ตัวอย่าง absolute shell</h2><p>Shell สร้าง storeและ <code>unawaited(store.loadAll())</code> ใน initState จากนั้น buildใช้ ListenableBuilderอ่าน store ส่วน <code>_body()</code> เป็น pure switchคืน screenตาม <code>store.screen</code> นี่แยก side effectจาก renderingชัด</p></section>
-<section id="section-6"><h2>6. Derived work ที่แพง</h2><p>Filter/sort listใหญ่มากใน buildอาจ pureแต่ช้า ให้ derive/cachingใน state layerตาม input revisionหรือใช้ memoizationที่ correct ก่อน optimizeต้อง profile อย่า cache widget/contextแบบทำให้ข้อมูลเก่า</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้า Task ต้องโหลดเมื่อ taskIdเปลี่ยน ออกแบบ lifecycleโดยไม่ยิงใน build</p><details><summary>เฉลย</summary><p>เริ่ม loadใน initStateจาก initial widget.taskId; ใน didUpdateWidgetเทียบ old/new idแล้ว loadใหม่/cancelหรือ generation token; set state/storeตามผล; buildแสดง snapshotเท่านั้น</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การห่อ side effectด้วย <code>Future.microtask</code> หรือ post-frame callbackจาก buildไม่ได้ทำให้ถูก ถ้า buildซ้ำก็ scheduleซ้ำ ต้องมี owner/event/lifecycle invariantที่ชัด</div></section>
+}</code></pre><p>อาการที่จะเจอจากโค้ดข้างบน: แอปยิง API รัวเป็นร้อยครั้งต่อวินาที, ข้อความที่พิมพ์หายทุกครั้งที่วาดใหม่, และหน่วยความจำเพิ่มไม่หยุด</p></section>
+
+<section id="section-5"><h2>5. ย้ายไปไว้ที่ไหน</h2><table><thead><tr><th>โค้ดแบบ</th><th>ย้ายไปที่</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลครั้งแรก</td><td><code>initState</code></td></tr>
+<tr><td>สร้างตัวควบคุม / เริ่มฟัง</td><td><code>initState</code> (คู่กับ <code>dispose</code>)</td></tr>
+<tr><td>โหลดใหม่เมื่อข้อมูลจากแม่เปลี่ยน</td><td><code>didUpdateWidget</code></td></tr>
+<tr><td>งานที่ต้องใช้ธีมหรือขนาดหน้าจอ</td><td><code>didChangeDependencies</code></td></tr>
+<tr><td>งานที่เกิดจากการกดของผู้ใช้</td><td>callback ของปุ่มนั้น</td></tr>
+</tbody></table><pre class="code-vs"><code>// ถูก — แยกให้ชัดว่าอะไรเกิดครั้งเดียว อะไรเกิดทุกรอบ
+@override
+void initState() {
+  super.initState();
+  _controller = TextEditingController();
+  _load();                    // เกิดครั้งเดียว
+}
+
+Future&lt;void&gt; _load() async {
+  setState(() =&gt; _loading = true);
+  try {
+    final result = await repository.loadTasks();
+    if (!mounted) return;
+    setState(() =&gt; _tasks = result);
+  } finally {
+    if (mounted) setState(() =&gt; _loading = false);
+  }
+}
+
+@override
+Widget build(BuildContext context) {
+  // เกิดทุกรอบ แต่แค่อ่านสถานะแล้วเลือกว่าจะแสดงอะไร
+  if (_loading) return const CircularProgressIndicator();
+  if (_tasks.isEmpty) return const Text('ยังไม่มีงานในกะนี้');
+  return ListView(children: [for (final t in _tasks) TaskTile(task: t)]);
+}</code></pre><p>สังเกตว่า <code>build</code> ไม่ได้ทำอะไรเลยนอกจากอ่านสถานะสามอย่างแล้วเลือกว่าจะแสดงอะไร — เรียกกี่ครั้งก็ได้ผลเหมือนกัน และไม่มีอะไรเสียหาย</p></section>
+
+<section id="section-6"><h2>6. ทำไม build ถึงถูกเรียกบ่อยกว่าที่คิด</h2><table><thead><tr><th>สาเหตุ</th><th>คาดเดาได้ไหม</th></tr></thead><tbody>
+<tr><td>เราเรียก <code>setState</code> เอง</td><td>ได้</td></tr>
+<tr><td>widget แม่ถูก build ใหม่</td><td>ยาก — ขึ้นกับคนอื่น</td></tr>
+<tr><td>ธีมหรือภาษาเปลี่ยน</td><td>ยาก</td></tr>
+<tr><td>แป้นพิมพ์ขึ้นมาบังจอ</td><td>ยาก</td></tr>
+<tr><td>หมุนอุปกรณ์</td><td>ยาก</td></tr>
+<tr><td>อนิเมชันกำลังเล่น</td><td>ไม่ได้ — เกิดได้ 60 ครั้งต่อวินาที</td></tr>
+</tbody></table><div class="warn">แถวสุดท้ายคือเหตุผลว่าทำไมกฎนี้ถึงเข้มงวด — ถ้ามีคนเพิ่มอนิเมชันเข้ามาในหน้าจอที่คุณเขียน API ที่คุณเผลอยิงไว้ใน <code>build</code> จะกลายเป็น 60 ครั้งต่อวินาที และคุณจะไม่รู้ตัวจนกว่าจะโดนบิลค่าเซิร์ฟเวอร์</div></section>
+
+<section id="section-7"><h2>7. งานคำนวณที่หนัก</h2><p>บางอย่าง “ไม่มีผลข้างเคียง” แต่ก็ไม่ควรอยู่ใน <code>build</code> เพราะช้า</p><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  // pure แต่ช้า — ถ้ามีหมื่นรายการ จะทำใหม่ทุกครั้งที่วาด
+  final sorted = allItems.where(...).toList()..sort(...);
+  return ListView(...);
+}</code></pre><p>ลำดับการแก้ตามที่เรียนใน D1.17</p><ol><li>วัดก่อนว่าช้าจริงไหม — รายการ 20 แถวไม่มีปัญหาแน่นอน</li><li>ถ้าช้าจริง ให้คำนวณตอนที่ข้อมูลเปลี่ยนแล้วเก็บผลไว้ ไม่ใช่คำนวณตอนวาด</li><li>ใช้รายการแบบสร้างทีละแถว (<code>ListView.builder</code>) แทนการสร้างทุกแถวพร้อมกัน</li></ol></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>API ถูกเรียกซ้ำไม่หยุด</td><td>เรียกใน <code>build</code></td><td>ย้ายไป <code>initState</code></td></tr>
+<tr><td><code>setState() called during build</code></td><td>เรียก <code>setState</code> ใน <code>build</code></td><td>ย้ายไป callback หรือ lifecycle</td></tr>
+<tr><td>ข้อความที่พิมพ์หายทุกครั้งที่วาดใหม่</td><td>สร้างตัวควบคุมใน <code>build</code></td><td>ย้ายไปเป็น field ของ <code>State</code></td></tr>
+<tr><td>ผู้ฟังทำงานซ้ำหลายรอบต่อหนึ่งเหตุการณ์</td><td>เริ่มฟังใน <code>build</code></td><td>ย้ายไป <code>initState</code></td></tr>
+<tr><td>ห่อด้วยการเลื่อนไปทำทีหลังแล้วยังซ้ำอยู่</td><td>ถ้า <code>build</code> ซ้ำ การเลื่อนก็ซ้ำ</td><td>แก้ที่ต้นเหตุ ให้เจ้าของงานเป็น lifecycle</td></tr>
+<tr><td>โหลดข้อมูลใหม่ทุกครั้งที่หน้าจอวาด ทั้งที่ใช้ <code>FutureBuilder</code></td><td>สร้าง <code>Future</code> ใหม่ใน <code>build</code></td><td>เก็บ <code>Future</code> ไว้ใน <code>State</code></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นกับดักที่พบบ่อยมาก และจะลงรายละเอียดพร้อมตัวอย่างเต็มใน 4.7</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>หน้าจอรายละเอียดงานรับ <code>taskId</code> จากแม่ และต้องโหลดข้อมูลของงานนั้นจาก API</p><ol><li>ต้องโหลดตอนเปิดหน้าจอครั้งแรก</li><li>ถ้าแม่ส่ง <code>taskId</code> ใหม่มา ต้องโหลดใหม่</li><li>ห้ามโหลดซ้ำเมื่อเพียงแค่ธีมเปลี่ยนหรือหน้าจอวาดใหม่</li><li>ระหว่างโหลดต้องแสดงสถานะกำลังโหลด และถ้าล้มเหลวต้องมีปุ่มลองใหม่</li></ol><p>จงเขียนโครงว่าโค้ดแต่ละส่วนอยู่ตรงไหน</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class _TaskDetailScreenState extends State&lt;TaskDetailScreen&gt; {
+  Task? _task;
+  String? _error;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();                          // ข้อ 1
+  }
+
+  @override
+  void didUpdateWidget(covariant TaskDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.taskId != widget.taskId) {
+      _load();                        // ข้อ 2 — โหลดเฉพาะเมื่อ id เปลี่ยนจริง
+    }
+  }
+
+  Future&lt;void&gt; _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final result = await repository.loadTask(widget.taskId);
+      if (!mounted) return;
+      setState(() =&gt; _task = result);
+    } on Exception {
+      if (!mounted) return;
+      setState(() =&gt; _error = 'โหลดไม่สำเร็จ');
+    } finally {
+      if (mounted) setState(() =&gt; _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // ข้อ 3 และ 4 — อ่านสถานะอย่างเดียว ไม่มีผลข้างเคียงเลย
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!),
+            FilledButton(onPressed: _load, child: const Text('ลองอีกครั้ง')),
+          ],
+        ),
+      );
+    }
+    final task = _task;
+    if (task == null) return const Center(child: Text('ไม่พบงานนี้'));
+    return TaskDetailView(task: task);
+  }
+}</code></pre><p><strong>ทำไมข้อ 2 ต้องเทียบ <code>oldWidget.taskId != widget.taskId</code>:</strong> เพราะ <code>didUpdateWidget</code> ถูกเรียกทุกครั้งที่แม่ build ใหม่ ไม่ใช่เฉพาะตอนที่ค่าเปลี่ยน ถ้าไม่เทียบก่อนก็จะโหลดซ้ำทุกครั้งที่แม่วาดใหม่ ซึ่งแทบไม่ต่างจากการเรียกใน <code>build</code> เลย</p><p><strong>ทำไมข้อ 3 ไม่ต้องเขียนโค้ดอะไรเพิ่ม:</strong> เพราะเราไม่ได้เรียก <code>_load</code> จาก <code>build</code> ตั้งแต่แรก การที่ธีมเปลี่ยนแล้ว <code>build</code> ทำงานใหม่จึงไม่กระทบอะไร — ข้อกำหนดนี้ได้มาฟรีจากการวางโค้ดถูกที่ ซึ่งเป็นประเด็นหลักของบทนี้</p><p><strong>ทำไมปุ่มลองใหม่ส่ง <code>_load</code> ไปตรง ๆ ได้:</strong> เพราะมันเป็นการส่ง <em>ตัวฟังก์ชัน</em> ไม่ใช่การเรียก ตามที่เรียนใน D1.11 — ถ้าเขียน <code>onPressed: _load()</code> มันจะเรียกทันทีตอน <code>build</code> ซึ่งกลายเป็นความผิดพลาดแบบเดียวกับที่บทนี้ห้ามพอดี</p><p><strong>ทำไม <code>final task = _task;</code> ถึงจำเป็น:</strong> เพราะ <code>_task</code> เป็น field ที่เปลี่ยนได้ Dart จึงไม่เลื่อนชนิดให้หลังตรวจ <code>null</code> ต้องคัดลอกลงตัวแปรในเครื่องก่อน — ตรงกับที่เรียนใน D1.13 หัวข้อ 5</p><p><strong>ลองต่อ:</strong> เพิ่ม <code>print</code> ไว้ต้น <code>_load</code> แล้วสลับโหมดมืด — ควรเห็นว่ามันไม่ถูกเรียกเลย จากนั้นลองย้าย <code>_load()</code> ไปไว้ใน <code>build</code> แล้วทำแบบเดิม เพื่อเห็นความต่างด้วยตาตัวเอง</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li><code>build</code> คือการถ่ายรูป ไม่ใช่การลงมือทำ</li><li>ถ้าเรียกซ้ำแล้วเสียหาย มันไม่ควรอยู่ใน <code>build</code></li><li>งานครั้งเดียวไป <code>initState</code>, งานตามข้อมูลที่เปลี่ยนไป <code>didUpdateWidget</code>, งานจากผู้ใช้ไป callback</li><li><code>didUpdateWidget</code> ต้องเทียบค่าเก่ากับใหม่ก่อนลงมือ</li><li><code>build</code> ถูกเรียกบ่อยกว่าที่คิดมาก และเราคาดเดาไม่ได้</li><li>งานคำนวณหนักก็ไม่ควรอยู่ใน <code>build</code> แม้จะไม่มีผลข้างเคียง</li></ul></div><p><strong>บทถัดไป:</strong> 1.10 จะกลับมาที่ <code>const</code> ที่เราใส่มาตลอดโดยยังไม่รู้เหตุผล และตอบว่าอะไรคือตัวชี้ขาดจริง ๆ ของประสิทธิภาพ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

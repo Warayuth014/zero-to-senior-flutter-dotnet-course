@@ -4,23 +4,119 @@
 <title>Key &amp; Widget Identity</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-08 · Flutter UI</span><h1>Key &amp; Widget Identity</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Key ประเภทใช้งานหลัก</a></li><li><a href="#section-2">List reorder bug</a></li><li><a href="#section-3">ตัวอย่างสลับ screen</a></li><li><a href="#section-4">ValueKey ใน dashboard/test</a></li><li><a href="#section-5">GlobalKey สำหรับ Form</a></li><li><a href="#section-6">Key ไม่แก้ state ownership</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Key ช่วย parent จับคู่ widget configuration ใหม่กับ Element เดิมใน sibling list: identity = runtimeType + key เมื่อไม่มี key Flutterจับตาม type/ตำแหน่ง จึงสำคัญตอน reorder/insert/animation/test</div>
-<section id="section-1"><h2>1. Key ประเภทใช้งานหลัก</h2><ul><li><code>ValueKey(id)</code>: identity จากค่าธุรกิจที่ stable</li><li><code>ObjectKey(object)</code>: identity จาก object/equality</li><li><code>UniqueKey()</code>: ใหม่เสมอ—บังคับ state ใหม่</li><li><code>GlobalKey</code>: unique ทั้ง tree และเข้าถึง State/context เช่น Form</li></ul></section>
-<section id="section-2"><h2>2. List reorder bug</h2><pre class="code-vs"><code>for (final task in tasks)
-  TaskRow(key: ValueKey(task.id), task: task)</code></pre><p>เมื่อ sort/insert Flutter ย้าย Element/State ตาม task id หากไม่ key state ของ TextField/expandอาจติด index เดิมและไปอยู่ taskอื่น Key ต้อง uniqueเฉพาะ siblings และ stableข้าม rebuild</p></section>
-<section id="section-3"><h2>3. ตัวอย่างสลับ screen</h2><pre class="code-vs"><code>AnimatedSwitcher(
-  child: KeyedSubtree(
-    key: ValueKey(store.screen),
-    child: buildCurrentScreen(),
-  ),
-)</code></pre><p>Absolute shell ใช้แบบนี้เพื่อบอก AnimatedSwitcher ว่า screen nameใหม่เป็น child คนละ identity แม้ wrapper/typeคล้ายกัน จึง transitionถูกและ stateเก่าถูกจัด lifecycleตาม intent</p></section>
-<section id="section-4"><h2>4. ValueKey ใน dashboard/test</h2><p>HomeView key AutoSizeText ตาม title/mode และ tests หา controls ด้วย ValueKey เช่น connection URL preview/scanner inputs ข้อดีคือ selector stableกว่าหาข้อความที่เปลี่ยนตามภาษา แต่ production identity key กับ test hookควรตั้งชื่อมีความหมาย</p></section>
-<section id="section-5"><h2>5. GlobalKey สำหรับ Form</h2><pre class="code-vs"><code>final formKey = GlobalKey&lt;FormState&gt;();
-Form(key: formKey, child: ...);
-formKey.currentState?.validate();</code></pre><p>LoginScreen absolute ใช้เพื่อสั่ง FormState validate เพราะ operationเกี่ยวกับ subtree stateจริง อย่าสร้าง GlobalKey ใน build—จะใหม่ทุกครั้งและทิ้ง state</p></section>
-<section id="section-6"><h2>6. Key ไม่แก้ state ownership</h2><p>ถ้าข้อมูลผิดเพราะ list mutation/store race การใส่ UniqueKeyอาจดูเหมือนแก้เพราะ remountทุกอย่าง แต่ซ่อน bugและเสีย focus/scroll/network lifecycle ต้องแก้ identityเฉพาะกรณีที่ Element matchingผิดจริง</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>รายการ serial reorderได้และแต่ละ rowมี TextField quantity เลือก keyใดและเพราะอะไร?</p><details><summary>เฉลย</summary><p><code>ValueKey(serial.id หรือ normalizedSerial)</code> ที่ unique/stable เพื่อให้ field stateตาม entity ไม่ตาม index ไม่ใช้ UniqueKeyเพราะจะ resetทุก rebuild และไม่ใช้ indexเพราะ reorderแล้ว identityผิด</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Key มีผลเฉพาะการจับคู่ใน parent/sibling level ที่วางไว้ ใส่ key ลึกเกินจุด reorderไม่ช่วย และ keyซ้ำใน siblingsทำให้ assertion/error</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ป้ายชื่อบนกล่องที่เหมือนกันทุกใบ</a></li><li><a href="#section-4">บั๊กที่เกิดขึ้นจริง</a></li><li><a href="#section-5">ดูของจริงใน lab</a></li><li><a href="#section-6">เลือก key แบบไหน</a></li><li><a href="#section-7">เมื่อไหร่ที่ไม่ต้องใส่ key</a></li><li><a href="#section-8">กับดักใหญ่: UniqueKey ที่ดูเหมือนแก้ปัญหาได้</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: แก้บั๊กข้อมูลสลับกันในรายการ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.3 (Element และการเทียบชนิด) และ 1.5 (ข้อมูลอยู่ใน <code>State</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใส่ <code>key</code> ให้ถูกที่ เข้าใจว่าทำไมข้อมูลถึงสลับกันเมื่อเรียงรายการใหม่ และรู้ว่าเมื่อไหร่ที่ <strong>ไม่</strong> ควรใส่</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใน 1.3 เราค้างไว้ว่า Flutter เทียบ <strong>ชนิด</strong> และ <strong>key</strong> เพื่อตัดสินว่าจะเก็บ Element เดิมไว้ไหม แล้วบอกว่า key จะอธิบายทีหลัง — ตอนนี้ถึงเวลาแล้ว</p><p>ปัญหาที่ key แก้เกิดขึ้นเมื่อมีรายการหลายแถวที่ <strong>ชนิดเดียวกันทั้งหมด</strong> เมื่อลำดับเปลี่ยน Flutter ไม่มีทางรู้ว่าแถวไหนคือแถวไหน</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>key</code></td><td>ป้ายชื่อที่ติดกับ widget เพื่อบอกว่า “ตัวนี้คือใคร”</td></tr>
+<tr><td><code>ValueKey</code></td><td>key ที่ใช้ค่าหนึ่งค่าเป็นตัวระบุ เช่นรหัสงาน</td></tr>
+<tr><td><code>UniqueKey</code></td><td>key ที่ต่างเสมอ ทำให้เป็นตัวใหม่ทุกครั้ง</td></tr>
+<tr><td><code>GlobalKey</code></td><td>key ที่ไม่ซ้ำทั้งแอป และเข้าถึง <code>State</code> ได้จากข้างนอก</td></tr>
+<tr><td>sibling</td><td>widget ที่อยู่ระดับเดียวกันใต้แม่คนเดียวกัน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ป้ายชื่อบนกล่องที่เหมือนกันทุกใบ</h2><p>ลองนึกถึงกล่องสินค้าสิบใบที่หน้าตาเหมือนกันหมดเรียงอยู่บนชั้น ถ้าเราสลับตำแหน่งกล่อง แล้วบอกให้ใครสักคนไปหยิบ “กล่องที่สาม” เขาจะได้กล่องคนละใบกับที่เราหมายถึง</p><p>ทางแก้คือติดป้ายชื่อไว้บนกล่องแต่ละใบ — <strong>นั่นคือ <code>key</code></strong></p><table><thead><tr><th></th><th>ไม่มี key</th><th>มี key</th></tr></thead><tbody>
+<tr><td>Flutter จำแถวด้วย</td><td>ตำแหน่งที่เท่าไร</td><td>ป้ายชื่อที่เราติดให้</td></tr>
+<tr><td>เมื่อสลับลำดับ</td><td>ข้อมูลติดอยู่กับตำแหน่ง</td><td>ข้อมูลย้ายตามตัวจริง</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> key ตอบคำถามว่า “widget ตัวนี้คือ <em>ใคร</em>” ไม่ใช่ “มันอยู่ <em>ที่ไหน</em>”</div></section>
+
+<section id="section-4"><h2>4. บั๊กที่เกิดขึ้นจริง</h2><p>สมมติรายการงานสามแถว แต่ละแถวมีช่องกรอกจำนวนที่ผู้ใช้พิมพ์ไว้แล้ว</p><pre class="code-vs"><code>เดิม (ยังไม่ใส่ key)
+  ตำแหน่ง 0: T-01  ช่องกรอกพิมพ์ไว้ "5"
+  ตำแหน่ง 1: T-02  ช่องกรอกพิมพ์ไว้ "12"
+  ตำแหน่ง 2: T-03  ช่องกรอกว่าง
+
+ผู้ใช้กดเรียงตามจำนวน → T-03 ขึ้นมาบนสุด
+
+หลังเรียงใหม่
+  ตำแหน่ง 0: T-03  ช่องกรอกยังเป็น "5"   ← ผิด! ค่าของ T-01
+  ตำแหน่ง 1: T-01  ช่องกรอกยังเป็น "12"  ← ผิด!
+  ตำแหน่ง 2: T-02  ช่องกรอกว่าง          ← ผิด!</code></pre><p>เหตุผลตรงกับ 1.3 ทุกประการ: ข้อความที่พิมพ์อยู่ใน <code>State</code> ซึ่งผูกกับ Element ที่ตำแหน่งนั้น เมื่อ widget ใหม่มาถึง Flutter เห็นว่า “ตำแหน่ง 0 เป็น <code>TaskRow</code> เหมือนเดิม” จึงใช้ Element เดิม พร้อมข้อความเก่าที่ติดมาด้วย</p><p>ทางแก้คือติดป้ายชื่อ</p><pre class="code-vs"><code>TaskRow(
+  key: ValueKey&lt;String&gt;(task.id),   // บอกว่าแถวนี้คือ T-01
+  task: task,
+)</code></pre><p>คราวนี้ Flutter จับคู่ด้วยรหัสงาน จึงย้าย Element พร้อมข้อความไปตามตัวจริง</p></section>
+
+<section id="section-5"><h2>5. ดูของจริงใน lab</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter test --no-pub test/widget_basics_test.dart</code></pre><p>ใน <code>widget_basics_app.dart</code> รายการงานติด key ไว้แล้ว</p><pre class="code-vs"><code>return TaskTile(
+  // ValueKey ผูก widget กับ "ข้อมูลใบไหน" ไม่ใช่ "ตำแหน่งที่เท่าไร"
+  key: ValueKey&lt;String&gt;(task.id),
+  task: task,
+  done: _doneIds.contains(task.id),
+  onToggle: () =&gt; _toggleDone(task.id),
+);</code></pre><p>และเทสต์ตรวจว่ามันติดจริง</p><pre class="code-vs"><code>expect(find.byKey(const ValueKey&lt;String&gt;('T-01')), findsOneWidget);</code></pre><p>สังเกตว่าเทสต์ค้นหาด้วย key แทนที่จะค้นด้วยข้อความ — ซึ่งดีกว่ามาก เพราะข้อความอาจเปลี่ยนเมื่อรองรับหลายภาษา แต่รหัสงานไม่เปลี่ยน</p></section>
+
+<section id="section-6"><h2>6. เลือก key แบบไหน</h2><table><thead><tr><th>แบบ</th><th>ใช้เมื่อ</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td><code>ValueKey(id)</code></td><td>มีรหัสที่ไม่ซ้ำและไม่เปลี่ยน</td><td><code>ValueKey(task.id)</code></td></tr>
+<tr><td><code>ValueKey(index)</code></td><td><strong>เกือบไม่ควรใช้เลย</strong></td><td>เพราะ index เปลี่ยนเมื่อเรียงใหม่ — ไม่ต่างจากไม่ใส่</td></tr>
+<tr><td><code>UniqueKey()</code></td><td>ตั้งใจให้เป็นของใหม่ทุกครั้ง</td><td>บังคับเล่นอนิเมชันซ้ำ</td></tr>
+<tr><td><code>GlobalKey</code></td><td>ต้องสั่งงาน <code>State</code> จากข้างนอก</td><td>สั่งฟอร์มตรวจข้อมูล (Part 3)</td></tr>
+</tbody></table><p>เกณฑ์ของ key ที่ดีมีสองข้อ: <strong>ไม่ซ้ำในกลุ่มพี่น้องเดียวกัน</strong> และ <strong>ไม่เปลี่ยนข้าม rebuild</strong> รหัสงานจากฐานข้อมูลเข้าเกณฑ์ทั้งสอง ส่วน index ไม่เข้าข้อสอง</p></section>
+
+<section id="section-7"><h2>7. เมื่อไหร่ที่ไม่ต้องใส่ key</h2><p>คนใหม่มักใส่ key ทุกที่เพราะกลัวพลาด ซึ่งทำให้โค้ดรกโดยไม่ได้อะไร</p><table><thead><tr><th>สถานการณ์</th><th>ต้องใส่ไหม</th></tr></thead><tbody>
+<tr><td>รายการที่เรียงใหม่ เพิ่ม หรือลบได้</td><td><strong>ใส่</strong></td></tr>
+<tr><td>รายการที่มีช่องกรอก หรือสถานะย่อยในแต่ละแถว</td><td><strong>ใส่</strong></td></tr>
+<tr><td>ต้องการหาใน widget test</td><td>ใส่ (ช่วยได้มาก)</td></tr>
+<tr><td>widget ที่อยู่ตำแหน่งเดียวตายตัว เช่นหัวข้อหน้าจอ</td><td>ไม่ต้อง</td></tr>
+<tr><td>รายการที่แสดงอย่างเดียว ไม่มีสถานะ และลำดับไม่เปลี่ยน</td><td>ไม่ต้อง</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. กับดักใหญ่: UniqueKey ที่ดูเหมือนแก้ปัญหาได้</h2><pre class="code-vs"><code>// อันตราย — สร้าง key ใหม่ทุกครั้งที่ build
+TaskRow(key: UniqueKey(), task: task)</code></pre><div class="warn">เมื่อเจอบั๊กแปลก ๆ หลายคนลอง <code>UniqueKey()</code> แล้วพบว่า “หายแล้ว” เพราะมันบังคับให้ทุกอย่างถูกสร้างใหม่หมด — แต่นั่นคือการซ่อนปัญหา ไม่ใช่แก้ ผลข้างเคียงที่จะตามมาคือ ช่องกรอกที่พิมพ์ไว้หายทุกครั้งที่หน้าจอวาดใหม่, รายการเด้งกลับไปบนสุดขณะเลื่อน, และอนิเมชันเริ่มใหม่ไม่หยุด</div><p>ถ้าใส่ <code>UniqueKey()</code> แล้วอาการดีขึ้น ให้ถามต่อว่า <em>ทำไม Element ถึงถูกจับคู่ผิดตั้งแต่แรก</em> คำตอบที่แท้จริงมักคือ ควรใช้ <code>ValueKey</code> ที่มีความหมาย หรือข้อมูลถูกเก็บผิดที่ตามที่คุยไว้ใน 1.5</p><p>อีกกับดักหนึ่งคือการสร้าง <code>GlobalKey</code> ใน <code>build</code></p><pre class="code-vs"><code>// ผิด — ได้ key ใหม่ทุกรอบ ทำให้ State ถูกทิ้งทุกรอบ
+Widget build(BuildContext context) {
+  final formKey = GlobalKey&lt;FormState&gt;();
+  ...
+}
+
+// ถูก — สร้างครั้งเดียวใน State
+final _formKey = GlobalKey&lt;FormState&gt;();</code></pre></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เรียงรายการใหม่แล้วข้อความในช่องกรอกสลับแถว</td><td>ไม่มี key</td><td>ใส่ <code>ValueKey</code> ที่ใช้รหัสจริง</td></tr>
+<tr><td>ใส่ <code>ValueKey(index)</code> แล้วยังสลับอยู่</td><td>index เปลี่ยนตามการเรียง</td><td>ใช้รหัสของข้อมูล ไม่ใช่ตำแหน่ง</td></tr>
+<tr><td><code>Duplicate keys found</code></td><td>มี key ซ้ำในกลุ่มพี่น้อง</td><td>ตรวจว่ารหัสที่ใช้ไม่ซ้ำจริง</td></tr>
+<tr><td>ช่องกรอกล้างตัวเองทุกครั้งที่พิมพ์</td><td>ใช้ <code>UniqueKey()</code></td><td>เปลี่ยนเป็น <code>ValueKey</code> หรือเอาออก</td></tr>
+<tr><td>ฟอร์มตรวจข้อมูลไม่ทำงาน</td><td>สร้าง <code>GlobalKey</code> ใน <code>build</code></td><td>ย้ายไปเป็น field ของ <code>State</code></td></tr>
+<tr><td>ใส่ key แล้วบั๊กไม่หาย</td><td>ใส่ผิดชั้น — ต้องใส่ที่ตัวที่ถูกจัดลำดับ</td><td>ใส่ที่ widget ระดับบนสุดของแต่ละแถว</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>รายการซีเรียลที่ผู้ใช้เรียงใหม่ได้ แต่ละแถวมีช่องกรอกจำนวน</p><ol><li>ควรใส่ key แบบไหน และใส่ที่ widget ตัวไหน</li><li>อธิบายว่าจะเกิดอะไรถ้าใช้ <code>ValueKey(index)</code></li><li>อธิบายว่าจะเกิดอะไรถ้าใช้ <code>UniqueKey()</code></li><li>เขียนเทสต์ที่พิสูจน์ว่าข้อมูลไม่สลับหลังเรียงใหม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>ListView.builder(
+  itemCount: serials.length,
+  itemBuilder: (context, index) {
+    final serial = serials[index];
+    return SerialRow(
+      key: ValueKey&lt;String&gt;(serial.code),   // ใส่ที่ตัวบนสุดของแถว
+      serial: serial,
+    );
+  },
+)</code></pre><p>ใช้ <code>serial.code</code> เพราะเป็นค่าที่ไม่ซ้ำและติดตัวข้อมูลไปตลอด ไม่เปลี่ยนเมื่อเรียงใหม่ และต้องใส่ที่ <code>SerialRow</code> ซึ่งเป็นตัวที่ถูกจัดลำดับ — ถ้าไปใส่ที่ช่องกรอกข้างในจะไม่ช่วย เพราะ Flutter จับคู่ที่ระดับพี่น้องใต้ <code>ListView</code></p><p><strong>ข้อ 2 — ถ้าใช้ <code>ValueKey(index)</code></strong></p><p>ไม่ต่างจากไม่ใส่เลย เพราะแถวที่อยู่ตำแหน่ง 0 จะมี key เป็น 0 เสมอไม่ว่าข้อมูลจริงจะเป็นซีเรียลใบไหน Flutter จึงยังจับคู่ตามตำแหน่งเหมือนเดิม และข้อมูลยังสลับอยู่ดี — นี่เป็นความผิดพลาดที่พบบ่อยมาก เพราะโค้ดดู “มี key แล้ว” จึงไม่มีใครสงสัย</p><p><strong>ข้อ 3 — ถ้าใช้ <code>UniqueKey()</code></strong></p><p>ข้อมูลจะไม่สลับจริง เพราะทุกแถวถูกสร้างใหม่หมด แต่แลกมาด้วยผลข้างเคียงที่ร้ายแรงกว่า: ช่องกรอกทุกช่องถูกล้างทุกครั้งที่หน้าจอวาดใหม่ ซึ่งเกิดบ่อยมาก ผู้ใช้จะพิมพ์ตัวเลขไม่ได้เลยเพราะทุกครั้งที่พิมพ์หนึ่งตัวอักษรแล้ว rebuild ข้อความจะหายไป</p><p><strong>ข้อ 4 — เทสต์</strong></p><pre class="code-vs"><code>testWidgets('เรียงใหม่แล้วข้อมูลไม่สลับแถว', (tester) async {
+  await tester.pumpWidget(const MaterialApp(home: SerialListScreen()));
+
+  // พิมพ์ค่าลงในแถวของ SN-001
+  await tester.enterText(
+    find.descendant(
+      of: find.byKey(const ValueKey&lt;String&gt;('SN-001')),
+      matching: find.byType(TextField),
+    ),
+    '5',
+  );
+  await tester.pump();
+
+  // สั่งเรียงใหม่
+  await tester.tap(find.byKey(const Key('sort-button')));
+  await tester.pumpAndSettle();
+
+  // ค่า "5" ต้องยังอยู่กับ SN-001 ไม่ว่ามันจะย้ายไปตำแหน่งไหน
+  final field = tester.widget&lt;TextField&gt;(
+    find.descendant(
+      of: find.byKey(const ValueKey&lt;String&gt;('SN-001')),
+      matching: find.byType(TextField),
+    ),
+  );
+  expect(field.controller?.text, '5');
+});</code></pre><p><strong>จุดสำคัญของเทสต์นี้:</strong> มันค้นหาด้วย <code>ValueKey</code> ไม่ใช่ด้วยตำแหน่ง จึงยังหาถูกแม้แถวจะย้ายที่ — ถ้าเขียนเทสต์โดยอ้างตำแหน่งที่เท่าไร เทสต์จะผ่านทั้งที่โค้ดผิด ซึ่งอันตรายกว่าไม่มีเทสต์</p><p><strong>ลองต่อ:</strong> ลบ <code>key</code> ออกแล้วรันเทสต์นี้ ควรเห็นมันล้มเหลว — นั่นคือการยืนยันว่าเทสต์จับบั๊กนี้ได้จริง</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>key ตอบว่า widget ตัวนี้คือ “ใคร” ไม่ใช่ “อยู่ที่ไหน”</li><li>จำเป็นเมื่อรายการเรียงใหม่ เพิ่ม หรือลบได้ และแต่ละแถวมีสถานะ</li><li>ใช้ <code>ValueKey</code> กับรหัสจริงของข้อมูล ไม่ใช่ index</li><li>ใส่ที่ widget ระดับบนสุดของแต่ละแถว</li><li><code>UniqueKey()</code> ซ่อนบั๊กและทำให้ข้อมูลที่ผู้ใช้พิมพ์หาย</li><li>อย่าสร้าง <code>GlobalKey</code> ใน <code>build</code></li><li>ใช้ key เป็นตัวค้นหาในเทสต์ ดีกว่าค้นด้วยข้อความ</li></ul></div><p><strong>บทถัดไป:</strong> 1.9 จะสรุปกฎที่เราแตะมาหลายบทแล้วให้เป็นเรื่องเดียว — <code>build</code> ต้องทำอะไรได้บ้าง และห้ามทำอะไรเด็ดขาด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

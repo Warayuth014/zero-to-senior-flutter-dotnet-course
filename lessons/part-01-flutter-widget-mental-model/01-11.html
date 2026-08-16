@@ -4,26 +4,91 @@
 <title>Widget Composition</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">01-11 · Flutter UI</span><h1>Widget Composition</h1><p>Part 1: Widget Fundamentals</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สัญญาของ component</a></li><li><a href="#section-2">เกณฑ์ว่าควรแตกตรงไหน</a></li><li><a href="#section-3">Dashboardจริง</a></li><li><a href="#section-4">Private widget ดีกว่า helper Widgetเมื่อไร</a></li><li><a href="#section-5">อย่าส่ง BuildContext/storeทั้งโลก</a></li><li><a href="#section-6">Composition กับ styling</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Flutter ออกแบบให้สร้าง UIด้วย composition: widgetเล็กรับ input/callbackแล้วประกอบกัน แทน inheritance hierarchyหรือ build methodยักษ์ การแตกที่ดีต้องตาม responsibility/rebuild/lifecycle boundary ไม่ใช่ตามจำนวนบรรทัดอย่างเดียว</div>
-<section id="section-1"><h2>1. สัญญาของ component</h2><pre class="code-vs"><code>class WarehouseTile extends StatelessWidget {
-  const WarehouseTile({
-    super.key,
-    required this.title,
-    required this.badge,
-    required this.onTap,
-  });
-  final String title;
-  final int badge;
-  final VoidCallback onTap;
-  // build presentation only
-}</code></pre><p>ชื่อ/fieldsบอก input-outputโดยไม่เปิด parent internals Childไม่ต้องรู้ store/repository/navigationถ้า callbackพอ</p></section>
-<section id="section-2"><h2>2. เกณฑ์ว่าควรแตกตรงไหน</h2><ul><li>มีชื่อโดเมน/visual responsibilityชัด เช่น DispatchTile, StatusBar</li><li>มี rebuild dependencyแคบกว่าส่วนอื่น</li><li>มี lifecycle/resourceของตน</li><li>reuse/testแยกมีประโยชน์</li><li>ส่วนใหญ่บดบัง intentของ parent</li></ul></section>
-<section id="section-3"><h2>3. Dashboardจริง</h2><p>Absolute <code>HomeView</code> แตกเป็น <code>_DispatchTile</code>, <code>_Tile</code>, <code>_HomeIcon</code>, <code>_SummaryCard</code> Parentอธิบาย layout/menu ส่วน childrenอธิบาย card/icon/dashboard mode ทำให้ local modeอยู่ SummaryCard State ไม่ทำให้ HomeViewทั้งตัว stateful</p></section>
-<section id="section-4"><h2>4. Private widget ดีกว่า helper Widgetเมื่อไร</h2><p>Method <code>Widget _tile(...)</code> ใช้ได้สำหรับ fragmentเล็ก แต่ class widgetมี config/type/const/key/context/rebuild boundaryที่ชัดกว่าและ testได้ตรง ถ้า helperรับ parameterมากหรือมี nested logicให้ยกเป็น widget</p></section>
-<section id="section-5"><h2>5. อย่าส่ง BuildContext/storeทั้งโลก</h2><p>ส่งข้อมูลขั้นต่ำและ callbackตาม use case ถ้า every childรับ WarehouseStoreแล้วเรียกได้ทุก command couplingจะกว้างและไม่รู้ dependencyที่ทำให้ rebuild อย่างไรก็ตาม container screenอาจรับ storeแล้วแจก typed propertiesเป็น patternที่เหมาะ</p></section>
-<section id="section-6"><h2>6. Composition กับ styling</h2><p>สร้าง design widgets/tokensเช่น PdaColors/PdaMetrics/ScanBox เพื่อ reuse accessibility/touch target แต่อย่าสร้าง wrapperทุก Containerจน call siteต้องเปิด 6ไฟล์เพื่อรู้ padding ใช้ abstractionเมื่อมี policyจริง</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้าสแกน 1,800บรรทัดมี input, result list, confirm dialog, APIและ status animation จะแตกตามลำดับใด?</p><details><summary>แนวคำตอบ</summary><p>เพิ่ม testsก่อน → แยก pure model/state transition/repository → แยก presentational ScanInput/ResultList/StatusBanner/ConfirmSheet รับ typed inputs/callbacks → วาง lifecycle controller/focusที่ ownerเหมาะ → profile/retest ไม่เริ่มจากตัดไฟล์ทุก 100บรรทัดโดย business stateยังรวม</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ไฟล์เล็กจำนวนมากไม่เท่ากับ compositionที่ดี ถ้า childรู้ singleton/globalทุกตัวและเปลี่ยน stateข้ามกัน boundaryเป็นเพียงชื่อไฟล์</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: แม่บอกโครง ลูกบอกหน้าตา</a></li><li><a href="#section-4">เกณฑ์ตัดสินว่าควรแตก</a></li><li><a href="#section-5">แตกเป็น class ไม่ใช่เป็น method</a></li><li><a href="#section-6">ส่งข้อมูลให้น้อยที่สุดเท่าที่จำเป็น</a></li><li><a href="#section-7">กับดัก: แตกมากเกินไป</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แตกหน้าจอใหญ่ให้เป็นชิ้นส่วนที่อ่านออก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.4 (สร้าง widget ของตัวเอง) และ 1.10 (ขอบเขตของ rebuild)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินใจได้ว่าควรแตก widget ตรงไหน แยกให้ถูกเส้น และหลีกเลี่ยงกับดักการแตกมากเกินไปจนอ่านยากกว่าเดิม</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>หน้าจอในแอปจริงมักโตขึ้นเรื่อย ๆ จนฟังก์ชัน <code>build</code> ยาวหลายร้อยบรรทัด อ่านแล้วไม่รู้ว่าตรงไหนคืออะไร แก้ตรงหนึ่งพังอีกตรงหนึ่ง</p><p>ใน 1.4 เราให้เกณฑ์กว้าง ๆ ไว้สามข้อ บทนี้จะทำให้ใช้งานได้จริง พร้อมเตือนกับดักฝั่งตรงข้าม — การแตกจนเป็นสิบไฟล์ที่ต้องเปิดทุกไฟล์ถึงจะเข้าใจว่าหน้าจอทำอะไร</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>composition</td><td>ประกอบของเล็กเข้าด้วยกันเป็นของใหญ่</td></tr>
+<tr><td>presentational widget</td><td>widget ที่แค่แสดงผล ไม่รู้จักตรรกะธุรกิจ</td></tr>
+<tr><td>container / screen</td><td>widget ที่ถือข้อมูลแล้วแจกให้ลูก</td></tr>
+<tr><td>coupling</td><td>ระดับที่สองส่วนผูกกันจนแยกไม่ออก</td></tr>
+<tr><td>design token</td><td>ค่ามาตรฐานที่ใช้ร่วมกัน เช่นระยะขอบ ขนาดปุ่ม</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: แม่บอกโครง ลูกบอกหน้าตา</h2><p>Flutter สร้าง UI ด้วยการ <strong>ประกอบ</strong> ไม่ใช่การสืบทอด — เราไม่เคยเขียน <code>class MyButton extends ElevatedButton</code> เลยตลอดคอร์ส แต่เราเอา widget เล็กมาซ้อนกัน</p><p>เมื่อแตกได้ดี การอ่าน <code>build</code> ของแม่ควรเหมือนอ่านสารบัญ</p><pre class="code-vs"><code>Column(
+  children: [
+    StatsRow(...),          // แถวสถิติ
+    TapCounterLabel(...),   // ข้อความนับจำนวนครั้ง
+    TaskListView(...),      // รายการงาน
+  ],
+)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> แม่ตอบว่า “หน้าจอนี้ประกอบด้วยอะไรบ้าง” ส่วนลูกตอบว่า “แต่ละชิ้นหน้าตาอย่างไร” — ถ้าอ่าน <code>build</code> ของแม่แล้วยังไม่รู้ว่าหน้าจอมีอะไร แปลว่าแตกยังไม่พอ</div></section>
+
+<section id="section-4"><h2>4. เกณฑ์ตัดสินว่าควรแตก</h2><table><thead><tr><th>เกณฑ์</th><th>คำถามที่ถามตัวเอง</th></tr></thead><tbody>
+<tr><td>ตั้งชื่อได้</td><td>เรียกส่วนนี้ด้วยคำเดียวได้ไหม เช่น “การ์ดสถิติ”</td></tr>
+<tr><td>ใช้ซ้ำ</td><td>ปรากฏมากกว่าหนึ่งที่ไหม</td></tr>
+<tr><td>ขอบเขต rebuild ต่างกัน</td><td>ส่วนนี้เปลี่ยนบ่อยกว่าหรือน้อยกว่าส่วนอื่นไหม</td></tr>
+<tr><td>มีของที่ต้องดูแลเอง</td><td>มีตัวควบคุมหรือการฟังที่ต้องคืนไหม (1.6)</td></tr>
+<tr><td>ทดสอบแยกมีประโยชน์</td><td>อยากเขียนเทสต์เฉพาะส่วนนี้ไหม</td></tr>
+</tbody></table><p>เข้าข้อใดข้อหนึ่งก็แตกได้ ไม่ต้องครบทุกข้อ</p><p>ดูตัวอย่างจริงใน lab — <code>widget_basics_app.dart</code> แตกเป็นสามชิ้น</p><table><thead><tr><th>widget</th><th>เข้าเกณฑ์ข้อไหน</th></tr></thead><tbody>
+<tr><td><code>StatCard</code></td><td>ตั้งชื่อได้ + ใช้ซ้ำสองใบ</td></tr>
+<tr><td><code>TaskTile</code></td><td>ตั้งชื่อได้ + ใช้ซ้ำทุกแถว + ทดสอบแยกได้</td></tr>
+<tr><td><code>DashboardScreen</code></td><td>เป็นตัวถือข้อมูลและแจกให้ลูก</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. แตกเป็น class ไม่ใช่เป็น method</h2><p>วิธีแตกที่คนใหม่ชอบใช้คือแยกเป็น method ที่คืน widget</p><pre class="code-vs"><code>// แบบ method
+Widget _buildStatCard(String label, String value) {
+  return Card(child: ...);
+}
+
+// แบบ class
+class StatCard extends StatelessWidget {
+  const StatCard({super.key, required this.label, required this.value});
+  ...
+}</code></pre><table><thead><tr><th></th><th>method</th><th>class</th></tr></thead><tbody>
+<tr><td>เขียนเร็ว</td><td>เร็วกว่า</td><td>ยาวกว่าเล็กน้อย</td></tr>
+<tr><td>ใส่ <code>const</code> ได้</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>มี key ของตัวเองได้</td><td>ไม่ได้</td><td>ได้ (1.8)</td></tr>
+<tr><td>เป็นขอบเขต rebuild แยก</td><td>ไม่เป็น</td><td>เป็น</td></tr>
+<tr><td>ทดสอบแยกได้</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>ปรากฏใน DevTools</td><td>ไม่ปรากฏ</td><td>ปรากฏพร้อมชื่อ</td></tr>
+</tbody></table><p>ใช้ method ได้กับชิ้นเล็กมากที่ใช้ครั้งเดียวในไฟล์นั้น แต่พอเริ่มมี parameter หลายตัวหรือมีเงื่อนไขข้างใน ให้ยกเป็น class</p></section>
+
+<section id="section-6"><h2>6. ส่งข้อมูลให้น้อยที่สุดเท่าที่จำเป็น</h2><pre class="code-vs"><code>// แย่ — ลูกได้ทั้งโลกและทำอะไรก็ได้
+TaskTile(store: warehouseStore, index: index)
+
+// ดี — ลูกได้เฉพาะที่ต้องใช้ และบอกกลับผ่าน callback
+TaskTile(
+  task: task,
+  done: _doneIds.contains(task.id),
+  onToggle: () =&gt; _toggleDone(task.id),
+)</code></pre><p>ประโยชน์ของแบบหลังที่เห็นได้ทันที</p><ul><li>อ่านบรรทัดเดียวก็รู้ว่า <code>TaskTile</code> ต้องใช้อะไรและทำอะไรได้</li><li>ทดสอบได้โดยไม่ต้องเตรียมข้อมูลทั้งระบบ — ดูเทสต์ตัวสุดท้ายใน <code>widget_basics_test.dart</code> ที่ประกอบ <code>TaskTile</code> เดี่ยว ๆ ได้เลย</li><li>ลูกเปลี่ยนสถานะข้ามหลังแม่ไม่ได้ เพราะไม่มีอะไรให้เปลี่ยน</li></ul><p>ข้อยกเว้นที่ยอมรับได้: widget ระดับหน้าจอที่รับข้อมูลก้อนใหญ่มาแล้วแจกเป็นค่าย่อย ๆ ให้ลูก — นั่นคือหน้าที่ของมันโดยตรง</p></section>
+
+<section id="section-7"><h2>7. กับดัก: แตกมากเกินไป</h2><div class="warn">ไฟล์เยอะไม่เท่ากับออกแบบดี ถ้าต้องเปิดหกไฟล์เพื่อตอบว่า “ปุ่มนี้มีระยะขอบเท่าไร” แสดงว่าแตกเกินความจำเป็น</div><table><thead><tr><th>สัญญาณว่าแตกเกิน</th><th>ทางแก้</th></tr></thead><tbody>
+<tr><td>widget ที่ตั้งชื่อไม่ได้ ต้องใช้ชื่ออย่าง <code>_Part2</code></td><td>รวมกลับเข้าไป</td></tr>
+<tr><td>widget ที่มีบรรทัดเดียวและใช้ครั้งเดียว</td><td>เขียนตรงที่ใช้เลย</td></tr>
+<tr><td>ห่อ <code>Container</code> ทุกตัวด้วย widget ของตัวเอง</td><td>สร้าง widget เมื่อมีกฎร่วมจริง ไม่ใช่ทุกกล่อง</td></tr>
+<tr><td>ต้องส่ง parameter สิบตัวลงไปสามชั้น</td><td>ชั้นกลางน่าจะไม่จำเป็น</td></tr>
+</tbody></table><p>ทางสายกลางคือสร้าง widget ที่เป็น <strong>มาตรฐานร่วม</strong> ซึ่งมีกฎที่ต้องบังคับใช้จริง เช่นปุ่มสำหรับ PDA ที่ต้องใหญ่พอให้กดได้ด้วยมือที่ใส่ถุงมือ — นั่นคือกฎที่มีเหตุผล ไม่ใช่การห่อเพื่อความสวยงาม</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>build</code> ยาวจนหาที่จะแก้ไม่เจอ</td><td>ไม่ได้แตกเลย</td><td>เริ่มจากแตกส่วนที่ตั้งชื่อได้ก่อน</td></tr>
+<tr><td>แตกแล้วแต่ยังใส่ <code>const</code> ไม่ได้</td><td>แตกเป็น method ไม่ใช่ class</td><td>ยกเป็น class</td></tr>
+<tr><td>เปลี่ยนข้อมูลชิ้นเดียวแล้วทั้งหน้าจอวาดใหม่</td><td>ทุกอย่างอยู่ในขอบเขตเดียวกัน</td><td>แตกส่วนที่เปลี่ยนบ่อยออกมา (1.13)</td></tr>
+<tr><td>ลูกไปเปลี่ยนข้อมูลของแม่โดยตรง</td><td>ส่งข้อมูลทั้งก้อนลงไป</td><td>ส่งค่าที่ต้องใช้ + callback</td></tr>
+<tr><td>เทสต์ widget หนึ่งตัวต้องเตรียมข้อมูลทั้งระบบ</td><td>ลูกผูกกับข้อมูลก้อนใหญ่</td><td>ให้ลูกรับเฉพาะที่ใช้จริง</td></tr>
+<tr><td>ต้องเปิดหลายไฟล์เพื่อเข้าใจหน้าจอเดียว</td><td>แตกเกินไป</td><td>รวมชิ้นที่ตั้งชื่อไม่ได้กลับเข้าไป</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>หน้าจอสแกนหนึ่งหน้ามีทั้งหมดในไฟล์เดียว 800 บรรทัด ประกอบด้วย</p><ul><li>ช่องรับบาร์โค้ดพร้อมปุ่มยืนยัน</li><li>รายการรายการที่สแกนไปแล้ว</li><li>แถบแสดงสถานะการเชื่อมต่อ</li><li>กล่องยืนยันก่อนปิดงาน</li><li>โค้ดเรียก API และแปลงข้อมูล</li></ul><ol><li>ลำดับการแตกควรเป็นอย่างไร และทำไม</li><li>ส่วนไหนที่ <strong>ไม่ควร</strong> เป็น widget</li><li>ส่วนไหนควรเป็น <code>StatefulWidget</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ลำดับที่ปลอดภัย</strong></p><ol><li><strong>เขียนเทสต์คลุมพฤติกรรมหลักก่อน</strong> อย่างน้อยหนึ่งเส้นทาง เช่น “สแกนแล้วรายการเพิ่มขึ้น” — เพื่อให้รู้ทันทีถ้าการแตกทำอะไรพัง</li><li><strong>แยกโค้ดที่ไม่ใช่ UI ออกก่อน</strong> คือส่วนเรียก API และแปลงข้อมูล ย้ายไปเป็น class ธรรมดาที่ไม่ต้องใช้ Flutter — ตรงกับหลักใน D1.20 ว่าตรรกะที่ไม่ผูกกับหน้าจอคือตรรกะที่ทดสอบได้</li><li><strong>แยกส่วนที่แสดงผลล้วน ๆ</strong> ได้แก่รายการที่สแกนแล้ว และแถบสถานะ ทั้งคู่รับข้อมูลเข้ามาแล้ววาด ไม่ต้องรู้อะไรอีก</li><li><strong>แยกช่องรับบาร์โค้ด</strong> ซึ่งมีตัวควบคุมของตัวเอง จึงต้องเป็น <code>StatefulWidget</code> ที่ดูแลการคืนทรัพยากรเอง (1.6)</li><li><strong>แยกกล่องยืนยัน</strong> ออกเป็นฟังก์ชันที่คืนผลลัพธ์กลับมา</li><li><strong>รันเทสต์ซ้ำ</strong> ทุกขั้น</li></ol><p><strong>ทำไมต้องเริ่มจากส่วนที่ไม่ใช่ UI:</strong> เพราะมันเป็นส่วนที่แยกแล้วได้ประโยชน์มากที่สุดและเสี่ยงน้อยที่สุด ถ้าเริ่มจากตัดไฟล์ตามจำนวนบรรทัด เราจะได้ไฟล์เล็กหลายไฟล์ที่ยังผูกกันแน่นเหมือนเดิม ซึ่งไม่ได้แก้อะไรเลย</p><p><strong>ข้อ 2 — สิ่งที่ไม่ควรเป็น widget</strong></p><ul><li><strong>โค้ดเรียก API และแปลงข้อมูล</strong> — ควรเป็น class ธรรมดาที่ไม่ import Flutter เลย ทำให้เขียนเทสต์ได้โดยไม่ต้องประกอบหน้าจอ</li><li><strong>กฎทางธุรกิจ</strong> เช่น “บาร์โค้ดซ้ำไม่นับซ้ำ” — ควรอยู่ในตรรกะ ไม่ใช่ใน <code>build</code></li></ul><p><strong>ข้อ 3 — ส่วนที่ควรเป็น <code>StatefulWidget</code></strong></p><table><thead><tr><th>ส่วน</th><th>ชนิด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ช่องรับบาร์โค้ด</td><td>Stateful</td><td>มีตัวควบคุมข้อความและโฟกัสที่ต้องคืน</td></tr>
+<tr><td>หน้าจอสแกน (ตัวนอกสุด)</td><td>Stateful</td><td>ถือรายการที่สแกนแล้ว ซึ่งหลายส่วนต้องใช้</td></tr>
+<tr><td>รายการที่สแกนแล้ว</td><td>Stateless</td><td>รับ list เข้ามาแล้ววาด</td></tr>
+<tr><td>แถบสถานะ</td><td>Stateless</td><td>รับสถานะเข้ามาแล้ววาด</td></tr>
+</tbody></table><p><strong>จุดที่คนมักพลาด:</strong> ทำให้ทุกส่วนเป็น <code>StatefulWidget</code> เพราะ “มันมีข้อมูล” — แต่รายการที่สแกนแล้ว <em>ไม่ได้เป็นเจ้าของ</em> ข้อมูลนั้น มันแค่แสดง เจ้าของคือหน้าจอ ตามกฎใน 1.5 ที่ว่าข้อมูลอยู่ที่ widget ต่ำที่สุดซึ่งยังครอบคลุมทุกคนที่ต้องใช้</p><p><strong>ลองต่อ:</strong> หลังแตกเสร็จ ลองเขียนเทสต์ให้รายการที่สแกนแล้วโดยส่ง list สามรายการเข้าไปตรง ๆ — ถ้าเขียนได้โดยไม่ต้องแตะ API แปลว่าแตกถูกเส้นแล้ว</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>Flutter สร้าง UI ด้วยการประกอบ ไม่ใช่การสืบทอด</li><li><code>build</code> ของแม่ควรอ่านเหมือนสารบัญ</li><li>แตกเมื่อ ตั้งชื่อได้ / ใช้ซ้ำ / ขอบเขต rebuild ต่าง / มีของต้องดูแล / ทดสอบแยกได้</li><li>แตกเป็น class ดีกว่า method เพราะได้ <code>const</code>, key, ขอบเขต rebuild และเทสต์</li><li>ส่งให้ลูกเฉพาะที่ต้องใช้ พร้อม callback สำหรับแจ้งกลับ</li><li>แตกเกินไปก็เป็นปัญหา — ถ้าตั้งชื่อไม่ได้ ยังไม่ควรแตก</li><li>เริ่มแตกจากส่วนที่ไม่ใช่ UI ก่อนเสมอ</li></ul></div><p><strong>บทถัดไป:</strong> 1.12 จะลงรายละเอียดเรื่อง callback ที่ใช้แจ้งจากลูกกลับไปหาแม่ ซึ่งเป็นกลไกที่ทำให้การแตก widget ในบทนี้ทำงานได้จริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
