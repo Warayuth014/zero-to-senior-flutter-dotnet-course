@@ -4,22 +4,128 @@
 <title>setState</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-01 · State &amp; Lifecycle</span><h1>setState</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Local UI state</a></li><li><a href="#section-2">setState ต้อง synchronous</a></li><li><a href="#section-3">Scope ของ rebuild</a></li><li><a href="#section-4">State ที่เหมาะ/ไม่เหมาะ</a></li><li><a href="#section-5">Equality guard</a></li><li><a href="#section-6">Mutation ก่อน/ใน setState</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>setState</code> บอก framework ว่า local mutable state ของ State object เปลี่ยนและ subtree นี้ต้อง build ใหม่ มันไม่เก็บ stateให้เราและไม่ควรครอบงาน async ทั้งก้อน ใช้เมื่อ owner/consumerอยู่ใกล้และ lifetimeผูกกับหน้าจอ</div>
-<section id="section-1"><h2>1. Local UI state</h2><pre class="code-vs"><code>class _SummaryCardState extends State&lt;SummaryCard&gt; {
-  DashboardMode _mode = DashboardMode.list;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ถามสามคำถาม</a></li><li><a href="#section-4">ตัวอย่างที่ setState เหมาะ</a></li><li><a href="#section-5">ตัวอย่างที่ setState ไม่เหมาะ</a></li><li><a href="#section-6">กฎการใช้ setState ที่ต้องจำ</a></li><li><a href="#section-7">อย่าเรียกเมื่อค่าไม่เปลี่ยน</a></li><li><a href="#section-8">ดูของจริงใน lab</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ใช้ setState ให้ถูกที่และถูกเวลา</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.5 (<code>StatefulWidget</code> และ <code>setState</code>) และ 1.9 (build ต้องเบา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่าข้อมูลชิ้นไหนควรใช้ <code>setState</code> และชิ้นไหนควรอยู่ที่อื่น ซึ่งเป็นคำถามหลักของทั้ง Part</div>
 
-  void _select(DashboardMode next) {
-    if (_mode == next) return;
-    setState(() =&gt; _mode = next);
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>เรารู้จัก <code>setState</code> มาตั้งแต่ 1.5 และใช้มาตลอด Part 3 แต่พอแอปโตขึ้นจะเริ่มเจอสามอาการ</p><ul><li>ข้อมูลชิ้นเดียวต้องส่ง callback ผ่านห้าชั้นเพื่อให้ทุกคนอัปเดตพร้อมกัน</li><li>สลับหน้าจอแล้วข้อมูลที่โหลดไว้หายหมด ต้องโหลดใหม่</li><li>ทดสอบตรรกะทีต้องประกอบทั้งหน้าจอ</li></ul><p>ทั้งสามอาการมีต้นเหตุเดียวกัน — <strong>ข้อมูลอยู่ผิดที่</strong> บทนี้จะทำให้เห็นว่าเมื่อไหร่ <code>setState</code> เหมาะ และเมื่อไหร่ถึงเวลาย้ายออก</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>local state</td><td>ข้อมูลที่ใช้อยู่ในหน้าจอเดียว</td></tr>
+<tr><td>shared state</td><td>ข้อมูลที่หลายหน้าจอต้องใช้</td></tr>
+<tr><td>source of truth</td><td>แหล่งเดียวที่ถือความจริงของข้อมูลนั้น</td></tr>
+<tr><td>lifetime</td><td>ช่วงเวลาที่ข้อมูลนั้นต้องมีชีวิตอยู่</td></tr>
+<tr><td>owner</td><td>ผู้ที่รับผิดชอบข้อมูลชิ้นนั้น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ถามสามคำถาม</h2><p>ก่อนตัดสินว่าข้อมูลชิ้นหนึ่งควรอยู่ที่ไหน ให้ถามตามลำดับนี้</p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่า...</th><th>ควรอยู่ที่</th></tr></thead><tbody>
+<tr><td>1. ใครต้องใช้บ้าง</td><td>หน้าจอนี้คนเดียว</td><td><code>setState</code> ในหน้าจอ</td></tr>
+<tr><td></td><td>หลายหน้าจอ</td><td>ชั้นที่อยู่เหนือขึ้นไป</td></tr>
+<tr><td>2. ต้องอยู่รอดข้ามหน้าจอไหม</td><td>ไม่ต้อง</td><td><code>setState</code></td></tr>
+<tr><td></td><td>ต้อง</td><td>ชั้นที่อายุยาวกว่า</td></tr>
+<tr><td>3. มีตรรกะที่ควรทดสอบแยกไหม</td><td>ไม่มี</td><td><code>setState</code></td></tr>
+<tr><td></td><td>มี</td><td>แยกออกมาเป็น class ของตัวเอง</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>setState</code> ไม่ได้แย่ — มันเหมาะกับข้อมูลที่ <em>เกิดและตายพร้อมหน้าจอ</em> ปัญหาเกิดเมื่อเราใช้มันกับข้อมูลที่ควรอยู่ยาวกว่านั้น</div></section>
+
+<section id="section-4"><h2>4. ตัวอย่างที่ setState เหมาะ</h2><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  bool _showHelp = false;              // เปิดคำแนะนำ
+  bool _sortByQuantity = false;        // เรียงตามจำนวน
+
+  void _toggleHelp() =&gt; setState(() =&gt; _showHelp = !_showHelp);
+}</code></pre><p>ทั้งสองตัวผ่านเกณฑ์ครบสามข้อ — ใช้ในหน้าจอนี้คนเดียว ไม่ต้องอยู่รอดข้ามหน้าจอ และไม่มีตรรกะที่ต้องทดสอบ</p><p>ถ้าผู้ใช้ออกจากหน้าจอแล้วกลับมา คำแนะนำปิดอยู่เหมือนเดิม ซึ่งเป็นพฤติกรรมที่ถูกต้อง</p></section>
+
+<section id="section-5"><h2>5. ตัวอย่างที่ setState ไม่เหมาะ</h2><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  List&lt;PickLine&gt; _lines = [];          // มาจาก server
+  bool _loading = false;
+  String? _error;
+
+  Future&lt;void&gt; _load() async {
+    setState(() =&gt; _loading = true);
+    final result = await api.fetchLines();
+    if (!mounted) return;
+    setState(() {
+      _lines = result;
+      _loading = false;
+    });
   }
-}</code></pre><p>โหมด list/chart ของ SummaryCard ใน Absolute เป็น local presentation state ที่ไม่ต้องให้ทั้ง WarehouseStoreรู้</p></section>
-<section id="section-2"><h2>2. setState ต้อง synchronous</h2><p>Callbackของ setStateต้องแก้ค่าแบบ synchronousและคืนทันที ห้าม <code>setState(() async { ... })</code> ให้ awaitนอกแล้ว setStateเฉพาะ snapshotที่พร้อม เพราะ frameworkต้องรู้ทันทีว่า mutationจบเมื่อไร</p></section>
-<section id="section-3"><h2>3. Scope ของ rebuild</h2><p>setStateทำให้ State subtree buildใหม่ ไม่ได้ repaintทุกจุดเสมอ Element/render diffจะ reuseส่วนที่ไม่เปลี่ยน แต่ build methodใหญ่ยังมี cost จึงแตก componentตาม responsibilityและวาง stateใกล้ consumer</p></section>
-<section id="section-4"><h2>4. State ที่เหมาะ/ไม่เหมาะ</h2><ul><li>เหมาะ: toggle, selected tab, controller visibility, animation flag</li><li>ไม่เหมาะ: inventoryที่หลายหน้าต้องใช้, auth session, cache/API workflowข้าม route</li></ul><p>ข้อมูลข้าม featureควรมี owner/store/repositoryชัด ไม่ส่ง setState callbackทอดยาวทั้งแอป</p></section>
-<section id="section-5"><h2>5. Equality guard</h2><p>ถ้าค่าใหม่เท่าเดิมไม่ต้อง setState ลด rebuildและ side effects downstream แต่ห้าม optimizeจนไม่ notifyเมื่อ object mutableภายในเปลี่ยน ทางที่ดีใช้ immutable snapshot/equalityตาม semantic</p></section>
-<section id="section-6"><h2>6. Mutation ก่อน/ใน setState</h2><p>Frameworkต้องการให้เรียก setStateเมื่อ mutationกระทบ build เขียน mutationใน callbackเพื่ออ่าน intentง่าย หาก mutateก่อนแล้ว setStateเปล่ายังทำงานแต่เสี่ยง return/exceptionจนลืมแจ้ง และอย่าวาง API/file I/Oใน callback</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หน้า scanมี <code>showHelp</code>, current pallet และรายการ inventory อะไรควรอยู่ local?</p><details><summary>เฉลย</summary><p>showHelpเป็น local setState; current palletอาจอยู่ workflow controllerถ้ามีหลาย step/ต้องคงเมื่อ UIสลับ; inventoryอยู่ store/repositoryเพราะโหลด asyncและหลาย consumer หลักคือ ownership/lifetime ไม่ใช่จำนวนตัวแปร</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าเรียก setStateใน build, dispose หรือหลัง State unmounted และอย่าใช้ setStateเพื่อบังคับ refreshเมื่อ source of truthไม่เปลี่ยน ต้องแก้ source/notification contract</div></section>
+}</code></pre><p>โค้ดนี้ทำงานได้และไม่ผิดอะไร แต่ตกเกณฑ์ทั้งสามข้อ</p><table><thead><tr><th>เกณฑ์</th><th>ปัญหาที่จะเจอ</th></tr></thead><tbody>
+<tr><td>ใครใช้บ้าง</td><td>หน้าสรุปยอดก็ต้องใช้ ต้องโหลดซ้ำอีกชุด</td></tr>
+<tr><td>อยู่รอดข้ามหน้าจอ</td><td>กดดูรายละเอียดแล้วกลับมา ต้องโหลดใหม่ทั้งหมด</td></tr>
+<tr><td>ทดสอบแยก</td><td>จะทดสอบว่าโหลดล้มเหลวแล้วขึ้นอะไร ต้องประกอบทั้งหน้าจอ</td></tr>
+</tbody></table><p>บทที่เหลือของ Part นี้คือการย้ายข้อมูลแบบนี้ออกไปทีละขั้น</p></section>
+
+<section id="section-6"><h2>6. กฎการใช้ setState ที่ต้องจำ</h2><pre class="code-vs"><code>// ผิด — งานที่ต้องรอ อยู่ข้างใน
+setState(() async {
+  _lines = await api.fetchLines();
+});
+
+// ถูก — รอให้เสร็จก่อน แล้วค่อยแจ้ง
+final result = await api.fetchLines();
+if (!mounted) return;
+setState(() =&gt; _lines = result);</code></pre><table><thead><tr><th>กฎ</th><th>เหตุผล</th><th>บทที่อธิบาย</th></tr></thead><tbody>
+<tr><td>ข้างใน <code>setState</code> ต้องเสร็จทันที</td><td>Flutter ต้องรู้ทันทีว่าแก้ค่าเสร็จแล้ว</td><td>1.5</td></tr>
+<tr><td>ห้ามเรียกใน <code>build</code></td><td>จะวนไม่รู้จบ</td><td>1.9</td></tr>
+<tr><td>ตรวจ <code>mounted</code> หลัง <code>await</code></td><td>หน้าจออาจหายไปแล้ว</td><td>1.6, 3.13</td></tr>
+<tr><td>ห้ามเรียกใน <code>dispose</code></td><td>หน้าจอกำลังถูกทำลาย</td><td>3.12</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. อย่าเรียกเมื่อค่าไม่เปลี่ยน</h2><pre class="code-vs"><code>void _select(SortMode next) {
+  if (_sortMode == next) return;      // ไม่มีอะไรเปลี่ยน ไม่ต้องแจ้ง
+  setState(() =&gt; _sortMode = next);
+}</code></pre><p>เป็นการลดงานที่ไม่จำเป็นตามหลักใน 1.10 — แต่ระวังกับดักหนึ่งข้อ</p><div class="warn">การเทียบแบบนี้ใช้ได้กับค่าเดี่ยวอย่าง <code>enum</code> หรือ <code>bool</code> แต่ <strong>ใช้กับ list ไม่ได้</strong> ถ้าเราแก้ข้างใน list ก้อนเดิม การเทียบจะบอกว่า “เหมือนเดิม” ทั้งที่เนื้อหาเปลี่ยนไปแล้ว — ทบทวน D1.5 หัวข้อ 7</div><pre class="code-vs"><code>// อันตราย — แก้ก้อนเดิม
+_lines.add(newLine);
+
+// ปลอดภัย — สร้างก้อนใหม่
+_lines = [..._lines, newLine];</code></pre><p>ใน lab ของ Part นี้เราใช้แบบหลังเสมอ</p><pre class="code-vs"><code>void _setLine(int index, PickLine line) {
+  // สร้าง list ก้อนใหม่ ไม่แก้ก้อนเดิม (D1.5)
+  final next = [..._lines];
+  next[index] = line;
+  _lines = next;
+}</code></pre></section>
+
+<section id="section-8"><h2>8. ดูของจริงใน lab</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter test --no-pub test/pick_store_test.dart test/state_basics_test.dart</code></pre><p>เปิด <code>lib/state_basics/state_basics_app.dart</code> จะเห็นว่าหน้าจอ <strong>ไม่มี <code>setState</code> เลยแม้แต่ที่เดียว</strong></p><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  @override
+  void initState() {
+    super.initState();
+    // เริ่มโหลดที่นี่ ไม่ใช่ใน build (1.9)
+    widget.store.load();
+  }
+  ...
+}</code></pre><p>เพราะข้อมูลทั้งหมดย้ายไปอยู่ที่ <code>PickStore</code> แล้ว — ซึ่งเป็นปลายทางที่ Part นี้จะพาไปถึงในบทที่ 4.5 ตอนนี้แค่รู้ว่ามีทางเลือกนี้อยู่</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดแล้วไม่มีอะไรเกิดขึ้น</td><td>เปลี่ยนค่าโดยไม่เรียก <code>setState</code></td><td>ห่อการเปลี่ยนค่าไว้ข้างใน</td></tr>
+<tr><td>เพิ่มลง list แล้วหน้าจอไม่อัปเดต</td><td>แก้ก้อนเดิมแล้วมีการเทียบค่า</td><td>สร้างก้อนใหม่ด้วย <code>[...old, x]</code></td></tr>
+<tr><td><code>setState() called during build</code></td><td>เรียกใน <code>build</code></td><td>ย้ายไป callback หรือ <code>initState</code></td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>ไม่ตรวจ <code>mounted</code></td><td>ตรวจหลัง <code>await</code> ทุกครั้ง</td></tr>
+<tr><td>ต้องส่ง callback ผ่านหลายชั้น</td><td>ข้อมูลอยู่ต่ำเกินไป</td><td>ย้ายขึ้น (4.3)</td></tr>
+<tr><td>สลับหน้าจอแล้วต้องโหลดใหม่ทุกครั้ง</td><td>ข้อมูลผูกกับหน้าจอ</td><td>ย้ายออกไปชั้นที่อายุยาวกว่า (4.5)</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอหยิบสินค้ามีข้อมูลหกชิ้น จงจัดว่าแต่ละชิ้นควรอยู่ที่ไหน พร้อมเหตุผลตามเกณฑ์สามข้อ</p><table><thead><tr><th>ข้อมูล</th><th>บริบท</th></tr></thead><tbody>
+<tr><td>เปิด/ปิดคำแนะนำการใช้งาน</td><td>ผู้ใช้กดปุ่มเครื่องหมายคำถาม</td></tr>
+<tr><td>รายการงานที่ต้องหยิบ</td><td>มาจาก server หน้าสรุปก็ใช้</td></tr>
+<tr><td>ข้อความที่พิมพ์ในช่องค้นหา</td><td>ใช้กรองรายการในหน้านี้</td></tr>
+<tr><td>ชื่อและสิทธิ์ของผู้ใช้ที่ล็อกอิน</td><td>เกือบทุกหน้าจอใช้</td></tr>
+<tr><td>แถวที่กำลังส่งคำสั่งอยู่</td><td>ใช้ปิดปุ่มของแถวนั้น</td></tr>
+<tr><td>ตำแหน่งการเลื่อนของรายการ</td><td>อยากให้กลับมาแล้วอยู่ที่เดิม</td></tr>
+</tbody></table><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>ข้อมูล</th><th>อยู่ที่ไหน</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>เปิด/ปิดคำแนะนำ</td><td><code>setState</code></td><td>ผ่านทั้งสามเกณฑ์ — คนเดียวใช้ ไม่ต้องอยู่รอด ไม่มีตรรกะ</td></tr>
+<tr><td>รายการงาน</td><td>store</td><td>หลายหน้าจอใช้ และมีตรรกะการโหลดที่ต้องทดสอบ</td></tr>
+<tr><td>ข้อความค้นหา</td><td><code>setState</code></td><td>ใช้กรองในหน้านี้เท่านั้น และควรล้างเมื่อออกจากหน้าจอ</td></tr>
+<tr><td>ผู้ใช้ที่ล็อกอิน</td><td>ชั้นบนสุดของแอป</td><td>อายุเท่ากับ session ไม่ใช่เท่าหน้าจอ</td></tr>
+<tr><td>แถวที่กำลังส่งคำสั่ง</td><td>store</td><td>เป็นสถานะของคำสั่ง ไม่ใช่ของหน้าจอ — ถ้าอยู่ในหน้าจอแล้วผู้ใช้ออกไป คำสั่งจะไม่มีใครติดตาม</td></tr>
+<tr><td>ตำแหน่งการเลื่อน</td><td>ขึ้นกับความต้องการ</td><td>ดูคำอธิบายด้านล่าง</td></tr>
+</tbody></table><p><strong>ข้อที่ตัดสินยากที่สุด — แถวที่กำลังส่งคำสั่ง</strong></p><p>ดูเผิน ๆ เหมือนเป็นเรื่องของหน้าจอ เพราะใช้แค่ปิดปุ่ม แต่ถามด้วยเกณฑ์ข้อ 2 จะได้คำตอบต่างออกไป — ถ้าผู้ใช้กดปุ่มแล้วออกจากหน้าจอทันที คำสั่งนั้นยังวิ่งอยู่ ถ้าสถานะอยู่ในหน้าจอที่ตายไปแล้ว จะไม่มีใครรู้ว่ามันจบหรือยัง</p><p>ใน lab เราจึงเก็บไว้ที่ store</p><pre class="code-vs"><code>/// บรรทัดที่กำลังส่งคำสั่งอยู่ — เก็บเป็น id ไม่ใช่ตำแหน่ง (1.8)
+final Set&lt;String&gt; _busyLineIds = &lt;String&gt;{};
+
+bool isBusy(String lineId) =&gt; _busyLineIds.contains(lineId);</code></pre><p><strong>ข้อที่ไม่มีคำตอบตายตัว — ตำแหน่งการเลื่อน</strong></p><table><thead><tr><th>ถ้าธุรกิจต้องการ</th><th>เก็บที่ไหน</th></tr></thead><tbody>
+<tr><td>กลับมาแล้วเริ่มที่บนสุด</td><td>ไม่ต้องเก็บเลย</td></tr>
+<tr><td>กลับมาแล้วอยู่ที่เดิมภายในรอบเดียวกัน</td><td>ในหน้าจอ ผ่านตัวควบคุมการเลื่อน</td></tr>
+<tr><td>อยู่ที่เดิมแม้ปิดแอปแล้วเปิดใหม่</td><td>บันทึกลงเครื่อง</td></tr>
+</tbody></table><p>นี่เป็นตัวอย่างสำคัญว่า <strong>คำตอบมาจากความต้องการทางธุรกิจ ไม่ใช่จากกฎทางเทคนิค</strong> — คนที่ตอบว่า “เก็บใน store เสมอ” หรือ “เก็บใน setState เสมอ” ยังไม่ได้ถามคำถามที่ถูก</p><p><strong>ลองต่อ:</strong> เปิด <code>state_basics_app.dart</code> แล้วนับว่ามี <code>setState</code> กี่ที่ — คำตอบคือศูนย์ จากนั้นถามว่าถ้าจะเพิ่มปุ่มเปิด/ปิดคำแนะนำ ควรใช้ <code>setState</code> หรือใส่ใน store ตามเกณฑ์สามข้อ</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>setState</code> เหมาะกับข้อมูลที่เกิดและตายพร้อมหน้าจอ</li><li>ถามสามคำถาม — ใครใช้ ต้องอยู่รอดไหม มีตรรกะต้องทดสอบไหม</li><li>ข้างใน <code>setState</code> ต้องทำงานเสร็จทันที ห้ามมีงานที่ต้องรอ</li><li>ตรวจ <code>mounted</code> หลัง <code>await</code> เสมอ</li><li>สร้าง list ก้อนใหม่แทนการแก้ก้อนเดิม</li><li>ถ้าต้องส่ง callback ผ่านหลายชั้น หรือข้อมูลหายเมื่อสลับหน้าจอ แปลว่าอยู่ผิดที่</li></ul></div><p><strong>บทถัดไป:</strong> 4.2 จะลดจำนวนข้อมูลที่ต้องเก็บลง ด้วยการไม่เก็บสิ่งที่คำนวณได้ — ซึ่งเป็นวิธีกำจัดบั๊กประเภท “ตัวเลขสองที่ไม่ตรงกัน” ตั้งแต่ต้นทาง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

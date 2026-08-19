@@ -4,28 +4,190 @@
 <title>ValueNotifier</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-04 · State &amp; Lifecycle</span><h1>ValueNotifier</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ตัวอย่าง ThemeMode</a></li><li><a href="#section-2">ValueListenableBuilder</a></li><li><a href="#section-3">Immutable value</a></li><li><a href="#section-4">เมื่อโตเกิน ValueNotifier</a></li><li><a href="#section-5">Ownership/dispose</a></li><li><a href="#section-6">ValueNotifier vs setState</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>ValueNotifier&lt;T&gt;</code> เหมาะกับ stateหนึ่งค่าที่มี equalityชัดและ commandไม่ซับซ้อน มัน notifyเมื่อกำหนด <code>value</code> ใหม่ที่ไม่เท่าค่าเดิม ไม่ตรวจ mutationภายใน mutable object</div>
-<section id="section-1"><h2>1. ตัวอย่าง ThemeMode</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กล่องที่ประกาศเมื่อของข้างในเปลี่ยน</a></li><li><a href="#section-4">รูปแบบพื้นฐาน</a></li><li><a href="#section-5">กับดักใหญ่: แก้ข้างในไม่นับว่าเปลี่ยน</a></li><li><a href="#section-6">ปิดไม่ให้คนนอกเปลี่ยนค่า</a></li><li><a href="#section-7">เมื่อไหร่ที่มันเล็กเกินไป</a></li><li><a href="#section-8">ใครสร้าง คนนั้นคืน</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ย้ายข้อมูลออกจากหน้าจอเป็นครั้งแรก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.13 (<code>ValueNotifier</code> กับการจำกัดขอบเขต rebuild) และ 4.3 (การย้ายข้อมูลขึ้น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บข้อมูลไว้นอกหน้าจอด้วย <code>ValueNotifier</code> และรู้ว่าเมื่อไหร่มันเล็กเกินไปสำหรับงานที่ทำอยู่</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>4.3 แก้ปัญหาข้อมูลกระจายด้วยการย้ายขึ้นไปที่แม่ร่วม แต่ยังมีข้อจำกัดที่แก้ไม่ได้ — <strong>ข้อมูลยังผูกกับหน้าจอ</strong> เมื่อหน้าจอถูกทำลาย ข้อมูลหายไปด้วย</p><p><code>ValueNotifier</code> คือก้าวแรกที่ทำให้ข้อมูลอยู่นอกหน้าจอได้ โดยยังเรียบง่ายมาก</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>ValueNotifier&lt;T&gt;</code></td><td>กล่องเก็บค่าหนึ่งค่าที่แจ้งเมื่อค่าเปลี่ยน</td></tr>
+<tr><td><code>ValueListenable&lt;T&gt;</code></td><td>สัญญาว่า “อ่านค่าได้และฟังได้” แต่เปลี่ยนค่าไม่ได้</td></tr>
+<tr><td><code>.value</code></td><td>ค่าปัจจุบัน อ่านและเขียนได้</td></tr>
+<tr><td>equality</td><td>การเทียบว่าค่าใหม่ต่างจากค่าเดิมหรือไม่</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กล่องที่ประกาศเมื่อของข้างในเปลี่ยน</h2><pre class="code-vs"><code>final counter = ValueNotifier&lt;int&gt;(0);
+
+counter.value = 1;     // เปลี่ยนค่า → แจ้งทุกคนที่ฟังอยู่
+counter.value = 1;     // ค่าเท่าเดิม → ไม่แจ้ง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> มันแจ้งเมื่อ <em>กำหนดค่าใหม่ที่ไม่เท่าค่าเดิม</em> — คำว่า “กำหนดค่าใหม่” สำคัญมาก เพราะการแก้ข้างในของเดิมไม่นับ</div><p>ความต่างจาก <code>setState</code></p><table><thead><tr><th></th><th><code>setState</code></th><th><code>ValueNotifier</code></th></tr></thead><tbody>
+<tr><td>ข้อมูลอยู่ที่</td><td>ใน <code>State</code></td><td>ที่ไหนก็ได้</td></tr>
+<tr><td>อายุ</td><td>เท่าหน้าจอ</td><td>เท่าที่เจ้าของกำหนด</td></tr>
+<tr><td>ใครวาดใหม่</td><td>ทั้ง <code>build</code></td><td>เฉพาะข้างใน builder</td></tr>
+<tr><td>ทดสอบแยกได้</td><td>ไม่ได้</td><td>ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-4"><h2>4. รูปแบบพื้นฐาน</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
   ThemeController() : super(ThemeMode.system);
 
   void toggle() {
     value = value == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
   }
-}</code></pre><p>wmsapp rootใช้ ValueListenableBuilderกับ ThemeModeทำให้ APIอ่านง่ายกว่า ChangeNotifierที่ต้อง getterเพิ่ม</p></section>
-<section id="section-2"><h2>2. ValueListenableBuilder</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
+}</code></pre><p>การสืบทอดแบบนี้ให้ประโยชน์สองอย่างตามที่เรียนใน D1.8 — ได้ความสามารถของ <code>ValueNotifier</code> มาฟรี และเพิ่ม method ที่สื่อเจตนาอย่าง <code>toggle()</code> แทนที่จะให้คนนอกไปคำนวณเอง</p><p>ฝั่งหน้าจออ่านผ่าน builder ตามที่เรียนใน 1.13</p><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
   valueListenable: themeController,
-  builder: (_, mode, child) =&gt; MaterialApp(
+  builder: (context, mode, child) =&gt; MaterialApp(
     themeMode: mode,
     home: child,
   ),
-  child: const HomeScreen(),
-)</code></pre><p>childคงที่ไม่ถูกสร้างซ้ำเพราะไม่ขึ้นกับ mode</p></section>
-<section id="section-3"><h2>3. Immutable value</h2><p><code>ValueNotifier&lt;List&lt;Task&gt;&gt;</code> แล้ว <code>value.add(task)</code> จะไม่ notifyเพราะ setterไม่ถูกเรียก ให้ assign listใหม่ <code>value = [...value, task]</code> หรือใช้ storeที่ encapsulate mutationและ notifyชัด</p></section>
-<section id="section-4"><h2>4. เมื่อโตเกิน ValueNotifier</h2><p>ถ้ามี loading/error/dataหลาย field, async commands/invariantsหรือหลาย slices เปลี่ยนพร้อมกัน ใช้ immutable state objectใน ValueNotifierได้ระยะหนึ่ง หรือ ChangeNotifier/controllerแบบ explicit อย่าสร้าง ValueNotifierสิบตัวโดยไม่มี atomic update policy</p></section>
-<section id="section-5"><h2>5. Ownership/dispose</h2><p>Notifierที่ widgetสร้างต้อง dispose; singleton/app ownerอยู่ตลอด appไม่ให้ builder dispose แทน Constructorรับ ValueListenableช่วย testด้วย fake notifierและไม่ผูก implementation</p></section>
-<section id="section-6"><h2>6. ValueNotifier vs setState</h2><p>setStateเหมาะ stateภายใน widgetเดียว ValueNotifierเหมาะเมื่อค่าเดียวแชร์หลาย widgets/แยก ownerหรืออยาก expose listenable contract ทั้งคู่ไม่ใช่ persistence/repository เลือกจาก ownershipไม่ใช่กระแส package</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection statusมี unknown/connecting/connected/disconnectedและ last error/profileหลายค่า ใช้ ValueNotifierค่าเดียวดีไหม?</p><details><summary>เฉลย</summary><p>ถ้ารวมเป็น immutable ConnectionState snapshotเดียวและ transitionsไม่ซับซ้อนใช้ได้ แต่โปรเจกต์จริงมี profiles, active ID, persistence, resultและ commandsหลายตัว ChangeNotifier controllerเหมาะกว่า โดย expose gettersไม่ให้แก้ listตรง</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าพึ่ง mutationภายในค่าเดิมแล้วเรียก <code>notifyListeners</code> เพราะ ValueNotifierไม่ได้ exposeให้เรียกจากภายนอกอย่างตั้งใจ ใช้ immutable replacementหรือ subclass/storeที่ contractชัด</div></section>
+  child: const HomeScreen(),        // ไม่ขึ้นกับ mode จึงสร้างครั้งเดียว
+)</code></pre></section>
+
+<section id="section-5"><h2>5. กับดักใหญ่: แก้ข้างในไม่นับว่าเปลี่ยน</h2><pre class="code-vs"><code>final lines = ValueNotifier&lt;List&lt;PickLine&gt;&gt;([]);
+
+lines.value.add(newLine);        // ไม่แจ้งใครเลย — หน้าจอไม่อัปเดต
+lines.value = [...lines.value, newLine];   // แจ้ง เพราะเป็นก้อนใหม่</code></pre><p>เหตุผลตรงกับ D1.5 หัวข้อ 7 — <code>ValueNotifier</code> เทียบว่า “เป็นก้อนเดียวกันหรือเปล่า” เมื่อเราแก้ข้างในก้อนเดิม มันจึงเห็นว่าไม่เปลี่ยน</p><p>นี่คือเหตุผลที่ lab สร้าง list ก้อนใหม่เสมอ</p><pre class="code-vs"><code>void _setLine(int index, PickLine line) {
+  // สร้าง list ก้อนใหม่ ไม่แก้ก้อนเดิม (D1.5)
+  final next = [..._lines];
+  next[index] = line;
+  _lines = next;
+}</code></pre><div class="warn">อาการนี้หายากเป็นพิเศษเพราะ <strong>ไม่มี error อะไรเลย</strong> โค้ดดูถูกทุกบรรทัด ข้อมูลก็เปลี่ยนจริง แต่หน้าจอไม่ขยับ — และถ้ามีอะไรอื่นทำให้หน้าจอวาดใหม่พอดี มันจะแสดงถูกบ้างผิดบ้าง</div></section>
+
+<section id="section-6"><h2>6. ปิดไม่ให้คนนอกเปลี่ยนค่า</h2><pre class="code-vs"><code>class ScanCounter {
+  final ValueNotifier&lt;int&gt; _count = ValueNotifier&lt;int&gt;(0);
+
+  /// เปิดให้อ่านและฟังได้ แต่เปลี่ยนค่าไม่ได้
+  ValueListenable&lt;int&gt; get count =&gt; _count;
+
+  void increment() =&gt; _count.value++;
+
+  void reset() =&gt; _count.value = 0;
+
+  void dispose() =&gt; _count.dispose();
+}</code></pre><p>การคืนเป็น <code>ValueListenable</code> แทน <code>ValueNotifier</code> ทำให้คนนอกเรียก <code>.value = ...</code> ไม่ได้ — เป็นหลักเดียวกับการคืน <code>List.unmodifiable</code> ใน D1.7</p><p>ประโยชน์คือกฎทั้งหมดถูกบังคับผ่าน <code>increment()</code> และ <code>reset()</code> เท่านั้น ไม่มีทางที่ใครจะข้ามไปตั้งค่าเองได้</p></section>
+
+<section id="section-7"><h2>7. เมื่อไหร่ที่มันเล็กเกินไป</h2><p><code>ValueNotifier</code> เก็บได้ค่าเดียว ซึ่งพอสำหรับหลายกรณี แต่หน้าจอที่โหลดข้อมูลจาก server มีอย่างน้อยสามสิ่งที่เปลี่ยนพร้อมกัน</p><pre class="code-vs"><code>final lines = ValueNotifier&lt;List&lt;PickLine&gt;&gt;([]);
+final state = ValueNotifier&lt;LoadState&gt;(LoadState.idle);
+final error = ValueNotifier&lt;String?&gt;(null);</code></pre><p>ปัญหาที่ตามมาทันที</p><table><thead><tr><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>เปลี่ยนสามตัวแยกกัน</td><td>หน้าจอวาดใหม่สามรอบ และอาจเห็นสถานะกลางที่ไม่ถูกต้อง</td></tr>
+<tr><td>ต้องฟังทั้งสามตัว</td><td>ต้องซ้อน builder สามชั้น</td></tr>
+<tr><td>ไม่มีที่วางตรรกะ</td><td>การโหลดข้อมูลไปอยู่ในหน้าจอเหมือนเดิม</td></tr>
+</tbody></table><p>ทางเลือกมีสองทาง</p><pre class="code-vs"><code>// ทางที่ 1 — รวมเป็นค่าเดียวที่แก้ไม่ได้
+final state = ValueNotifier&lt;PickPageState&gt;(const PickPageState.initial());
+
+// ทางที่ 2 — ใช้ ChangeNotifier ซึ่งเก็บได้หลายค่าและมีที่วางตรรกะ
+class PickStore extends ChangeNotifier { ... }</code></pre><p>ทางที่ 2 คือสิ่งที่ lab ใช้ และเป็นเนื้อหาของบทหน้า</p></section>
+
+<section id="section-8"><h2>8. ใครสร้าง คนนั้นคืน</h2><pre class="code-vs"><code>class _CounterScreenState extends State&lt;CounterScreen&gt; {
+  final _tapCount = ValueNotifier&lt;int&gt;(0);      // เราสร้าง
+
+  @override
+  void dispose() {
+    _tapCount.dispose();                         // เราคืน (1.6, 3.12)
+    super.dispose();
+  }
+}</code></pre><table><thead><tr><th>สร้างที่ไหน</th><th>ใครคืน</th></tr></thead><tbody>
+<tr><td>ใน <code>State</code> ของหน้าจอ</td><td>หน้าจอนั้น ใน <code>dispose</code></td></tr>
+<tr><td>ในชั้นที่อยู่ยาวกว่าหน้าจอ</td><td>ชั้นนั้น — หน้าจอห้ามคืน</td></tr>
+<tr><td>รับมาจากภายนอกผ่าน constructor</td><td>ผู้ที่ส่งมา</td></tr>
+</tbody></table><p><code>ValueListenableBuilder</code> เลิกฟังให้เองเมื่อถูกถอดออก แต่ <strong>ไม่ได้คืนตัว notifier ให้</strong> — เป็นเรื่องเดียวกับที่ 1.13 หัวข้อ 7 เตือนไว้</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนข้อมูลใน list แล้วหน้าจอไม่อัปเดต</td><td>แก้ข้างในก้อนเดิม</td><td>กำหนดก้อนใหม่ <code>value = [...value, x]</code></td></tr>
+<tr><td>หน้าจอวาดใหม่ทั้งที่ค่าเท่าเดิม</td><td>กำหนดค่าที่เทียบว่าไม่เท่ากันแม้เนื้อหาเหมือน</td><td>ใช้ชนิดที่เทียบด้วยค่าได้ หรือเทียบเองก่อนตั้ง</td></tr>
+<tr><td>คนนอกตั้งค่าข้ามกฎได้</td><td>เปิด <code>ValueNotifier</code> ออกไปตรง ๆ</td><td>คืนเป็น <code>ValueListenable</code></td></tr>
+<tr><td>หน่วยความจำรั่ว</td><td>ลืม <code>dispose</code></td><td>คืนใน <code>dispose</code> ของผู้สร้าง</td></tr>
+<tr><td><code>used after being disposed</code></td><td>คืนตัวที่รับมาจากภายนอก</td><td>คืนเฉพาะที่สร้างเอง</td></tr>
+<tr><td>ต้องซ้อน builder หลายชั้น</td><td>ใช้ <code>ValueNotifier</code> หลายตัวกับข้อมูลที่เปลี่ยนพร้อมกัน</td><td>รวมเป็นค่าเดียว หรือใช้ <code>ChangeNotifier</code> (4.5)</td></tr>
+<tr><td>เห็นสถานะกลางที่ไม่ถูกต้องแวบหนึ่ง</td><td>เปลี่ยนหลายค่าแยกกัน</td><td>เปลี่ยนให้ครบก่อนแล้วแจ้งครั้งเดียว</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>เขียน <code>ScanCounter</code> ที่นับจำนวนการยิงบาร์โค้ดในกะปัจจุบัน โดย</p><ol><li>เก็บจำนวนที่สำเร็จและจำนวนที่ถูกปฏิเสธ</li><li>คนนอกอ่านและฟังได้ แต่ตั้งค่าเองไม่ได้</li><li>มีค่าที่คำนวณได้คือจำนวนรวมและอัตราสำเร็จ</li><li>รีเซ็ตได้เมื่อเริ่มกะใหม่</li><li>ทดสอบได้โดยไม่ต้องมีหน้าจอ</li></ol><p>แล้วตอบว่าจะใช้ <code>ValueNotifier</code> กี่ตัว เพราะอะไร</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>คำตอบเรื่องจำนวน notifier — ใช้ตัวเดียว</strong></p><p>เพราะทั้งสองตัวเลขเปลี่ยนจากเหตุการณ์เดียวกันและถูกอ่านพร้อมกันเสมอ ถ้าแยกเป็นสองตัว หน้าจอจะวาดใหม่สองรอบต่อหนึ่งการยิง และอาจเห็นช่วงที่ตัวเลขไม่สอดคล้องกัน</p><pre class="code-vs"><code>/// ค่าที่แก้ไม่ได้ เปลี่ยนทีเดียวทั้งก้อน
+class ScanTally {
+  const ScanTally({this.accepted = 0, this.rejected = 0});
+
+  final int accepted;
+  final int rejected;
+
+  // ค่าที่คำนวณได้ ไม่เก็บซ้ำ (4.2)
+  int get total =&gt; accepted + rejected;
+
+  double get successRate =&gt; total == 0 ? 0 : accepted / total;
+
+  ScanTally copyWith({int? accepted, int? rejected}) =&gt; ScanTally(
+    accepted: accepted ?? this.accepted,
+    rejected: rejected ?? this.rejected,
+  );
+
+  // ต้องมี เพื่อให้ ValueNotifier รู้ว่าค่าเปลี่ยนจริงหรือไม่
+  @override
+  bool operator ==(Object other) =&gt;
+      other is ScanTally &amp;&amp;
+      other.accepted == accepted &amp;&amp;
+      other.rejected == rejected;
+
+  @override
+  int get hashCode =&gt; Object.hash(accepted, rejected);
+}
+
+class ScanCounter {
+  final ValueNotifier&lt;ScanTally&gt; _tally =
+      ValueNotifier&lt;ScanTally&gt;(const ScanTally());
+
+  /// เปิดให้อ่านและฟัง แต่ตั้งค่าไม่ได้
+  ValueListenable&lt;ScanTally&gt; get tally =&gt; _tally;
+
+  void recordAccepted() {
+    _tally.value = _tally.value.copyWith(
+      accepted: _tally.value.accepted + 1,
+    );
+  }
+
+  void recordRejected() {
+    _tally.value = _tally.value.copyWith(
+      rejected: _tally.value.rejected + 1,
+    );
+  }
+
+  void resetForNewShift() =&gt; _tally.value = const ScanTally();
+
+  void dispose() =&gt; _tally.dispose();
+}</code></pre><pre class="code-vs"><code>test('นับแยกสำเร็จกับถูกปฏิเสธ และคำนวณอัตราให้', () {
+  final counter = ScanCounter();
+  addTearDown(counter.dispose);
+
+  counter.recordAccepted();
+  counter.recordAccepted();
+  counter.recordRejected();
+
+  expect(counter.tally.value.accepted, 2);
+  expect(counter.tally.value.total, 3);
+  expect(counter.tally.value.successRate, closeTo(0.667, 0.001));
+});
+
+test('รีเซ็ตแล้วเริ่มนับใหม่', () {
+  final counter = ScanCounter();
+  addTearDown(counter.dispose);
+
+  counter.recordAccepted();
+  counter.resetForNewShift();
+
+  expect(counter.tally.value.total, 0);
+});
+
+test('แจ้งเมื่อค่าเปลี่ยนจริงเท่านั้น', () {
+  final counter = ScanCounter();
+  addTearDown(counter.dispose);
+
+  var notifications = 0;
+  counter.tally.addListener(() =&gt; notifications++);
+
+  counter.recordAccepted();
+  counter.resetForNewShift();
+  counter.resetForNewShift();     // ค่าเท่าเดิมแล้ว ไม่ควรแจ้ง
+
+  expect(notifications, 2);
+});</code></pre><p><strong>ทำไมต้องเขียน <code>operator ==</code></strong></p><p>เพราะ <code>ValueNotifier</code> ใช้การเทียบเพื่อตัดสินว่าจะแจ้งหรือไม่ ถ้าไม่เขียน class ที่เราสร้างเองจะเทียบด้วยตัวตนตามที่เรียนใน D1.6 — ผลคือทุกครั้งที่ <code>copyWith</code> สร้างก้อนใหม่ มันจะถือว่าเปลี่ยนเสมอ แม้ตัวเลขจะเท่าเดิม</p><p>เทสต์ตัวสุดท้ายจับข้อนี้ — <code>resetForNewShift()</code> ครั้งที่สองตั้งค่าที่เท่ากับค่าปัจจุบัน จึงไม่ควรแจ้ง ถ้าลบ <code>operator ==</code> ออก เทสต์นี้จะได้ 3 แทนที่จะเป็น 2</p><p><strong>ข้อสังเกต:</strong> การเขียน <code>operator ==</code> และ <code>hashCode</code> ด้วยมือทุกครั้งน่าเบื่อและลืมง่าย — Part 30 จะสอนให้เครื่องมือสร้างให้อัตโนมัติ ตอนนี้เขียนเองก่อนเพื่อให้เห็นว่ามันจำเป็นเพราะอะไร</p><p><strong>ทำไมใช้ <code>addTearDown</code> ในเทสต์</strong></p><p>เพื่อให้ <code>dispose</code> ถูกเรียกแม้เทสต์จะล้มเหลวกลางคัน — เป็นหลักเดียวกับ <code>finally</code> ใน D1.15</p><p><strong>ลองต่อ:</strong> เปลี่ยนเป็น <code>ValueNotifier&lt;int&gt;</code> สองตัวแยกกัน แล้วเขียนเทสต์นับจำนวนครั้งที่หน้าจอถูกแจ้ง — จะเห็นว่าการยิงหนึ่งครั้งทำให้เกิดการแจ้งหนึ่งครั้งเหมือนกัน แต่เมื่อต้องเปลี่ยนทั้งสองค่าพร้อมกัน (เช่นย้ายหนึ่งรายการจากปฏิเสธไปสำเร็จ) จะได้สองครั้ง และมีช่วงที่ยอดรวมผิด</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>ValueNotifier</code> ทำให้ข้อมูลอยู่นอกหน้าจอได้ โดยยังเรียบง่าย</li><li>มันแจ้งเมื่อกำหนดค่าใหม่ที่ไม่เท่าค่าเดิม</li><li>แก้ข้างในก้อนเดิมไม่นับว่าเปลี่ยน ต้องสร้างก้อนใหม่</li><li>คืนเป็น <code>ValueListenable</code> เพื่อไม่ให้คนนอกตั้งค่าข้ามกฎ</li><li>class ที่เราสร้างเองต้องเขียน <code>operator ==</code> ถ้าจะใช้เป็นค่าใน notifier</li><li>ใครสร้างคนนั้นคืน builder ไม่คืนให้</li><li>เมื่อมีหลายค่าที่เปลี่ยนพร้อมกัน ให้รวมเป็นค่าเดียวหรือใช้เครื่องมือที่ใหญ่กว่า</li></ul></div><p><strong>บทถัดไป:</strong> 4.5 จะแนะนำ <code>ChangeNotifier</code> ซึ่งเก็บได้หลายค่าและมีที่วางตรรกะ — เป็นเครื่องมือที่ lab ของ Part นี้ใช้จริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

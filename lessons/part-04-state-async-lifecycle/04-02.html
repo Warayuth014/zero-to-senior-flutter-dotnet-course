@@ -4,19 +4,128 @@
 <title>Derived State</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-02 · State &amp; Lifecycle</span><h1>Derived State</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ตัวอย่างไม่เก็บซ้ำ</a></li><li><a href="#section-2">WarehouseStore จริง</a></li><li><a href="#section-3">Normalize state shape</a></li><li><a href="#section-4">เมื่อ cache derived valueได้</a></li><li><a href="#section-5">Async derived state</a></li><li><a href="#section-6">Invariants</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Derived state คือค่าที่คำนวณได้จาก source of truth อื่น หากเก็บซ้ำจะต้อง syncหลายจุดและเกิด impossible state ให้เก็บข้อมูลขั้นต่ำแล้วคำนวณ getter/selector เว้นแต่มีเหตุผลด้าน snapshot/performanceที่พิสูจน์ได้</div>
-<section id="section-1"><h2>1. ตัวอย่างไม่เก็บซ้ำ</h2><pre class="code-vs"><code>final List&lt;Task&gt; tasks = [];
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ข้อมูลชั้นเดียว</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">สังเกตเรื่อง allDone</a></li><li><a href="#section-6">เก็บรหัส ไม่เก็บ object</a></li><li><a href="#section-7">เมื่อไหร่ที่เก็บซ้ำได้</a></li><li><a href="#section-8">getter ต้องไม่มีผลข้างเคียง</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: เก็บข้อมูลให้น้อยที่สุดเท่าที่จำเป็น</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.7 (getter กับค่าที่คำนวณได้) และ 4.1 (ข้อมูลควรอยู่ที่ไหน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกได้ว่าข้อมูลชิ้นไหนต้องเก็บจริง ชิ้นไหนคำนวณเอาได้ และกำจัดบั๊กประเภท “ตัวเลขสองที่ไม่ตรงกัน”</div>
 
-int get pendingCount =&gt; tasks.where((t) =&gt; t.isPending).length;
-bool get isEmpty =&gt; tasks.isEmpty;
-Task? taskById(String id) =&gt; tasks.where((t) =&gt; t.id == id).firstOrNull;</code></pre><p>ไม่ต้องมี fields <code>pendingCount</code>, <code>hasTasks</code> ที่ลืมอัปเดตตอน replace/filter</p></section>
-<section id="section-2"><h2>2. WarehouseStore จริง</h2><p>Store เก็บ picks/destination/selected IDs แล้วคำนวณ <code>activePicksForCurrentDestination</code>, <code>activePickCount</code>, <code>selectedPickingConveyor</code> เป็น getters การใช้ IDแทน duplicate selected objectช่วย reconcileหลัง reload list</p></section>
-<section id="section-3"><h2>3. Normalize state shape</h2><p>เก็บ entityตาม ID + selection ID เมื่อข้อมูล refresh object instanceเปลี่ยน getterยังหา entityล่าสุดได้ ถ้าเก็บทั้ง selectedTask objectและ task list อาจ selectedอ้าง objectเก่าที่ statusไม่ตรง list</p></section>
-<section id="section-4"><h2>4. เมื่อ cache derived valueได้</h2><p>การคำนวณหนักบน listใหญ่มากและเรียกบ่อยอาจ memoizeตาม immutable input/version แต่ต้อง invalidateจาก sourceเดียว ใช้ profileก่อน optimize ส่วน filter/sortที่เป็น user intentอาจเก็บ query/sort mode แล้ว derive visible list</p></section>
-<section id="section-5"><h2>5. Async derived state</h2><p>ค่าจาก serverไม่ถือว่า derived localแม้คำนวณได้เชิงแนวคิด หากต้อง authority/current snapshotให้เก็บ responseหรือ fetchผ่าน repository เช่น doneTodayCount/locationCountมาจาก DBและอยู่รอด restart จึงเป็น server state ไม่คำนวณจาก listที่โหลดบางส่วน</p></section>
-<section id="section-6"><h2>6. Invariants</h2><p>กำหนดว่า selectionต้อง nullหรือมีใน list หลัง refresh WarehouseStoreตรวจ selected IDแล้ว clearถ้าหาไม่พบ ทำ mutation batchก่อน notifyหนึ่งครั้ง ป้องกัน UIเห็นช่วง listใหม่แต่ selectedเก่า</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>มี <code>requiredQty</code>, set serials และ <code>scannedQty</code> ควรเก็บอะไร?</p><details><summary>เฉลย</summary><p>เก็บ requiredQtyและ Setของ accepted serial IDs; derive scannedQtyจาก set.length, remainingจาก clamp(required-scanned), completeจาก equality/range ไม่เก็บทั้งสามตัวเลขซ้ำ เว้น backendส่ง authoritative countsที่ไม่เท่ากับ local pending ต้องตั้งชื่อแยกชัด</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ getterที่ mutate, ยิง API หรือ notifyListeners Getterควรอ่าน snapshotอย่าง predictable มิฉะนั้น buildที่อ่านซ้ำทำ side effectและ debugยาก</div></section>
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>เมื่อหน้าจอต้องแสดงหลายอย่าง เรามักเก็บทุกอย่างไว้เป็นตัวแปรแยกกัน</p><pre class="code-vs"><code>List&lt;PickLine&gt; _lines = [];
+int _remainingCount = 0;      // จำนวนที่ยังไม่เสร็จ
+bool _allDone = false;        // เสร็จหมดหรือยัง
+bool _hasLines = false;       // มีรายการไหม</code></pre><p>ปัญหาคือทั้งสามตัวล่างคำนวณจากตัวบนได้ทั้งหมด — และทุกครั้งที่ <code>_lines</code> เปลี่ยน เราต้องจำอัปเดตทั้งสามตัวให้ตรง</p><p>วันหนึ่งจะมี method ที่ลืม แล้วหน้าจอจะแสดงว่า “เหลือ 3 รายการ” พร้อมข้อความ “เสร็จหมดแล้ว” พร้อมกัน</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>derived value</td><td>ค่าที่คำนวณจากค่าอื่นได้</td></tr>
+<tr><td>source of truth</td><td>ข้อมูลต้นทางที่ถือความจริง</td></tr>
+<tr><td>impossible state</td><td>ชุดค่าที่เป็นไปไม่ได้ในโลกจริง แต่โค้ดยอมให้เกิด</td></tr>
+<tr><td>normalize</td><td>จัดรูปข้อมูลให้ไม่ซ้ำซ้อน</td></tr>
+<tr><td>memoize</td><td>จำผลการคำนวณไว้ใช้ซ้ำ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ข้อมูลชั้นเดียว</h2><pre class="code-vs"><code>_lines            ← เก็บจริง (source of truth)
+   │
+   ├─ remainingCount   ← คำนวณ
+   ├─ allDone          ← คำนวณ
+   └─ hasLines         ← คำนวณ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าคำนวณจากค่าอื่นได้ อย่าเก็บซ้ำ — เพราะข้อมูลสองชุดที่ต้อง “ตรงกัน” จะมีวันที่ไม่ตรงกันเสมอ นี่คือหลักเดียวกับ <code>remaining</code> ในแบบฝึกหัด D1.7</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>class PickStore extends ChangeNotifier {
+  List&lt;PickLine&gt; _lines = const [];        // เก็บอย่างเดียว
+
+  List&lt;PickLine&gt; get lines =&gt; List.unmodifiable(_lines);
+
+  /// ค่าที่คำนวณจากค่าอื่นได้ ไม่เก็บซ้ำ (D1.7)
+  int get remainingCount =&gt; _lines.where((line) =&gt; !line.done).length;
+
+  bool get allDone =&gt; _lines.isNotEmpty &amp;&amp; remainingCount == 0;
+}</code></pre><p>ผลที่ได้ทันที — เมื่อ <code>_lines</code> เปลี่ยนด้วยวิธีใดก็ตาม ตัวเลขทั้งหมดถูกต้องเสมอโดยอัตโนมัติ ไม่มีทางไม่ตรงกันได้เลย</p><p>เทสต์ยืนยันว่าค่าปรับตามโดยที่เราไม่ต้องเขียนโค้ดอัปเดตเลย</p><pre class="code-vs"><code>test('allDone เป็นจริงเมื่อไม่มีอะไรเหลือ', () async {
+  await store.load();
+  expect(store.allDone, isFalse);
+
+  await store.markDone('L-1');
+  await store.markDone('L-2');
+
+  expect(store.remainingCount, 0);
+  expect(store.allDone, isTrue);
+});</code></pre><p>สังเกตว่า <code>markDone</code> ไม่ได้แตะ <code>remainingCount</code> หรือ <code>allDone</code> เลย — มันแค่แก้ <code>_lines</code> แล้วที่เหลือถูกต้องตามไปเอง</p></section>
+
+<section id="section-5"><h2>5. สังเกตเรื่อง allDone</h2><pre class="code-vs"><code>bool get allDone =&gt; _lines.isNotEmpty &amp;&amp; remainingCount == 0;</code></pre><p>ทำไมต้องมี <code>_lines.isNotEmpty</code> ด้วย — เพราะถ้าเขียนแค่ <code>remainingCount == 0</code> รายการว่างเปล่าจะถือว่า “เสร็จหมดแล้ว” ซึ่งผิด</p><table><thead><tr><th>สถานการณ์</th><th><code>remainingCount == 0</code></th><th>ความหมายจริง</th></tr></thead><tbody>
+<tr><td>ยังไม่มีงานเลย</td><td>จริง</td><td>ยังไม่มีงาน ไม่ใช่ทำเสร็จ</td></tr>
+<tr><td>มี 3 งาน ทำครบแล้ว</td><td>จริง</td><td>เสร็จหมดแล้ว</td></tr>
+</tbody></table><p>นี่คือเหตุผลที่การแยกสถานะ <code>empty</code> ออกจาก <code>ready</code> สำคัญ ซึ่งเป็นเรื่องเดียวกับที่คุยไว้ใน 2.7 หัวข้อ 3 และจะกลับมาอีกครั้งใน 4.7</p></section>
+
+<section id="section-6"><h2>6. เก็บรหัส ไม่เก็บ object</h2><p>เมื่อต้องจำว่า “ผู้ใช้เลือกรายการไหนอยู่” มีสองทางเลือก</p><pre class="code-vs"><code>// เสี่ยง — เก็บ object ทั้งก้อน
+PickLine? _selected;
+
+// ปลอดภัย — เก็บรหัสแล้วหาเอา
+String? _selectedId;
+PickLine? get selected =&gt;
+    _lines.where((line) =&gt; line.id == _selectedId).firstOrNull;</code></pre><p>ปัญหาของแบบแรกเกิดเมื่อโหลดข้อมูลใหม่ — <code>_lines</code> ได้ object ชุดใหม่จาก server แต่ <code>_selected</code> ยังชี้ object เก่าที่ข้อมูลอาจเปลี่ยนไปแล้ว</p><pre class="code-vs"><code>โหลดครั้งแรก:  _selected = PickLine(L-1, done: false)
+ผู้ใช้กดเสร็จบนเครื่องอื่น
+โหลดใหม่:      _lines มี PickLine(L-1, done: true)
+              _selected ยังเป็น done: false   ← ข้อมูลค้าง</code></pre><p>แบบที่สองหาใหม่ทุกครั้งจากข้อมูลล่าสุด จึงไม่มีทางค้าง — และถ้ารายการนั้นหายไปเลย <code>selected</code> จะเป็น <code>null</code> เองซึ่งถูกต้อง</p><p>ใน lab เราใช้หลักเดียวกันกับสิ่งที่ต้องจำข้ามการโหลด</p><pre class="code-vs"><code>/// บรรทัดที่กำลังส่งคำสั่งอยู่ — เก็บเป็น id ไม่ใช่ตำแหน่ง (1.8)
+final Set&lt;String&gt; _busyLineIds = &lt;String&gt;{};</code></pre></section>
+
+<section id="section-7"><h2>7. เมื่อไหร่ที่เก็บซ้ำได้</h2><table><thead><tr><th>สถานการณ์</th><th>เก็บซ้ำได้ไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>นับจำนวนใน list ไม่กี่สิบรายการ</td><td>ไม่ควร</td><td>คำนวณเร็วมาก ไม่คุ้มความเสี่ยง</td></tr>
+<tr><td>คำนวณหนักบนข้อมูลหมื่นรายการ ที่เรียกทุกครั้งที่วาด</td><td>ได้ ถ้าวัดแล้ว</td><td>ต้องมีวิธีล้างค่าที่จำไว้เมื่อข้อมูลเปลี่ยน</td></tr>
+<tr><td>ตัวเลขที่ server เป็นคนคำนวณ</td><td><strong>ต้องเก็บ</strong></td><td>ไม่ใช่ค่าที่คำนวณจากข้อมูลในมือได้</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญและมักถูกเข้าใจผิด — เช่น “จำนวนงานที่ทำเสร็จวันนี้ทั้งคลัง” ดูเหมือนคำนวณได้ แต่ข้อมูลในมือเรามีแค่งานของตัวเอง ตัวเลขนั้นจึงเป็นข้อมูลจาก server ที่ต้องเก็บ ไม่ใช่ค่าที่คำนวณเอง</p><div class="warn">ถ้าเผลอคำนวณตัวเลขระดับคลังจากรายการที่โหลดมาบางส่วน จะได้ตัวเลขที่ดูสมเหตุสมผลแต่ผิด — และไม่มีใครสังเกตจนกว่าจะเอาไปเทียบกับรายงาน</div></section>
+
+<section id="section-8"><h2>8. getter ต้องไม่มีผลข้างเคียง</h2><pre class="code-vs"><code>// ผิด — getter ที่เปลี่ยนอะไรบางอย่าง
+int get remainingCount {
+  _lastCheckedAt = DateTime.now();     // เปลี่ยนสถานะ
+  notifyListeners();                    // แจ้งคนอื่น — อันตรายมาก
+  return _lines.where((l) =&gt; !l.done).length;
+}</code></pre><p>ทบทวนจาก D1.7 — คนอ่านโค้ดเห็น <code>store.remainingCount</code> แล้วคิดว่าเป็นการอ่านค่าธรรมดา ถ้ามันไปแจ้งให้คนอื่นวาดใหม่ จะเกิดการวาดวนไม่รู้จบทันที เพราะ <code>build</code> อ่านค่านี้แล้วทำให้เกิด <code>build</code> รอบใหม่</p><p>getter ควรทำอย่างเดียวคือคำนวณแล้วคืนค่า</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ตัวเลขสองที่บนหน้าจอไม่ตรงกัน</td><td>เก็บค่าที่คำนวณได้ไว้ซ้ำ</td><td>เปลี่ยนเป็น getter</td></tr>
+<tr><td>ขึ้นว่า “เสร็จหมดแล้ว” ทั้งที่ยังไม่มีงาน</td><td>ลืมเงื่อนไข <code>isNotEmpty</code></td><td>เพิ่มเข้าไป</td></tr>
+<tr><td>รายการที่เลือกไว้แสดงข้อมูลเก่า</td><td>เก็บ object แทนรหัส</td><td>เก็บรหัสแล้วหาใหม่</td></tr>
+<tr><td>เลือกรายการที่ถูกลบไปแล้วค้างอยู่</td><td>ไม่ได้ตรวจว่ายังมีอยู่</td><td>ให้ getter คืน <code>null</code> เองเมื่อหาไม่เจอ</td></tr>
+<tr><td>ตัวเลขสรุประดับคลังไม่ตรงกับรายงาน</td><td>คำนวณจากข้อมูลบางส่วน</td><td>ใช้ตัวเลขจาก server</td></tr>
+<tr><td>หน้าจอวาดวนไม่หยุด</td><td>getter เรียก <code>notifyListeners</code></td><td>เอาผลข้างเคียงออกจาก getter</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอตรวจนับซีเรียลเก็บข้อมูลแบบนี้</p><pre class="code-vs"><code>class CountState {
+  int requiredQty = 10;              // ต้องนับกี่ชิ้น
+  Set&lt;String&gt; scannedSerials = {};   // ซีเรียลที่ยิงแล้ว
+  int scannedQty = 0;                // ยิงไปกี่ชิ้น
+  int remainingQty = 10;             // เหลืออีกกี่ชิ้น
+  bool isComplete = false;           // ครบหรือยัง
+  bool isOverScanned = false;        // ยิงเกินหรือไม่
+}</code></pre><ol><li>ระบุว่าอะไรควรเก็บจริง อะไรควรคำนวณ</li><li>เขียนใหม่ให้ไม่มีข้อมูลซ้ำซ้อน</li><li>ยกตัวอย่างสถานะที่เป็นไปไม่ได้ ซึ่งโค้ดเดิมยอมให้เกิด</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ฟิลด์</th><th>เก็บหรือคำนวณ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>requiredQty</code></td><td><strong>เก็บ</strong></td><td>มาจากใบงาน คำนวณจากอะไรไม่ได้</td></tr>
+<tr><td><code>scannedSerials</code></td><td><strong>เก็บ</strong></td><td>เป็นข้อมูลที่ผู้ใช้สร้างขึ้น</td></tr>
+<tr><td><code>scannedQty</code></td><td>คำนวณ</td><td>คือ <code>scannedSerials.length</code></td></tr>
+<tr><td><code>remainingQty</code></td><td>คำนวณ</td><td>คือ <code>requiredQty - scannedQty</code></td></tr>
+<tr><td><code>isComplete</code></td><td>คำนวณ</td><td>คือ <code>scannedQty == requiredQty</code></td></tr>
+<tr><td><code>isOverScanned</code></td><td>คำนวณ</td><td>คือ <code>scannedQty &gt; requiredQty</code></td></tr>
+</tbody></table><pre class="code-vs"><code>class CountState {
+  CountState({required this.requiredQty});
+
+  final int requiredQty;
+  final Set&lt;String&gt; _scanned = &lt;String&gt;{};
+
+  Set&lt;String&gt; get scannedSerials =&gt; Set.unmodifiable(_scanned);   // D1.7
+
+  int get scannedQty =&gt; _scanned.length;
+
+  /// ไม่ให้ติดลบ เพราะ "เหลือ -2" ไม่มีความหมายกับผู้ใช้
+  int get remainingQty =&gt; (requiredQty - scannedQty).clamp(0, requiredQty);
+
+  bool get isComplete =&gt; scannedQty == requiredQty;
+
+  bool get isOverScanned =&gt; scannedQty &gt; requiredQty;
+
+  /// ทางเดียวที่ข้อมูลเปลี่ยนได้ จึงรักษากฎได้ครบ
+  bool addSerial(String serial) =&gt; _scanned.add(serial);
+}</code></pre><p><strong>ข้อ 3 — สถานะที่เป็นไปไม่ได้ซึ่งโค้ดเดิมยอมให้เกิด</strong></p><table><thead><tr><th>ชุดค่า</th><th>ทำไมเป็นไปไม่ได้</th><th>เกิดได้อย่างไร</th></tr></thead><tbody>
+<tr><td><code>scannedSerials</code> มี 3 ตัว แต่ <code>scannedQty = 5</code></td><td>นับจากชุดเดียวกันต้องเท่ากัน</td><td>มี method ที่เพิ่มลง set แต่ลืมบวก <code>scannedQty</code></td></tr>
+<tr><td><code>isComplete = true</code> พร้อม <code>remainingQty = 4</code></td><td>ครบแล้วต้องไม่เหลือ</td><td>อัปเดตตัวหนึ่งแต่ลืมอีกตัว</td></tr>
+<tr><td><code>isComplete = true</code> พร้อม <code>isOverScanned = true</code></td><td>ครบพอดีกับเกินพร้อมกันไม่ได้</td><td>เขียนเงื่อนไขคนละที่ไม่ตรงกัน</td></tr>
+<tr><td><code>remainingQty = -2</code></td><td>เหลือติดลบไม่มีความหมาย</td><td>ยิงเกินแล้วลบตรง ๆ</td></tr>
+</tbody></table><p><strong>สิ่งที่ได้จากการเขียนใหม่</strong> — ทั้งสี่ชุดค่าข้างบน <em>เขียนออกมาไม่ได้เลย</em> เพราะไม่มีที่ให้เก็บค่าที่ขัดกัน ทุกอย่างคำนวณจากสองฟิลด์ที่เก็บจริง</p><p>นี่คือหลักคิดเดียวกับที่ D1.10 เรียกว่า “ทำให้สถานะที่ผิดเขียนออกมาไม่ได้” และที่ 3.14 ใช้กับ <code>sealed class</code> — ต่างกันแค่ที่นี่ใช้ getter</p><p><strong>ทำไม <code>addSerial</code> คืน <code>bool</code></strong></p><p>เพราะ <code>Set.add</code> คืน <code>false</code> เมื่อมีอยู่แล้ว ซึ่งเป็นข้อมูลที่ผู้เรียกต้องใช้เพื่อแจ้งว่ายิงซ้ำ — เป็นรูปแบบเดียวกับที่ใช้ใน 3.7 และเป็นการไม่ทิ้งข้อมูลที่ภาษาให้มาฟรี ๆ</p><p><strong>จุดที่ควรสังเกตเรื่อง <code>clamp</code></strong></p><p>การจำกัดไม่ให้ติดลบเป็นการตัดสินใจเชิงการใช้งาน ไม่ใช่เชิงเทคนิค — ผู้ใช้ที่เห็น “เหลือ -2” จะงง ส่วน “เหลือ 0” พร้อมคำเตือนว่ายิงเกินสื่อสารได้ดีกว่า และเรายังรู้ว่าเกินอยู่ผ่าน <code>isOverScanned</code></p><p><strong>ลองต่อ:</strong> ใน lab ลองเพิ่ม field <code>int _remainingCount</code> เข้าไปใน <code>PickStore</code> แล้วอัปเดตเฉพาะใน <code>load</code> แต่ลืมใน <code>markDone</code> — จากนั้นรันเทสต์ <code>allDone เป็นจริงเมื่อไม่มีอะไรเหลือ</code> จะเห็นว่าล้มเหลว ซึ่งเป็นการจำลองบั๊กที่บทนี้ป้องกัน</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ถ้าคำนวณจากค่าอื่นได้ อย่าเก็บซ้ำ</li><li>ข้อมูลสองชุดที่ต้องตรงกัน จะมีวันที่ไม่ตรงกัน</li><li>เก็บรหัสแล้วหา object เอา ดีกว่าเก็บ object ไว้</li><li>แยก “ไม่มีข้อมูล” ออกจาก “ทำเสร็จหมดแล้ว”</li><li>ตัวเลขที่ server คำนวณ ต้องเก็บ ไม่ใช่คำนวณเอง</li><li>getter ต้องไม่มีผลข้างเคียง</li><li>เป้าหมายคือทำให้สถานะที่ผิดเขียนออกมาไม่ได้</li></ul></div><p><strong>บทถัดไป:</strong> 4.3 จะแก้ปัญหาที่ค้างจาก 4.1 — เมื่อสองส่วนของหน้าจอต้องใช้ข้อมูลชิ้นเดียวกัน ควรย้ายมันไปไว้ที่ไหน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

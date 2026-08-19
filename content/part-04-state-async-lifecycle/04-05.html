@@ -1,31 +1,245 @@
-<div class="note"><code>ChangeNotifier</code> เป็น observable mutable owner: commandsรักษา invariantsแล้ว <code>notifyListeners()</code> เพื่อให้ consumersอ่าน snapshotใหม่ ความง่ายนี้แลกกับความรับผิดชอบเรื่อง encapsulation, notification granularity และ async race</div>
-<section><h2>1. Store ขั้นต่ำ</h2><pre class="code-vs"><code>class TaskStore extends ChangeNotifier {
-  TaskStore(this.repository);
-  final TaskRepository repository;
-  final List&lt;Task&gt; _tasks = [];
-  List&lt;Task&gt; get tasks =&gt; List.unmodifiable(_tasks);
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: สร้างที่เก็บสถานะที่ทดสอบได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.4 (<code>ValueNotifier</code> และข้อจำกัดของมัน) และ D1.8 (interface กับการสลับตัวจริงกับตัวปลอม)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้าง store ที่เก็บได้หลายค่า มีที่วางตรรกะ และทดสอบได้โดยไม่ต้องประกอบหน้าจอเลย</div>
 
-  void select(String id) {
-    if (_selectedId == id) return;
-    _selectedId = id;
-    notifyListeners();
-  }
-  String? _selectedId;
-}</code></pre></section>
-<section><h2>2. Encapsulate mutation</h2><p>อย่า expose mutable list/public fieldsให้ UIแก้โดยไม่ notify ConnectionControllerเก็บ profiles privateและคืน List.unmodifiable ส่วน WarehouseStoreจริงยังมี public mutable fieldsมากเพื่อความตรงไปตรงมา ซึ่งต้องมีวินัยให้ทุก mutationผ่าน methods</p></section>
-<section><h2>3. Notify หลัง consistent snapshot</h2><p>อัปเดตหลาย fieldที่เป็น transactionเดียวกันก่อน notifyหนึ่งครั้ง เช่น replace tasks → clear invalid selection → set loaded ถ้า notifyกลางทาง UIอาจเห็น selectionที่ไม่มีใน list อย่า notifyทุก assignmentโดยอัตโนมัติ</p></section>
-<section><h2>4. Loading pattern</h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
-  if (_loading) return;
-  _loading = true; _error = null; notifyListeners();
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>4.4 จบด้วยข้อจำกัดที่ชัดเจน — หน้าจอที่โหลดข้อมูลจาก server มีอย่างน้อยสามสิ่งที่เปลี่ยนพร้อมกัน และ <code>ValueNotifier</code> เก็บได้ค่าเดียว</p><p><code>ChangeNotifier</code> แก้ปัญหานี้ด้วยการให้เราเก็บอะไรก็ได้ แล้วบอกเองว่าเมื่อไหร่ควรแจ้ง — ซึ่งทั้งเป็นข้อดีและข้อควรระวัง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>ChangeNotifier</code></td><td>คลาสที่มีความสามารถ “แจ้งคนที่ฟังอยู่”</td></tr>
+<tr><td><code>notifyListeners()</code></td><td>คำสั่งแจ้ง เราเป็นคนเรียกเอง</td></tr>
+<tr><td>store</td><td>คำเรียกทั่วไปของที่เก็บสถานะพร้อมตรรกะ</td></tr>
+<tr><td>command</td><td>method ที่เปลี่ยนสถานะ เช่น <code>load()</code>, <code>markDone()</code></td></tr>
+<tr><td>repository</td><td>ชั้นที่รู้วิธีดึงข้อมูล — store ไม่ต้องรู้ว่ามาจากไหน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: กล่องที่เราคุมเองทุกอย่าง</h2><table><thead><tr><th></th><th><code>ValueNotifier</code></th><th><code>ChangeNotifier</code></th></tr></thead><tbody>
+<tr><td>เก็บได้</td><td>ค่าเดียว</td><td>กี่ค่าก็ได้</td></tr>
+<tr><td>ใครแจ้ง</td><td>มันแจ้งให้เองเมื่อค่าเปลี่ยน</td><td><strong>เราต้องเรียกเอง</strong></td></tr>
+<tr><td>มีที่วางตรรกะ</td><td>ไม่ค่อยมี</td><td>มี — เป็น class เต็ม</td></tr>
+<tr><td>ความเสี่ยง</td><td>ลืมสร้างก้อนใหม่</td><td><strong>ลืมเรียก <code>notifyListeners</code></strong></td></tr>
+</tbody></table><div class="warn"><strong>ความเสี่ยงหลักของ <code>ChangeNotifier</code>:</strong> ถ้าเปลี่ยนค่าแล้วลืมเรียก <code>notifyListeners()</code> หน้าจอจะไม่อัปเดต และ <strong>ไม่มี error อะไรเตือนเลย</strong> — ทางป้องกันคือทำให้ทุกการเปลี่ยนแปลงต้องผ่าน method ที่เราควบคุมได้ ตามหลัก D1.7</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>class PickStore extends ChangeNotifier {
+  PickStore({required this.repository, String Function()? createCommandId})
+    : _createCommandId = createCommandId ?? (() =&gt; ...);
+
+  final PickRepository repository;          // รับสัญญา ไม่ใช่ตัวจริง
+
+  List&lt;PickLine&gt; _lines = const [];         // ทุก field เป็น private
+  LoadState _state = LoadState.idle;
+  String? _errorMessage;
+
+  List&lt;PickLine&gt; get lines =&gt; List.unmodifiable(_lines);   // อ่านได้ แก้ไม่ได้
+  LoadState get state =&gt; _state;
+  String? get errorMessage =&gt; _errorMessage;
+}</code></pre><p>สามอย่างที่ทำให้ store นี้แข็งแรง</p><table><thead><tr><th>สิ่งที่ทำ</th><th>ป้องกันอะไร</th><th>มาจากบท</th></tr></thead><tbody>
+<tr><td>ทุก field เป็น private</td><td>คนนอกเปลี่ยนค่าโดยไม่แจ้ง</td><td>D1.7</td></tr>
+<tr><td>คืน <code>List.unmodifiable</code></td><td>คนนอกแก้ list ข้ามกฎ</td><td>D1.7, 4.3</td></tr>
+<tr><td>รับ <code>PickRepository</code> เข้ามา</td><td>ผูกกับ server จนทดสอบไม่ได้</td><td>D1.8</td></tr>
+</tbody></table></section>
+
+<section><h2>5. รูปแบบของคำสั่งที่โหลดข้อมูล</h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  final generation = ++_generation;
+  _state = LoadState.loading;
+  _errorMessage = null;
+  notifyListeners();                    // แจ้งครั้งที่ 1 — เริ่มโหลด
+
   try {
-    _tasks..clear()..addAll(await repository.fetch());
-  } catch (e) {
-    _error = mapError(e);
+    final result = await repository.fetchLines();
+    if (generation != _generation) return;
+
+    _lines = result;
+    _state = result.isEmpty ? LoadState.empty : LoadState.ready;
+  } on PickException catch (error) {
+    if (generation != _generation) return;
+    _state = LoadState.failed;
+    _errorMessage = error.message;
   } finally {
-    _loading = false; notifyListeners();
+    if (generation == _generation) notifyListeners();   // แจ้งครั้งที่ 2 — จบ
   }
-}</code></pre><p>WarehouseStore loadPalletsใช้รูปแบบนี้ตรง ๆ</p></section>
-<section><h2>5. Repository injection</h2><p>Storeรับ interfaces/repositoriesผ่าน constructor ไม่สร้าง HTTP clientเอง ทำ fake repository, deterministic Future/errorและ test transitionsได้ Absolute WarehouseStoreรับ receiving/tasks/inventory/cycle-count repositoriesครบ</p></section>
-<section><h2>6. Dispose</h2><p>ChangeNotifier disposeหยุดการใช้งานและ assertถ้า notifyภายหลัง Storeต้อง cancel timers/subscriptionsก่อน super.dispose Shellที่สร้าง WarehouseStoreเป็นคน dispose อย่า dispose singleton controllerจาก widgetชั่วคราว</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Commandเพิ่ม taskลง listแล้ว notify แต่ callerยังถือ listจาก getterและแก้ได้ จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>เก็บ list private คืน UnmodifiableListView/List.unmodifiableหรือ immutable snapshot; expose add/remove/update commandsที่ validateและ notify ทำ model immutableเพื่อไม่ให้ callerแก้ fieldภายในโดยไม่ผ่าน store</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ChangeNotifierไม่ทำ thread safety, cancellation, equality หรือ error handlingให้อัตโนมัติ มันแค่ส่ง notification ต้องออกแบบ state/commands/raceเหมือนเดิม และ God Storeที่ notifyทุกเรื่องจะ scaleยาก</div></section>
+}</code></pre><p>โครงนี้จะเจอซ้ำในทุก store ที่เขียนต่อจากนี้</p><ol><li>ตั้งสถานะกำลังโหลด แล้วแจ้ง — ผู้ใช้เห็นตัวหมุนทันที</li><li>ทำงานที่ต้องรอ</li><li>ตั้งผลลัพธ์ ไม่ว่าจะสำเร็จหรือล้มเหลว</li><li>แจ้งอีกครั้งใน <code>finally</code> — จึงแจ้งเสมอไม่ว่าเกิดอะไร</li></ol><p>ส่วนเรื่อง <code>generation</code> คือการกันผลลัพธ์เก่าจาก 3.13 ซึ่งจะอธิบายเต็มอีกครั้งใน 4.10</p></section>
+
+<section><h2>6. เปลี่ยนให้ครบก่อนแจ้ง</h2><pre class="code-vs"><code>// ผิด — แจ้งกลางทาง หน้าจอเห็นสถานะที่ไม่สอดคล้อง
+_lines = newLines;
+notifyListeners();              // ตรงนี้ state ยังเป็น loading อยู่
+_state = LoadState.ready;
+notifyListeners();
+
+// ถูก — เปลี่ยนให้ครบแล้วแจ้งครั้งเดียว
+_lines = newLines;
+_state = LoadState.ready;
+notifyListeners();</code></pre><p>เหตุผลตรงกับที่เตือนใน 1.13 หัวข้อ 5 — การแจ้งกลางทางทำให้หน้าจอวาดในจังหวะที่ข้อมูลยังไม่สอดคล้องกัน ผู้ใช้จะเห็นภาพแวบหนึ่งที่ผิด เช่นรายการขึ้นมาแล้วแต่ยังมีตัวหมุนอยู่</p><p>ข้อยกเว้นที่ตั้งใจคือใน lab ตอนที่ผลไม่แน่ชัด</p><pre class="code-vs"><code>_errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+notifyListeners();              // แจ้งก่อน เพื่อให้ผู้ใช้เห็นว่ากำลังตรวจสอบ
+await load();                   // แล้วค่อยไปโหลดใหม่</code></pre><p>ตรงนี้แจ้งกลางทางโดยตั้งใจ เพราะขั้นตอนตรวจสอบใช้เวลา และผู้ใช้ควรรู้ว่าระบบกำลังทำอะไรอยู่</p></section>
+
+<section><h2>7. รับสัญญาเข้ามา ไม่สร้างเอง</h2><pre class="code-vs"><code>// ผิด — store สร้าง client เอง ทดสอบไม่ได้
+class PickStore extends ChangeNotifier {
+  final api = HttpClient();
+}
+
+// ถูก — รับเข้ามา
+class PickStore extends ChangeNotifier {
+  PickStore({required this.repository});
+  final PickRepository repository;
+}</code></pre><p>ผลที่ได้คือเทสต์กำหนดสถานการณ์ได้ทุกแบบ โดยไม่ต้องมี server</p><pre class="code-vs"><code>test('ล้มเหลวได้สถานะ failed ไม่ใช่ empty', () async {
+  final repo = FakePickRepository()
+    ..fetchError = const PickException('เชื่อมต่อไม่ได้');
+  final store = PickStore(repository: repo);
+
+  await store.load();
+
+  expect(store.state, LoadState.failed);
+  expect(store.errorMessage, 'เชื่อมต่อไม่ได้');
+});</code></pre><p>เทสต์นี้รันในไม่กี่มิลลิวินาที ไม่ต้องมีเครือข่าย ไม่ต้องประกอบ widget และให้ผลเหมือนเดิมทุกครั้ง — ซึ่งเป็นสามอย่างที่เทสต์ระดับหน้าจอทำไม่ได้</p><p>ตัวปลอมใน lab ควบคุมได้ทั้งผลลัพธ์และเวลา</p><pre class="code-vs"><code>class FakePickRepository implements PickRepository {
+  /// ถ้าตั้งไว้ fetchLines จะรอ future นี้แทนที่จะคืนทันที
+  Completer&lt;List&lt;PickLine&gt;&gt;? fetchGate;
+
+  PickException? fetchError;
+
+  final List&lt;String&gt; fetchCalls = [];      // นับว่าถูกเรียกกี่ครั้ง
+}</code></pre></section>
+
+<section><h2>8. เก็บกวาดใน dispose</h2><pre class="code-vs"><code>@override
+void dispose() {
+  stopPolling();
+  _generation++;        // ทำให้ผลที่ยังค้างอยู่ถูกทิ้งทั้งหมด
+  super.dispose();
+}</code></pre><p><code>ChangeNotifier</code> มี <code>dispose</code> มาให้แล้ว เราเพิ่มการเก็บกวาดของเราก่อนเรียกของแม่ ตามลำดับที่เรียนใน 3.12</p><p>บรรทัด <code>_generation++</code> เป็นเทคนิคที่ใช้แทนการตรวจ <code>mounted</code> — เพราะ store ไม่มี <code>mounted</code> การเพิ่มรุ่นทำให้งานที่ยังค้างอยู่ทั้งหมดถูกทิ้งเมื่อผลกลับมา</p><div class="warn">ถ้าเรียก <code>notifyListeners()</code> หลัง <code>dispose</code> จะได้ error ทันที ซึ่งดีเพราะบอกว่ามีงานค้างที่ยังไม่ถูกจัดการ — อย่าแก้ด้วยการดักเงียบ ๆ ให้ไปหาว่างานไหนยังไม่หยุด</div></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนข้อมูลแล้วหน้าจอไม่อัปเดต</td><td>ลืม <code>notifyListeners()</code></td><td>ทำ field เป็น private แล้วเปลี่ยนผ่าน method เท่านั้น</td></tr>
+<tr><td>คนนอกแก้ list ได้โดยตรง</td><td>คืน list ตัวจริงออกไป</td><td>คืน <code>List.unmodifiable</code></td></tr>
+<tr><td>หน้าจอกระพริบเห็นสถานะกลาง</td><td>แจ้งหลายครั้งต่อการกระทำเดียว</td><td>เปลี่ยนให้ครบก่อนแล้วแจ้งครั้งเดียว</td></tr>
+<tr><td>ธงกำลังโหลดค้างเมื่อเกิดข้อผิดพลาด</td><td>ตั้งค่ากลับไว้ท้าย <code>try</code></td><td>ย้ายไป <code>finally</code></td></tr>
+<tr><td>ทดสอบ store ไม่ได้ ต้องมี server</td><td>store สร้าง client เอง</td><td>รับ repository เข้ามาผ่าน constructor</td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>งานที่ค้างอยู่แจ้งหลัง store ตาย</td><td>หยุดงานทั้งหมดใน <code>dispose</code></td></tr>
+<tr><td>store ตัวเดียวเก็บทุกอย่างของทั้งแอป</td><td>ไม่ได้แบ่งตามส่วนงาน</td><td>แยก store ตามส่วนงาน</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>แปลงหน้าจอนี้ให้ใช้ store</p><pre class="code-vs"><code>class _CountScreenState extends State&lt;CountScreen&gt; {
+  List&lt;CountLine&gt; _lines = [];
+  bool _loading = false;
+  String? _error;
+
+  Future&lt;void&gt; _load() async {
+    setState(() =&gt; _loading = true);
+    try {
+      final result = await api.fetchCountLines();
+      setState(() =&gt; _lines = result);
+    } catch (e) {
+      setState(() =&gt; _error = e.toString());
+    } finally {
+      setState(() =&gt; _loading = false);
+    }
+  }
+}</code></pre><ol><li>ระบุปัญหาที่โค้ดเดิมมี</li><li>เขียน store พร้อม repository ที่เป็นสัญญา</li><li>เขียนเทสต์อย่างน้อยสามกรณีที่โค้ดเดิมทดสอบไม่ได้</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ปัญหาของโค้ดเดิม</strong></p><table><thead><tr><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ไม่ตรวจ <code>mounted</code></td><td>พังเมื่อออกจากหน้าจอระหว่างโหลด (3.13)</td></tr>
+<tr><td>ไม่แยกสถานะว่างออกจากสำเร็จ</td><td>ไม่มีข้อมูลกับล้มเหลวดูเหมือนกัน (4.2)</td></tr>
+<tr><td>ใช้ <code>e.toString()</code> เป็นข้อความ</td><td>ผู้ใช้เห็นข้อความทางเทคนิค (D1.14)</td></tr>
+<tr><td>ผูกกับ <code>api</code> โดยตรง</td><td>ทดสอบต้องมี server</td></tr>
+<tr><td>เรียก <code>setState</code> สามครั้ง</td><td>วาดใหม่สามรอบต่อการโหลดหนึ่งครั้ง</td></tr>
+</tbody></table><pre class="code-vs"><code>// สัญญา — ไม่รู้ว่าข้อมูลมาจากไหน
+abstract interface class CountRepository {
+  Future&lt;List&lt;CountLine&gt;&gt; fetchLines();
+}
+
+class CountException implements Exception {
+  const CountException(this.message);
+  final String message;
+}
+
+enum CountLoadState { idle, loading, ready, empty, failed }
+
+class CountStore extends ChangeNotifier {
+  CountStore({required this.repository});
+
+  final CountRepository repository;
+
+  List&lt;CountLine&gt; _lines = const [];
+  CountLoadState _state = CountLoadState.idle;
+  String? _errorMessage;
+
+  List&lt;CountLine&gt; get lines =&gt; List.unmodifiable(_lines);
+  CountLoadState get state =&gt; _state;
+  String? get errorMessage =&gt; _errorMessage;
+
+  int get totalQuantity =&gt;
+      _lines.fold(0, (sum, line) =&gt; sum + line.quantity);   // คำนวณ (4.2)
+
+  Future&lt;void&gt; load() async {
+    if (_state == CountLoadState.loading) return;   // กันเรียกซ้อน
+
+    _state = CountLoadState.loading;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final result = await repository.fetchLines();
+      _lines = result;
+      _state = result.isEmpty
+          ? CountLoadState.empty
+          : CountLoadState.ready;
+    } on CountException catch (error) {
+      _state = CountLoadState.failed;
+      _errorMessage = error.message;        // ข้อความที่เตรียมไว้ให้ผู้ใช้
+    } finally {
+      notifyListeners();                     // แจ้งเสมอ
+    }
+  }
+}</code></pre><pre class="code-vs"><code>class FakeCountRepository implements CountRepository {
+  FakeCountRepository({this.lines = const []});
+
+  List&lt;CountLine&gt; lines;
+  CountException? error;
+  Completer&lt;List&lt;CountLine&gt;&gt;? gate;
+  int fetchCount = 0;
+
+  @override
+  Future&lt;List&lt;CountLine&gt;&gt; fetchLines() async {
+    fetchCount++;
+    final pending = gate;
+    if (pending != null) return pending.future;
+    if (error != null) throw error!;
+    return lines;
+  }
+}
+
+void main() {
+  test('ไม่มีข้อมูลได้สถานะ empty ไม่ใช่ ready', () async {
+    final store = CountStore(repository: FakeCountRepository());
+    await store.load();
+    expect(store.state, CountLoadState.empty);
+  });
+
+  test('ล้มเหลวแล้วได้ข้อความที่เตรียมไว้ ไม่ใช่ข้อความทางเทคนิค', () async {
+    final repo = FakeCountRepository()
+      ..error = const CountException('เชื่อมต่อไม่ได้');
+    final store = CountStore(repository: repo);
+
+    await store.load();
+
+    expect(store.state, CountLoadState.failed);
+    expect(store.errorMessage, 'เชื่อมต่อไม่ได้');
+  });
+
+  test('เรียกโหลดซ้อนระหว่างที่ยังไม่เสร็จ ไม่ยิงซ้ำ', () async {
+    final repo = FakeCountRepository();
+    final gate = Completer&lt;List&lt;CountLine&gt;&gt;();
+    repo.gate = gate;
+    final store = CountStore(repository: repo);
+
+    final first = store.load();
+    await store.load();
+    await store.load();
+
+    gate.complete(const []);
+    await first;
+
+    expect(repo.fetchCount, 1);
+  });
+}</code></pre><p><strong>ทำไมสามกรณีนี้ทดสอบไม่ได้ด้วยโค้ดเดิม</strong></p><table><thead><tr><th>กรณี</th><th>ทำไมเดิมทำไม่ได้</th></tr></thead><tbody>
+<tr><td>สถานะว่าง</td><td>โค้ดเดิมไม่มีสถานะนี้เลย</td></tr>
+<tr><td>ข้อความผิดพลาด</td><td>ต้องทำให้ server ล้มเหลวจริง ซึ่งควบคุมไม่ได้</td></tr>
+<tr><td>เรียกซ้อน</td><td>ต้องควบคุมเวลาให้คำขอค้าง ซึ่งทำกับ server จริงไม่ได้</td></tr>
+</tbody></table><p><strong>จุดที่ควรสังเกตที่สุด</strong> — เทสต์ทั้งสามไม่มีคำว่า <code>widget</code>, <code>tester</code> หรือ <code>pumpWidget</code> เลยแม้แต่คำเดียว ซึ่งหมายความว่าตรรกะการโหลดแยกออกจากหน้าจอได้จริง ตามหลักที่ใช้มาตั้งแต่ D1.20</p><p><strong>ลองต่อ:</strong> เพิ่ม getter <code>totalQuantity</code> แล้วเขียนเทสต์ — จะเห็นว่าไม่ต้องแก้ <code>load()</code> เลย เพราะเป็นค่าที่คำนวณได้ตามหลัก 4.2</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>ChangeNotifier</code> เก็บได้หลายค่าและมีที่วางตรรกะ</li><li>เราเป็นคนเรียก <code>notifyListeners()</code> เอง — ลืมแล้วไม่มีอะไรเตือน</li><li>ทำ field เป็น private แล้วเปลี่ยนผ่าน method เท่านั้น</li><li>คืนข้อมูลออกไปแบบแก้ไม่ได้</li><li>เปลี่ยนให้ครบก่อนแล้วแจ้งครั้งเดียว</li><li>รับ repository เข้ามาผ่าน constructor เพื่อให้ทดสอบได้</li><li>แจ้งใน <code>finally</code> เพื่อให้แจ้งเสมอไม่ว่าเกิดอะไร</li><li>หยุดงานทั้งหมดใน <code>dispose</code></li></ul></div><p><strong>บทถัดไป:</strong> 4.6 จะแก้ผลข้างเคียงของ store — เมื่อแจ้งหนึ่งครั้ง ทุกคนที่ฟังอยู่จะวาดใหม่หมด ซึ่งอาจมากเกินจำเป็น</p></section>

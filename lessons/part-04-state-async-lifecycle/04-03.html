@@ -4,22 +4,142 @@
 <title>Lifting State Up</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-03 · State &amp; Lifecycle</span><h1>Lifting State Up</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Data down, events up</a></li><li><a href="#section-2">เมื่อ siblingsต้อง sync</a></li><li><a href="#section-3">Lift เท่าที่จำเป็น</a></li><li><a href="#section-4">Typed event</a></li><li><a href="#section-5">Async callback ownership</a></li><li><a href="#section-6">Alternatives เมื่อ prop drillingลึก</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">ยก stateขึ้นถึง ownerร่วมที่ต่ำที่สุด แล้วส่ง immutable dataลงและ event callbackกลับขึ้น วิธีนี้ให้ source of truthเดียวโดยไม่ยกทุก stateถึง app root</div>
-<section id="section-1"><h2>1. Data down, events up</h2><pre class="code-vs"><code>class QuantityPanel extends StatelessWidget {
-  const QuantityPanel({
-    required this.quantity,
-    required this.onChanged,
-  });
-  final int quantity;
-  final ValueChanged&lt;int&gt; onChanged;
-}</code></pre><p>Childไม่แก้ modelเอง Parent/store validate/clampแล้วส่งค่ารอบใหม่ลงมา</p></section>
-<section id="section-2"><h2>2. เมื่อ siblingsต้อง sync</h2><p>StepperและTextFieldแก้ quantityเดียวกัน ให้ parentถือ int/controller policy แล้ว childrenส่ง delta/valueกลับ หากแต่ละ childมี copyของ quantityจะ driftเมื่ออีกฝั่งเปลี่ยน</p></section>
-<section id="section-3"><h2>3. Lift เท่าที่จำเป็น</h2><p>Stateโหมด chartใช้เฉพาะ SummaryCardจึงอยู่ใน card แต่ selected taskที่ detail/listใช้ร่วมกันควรอยู่ feature container/store อย่ายก hover/expanded tileทุกใบเข้า God Storeจน notifyหนึ่งครั้ง rebuildทั้งแอป</p></section>
-<section id="section-4"><h2>4. Typed event</h2><p>ใช้ <code>VoidCallback</code>, <code>ValueChanged&lt;T&gt;</code> หรือ domain callbackเช่น <code>Future&lt;void&gt; Function(TaskId)</code> แทน Functionกว้าง Callbackควรสื่อ user intent “confirmPick” ไม่ใช่ expose setterทุก fieldของ parent</p></section>
-<section id="section-5"><h2>5. Async callback ownership</h2><p>Childปุ่มสามารถ await callbackเพื่อแสดง local pressed stateได้ แต่ business loading/errorควรอยู่ command ownerและส่ง busy/resultลง Childไม่จับ exceptionแล้วกลืนหาก ownerต้อง rollback/reconcile</p></section>
-<section id="section-6"><h2>6. Alternatives เมื่อ prop drillingลึก</h2><p>ถ้าส่ง data/callbackผ่าน intermediate widgetsหลายชั้นที่ไม่ใช้ ให้ย้าย feature ownerใกล้ consumersหรือใช้ Inherited/Provider scoped subtree ไม่ใช้ global singletonทันที Constructor injectionยังดีที่สุดเมื่อ dependencyตรงและชั้นน้อย</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>TaskListและTaskDetailต้องเห็น selected task; AppBarไม่ใช้มัน Ownerอยู่ไหน?</p><details><summary>เฉลย</summary><p>อยู่ parent/containerที่ครอบ List+Detailต่ำที่สุด ส่ง selected ID/taskลงและ onSelect/onClearกลับ AppBarไม่ต้องรับ หาก selectionต้องคงข้าม routeหรือใช้ command asyncหลายหน้า ค่อยอยู่ feature storeที่มี lifetimeยาวขึ้น</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าส่ง mutable List/storeทั้งก้อนให้ childทุกตัวแล้วปล่อยแก้เอง เพราะ ownershipและ notificationหาย ใช้ unmodifiable view/snapshot + commandsที่รักษา invariants</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: หาแม่ร่วมที่ต่ำที่สุด</a></li><li><a href="#section-4">รูปแบบที่ใช้จริง</a></li><li><a href="#section-5">ลูกต้องไม่เก็บสำเนาไว้เอง</a></li><li><a href="#section-6">เมื่อการส่งผ่านหลายชั้นเริ่มเป็นปัญหา</a></li><li><a href="#section-7">ส่งข้อมูลที่แก้ไม่ได้ลงไป</a></li><li><a href="#section-8">ยกขึ้นเท่าที่จำเป็น</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ย้ายข้อมูลขึ้นไปให้พี่น้องใช้ร่วมกัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.12 (ข้อมูลไหลลง เหตุการณ์ไหลขึ้น) และ 4.1 (สามคำถามเรื่องข้อมูลควรอยู่ที่ไหน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> หาตำแหน่งที่ถูกต้องของข้อมูลที่หลายส่วนต้องใช้ และรู้ว่าเมื่อไหร่การส่งผ่านหลายชั้นกลายเป็นปัญหา</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>สมมติหน้าจอมีสองส่วนที่ต้องใช้จำนวนเดียวกัน — ปุ่มเพิ่มลด และช่องกรอกตัวเลข ถ้าแต่ละส่วนเก็บค่าของตัวเอง จะเกิดอาการที่ผู้ใช้เห็นทันที</p><pre class="code-vs"><code>ผู้ใช้กดปุ่มเพิ่ม  →  ปุ่มแสดง 5   ช่องกรอกยังแสดง 4
+ผู้ใช้พิมพ์ 12     →  ช่องแสดง 12  ปุ่มยังคิดว่าเป็น 5</code></pre><p>นี่คือปัญหา “แหล่งความจริงสองที่” ซึ่งแก้ด้วยการย้ายข้อมูลขึ้นไปอยู่ที่แม่ร่วม</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>lifting state up</td><td>ย้ายข้อมูลขึ้นไปที่แม่</td></tr>
+<tr><td>common ancestor</td><td>แม่ร่วมที่ต่ำที่สุดของทุกคนที่ต้องใช้</td></tr>
+<tr><td>prop drilling</td><td>การส่งข้อมูลผ่านชั้นกลางที่ไม่ได้ใช้</td></tr>
+<tr><td>snapshot</td><td>ภาพนิ่งของข้อมูลที่ส่งลงไป</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: หาแม่ร่วมที่ต่ำที่สุด</h2><pre class="code-vs"><code>          PickScreen          ← ข้อมูลควรอยู่ที่นี่
+         /          \
+   QuantityStepper  QuantityField
+   (ต้องใช้)         (ต้องใช้)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ย้ายขึ้นไปให้ <em>ต่ำที่สุดเท่าที่ยังครอบทุกคนที่ต้องใช้</em> — ไม่ใช่ยกขึ้นไปบนสุดของแอปทุกครั้ง เพราะยิ่งสูง ยิ่งมีคนที่ไม่เกี่ยวข้องถูกวาดใหม่</div><p>นี่คือกฎเดียวกับที่ 1.5 หัวข้อ 7 บอกไว้ และเป็นกฎเดียวกับการวาง builder ใน 1.13 — ต่างแค่มิติ</p></section>
+
+<section id="section-4"><h2>4. รูปแบบที่ใช้จริง</h2><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  int _quantity = 1;                          // แหล่งความจริงเดียว
+
+  void _setQuantity(int next) {
+    final clamped = next.clamp(1, 999);       // กฎอยู่ที่แม่ที่เดียว
+    if (clamped == _quantity) return;
+    setState(() =&gt; _quantity = clamped);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        QuantityStepper(
+          value: _quantity,                    // ข้อมูลลง
+          onChanged: _setQuantity,             // เหตุการณ์ขึ้น
+        ),
+        QuantityField(
+          value: _quantity,
+          onChanged: _setQuantity,
+        ),
+      ],
+    );
+  }
+}</code></pre><p>สังเกตว่าทั้งสองส่วนใช้ <code>_setQuantity</code> ตัวเดียวกัน จึงเป็นไปไม่ได้ที่กฎจะไม่ตรงกัน — ตรงกับหลักใน 3.4 ที่ว่าทุกทางต้องไปที่ method เดียว</p><p>และลูกทั้งสองเป็น <code>StatelessWidget</code> ได้ เพราะไม่ต้องจำอะไร</p></section>
+
+<section id="section-5"><h2>5. ลูกต้องไม่เก็บสำเนาไว้เอง</h2><pre class="code-vs"><code>// ผิด — ลูกเก็บสำเนา
+class _QuantityFieldState extends State&lt;QuantityField&gt; {
+  late int _local = widget.value;      // คัดลอกครั้งเดียวตอนเกิด
+
+  // เมื่อแม่เปลี่ยนค่า _local ไม่รู้เรื่อง
+}</code></pre><p>ทบทวนจาก 1.6 — <code>initState</code> ทำงานครั้งเดียว การคัดลอกค่าจากแม่ตอนนั้นทำให้ค่าค้างไปตลอด</p><p>ถ้าจำเป็นต้องเก็บสำเนาจริง ๆ (เช่นช่องกรอกที่ต้องมีตัวควบคุมของตัวเอง) ต้องซิงก์เมื่อแม่ส่งค่าใหม่</p><pre class="code-vs"><code>@override
+void didUpdateWidget(covariant QuantityField oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (oldWidget.value != widget.value) {          // เทียบก่อนเสมอ (1.9)
+    _controller.text = widget.value.toString();
+  }
+}</code></pre><div class="warn">อย่าซิงก์โดยไม่เทียบก่อน — เพราะ <code>didUpdateWidget</code> ถูกเรียกทุกครั้งที่แม่วาดใหม่ ถ้าตั้งค่าทุกรอบ เคอร์เซอร์จะเด้งไปต้นบรรทัดขณะที่ผู้ใช้กำลังพิมพ์</div></section>
+
+<section id="section-6"><h2>6. เมื่อการส่งผ่านหลายชั้นเริ่มเป็นปัญหา</h2><pre class="code-vs"><code>PickScreen (มีข้อมูล)
+└── Column
+    └── Card              ← ไม่ได้ใช้ แต่ต้องรับแล้วส่งต่อ
+        └── Padding       ← ไม่ได้ใช้
+            └── Row       ← ไม่ได้ใช้
+                └── QuantityField   ← ใช้จริง</code></pre><table><thead><tr><th>ระยะห่าง</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>1–2 ชั้น</td><td>ส่งผ่าน constructor ตามปกติ</td></tr>
+<tr><td>3 ชั้นขึ้นไป แต่ชั้นกลางเป็นแค่การจัดวาง</td><td>ยังส่งผ่านได้ เพราะชั้นกลางไม่ใช่ widget ที่เราเขียนเอง</td></tr>
+<tr><td>3 ชั้นขึ้นไป และชั้นกลางเป็น widget ของเราที่ไม่ได้ใช้</td><td>เริ่มมีปัญหา — ดู 4.5</td></tr>
+</tbody></table><p>ข้อสังเกตสำคัญ — ชั้นกลางอย่าง <code>Column</code> หรือ <code>Padding</code> <strong>ไม่ได้รับข้อมูลผ่าน constructor</strong> เพราะเราเขียน <code>QuantityField</code> ไว้ข้างในโดยตรง ปัญหาการส่งผ่านหลายชั้นเกิดเฉพาะเมื่อเราแตก widget ของตัวเองออกมาเป็นชั้น ๆ แล้วต้องส่งต่อทีละชั้น</p></section>
+
+<section id="section-7"><h2>7. ส่งข้อมูลที่แก้ไม่ได้ลงไป</h2><pre class="code-vs"><code>// เสี่ยง — ลูกแก้ได้เอง แม่ไม่รู้
+LineList(lines: _lines)
+
+// ปลอดภัย — ลูกแก้ไม่ได้
+LineList(lines: List.unmodifiable(_lines))</code></pre><p>ใน lab เราคืนแบบแก้ไม่ได้จาก store เสมอ</p><pre class="code-vs"><code>List&lt;PickLine&gt; get lines =&gt; List.unmodifiable(_lines);</code></pre><p>และเทสต์ยืนยันว่าคนนอกแก้ไม่ได้จริง</p><pre class="code-vs"><code>test('รายการที่คืนออกไปแก้ไม่ได้', () async {
+  await store.load();
+  expect(
+    () =&gt; store.lines.add(const PickLine(id: 'X', palletCode: 'X', quantity: 1)),
+    throwsUnsupportedError,
+  );
+});</code></pre><p>เหตุผลตรงกับ D1.7 — ถ้าลูกแก้ข้อมูลได้โดยตรง กฎทั้งหมดที่แม่เขียนไว้จะถูกข้าม และไม่มีใครแจ้งให้หน้าจอวาดใหม่</p></section>
+
+<section id="section-8"><h2>8. ยกขึ้นเท่าที่จำเป็น</h2><table><thead><tr><th>ข้อมูล</th><th>ยกไปถึงไหน</th><th>ถ้ายกสูงเกินไปจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td>โหมดแสดงผลของการ์ดใบเดียว</td><td>อยู่ในการ์ดนั้น</td><td>ทั้งหน้าจอวาดใหม่เมื่อสลับโหมด</td></tr>
+<tr><td>รายการที่ถูกเลือกในหน้านี้</td><td>แม่ร่วมของรายการกับรายละเอียด</td><td>หน้าจออื่นถูกวาดใหม่โดยไม่จำเป็น</td></tr>
+<tr><td>ผู้ใช้ที่ล็อกอิน</td><td>ชั้นบนสุดของแอป</td><td>ถูกต้องแล้ว</td></tr>
+</tbody></table><div class="warn">การยกทุกอย่างขึ้นไปไว้ที่เดียวทั้งแอปทำให้เกิดสิ่งที่เรียกว่า “ที่เก็บทุกอย่าง” — เมื่อค่าใด ๆ เปลี่ยน ทุกคนที่ฟังอยู่จะถูกแจ้งหมด แม้จะไม่เกี่ยวข้อง ผลคือแอปช้าลงและหาสาเหตุของการวาดใหม่ยากมาก</div></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สองส่วนแสดงค่าไม่ตรงกัน</td><td>แต่ละส่วนเก็บสำเนาของตัวเอง</td><td>ย้ายขึ้นไปที่แม่ร่วม</td></tr>
+<tr><td>แม่เปลี่ยนค่าแล้วลูกไม่ตาม</td><td>ลูกคัดลอกไว้ใน <code>initState</code></td><td>อ่านจาก <code>widget.value</code> หรือซิงก์ใน <code>didUpdateWidget</code></td></tr>
+<tr><td>เคอร์เซอร์เด้งขณะพิมพ์</td><td>ซิงก์ทุกครั้งโดยไม่เทียบก่อน</td><td>เทียบค่าเก่ากับใหม่ก่อนตั้ง</td></tr>
+<tr><td>กฎการตรวจไม่ตรงกันระหว่างสองทาง</td><td>เขียนตรรกะสองชุด</td><td>ให้ทุกทางเรียก method เดียว</td></tr>
+<tr><td>ลูกแก้ข้อมูลแล้วหน้าจอไม่อัปเดต</td><td>ส่ง list ที่แก้ได้ลงไป</td><td>ส่งแบบแก้ไม่ได้</td></tr>
+<tr><td>เปลี่ยนค่าเล็ก ๆ แล้วทั้งแอปวาดใหม่</td><td>ยกขึ้นสูงเกินไป</td><td>ย้ายลงมาให้ต่ำที่สุดที่ยังครอบทุกคน</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอหนึ่งมีโครงสร้างแบบนี้</p><pre class="code-vs"><code>PickScreen
+├── AppBar          — แสดงชื่อหน้าจอ ไม่ใช้ข้อมูลอะไร
+├── FilterBar       — เลือกกรองเฉพาะที่ยังไม่เสร็จ
+├── LineList        — แสดงรายการตามตัวกรอง
+└── SummaryFooter   — แสดงจำนวนที่กรองแล้ว</code></pre><ol><li>ตัวกรองควรอยู่ที่ไหน</li><li>รายการที่กรองแล้วควรเก็บเป็นตัวแปรหรือคำนวณ</li><li>เขียนโครงโค้ด</li><li>ถ้าวันหนึ่งหน้าจออื่นต้องใช้ตัวกรองเดียวกันด้วย จะทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1</strong></p><p>อยู่ที่ <code>PickScreen</code> เพราะเป็นแม่ร่วมที่ต่ำที่สุดของสามส่วนที่ต้องใช้ — <code>FilterBar</code> เปลี่ยนมัน ส่วน <code>LineList</code> กับ <code>SummaryFooter</code> อ่านมัน ส่วน <code>AppBar</code> ไม่เกี่ยว จึงไม่ต้องรับอะไร</p><p><strong>ข้อ 2</strong></p><p>คำนวณ ตามหลักใน 4.2 — เก็บแค่ตัวกรองกับรายการทั้งหมด แล้วรายการที่กรองแล้วเป็น getter</p><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  bool _showOnlyRemaining = false;         // เก็บ
+
+  // คำนวณ — ไม่มีทางไม่ตรงกับตัวกรอง
+  List&lt;PickLine&gt; get _visibleLines =&gt; _showOnlyRemaining
+      ? widget.store.lines.where((line) =&gt; !line.done).toList()
+      : widget.store.lines;
+
+  void _setFilter(bool value) {
+    if (value == _showOnlyRemaining) return;
+    setState(() =&gt; _showOnlyRemaining = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _visibleLines;           // คำนวณครั้งเดียวต่อการวาด
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('หยิบสินค้า')),   // ไม่รับอะไร
+      body: Column(
+        children: [
+          FilterBar(
+            showOnlyRemaining: _showOnlyRemaining,
+            onChanged: _setFilter,
+          ),
+          Expanded(child: LineList(lines: visible)),
+          SummaryFooter(visibleCount: visible.length),
+        ],
+      ),
+    );
+  }
+}</code></pre><p><strong>ทำไมเก็บ <code>visible</code> ลงตัวแปรใน <code>build</code></strong></p><p>เพราะ <code>_visibleLines</code> สร้าง list ใหม่ทุกครั้งที่เรียก ถ้าเรียกสองครั้ง (ครั้งหนึ่งให้ <code>LineList</code> อีกครั้งให้ <code>SummaryFooter</code>) จะกรองสองรอบโดยไม่จำเป็น — การเก็บลงตัวแปรในเครื่องแก้ได้ทันทีโดยไม่ต้องทำอะไรซับซ้อน</p><p><strong>ข้อ 4 — ถ้าหน้าจออื่นต้องใช้ตัวกรองเดียวกัน</strong></p><p>ให้กลับไปถามสามคำถามจาก 4.1 ใหม่ — คำตอบข้อแรกเปลี่ยนจาก “หน้าจอนี้คนเดียว” เป็น “หลายหน้าจอ” ดังนั้นตัวกรองต้องย้ายออกจาก <code>setState</code></p><p>แต่ต้องถามต่ออีกข้อก่อนตัดสิน — <strong>สองหน้าจอนั้นต้องเห็นตัวกรองเดียวกันจริงไหม หรือแค่มีตัวกรองแบบเดียวกัน</strong></p><table><thead><tr><th>ความต้องการ</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>ตั้งกรองในหน้าหนึ่ง แล้วอีกหน้าต้องเห็นตามด้วย</td><td>ย้ายไปที่ store</td></tr>
+<tr><td>แต่ละหน้ามีตัวกรองของตัวเอง แค่หน้าตาเหมือนกัน</td><td>คงไว้ที่ <code>setState</code> ของแต่ละหน้า แล้วแชร์เฉพาะ widget</td></tr>
+</tbody></table><p>ข้อนี้เป็นกับดักที่พบบ่อย — เห็นว่าสองหน้าจอมีตัวกรองเหมือนกัน เลยรีบย้ายไปที่เก็บกลาง ผลคือผู้ใช้ตั้งกรองในหน้าหนึ่งแล้วอีกหน้าเปลี่ยนตามโดยไม่ได้ตั้งใจ ซึ่งเป็นพฤติกรรมที่ผู้ใช้ไม่คาดคิด</p><p><strong>ลองต่อ:</strong> ใน lab ให้เพิ่มตัวกรองตามแนวคำตอบนี้ลงใน <code>PickScreen</code> โดยยังไม่แตะ <code>PickStore</code> — จะเห็นว่าทำได้โดยไม่กระทบเทสต์ของ store เลยแม้แต่ตัวเดียว ซึ่งเป็นหลักฐานว่าเราวางข้อมูลถูกที่</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>เมื่อหลายส่วนต้องใช้ข้อมูลเดียวกัน ให้ย้ายขึ้นไปที่แม่ร่วมที่ต่ำที่สุด</li><li>ข้อมูลไหลลงผ่าน constructor เหตุการณ์ไหลขึ้นผ่าน callback</li><li>ลูกต้องไม่เก็บสำเนา — ถ้าจำเป็นต้องซิงก์ใน <code>didUpdateWidget</code> พร้อมเทียบก่อน</li><li>ให้ทุกทางที่เปลี่ยนค่าเรียก method เดียว กฎจะได้ไม่แตกต่างกัน</li><li>ส่งข้อมูลแบบแก้ไม่ได้ลงไป</li><li>ยกขึ้นเท่าที่จำเป็น อย่ายกทุกอย่างไปไว้ที่เดียวทั้งแอป</li><li>ถามก่อนว่า “ต้องเห็นค่าเดียวกัน” หรือ “แค่มีแบบเดียวกัน”</li></ul></div><p><strong>บทถัดไป:</strong> 4.4 จะแนะนำเครื่องมือแรกที่ทำให้ข้อมูลอยู่นอกหน้าจอได้ — <code>ValueNotifier</code> ซึ่งเราเจอผ่าน ๆ มาแล้วใน 1.13</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
