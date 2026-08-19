@@ -1,23 +1,352 @@
-<div class="note">Finite state machine (FSM) ระบุ finite states, events, guards และ transitions ทำให้ workflowหลายขั้นไม่มี boolean combinationsที่เป็นไปไม่ได้ และบังคับ async resultกลับเข้าทาง eventที่ตรวจ current state</div>
-<section><h2>1. Boolean explosion</h2><p><code>loading, hasPallet, confirmed, error, done</code> ห้าตัวมี 32 combinationsแต่ถูกจริงไม่กี่แบบ เช่น done+loading+errorพร้อมกันอาจไม่มีความหมาย FSMแทนด้วย stateเดียวที่ encodeข้อมูลจำเป็น</p></section>
-<section><h2>2. State types</h2><pre class="code-vs"><code>sealed class ReceiveState { const ReceiveState(); }
-class ScanItem extends ReceiveState { const ScanItem(); }
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–55 นาที</span><span>ลงมือทำ: เปลี่ยนงานหลายขั้นตอนให้เหลือค่าเดียวที่ตอบได้ทุกอย่าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.7 (สถานะการโหลด และ <code>sealed class</code>), 4.14 (การกันคำสั่งซ้ำ) และ 3.14 (<code>sealed class</code> กับ pattern matching)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบงานหลายขั้นตอนให้ compiler ช่วยจับกรณีที่ลืม และให้สถานะที่เป็นไปไม่ได้สร้างไม่ได้เลย</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>4.7 แก้เรื่องสถานะของงานที่มีขั้นเดียวคือ “โหลด” แต่งานจริงในคลังมีหลายขั้น</p><pre class="code-vs"><code>รับเข้า: สแกนสินค้า → ใส่จำนวน → สแกนพาเลท → ตรวจทาน → ยืนยัน → เสร็จ</code></pre><p>โค้ดที่โตขึ้นทีละนิดจะกลายเป็นแบบนี้</p><pre class="code-vs"><code>bool _loading = false;
+bool _hasItem = false;
+bool _hasQuantity = false;
+bool _hasPallet = false;
+bool _submitting = false;
+bool _confirmed = false;
+String? _error;
+
+Item? _item;
+int? _quantity;
+String? _palletCode;
+Receipt? _receipt;</code></pre><p>แล้วทุกที่ในหน้าจอจะเต็มไปด้วยการรวมเงื่อนไข</p><pre class="code-vs"><code>if (!_loading &amp;&amp; _hasItem &amp;&amp; _hasQuantity &amp;&amp; _hasPallet &amp;&amp;
+    !_submitting &amp;&amp; !_confirmed &amp;&amp; _error == null) {
+  // ถึงตรงนี้แปลว่า... อะไรนะ
+}</code></pre><p>boolean หกตัวสร้างได้ 64 แบบ แต่แบบที่มีความหมายจริงมีหกแบบ — <strong>อีก 58 แบบคือสถานะที่ไม่ควรมีอยู่ แต่โค้ดอนุญาตให้เกิดขึ้น</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>finite state machine</td><td>เครื่องที่อยู่ได้ทีละหนึ่งสถานะ จากชุดสถานะที่กำหนดไว้แน่นอน</td></tr>
+<tr><td>state</td><td>สถานะปัจจุบัน ซึ่งบอกได้ว่าตอนนี้ทำอะไรได้บ้าง</td></tr>
+<tr><td>event</td><td>สิ่งที่เกิดขึ้นแล้วอาจทำให้เปลี่ยนสถานะ เช่นสแกน กดปุ่ม</td></tr>
+<tr><td>transition</td><td>การย้ายจากสถานะหนึ่งไปอีกสถานะ</td></tr>
+<tr><td>guard</td><td>เงื่อนไขที่ต้องผ่านก่อนจึงจะย้ายได้</td></tr>
+<tr><td>entry effect</td><td>สิ่งที่ต้องทำเมื่อเข้าสู่สถานะหนึ่ง เช่นย้ายโฟกัส</td></tr>
+<tr><td>exhaustive</td><td>ครอบทุกสถานะ ไม่มีทางตกหล่น</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ถามว่าตอนนี้อยู่ตรงไหน ไม่ใช่ผ่านอะไรมาแล้วบ้าง</h2><pre class="code-vs"><code>แบบ boolean:  ผ่านสแกนแล้วไหม? ใส่จำนวนแล้วไหม? กำลังส่งไหม? ...
+              (ต้องประกอบคำตอบเองทุกครั้ง และประกอบผิดได้)
+
+แบบ FSM:      ตอนนี้อยู่สถานะไหน?
+              (ค่าเดียว ตอบได้ทันที และผิดไม่ได้)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> สถานะไม่ได้บอกแค่ว่าเกิดอะไรไปแล้ว แต่บอกว่า <em>ตอนนี้ทำอะไรได้บ้าง</em> — ถ้าตอบคำถามหลังไม่ได้จากค่าเดียว แสดงว่ายังออกแบบไม่เสร็จ</div></section>
+
+<section><h2>4. เขียนสถานะให้พกข้อมูลของตัวเอง</h2><p>4.7 ใช้ <code>enum</code> ซึ่งพอสำหรับกรณีนั้น แต่ที่นี่แต่ละขั้นถือข้อมูลไม่เหมือนกัน จึงต้องใช้ <code>sealed class</code></p><pre class="code-vs"><code>sealed class ReceiveState {
+  const ReceiveState();
+}
+
+class ScanItem extends ReceiveState {
+  const ScanItem();                      // ยังไม่มีข้อมูลอะไร
+}
+
 class EnterQuantity extends ReceiveState {
-  const EnterQuantity(this.item); final Item item;
+  const EnterQuantity(this.item);
+  final Item item;                       // มีสินค้าแน่นอน
 }
+
 class ScanPallet extends ReceiveState {
-  const ScanPallet(this.draft); final ReceiveDraft draft;
+  const ScanPallet(this.item, this.quantity);
+  final Item item;
+  final int quantity;                    // มีทั้งสองอย่างแน่นอน
 }
+
+class ReadyToConfirm extends ReceiveState {
+  const ReadyToConfirm(this.draft);
+  final ReceiveDraft draft;
+}
+
 class Submitting extends ReceiveState {
-  const Submitting(this.draft, this.operationId);
-  final ReceiveDraft draft; final String operationId;
+  const Submitting(this.draft, this.commandId);
+  final ReceiveDraft draft;
+  final String commandId;                // รหัสคำสั่งอยู่ในสถานะเลย (4.14)
 }
+
 class Completed extends ReceiveState {
-  const Completed(this.receipt); final Receipt receipt;
-}</code></pre></section>
-<section><h2>3. Event + guard</h2><p><code>scanBarcode</code> ใช้ได้เฉพาะ ScanItem/ScanPalletตาม target; <code>setQuantity</code> เฉพาะ EnterQuantityและ range; confirmเฉพาะ ready state Guard reject eventโดยไม่ mutate และ feedbackบอก targetปัจจุบัน</p></section>
-<section><h2>4. Transition table</h2><table><thead><tr><th>State</th><th>Event</th><th>Next</th></tr></thead><tbody><tr><td>ScanItem</td><td>valid item</td><td>EnterQuantity</td></tr><tr><td>EnterQuantity</td><td>qty accepted</td><td>ScanPallet</td></tr><tr><td>ScanPallet</td><td>pallet valid</td><td>Ready/Review</td></tr><tr><td>Ready</td><td>confirm</td><td>Submitting</td></tr><tr><td>Submitting</td><td>success</td><td>Completed</td></tr><tr><td>Submitting</td><td>failure</td><td>Ready/Error</td></tr></tbody></table></section>
-<section><h2>5. Absolute flow</h2><p>WarehouseStoreปัจจุบันใช้ <code>screen</code>, step indicesและ transient fields เช่น rStep/tStep ซึ่งเป็น FSMแบบ implicitและ workflow definitions map step การเปลี่ยนเป็น typed stateช่วย compile-time exhaustiveness แต่ migrationต้องรักษา API/UI behaviorและแบ่ง feature storeไม่ให้ไฟล์เดียวโต</p></section>
-<section><h2>6. Entry/exit effects</h2><p>Focus, polling, fetchและfeedbackเป็น effectsของ transition ไม่อยู่ build เช่นเข้า ScanPallet→focus pallet; เข้า Submitting→call repositoryครั้งเดียว; exit workflow→increment session/cancel request Testsแยก pure reducerจาก effect runnerได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Putaway failเพราะ locationเต็มควรไป stateใด?</p><details><summary>เฉลย</summary><p>กลับ/คง ScanLocationพร้อม error effectและ refresh free locations ไม่ไป Completedและไม่ reset taskทั้งหมด Absoluteทำเช่นนี้: catchแล้วปลด submitting, flash/errorและ stay scan stepให้ลอง locationอื่น</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Enumอย่างเดียวไม่พอถ้า dataของแต่ละ stateยังเป็น nullable fieldsสิบตัว ใช้ sealed classes/recordsที่ stateถือ required dataของตน หรืออย่างน้อยรวม immutable snapshot+validated transitions</div></section>
+  const Completed(this.receipt);
+  final Receipt receipt;
+}</code></pre><p>เทียบกับแบบเดิม</p><table><thead><tr><th></th><th>boolean + field ที่เป็น null ได้</th><th><code>sealed class</code></th></tr></thead><tbody>
+<tr><td>อยู่ขั้นใส่จำนวน แต่ไม่มีสินค้า</td><td>สร้างได้ ต้องเช็กเอง</td><td>สร้างไม่ได้ — constructor บังคับ</td></tr>
+<tr><td>เสร็จแล้วแต่ไม่มีใบรับ</td><td>สร้างได้</td><td>สร้างไม่ได้</td></tr>
+<tr><td>กำลังส่งและเสร็จแล้วพร้อมกัน</td><td>สร้างได้</td><td>สร้างไม่ได้ — เป็นได้ทีละคลาส</td></tr>
+<tr><td>ต้องเขียน <code>item!</code></td><td>ทุกที่</td><td>ไม่มีเลย</td></tr>
+</tbody></table><p>สังเกตว่า <code>commandId</code> ถูกยัดเข้าไปใน <code>Submitting</code> ซึ่งแก้ปัญหาจาก 4.14 ได้สวยกว่า map แยก — เพราะรหัสจะมีอยู่ก็ต่อเมื่ออยู่ในสถานะที่ส่งอยู่จริงเท่านั้น และหายไปเองเมื่อออกจากสถานะนั้น</p></section>
+
+<section><h2>5. ตารางการย้ายสถานะ</h2><p>ก่อนเขียนโค้ด ให้เขียนตารางนี้ก่อนเสมอ — มันคือข้อตกลงทั้งหมดของฟีเจอร์ในหน้าเดียว</p><table><thead><tr><th>สถานะปัจจุบัน</th><th>เหตุการณ์</th><th>เงื่อนไข</th><th>สถานะถัดไป</th></tr></thead><tbody>
+<tr><td><code>ScanItem</code></td><td>สแกน</td><td>พบสินค้า</td><td><code>EnterQuantity</code></td></tr>
+<tr><td><code>ScanItem</code></td><td>สแกน</td><td>ไม่พบ</td><td>อยู่ที่เดิม + แจ้งเตือน</td></tr>
+<tr><td><code>EnterQuantity</code></td><td>ใส่จำนวน</td><td>1–999</td><td><code>ScanPallet</code></td></tr>
+<tr><td><code>EnterQuantity</code></td><td>ยกเลิก</td><td>—</td><td><code>ScanItem</code></td></tr>
+<tr><td><code>ScanPallet</code></td><td>สแกน</td><td>รูปแบบถูกต้อง</td><td><code>ReadyToConfirm</code></td></tr>
+<tr><td><code>ReadyToConfirm</code></td><td>ยืนยัน</td><td>—</td><td><code>Submitting</code></td></tr>
+<tr><td><code>Submitting</code></td><td>สำเร็จ</td><td>—</td><td><code>Completed</code></td></tr>
+<tr><td><code>Submitting</code></td><td>ถูกปฏิเสธ</td><td>—</td><td><code>ReadyToConfirm</code> + ข้อความ</td></tr>
+<tr><td><code>Submitting</code></td><td>ไม่รู้ผล</td><td>—</td><td>อยู่ที่เดิม แล้วไปตรวจสอบ (4.13)</td></tr>
+<tr><td><code>Completed</code></td><td>เริ่มใหม่</td><td>—</td><td><code>ScanItem</code></td></tr>
+</tbody></table><p>ทุกช่องที่ไม่ได้อยู่ในตารางนี้ แปลว่า <strong>เหตุการณ์นั้นถูกปฏิเสธ</strong> — ซึ่งเป็นพฤติกรรมที่ต้องตั้งใจ ไม่ใช่ผลข้างเคียง</p><p>ประโยชน์ที่ได้ทันทีคือคำถามอย่าง “ถ้าสแกนพาเลทตอนที่ยังไม่ได้ใส่จำนวนล่ะ” ตอบได้จากตารางโดยไม่ต้องเปิดโค้ด</p></section>
+
+<section><h2>6. เหตุการณ์ต้องตรวจสถานะก่อนเสมอ</h2><pre class="code-vs"><code>void onBarcodeScanned(String raw) {
+  final code = normalizeBarcode(raw);
+
+  switch (_state) {
+    case ScanItem():
+      final item = catalog.findByBarcode(code);
+      if (item == null) {
+        _flash('ไม่พบสินค้ารหัสนี้');     // ปฏิเสธโดยไม่เปลี่ยนสถานะ
+        return;
+      }
+      _state = EnterQuantity(item);
+
+    case ScanPallet(:final item, :final quantity):
+      if (!isValidPalletCode(code)) {
+        _flash('รูปแบบรหัสพาเลทไม่ถูกต้อง');
+        return;
+      }
+      _state = ReadyToConfirm(ReceiveDraft(item, quantity, code));
+
+    case EnterQuantity() || ReadyToConfirm() || Submitting() || Completed():
+      _flash('ตอนนี้ยังไม่ใช่ขั้นตอนสแกน');   // ปฏิเสธอย่างชัดเจน
+      return;
+  }
+  notifyListeners();
+}</code></pre><p>บาร์โค้ดเดียวกันให้ผลต่างกันตามสถานะ ซึ่งจำเป็นบน PDA เพราะ <strong>เครื่องสแกนยิงข้อมูลเข้ามาได้ตลอดเวลา ไม่สนใจว่าจอกำลังแสดงอะไร</strong></p><p>สิ่งที่ FSM ให้เพิ่มคือกรณีสุดท้าย — แทนที่จะเงียบหรือทำอะไรมั่ว ๆ มันบอกผู้ใช้ตรง ๆ ว่าตอนนี้ไม่ใช่จังหวะสแกน</p><div class="note">การใช้ <code>switch</code> บน <code>sealed class</code> โดยไม่มี <code>default:</code> ทำให้ <strong>compiler บังคับให้จัดการทุกสถานะ</strong> — พอเพิ่มสถานะใหม่ในภายหลัง <code>flutter analyze</code> จะไล่ชี้ทุกจุดที่ต้องกลับมาตัดสินใจ ซึ่งเป็นสิ่งที่ boolean ทำให้ไม่ได้เลย</div></section>
+
+<section><h2>7. คำสั่งที่ต้องรอผล</h2><p>ตรงนี้คือจุดที่ FSM แก้ปัญหาจากบทก่อน ๆ ได้ในคราวเดียว</p><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
+  final current = _state;
+  if (current is! ReadyToConfirm) return;     // guard — กันกดซ้ำ (4.14)
+
+  final commandId = _createCommandId();
+  _state = Submitting(current.draft, commandId);
+  notifyListeners();
+
+  try {
+    final receipt = await repository.confirm(current.draft, commandId: commandId);
+    if (_state is! Submitting) return;         // ออกจาก flow ไปแล้ว
+    _state = Completed(receipt);
+  } on ReceiveException catch (error) {
+    if (_state is! Submitting) return;
+    if (error.outcomeUnknown) {
+      _errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+      notifyListeners();
+      await _reconcile(commandId);             // ยังอยู่ Submitting (4.13)
+      return;
+    }
+    _errorMessage = error.message;
+    _state = ReadyToConfirm(current.draft);    // ย้อนกลับให้ลองใหม่ได้
+  } finally {
+    notifyListeners();                          // (4.8)
+  }
+}</code></pre><table><thead><tr><th>บรรทัด</th><th>แทนที่อะไรจากบทก่อน</th></tr></thead><tbody>
+<tr><td><code>if (current is! ReadyToConfirm) return;</code></td><td>ธง <code>_submitting</code> — และแข็งแรงกว่า เพราะบอกว่า <em>อนุญาตจากสถานะไหน</em> ไม่ใช่แค่ <em>ตอนนี้ไม่ว่าง</em></td></tr>
+<tr><td><code>_state = Submitting(...)</code></td><td>การตั้ง <code>_loading = true</code> — และพก draft กับรหัสคำสั่งไปด้วย</td></tr>
+<tr><td><code>if (_state is! Submitting) return;</code></td><td>ตัวนับรุ่น (4.10) สำหรับกรณีที่ผู้ใช้ออกจาก flow ไปแล้ว</td></tr>
+<tr><td><code>_state = ReadyToConfirm(current.draft)</code></td><td>การย้อนกลับ (4.13) — และ <code>draft</code> ยังอยู่ครบ ไม่ต้องกรอกใหม่</td></tr>
+</tbody></table><p>ข้อควรระวังของ <code>if (_state is! Submitting)</code> — ถ้าผู้ใช้ออกจาก flow แล้วเข้ามาใหม่จนกลับมาอยู่ <code>Submitting</code> อีกครั้งพอดี การตรวจแค่ชนิดจะไม่พอ ต้องเทียบ <code>commandId</code> ด้วย</p><pre class="code-vs"><code>final active = _state;
+if (active is! Submitting || active.commandId != commandId) return;</code></pre></section>
+
+<section><h2>8. ผลข้างเคียงผูกกับการย้าย ไม่ใช่กับการวาด</h2><p>บางอย่างต้องเกิดเมื่อ <em>เข้าสู่</em> สถานะหนึ่ง</p><table><thead><tr><th>เข้าสู่สถานะ</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td><code>EnterQuantity</code></td><td>ย้ายโฟกัสไปช่องจำนวน และเลือกข้อความทั้งหมด</td></tr>
+<tr><td><code>ScanPallet</code></td><td>ย้ายโฟกัสกลับช่องสแกน</td></tr>
+<tr><td><code>Completed</code></td><td>สั่นเครื่อง และเริ่มนับถอยหลังกลับหน้าแรก</td></tr>
+<tr><td>ออกจาก flow</td><td>ยกเลิกคำขอที่ค้าง เพิ่มเลขรุ่น</td></tr>
+</tbody></table><p>สิ่งเหล่านี้ห้ามอยู่ใน <code>build</code> เพราะ <code>build</code> ถูกเรียกหลายครั้ง (1.9, 4.6) ให้ทำในจุดที่รู้ว่า <em>เพิ่งเปลี่ยน</em></p><pre class="code-vs"><code>ReceiveState _state = const ScanItem();
+
+void _transitionTo(ReceiveState next) {
+  final previous = _state;
+  if (previous.runtimeType == next.runtimeType) {
+    _state = next;
+    notifyListeners();
+    return;
+  }
+  _state = next;
+  _onEnter(next);                 // เกิดครั้งเดียวตอนเปลี่ยนจริง
+  notifyListeners();
+}
+
+void _onEnter(ReceiveState state) {
+  switch (state) {
+    case EnterQuantity():
+      onFocusQuantity?.call();
+    case ScanPallet():
+      onFocusScanner?.call();
+    case Completed():
+      onCompleted?.call();
+    case ScanItem() || ReadyToConfirm() || Submitting():
+      break;                       // ไม่ต้องทำอะไร แต่ต้องเขียนให้ครบ
+  }
+}</code></pre><p>สังเกตว่า store ไม่ได้เรียก <code>FocusNode</code> เอง แต่เรียก callback ที่หน้าจอส่งเข้ามา — เพราะ store ต้องไม่รู้จักเรื่อง widget (4.5) และเพื่อให้ทดสอบ store ได้โดยไม่ต้องสร้างหน้าจอ</p></section>
+
+<section><h2>9. แยกส่วนที่คิด ออกจากส่วนที่ทำ</h2><p>รูปแบบที่ทดสอบง่ายที่สุดคือแยกฟังก์ชันที่ตัดสินใจออกมาเป็นฟังก์ชันบริสุทธิ์</p><pre class="code-vs"><code>// รับสถานะเก่า + เหตุการณ์ → คืนสถานะใหม่ ไม่แตะอะไรข้างนอกเลย
+ReceiveState reduce(ReceiveState state, ReceiveEvent event) =&gt; switch ((state, event)) {
+  (ScanItem(), ItemScanned(:final item)) =&gt; EnterQuantity(item),
+  (EnterQuantity(:final item), QuantityEntered(:final quantity)) =&gt;
+      ScanPallet(item, quantity),
+  (ScanPallet(:final item, :final quantity), PalletScanned(:final code)) =&gt;
+      ReadyToConfirm(ReceiveDraft(item, quantity, code)),
+  _ =&gt; state,        // เหตุการณ์ที่ไม่ตรงเงื่อนไข ไม่เปลี่ยนอะไร
+};</code></pre><pre class="code-vs"><code>test('สแกนพาเลทตอนอยู่ขั้นใส่จำนวน ต้องไม่เปลี่ยนสถานะ', () {
+  const state = EnterQuantity(item);
+  final next = reduce(state, const PalletScanned('PAL-0001'));
+  expect(next, same(state));
+});</code></pre><p>ไม่ต้องมี widget ไม่ต้องมี repository ไม่ต้อง <code>await</code> — เป็นการทดสอบตรรกะล้วน ๆ แบบเดียวกับที่ทำกับ <code>ScanSession</code> ใน Part 3</p><table><thead><tr><th>ส่วน</th><th>ทดสอบอย่างไร</th></tr></thead><tbody>
+<tr><td>ตารางการย้าย (<code>reduce</code>)</td><td>ฟังก์ชันบริสุทธิ์ เร็วมาก ครอบทุกช่องได้</td></tr>
+<tr><td>ผลข้างเคียง (<code>_onEnter</code>)</td><td>ใส่ callback ปลอมแล้วตรวจว่าถูกเรียกกี่ครั้ง</td></tr>
+<tr><td>คำสั่ง async</td><td>repository ปลอม + <code>Completer</code> (4.10)</td></tr>
+</tbody></table></section>
+
+<section><h2>10. เมื่อไหร่ที่ยังไม่ควรใช้ FSM</h2><p>FSM ไม่ฟรี — ต้องเขียนคลาสหลายตัว และทุกจุดที่อ่านสถานะต้อง <code>switch</code></p><table><thead><tr><th>ใช้ FSM เมื่อ</th><th>ยังไม่ต้องใช้เมื่อ</th></tr></thead><tbody>
+<tr><td>มีสามขั้นตอนขึ้นไป</td><td>มีแค่ “โหลด/สำเร็จ/ล้มเหลว”</td></tr>
+<tr><td>ลำดับสำคัญ ข้ามขั้นไม่ได้</td><td>ทำอะไรก่อนหลังก็ได้</td></tr>
+<tr><td>แต่ละขั้นถือข้อมูลไม่เหมือนกัน</td><td>ข้อมูลชุดเดียวตลอด</td></tr>
+<tr><td>มีคำถามว่า “ตอนนี้กดอันนี้ได้ไหม” หลายจุด</td><td>ไม่มีคำถามแบบนั้น</td></tr>
+</tbody></table><p><code>PickStore</code> ใน lab เป็นตัวอย่างของฝั่งขวา — มันมี <code>LoadState</code> ที่เป็น <code>enum</code> ธรรมดา เพราะการหยิบสินค้าไม่มีลำดับขั้น แต่ละบรรทัดปิดงานได้อิสระ</p><p>สัญญาณที่บอกว่าถึงเวลาต้องเปลี่ยนแล้ว</p><table><thead><tr><th>สัญญาณ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>เขียน <code>if</code> รวมสาม boolean ขึ้นไป</td><td>กำลังประกอบสถานะเองด้วยมือ</td></tr>
+<tr><td>มี <code>field!</code> กระจายอยู่หลายที่</td><td>ข้อมูลไม่ได้ผูกกับสถานะ</td></tr>
+<tr><td>เจอบั๊กแบบ “กดปุ่มนี้ตอนนี้ไม่ควรได้”</td><td>ไม่มี guard ที่ระดับสถานะ</td></tr>
+<tr><td>อธิบาย flow ให้คนอื่นฟังไม่ได้ในหนึ่งนาที</td><td>ยังไม่มีตารางการย้าย</td></tr>
+</tbody></table></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยังต้องเขียน <code>item!</code> เต็มไปหมด</td><td>ใช้ <code>enum</code> แต่เก็บข้อมูลเป็น field ที่เป็น null ได้</td><td>ย้ายข้อมูลเข้าไปในคลาสของสถานะ</td></tr>
+<tr><td>เพิ่มสถานะใหม่แล้วบางจุดไม่รองรับ</td><td>มี <code>default:</code> ใน switch</td><td>ตัดออก ให้ compiler ไล่ให้</td></tr>
+<tr><td>สแกนแล้วเกิดสิ่งที่ไม่ควรเกิดในขั้นนั้น</td><td>เหตุการณ์ไม่ได้ตรวจสถานะก่อน</td><td>ให้ทุกเหตุการณ์ <code>switch</code> บนสถานะ</td></tr>
+<tr><td>โฟกัสเด้งซ้ำ หรือสั่นรัว</td><td>ทำผลข้างเคียงใน <code>build</code></td><td>ผูกกับการย้ายสถานะ</td></tr>
+<tr><td>ผลของคำสั่งเก่าย้ายสถานะที่ผู้ใช้ออกไปแล้ว</td><td>ไม่ตรวจสถานะหลัง <code>await</code></td><td>ตรวจทั้งชนิดและ <code>commandId</code></td></tr>
+<tr><td>ล้มเหลวแล้วต้องกรอกใหม่ทั้งหมด</td><td>ย้อนกลับไปสถานะแรกสุด</td><td>ย้อนไปสถานะก่อนหน้าพร้อม draft เดิม</td></tr>
+<tr><td>โค้ดยาวขึ้นแต่ไม่ได้อะไร</td><td>ใช้ FSM กับงานที่มีขั้นเดียว</td><td>ใช้ <code>enum</code> ก็พอ</td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><p>งาน putaway — สแกนพาเลท แล้วสแกนช่องเก็บ แล้วยืนยัน</p><pre class="code-vs"><code>String? _palletCode;
+String? _locationCode;
+bool _submitting = false;
+bool _done = false;
+String? _error;
+
+void onScan(String code) {
+  if (_palletCode == null) {
+    _palletCode = code;
+  } else {
+    _locationCode = code;
+  }
+  notifyListeners();
+}
+
+Future&lt;void&gt; confirm() async {
+  _submitting = true;
+  notifyListeners();
+  try {
+    await repository.putaway(_palletCode!, _locationCode!);
+    _done = true;
+  } catch (e) {
+    _error = 'ไม่สำเร็จ';
+  }
+  _submitting = false;
+  notifyListeners();
+}</code></pre><ol><li>ระบุสถานะที่ไม่ควรมีอยู่ แต่โค้ดนี้สร้างได้</li><li>เขียนตารางการย้ายสถานะ แล้วเขียนใหม่ด้วย <code>sealed class</code></li><li>ตอบว่าถ้าช่องเก็บเต็ม เซิร์ฟเวอร์ปฏิเสธ ควรไปสถานะไหน และทำไมไม่ใช่สถานะแรกสุด</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สถานะที่ไม่ควรมีอยู่</strong></p><table><thead><tr><th>#</th><th>สถานะที่สร้างได้</th><th>ทำไมไม่ควรมี</th></tr></thead><tbody>
+<tr><td>1</td><td><code>_submitting</code> และ <code>_done</code> เป็น true พร้อมกัน</td><td>กำลังส่งและเสร็จแล้วพร้อมกันไม่มีความหมาย</td></tr>
+<tr><td>2</td><td><code>_done</code> เป็น true แต่ <code>_locationCode</code> เป็น null</td><td>เก็บของสำเร็จโดยไม่มีช่องเก็บ</td></tr>
+<tr><td>3</td><td>สแกนช่องเก็บได้ทั้งที่ยังไม่มีพาเลท</td><td>ที่จริงกันไว้ด้วย if แต่กันด้วยการเดา ไม่ใช่ด้วยกติกา</td></tr>
+<tr><td>4</td><td><code>_error</code> มีค่า พร้อมกับ <code>_done</code> เป็น true</td><td>สำเร็จและล้มเหลวพร้อมกัน</td></tr>
+<tr><td>5</td><td>กด <code>confirm()</code> ตอนที่ยังไม่มีช่องเก็บ</td><td><code>_locationCode!</code> จะพังทันที</td></tr>
+<tr><td>6</td><td>กด <code>confirm()</code> ซ้ำระหว่างส่ง</td><td>ไม่มี guard เลย — ส่งซ้อนได้ (4.14)</td></tr>
+</tbody></table><p>และมีข้อบกพร่องเชิงพฤติกรรมเพิ่ม — <code>onScan</code> ตัดสินจาก “ค่าไหนยังว่าง” ทำให้สแกนพาเลทผิดแล้วแก้ไม่ได้ ต้องปิดหน้าจอเริ่มใหม่</p><p><strong>ข้อ 2 — ตารางและโค้ด</strong></p><table><thead><tr><th>สถานะ</th><th>เหตุการณ์</th><th>เงื่อนไข</th><th>ถัดไป</th></tr></thead><tbody>
+<tr><td><code>ScanPallet</code></td><td>สแกน</td><td>รูปแบบถูก</td><td><code>ScanLocation</code></td></tr>
+<tr><td><code>ScanPallet</code></td><td>สแกน</td><td>รูปแบบผิด</td><td>อยู่ที่เดิม + เตือน</td></tr>
+<tr><td><code>ScanLocation</code></td><td>สแกน</td><td>รูปแบบถูก</td><td><code>ReadyToConfirm</code></td></tr>
+<tr><td><code>ScanLocation</code></td><td>ย้อนกลับ</td><td>—</td><td><code>ScanPallet</code></td></tr>
+<tr><td><code>ReadyToConfirm</code></td><td>ยืนยัน</td><td>—</td><td><code>Submitting</code></td></tr>
+<tr><td><code>ReadyToConfirm</code></td><td>เปลี่ยนช่องเก็บ</td><td>—</td><td><code>ScanLocation</code></td></tr>
+<tr><td><code>Submitting</code></td><td>สำเร็จ</td><td>—</td><td><code>Completed</code></td></tr>
+<tr><td><code>Submitting</code></td><td>ช่องเก็บเต็ม</td><td>—</td><td><code>ScanLocation</code> + เตือน</td></tr>
+<tr><td><code>Submitting</code></td><td>ปฏิเสธด้วยเหตุอื่น</td><td>—</td><td><code>ReadyToConfirm</code> + เตือน</td></tr>
+<tr><td><code>Completed</code></td><td>เริ่มงานถัดไป</td><td>—</td><td><code>ScanPallet</code></td></tr>
+</tbody></table><pre class="code-vs"><code>sealed class PutawayState { const PutawayState(); }
+
+class ScanPallet extends PutawayState { const ScanPallet(); }
+
+class ScanLocation extends PutawayState {
+  const ScanLocation(this.palletCode);
+  final String palletCode;
+}
+
+class ReadyToConfirm extends PutawayState {
+  const ReadyToConfirm(this.palletCode, this.locationCode);
+  final String palletCode;
+  final String locationCode;
+}
+
+class Submitting extends PutawayState {
+  const Submitting(this.palletCode, this.locationCode, this.commandId);
+  final String palletCode;
+  final String locationCode;
+  final String commandId;
+}
+
+class Completed extends PutawayState {
+  const Completed(this.palletCode, this.locationCode);
+  final String palletCode;
+  final String locationCode;
+}</code></pre><pre class="code-vs"><code>void onScan(String raw) {
+  final code = normalizeBarcode(raw);
+  switch (_state) {
+    case ScanPallet():
+      if (!isValidPalletCode(code)) {
+        _flash('รูปแบบรหัสพาเลทไม่ถูกต้อง');
+        return;
+      }
+      _transitionTo(ScanLocation(code));
+
+    case ScanLocation(:final palletCode):
+      if (!isValidLocationCode(code)) {
+        _flash('รูปแบบรหัสช่องเก็บไม่ถูกต้อง');
+        return;
+      }
+      _transitionTo(ReadyToConfirm(palletCode, code));
+
+    case ReadyToConfirm(:final palletCode):
+      // สแกนตอนตรวจทาน = ตั้งใจเปลี่ยนช่องเก็บ
+      if (!isValidLocationCode(code)) {
+        _flash('รูปแบบรหัสช่องเก็บไม่ถูกต้อง');
+        return;
+      }
+      _transitionTo(ReadyToConfirm(palletCode, code));
+
+    case Submitting() || Completed():
+      _flash('กำลังบันทึกอยู่ กรุณารอสักครู่');
+  }
+}</code></pre><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
+  final current = _state;
+  if (current is! ReadyToConfirm) return;              // แก้ข้อ 5, 6
+
+  final commandId = _createCommandId();
+  _transitionTo(Submitting(
+      current.palletCode, current.locationCode, commandId));
+
+  try {
+    await repository.putaway(
+      current.palletCode, current.locationCode, commandId: commandId);
+    if (!_isStillSubmitting(commandId)) return;
+    _transitionTo(Completed(current.palletCode, current.locationCode));
+  } on LocationFullException {
+    if (!_isStillSubmitting(commandId)) return;
+    _errorMessage = 'ช่องเก็บนี้เต็มแล้ว กรุณาสแกนช่องอื่น';
+    _transitionTo(ScanLocation(current.palletCode));   // ข้อ 3
+  } on PutawayException catch (error) {
+    if (!_isStillSubmitting(commandId)) return;
+    _errorMessage = error.message;
+    _transitionTo(ReadyToConfirm(current.palletCode, current.locationCode));
+  } finally {
+    notifyListeners();
+  }
+}
+
+bool _isStillSubmitting(String commandId) {
+  final active = _state;
+  return active is Submitting &amp;&amp; active.commandId == commandId;
+}</code></pre><p>สังเกตว่าข้อ 1, 2, 4 หายไปเองโดยไม่ต้องเขียนโค้ดอะไรกัน เพราะสถานะเป็นได้ทีละคลาสเดียว และข้อมูลผูกอยู่กับคลาสนั้น</p><p><strong>ข้อ 3 — ช่องเก็บเต็ม ควรไปสถานะไหน</strong></p><p>ควรไป <code>ScanLocation</code> โดยยังถือ <code>palletCode</code> เดิมไว้</p><p>เหตุผลมาจากการถามว่า <strong>ข้อมูลชิ้นไหนที่ยังใช้ได้อยู่</strong></p><table><thead><tr><th>ข้อมูล</th><th>ยังถูกต้องไหมหลังถูกปฏิเสธ</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท</td><td>ถูกต้อง — ของยังอยู่บนรถยกคันเดิม</td></tr>
+<tr><td>รหัสช่องเก็บ</td><td>ไม่ถูกต้องแล้ว — ช่องนั้นเต็ม</td></tr>
+</tbody></table><p><strong>ทำไมไม่กลับไป <code>ScanPallet</code></strong> — เพราะจะบังคับให้ผู้ใช้สแกนพาเลทใหม่ทั้งที่ข้อมูลนั้นไม่ได้ผิดอะไรเลย คนที่ยืนถือ PDA อยู่หน้าแร็คต้องก้มไปสแกนพาเลทบนรถยกอีกรอบโดยไม่มีเหตุผล ทั้งที่สิ่งเดียวที่ต้องเปลี่ยนคือช่องเก็บ</p><p><strong>ทำไมไม่อยู่ <code>ReadyToConfirm</code></strong> — เพราะสถานะนั้นแปลว่า “พร้อมยืนยัน” ซึ่งไม่จริงแล้ว ถ้าคาไว้ตรงนั้น ผู้ใช้กดยืนยันซ้ำได้และจะถูกปฏิเสธซ้ำ</p><p><strong>ทำไมไม่มีสถานะ <code>Failed</code> แยก</strong> — เพราะความล้มเหลวส่วนใหญ่ไม่ใช่ปลายทาง แต่คือ <em>การกลับไปยังจุดที่แก้ได้</em> การมีสถานะ <code>Failed</code> ที่มีทางออกทางเดียวคือเริ่มใหม่ทั้งหมด คือการทิ้งงานที่ผู้ใช้ทำมาแล้วโดยไม่จำเป็น</p><p>สิ่งที่ควรทำเพิ่มคือรีเฟรชรายการช่องเก็บว่างพร้อมกับการย้าย เพื่อให้ผู้ใช้เลือกช่องถัดไปได้เลย — ซึ่งเป็น entry effect ตามหัวข้อ 8</p><p><strong>หลักที่ใช้ตอบคำถามทำนองนี้ได้ทุกครั้ง:</strong> <em>ย้อนกลับไปให้ใกล้จุดที่ผิดที่สุด และเก็บทุกอย่างที่ยังถูกต้องไว้</em></p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>boolean หลายตัวสร้างสถานะที่ไม่ควรมีอยู่เป็นสิบเป็นร้อยแบบ</li><li>สถานะเดียวตอบได้ว่า “ตอนนี้ทำอะไรได้บ้าง” ไม่ใช่แค่ “ผ่านอะไรมาแล้ว”</li><li><code>sealed class</code> ทำให้ข้อมูลผูกกับสถานะ จนไม่ต้องเขียน <code>!</code> อีกเลย</li><li>เขียนตารางการย้ายก่อนเขียนโค้ดเสมอ</li><li>ทุกเหตุการณ์ต้อง <code>switch</code> บนสถานะก่อน และปฏิเสธอย่างชัดเจนเมื่อไม่ตรง</li><li><code>switch</code> ที่ไม่มี <code>default:</code> ทำให้ compiler ไล่จุดที่ลืมให้เมื่อเพิ่มสถานะใหม่</li><li>guard ที่ระดับสถานะแทนธง <code>_submitting</code> ได้ และแข็งแรงกว่า</li><li>หลัง <code>await</code> ต้องตรวจทั้งชนิดของสถานะและรหัสคำสั่ง</li><li>ผลข้างเคียงผูกกับการย้ายสถานะ ไม่ใช่กับ <code>build</code></li><li>ล้มเหลวแล้วย้อนไปให้ใกล้จุดที่ผิดที่สุด เก็บสิ่งที่ยังถูกต้องไว้</li><li>งานขั้นเดียวใช้ <code>enum</code> ก็พอ อย่าใช้ FSM เพราะรู้จักมัน</li></ul></div><p><strong>บทถัดไป:</strong> 4.16 เป็นบทปฏิบัติปิดท้าย Part 4 — ประกอบทุกอย่างตั้งแต่ 4.1 ให้เป็น store ที่ทดสอบได้จริง แล้วเทียบกับ <code>TaskStore</code> ในโปรเจกต์จริงว่าโตขึ้นไปเป็นอย่างไร</p></section>

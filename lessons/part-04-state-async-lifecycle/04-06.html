@@ -4,25 +4,163 @@
 <title>Selective Rebuild</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-06 · State &amp; Lifecycle</span><h1>Selective Rebuild</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Builder พื้นฐาน</a></li><li><a href="#section-2">ขอบเขตจากโปรเจกต์จริง</a></li><li><a href="#section-3">child optimization</a></li><li><a href="#section-4">Rebuild ไม่เท่ากับ repaint</a></li><li><a href="#section-5">Selector concept</a></li><li><a href="#section-6">Side effect ไม่อยู่ builder</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>ListenableBuilder</code> rebuild builderเมื่อ notifierส่งสัญญาณ ขอบเขต builderควรครอบ consumersที่ต้องอ่าน snapshotเดียวกัน แต่ไม่ครอบ subtreeคงที่หรือ unrelated featureโดยไม่จำเป็น</div>
-<section id="section-1"><h2>1. Builder พื้นฐาน</h2><pre class="code-vs"><code>ListenableBuilder(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: builder คือรั้วกั้น</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">ความจริงที่ต้องเข้าใจ: แยก builder ไม่ได้ลดการแจ้ง</a></li><li><a href="#section-6">เมื่อไหร่ควรแยก store</a></li><li><a href="#section-7">child: ส่วนที่ไม่ต้องสร้างใหม่</a></li><li><a href="#section-8">ห้ามทำสิ่งที่มีผลข้างเคียงใน builder</a></li><li><a href="#section-9">อย่าซอยย่อยเกินจำเป็น</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จำกัดว่าใครวาดใหม่บ้างเมื่อ store แจ้ง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.13 (<code>ListenableBuilder</code> และขอบเขต rebuild) และ 4.5 (<code>ChangeNotifier</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> วาง builder ให้ถูกตำแหน่ง และรู้ว่าเมื่อไหร่ที่ควรแยก store แทนที่จะแยก builder</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>4.5 จบด้วย store ที่ใช้งานได้ แต่มีผลข้างเคียงหนึ่งข้อที่ยังไม่ได้แก้ — <strong><code>notifyListeners()</code> แจ้งทุกคนที่ฟังอยู่ ไม่ว่าจะสนใจส่วนไหน</strong></p><pre class="code-vs"><code>store.markDone('L-1')  →  notifyListeners()
+                            ├→ ยอดคงเหลือ วาดใหม่   ✓ เกี่ยว
+                            ├→ รายการทั้งหมด วาดใหม่ ✓ เกี่ยว
+                            └→ ปุ่มตั้งค่า วาดใหม่    ✗ ไม่เกี่ยวเลย</code></pre><p>บนรายการไม่กี่สิบแถวจะไม่รู้สึกอะไร แต่เมื่อโตขึ้นและ store แจ้งบ่อย จะเริ่มหน่วงบน PDA</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>rebuild scope</td><td>ขอบเขตว่าใครถูกวาดใหม่</td></tr>
+<tr><td>slice</td><td>ส่วนย่อยของสถานะที่ผู้ใช้บางคนสนใจ</td></tr>
+<tr><td>selector</td><td>ตัวคัดว่าจะฟังเฉพาะค่าไหน</td></tr>
+<tr><td>atomic</td><td>เห็นข้อมูลทั้งชุดพร้อมกัน ไม่เห็นครึ่ง ๆ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: builder คือรั้วกั้น</h2><p>ทุกอย่างที่อยู่ <strong>ข้างใน</strong> builder จะถูกวาดใหม่เมื่อ store แจ้ง ส่วนที่อยู่ข้างนอกไม่ถูกแตะ</p><pre class="code-vs"><code>Scaffold(
+  appBar: AppBar(title: const Text('หยิบสินค้า')),   ← ข้างนอก ไม่วาดใหม่
+  body: ListenableBuilder(
+    listenable: store,
+    builder: (context, child) =&gt; ...,               ← ข้างใน วาดใหม่
+  ),
+)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> วาง builder ให้ <em>ครอบเฉพาะส่วนที่ต้องใช้ข้อมูลนั้น</em> — ไม่ครอบกว้างเกินจนของนิ่งถูกวาดใหม่ และไม่ซอยย่อยเกินจนโค้ดอ่านยากโดยไม่ได้อะไร</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><p>เปิด <code>lib/state_basics/state_basics_app.dart</code> จะเห็นว่ามี builder สองที่ ไม่ใช่ที่เดียว</p><pre class="code-vs"><code>appBar: AppBar(
+  title: const Text('หยิบสินค้า'),        // นิ่ง ไม่ต้องฟัง
+  actions: [
+    // ส่วนนี้ฟัง store เพื่อแสดงจำนวนคงเหลือ
+    ListenableBuilder(
+      listenable: widget.store,
+      builder: (context, child) =&gt; Text('เหลือ ${widget.store.remainingCount}'),
+    ),
+  ],
+),
+body: ListenableBuilder(
+  listenable: widget.store,
+  builder: (context, child) =&gt; switch (widget.store.state) { ... },
+),</code></pre><table><thead><tr><th>ส่วน</th><th>ฟังไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ชื่อหน้าจอ</td><td>ไม่</td><td>ไม่เคยเปลี่ยน</td></tr>
+<tr><td>ยอดคงเหลือ</td><td>ฟัง</td><td>เปลี่ยนทุกครั้งที่ปิดงาน</td></tr>
+<tr><td>เนื้อหาหลัก</td><td>ฟัง</td><td>เปลี่ยนตามสถานะและรายการ</td></tr>
+</tbody></table><p>การแยกสองที่ทำให้ชื่อหน้าจอไม่ถูกวาดใหม่เลยตลอดอายุหน้าจอ</p></section>
+
+<section id="section-5"><h2>5. ความจริงที่ต้องเข้าใจ: แยก builder ไม่ได้ลดการแจ้ง</h2><p>นี่คือจุดที่คนเข้าใจผิดบ่อยที่สุดในบทนี้</p><pre class="code-vs"><code>store.notifyListeners()
+   ├→ builder ตัวที่ 1 ทำงาน
+   └→ builder ตัวที่ 2 ทำงาน      ← ทั้งคู่ทำงานเสมอ</code></pre><p><code>ChangeNotifier</code> ไม่รู้ว่าอะไรเปลี่ยน มันแจ้งอย่างเดียว — ดังนั้นการแยก builder <strong>ไม่ได้ลดจำนวนครั้งที่ builder ถูกเรียก</strong> มันแค่ลด <em>ปริมาณ widget ที่ถูกสร้างใหม่</em> ในแต่ละครั้ง</p><table><thead><tr><th>สิ่งที่การแยก builder ทำได้</th><th>สิ่งที่ทำไม่ได้</th></tr></thead><tbody>
+<tr><td>ลดจำนวน widget ที่สร้างใหม่</td><td>ลดจำนวนครั้งที่ถูกแจ้ง</td></tr>
+<tr><td>ทำให้ของนิ่งไม่ถูกแตะ</td><td>ทำให้ builder ไม่ทำงานเมื่อค่าที่มันสนใจไม่เปลี่ยน</td></tr>
+</tbody></table><p>ถ้าต้องการอย่างหลังจริง ๆ ต้องแยกที่ระดับ store ไม่ใช่ที่ระดับ builder</p></section>
+
+<section id="section-6"><h2>6. เมื่อไหร่ควรแยก store</h2><pre class="code-vs"><code>// แทนที่จะมี store เดียวที่แจ้งทุกเรื่อง
+class WarehouseStore extends ChangeNotifier {
+  // รายการงาน + สถานะการเชื่อมต่อ + การตั้งค่า + ผู้ใช้
+}
+
+// แยกตามความถี่และความเกี่ยวข้อง
+class PickStore extends ChangeNotifier { ... }        // เปลี่ยนเมื่อทำงาน
+class ConnectionStatus extends ChangeNotifier { ... } // เปลี่ยนทุกไม่กี่วินาที</code></pre><p>ตัวอย่างที่ชัดที่สุดคือสถานะการเชื่อมต่อ — ถ้ามันอยู่ใน store เดียวกับรายการงาน ทุกครั้งที่ตรวจสัญญาณ (ทุกไม่กี่วินาที) รายการทั้งหมดจะถูกสร้างใหม่ ทั้งที่ไม่มีอะไรเปลี่ยน</p><table><thead><tr><th>เกณฑ์แยก store</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>เปลี่ยนคนละความถี่</td><td>สถานะเชื่อมต่อ เทียบกับ รายการงาน</td></tr>
+<tr><td>คนละอายุ</td><td>ผู้ใช้ที่ล็อกอิน เทียบกับ ข้อมูลของหน้าจอ</td></tr>
+<tr><td>คนละส่วนงาน</td><td>รับเข้า เทียบกับ หยิบออก</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. child: ส่วนที่ไม่ต้องสร้างใหม่</h2><pre class="code-vs"><code>ListenableBuilder(
   listenable: store,
-  child: const WarehouseLogo(),
+  child: const WarehouseLogo(),          // สร้างครั้งเดียว
   builder: (context, child) =&gt; Column(
     children: [
-      child!,
-      Text('${store.pendingCount} งาน'),
-      Expanded(child: TaskList(tasks: store.tasks)),
+      child!,                             // ใช้ตัวเดิมซ้ำ
+      Text('เหลือ ${store.remainingCount}'),
     ],
   ),
-)</code></pre></section>
-<section id="section-2"><h2>2. ขอบเขตจากโปรเจกต์จริง</h2><p>Absolute shellแยก ListenableBuilderของ bodyและ bottom navigationแม้ฟัง storeเดียวกัน ทำ responsibilityชัด แต่ ChangeNotifier notifyยังเรียกทั้งสอง builder หากต้องลดกว่านั้นต้องแยก notifier/sliceหรือ selector ไม่ใช่แค่เพิ่ม nested builder</p></section>
-<section id="section-3"><h2>3. child optimization</h2><p>ส่ง subtreeที่ไม่ขึ้นกับ stateผ่าน childเพื่อสร้าง configurationครั้งเดียว เช่น logo/static frame แต่ถ้า childอ่าน notifierผ่าน global/contextก็ไม่คงจริงและอาจ stale ให้ dependency explicit</p></section>
-<section id="section-4"><h2>4. Rebuild ไม่เท่ากับ repaint</h2><p>Builderทำ buildใหม่แต่ Element/renderอาจ reuse การ optimizeต้อง profile DevToolsก่อน การแตก builderเล็กมากจำนวนมากเพิ่ม complexity ถ้า widgetราคาถูกและ notifyไม่ถี่อาจไม่คุ้ม</p></section>
-<section id="section-5"><h2>5. Selector concept</h2><p>เมื่อ consumerสนเพียง pendingCount ให้ listenค่า sliceที่มี equality เช่น ValueListenable/Selector หรือแยก TaskSummaryNotifier จาก TaskDetailNotifier Snapshotควร immutableเพื่อเทียบได้ ไม่ให้ mutable listเปลี่ยนแต่ referenceเดิม</p></section>
-<section id="section-6"><h2>6. Side effect ไม่อยู่ builder</h2><p>ห้าม showDialog, Navigator, sound หรือ APIใน builderเพราะ notify/buildซ้ำได้ ใช้ listener/effect channelที่ consume eventครั้งเดียว หรือ callbackจาก command owner ส่วน builder render stateเท่านั้น</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection dotเปลี่ยนทุก probeแต่ MaterialAppทั้งต้นไม้ rebuild ควรทำอย่างไร?</p><details><summary>เฉลย</summary><p>วาง ListenableBuilderเฉพาะ header dot/connection menuที่อ่าน controller ไม่ครอบ MaterialApp หาก base URL/profileกระทบ dependencyระดับ app ให้แยก config snapshotจาก status heartbeatเพื่อไม่ rebuildกว้างจาก dot</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การวาง builderต่ำเกินจนแต่ละลูกอ่าน stateคนละช่วง notificationอาจเพิ่ม boilerplateและ snapshotไม่ atomic เลือก boundaryตาม consistencyและcost ไม่ใช่ “เล็กที่สุดเสมอ”</div></section>
+)</code></pre><p>เหมือนที่เรียนใน 1.13 หัวข้อ 6 — ใช้เมื่อมีส่วนที่ไม่ขึ้นกับ store และสร้างแพง</p><div class="warn">ระวังกับดัก — ถ้าสิ่งที่ส่งผ่าน <code>child</code> ไปอ่านค่าจาก store เองข้างใน มันจะไม่ได้ค่าใหม่ เพราะถูกสร้างครั้งเดียว ให้ส่งเฉพาะสิ่งที่ไม่เกี่ยวกับ store จริง ๆ</div></section>
+
+<section id="section-8"><h2>8. ห้ามทำสิ่งที่มีผลข้างเคียงใน builder</h2><pre class="code-vs"><code>// ผิด — builder ถูกเรียกทุกครั้งที่แจ้ง
+builder: (context, child) {
+  if (store.allDone) {
+    showDialog(...);                     // เด้งซ้ำไม่หยุด
+    HapticFeedback.lightImpact();        // สั่นรัว
+  }
+  return ...;
+}</code></pre><p>เป็นกฎเดียวกับ 1.9 — <code>builder</code> คือ <code>build</code> รูปแบบหนึ่ง จึงห้ามมีผลข้างเคียง</p><p>สิ่งที่ต้องเกิดครั้งเดียวเมื่อสถานะเปลี่ยน ให้ใช้การฟังแยกต่างหาก ตามรูปแบบที่ใช้ใน 3.14</p><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  widget.store.addListener(_onStoreChanged);    // ฟังเพื่อทำผลข้างเคียง
+}
+
+@override
+void dispose() {
+  widget.store.removeListener(_onStoreChanged); // คู่ตรงข้าม (3.12)
+  super.dispose();
+}
+
+bool _wasAllDone = false;
+
+void _onStoreChanged() {
+  final isAllDone = widget.store.allDone;
+  if (isAllDone &amp;&amp; !_wasAllDone) {
+    HapticFeedback.lightImpact();               // เกิดครั้งเดียวตอนเปลี่ยน
+  }
+  _wasAllDone = isAllDone;
+}</code></pre><p>รายละเอียดเรื่องการฟังและการเลิกฟังจะลงลึกใน 4.12</p></section>
+
+<section id="section-9"><h2>9. อย่าซอยย่อยเกินจำเป็น</h2><table><thead><tr><th>สัญญาณว่าซอยเกิน</th><th>ปัญหาที่ตามมา</th></tr></thead><tbody>
+<tr><td>builder ห้าชั้นซ้อนกันในหน้าจอเดียว</td><td>อ่านยากมาก และหาจุดที่วาดใหม่ไม่เจอ</td></tr>
+<tr><td>แต่ละส่วนอ่านข้อมูลคนละจังหวะ</td><td>เห็นข้อมูลที่ไม่สอดคล้องกันในจอเดียว</td></tr>
+<tr><td>เพิ่ม builder โดยยังไม่เคยวัด</td><td>เพิ่มความซับซ้อนโดยไม่ได้อะไร</td></tr>
+</tbody></table><p>ข้อสองสำคัญและมองข้ามง่าย — ถ้าแยก builder จนแต่ละส่วนอ่าน store คนละครั้ง อาจเกิดจังหวะที่ยอดคงเหลือแสดง 3 แต่รายการแสดง 4 แถวที่ยังไม่เสร็จ</p><p>ทางป้องกันคือให้ส่วนที่ต้อง <strong>สอดคล้องกัน</strong> อยู่ใน builder เดียวกัน</p><p>และตามลำดับใน 2.10 — วัดก่อนเสมอ อย่าปรับโดยเดา</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทั้งหน้าจอวาดใหม่เมื่อค่าเล็ก ๆ เปลี่ยน</td><td>builder ครอบกว้างเกิน</td><td>ย้ายลงมาให้ครอบเฉพาะส่วนที่ใช้</td></tr>
+<tr><td>แยก builder แล้วยังวาดใหม่บ่อยเหมือนเดิม</td><td>เข้าใจว่าการแยกลดการแจ้ง</td><td>แยกที่ระดับ store แทน</td></tr>
+<tr><td>รายการทั้งหมดวาดใหม่ทุกครั้งที่ตรวจสัญญาณ</td><td>รวมของที่เปลี่ยนคนละความถี่ไว้ store เดียว</td><td>แยก store</td></tr>
+<tr><td>กล่องโต้ตอบเด้งซ้ำไม่หยุด</td><td>เปิดใน builder</td><td>ย้ายไปการฟังแยก</td></tr>
+<tr><td>ตัวเลขสองที่บนจอไม่ตรงกันชั่วขณะ</td><td>แยก builder จนอ่านคนละจังหวะ</td><td>รวมส่วนที่ต้องสอดคล้องไว้ builder เดียว</td></tr>
+<tr><td>ส่วนที่ส่งผ่าน <code>child</code> ไม่อัปเดต</td><td>มันอ่าน store เองข้างใน</td><td>ส่งเฉพาะสิ่งที่ไม่เกี่ยวกับ store</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>หน้าจอหนึ่งฟัง store ตัวเดียวทั้งหน้า และมีสี่ส่วน</p><table><thead><tr><th>ส่วน</th><th>ใช้ข้อมูล</th><th>ความถี่ที่เปลี่ยน</th></tr></thead><tbody>
+<tr><td>ชื่อหน้าจอ</td><td>ไม่ใช้</td><td>ไม่เคย</td></tr>
+<tr><td>จุดสถานะการเชื่อมต่อ</td><td>สถานะเชื่อมต่อ</td><td>ทุก 3 วินาที</td></tr>
+<tr><td>ยอดคงเหลือ</td><td>รายการงาน</td><td>เมื่อปิดงาน</td></tr>
+<tr><td>รายการงาน 200 แถว</td><td>รายการงาน</td><td>เมื่อปิดงานหรือโหลดใหม่</td></tr>
+</tbody></table><ol><li>อธิบายว่าโครงปัจจุบันมีปัญหาอะไร</li><li>แก้ไข พร้อมบอกว่าแก้ที่ระดับ builder หรือระดับ store</li><li>อธิบายว่าทำไมยอดคงเหลือกับรายการควรอยู่ใน builder เดียวกัน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ปัญหาปัจจุบัน</strong></p><p>ทุก 3 วินาทีที่สถานะเชื่อมต่อเปลี่ยน <code>notifyListeners()</code> ถูกเรียก แล้วทั้งหน้าจอถูกสร้างใหม่ รวมถึงรายการ 200 แถว — ทั้งที่ข้อมูลรายการไม่ได้เปลี่ยนเลยแม้แต่แถวเดียว</p><p>บน PDA จะเห็นเป็นการกระตุกเป็นจังหวะทุก 3 วินาทีขณะเลื่อนรายการ</p><p><strong>ข้อ 2 — แก้ที่สองระดับ</strong></p><p>ต้องแก้ทั้งสองระดับ เพราะแก้ระดับเดียวไม่พอ</p><pre class="code-vs"><code>// ระดับ store — แยกของที่เปลี่ยนคนละความถี่ออกจากกัน
+class PickStore extends ChangeNotifier { ... }         // งาน
+class ConnectionStatus extends ChangeNotifier { ... }  // สัญญาณ</code></pre><pre class="code-vs"><code>// ระดับ builder — แต่ละส่วนฟังเฉพาะตัวที่เกี่ยวข้อง
+Scaffold(
+  appBar: AppBar(
+    title: const Text('หยิบสินค้า'),          // ไม่ฟังอะไรเลย
+    actions: [
+      ListenableBuilder(
+        listenable: connectionStatus,          // ฟังเฉพาะสัญญาณ
+        builder: (context, child) =&gt; ConnectionDot(
+          online: connectionStatus.isOnline,
+        ),
+      ),
+    ],
+  ),
+  body: ListenableBuilder(
+    listenable: pickStore,                     // ฟังเฉพาะงาน
+    builder: (context, child) =&gt; Column(
+      children: [
+        Text('เหลือ ${pickStore.remainingCount}'),
+        Expanded(child: LineList(lines: pickStore.lines)),
+      ],
+    ),
+  ),
+)</code></pre><p><strong>ทำไมแก้ระดับเดียวไม่พอ</strong></p><table><thead><tr><th>ถ้าแก้แค่</th><th>ผลที่ได้</th></tr></thead><tbody>
+<tr><td>ระดับ builder อย่างเดียว</td><td>ยังฟัง store เดียวกัน จึงยังถูกแจ้งทุก 3 วินาที รายการยังสร้างใหม่</td></tr>
+<tr><td>ระดับ store อย่างเดียว</td><td>ถ้ายังมี builder ตัวเดียวครอบทั้งหน้าและฟังทั้งสอง ก็เหมือนเดิม</td></tr>
+</tbody></table><p>นี่คือประเด็นหลักของหัวข้อ 5 — การแยก builder ลดปริมาณ widget ที่สร้างใหม่ แต่ลดจำนวนครั้งที่ถูกแจ้งไม่ได้ ต้องแยกแหล่งที่แจ้งด้วย</p><p><strong>ข้อ 3 — ทำไมยอดคงเหลือกับรายการต้องอยู่ด้วยกัน</strong></p><p>เพราะทั้งสองอ่านจากข้อมูลชุดเดียวกันและต้องสอดคล้องกันเสมอ ถ้าแยกเป็นสอง builder จะมีจังหวะที่ตัวหนึ่งวาดเสร็จแล้วอีกตัวยังไม่วาด ผู้ใช้อาจเห็น</p><pre class="code-vs"><code>เหลือ 3 รายการ
+─────────────
+□ L-1     ← ยังไม่เสร็จ
+□ L-2
+□ L-3
+□ L-4     ← นับได้ 4 แถว แต่หัวบอก 3</code></pre><p>ในทางปฏิบัติจังหวะนี้สั้นมากจนอาจไม่ทันเห็น แต่บน PDA ที่ช้ากว่าจะเห็นได้จริง และที่สำคัญกว่าคือ <strong>มันเป็นการเปิดช่องให้เกิดสิ่งที่ไม่ควรเกิด</strong> — ซึ่งเป็นสิ่งที่ 4.2 พยายามกำจัดตั้งแต่ระดับข้อมูล</p><p>การรวมไว้ใน builder เดียวทำให้ทั้งสองอ่านข้อมูลชุดเดียวกันในการวาดครั้งเดียว จึงไม่มีทางไม่ตรงกัน</p><p><strong>ลองต่อ:</strong> ใน lab ให้ใส่ <code>debugPrint</code> ไว้ต้น builder ทั้งสองตัว แล้วกดปิดงานหนึ่งบรรทัด — จะเห็นว่าทั้งคู่ทำงาน ซึ่งยืนยันหัวข้อ 5 ว่าการแยก builder ไม่ได้ลดการแจ้ง</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ทุกอย่างที่อยู่ใน builder ถูกวาดใหม่เมื่อ store แจ้ง</li><li>วาง builder ให้ครอบเฉพาะส่วนที่ต้องใช้ข้อมูลนั้น</li><li>การแยก builder ลดปริมาณ widget ที่สร้างใหม่ แต่ไม่ลดจำนวนครั้งที่ถูกแจ้ง</li><li>ถ้าต้องการลดการแจ้ง ต้องแยกที่ระดับ store</li><li>แยก store ตามความถี่ อายุ และส่วนงาน</li><li>ห้ามทำสิ่งที่มีผลข้างเคียงใน builder</li><li>ส่วนที่ต้องสอดคล้องกันควรอยู่ใน builder เดียวกัน</li><li>วัดก่อนปรับ อย่าซอยย่อยโดยเดา</li></ul></div><p><strong>บทถัดไป:</strong> 4.7 จะกลับมาที่เรื่องที่ค้างจาก 4.5 — สถานะของงานที่ต้องรอมีมากกว่า “กำลังโหลด” กับ “เสร็จแล้ว” และการแยกให้ครบคือสิ่งที่ทำให้ผู้ใช้รู้ว่าเกิดอะไรขึ้นจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

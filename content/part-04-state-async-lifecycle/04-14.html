@@ -1,15 +1,166 @@
-<div class="note">UI idempotencyทำให้ eventซ้ำให้ผลเหมือนครั้งเดียวภายใน client session ด้วย guard, command identity และ state transition แต่ความถูกต้องสุดท้ายของ mutationต้องมี server idempotency/unique constraintด้วย</div>
-<section><h2>1. Guard by state</h2><pre class="code-vs"><code>Future&lt;void&gt; confirmPick() async {
-  if (state is! ReadyToConfirm) return;
-  final ready = state as ReadyToConfirm;
-  state = Submitting(ready.draft);
-  notifyListeners();
-  // eventที่สองเห็น Submittingและ return
-}</code></pre><p>State machine guardแข็งแรงกว่า boolกระจัดกระจายเพราะบอก actionที่อนุญาต</p></section>
-<section><h2>2. Operation key</h2><p>สร้าง UUIDตอนเริ่ม business operationและเก็บคู่ pending state Retry requestเดิม reuse key; userเริ่ม operationใหม่จึงสร้าง keyใหม่ ส่ง header/bodyให้ .NET endpointเก็บผล/unique keyตาม user+operation</p></section>
-<section><h2>3. Disable UI ไม่พอ</h2><p>Enter, scanner, hardware button, deep callbackและ double tapอาจเข้าก่อน rebuild ต้อง guard synchronousใน command และ serverตรวจอีกชั้น Disabled widgetเป็น feedback/accessibilityไม่ใช่ lockหลัก</p></section>
-<section><h2>4. Duplicate domain value</h2><p>Idempotency keyต่างจาก barcode duplicate รหัสเดิมอาจเป็น operationใหม่ที่ถูกต้อง หรือ scanซ้ำผิด ต้องมี domain ruleแยก เช่น serial unique, product barcodeเพิ่ม qty, retry confirmใช้ operationเดิม</p></section>
-<section><h2>5. Timeout unknown outcome</h2><p>อย่าปลด stateเป็น Readyแล้วสร้าง keyใหม่ทันที เพราะ serverอาจ commitแล้ว เปลี่ยนเป็น Unknown/Reconcile, query statusด้วย key หรือ retry same keyจนได้ deterministic result</p></section>
-<section><h2>6. Tests</h2><p>เรียก commandสองครั้งก่อน Futureแรกจบ assert repositoryหนึ่ง call; timeoutแล้ว retry assert keyเดิม; successแล้ว eventซ้ำไม่ call; reset/new draftจึง keyใหม่ ใช้ Completerกับ fake UUID generator</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้กด Confirm, timeout, ปิดหน้าแล้วกลับมา ต้องเก็บอะไรเพื่อ retryปลอดภัย?</p><details><summary>เฉลย</summary><p>persist pending operation ID + canonical request hash/entity ID/statusตามความเสี่ยง Query backendก่อนหรือ retry keyเดิม Backendตอบผลเดิม/Conflict ไม่สร้าง transactionใหม่จาก UI stateที่ลืม requestเก่า</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Debounce 500msไม่ใช่ idempotency Requestอาจใช้ 5s, app retryหรือสอง deviceยังซ้ำ ต้องออกแบบ command stateและ backend contractร่วมกัน</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: ทำให้กดซ้ำ ส่งซ้ำ แล้วผลยังเหมือนกดครั้งเดียว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.13 (การย้อนกลับและกรณีไม่รู้ผล) และ 3.9 (การกันสแกนซ้ำ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบคำสั่งที่ส่งซ้ำได้อย่างปลอดภัย และรู้ว่าฝั่งแอปทำได้แค่ไหน ฝั่งเซิร์ฟเวอร์ต้องทำอะไร</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ปัญหาที่เจอจริงในคลัง — <strong>ใบรับเข้าใบเดียวกันถูกบันทึกสองครั้ง สต๊อกเกินไป 240 ชิ้น</strong></p><p>ไล่ย้อนกลับไปดูจะพบว่าไม่มีใครทำอะไรผิดเลย</p><pre class="code-vs"><code>0.0s  ผู้ใช้กดยืนยัน → ยิงคำขอไป
+5.0s  ยังไม่มีอะไรเกิดขึ้นบนจอ (สัญญาณ Wi-Fi แถวแร็คแย่)
+6.0s  ผู้ใช้กดยืนยันอีกครั้ง เพราะคิดว่ากดไม่ติด
+7.0s  คำขอแรกถึง server → บันทึก
+9.0s  คำขอที่สองถึง server → บันทึกอีกใบ</code></pre><p>เซิร์ฟเวอร์ทำถูกต้องทุกอย่าง — ได้รับคำขอสองครั้ง ก็บันทึกสองครั้ง ปัญหาคือ <strong>ไม่มีใครบอกมันว่าสองคำขอนี้คือเจตนาเดียวกัน</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>idempotent</td><td>ทำกี่ครั้งก็ได้ผลเท่ากับทำครั้งเดียว</td></tr>
+<tr><td>command id / idempotency key</td><td>รหัสประจำเจตนาหนึ่งครั้งของผู้ใช้</td></tr>
+<tr><td>guard</td><td>เงื่อนไขที่ปฏิเสธคำสั่งซ้ำก่อนที่จะทำอะไร</td></tr>
+<tr><td>unique constraint</td><td>กติกาในฐานข้อมูลที่ห้ามข้อมูลซ้ำ</td></tr>
+<tr><td>at-least-once</td><td>รับประกันว่าถึงอย่างน้อยหนึ่งครั้ง แต่อาจมากกว่า</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: แยก “การกด” ออกจาก “เจตนา”</h2><pre class="code-vs"><code>เจตนา: "ปิดงานบรรทัด L-3"       ← มีครั้งเดียว
+  ├─ กดครั้งที่ 1 → คำขอ
+  ├─ กดครั้งที่ 2 → คำขอ           ทั้งหมดนี้คือเจตนาเดียวกัน
+  └─ ลองใหม่อัตโนมัติ → คำขอ
+
+เจตนาใหม่: "ปิดงานบรรทัด L-3 อีกครั้งหลังแก้ปัญหาแล้ว"  ← คนละครั้ง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> รหัสคำสั่งไม่ได้ระบุ “คำขอ” แต่ระบุ “เจตนา” — คำขอหลายครั้งที่มาจากเจตนาเดียวกัน ต้องพกรหัสเดียวกันไป</div></section>
+
+<section><h2>4. ด่านที่หนึ่ง: กันในเครื่อง</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code></p><pre class="code-vs"><code>Future&lt;void&gt; markDone(String lineId) async {
+  if (_busyLineIds.contains(lineId)) return;   // กดซ้ำระหว่างส่ง → ไม่ทำอะไร
+  ...
+  final before = _lines[index];
+  if (before.done) return;                      // ทำไปแล้ว → ไม่ทำอีก
+</code></pre><p>สองบรรทัดนี้กันได้เยอะ แต่ต้องเข้าใจข้อจำกัดให้ชัด</p><table><thead><tr><th>กันได้</th><th>กันไม่ได้</th></tr></thead><tbody>
+<tr><td>กดรัวขณะคำขอยังไม่จบ</td><td>คำขอถึงเซิร์ฟเวอร์แล้วแต่คำตอบหาย</td></tr>
+<tr><td>กดซ้ำหลังสำเร็จแล้ว</td><td>ผู้ใช้เปิดแอปใหม่แล้วกดอีกรอบ</td></tr>
+<tr><td></td><td>อีกคนกดบรรทัดเดียวกันจาก PDA อีกเครื่อง</td></tr>
+</tbody></table><p>สิ่งที่ต้องระวังคือ <strong>การปิดปุ่มไม่ใช่การกัน</strong></p><pre class="code-vs"><code>ElevatedButton(
+  onPressed: store.isBusy(line.id) ? null : () =&gt; store.markDone(line.id),
+  ...
+)</code></pre><p>ปุ่มจะกลายเป็นสีเทาก็ต่อเมื่อ <code>notifyListeners()</code> ทำงานและ Flutter วาดใหม่เสร็จ ซึ่งเกิดหลังจากที่ผู้ใช้กดไปแล้ว บน PDA ที่ใช้ปุ่มสแกนแบบกดค้าง หรือเครื่องสแกนที่ยิง Enter รัว ๆ เหตุการณ์สองครั้งอาจเข้ามาก่อนที่จอจะทันวาดด้วยซ้ำ</p><div class="note">การปิดปุ่มคือการ <em>บอก</em> ผู้ใช้ ส่วนบรรทัด <code>if (_busyLineIds.contains(lineId)) return;</code> คือการ <em>กัน</em> จริง — เพราะมันทำงานทันทีแบบไม่รอวาดจอ ต้องมีทั้งคู่</div></section>
+
+<section><h2>5. ด่านที่สอง: รหัสคำสั่ง</h2><p>ด่านแรกอยู่ในหน่วยความจำของแอป จึงหายไปทุกครั้งที่ปิดแอป และไม่มีทางรู้เรื่องของ PDA เครื่องอื่น ด่านที่สองคือการติดรหัสไปกับคำขอ</p><pre class="code-vs"><code>final Map&lt;String, String&gt; _pendingCommandIds = &lt;String, String&gt;{};
+
+final commandId = _pendingCommandIds.putIfAbsent(lineId, _createCommandId);</code></pre><p><code>putIfAbsent</code> ทำสองอย่างในบรรทัดเดียว</p><table><thead><tr><th>สถานการณ์</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td>ยังไม่มีรหัสค้างอยู่</td><td>สร้างรหัสใหม่แล้วเก็บไว้</td></tr>
+<tr><td>มีรหัสค้างอยู่แล้ว</td><td>ใช้รหัสเดิม</td></tr>
+</tbody></table><p>แล้วส่งไปกับคำขอ</p><pre class="code-vs"><code>await repository.markDone(lineId, commandId: commandId);</code></pre><p>ฝั่งเซิร์ฟเวอร์จะเห็นว่าคำขอที่สองพกรหัสเดียวกับคำขอแรก จึงตอบผลเดิมกลับมาแทนที่จะบันทึกซ้ำ — รายละเอียดฝั่ง .NET อยู่ในหัวข้อ 8</p></section>
+
+<section><h2>6. กฎที่ตัดสินว่าเมื่อไหร่ใช้รหัสเดิม</h2><p>นี่คือส่วนที่คิดยากที่สุดของบทนี้ และเป็นจุดที่คนเขียนผิดบ่อยที่สุด</p><p>คำถามคือ <strong>เมื่อคำสั่งล้มเหลวแล้วผู้ใช้กดใหม่ ควรใช้รหัสเดิมหรือรหัสใหม่</strong></p><p>คำตอบไม่ใช่ “เดิมเสมอ” และไม่ใช่ “ใหม่เสมอ” แต่ขึ้นกับว่า <strong>เรารู้ผลของครั้งก่อนหรือเปล่า</strong></p><table><thead><tr><th>ผลของครั้งก่อน</th><th>ครั้งใหม่คือ</th><th>รหัส</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ไม่รู้ผล เช่นหมดเวลารอ</td><td>การส่งซ้ำของเจตนาเดิม</td><td><strong>เดิม</strong></td><td>เซิร์ฟเวอร์อาจบันทึกไปแล้ว รหัสเดิมทำให้ไม่ซ้ำ</td></tr>
+<tr><td>รู้แน่ว่าถูกปฏิเสธ</td><td>เจตนาใหม่</td><td><strong>ใหม่</strong></td><td>ครั้งก่อนไม่มีอะไรถูกบันทึก และเงื่อนไขอาจเปลี่ยนไปแล้ว</td></tr>
+<tr><td>สำเร็จ</td><td>—</td><td>ล้างทิ้ง</td><td>เจตนานั้นจบแล้ว</td></tr>
+</tbody></table><p>ดูว่าโค้ดบังคับกฎนี้อย่างไร</p><pre class="code-vs"><code>try {
+  await repository.markDone(lineId, commandId: commandId);
+  _pendingCommandIds.remove(lineId);       // สำเร็จ → ล้าง
+} on PickException catch (error) {
+  if (error.outcomeUnknown) {
+    ...
+    await load();
+    return;                                 // ไม่ลบ → ครั้งหน้าได้รหัสเดิม
+  }
+  _rollback(lineId, before);
+  _pendingCommandIds.remove(lineId);       // ล้มเหลวแน่นอน → ล้าง → รหัสใหม่
+  _errorMessage = error.message;
+}</code></pre><p>ทั้งหมดตัดสินด้วยการ <strong>ลบหรือไม่ลบ</strong> รายการออกจาก map เท่านั้น</p><p>ทำไมกรณี “ถูกปฏิเสธ” ถึงต้องใช้รหัสใหม่ — ลองนึกภาพว่าเซิร์ฟเวอร์ปฏิเสธเพราะบรรทัดนั้นถูกล็อกโดยคนอื่นอยู่ พอคนนั้นทำเสร็จ ผู้ใช้กดใหม่ ถ้ายังส่งรหัสเดิมไป เซิร์ฟเวอร์ที่จำผลเดิมไว้จะตอบ “ถูกปฏิเสธ” กลับมาอีกทั้งที่ตอนนี้ทำได้แล้ว</p></section>
+
+<section><h2>7. เทสต์ที่ตรึงกฎทั้งสองข้อไว้</h2><p>กฎในหัวข้อ 6 เป็นข้อตกลงที่มองไม่เห็นจากตัวโค้ด ถ้าไม่มีเทสต์ตรึงไว้ วันหนึ่งจะมีคนย้าย <code>_pendingCommandIds.remove()</code> ไปไว้ใน <code>finally</code> เพราะดูสะอาดกว่า แล้วกฎครึ่งหนึ่งจะหายไปเงียบ ๆ</p><p>สิ่งที่ทำให้ทดสอบได้คือ store รับตัวสร้างรหัสเข้ามาได้</p><pre class="code-vs"><code>PickStore({required this.repository, String Function()? createCommandId})
+  : _createCommandId = createCommandId ??
+        (() =&gt; DateTime.now().microsecondsSinceEpoch.toString());</code></pre><pre class="code-vs"><code>// ในเทสต์ ใช้ตัวสร้างที่คาดเดาได้
+var counter = 0;
+store = PickStore(
+  repository: repository,
+  createCommandId: () =&gt; 'cmd-${counter++}',
+);</code></pre><pre class="code-vs"><code>test('ไม่รู้ผลแล้วลองใหม่ ต้องใช้รหัสคำสั่งเดิม เพื่อไม่ให้บันทึกซ้ำ', () async {
+  repository.failWith = const PickException('หมดเวลารอ', outcomeUnknown: true);
+  await store.markDone('L-1');
+
+  repository.failWith = null;
+  await store.markDone('L-1');
+
+  expect(repository.commandIds, ['cmd-0', 'cmd-0']);
+});
+
+test('รู้แน่ว่าล้มเหลว การลองใหม่คือเจตนาใหม่ จึงใช้รหัสใหม่', () async {
+  repository.failWith = const PickException('บรรทัดนี้ถูกยกเลิกแล้ว');
+  await store.markDone('L-1');
+
+  repository.failWith = null;
+  await store.markDone('L-1');
+
+  expect(repository.commandIds, ['cmd-0', 'cmd-1']);
+});</code></pre><p>สองเทสต์นี้ตรึงคนละครึ่งของกฎเดียวกัน และถ้าเขียนแค่ตัวเดียวจะได้ระบบที่ผิดคนละแบบ</p><table><thead><tr><th>ถ้ามีแต่เทสต์แรก</th><th>ถ้ามีแต่เทสต์ที่สอง</th></tr></thead><tbody>
+<tr><td>อาจเขียนให้ใช้รหัสเดิมตลอด → ลองใหม่หลังถูกปฏิเสธแล้วโดนปฏิเสธซ้ำตลอดกาล</td><td>อาจเขียนให้สร้างรหัสใหม่ตลอด → ข้อมูลซ้ำเมื่อหมดเวลารอ</td></tr>
+</tbody></table><div class="note"><strong>ลองเอง:</strong> ย้าย <code>_pendingCommandIds.remove(lineId)</code> ทั้งสองที่ไปรวมไว้ใน <code>finally</code> แล้วรัน <code>flutter test --no-pub</code> — เทสต์แรกจะแดงทันที นี่คือตัวอย่างของเทสต์ที่ปกป้องการตัดสินใจเชิงออกแบบ ไม่ใช่แค่ปกป้องโค้ด</div></section>
+
+<section><h2>8. ฝั่งแอปทำได้แค่ครึ่งเดียว</h2><p>ต้องพูดให้ชัด — <strong>ทุกอย่างในบทนี้ไม่มีความหมายเลยถ้าเซิร์ฟเวอร์ไม่ทำหน้าที่ของมัน</strong></p><table><thead><tr><th>ฝั่งแอปรับผิดชอบ</th><th>ฝั่งเซิร์ฟเวอร์รับผิดชอบ</th></tr></thead><tbody>
+<tr><td>สร้างรหัสประจำเจตนา</td><td>จำว่ารหัสไหนเคยทำไปแล้ว</td></tr>
+<tr><td>ส่งรหัสเดิมไปเมื่อส่งซ้ำ</td><td>ตอบผลเดิมแทนการทำซ้ำ</td></tr>
+<tr><td>กันการกดรัวในเครื่อง</td><td>กันคำขอจากหลายเครื่องพร้อมกัน</td></tr>
+</tbody></table><p>เหตุผลที่ฝั่งแอปทำเองไม่ได้ เพราะมีอย่างน้อยสามช่องที่แอปมองไม่เห็น</p><table><thead><tr><th>ช่องโหว่</th><th>ทำไมแอปกันไม่ได้</th></tr></thead><tbody>
+<tr><td>ปิดแอปแล้วเปิดใหม่</td><td>ข้อมูลในหน่วยความจำหายหมด</td></tr>
+<tr><td>PDA สองเครื่องทำบรรทัดเดียวกัน</td><td>แต่ละเครื่องไม่รู้จักกัน</td></tr>
+<tr><td>ชั้นเครือข่ายส่งซ้ำเอง</td><td>เกิดใต้ระดับที่โค้ดเรามองเห็น</td></tr>
+</tbody></table><p>ฝั่ง .NET จะเก็บรหัสไว้แล้วตอบผลเดิมเมื่อเจอซ้ำ</p><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+var existing = await _db.Commands.FindAsync(commandId);
+if (existing is not null) return Ok(existing.Result);   // ตอบผลเดิม ไม่ทำซ้ำ</code></pre><p>และควรมี unique constraint ในฐานข้อมูลเป็นด่านสุดท้าย เพราะสองคำขอที่มาถึงพร้อมกันจริง ๆ อาจอ่านตารางเจอว่า “ยังไม่มี” พร้อมกันทั้งคู่</p><p>เรื่องการออกแบบ endpoint และการเก็บผลฝั่งเซิร์ฟเวอร์อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a> ส่วนการส่งรหัสผ่าน header และการอ่านคำตอบจะทำจริงใน Part 8</p><div class="warn">ก่อนเริ่มเขียนฟีเจอร์ที่เปลี่ยนสต๊อก ต้องคุยกับฝั่งหลังบ้านก่อนว่ารหัสคำสั่งส่งไปทางไหนและเซิร์ฟเวอร์ตอบอะไรเมื่อเจอซ้ำ — ถ้าตกลงกันทีหลัง มักจะได้ข้อตกลงที่ไม่ครอบคลุมกรณีหมดเวลารอ ซึ่งเป็นกรณีที่สำคัญที่สุด</div></section>
+
+<section><h2>9. รหัสคำสั่ง กับ การสแกนซ้ำ ไม่ใช่เรื่องเดียวกัน</h2><p>ใน 3.9 เราเคยกันการสแกนบาร์โค้ดซ้ำมาแล้ว แต่คนละเรื่องกับบทนี้</p><table><thead><tr><th></th><th>กันสแกนซ้ำ (3.9)</th><th>รหัสคำสั่ง (บทนี้)</th></tr></thead><tbody>
+<tr><td>ถามว่า</td><td>“รหัสของนี้เคยสแกนในรอบนี้ไหม”</td><td>“เจตนานี้เคยถูกส่งไปแล้วไหม”</td></tr>
+<tr><td>เป็นกติกาของ</td><td>ธุรกิจ</td><td>ระบบ</td></tr>
+<tr><td>ค่าเดิมซ้ำได้ไหม</td><td>แล้วแต่กติกา</td><td>ไม่มีทางซ้ำ เพราะสร้างใหม่ทุกเจตนา</td></tr>
+</tbody></table><p>และกติกาธุรกิจก็ไม่เหมือนกันในแต่ละกรณี</p><table><thead><tr><th>สแกนของเดิมซ้ำ</th><th>ควรทำอย่างไร</th></tr></thead><tbody>
+<tr><td>เลข serial ที่ต้องไม่ซ้ำ</td><td>ปฏิเสธ ของชิ้นนั้นมีชิ้นเดียว</td></tr>
+<tr><td>บาร์โค้ดสินค้าทั่วไป</td><td>เพิ่มจำนวน เพราะหยิบมาสองชิ้นจริง</td></tr>
+<tr><td>รหัสพาเลทปลายทาง</td><td>ยอมรับ ค่าเดิมคือค่าเดิม</td></tr>
+</tbody></table><p>อย่าใช้รหัสคำสั่งไปแก้ปัญหาการสแกนซ้ำ และอย่าใช้การกันสแกนซ้ำไปแก้ปัญหาการส่งซ้ำ</p></section>
+
+<section><h2>10. debounce ไม่ใช่ idempotency</h2><p>ทางลัดที่เห็นบ่อย</p><pre class="code-vs"><code>// "แก้แล้ว" — ยังไม่ได้แก้
+if (DateTime.now().difference(_lastTap) &lt; const Duration(milliseconds: 500)) {
+  return;
+}</code></pre><table><thead><tr><th>สถานการณ์</th><th>debounce 500ms</th><th>รหัสคำสั่ง</th></tr></thead><tbody>
+<tr><td>กดรัวใน 0.2 วินาที</td><td>กันได้</td><td>กันได้</td></tr>
+<tr><td>กดอีกครั้งหลังรอ 5 วินาที</td><td>กันไม่ได้</td><td>กันได้</td></tr>
+<tr><td>ปิดแอปแล้วเปิดใหม่กด</td><td>กันไม่ได้</td><td>กันได้ ถ้าเก็บรหัสลงเครื่อง</td></tr>
+<tr><td>เครือข่ายส่งซ้ำเอง</td><td>กันไม่ได้</td><td>กันได้</td></tr>
+</tbody></table><p>debounce แก้เรื่องนิ้วสั่น ส่วน idempotency แก้เรื่องความถูกต้องของข้อมูล — ใช้แทนกันไม่ได้</p></section>
+
+<section><h2>11. เมื่อต้องข้ามการปิดแอป</h2><p>ถ้าคำสั่งนั้นสำคัญพอ รหัสต้องอยู่รอดแม้แอปถูกปิด</p><pre class="code-vs"><code>ก่อนยิงคำขอ  → บันทึกรหัสลงเครื่อง
+ยิงคำขอ
+สำเร็จ       → ลบรหัสออก
+ปิดแอปกลางคัน → รหัสยังอยู่</code></pre><p>ตอนเปิดแอปกลับมาแล้วเจอรหัสค้าง มีสองทางเลือก</p><table><thead><tr><th>ทางเลือก</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ถามเซิร์ฟเวอร์ก่อนว่ารหัสนี้ผลเป็นอย่างไร</td><td>เซิร์ฟเวอร์มี endpoint ให้ถาม</td></tr>
+<tr><td>ส่งซ้ำด้วยรหัสเดิม</td><td>เซิร์ฟเวอร์รองรับรหัสซ้ำแล้ว — ปลอดภัยเท่ากัน</td></tr>
+</tbody></table><p>ทั้งสองทางต้องอาศัยฝั่งเซิร์ฟเวอร์ที่ทำหน้าที่ตามหัวข้อ 8 ไว้แล้ว</p><p>สิ่งที่ห้ามทำคือลบรหัสทิ้งตอนเปิดแอปเพราะดูรก — เท่ากับลืมว่าเคยส่งอะไรไป แล้วคำสั่งถัดไปจะกลายเป็นการบันทึกซ้ำ</p><p>การเก็บข้อมูลลงเครื่องจะทำจริงใน Part 12</p></section>
+
+<section><h2>12. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ข้อมูลซ้ำเมื่อเน็ตช้า</td><td>ไม่มีรหัสคำสั่ง</td><td>ส่งรหัสไปกับคำขอ</td></tr>
+<tr><td>ปิดปุ่มแล้วยังซ้ำ</td><td>เหตุการณ์เข้ามาก่อนจอวาดใหม่</td><td>กันในโค้ดด้วยธง ไม่ใช่กันด้วยหน้าตา</td></tr>
+<tr><td>ลองใหม่หลังหมดเวลารอแล้วได้สองรายการ</td><td>สร้างรหัสใหม่ทุกครั้ง</td><td>ใช้รหัสเดิมเมื่อไม่รู้ผล</td></tr>
+<tr><td>ลองใหม่หลังถูกปฏิเสธแล้วโดนปฏิเสธซ้ำตลอด</td><td>ใช้รหัสเดิมตลอด</td><td>ล้างรหัสเมื่อรู้แน่ว่าล้มเหลว</td></tr>
+<tr><td>เทสต์ผ่านหมด แต่ยังซ้ำที่หน้างาน</td><td>เซิร์ฟเวอร์ไม่ได้ตรวจรหัส</td><td>ตกลงข้อตกลงกับหลังบ้านให้ครบ</td></tr>
+<tr><td>ใช้ debounce แล้วคิดว่าจบ</td><td>เข้าใจผิดว่าเป็นเรื่องเดียวกัน</td><td>ทำทั้งสองอย่าง</td></tr>
+<tr><td>สแกนของสองชิ้นแล้วนับได้ชิ้นเดียว</td><td>เอาการกันคำสั่งซ้ำไปใช้กับการสแกน</td><td>แยกกติกาธุรกิจออกจากกลไกระบบ</td></tr>
+</tbody></table></section>
+
+<section><h2>13. แบบฝึกหัด</h2><p>ผู้ใช้กดยืนยันรับเข้า แล้วเกิดหมดเวลารอ จากนั้นกดปุ่มย้อนกลับออกจากหน้าจอ ปิดแอป แล้วเปิดกลับเข้ามาที่ใบเดิม</p><ol><li>ระบุว่าตอนเปิดกลับมา ความจริงมีกี่แบบที่เป็นไปได้</li><li>บอกว่าต้องเก็บอะไรไว้บ้างเพื่อให้กดใหม่ได้อย่างปลอดภัย</li><li>อธิบายว่าถ้าไม่เก็บอะไรเลย จะเกิดอะไรขึ้นและเสียหายแค่ไหน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ความจริงที่เป็นไปได้</strong></p><table><thead><tr><th>#</th><th>ความจริง</th><th>ควรทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>คำขอไปไม่ถึงเลย</td><td>ส่งใหม่ได้</td></tr>
+<tr><td>2</td><td>ถึงแล้ว บันทึกสำเร็จ แต่คำตอบหาย</td><td><strong>ห้ามส่งใหม่แบบไม่มีรหัส</strong></td></tr>
+<tr><td>3</td><td>ถึงแล้ว กำลังประมวลผลอยู่</td><td>รอหรือถามสถานะ</td></tr>
+<tr><td>4</td><td>ถึงแล้ว แต่ถูกปฏิเสธ</td><td>ส่งใหม่เป็นเจตนาใหม่</td></tr>
+</tbody></table><p>จุดสำคัญคือ <strong>ฝั่งแอปแยกทั้งสี่แบบนี้ไม่ออกเลย</strong> — สิ่งที่เห็นเหมือนกันหมดคือ “ไม่ได้คำตอบ” จึงห้ามเดา</p><p><strong>ข้อ 2 — ต้องเก็บอะไร</strong></p><table><thead><tr><th>เก็บ</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td>รหัสคำสั่ง</td><td>ส่งซ้ำได้โดยไม่บันทึกซ้ำ — สำคัญที่สุด</td></tr>
+<tr><td>รหัสใบที่ทำอยู่</td><td>รู้ว่ารหัสคำสั่งนั้นเป็นของใบไหน</td></tr>
+<tr><td>สถานะว่า “ส่งไปแล้วแต่ไม่รู้ผล”</td><td>ตอนเปิดมาจะได้รู้ว่าต้องตรวจสอบก่อน ไม่ใช่เริ่มใหม่</td></tr>
+<tr><td>เวลาที่ส่ง</td><td>ใช้บอกผู้ใช้ และตัดสินว่าเก่าเกินจะสนใจหรือยัง</td></tr>
+</tbody></table><p>ลำดับที่ควรทำเมื่อเปิดกลับมา</p><pre class="code-vs"><code>เปิดแอป → เจอคำสั่งค้าง
+  → แสดงว่า "มีการยืนยันค้างอยู่ กำลังตรวจสอบ"   ← อย่าให้เริ่มใหม่เงียบ ๆ
+  → ถามเซิร์ฟเวอร์ด้วยรหัสคำสั่งนั้น
+      ├─ สำเร็จไปแล้ว → แสดงผล ลบรหัส จบ
+      ├─ ไม่เคยได้รับ → ให้ผู้ใช้กดส่งด้วยรหัสเดิม
+      └─ ถูกปฏิเสธ   → แสดงเหตุผล ลบรหัส เริ่มเจตนาใหม่ได้</code></pre><p>ถ้าเซิร์ฟเวอร์ไม่มี endpoint ให้ถาม ก็ส่งซ้ำด้วยรหัสเดิมได้เลย ซึ่งปลอดภัยเท่ากันตราบใดที่เซิร์ฟเวอร์ตรวจรหัส</p><p><strong>ข้อ 3 — ถ้าไม่เก็บอะไรเลย</strong></p><p>ตอนเปิดกลับมา แอปจะไม่รู้ว่าเคยมีอะไรเกิดขึ้น หน้าจอจะแสดงใบเดิมในสภาพ “ยังไม่ได้ยืนยัน” เพราะข้อมูลที่โหลดมายังไม่ทันอัปเดต หรือเพราะโหลดมาก่อนที่เซิร์ฟเวอร์จะบันทึกเสร็จ</p><pre class="code-vs"><code>ผู้ใช้เห็นว่ายังไม่ยืนยัน → กดยืนยัน → รหัสใหม่ → บันทึกอีกใบ</code></pre><p>ความเสียหายเรียงจากเบาไปหนัก</p><table><thead><tr><th>ระดับ</th><th>สิ่งที่เกิด</th></tr></thead><tbody>
+<tr><td>ข้อมูล</td><td>ใบรับเข้าซ้ำสองใบ</td></tr>
+<tr><td>สต๊อก</td><td>ยอดเกินจริงเท่ากับของทั้งใบ</td></tr>
+<tr><td>การเงิน</td><td>ตั้งหนี้ผู้ขายซ้ำ หรือจ่ายซ้ำ ขึ้นกับว่าระบบผูกกับอะไร</td></tr>
+<tr><td>การนับสต๊อก</td><td>รอบนับถัดไปพบส่วนต่าง ต้องสอบสวนย้อนหลังทั้งวัน</td></tr>
+<tr><td>ความเชื่อถือ</td><td>คนหน้างานเลิกเชื่อตัวเลขในระบบ แล้วกลับไปจดใส่กระดาษ</td></tr>
+</tbody></table><p>แถวสุดท้ายคือความเสียหายที่แท้จริง — ระบบที่ตัวเลขเชื่อถือไม่ได้ ไม่ได้ถูกใช้งานผิด แต่ถูกเลิกใช้</p><p><strong>ข้อสังเกตสุดท้าย:</strong> ทั้งบทนี้แก้ปัญหาที่มาจากข้อเท็จจริงเดียว — <em>เครือข่ายรับประกันได้แค่ว่าข้อความจะถึงอย่างน้อยหนึ่งครั้ง ไม่เคยรับประกันว่าถึงครั้งเดียว</em> เมื่อรับข้อเท็จจริงนี้แล้ว รหัสคำสั่งจะไม่ใช่ของแถม แต่เป็นส่วนหนึ่งของคำสั่งที่ขาดไม่ได้</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่จำลองข้อ 1 กรณีที่ 2 — ให้ repository ปลอมโยน <code>outcomeUnknown</code> แต่บันทึกลง list ภายในว่าทำสำเร็จแล้ว จากนั้นส่งซ้ำด้วยรหัสเดิมแล้วให้ repository ตรวจรหัสและตอบผลเดิม แล้วยืนยันว่ารายการที่บันทึกมีแค่หนึ่ง</p></details></section>
+
+<section><h2>14. สรุปท้ายบท</h2><div class="success"><ul><li>เครือข่ายรับประกันแค่ “ถึงอย่างน้อยหนึ่งครั้ง” ไม่เคยรับประกันว่าครั้งเดียว</li><li>รหัสคำสั่งระบุเจตนา ไม่ใช่ระบุคำขอ</li><li>การปิดปุ่มคือการบอกผู้ใช้ ส่วนธงในโค้ดคือการกันจริง ต้องมีทั้งคู่</li><li>ไม่รู้ผล → ใช้รหัสเดิม / รู้ว่าล้มเหลว → ใช้รหัสใหม่ / สำเร็จ → ล้างทิ้ง</li><li>กฎนี้มองไม่เห็นจากโค้ด จึงต้องมีเทสต์ตรึงไว้ทั้งสองข้าง</li><li>ฝั่งแอปทำได้แค่ครึ่งเดียว เซิร์ฟเวอร์ต้องจำรหัสและตอบผลเดิม</li><li>ควรมี unique constraint เป็นด่านสุดท้ายในฐานข้อมูล</li><li>debounce ไม่ใช่ idempotency และการกันสแกนซ้ำก็คนละเรื่อง</li><li>คำสั่งที่สำคัญ ต้องเก็บรหัสให้อยู่รอดข้ามการปิดแอป</li></ul></div><p><strong>บทถัดไป:</strong> 4.15 จะรวบทุกอย่างที่ทำมาในบทนี้ให้เป็นโครงเดียว — เมื่อคำสั่งมีหลายขั้นตอน การถามว่า “ตอนนี้ทำอะไรได้บ้าง” ควรตอบได้จากค่าเดียว ไม่ใช่จากการรวมเงื่อนไขหลายตัว</p></section>

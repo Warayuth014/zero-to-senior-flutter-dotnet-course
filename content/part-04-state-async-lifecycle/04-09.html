@@ -1,11 +1,196 @@
-<div class="note">หลัง await UI ownerอาจถูก dispose การตรวจ <code>mounted</code> ป้องกันใช้ State/BuildContextที่หมดอายุ แต่ไม่ป้องกัน responseเก่าหรือ business stateเปลี่ยน ต้องตรวจ lifecycleและ operation identityแยกกัน</div>
-<section><h2>1. State.mounted</h2><pre class="code-vs"><code>final result = await repository.login(credentials);
-if (!mounted) return;
-Navigator.of(context).pushReplacement(/* ... */);</code></pre><p>ใช้ใน State methodก่อน setState, Navigator, ScaffoldMessengerหรือ FocusNodeหลัง async gap</p></section>
-<section><h2>2. context.mounted</h2><p>ใน callbackที่มี local BuildContextใช้ <code>if (!context.mounted) return</code> และตรวจ contextตัวที่จะใช้จริง Dialog contextที่ popแล้วไม่เหมือน page contextที่ยังอยู่</p></section>
-<section><h2>3. Store ไม่ควรพึ่ง mounted</h2><p>ChangeNotifier/repositoryไม่ควรรับ BuildContextเพื่อเช็ค lifecycle Storeมี ownership/disposed/cancellationของตนและ publish state; UI listenerที่ยัง mountedจึง render/effect WarehouseStoreอยู่ใต้ shellและ shell dispose storeพร้อมกัน</p></section>
-<section><h2>4. finally เมื่อ unmounted</h2><p>อย่า returnก่อน cleanupที่จำเป็น วาง resource/store cleanupใน finallyแล้วตรวจ mountedเฉพาะ UI update ถ้า Stateหาย busy fieldของมันไม่สำคัญ แต่ timer/request/clientที่ ownerถือยังต้องจัดการ</p></section>
-<section><h2>5. Focus/dialog</h2><p>หลัง await dialog/APIตรวจ mountedก่อนคืน focus wmsappและ Absoluteทำเช่นนี้หลายจุด ป้องกัน FocusNodeถูก disposeเมื่อ userกดย้อนระหว่าง request</p></section>
-<section><h2>6. Analyzer lint</h2><p><code>use_build_context_synchronously</code> ชี้จุด contextข้าม async gap แก้ด้วย reorderให้ใช้ก่อน await, ตรวจ mounted, หรือย้าย navigation/effectออกจาก service ไม่ปิด lintทั้งโปรเจกต์เพราะรำคาญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Store fetchเสร็จหลังหน้า Aปิดแต่หน้า Bยังใช้ storeเดียวกัน ควรทิ้ง resultเพราะ A unmountedไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรผูก resultกับ Aถ้า storeเป็น shared owner ให้ store applyตาม operation identityและ notify B ส่วน Aเพียงหยุดใช้ context/effects หาก requestเป็นของ Aโดยเฉพาะค่อย cancel/ignoreเมื่อ owner dispose</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Mounted trueไม่ได้แปลว่า task/entityยังเดิม และ mounted falseไม่ได้แปลว่าควรยกเลิก domain operationเสมอ แยก UI lifetimeจากงานธุรกิจให้ชัด</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ใช้ context หลัง await โดยไม่ทำให้แอปพัง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.8 (try/finally) และ 1.10 (<code>BuildContext</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าเมื่อไหร่ต้องตรวจ <code>mounted</code> เมื่อไหร่ไม่ต้อง และเข้าใจว่าทำไมมันไม่ใช่คำตอบของทุกปัญหาหลัง <code>await</code></div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่ดูปกติมาก</p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  final receipt = await repository.confirm(draft);   // ใช้เวลา 2 วินาที
+  ScaffoldMessenger.of(context).showSnackBar(         // ระเบิดตรงนี้
+    SnackBar(content: Text('บันทึกแล้ว ${receipt.id}')),
+  );
+}</code></pre><p>ทำงานได้ตลอดตอนทดสอบ แล้ววันหนึ่งจะได้ข้อความนี้</p><pre class="code-vs"><code>FlutterError: Looking up a deactivated widget's ancestor is unsafe.</code></pre><p>สาเหตุ — ระหว่างสองวินาทีนั้น ผู้ใช้กดปุ่มย้อนกลับ หน้าจอถูกถอดออกไปแล้ว แต่ <code>_submit()</code> ยังทำงานต่อ และไปเรียก <code>context</code> ของหน้าจอที่ไม่มีอยู่แล้ว</p><p>ข้อความมันอ่านยาก ชี้ไม่ตรงจุด และเกิดเฉพาะเมื่อจังหวะพอดี — จึงมักหลุดขึ้น production ไปก่อน</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>async gap</td><td>ช่วงเวลาที่โค้ดหยุดรอที่ <code>await</code></td></tr>
+<tr><td>mounted</td><td>ค่า <code>bool</code> ที่บอกว่า <code>State</code> นี้ยังอยู่ในต้นไม้หรือไม่</td></tr>
+<tr><td>deactivated widget</td><td>widget ที่ถูกถอดออกจากต้นไม้แล้ว</td></tr>
+<tr><td>UI lifetime</td><td>อายุของหน้าจอ</td></tr>
+<tr><td>business operation</td><td>งานทางธุรกิจ ซึ่งมีอายุของตัวเอง ไม่ผูกกับหน้าจอ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: หน้าจออาจไม่รอคุณ</h2><pre class="code-vs"><code>0.0s  ผู้ใช้กดปุ่ม → _submit() เริ่ม
+0.0s  await repository.confirm(...)     ← โค้ดหยุดตรงนี้
+0.8s  ผู้ใช้กดย้อนกลับ → หน้าจอถูกถอด, dispose() ถูกเรียก
+2.0s  server ตอบกลับ → โค้ดทำงานต่อจากบรรทัดถัดไป
+2.0s  ใช้ context ของหน้าจอที่ไม่มีอยู่แล้ว → พัง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกบรรทัดที่อยู่หลัง <code>await</code> ต้องถือว่าหน้าจออาจหายไปแล้ว — ไม่ใช่บางครั้ง แต่ทุกครั้ง</div></section>
+
+<section><h2>4. ทางแก้พื้นฐาน: ตรวจ mounted</h2><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  final receipt = await repository.confirm(draft);
+  if (!mounted) return;                    // ← ด่านตรวจ
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('บันทึกแล้ว ${receipt.id}')),
+  );
+}</code></pre><p><code>mounted</code> เป็นสมบัติของ <code>State</code> ที่ Flutter ตั้งให้เอง</p><table><thead><tr><th>ช่วงเวลา</th><th><code>mounted</code></th></tr></thead><tbody>
+<tr><td>ก่อน <code>initState</code></td><td>false</td></tr>
+<tr><td>ตั้งแต่ <code>initState</code> จนถึงก่อน <code>dispose</code></td><td>true</td></tr>
+<tr><td>หลัง <code>dispose</code></td><td>false ตลอดไป</td></tr>
+</tbody></table><p>สิ่งที่ต้องตรวจ <code>mounted</code> ก่อนใช้เสมอหลัง async gap</p><table><thead><tr><th>สิ่งที่ทำ</th><th>ทำไมต้องตรวจ</th></tr></thead><tbody>
+<tr><td><code>setState(...)</code></td><td>สั่งวาดใหม่บนหน้าจอที่ไม่มีแล้ว</td></tr>
+<tr><td><code>Navigator.of(context)</code></td><td>ต้องเดินขึ้นต้นไม้จาก context ที่ตายแล้ว</td></tr>
+<tr><td><code>ScaffoldMessenger.of(context)</code></td><td>เหตุผลเดียวกัน</td></tr>
+<tr><td><code>Theme.of(context)</code> / <code>MediaQuery.of(context)</code></td><td>เหตุผลเดียวกัน</td></tr>
+<tr><td><code>_focusNode.requestFocus()</code></td><td><code>FocusNode</code> อาจถูก dispose ไปแล้ว</td></tr>
+</tbody></table></section>
+
+<section><h2>5. context.mounted: เมื่อ context ไม่ใช่ของ State</h2><p>บางที <code>context</code> ที่จะใช้ไม่ได้มาจาก <code>State</code> แต่มาจาก builder</p><pre class="code-vs"><code>showDialog(
+  context: context,
+  builder: (dialogContext) =&gt; AlertDialog(     // context คนละตัว
+    actions: [
+      TextButton(
+        onPressed: () async {
+          await store.markDone(lineId);
+          if (!dialogContext.mounted) return;   // ตรวจตัวที่จะใช้จริง
+          Navigator.of(dialogContext).pop();
+        },
+        child: const Text('ยืนยัน'),
+      ),
+    ],
+  ),
+)</code></pre><p>จุดที่พลาดกันคือ <strong>ตรวจ <code>mounted</code> ของหน้าจอ แต่ไปใช้ <code>dialogContext</code></strong> ซึ่งเป็นคนละอายุกัน — กล่องโต้ตอบอาจถูกปิดไปแล้วในขณะที่หน้าจอเบื้องหลังยังอยู่ครบ</p><table><thead><tr><th>context ที่ใช้</th><th>ต้องตรวจ</th></tr></thead><tbody>
+<tr><td><code>context</code> ของ <code>State</code></td><td><code>mounted</code></td></tr>
+<tr><td><code>context</code> ที่รับมาจาก builder</td><td><code>thatContext.mounted</code></td></tr>
+</tbody></table><div class="note">กฎง่าย ๆ — <em>ตรวจตัวที่จะใช้ ไม่ใช่ตัวที่อยู่ใกล้มือ</em></div></section>
+
+<section><h2>6. analyzer หาให้ได้ก่อนที่ผู้ใช้จะเจอ</h2><p>Flutter มี lint ชื่อ <code>use_build_context_synchronously</code> ที่เตือนเมื่อมีการใช้ <code>context</code> ข้าม async gap</p><pre class="code-vs"><code>flutter analyze --no-pub</code></pre><table><thead><tr><th>วิธีแก้เมื่อ analyzer เตือน</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ย้ายการอ่านค่ามาก่อน <code>await</code></td><td>แค่ต้องการ <code>Theme.of</code> หรือค่าอื่นที่อ่านได้ล่วงหน้า</td></tr>
+<tr><td>ใส่ <code>if (!mounted) return;</code></td><td>ต้องใช้ <code>context</code> หลังงานเสร็จจริง ๆ</td></tr>
+<tr><td>ย้ายงาน async ไปไว้ใน store</td><td>ดีที่สุด ถ้าทำได้ (ดูหัวข้อ 8)</td></tr>
+</tbody></table><pre class="code-vs"><code>// ย้ายมาก่อน await — ไม่ต้องตรวจอะไรเลย
+final messenger = ScaffoldMessenger.of(context);
+final receipt = await repository.confirm(draft);
+messenger.showSnackBar(SnackBar(content: Text('บันทึกแล้ว ${receipt.id}')));</code></pre><p>วิธีนี้ใช้ได้เพราะ <code>ScaffoldMessengerState</code> ที่หยิบไว้ยังใช้งานได้แม้หน้าจอที่หยิบมันมาจะถูกปิดไปแล้ว — แต่ต้องรู้ตัวว่ามันจะแสดง SnackBar ขึ้นมาบนหน้าจอใหม่ที่ผู้ใช้กำลังดูอยู่ ซึ่งอาจไม่ใช่สิ่งที่ต้องการ</p><div class="warn">อย่าปิด lint ตัวนี้ทั้งโปรเจกต์เพราะรำคาญ — มันหาบั๊กที่หายากที่สุดชนิดหนึ่งได้ฟรี ๆ ถ้าจุดไหนตรวจสอบแล้วว่าปลอดภัยจริง ให้ปิดเฉพาะบรรทัดนั้นพร้อมคำอธิบาย</div></section>
+
+<section><h2>7. mounted ไม่ได้แก้ปัญหาที่คนคิดว่ามันแก้</h2><p>นี่คือหัวใจของบทนี้ และเป็นสิ่งที่ทำให้บทนี้ต่อกับ 4.10</p><table><thead><tr><th>สิ่งที่ <code>mounted</code> ตอบได้</th><th>สิ่งที่ตอบไม่ได้</th></tr></thead><tbody>
+<tr><td>“หน้าจอนี้ยังอยู่ไหม”</td><td>“ผลลัพธ์นี้เป็นของคำขอล่าสุดหรือเปล่า”</td></tr>
+<tr><td>“ใช้ <code>context</code> ได้ไหม”</td><td>“ข้อมูลที่ฉันกำลังจะเขียนทับ ใหม่กว่าของฉันหรือเปล่า”</td></tr>
+</tbody></table><pre class="code-vs"><code>// mounted เป็น true ตลอด แต่ยังผิด
+await load('PAL-0001');   // ช้า
+await load('PAL-0002');   // เร็ว มาถึงก่อน
+// ผลของ PAL-0001 มาทีหลัง แล้วทับ PAL-0002
+// หน้าจอยัง mounted อยู่ตลอด — mounted จึงช่วยอะไรไม่ได้เลย</code></pre><p>และในทางกลับกัน <code>mounted == false</code> ก็ไม่ได้แปลว่าควรทิ้งงานเสมอไป</p><pre class="code-vs"><code>await repository.markDone(lineId);   // server บันทึกแล้ว
+if (!mounted) return;                 // ← ถ้า return ตรงนี้ ใครอัปเดตข้อมูล?</code></pre><p>ถ้าผู้ใช้กดย้อนกลับหลังกดปิดงาน งานนั้น <strong>ก็ยังถูกปิดจริงที่ server</strong> การ <code>return</code> เฉย ๆ ทำให้ข้อมูลในแอปไม่ตรงกับความจริง — พอเข้าหน้าเดิมอีกครั้งจะยังเห็นว่ายังไม่เสร็จ</p><div class="note"><strong>แยกให้ออก:</strong> อายุของหน้าจอ กับ อายุของงานทางธุรกิจ เป็นคนละเรื่อง <code>mounted</code> คุมได้แค่เรื่องแรก</div></section>
+
+<section><h2>8. ทางออกที่แท้จริง: อย่าให้ widget ถืองาน async</h2><p>เปิด <code>lib/state_basics/state_basics_app.dart</code> แล้วมองหา <code>mounted</code> — <strong>จะไม่เจอเลยแม้แต่ที่เดียว</strong></p><p>ไม่ใช่เพราะลืม แต่เพราะไม่มีจุดไหนที่ widget รอ <code>await</code> แล้วใช้ <code>context</code> ต่อ</p><pre class="code-vs"><code>ElevatedButton(
+  onPressed: store.isBusy(line.id)
+      ? null
+      : () =&gt; store.markDone(line.id),   // สั่งแล้วจบ ไม่รอผล
+  child: const Text('ปิดงาน'),
+)</code></pre><p>ผลลัพธ์ไม่ได้กลับมาที่ปุ่ม แต่ไปอยู่ใน store แล้ว store แจ้ง แล้ว <code>ListenableBuilder</code> วาดใหม่</p><pre class="code-vs"><code>ปุ่ม → store.markDone()
+                │
+                ├→ await repository ...
+                └→ notifyListeners()
+                        │
+                        └→ ListenableBuilder วาดใหม่ (ถ้ายังอยู่)
+                           ถ้าไม่อยู่แล้ว มันก็แค่ไม่มีใครฟัง — ไม่พัง</code></pre><table><thead><tr><th></th><th>widget ถืองาน async</th><th>store ถืองาน async</th></tr></thead><tbody>
+<tr><td>ต้องตรวจ <code>mounted</code></td><td>ทุกจุดหลัง await</td><td>ไม่ต้อง</td></tr>
+<tr><td>หน้าจอปิดกลางทาง</td><td>ต้องเขียนโค้ดรับมือ</td><td>งานเดินต่อจนจบ ข้อมูลถูกต้อง</td></tr>
+<tr><td>ทดสอบ</td><td>ต้องมี widget</td><td>ทดสอบ store ตรง ๆ ได้</td></tr>
+</tbody></table><p>นี่เป็นเหตุผลเชิงปฏิบัติอีกข้อของสิ่งที่ทำมาตั้งแต่ 4.5 — การย้ายสถานะออกจาก widget ไม่ได้ทำให้แค่ทดสอบง่ายขึ้น แต่ทำให้ปัญหาทั้งหมวดนี้หายไปเลย</p></section>
+
+<section><h2>9. store ไม่มี mounted แล้วใช้อะไรแทน</h2><p><code>ChangeNotifier</code> ไม่มี <code>mounted</code> เพราะมันไม่ได้อยู่ในต้นไม้ widget สิ่งที่มันมีคือ <code>dispose()</code></p><pre class="code-vs"><code>@override
+void dispose() {
+  stopPolling();
+  _generation++;      // ทำให้ผลของคำขอที่ยังค้างอยู่ ถูกทิ้งเมื่อกลับมา
+  super.dispose();
+}</code></pre><p>บรรทัด <code>_generation++</code> คือกลไกเดียวกับที่ใช้กันผลลัพธ์เก่าใน 4.10 — พอเลขรุ่นเปลี่ยน คำขอที่ยิงไปก่อนหน้าจะตรวจเจอว่าตัวเองล้าสมัยแล้วจึงไม่เขียนอะไรทับ</p><p>สิ่งที่ store ต้องทำใน <code>dispose()</code></p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ยกเลิก <code>Timer</code></td><td>ไม่งั้นมันเดินต่อตลอดอายุแอป (4.11)</td></tr>
+<tr><td>ยกเลิกการ subscribe stream</td><td>เหตุผลเดียวกัน</td></tr>
+<tr><td>ทำให้ผลที่ค้างอยู่ถูกทิ้ง</td><td>ไม่ให้เขียนทับสถานะของ store ที่ตายแล้ว</td></tr>
+</tbody></table><p>และสิ่งที่ <strong>ห้าม</strong> ทำคือข้ามงานเก็บกวาดใน <code>finally</code> เพราะคิดว่าไม่มีใครฟังแล้ว — เหตุผลอยู่ใน 4.8 หัวข้อ 8</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Looking up a deactivated widget's ancestor</code></td><td>ใช้ <code>context</code> หลัง await โดยไม่ตรวจ</td><td><code>if (!mounted) return;</code></td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>เรียก <code>setState</code> หลังหน้าจอปิด</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ตรวจ <code>mounted</code> แล้วยังพัง</td><td>ตรวจของ <code>State</code> แต่ใช้ context ของ dialog</td><td>ตรวจ <code>dialogContext.mounted</code></td></tr>
+<tr><td>ปิดงานแล้วแต่กลับเข้ามายังเห็นว่าไม่เสร็จ</td><td><code>return</code> เมื่อ unmounted โดยไม่อัปเดตข้อมูล</td><td>ย้ายงานไปไว้ใน store</td></tr>
+<tr><td>ข้อมูลผิดทั้งที่ <code>mounted</code> เป็น true ตลอด</td><td>เป็นปัญหาผลลัพธ์เก่า ไม่ใช่ปัญหา lifecycle</td><td>ใช้ตัวนับรุ่น (4.10)</td></tr>
+<tr><td>SnackBar โผล่บนหน้าจอที่ไม่เกี่ยวกัน</td><td>หยิบ messenger ไว้ก่อน await แล้วผู้ใช้เปลี่ยนหน้า</td><td>ตัดสินใจว่าต้องการแบบไหน แล้วเขียนให้ตรง</td></tr>
+<tr><td>ปิด lint ทั้งไฟล์เพราะเตือนเยอะ</td><td>คิดว่าเป็นเสียงรบกวน</td><td>แก้ทีละจุด ปิดเฉพาะบรรทัดที่มีเหตุผล</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><pre class="code-vs"><code>class _ConfirmScreenState extends State&lt;ConfirmScreen&gt; {
+  bool _submitting = false;
+  final _focusNode = FocusNode();
+
+  Future&lt;void&gt; _submit() async {
+    setState(() =&gt; _submitting = true);
+
+    final receipt = await widget.repository.confirm(widget.draft);
+
+    setState(() =&gt; _submitting = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('บันทึกแล้ว ${receipt.id}')),
+    );
+    _focusNode.requestFocus();
+    Navigator.of(context).pop(receipt);
+  }
+}</code></pre><ol><li>ระบุทุกบรรทัดที่พังได้ถ้าผู้ใช้กดย้อนกลับระหว่างรอ</li><li>แก้ด้วย <code>mounted</code></li><li>อธิบายว่าข้อ 2 ยังเหลือปัญหาอะไร และแก้อย่างไรให้ถูกจริง</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — บรรทัดที่พังได้</strong></p><table><thead><tr><th>บรรทัด</th><th>พังอย่างไร</th></tr></thead><tbody>
+<tr><td><code>setState(() =&gt; _submitting = false)</code></td><td><code>setState() called after dispose()</code></td></tr>
+<tr><td><code>ScaffoldMessenger.of(context)</code></td><td>เดินขึ้นต้นไม้จาก context ที่ตายแล้ว</td></tr>
+<tr><td><code>_focusNode.requestFocus()</code></td><td><code>FocusNode</code> ถูก dispose ไปแล้ว</td></tr>
+<tr><td><code>Navigator.of(context).pop()</code></td><td>ทั้งพัง และถ้าไม่พังก็ pop หน้าที่ไม่ใช่ของตัวเอง</td></tr>
+</tbody></table><p>ทุกบรรทัดหลัง <code>await</code> พังได้หมด — และบรรทัดสุดท้ายอันตรายที่สุดเพราะอาจไม่พัง แต่ไปปิดหน้าจอที่ผู้ใช้เพิ่งเปิดขึ้นมาใหม่</p><p><strong>ข้อ 2 — แก้ด้วย mounted</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  if (_submitting) return;                  // กันกดซ้ำ (4.8)
+  setState(() =&gt; _submitting = true);
+
+  Receipt? receipt;
+  try {
+    receipt = await widget.repository.confirm(widget.draft);
+  } on ReceiptException catch (error) {
+    if (!mounted) return;
+    setState(() =&gt; _submitting = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error.message)),
+    );
+    return;
+  }
+
+  if (!mounted) return;                     // ด่านเดียวคุมทุกบรรทัดข้างล่าง
+  setState(() =&gt; _submitting = false);
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('บันทึกแล้ว ${receipt.id}')),
+  );
+  Navigator.of(context).pop(receipt);
+}</code></pre><p>สังเกตว่า <code>_focusNode.requestFocus()</code> ถูกตัดออก — ถ้ากำลังจะ <code>pop</code> อยู่แล้ว การขอโฟกัสไม่มีความหมาย และเป็นตัวอย่างของโค้ดที่เขียนไว้โดยไม่ได้ตั้งใจจริง</p><p><strong>ข้อ 3 — ปัญหาที่ยังเหลือ</strong></p><p>ข้อ 2 กันไม่ให้แอปพังได้จริง แต่ <strong>ไม่ได้แก้ปัญหาจริง</strong> — มันแค่เงียบ</p><p>ลองไล่ตามลำดับเวลา</p><pre class="code-vs"><code>0.0s  กดยืนยัน → ยิงคำขอไป server
+0.8s  ผู้ใช้กดย้อนกลับ → หน้าจอปิด
+2.0s  server ตอบว่า "บันทึกสำเร็จ ใบรับ RC-771"
+2.0s  if (!mounted) return;   ← ทิ้งใบรับไปเฉย ๆ</code></pre><table><thead><tr><th>ผลที่ตามมา</th><th>ความเสียหาย</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ไม่รู้ว่าบันทึกสำเร็จ</td><td>อาจยืนยันซ้ำอีกรอบ ได้ใบรับสองใบ</td></tr>
+<tr><td>หน้ารายการยังแสดงว่ายังไม่ยืนยัน</td><td>ข้อมูลในแอปไม่ตรงกับ server</td></tr>
+<tr><td>ใบรับที่ได้มาหายไปเลย</td><td>ไม่มีใครเก็บ ไม่มีที่ไหนบันทึก</td></tr>
+</tbody></table><p><strong>ทางแก้ที่ถูก</strong> — ย้ายงานออกจาก widget ไปไว้ใน store ตามที่ทำใน lab</p><pre class="code-vs"><code>class ReceiptStore extends ChangeNotifier {
+  Future&lt;void&gt; confirm(ReceiptDraft draft) async {
+    if (_submitting) return;
+    _submitting = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      _lastReceipt = await repository.confirm(draft);   // ผลอยู่ใน store
+      _confirmedDraftIds.add(draft.id);                 // ข้อมูลถูกต้องเสมอ
+    } on ReceiptException catch (error) {
+      _errorMessage = error.message;
+    } finally {
+      _submitting = false;
+      notifyListeners();      // ถ้าไม่มีใครฟังก็ไม่เป็นไร ไม่พัง
+    }
+  }
+}</code></pre><pre class="code-vs"><code>// widget เหลือแค่สั่ง
+ElevatedButton(
+  onPressed: store.isSubmitting ? null : () =&gt; store.confirm(draft),
+  child: const Text('ยืนยัน'),
+)</code></pre><p>ผลที่ได้</p><table><thead><tr><th>เดิม</th><th>ใหม่</th></tr></thead><tbody>
+<tr><td>ต้องตรวจ <code>mounted</code> สี่จุด</td><td>ไม่ต้องตรวจเลย</td></tr>
+<tr><td>ปิดหน้าจอ = ผลหาย</td><td>ปิดหน้าจอ = ผลยังถูกบันทึกใน store</td></tr>
+<tr><td>ทดสอบต้องสร้าง widget</td><td>ทดสอบ store ตรง ๆ</td></tr>
+</tbody></table><p>ส่วน <code>Navigator.pop</code> ที่หายไป — ให้หน้าจอฟัง store แล้วปิดตัวเองเมื่อยืนยันสำเร็จ ซึ่งเป็นผลข้างเคียงที่ต้องทำนอก <code>build</code> ตามรูปแบบใน 4.6 หัวข้อ 8 และจะทำเต็มรูปแบบใน Part 5</p><p><strong>บทเรียนที่ควรจำ:</strong> <code>mounted</code> เป็นเครื่องมือกันแอปพัง ไม่ใช่เครื่องมือออกแบบ ถ้าพบว่าต้องโรย <code>if (!mounted) return;</code> เต็มไฟล์ นั่นคือสัญญาณว่างาน async อยู่ผิดที่</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ทุกบรรทัดหลัง <code>await</code> ต้องถือว่าหน้าจออาจหายไปแล้ว</li><li><code>mounted</code> ต้องตรวจก่อน <code>setState</code>, <code>Navigator</code>, <code>ScaffoldMessenger</code>, <code>Theme</code> และ <code>FocusNode</code></li><li>ตรวจ <code>mounted</code> ของ context ตัวที่จะใช้จริง ไม่ใช่ตัวที่อยู่ใกล้มือ</li><li><code>use_build_context_synchronously</code> หาจุดเหล่านี้ให้ฟรี อย่าปิดทั้งโปรเจกต์</li><li><code>mounted</code> ตอบได้แค่ว่าหน้าจอยังอยู่ไหม ไม่ได้ตอบว่าผลลัพธ์นี้ใหม่ที่สุดหรือเปล่า</li><li><code>mounted == false</code> ไม่ได้แปลว่าควรทิ้งงานทางธุรกิจ</li><li>ทางแก้ที่ดีที่สุดคือย้ายงาน async ไปไว้ใน store แล้วปัญหาทั้งหมวดนี้หายไป</li><li>store ไม่มี <code>mounted</code> — ใช้ <code>dispose()</code> ยกเลิกตัวจับเวลาและทำให้ผลที่ค้างอยู่ถูกทิ้ง</li></ul></div><p><strong>บทถัดไป:</strong> 4.10 จะแก้ปัญหาที่ <code>mounted</code> ตอบไม่ได้ — ผลของคำขอเก่าที่มาถึงช้ากว่าคำขอใหม่ แล้วเขียนทับข้อมูลล่าสุด</p></section>

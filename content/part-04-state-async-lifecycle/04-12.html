@@ -1,25 +1,227 @@
-<div class="note">Listener/subscriptionเป็นทรัพยากรเชื่อม producerกับ consumer ต้อง subscribeเมื่อ ownerพร้อม, unsubscribe sourceเดิมเมื่อ dependencyเปลี่ยน และ unsubscribeตอน dispose มิฉะนั้น callbackซ้ำหรือเรียก objectที่ตายแล้ว</div>
-<section><h2>1. ChangeNotifier listener</h2><pre class="code-vs"><code>@override
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ทำให้ทุกการฟังมีคนถอดออกเสมอ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.11 (การยกเลิกตัวจับเวลา) และ 3.12 (คู่ตรงข้ามของการสร้าง–ทำลาย)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตอบได้ทุกครั้งว่า “ใครเป็นเจ้าของ ใครต้องเก็บกวาด” และรู้ว่าเมื่อไหร่ไม่ต้องเขียนเองเลย</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>สามอาการที่มาจากสาเหตุเดียวกัน</p><table><thead><tr><th>อาการ</th><th>เกิดจาก</th></tr></thead><tbody>
+<tr><td>กดปุ่มครั้งเดียวแต่มีเสียงเตือนสามครั้ง</td><td>ฟังซ้ำโดยไม่ได้เลิกฟังของเก่า</td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>ยังฟังของที่ถูกทำลายไปแล้ว</td></tr>
+<tr><td>แอปช้าลงเรื่อย ๆ ยิ่งใช้นานยิ่งช้า</td><td>ผู้ฟังสะสมไม่มีวันหาย</td></tr>
+</tbody></table><p>ทั้งสามมาจากคำถามเดียวที่ไม่ได้ตอบ — <strong>ใครเป็นคนถอดสิ่งที่ต่อไว้ออก</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>listener</td><td>ฟังก์ชันที่ถูกเรียกเมื่อมีการแจ้ง</td></tr>
+<tr><td>subscription</td><td>การสมัครรับข้อมูลจาก stream ซึ่งต้องยกเลิกเป็น</td></tr>
+<tr><td>ownership</td><td>ใครเป็นเจ้าของ ก็คือคนที่ต้องทำลาย</td></tr>
+<tr><td>one-shot event</td><td>เหตุการณ์ที่ควรเกิดครั้งเดียว เช่นเสียงเตือนหรือการเปลี่ยนหน้า</td></tr>
+<tr><td>closure</td><td>ฟังก์ชันไม่มีชื่อที่เขียนตรงจุดใช้งาน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ทุกการต่อ ต้องมีการถอด</h2><pre class="code-vs"><code>addListener      ↔  removeListener
+listen           ↔  subscription.cancel()
+addObserver      ↔  removeObserver
+Timer.periodic   ↔  timer.cancel()
+TextEditingController()  ↔  controller.dispose()</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทันทีที่เขียนบรรทัดฝั่งซ้าย ให้เลื่อนลงไปเขียนบรรทัดฝั่งขวาใน <code>dispose()</code> ก่อนทำอย่างอื่น — ไม่ใช่ "เดี๋ยวค่อยกลับมาใส่"</div><p>นี่คือกฎเดียวกับที่ใช้กับ <code>TextEditingController</code> และ <code>FocusNode</code> ใน 3.12 — ต่างกันแค่ชื่อของสิ่งที่ต้องเก็บกวาด</p></section>
+
+<section><h2>4. เมื่อไหร่ที่ไม่ต้องเขียนเอง</h2><p>เริ่มจากข่าวดีก่อน — <strong>ถ้าฟังเพื่อวาดหน้าจอใหม่ ไม่ต้องเขียนอะไรเลย</strong></p><pre class="code-vs"><code>ListenableBuilder(
+  listenable: widget.store,
+  builder: (context, child) =&gt; Text('เหลือ ${widget.store.remainingCount}'),
+)</code></pre><p><code>ListenableBuilder</code> จัดการให้ครบ</p><table><thead><tr><th>ทำอะไรให้</th><th>เมื่อไหร่</th></tr></thead><tbody>
+<tr><td><code>addListener</code></td><td>ตอนเข้าต้นไม้</td></tr>
+<tr><td><code>removeListener</code> ตัวเก่า + <code>addListener</code> ตัวใหม่</td><td>เมื่อ <code>listenable</code> เปลี่ยนตัว</td></tr>
+<tr><td><code>removeListener</code></td><td>ตอนออกจากต้นไม้</td></tr>
+</tbody></table><p>เปิด <code>lib/state_basics/state_basics_app.dart</code> — มี <code>ListenableBuilder</code> สองที่ และ <strong>ไม่มี <code>addListener</code> เลยแม้แต่ที่เดียว</strong> นั่นเป็นเพราะทุกการฟังในหน้าจอนี้มีจุดประสงค์เดียวคือวาดใหม่</p><table><thead><tr><th>ฟังเพื่ออะไร</th><th>ใช้อะไร</th></tr></thead><tbody>
+<tr><td>วาดหน้าจอใหม่</td><td><code>ListenableBuilder</code> — ไม่ต้องเขียนเอง</td></tr>
+<tr><td>ทำผลข้างเคียง เช่นสั่นเครื่อง เปลี่ยนหน้า</td><td><code>addListener</code> เอง และต้องถอดเอง</td></tr>
+</tbody></table><p>ก่อนจะเขียน <code>addListener</code> ทุกครั้ง ให้ถามก่อนว่าอยู่กรณีบนหรือกรณีล่าง</p></section>
+
+<section><h2>5. เมื่อต้องฟังเอง</h2><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; {
+  bool _wasAllDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.store.addListener(_onStoreChanged);    // ต่อ
+    widget.store.load();
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_onStoreChanged); // ถอด
+    super.dispose();
+  }
+
+  void _onStoreChanged() {
+    final isAllDone = widget.store.allDone;
+    if (isAllDone &amp;&amp; !_wasAllDone) {
+      HapticFeedback.mediumImpact();              // เกิดครั้งเดียวตอนเปลี่ยน
+    }
+    _wasAllDone = isAllDone;
+  }
+}</code></pre><p>สองจุดที่ต้องสังเกต</p><table><thead><tr><th>จุด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ใช้เมธอดที่มีชื่อ ไม่ใช่ closure</td><td>ดูหัวข้อ 6</td></tr>
+<tr><td>เทียบกับค่าก่อนหน้าเสมอ</td><td><code>notifyListeners()</code> ถูกเรียกหลายครั้ง แต่ผลข้างเคียงต้องเกิดครั้งเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>6. กับดักที่ทำให้ถอดไม่ออก</h2><pre class="code-vs"><code>// ผิด — ถอดไม่ออกเลย
+store.addListener(() =&gt; _showToast());
+...
+store.removeListener(() =&gt; _showToast());</code></pre><p>สอง closure นี้หน้าตาเหมือนกันแต่เป็นคนละวัตถุ <code>removeListener</code> เทียบด้วยความเป็นตัวเดียวกัน จึงหาไม่เจอและ <strong>ไม่แจ้งอะไรเลยว่าถอดไม่สำเร็จ</strong></p><pre class="code-vs"><code>// ถูก — เมธอดที่มีชื่อ อ้างถึงตัวเดียวกันเสมอ
+store.addListener(_showToast);
+store.removeListener(_showToast);</code></pre><p>ถ้าจำเป็นต้องใช้ closure จริง ๆ ให้เก็บไว้ในตัวแปร</p><pre class="code-vs"><code>late final VoidCallback _listener;
+
+@override
 void initState() {
   super.initState();
-  widget.store.addListener(_onStoreChanged);
+  _listener = () =&gt; _showToast(widget.store.errorMessage);
+  widget.store.addListener(_listener);
 }
 
 @override
 void dispose() {
-  widget.store.removeListener(_onStoreChanged);
+  widget.store.removeListener(_listener);
   super.dispose();
-}</code></pre><p>ถ้าเพียง renderใช้ ListenableBuilderจัด lifecycle listenerให้ ไม่ต้อง manual</p></section>
-<section><h2>2. didUpdateWidget</h2><pre class="code-vs"><code>@override
-void didUpdateWidget(covariant StoreView oldWidget) {
+}</code></pre></section>
+
+<section><h2>7. ห้ามฟังใน build</h2><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  widget.store.addListener(_onStoreChanged);   // หายนะ
+  return ...;
+}</code></pre><p>ไล่ดูว่าเกิดอะไร</p><pre class="code-vs"><code>build ครั้งที่ 1 → ผู้ฟัง 1 ตัว
+store แจ้ง → build ครั้งที่ 2 → ผู้ฟัง 2 ตัว
+store แจ้ง → callback ทำงาน 2 ครั้ง → build 2 ครั้ง → ผู้ฟัง 4 ตัว
+store แจ้ง → 4 ครั้ง → ผู้ฟัง 8 ตัว ...</code></pre><p>เพิ่มเป็นทวีคูณจนแอปค้าง เป็นตัวอย่างที่ชัดที่สุดของกฎใน 1.9 — <code>build</code> ต้องไม่มีผลข้างเคียง</p><table><thead><tr><th>สิ่งที่ต้องทำ</th><th>ทำที่ไหน</th></tr></thead><tbody>
+<tr><td>เริ่มฟัง</td><td><code>initState</code></td></tr>
+<tr><td>เปลี่ยนตัวที่ฟัง</td><td><code>didUpdateWidget</code></td></tr>
+<tr><td>เลิกฟัง</td><td><code>dispose</code></td></tr>
+<tr><td>วาด</td><td><code>build</code> เท่านั้น</td></tr>
+</tbody></table></section>
+
+<section><h2>8. เมื่อสิ่งที่ฟังถูกเปลี่ยนตัว</h2><p><code>initState</code> ทำงานครั้งเดียว แต่ widget แม่อาจส่ง store ตัวใหม่ลงมาทีหลัง</p><pre class="code-vs"><code>@override
+void didUpdateWidget(covariant PickScreen oldWidget) {
   super.didUpdateWidget(oldWidget);
-  if (oldWidget.store == widget.store) return;
-  oldWidget.store.removeListener(_onStoreChanged);
-  widget.store.addListener(_onStoreChanged);
-}</code></pre><p>ป้องกันฟัง storeเก่าเมื่อ parentเปลี่ยน instance</p></section>
-<section><h2>3. StreamSubscription</h2><p><code>final subscription = stream.listen(...)</code> ต้อง cancel/await cancelตาม API Pause/resumeเมื่อ app lifecycleหรือ tabไม่ activeได้ Error/done handlersต้องกำหนด stateและ reconnect policy ไม่ assume streamอยู่ตลอด</p></section>
-<section><h2>4. WidgetsBindingObserver</h2><p>Absolute shell <code>addObserver</code>ใน initState, refresh connectionเมื่อ resumed และ <code>removeObserver</code>ใน dispose Observer globalที่ไม่ถอดทำ shellเก่ารับ lifecycleซ้ำและอาจใช้ disposed store</p></section>
-<section><h2>5. One-shot events</h2><p>อย่าเก็บ toast/navigationเป็น persistent stateแล้ว listenerใหม่เล่นซ้ำ ใช้ event ID/queue/consume semantics หรือให้ UI callback ownerรับ effect ขณะ mounted WarehouseStoreใช้ onToast/onFlash callbacksจาก shellซึ่งง่ายแต่ couplingสูงและต้อง clear/owner lifetimeให้ชัด</p></section>
-<section><h2>6. Subscribe order</h2><p>สร้าง state/resourcesก่อน subscribe เพราะ producerอาจ emitทันที Unsubscribeก่อน dispose consumers Timer/subscription callbackตรวจ mounted/current generationเมื่อมี async gap</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Widgetเปลี่ยนจาก store Aเป็น Bแต่ callbackยังมาสองครั้ง สาเหตุและวิธีแก้?</p><details><summary>เฉลย</summary><p>subscribe Aใน initStateแต่ไม่ removeเมื่อ didUpdateWidget ให้ remove A/add Bเมื่อ identityเปลี่ยน และ remove current Bใน dispose ตรวจว่า callbackไม่ได้ add listenerซ้ำทุก build</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Anonymous closureที่ addListenerแล้วสร้าง closureใหม่ตอน removeจะถอดไม่ออก เก็บ callback referenceหรือใช้ named methodเดียวกัน และอย่า subscribeใน build</div></section>
+  if (oldWidget.store == widget.store) return;      // ตัวเดิม ไม่ต้องทำอะไร
+  oldWidget.store.removeListener(_onStoreChanged);  // ถอดจากตัวเก่า
+  widget.store.addListener(_onStoreChanged);        // ต่อกับตัวใหม่
+}</code></pre><p>ถ้าลืมเมธอดนี้จะได้อาการแรกในหัวข้อ 1 — ฟังทั้งตัวเก่าและตัวใหม่พร้อมกัน callback ทำงานสองรอบ</p><p>บรรทัด <code>if (oldWidget.store == widget.store) return;</code> จำเป็น เพราะ <code>didUpdateWidget</code> ถูกเรียกทุกครั้งที่แม่วาดใหม่ ไม่ใช่เฉพาะตอนที่ store เปลี่ยน — เป็นรูปแบบเดียวกับที่เจอใน 4.3</p></section>
+
+<section><h2>9. ใครสร้าง คนนั้นทำลาย</h2><p>คำถามที่ต้องตอบให้ได้ทุกครั้ง — <strong>store ตัวนี้ใครทำลาย</strong></p><table><thead><tr><th>store มาจากไหน</th><th>ใครเรียก <code>store.dispose()</code></th></tr></thead><tbody>
+<tr><td>หน้าจอสร้างเองใน <code>initState</code></td><td>หน้าจอนั้น ใน <code>dispose</code></td></tr>
+<tr><td>รับมาทาง constructor</td><td><strong>ห้ามทำลาย</strong> — คนที่สร้างเป็นคนทำลาย</td></tr>
+<tr><td>อยู่ระดับแอปทั้งตัว</td><td>ตัวแอป หรือไม่ทำลายเลยก็ได้</td></tr>
+</tbody></table><pre class="code-vs"><code>// หน้าจอสร้างเอง จึงต้องทำลายเอง
+class _ScreenState extends State&lt;Screen&gt; {
+  late final PickStore _store;
+
+  @override
+  void initState() {
+    super.initState();
+    _store = PickStore(repository: widget.repository);
+    _store.load();
+  }
+
+  @override
+  void dispose() {
+    _store.dispose();
+    super.dispose();
+  }
+}</code></pre><p>ใน lab นั้น <code>PickScreen</code> <strong>รับ</strong> store มาทาง constructor จึงไม่ทำลาย — ถ้าทำลาย เทสต์ที่สร้าง store ไว้ข้างนอกแล้วตรวจผลหลังจากนั้นจะพังทันที</p><div class="warn">ทำลาย store ที่คนอื่นเป็นเจ้าของ คือบั๊กที่หายากที่สุดชนิดหนึ่ง — หน้าจออื่นที่ยังใช้ store ตัวเดียวกันจะพังในภายหลัง โดยไม่มีอะไรชี้กลับมาที่ต้นเหตุ</div></section>
+
+<section><h2>10. เหตุการณ์ที่ควรเกิดครั้งเดียว</h2><p>สถานะกับเหตุการณ์เป็นคนละอย่าง และการเก็บเหตุการณ์ไว้ในสถานะทำให้มันเกิดซ้ำ</p><table><thead><tr><th></th><th>สถานะ</th><th>เหตุการณ์</th></tr></thead><tbody>
+<tr><td>ตัวอย่าง</td><td>“กำลังโหลด” “มีข้อผิดพลาด”</td><td>“แสดงข้อความ” “ปิดหน้าจอ” “สั่นเครื่อง”</td></tr>
+<tr><td>อ่านซ้ำได้ไหม</td><td>ได้ อ่านกี่ครั้งก็ได้ค่าเดิม</td><td>ไม่ได้ ต้องเกิดครั้งเดียว</td></tr>
+</tbody></table><pre class="code-vs"><code>// ผิด — เก็บเหตุการณ์ไว้เป็นสถานะ
+String? errorMessage;   // ถ้ามีค่า ให้แสดง SnackBar
+
+// หน้าจอกลับเข้ามาใหม่ → อ่านเจอ errorMessage เดิม → เด้ง SnackBar ซ้ำ</code></pre><p>ทางแก้ที่ตรงไปตรงมาที่สุดคือ <strong>ลบทิ้งเมื่อใช้แล้ว</strong></p><pre class="code-vs"><code>void _onStoreChanged() {
+  final message = widget.store.takeErrorMessage();   // อ่านแล้วเคลียร์
+  if (message == null) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+}</code></pre><p>สังเกตว่าใน lab นั้น <code>_errorMessage</code> ถูกใช้เป็น <em>สถานะ</em> — แสดงเป็นแถบอยู่กับที่ในหน้าจอ ไม่ใช่เด้งขึ้นมาแล้วหาย จึงไม่มีปัญหานี้</p><p>การเลือกระหว่างสองแบบขึ้นกับว่าอยากให้ข้อความนั้นอยู่ต่อหรือหายไป ซึ่งเป็นการตัดสินใจเรื่อง UX ไม่ใช่เรื่องเทคนิค</p></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>callback ทำงานหลายรอบ</td><td>ฟังซ้ำโดยไม่ถอดของเก่า</td><td><code>didUpdateWidget</code> หรือย้ายออกจาก <code>build</code></td></tr>
+<tr><td><code>removeListener</code> แล้วยังทำงานอยู่</td><td>ถอดคนละ closure กับที่ต่อไว้</td><td>ใช้เมธอดที่มีชื่อ</td></tr>
+<tr><td>แอปช้าลงเรื่อย ๆ</td><td>ฟังใน <code>build</code></td><td>ย้ายไป <code>initState</code></td></tr>
+<tr><td><code>used after being disposed</code></td><td>ยังฟังของที่ถูกทำลายแล้ว</td><td>ถอดใน <code>dispose</code></td></tr>
+<tr><td>หน้าจออื่นพังโดยไม่มีสาเหตุ</td><td>ทำลาย store ที่รับมา</td><td>ใครสร้าง คนนั้นทำลาย</td></tr>
+<tr><td>SnackBar เด้งซ้ำเมื่อกลับเข้าหน้าจอ</td><td>เก็บเหตุการณ์ไว้เป็นสถานะ</td><td>อ่านแล้วเคลียร์</td></tr>
+<tr><td>เขียน <code>addListener</code> เต็มไปหมด</td><td>ใช้ผิดเครื่องมือ</td><td>ถ้าฟังเพื่อวาด ใช้ <code>ListenableBuilder</code></td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><pre class="code-vs"><code>class _DashboardState extends State&lt;Dashboard&gt; {
+  @override
+  Widget build(BuildContext context) {
+    widget.store.addListener(() {
+      if (widget.store.hasError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(widget.store.errorMessage!)),
+        );
+      }
+    });
+    return Text('เหลือ ${widget.store.remainingCount}');
+  }
+
+  @override
+  void dispose() {
+    widget.store.dispose();
+    super.dispose();
+  }
+}</code></pre><p><code>store</code> ถูกสร้างที่หน้าจอแม่แล้วส่งลงมาทาง constructor</p><ol><li>หาข้อบกพร่องให้ได้อย่างน้อยห้าข้อ</li><li>เขียนใหม่</li><li>อธิบายว่าข้อไหนอาการจะโผล่ทันที และข้อไหนจะโผล่ตอนขึ้น production แล้ว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>1</td><td><code>addListener</code> ใน <code>build</code></td><td>ผู้ฟังเพิ่มเป็นทวีคูณจนแอปค้าง</td></tr>
+<tr><td>2</td><td>ใช้ closure ไม่มีชื่อ</td><td>ต่อให้ย้ายไป <code>initState</code> ก็ยังถอดไม่ออก</td></tr>
+<tr><td>3</td><td>ไม่มี <code>removeListener</code> เลย</td><td>ฟัง store ที่ตายแล้ว</td></tr>
+<tr><td>4</td><td>ทำลาย store ที่รับมา</td><td>หน้าจอแม่และหน้าจออื่นพัง</td></tr>
+<tr><td>5</td><td>ใช้ <code>addListener</code> เพื่อวาด <code>remainingCount</code></td><td>ผิดเครื่องมือ — ควรเป็น <code>ListenableBuilder</code></td></tr>
+<tr><td>6</td><td>ใช้ <code>context</code> ใน callback โดยไม่ตรวจ <code>mounted</code></td><td>พังเมื่อ callback ทำงานหลังหน้าจอปิด (4.9)</td></tr>
+<tr><td>7</td><td>ข้อผิดพลาดเป็นสถานะค้าง</td><td>เด้ง SnackBar ซ้ำทุกครั้งที่แจ้ง</td></tr>
+<tr><td>8</td><td>ไม่มี <code>didUpdateWidget</code></td><td>แม่เปลี่ยน store แล้วยังฟังตัวเก่า</td></tr>
+<tr><td>9</td><td><code>errorMessage!</code></td><td>พังถ้า <code>hasError</code> กับ <code>errorMessage</code> ไม่ตรงกัน (4.7)</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>class _DashboardState extends State&lt;Dashboard&gt; {
+  @override
+  void initState() {
+    super.initState();
+    widget.store.addListener(_onStoreChanged);      // แก้ข้อ 1, 2
+  }
+
+  @override
+  void didUpdateWidget(covariant Dashboard oldWidget) {   // แก้ข้อ 8
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store == widget.store) return;
+    oldWidget.store.removeListener(_onStoreChanged);
+    widget.store.addListener(_onStoreChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.store.removeListener(_onStoreChanged);   // แก้ข้อ 3
+    super.dispose();                                // แก้ข้อ 4 — ไม่ทำลาย store
+  }
+
+  void _onStoreChanged() {
+    if (!mounted) return;                           // แก้ข้อ 6
+    final message = widget.store.takeErrorMessage();// แก้ข้อ 7, 9
+    if (message == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) =&gt; ListenableBuilder(   // แก้ข้อ 5
+    listenable: widget.store,
+    builder: (context, child) =&gt; Text('เหลือ ${widget.store.remainingCount}'),
+  );
+}</code></pre><p>มีจุดที่ดูขัดกันแต่ถูกต้อง — หน้าจอนี้ทั้ง <code>addListener</code> เองและใช้ <code>ListenableBuilder</code> ด้วย เพราะฟังสองจุดประสงค์ที่ต่างกัน</p><table><thead><tr><th>ทาง</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>addListener</code> เอง</td><td>ผลข้างเคียง — เด้ง SnackBar</td></tr>
+<tr><td><code>ListenableBuilder</code></td><td>วาดตัวเลขใหม่</td></tr>
+</tbody></table><p>และ <code>takeErrorMessage()</code> ต้องเพิ่มใน store</p><pre class="code-vs"><code>String? takeErrorMessage() {
+  final message = _errorMessage;
+  _errorMessage = null;      // อ่านแล้วหาย เกิดครั้งเดียว
+  return message;
+}</code></pre><p><strong>ข้อ 3 — อันไหนโผล่เมื่อไหร่</strong></p><table><thead><tr><th>โผล่ทันที</th><th>โผล่ตอน production</th></tr></thead><tbody>
+<tr><td>ข้อ 1 — แอปช้าลงจนสังเกตได้ในไม่กี่วินาที</td><td>ข้อ 3 — ต้องปิดหน้าจอตอนที่มีคำขอค้างพอดี</td></tr>
+<tr><td>ข้อ 4 — เปิดหน้าจอนี้แล้วกลับ หน้าแม่พังทันที</td><td>ข้อ 6 — ต้องกดย้อนกลับตอนที่คำขอกำลังจะเสร็จ</td></tr>
+<tr><td>ข้อ 7 — เห็นซ้ำตั้งแต่ทดสอบครั้งแรก</td><td>ข้อ 8 — เกิดเฉพาะเมื่อแม่เปลี่ยน store ซึ่งอาจยังไม่มีในเวอร์ชันแรก</td></tr>
+<tr><td></td><td>ข้อ 9 — เกิดเมื่อ store เข้าสถานะที่ไม่สอดคล้อง</td></tr>
+</tbody></table><p><strong>ทำไมการแยกแบบนี้สำคัญ</strong></p><p>ข้อที่โผล่ทันทีจะถูกแก้อยู่แล้วเพราะเจอตอนพัฒนา — <strong>ข้อที่อันตรายจริงคือกลุ่มขวา</strong> ซึ่งต้องอาศัยจังหวะบังเอิญจึงจะเกิด แปลว่ามันจะผ่านการทดสอบไปได้ทั้งหมด แล้วไปโผล่ที่หน้างานในวันที่เน็ตช้ากว่าปกติ</p><p>ทางกันเดียวที่ได้ผลคือ <strong>ทำให้เป็นนิสัย ไม่ใช่รอให้เจอ</strong> — เขียนฝั่งถอดทันทีที่เขียนฝั่งต่อ และตอบคำถามเรื่องเจ้าของก่อนเขียน <code>dispose()</code> ทุกครั้ง</p><p><strong>ลองต่อ:</strong> ใน lab ลองเพิ่ม <code>addListener</code> ใน <code>build</code> ของ <code>PickScreen</code> พร้อม <code>debugPrint</code> แล้วกดปิดงานสองสามครั้ง — จะเห็นจำนวนบรรทัดที่พิมพ์ออกมาเพิ่มเป็น 1, 2, 4, 8 ซึ่งเป็นภาพของหัวข้อ 7 ที่ชัดที่สุด</p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>ทุกการต่อต้องมีการถอด และเขียนคู่กันทันที</li><li>ถ้าฟังเพื่อวาดหน้าจอ ใช้ <code>ListenableBuilder</code> แล้วไม่ต้องเขียนอะไรเลย</li><li>ถ้าฟังเพื่อผลข้างเคียง ต้อง <code>addListener</code> เองและถอดเอง</li><li>ใช้เมธอดที่มีชื่อเสมอ ไม่ใช่ closure ที่เขียนตรงจุด</li><li>ห้าม <code>addListener</code> ใน <code>build</code> — ผู้ฟังจะเพิ่มเป็นทวีคูณ</li><li><code>didUpdateWidget</code> ต้องเทียบก่อนว่าเปลี่ยนตัวจริงไหม</li><li>ใครสร้าง คนนั้นทำลาย — สิ่งที่รับมาทาง constructor ห้ามทำลาย</li><li>เหตุการณ์ที่ควรเกิดครั้งเดียว ต้องเคลียร์เมื่ออ่านแล้ว</li></ul></div><p><strong>บทถัดไป:</strong> 4.13 จะกลับมาที่ประสบการณ์ผู้ใช้ — ทำให้จอตอบสนองทันทีที่กดโดยไม่ต้องรอเซิร์ฟเวอร์ และย้อนกลับให้ถูกเมื่อผลออกมาไม่เป็นอย่างที่คิด</p></section>

@@ -1,25 +1,189 @@
-<div class="note">Stale responseเกิดเมื่อ requestเก่ากลับหลัง request/selectionใหม่และทับ stateล่าสุด วิธีง่ายที่ testได้คือ generation/session token: captureเลขตอนเริ่มและ applyเฉพาะเมื่อยังตรง current generation</div>
-<section><h2>1. Race ตัวอย่าง</h2><pre class="code-vs"><code>A: load pallet P1 ─────────────── returns last
-B: load pallet P2 ───── returns first → UI shows P2
-A result applies                         → UI wrongly shows P1</code></pre></section>
-<section><h2>2. Generation token</h2><pre class="code-vs"><code>int _loadGeneration = 0;
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: กันไม่ให้ผลลัพธ์เก่าเขียนทับข้อมูลล่าสุด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.9 (สิ่งที่ <code>mounted</code> ตอบไม่ได้) และ 4.7 (สถานะการโหลด)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ตัวนับรุ่นกันผลลัพธ์ล้าสมัย และเขียนเทสต์ที่บังคับลำดับการตอบกลับได้</div>
 
-Future&lt;void&gt; load(String id) async {
-  final generation = ++_loadGeneration;
-  _state = Loading(id); notifyListeners();
-  final result = await repository.fetch(id);
-  if (generation != _loadGeneration) return;
-  _state = Data(result); notifyListeners();
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ผู้ใช้สแกนพาเลท <code>PAL-0001</code> แล้วรู้ว่าสแกนผิด จึงสแกน <code>PAL-0002</code> ทันที</p><pre class="code-vs"><code>0.0s  สแกน PAL-0001 → ยิงคำขอ A
+0.3s  สแกน PAL-0002 → ยิงคำขอ B
+0.9s  B ตอบกลับ     → จอแสดงข้อมูล PAL-0002   ✓ ถูกต้อง
+1.6s  A ตอบกลับ     → จอแสดงข้อมูล PAL-0001   ✗ ผิด</code></pre><p>จอค้างอยู่ที่ข้อมูลของพาเลทที่สแกนผิด และ <strong>ไม่มีอะไรบอกว่าผิด</strong> — ผู้ใช้เห็นข้อมูลบนจอ ก็เชื่อว่านั่นคือของที่ถืออยู่ในมือ แล้วทำงานต่อ</p><p>บนคลังจริงนี่คือของขึ้นแร็คผิดช่อง</p><p>สิ่งที่ทำให้บั๊กนี้ร้ายคือ <strong>มันไม่พัง</strong> ไม่มี exception ไม่มี log และเกิดเฉพาะเมื่อเน็ตช้าไม่เท่ากันในสองคำขอ ซึ่งบนเครื่องพัฒนาแทบไม่เกิดเลย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>race condition</td><td>ผลลัพธ์ขึ้นกับว่าใครมาถึงก่อน ซึ่งควบคุมไม่ได้</td></tr>
+<tr><td>stale response</td><td>ผลลัพธ์ของคำขอที่ล้าสมัยไปแล้ว</td></tr>
+<tr><td>generation / token</td><td>เลขประจำรุ่นของคำขอ ใช้ตรวจว่ายังใหม่อยู่ไหม</td></tr>
+<tr><td>in-flight</td><td>คำขอที่ยิงไปแล้วแต่ยังไม่ได้ผล</td></tr>
+<tr><td>cancellation</td><td>การยกเลิกคำขอที่ระดับเครือข่าย</td></tr>
+<tr><td><code>Completer</code></td><td>เครื่องมือ Dart ที่ให้เราเลือกเองว่า <code>Future</code> จะเสร็จเมื่อไหร่</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: คำขอไม่ได้ต่อคิว</h2><p>เรามักเผลอคิดว่าคำขอที่ยิงก่อนจะกลับก่อน ซึ่งไม่จริงเลย</p><pre class="code-vs"><code>สิ่งที่คิด          สิ่งที่เกิดจริง
+A ─────→            A ─────────────→
+      B ───→              B ──→
+A กลับ B กลับ         B กลับ  A กลับ</code></pre><p>เวลาตอบกลับขึ้นกับขนาดข้อมูล เส้นทางเครือข่าย ภาระของ server และสัญญาณ Wi-Fi ในคลัง — ไม่มีอะไรรับประกันลำดับ</p><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ก่อนจะเขียนผลลัพธ์ลง state ต้องถามก่อนว่า “ผลนี้ยังเป็นของคำขอล่าสุดอยู่ไหม” — ถ้าไม่ ให้ทิ้งไปเงียบ ๆ</div></section>
+
+<section><h2>4. ตัวนับรุ่น</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code></p><pre class="code-vs"><code>int _generation = 0;
+
+Future&lt;void&gt; load() async {
+  final generation = ++_generation;      // 1. เพิ่มเลข และจำเลขของตัวเอง
+  _state = LoadState.loading;
+  _errorMessage = null;
+  notifyListeners();
+  try {
+    final result = await repository.fetchLines();
+    if (generation != _generation) return;   // 2. ล้าสมัยแล้ว ทิ้งเลย
+    _lines = result;
+    _state = result.isEmpty ? LoadState.empty : LoadState.ready;
+  } on PickException catch (error) {
+    if (generation != _generation) return;   // 3. error ก็ต้องตรวจเหมือนกัน
+    _state = LoadState.failed;
+    _errorMessage = error.message;
+  } finally {
+    if (generation == _generation) notifyListeners();   // 4. แจ้งเฉพาะรุ่นล่าสุด
+  }
+}</code></pre><p>ไล่ตามสถานการณ์เดิม</p><pre class="code-vs"><code>load() ครั้งแรก : ++_generation → 1, generation ในตัวมันเอง = 1
+load() ครั้งที่สอง: ++_generation → 2, generation ในตัวมันเอง = 2
+
+ผลของครั้งที่สองกลับมา : 2 == 2  → เขียนลง state ✓
+ผลของครั้งแรกกลับมา    : 1 != 2  → return ทิ้งไป ✓</code></pre><p><code>generation</code> เป็นตัวแปรท้องถิ่นในแต่ละครั้งที่เรียก จึงไม่ถูกใครแก้ ส่วน <code>_generation</code> เป็นของ store จึงสะท้อนว่าตอนนี้รุ่นล่าสุดคือเลขอะไร</p></section>
+
+<section><h2>5. สี่จุดที่ต้องตรวจ ไม่ใช่จุดเดียว</h2><p>คนส่วนใหญ่ใส่การตรวจแค่จุดเดียวคือหลัง <code>await</code> แล้วก็ยังเจอบั๊กอยู่ดี</p><table><thead><tr><th>จุด</th><th>ถ้าไม่ตรวจจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td>หลัง await ในทางสำเร็จ</td><td>ข้อมูลเก่าทับข้อมูลใหม่ — ตัวปัญหาหลัก</td></tr>
+<tr><td>ใน <code>catch</code></td><td>คำขอเก่าล้มเหลว → จอขึ้นหน้าผิดพลาด ทั้งที่คำขอใหม่สำเร็จไปแล้ว</td></tr>
+<tr><td>ใน <code>finally</code> ก่อน <code>notifyListeners()</code></td><td>แจ้งโดยไม่มีอะไรเปลี่ยน — วาดใหม่เปล่า ๆ</td></tr>
+<tr><td>ใน <code>dispose()</code></td><td>ผลที่ค้างอยู่กลับมาแตะ store ที่ตายแล้ว</td></tr>
+</tbody></table><p>จุดที่สองสำคัญและมองข้ามบ่อยที่สุด — ลองนึกภาพ</p><pre class="code-vs"><code>0.0s  โหลดครั้งแรก (สัญญาณแย่)
+0.5s  ผู้ใช้กดรีเฟรช → โหลดครั้งที่สอง
+1.0s  ครั้งที่สองสำเร็จ  → จอแสดงรายการครบ ✓
+3.0s  ครั้งแรกหมดเวลารอ → จอเปลี่ยนเป็น "โหลดไม่สำเร็จ" ✗</code></pre><p>ผู้ใช้เห็นรายการอยู่ดี ๆ แล้วหน้าจอกลายเป็นหน้าผิดพลาดเอง โดยไม่ได้ทำอะไรเลย</p><p>ส่วนจุดที่สี่คือบรรทัดที่เจอใน 4.9</p><pre class="code-vs"><code>@override
+void dispose() {
+  stopPolling();
+  _generation++;      // ทุกคำขอที่ยังค้างอยู่ กลายเป็นล้าสมัยทันที
+  super.dispose();
+}</code></pre></section>
+
+<section><h2>6. ทำไมไม่เทียบค่าที่เห็นบนจอแทน</h2><p>ทางลัดที่หลายคนคิดถึงก่อน</p><pre class="code-vs"><code>final result = await repository.search(query);
+if (query != _controller.text) return;   // เทียบกับสิ่งที่พิมพ์อยู่ตอนนี้</code></pre><p>ดูสมเหตุสมผล แต่พังในหลายกรณี</p><table><thead><tr><th>กรณี</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ผู้ใช้พิมพ์ <code>pal</code> → ลบ → พิมพ์ <code>pal</code> ใหม่</td><td>ข้อความเท่ากัน แต่เป็นคนละคำขอ ผลเก่าผ่านด่านได้</td></tr>
+<tr><td>มีการตัดช่องว่างหรือแปลงเป็นตัวใหญ่</td><td>ข้อความไม่ตรงกันทั้งที่เป็นคำขอเดียวกัน</td></tr>
+<tr><td>โหลดใหม่โดยไม่มีคำค้น เช่นกดรีเฟรช</td><td>ไม่มีค่าอะไรให้เทียบเลย</td></tr>
+</tbody></table><p>ตัวนับรุ่นระบุ <strong>ครั้งของการเรียก</strong> ไม่ใช่ <strong>เนื้อหาของการเรียก</strong> — จึงตรงกับสิ่งที่ต้องการจริง และใช้ได้กับทุกกรณีรวมถึงที่ไม่มีพารามิเตอร์</p></section>
+
+<section><h2>7. ตัวนับรุ่น ไม่ใช่การยกเลิก</h2><table><thead><tr><th></th><th>ตัวนับรุ่น</th><th>การยกเลิกจริง</th></tr></thead><tbody>
+<tr><td>คำขอเก่าหยุดวิ่งไหม</td><td>ไม่หยุด</td><td>หยุด</td></tr>
+<tr><td>เปลืองเน็ต/แบตหรือไม่</td><td>เปลือง</td><td>ไม่เปลือง</td></tr>
+<tr><td>กันเขียนทับได้ไหม</td><td>ได้</td><td>ได้ แต่ไม่แน่นอน</td></tr>
+<tr><td>เขียนยากไหม</td><td>สามบรรทัด</td><td>ต้องรองรับที่ชั้น HTTP</td></tr>
+</tbody></table><p>ข้อสามคือเหตุผลที่ต้องมีตัวนับรุ่นเสมอ แม้จะยกเลิกได้ — เพราะการยกเลิกอาจสั่งไปตอนที่คำขอกำลังจะเสร็จพอดี แล้วผลก็ยังหลุดกลับมาอยู่ดี</p><div class="note">สรุปสั้น ๆ — ตัวนับรุ่นคุมความ<strong>ถูกต้อง</strong> การยกเลิกคุมความ<strong>สิ้นเปลือง</strong> ทำอย่างแรกก่อนเสมอ อย่างที่สองทำเมื่อวัดแล้วว่าคุ้ม</div></section>
+
+<section><h2>8. เมื่อหลายคำขอต้องอยู่ร่วมกันได้</h2><p>ตัวนับรุ่นตัวเดียวหมายความว่า <strong>คำขอใหม่ยกเลิกความถูกต้องของทุกคำขอเก่า</strong> ซึ่งถูกต้องเมื่อทุกคำขอเขียนลงที่เดียวกัน</p><p>แต่ถ้าโหลดรายละเอียดของหลายพาเลทพร้อมกัน แต่ละอันเขียนคนละที่ ตัวนับตัวเดียวจะทำให้อันที่ยิงก่อนถูกทิ้งทั้งที่ยังต้องการ</p><pre class="code-vs"><code>final Map&lt;String, int&gt; _generations = &lt;String, int&gt;{};
+
+Future&lt;void&gt; loadDetail(String palletCode) async {
+  final generation = (_generations[palletCode] ?? 0) + 1;
+  _generations[palletCode] = generation;
+
+  final result = await repository.fetchDetail(palletCode);
+  if (_generations[palletCode] != generation) return;   // เทียบเฉพาะ key ตัวเอง
+  _details[palletCode] = result;
+  notifyListeners();
+}</code></pre><table><thead><tr><th>รูปแบบ</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td>ตัวนับเดียว</td><td>ทุกคำขอเขียนลง state ก้อนเดียวกัน (กรณีส่วนใหญ่)</td></tr>
+<tr><td>ตัวนับต่อ key</td><td>แต่ละคำขอเขียนคนละที่ และต้องอยู่ร่วมกันได้</td></tr>
+</tbody></table><p>อย่าเพิ่งใช้แบบต่อ key ถ้ายังไม่มีความต้องการจริง — มันซับซ้อนกว่าและต้องดูแล map เพิ่ม</p></section>
+
+<section><h2>9. ทดสอบด้วยการบังคับลำดับ</h2><p>บั๊กชนิดนี้ทดสอบไม่ได้ด้วยการรอเฉย ๆ เพราะลำดับควบคุมไม่ได้ ต้องใช้ <code>Completer</code> ซึ่งให้เราสั่งเองว่า <code>Future</code> จะเสร็จเมื่อไหร่</p><pre class="code-vs"><code>class FakePickRepository implements PickRepository {
+  Completer&lt;List&lt;PickLine&gt;&gt;? fetchGate;   // ประตูที่เราเปิดเอง
+
+  @override
+  Future&lt;List&lt;PickLine&gt;&gt; fetchLines() {
+    final gate = fetchGate;
+    if (gate != null) return gate.future;   // รอจนกว่าเทสต์จะสั่งให้ผ่าน
+    return Future.value(lines);
+  }
+}</code></pre><pre class="code-vs"><code>test('ผลของคำขอเก่าที่มาช้าต้องไม่ทับคำขอใหม่', () async {
+  final firstGate = Completer&lt;List&lt;PickLine&gt;&gt;();
+  repository.fetchGate = firstGate;
+  final firstLoad = store.load();               // คำขอ A ค้างอยู่ที่ประตู
+
+  final secondGate = Completer&lt;List&lt;PickLine&gt;&gt;();
+  repository.fetchGate = secondGate;
+  final secondLoad = store.load();              // คำขอ B ค้างอยู่ที่ประตู
+
+  secondGate.complete([lineB]);                 // ปล่อย B ก่อน
+  await secondLoad;
+  expect(store.lines.single.id, lineB.id);
+
+  firstGate.complete([lineA]);                  // แล้วค่อยปล่อย A
+  await firstLoad;
+  expect(store.lines.single.id, lineB.id);      // ต้องยังเป็น B
+});
+</code></pre><p>บรรทัดสุดท้ายคือหัวใจ — <strong>ถ้าลบการตรวจ <code>generation</code> ออกจาก <code>load()</code> เทสต์นี้จะแดงทันที</strong></p><div class="note"><strong>ลองเอง:</strong> เปิด <code>pick_store.dart</code> ลบบรรทัด <code>if (generation != _generation) return;</code> ในทางสำเร็จออก แล้วรัน <code>flutter test --no-pub</code> — จะเห็นว่าเทสต์นี้จับได้ทันที นี่คือความต่างระหว่าง “เขียนเทสต์ไว้” กับ “มีเทสต์ที่กันบั๊กได้จริง”</div></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>จอแสดงข้อมูลของสิ่งที่เลือกก่อนหน้า</td><td>ผลเก่ามาทีหลังแล้วทับ</td><td>ตัวนับรุ่น</td></tr>
+<tr><td>จอกลายเป็นหน้าผิดพลาดเองทั้งที่โหลดสำเร็จแล้ว</td><td>ไม่ตรวจรุ่นใน <code>catch</code></td><td>ตรวจในทาง error ด้วย</td></tr>
+<tr><td>ตัวหมุนหายทั้งที่ยังโหลดอยู่</td><td>คำขอเก่าตั้งสถานะให้คำขอใหม่</td><td>ตรวจรุ่นก่อนแตะสถานะ</td></tr>
+<tr><td>เทียบ <code>query == controller.text</code> แล้วยังพลาด</td><td>ค่าซ้ำหรือถูกแปลงรูป</td><td>ใช้ตัวนับรุ่นแทน</td></tr>
+<tr><td>ปิดหน้าจอแล้วยังมีอะไรมาแตะ store</td><td>ไม่เพิ่มรุ่นใน <code>dispose()</code></td><td>ใส่ <code>_generation++</code></td></tr>
+<tr><td>โหลดหลายรายการพร้อมกันแล้วได้แค่อันสุดท้าย</td><td>ใช้ตัวนับเดียวกับงานที่แยกกัน</td><td>ตัวนับต่อ key</td></tr>
+<tr><td>บั๊กเกิดเฉพาะที่หน้างาน ทำซ้ำไม่ได้</td><td>ไม่มีเทสต์ที่บังคับลำดับได้</td><td><code>Completer</code></td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ช่องค้นหาที่ยิงคำขอทุกครั้งที่พิมพ์</p><pre class="code-vs"><code>Future&lt;void&gt; search(String query) async {
+  _searching = true;
+  notifyListeners();
+  try {
+    _results = await repository.search(query);
+  } on SearchException catch (error) {
+    _errorMessage = error.message;
+  } finally {
+    _searching = false;
+    notifyListeners();
+  }
+}</code></pre><p>ผู้ใช้พิมพ์ <code>p</code> → <code>pa</code> → <code>pal</code> → <code>pall</code> เร็ว ๆ</p><ol><li>อธิบายว่าอาจเกิดอะไรได้บ้าง</li><li>แก้ด้วยตัวนับรุ่น</li><li>อธิบายว่ายังควรเพิ่มอะไรอีก และตัวนับรุ่นเพียงพอหรือไม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — อาจเกิดอะไรได้บ้าง</strong></p><p>ยิงไปสี่คำขอ และไม่มีอะไรรับประกันว่าจะกลับตามลำดับ</p><table><thead><tr><th>#</th><th>อาการ</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>1</td><td>พิมพ์ <code>pall</code> อยู่ แต่เห็นผลของ <code>pa</code></td><td>ผลของคำขอเก่ามาทีหลังแล้วทับ</td></tr>
+<tr><td>2</td><td>ผลกระพริบเปลี่ยนไปมาหลายรอบ</td><td>สี่คำขอทยอยกลับ แต่ละอันเขียนทับ</td></tr>
+<tr><td>3</td><td>ตัวหมุนหายทั้งที่ยังค้นอยู่</td><td><code>_searching = false</code> ของคำขอแรกไปปิดของคำขอที่สี่</td></tr>
+<tr><td>4</td><td>ขึ้นข้อความผิดพลาดทั้งที่ผลล่าสุดสำเร็จ</td><td>คำขอเก่าล้มเหลวแล้วเขียน <code>_errorMessage</code></td></tr>
+<tr><td>5</td><td>ยิงคำขอสี่ครั้งทั้งที่ต้องการผลอันเดียว</td><td>ไม่มี debounce</td></tr>
+</tbody></table><p><strong>ข้อ 2 — แก้ด้วยตัวนับรุ่น</strong></p><pre class="code-vs"><code>int _searchGeneration = 0;
+
+Future&lt;void&gt; search(String query) async {
+  final generation = ++_searchGeneration;
+  _searching = true;
+  _errorMessage = null;
+  notifyListeners();
+  try {
+    final result = await repository.search(query);
+    if (generation != _searchGeneration) return;      // แก้ข้อ 1, 2
+    _results = result;
+  } on SearchException catch (error) {
+    if (generation != _searchGeneration) return;      // แก้ข้อ 4
+    _errorMessage = error.message;
+  } finally {
+    if (generation == _searchGeneration) {            // แก้ข้อ 3
+      _searching = false;
+      notifyListeners();
+    }
+  }
+}</code></pre><p>ข้อ 3 คือจุดที่ละเอียดที่สุด — ถ้าปล่อยให้ <code>_searching = false</code> อยู่นอกการตรวจ คำขอเก่าที่จบก่อนจะไปปิดตัวหมุนของคำขอใหม่ที่ยังวิ่งอยู่ ผู้ใช้จะเห็นผลเก่านิ่งอยู่โดยไม่มีอะไรบอกว่ายังค้นอยู่</p><p><strong>ข้อ 3 — ยังควรเพิ่มอะไรอีก</strong></p><p>ตัวนับรุ่นทำให้ <em>ถูกต้อง</em> แล้ว แต่ยัง <em>ไม่ดี</em> เพราะข้อ 5 ยังอยู่ — ยังยิงสี่คำขอเพื่อเอาผลอันเดียว</p><p><em>เพิ่ม debounce</em> — รอให้หยุดพิมพ์สักครู่ก่อนค่อยยิง</p><pre class="code-vs"><code>Timer? _debounce;
+
+void onQueryChanged(String query) {
+  _debounce?.cancel();
+  _debounce = Timer(const Duration(milliseconds: 300), () =&gt; search(query));
 }
 
-void clear() {
-  _loadGeneration++;
-  _state = const Initial();
+@override
+void dispose() {
+  _debounce?.cancel();      // อย่าลืม (4.11)
+  _searchGeneration++;
+  super.dispose();
+}</code></pre><p><em>เพิ่มความยาวขั้นต่ำ</em> — ค้นด้วยตัวอักษรเดียวได้ผลเป็นพันแถวและไม่มีประโยชน์</p><pre class="code-vs"><code>if (query.trim().length &lt; 2) {
+  _results = const [];
   notifyListeners();
-}</code></pre></section>
-<section><h2>3. Receive session จริง</h2><p>WarehouseStoreเก็บ <code>_receiveSession</code> captureก่อน validate/confirm แล้วเปรียบเทียบหลัง await หากผู้ใช้ออกจาก flow sessionเพิ่มจึงไม่ restore UIเก่า แม้ backendอาจ commitแล้วก็ refresh receivingเพื่อ reconcile</p></section>
-<section><h2>4. Token vs cancellation</h2><p>Tokenไม่หยุด network/batteryแต่กัน applyผิด; cancellationหยุดงานถ้า clientรองรับแต่ยังต้อง tokenเพราะ cancelอาจแข่ง completion ใช้ทั้งคู่ตาม cost และให้ repositoryรับ cancellation signalเมื่อเหมาะ</p></section>
-<section><h2>5. Per-key concurrency</h2><p>Global generationทำ requestคนละ entityยกเลิกกันหมด หากโหลด detailหลายรายการพร้อมกันใช้ Map&lt;ID,generation&gt;, cache per keyหรือ immutable query key ตรวจ responseตรง request key/current selection</p></section>
-<section><h2>6. Busy flags และ stale finally</h2><p>Requestเก่าไม่ควร set loading=falseของ requestใหม่ ใน finallyตรวจ generationก่อน publish หรือเก็บ in-flight count/tokenใน state มิฉะนั้น spinnerหายขณะ Bยังวิ่ง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Search-as-you-type “pa” ช้ากว่า “pallet” แล้วผลเก่าทับ ต้องทำอะไร?</p><details><summary>เฉลย</summary><p>debounce query, เพิ่ม generationทุก accepted query, capture query/token, apply data/error/loadingเฉพาะ tokenล่าสุด และ cancel HTTPเก่าถ้าได้ Cacheผลตาม queryได้แต่ UI currentต้องตรง queryล่าสุด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ตรวจเพียง <code>if (query == controller.text)</code> เปราะต่อ normalizationและ queryซ้ำรอบใหม่ Generationระบุ operation instanceได้ชัดกว่า และควร testด้วย Completerควบคุมลำดับ response</div></section>
+  return;
+}</code></pre><p><strong>debounce แทนตัวนับรุ่นได้ไหม — ไม่ได้</strong></p><p>นี่คือคำถามสำคัญของข้อนี้</p><table><thead><tr><th></th><th>debounce</th><th>ตัวนับรุ่น</th></tr></thead><tbody>
+<tr><td>แก้อะไร</td><td>ลดจำนวนคำขอ</td><td>กันผลเก่าทับผลใหม่</td></tr>
+<tr><td>ถ้าผู้ใช้พิมพ์ช้ากว่า 300ms</td><td>ยิงทุกครั้งอยู่ดี</td><td>ยังกันได้</td></tr>
+<tr><td>ถ้าคำขอแรกช้ากว่าคำขอสอง</td><td>ช่วยไม่ได้เลย</td><td>กันได้</td></tr>
+</tbody></table><p>debounce เป็นเรื่อง <strong>ประสิทธิภาพ</strong> ตัวนับรุ่นเป็นเรื่อง <strong>ความถูกต้อง</strong> — ต้องมีทั้งคู่ และถ้าเลือกได้แค่อย่างเดียว ต้องเลือกตัวนับรุ่น</p><p><strong>ลองต่อ:</strong> เขียนเทสต์แบบหัวข้อ 9 ให้ครอบข้อ 3 — ปล่อยคำขอที่สองให้สำเร็จก่อน แล้วค่อยปล่อยคำขอแรก จากนั้นตรวจว่า <code>_searching</code> ยังเป็นค่าที่ถูกต้อง</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>คำขอไม่ได้กลับตามลำดับที่ยิงไป</li><li>ผลเก่าที่มาทีหลังจะเขียนทับผลใหม่โดยไม่มีอะไรพัง ซึ่งอันตรายกว่าการพัง</li><li>ตัวนับรุ่นใช้สามบรรทัด — เพิ่มเลข จำเลข เทียบเลขก่อนเขียน</li><li>ต้องตรวจสี่จุด: ทางสำเร็จ ทาง error ก่อน <code>notifyListeners()</code> และใน <code>dispose()</code></li><li>อย่าเทียบค่าที่ผู้ใช้พิมพ์แทนเลขรุ่น</li><li>ตัวนับรุ่นคุมความถูกต้อง การยกเลิกคุมความสิ้นเปลือง — ทำอย่างแรกก่อน</li><li>ใช้ตัวนับต่อ key เมื่อหลายคำขอต้องอยู่ร่วมกันได้</li><li><code>Completer</code> ทำให้ทดสอบลำดับการตอบกลับได้จริง</li></ul></div><p><strong>บทถัดไป:</strong> 4.11 จะทำให้หน้าจออัปเดตเองโดยไม่ต้องกดรีเฟรช ซึ่งจะทำให้ทุกอย่างในบทนี้ถูกใช้งานหนักขึ้นมาก</p></section>

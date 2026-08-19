@@ -4,34 +4,283 @@
 <title>Polling</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-11 · State &amp; Lifecycle</span><h1>Polling</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Timer.periodic</a></li><li><a href="#section-2">Overlapping request</a></li><li><a href="#section-3">Poll เฉพาะที่ดู</a></li><li><a href="#section-4">Lifecycle</a></li><li><a href="#section-5">Backoff และ jitter</a></li><li><a href="#section-6">Timer test</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Polling คือการแลก freshnessกับ battery, radio, server load และ race Timer.periodicไม่รอ Futureเดิมจบ จึงต้องมี in-flight guard, lifecycle policy, backoff และ disposeที่ชัด</div>
-<section id="section-1"><h2>1. Timer.periodic</h2><pre class="code-vs"><code>Timer? _timer;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ตัวจับเวลาไม่สนใจว่าคุณเสร็จหรือยัง</a></li><li><a href="#section-4">โครงพื้นฐานใน lab</a></li><li><a href="#section-5">ทำไมต้องข้าม tick ตอนผู้ใช้กำลังกด</a></li><li><a href="#section-6">กันคำขอซ้อนกัน</a></li><li><a href="#section-7">หยุดเมื่อไม่มีใครดู</a></li><li><a href="#section-8">เลือกจังหวะให้เหมาะกับข้อมูล</a></li><li><a href="#section-9">เมื่อล้มเหลวติดกัน ต้องยืดระยะ</a></li><li><a href="#section-10">ทดสอบโดยไม่ต้องรอเวลาจริง</a></li><li><a href="#section-11">ยกเลิกตัวจับเวลาไม่ได้ยกเลิกคำขอ</a></li><li><a href="#section-12">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-13">แบบฝึกหัด</a></li><li><a href="#section-14">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ให้หน้าจออัปเดตเองโดยไม่กินแบตทั้งกะ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.10 (ตัวนับรุ่น) และ 3.12 (คู่ตรงข้ามของการสร้าง–ทำลาย)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนการรีเฟรชอัตโนมัติที่ไม่ซ้อนกัน ไม่กวนงานผู้ใช้ หยุดเป็น และทดสอบได้โดยไม่ต้องรอเวลาจริง</div>
 
-void startPolling() {
-  _timer?.cancel();
-  _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-    unawaited(_refreshIfIdle());
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>คนหน้างานสองคนทำงานใน order เดียวกัน คนแรกปิดงานบรรทัดที่ 3 ไปแล้ว แต่จอของคนที่สองยังแสดงว่ายังไม่เสร็จ — เพราะข้อมูลบนจอถูกโหลดมาตั้งแต่ตอนเปิดหน้าจอ</p><p>ทางแก้ที่ตรงที่สุดคือให้แอปถามเซิร์ฟเวอร์เองเป็นระยะ ซึ่งเรียกว่า polling</p><p>แต่พอทำจริงจะเจอปัญหาชุดใหม่ทันที</p><table><thead><tr><th>ปัญหา</th><th>อาการที่หน้างาน</th></tr></thead><tbody>
+<tr><td>คำขอซ้อนกัน</td><td>เน็ตช้าอยู่แล้วยิ่งช้าลงเรื่อย ๆ</td></tr>
+<tr><td>รีเฟรชระหว่างที่ผู้ใช้กำลังกดปุ่ม</td><td>สิ่งที่เพิ่งกดถูกเขียนทับกลับเป็นค่าเก่า</td></tr>
+<tr><td>ตัวจับเวลาไม่เคยหยุด</td><td>แบตหมดก่อนหมดกะ</td></tr>
+<tr><td>เน็ตหลุด แต่ยังยิงทุก 5 วินาที</td><td>ยิงเปล่าเป็นร้อยครั้ง</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>polling</td><td>ถามซ้ำเป็นระยะว่ามีอะไรใหม่ไหม</td></tr>
+<tr><td><code>Timer.periodic</code></td><td>ตัวจับเวลาที่ยิงซ้ำทุกช่วงเวลา</td></tr>
+<tr><td>tick</td><td>หนึ่งครั้งที่ตัวจับเวลายิง</td></tr>
+<tr><td>overlap</td><td>คำขอใหม่เริ่มทั้งที่คำขอเก่ายังไม่จบ</td></tr>
+<tr><td>backoff</td><td>ยืดระยะเวลาออกเมื่อล้มเหลวติดกัน</td></tr>
+<tr><td>jitter</td><td>สุ่มเวลาเล็กน้อย ไม่ให้ทุกเครื่องยิงพร้อมกัน</td></tr>
+<tr><td><code>fakeAsync</code></td><td>เครื่องมือทดสอบที่ทำให้เราเดินเวลาเองได้</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ตัวจับเวลาไม่สนใจว่าคุณเสร็จหรือยัง</h2><pre class="code-vs"><code>Timer.periodic 5 วินาที + คำขอที่ใช้เวลา 8 วินาที
+
+0s   tick → คำขอ A เริ่ม ─────────────────→ จบ 8s
+5s   tick → คำขอ B เริ่ม ─────────────────→ จบ 13s
+10s  tick → คำขอ C เริ่ม ─────────────────→ จบ 18s
+15s  tick → คำขอ D เริ่ม ...
+
+จำนวนคำขอที่วิ่งพร้อมกัน เพิ่มขึ้นเรื่อย ๆ ไม่มีวันหยุด</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>Timer.periodic</code> ยิงตามนาฬิกา ไม่ได้ยิงตามงาน — เราต้องเป็นคนตัดสินใจเองว่า tick ไหนควรข้าม</div></section>
+
+<section id="section-4"><h2>4. โครงพื้นฐานใน lab</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code></p><pre class="code-vs"><code>Timer? _pollTimer;
+
+void startPolling(Duration interval) {
+  stopPolling();                                  // 1. กันเปิดซ้อน
+  _pollTimer = Timer.periodic(interval, (_) {
+    if (_busyLineIds.isEmpty) load();             // 2. ข้าม tick เมื่อไม่ว่าง
   });
+}
+
+void stopPolling() {
+  _pollTimer?.cancel();
+  _pollTimer = null;
 }
 
 @override
 void dispose() {
-  _timer?.cancel();
+  stopPolling();                                  // 3. คู่ตรงข้าม
+  _generation++;
   super.dispose();
-}</code></pre></section>
-<section id="section-2"><h2>2. Overlapping request</h2><pre class="code-vs"><code>bool _refreshing = false;
+}</code></pre><p>สามบรรทัดสำคัญ ทำหน้าที่ต่างกัน</p><table><thead><tr><th>#</th><th>กันอะไร</th><th>ถ้าไม่มีจะเป็นอย่างไร</th></tr></thead><tbody>
+<tr><td>1</td><td>เรียก <code>startPolling</code> สองครั้ง</td><td>มีตัวจับเวลาสองตัววิ่งพร้อมกัน ตัวเก่าไม่มีใครถือแล้วจึงหยุดไม่ได้อีกเลย</td></tr>
+<tr><td>2</td><td>รีเฟรชขณะผู้ใช้กำลังส่งคำสั่ง</td><td>ข้อมูลจากเซิร์ฟเวอร์ทับสิ่งที่ผู้ใช้เพิ่งกด</td></tr>
+<tr><td>3</td><td>ตัวจับเวลาเดินต่อหลัง store ตายแล้ว</td><td>ยิงคำขอไปเรื่อย ๆ ตลอดอายุแอป</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. ทำไมต้องข้าม tick ตอนผู้ใช้กำลังกด</h2><p>บรรทัด <code>if (_busyLineIds.isEmpty)</code> ดูเล็กมาก แต่กันเหตุการณ์ที่อธิบายให้ผู้ใช้เข้าใจยากที่สุด</p><pre class="code-vs"><code>0.0s  ผู้ใช้กดปิดงาน L-3 → จอแสดงว่าเสร็จแล้วทันที (4.13)
+0.1s  คำขอ markDone กำลังวิ่งไป server
+0.2s  tick ของ polling → load() ยิงไปถาม server
+0.6s  load() ได้ผลกลับมา: L-3 "ยังไม่เสร็จ" (เพราะ markDone ยังไปไม่ถึง)
+0.6s  จอเปลี่ยนกลับเป็นยังไม่เสร็จ            ← ผู้ใช้เห็นสิ่งที่กดหายไป
+0.9s  markDone สำเร็จ
+0.9s  จอเปลี่ยนเป็นเสร็จอีกครั้ง</code></pre><p>ผู้ใช้เห็นเครื่องหมายถูกกระพริบหายแล้วกลับมา ซึ่งทำให้ไม่มั่นใจว่ากดติดหรือไม่ และมักจะกดซ้ำ</p><p>การข้าม tick แก้เรื่องนี้ตรง ๆ — <strong>ระหว่างที่มีคำสั่งของผู้ใช้ค้างอยู่ ห้ามให้ข้อมูลจากที่อื่นมาทับ</strong></p><p>สังเกตว่า <code>_busyLineIds</code> เป็นตัวเดียวกับที่ใช้ล็อกปุ่มใน 4.8 — ตัวเดียวทำสองหน้าที่ที่สอดคล้องกัน</p></section>
+
+<section id="section-6"><h2>6. กันคำขอซ้อนกัน</h2><p>การข้าม tick ตอนผู้ใช้กดยังไม่พอ เพราะ tick ถัดไปอาจมาก่อนที่ <code>load()</code> ของ tick ก่อนหน้าจะจบ</p><pre class="code-vs"><code>bool _refreshing = false;
+
 Future&lt;void&gt; _refreshIfIdle() async {
-  if (_refreshing) return;
+  if (_refreshing) return;        // ยังไม่จบ ข้าม tick นี้ไป
   _refreshing = true;
-  try { await repository.refresh(); }
-  finally { _refreshing = false; }
-}</code></pre><p>ถ้า requestใช้ 8sแต่ timer 5s guardจะ skip tickแทนซ้อน request</p></section>
-<section id="section-3"><h2>3. Poll เฉพาะที่ดู</h2><p>WarehouseStore timer 5sเรียก refreshตาม <code>screen</code>: tasks/history/picks/cycle-countที่เกี่ยวข้อง ลด callหน้าที่ไม่เปิด แต่ storeยังตื่นทุก 5s ควรพิจารณา start/stopตาม route/app lifecycleหรือ realtime SignalRใน Partหลัง</p></section>
-<section id="section-4"><h2>4. Lifecycle</h2><p>เมื่อ app paused/backgroundหยุดหรือยืด polling; resumedให้ refreshทันทีแล้ว restart schedule Absolute connection dotเลือกไม่ pollตลอดวัน แต่ refreshตอน shell mount/resume/เปลี่ยน profile เป็น policyประหยัดแบตที่เหมาะกับข้อมูลไม่ต้อง realtime</p></section>
-<section id="section-5"><h2>5. Backoff และ jitter</h2><p>เมื่อ networkล้มไม่ควรยิงทุก 5sตลอด ใช้ exponential backoffมีเพดานและ jitterลด clientพร้อมกัน resetเมื่อ success/foreground/manual retry แยก offline detectionจาก server errorอย่างระวัง</p></section>
-<section id="section-6"><h2>6. Timer test</h2><p>Inject scheduler/clockหรือใช้ <code>fake_async</code> เพื่อเดินเวลา deterministic ทดสอบ no overlap, stop/dispose, background/resume และ backoff ไม่รอเวลาจริงใน unit test</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Connection dotต้องสดพอแต่ PDAใช้ทั้งกะ ควร poll 1sไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรตามค่าเริ่ม ใช้ผลจาก requestจริง + refreshตอน mount/resume/profile change/manual retry อาจ pollช้าขณะ settingsเปิด หากธุรกิจต้อง realtimeใช้ push/heartbeatที่ออกแบบ serverร่วมและวัด battery/data</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Timer.cancelหยุด tickอนาคตแต่ไม่ cancel Futureที่เริ่มแล้ว Resultยังต้อง generation/disposed guard และ unawaited Futureต้องจับ errorภายใน</div></section>
+  try {
+    await load();
+  } finally {
+    _refreshing = false;          // ปลดเสมอ (4.8)
+  }
+}</code></pre><pre class="code-vs"><code>_pollTimer = Timer.periodic(interval, (_) {
+  if (_busyLineIds.isEmpty) unawaited(_refreshIfIdle());
+});</code></pre><p>ผลที่ได้เมื่อคำขอใช้เวลานานกว่ารอบ</p><pre class="code-vs"><code>0s   tick → เริ่ม ─────────────────→ จบ 8s
+5s   tick → ข้าม (ยังไม่จบ)
+10s  tick → เริ่ม ─────────────────→ จบ 18s
+15s  tick → ข้าม</code></pre><p>เป็นการ <strong>ข้าม</strong> ไม่ใช่การเข้าคิว ซึ่งถูกต้องสำหรับ polling เพราะเราต้องการข้อมูลล่าสุด ไม่ได้ต้องการทุกครั้งที่นาฬิกาเดิน</p><div class="note">สังเกตว่าใช้ <code>unawaited</code> ตามที่เรียนใน 4.8 — เพราะ callback ของ <code>Timer.periodic</code> ไม่รอ <code>Future</code> อยู่แล้ว การเขียน <code>unawaited</code> จึงเป็นการบอกคนอ่านว่าตั้งใจ ไม่ใช่ลืม</div></section>
+
+<section id="section-7"><h2>7. หยุดเมื่อไม่มีใครดู</h2><p>PDA เปิดทั้งกะ ถ้า polling ทำงานตลอดโดยไม่สนใจว่าแอปอยู่หน้าไหน จะเสียทั้งแบตและปริมาณข้อมูล</p><table><thead><tr><th>สถานการณ์</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>เปิดหน้าที่ต้องใช้ข้อมูลสด</td><td>เริ่ม polling</td></tr>
+<tr><td>ออกจากหน้านั้น</td><td>หยุด</td></tr>
+<tr><td>แอปถูกย่อลง / ปิดจอ</td><td>หยุด</td></tr>
+<tr><td>กลับมาที่แอป</td><td>รีเฟรชทันทีหนึ่งครั้ง แล้วเริ่มใหม่</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญ — คนเปิดจอกลับมาแล้วต้องเห็นข้อมูลล่าสุดทันที ไม่ใช่รออีก 5 วินาที</p><pre class="code-vs"><code>class _PickScreenState extends State&lt;PickScreen&gt; with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.store.load();
+    widget.store.startPolling(const Duration(seconds: 10));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        widget.store.load();                                   // สดทันที
+        widget.store.startPolling(const Duration(seconds: 10));
+      case AppLifecycleState.paused ||
+           AppLifecycleState.inactive ||
+           AppLifecycleState.hidden ||
+           AppLifecycleState.detached:
+        widget.store.stopPolling();
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);   // คู่ตรงข้าม
+    widget.store.stopPolling();
+    super.dispose();
+  }
+}</code></pre><p>สังเกตว่า <code>startPolling</code> เรียกซ้ำได้ปลอดภัย เพราะบรรทัดแรกของมันคือ <code>stopPolling()</code> — นี่คือประโยชน์ของการออกแบบให้เรียกซ้ำแล้วไม่พัง</p><p>รายละเอียดของ <code>WidgetsBindingObserver</code> จะลงลึกใน Part 5</p></section>
+
+<section id="section-8"><h2>8. เลือกจังหวะให้เหมาะกับข้อมูล</h2><p>คำถามที่ต้องตอบก่อนตั้งตัวเลขคือ <strong>ข้อมูลนี้เก่าได้กี่วินาทีโดยไม่ทำให้ใครทำงานผิด</strong></p><table><thead><tr><th>ข้อมูล</th><th>เก่าได้แค่ไหน</th><th>แนวทาง</th></tr></thead><tbody>
+<tr><td>รายการงานที่หลายคนแย่งกันทำ</td><td>ไม่กี่วินาที</td><td>polling 5–10 วินาที</td></tr>
+<tr><td>รายการงานของตัวเองคนเดียว</td><td>เป็นนาที</td><td>รีเฟรชตอนเข้าหน้าจอก็พอ</td></tr>
+<tr><td>ยอดคงคลังในรายงาน</td><td>เป็นนาที</td><td>ปุ่มรีเฟรช</td></tr>
+<tr><td>สถานะการเชื่อมต่อ</td><td>—</td><td>ดูจากผลของคำขอจริงที่ยิงอยู่แล้ว ไม่ต้อง ping แยก</td></tr>
+</tbody></table><p>ข้อสุดท้ายเป็นกับดักที่พบบ่อย — การยิง ping ทุกวินาทีเพื่อโชว์จุดสีเขียว คือการยิงคำขอ 28,800 ครั้งต่อกะ เพื่อข้อมูลที่ได้มาฟรีอยู่แล้วจากคำขออื่นที่แอปยิงอยู่</p><div class="note">ก่อนจะเพิ่ม polling ให้ถามก่อนว่ามีเหตุการณ์ที่รู้อยู่แล้วให้ใช้แทนได้ไหม — เข้าหน้าจอ กลับมาที่แอป ปิดงานสำเร็จ ล้วนเป็นจังหวะที่ควรรีเฟรชอยู่แล้ว และแม่นกว่าการเดาเวลา</div></section>
+
+<section id="section-9"><h2>9. เมื่อล้มเหลวติดกัน ต้องยืดระยะ</h2><p>เน็ตในคลังหลุดเป็นช่วง ๆ ถ้ายังยิงทุก 5 วินาทีตลอดที่หลุด จะได้คำขอที่ล้มเหลวเป็นร้อยครั้ง กินแบตและทำให้ log เต็มไปด้วยเรื่องเดียว</p><pre class="code-vs"><code>int _failureCount = 0;
+
+Duration get _nextInterval {
+  if (_failureCount == 0) return const Duration(seconds: 10);
+  final seconds = 10 * (1 &lt;&lt; _failureCount);     // 20, 40, 80, 160...
+  final capped = seconds.clamp(10, 300);          // ไม่เกิน 5 นาที
+  final jitter = Random().nextInt(3000);          // สุ่ม 0–3 วินาที
+  return Duration(milliseconds: capped * 1000 + jitter);
+}</code></pre><table><thead><tr><th>ส่วนประกอบ</th><th>ทำไมต้องมี</th></tr></thead><tbody>
+<tr><td>ยืดเป็นทวีคูณ</td><td>ลดการยิงเปล่าอย่างรวดเร็ว</td></tr>
+<tr><td>มีเพดาน</td><td>ไม่งั้นพอเน็ตกลับมา จะรอเป็นชั่วโมงกว่าจะรู้</td></tr>
+<tr><td>jitter</td><td>PDA ทั้งคลังหลุดพร้อมกัน ถ้าไม่สุ่มก็จะกลับมายิงพร้อมกันจนล้ม server</td></tr>
+<tr><td>รีเซ็ตเมื่อสำเร็จ</td><td>กลับสู่จังหวะปกติทันที</td></tr>
+</tbody></table><p>และต้องรีเซ็ตทันทีเมื่อผู้ใช้กดรีเฟรชเองหรือเปิดแอปกลับมา — เพราะนั่นแปลว่ามีคนกำลังรอดูอยู่</p></section>
+
+<section id="section-10"><h2>10. ทดสอบโดยไม่ต้องรอเวลาจริง</h2><p>เทสต์ที่รอ 10 วินาทีจริงคือเทสต์ที่ไม่มีใครยอมรัน <code>fakeAsync</code> ให้เราเดินเวลาเองได้</p><pre class="code-vs"><code>import 'package:fake_async/fake_async.dart';
+
+test('polling ยิงซ้ำตามรอบ และหยุดเมื่อสั่งหยุด', () {
+  fakeAsync((async) {
+    store.startPolling(const Duration(seconds: 5));
+
+    async.elapse(const Duration(seconds: 12));   // เดินเวลา 12 วินาทีทันที
+    expect(repository.fetchCount, 2);            // ยิงไป 2 รอบ
+
+    store.stopPolling();
+    async.elapse(const Duration(seconds: 30));
+    expect(repository.fetchCount, 2);            // ไม่เพิ่มอีก
+  });
+});</code></pre><p>สิ่งที่ควรมีเทสต์ครอบ</p><table><thead><tr><th>เรื่อง</th><th>ทำไมต้องมี</th></tr></thead><tbody>
+<tr><td>ยิงตามรอบจริง</td><td>ยืนยันว่าตัวจับเวลาทำงาน</td></tr>
+<tr><td>ข้าม tick เมื่อมีคำสั่งค้างอยู่</td><td>กันอาการกระพริบในหัวข้อ 5</td></tr>
+<tr><td>ไม่ยิงซ้อนกัน</td><td>กันปัญหาในหัวข้อ 6</td></tr>
+<tr><td><code>stopPolling</code> แล้วหยุดจริง</td><td>ป้องกันตัวจับเวลารั่ว</td></tr>
+<tr><td><code>startPolling</code> สองครั้งแล้วไม่ยิงสองเท่า</td><td>ยืนยันว่าเรียกซ้ำได้</td></tr>
+<tr><td><code>dispose</code> แล้วหยุดจริง</td><td>เรื่องเดียวกับ 3.12</td></tr>
+</tbody></table><div class="warn"><code>fakeAsync</code> ใช้กับ callback ที่เป็นแบบธรรมดา ไม่ต้องใส่ <code>async</code> ให้ตัวฟังก์ชันของ <code>fakeAsync</code> เอง และอย่า <code>await</code> ข้างในโดยตรง — ให้ใช้ <code>async.elapse()</code> เดินเวลาแทน</div></section>
+
+<section id="section-11"><h2>11. ยกเลิกตัวจับเวลาไม่ได้ยกเลิกคำขอ</h2><p>ประเด็นสุดท้ายที่ต้องเชื่อมกลับไป 4.10</p><pre class="code-vs"><code>store.stopPolling();     // หยุด tick ในอนาคต
+// แต่ load() ที่เริ่มไปแล้วเมื่อ 2 วินาทีก่อน ยังวิ่งอยู่
+// และจะกลับมาเขียนลง state ตามปกติ</code></pre><p>นี่คือเหตุผลที่ <code>dispose()</code> ต้องมีทั้งสองบรรทัด</p><pre class="code-vs"><code>@override
+void dispose() {
+  stopPolling();      // หยุดที่จะเกิดในอนาคต
+  _generation++;      // ทิ้งผลของที่เกิดไปแล้ว
+  super.dispose();
+}</code></pre><p>ขาดบรรทัดใดบรรทัดหนึ่งก็ยังรั่ว</p></section>
+
+<section id="section-12"><h2>12. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยิ่งใช้ยิ่งช้า คำขอเยอะขึ้นเรื่อย ๆ</td><td>คำขอซ้อนกัน</td><td>ธง <code>_refreshing</code> + <code>finally</code></td></tr>
+<tr><td>สิ่งที่เพิ่งกดกลับเป็นค่าเก่าแวบหนึ่ง</td><td>polling ทับคำสั่งของผู้ใช้</td><td>ข้าม tick เมื่อมีคำสั่งค้าง</td></tr>
+<tr><td>แบตหมดเร็วผิดปกติ</td><td>ไม่หยุดเมื่อออกจากหน้าจอหรือย่อแอป</td><td>ผูกกับ lifecycle</td></tr>
+<tr><td>ปิดหน้าจอแล้วยังเห็นคำขอในบันทึกเครือข่าย</td><td>ไม่ยกเลิกใน <code>dispose</code></td><td><code>stopPolling()</code> ใน <code>dispose</code></td></tr>
+<tr><td>ยิงถี่เป็นสองเท่า</td><td>เรียก <code>startPolling</code> ซ้ำโดยไม่ยกเลิกตัวเก่า</td><td>เริ่มด้วย <code>stopPolling()</code></td></tr>
+<tr><td>เน็ตหลุดแล้วยิงเปล่าเป็นร้อยครั้ง</td><td>ไม่มี backoff</td><td>ยืดระยะ + เพดาน + jitter</td></tr>
+<tr><td>เน็ตกลับมาแล้วรอนานกว่าจะรู้</td><td>backoff ไม่มีเพดาน หรือไม่รีเซ็ต</td><td>ใส่เพดาน และรีเซ็ตเมื่อกลับมาที่แอป</td></tr>
+<tr><td>เทสต์ช้ามากหรือแดงเป็นครั้งคราว</td><td>รอเวลาจริงในเทสต์</td><td><code>fakeAsync</code></td></tr>
+</tbody></table></section>
+
+<section id="section-13"><h2>13. แบบฝึกหัด</h2><pre class="code-vs"><code>class TaskStore extends ChangeNotifier {
+  TaskStore({required this.repository}) {
+    Timer.periodic(const Duration(seconds: 3), (_) {
+      load();
+    });
+  }
+
+  Future&lt;void&gt; load() async {
+    _tasks = await repository.fetchTasks();
+    notifyListeners();
+  }
+}</code></pre><ol><li>หาข้อบกพร่องให้ได้อย่างน้อยห้าข้อ</li><li>เขียนใหม่</li><li>ตอบว่าถ้าเปลี่ยนเป็นรีเฟรชตอนเข้าหน้าจออย่างเดียว จะเสียอะไรและได้อะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่เก็บ <code>Timer</code> ไว้ในตัวแปร</td><td>ยกเลิกไม่ได้เลยตลอดอายุแอป</td></tr>
+<tr><td>2</td><td>เริ่มใน constructor</td><td>ยิงตั้งแต่สร้าง store แม้ยังไม่มีใครเปิดหน้าจอ</td></tr>
+<tr><td>3</td><td>ไม่มี <code>dispose</code> ที่ยกเลิก</td><td>ตัวจับเวลารั่ว</td></tr>
+<tr><td>4</td><td>ไม่กันคำขอซ้อน</td><td>รอบ 3 วินาทีกับเน็ตช้า = คำขอสะสม</td></tr>
+<tr><td>5</td><td>ไม่กันการทับคำสั่งของผู้ใช้</td><td>สิ่งที่กดกระพริบกลับ</td></tr>
+<tr><td>6</td><td>ไม่มี try/catch</td><td>เน็ตหลุดครั้งเดียว = unhandled exception</td></tr>
+<tr><td>7</td><td>ไม่มีตัวนับรุ่น</td><td>ผลเก่าทับผลใหม่ (4.10)</td></tr>
+<tr><td>8</td><td>ไม่มี backoff</td><td>เน็ตหลุด = ยิงเปล่าทุก 3 วินาที</td></tr>
+<tr><td>9</td><td>3 วินาทีอาจถี่เกินไป</td><td>ไม่ได้ตอบว่าข้อมูลนี้เก่าได้แค่ไหน</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>class TaskStore extends ChangeNotifier {
+  TaskStore({required this.repository});          // แก้ข้อ 2
+
+  final TaskRepository repository;
+
+  Timer? _pollTimer;                              // แก้ข้อ 1
+  bool _refreshing = false;
+  int _generation = 0;
+  int _failureCount = 0;
+  final Set&lt;String&gt; _busyTaskIds = &lt;String&gt;{};
+
+  void startPolling() {
+    stopPolling();                                // เรียกซ้ำได้ปลอดภัย
+    _pollTimer = Timer.periodic(_interval, (_) {
+      if (_busyTaskIds.isEmpty) {                 // แก้ข้อ 5
+        unawaited(_refreshIfIdle());
+      }
+    });
+  }
+
+  void stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  Duration get _interval {                        // แก้ข้อ 8, 9
+    if (_failureCount == 0) return const Duration(seconds: 10);
+    final seconds = (10 * (1 &lt;&lt; _failureCount)).clamp(10, 300);
+    return Duration(milliseconds: seconds * 1000 + Random().nextInt(3000));
+  }
+
+  Future&lt;void&gt; _refreshIfIdle() async {
+    if (_refreshing) return;                      // แก้ข้อ 4
+    _refreshing = true;
+    try {
+      await load();
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  Future&lt;void&gt; load() async {
+    final generation = ++_generation;             // แก้ข้อ 7
+    try {
+      final result = await repository.fetchTasks();
+      if (generation != _generation) return;
+      _tasks = result;
+      if (_failureCount != 0) {                   // รีเซ็ตแล้วกลับจังหวะปกติ
+        _failureCount = 0;
+        if (_pollTimer != null) startPolling();
+      }
+    } on TaskException catch (error) {            // แก้ข้อ 6
+      if (generation != _generation) return;
+      _errorMessage = error.message;
+      _failureCount++;
+      if (_pollTimer != null) startPolling();     // ยืดระยะ
+    } finally {
+      if (generation == _generation) notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {                                // แก้ข้อ 3
+    stopPolling();
+    _generation++;
+    super.dispose();
+  }
+}</code></pre><p>สังเกตว่าการเปลี่ยนจังหวะทำโดยเรียก <code>startPolling()</code> ใหม่ ซึ่งทำได้เพราะออกแบบให้เรียกซ้ำแล้วไม่พังตั้งแต่แรก และเช็ก <code>_pollTimer != null</code> ก่อน เพื่อไม่ให้ <code>load()</code> ที่ผู้ใช้กดเองไปเปิด polling ที่ยังไม่ได้เริ่ม</p><p><strong>ข้อ 3 — ถ้าเปลี่ยนเป็นรีเฟรชตอนเข้าหน้าจออย่างเดียว</strong></p><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>โค้ดสั้นลงมาก — ไม่ต้องมีตัวจับเวลา backoff หรือการข้าม tick</td><td>ข้อมูลไม่สดระหว่างที่ค้างหน้าเดิม</td></tr>
+<tr><td>ประหยัดแบตและปริมาณข้อมูลชัดเจน</td><td>คนสองคนทำงานเดียวกันจะเห็นไม่ตรงกันจนกว่าจะออกแล้วเข้าใหม่</td></tr>
+<tr><td>บั๊กที่เป็นไปได้น้อยลงมาก</td><td>ต้องสอนผู้ใช้ให้รู้วิธีรีเฟรช</td></tr>
+</tbody></table><p><strong>คำตอบที่ควรให้คือ “ขึ้นกับว่าข้อมูลนี้แข่งกันหรือเปล่า”</strong></p><table><thead><tr><th>กรณี</th><th>เลือก</th></tr></thead><tbody>
+<tr><td>งานถูกจ่ายให้คนเดียว ไม่มีใครมาแย่ง</td><td>รีเฟรชตอนเข้าหน้าจอ + ปุ่มรีเฟรช พอแล้ว</td></tr>
+<tr><td>หลายคนหยิบจาก order เดียวกัน</td><td>ต้องมี polling ไม่งั้นสองคนไปหยิบของชิ้นเดียวกัน</td></tr>
+</tbody></table><p>และมีทางสายกลางที่มักดีที่สุดในทางปฏิบัติ — <strong>รีเฟรชตามเหตุการณ์ที่รู้อยู่แล้ว</strong> คือตอนเข้าหน้าจอ ตอนกลับมาที่แอป และตอนที่คำสั่งของผู้ใช้สำเร็จ ซึ่งครอบคลุมกรณีจริงได้เกือบหมดโดยไม่ต้องมีตัวจับเวลาเลย แล้วค่อยเพิ่ม polling เฉพาะหน้าที่พิสูจน์ได้ว่ามีการแย่งงานกันจริง</p><p><strong>ลองต่อ:</strong> ใน <code>test/pick_store_test.dart</code> มีเทสต์ polling ที่ใช้ <code>fakeAsync</code> อยู่แล้ว ลองเพิ่มเทสต์ว่าเรียก <code>startPolling</code> สองครั้งติดกันแล้วจำนวนคำขอต้องไม่เพิ่มเป็นสองเท่า — แล้วลองลบ <code>stopPolling()</code> บรรทัดแรกออกเพื่อดูว่าเทสต์จับได้จริง</p></details></section>
+
+<section id="section-14"><h2>14. สรุปท้ายบท</h2><div class="success"><ul><li><code>Timer.periodic</code> ยิงตามนาฬิกา ไม่รอให้งานเดิมจบ</li><li>ต้องมีธงกันคำขอซ้อน และปลดใน <code>finally</code></li><li>ข้าม tick เมื่อมีคำสั่งของผู้ใช้ค้างอยู่ ไม่งั้นสิ่งที่กดจะกระพริบกลับ</li><li>เก็บ <code>Timer</code> ไว้เสมอ และให้ <code>startPolling</code> เริ่มด้วย <code>stopPolling</code></li><li>ผูกกับ lifecycle — หยุดเมื่อไม่มีใครดู และรีเฟรชทันทีเมื่อกลับมา</li><li>เมื่อล้มเหลวติดกัน ให้ยืดระยะ มีเพดาน และใส่ jitter</li><li>ตั้งจังหวะจากคำถามว่าข้อมูลนี้เก่าได้กี่วินาที ไม่ใช่จากความรู้สึก</li><li>เหตุการณ์ที่รู้อยู่แล้วมักแทน polling ได้ และแม่นกว่า</li><li>ยกเลิกตัวจับเวลาไม่ได้ยกเลิกคำขอที่เริ่มไปแล้ว — ต้องมีตัวนับรุ่นด้วย</li><li>ทดสอบด้วย <code>fakeAsync</code> ไม่ใช่ด้วยการรอจริง</li></ul></div><p><strong>บทถัดไป:</strong> 4.12 จะรวบเรื่องที่โผล่มาซ้ำ ๆ ทั้งบทนี้และบทก่อน ๆ ให้เป็นกฎเดียว — ใครสร้าง ใครต้องทำลาย และเกิดอะไรขึ้นเมื่อลืม</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,20 +1,219 @@
-<div class="note">Optimistic UI แสดงผลเหมือนสำเร็จก่อน serverตอบเพื่อความเร็ว เหมาะ actionย้อนกลับง่าย/โอกาส failต่ำ แต่ warehouse stock/task commitเสี่ยงสูงจึงมักใช้ pendingหรือ pessimistic state พร้อม rollback/reconcileที่ชัด</div>
-<section><h2>1. Optimistic transaction</h2><pre class="code-vs"><code>Future&lt;void&gt; togglePinned(Task task) async {
-  final before = task.isPinned;
-  _replace(task.copyWith(isPinned: !before));
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: ทำให้จอตอบสนองทันที และย้อนกลับได้อย่างปลอดภัย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.8 (try/finally) และ 4.10 (ตัวนับรุ่น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินใจได้ว่าการกระทำไหนควรแสดงผลทันที และเขียนการย้อนกลับที่ไม่ทำให้ข้อมูลเพี้ยน</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>คนหน้างานหยิบของ 40 บรรทัด กดปุ่มปิดงานทีละบรรทัด ถ้าแต่ละครั้งต้องรอเซิร์ฟเวอร์ 600 มิลลิวินาที</p><pre class="code-vs"><code>40 บรรทัด × 0.6 วินาที = 24 วินาทีที่ยืนรอเฉย ๆ ต่อหนึ่ง order</code></pre><p>และช่วงที่รอนั้นไม่มีอะไรเปลี่ยนบนจอเลย ผู้ใช้จึงมักกดซ้ำเพราะคิดว่ากดไม่ติด</p><p>ทางแก้ที่ตรงที่สุดคือ <strong>อัปเดตหน้าจอทันทีเหมือนสำเร็จแล้ว แล้วค่อยยิงคำขอไปเบื้องหลัง</strong> ซึ่งเรียกว่า optimistic UI</p><p>แต่ทันทีที่ทำ จะมีคำถามใหม่ที่ต้องตอบให้ได้ — <strong>ถ้ามันไม่สำเร็จล่ะ</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>optimistic</td><td>แสดงผลทันทีโดยเชื่อว่าจะสำเร็จ</td></tr>
+<tr><td>pessimistic</td><td>รอผลจากเซิร์ฟเวอร์ก่อนค่อยแสดง</td></tr>
+<tr><td>pending</td><td>แสดงว่ากำลังดำเนินการ ยังไม่นับว่าเสร็จ</td></tr>
+<tr><td>rollback</td><td>ย้อนสถานะกลับเป็นค่าก่อนหน้า</td></tr>
+<tr><td>snapshot</td><td>สำเนาค่าก่อนเปลี่ยน เก็บไว้เพื่อย้อนกลับ</td></tr>
+<tr><td>reconcile</td><td>ถามเซิร์ฟเวอร์ว่าความจริงคืออะไร แล้วปรับตาม</td></tr>
+<tr><td>authoritative</td><td>แหล่งที่ถือความจริง ซึ่งคือเซิร์ฟเวอร์เสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: กำลังโกหกอยู่ชั่วคราว</h2><pre class="code-vs"><code>optimistic:   กด → จอบอกว่าเสร็จ ─────→ server ตอบ → ถูกต้องแล้ว
+                        ↑
+                  ช่วงนี้จอกำลังโกหก
+
+ถ้า server ปฏิเสธ → ต้องยอมรับว่าโกหก แล้วแก้กลับ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถามตัวเองก่อนเสมอว่า “ถ้าคำโกหกนี้ถูกจับได้ ต้องแก้ยากแค่ไหน” — ถ้าคำตอบคือแก้ง่าย ให้ทำ optimistic ถ้าแก้ยาก อย่าทำ</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code></p><pre class="code-vs"><code>Future&lt;void&gt; markDone(String lineId) async {
+  if (_busyLineIds.contains(lineId)) return;
+  final index = _lines.indexWhere((line) =&gt; line.id == lineId);
+  if (index == -1) return;
+  final before = _lines[index];              // 1. เก็บสำเนาไว้ก่อน
+  if (before.done) return;
+
+  final commandId = _pendingCommandIds.putIfAbsent(lineId, _createCommandId);
+  _busyLineIds.add(lineId);
+  _errorMessage = null;
+  _setLine(index, before.copyWith(done: true));   // 2. โกหกไว้ก่อน
   notifyListeners();
+
   try {
-    await repository.setPinned(task.id, !before);
-  } catch (e) {
-    _replace(task.copyWith(isPinned: before));
-    _error = 'บันทึกไม่สำเร็จ';
+    await repository.markDone(lineId, commandId: commandId);
+    _pendingCommandIds.remove(lineId);             // 3. สำเร็จ ลบร่องรอย
+  } on PickException catch (error) {
+    if (error.outcomeUnknown) {                    // 4. ไม่รู้ผล
+      _errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+      notifyListeners();
+      await load();                                //    ถามความจริงใหม่
+      return;
+    }
+    _rollback(lineId, before);                     // 5. รู้แน่ว่าล้มเหลว
+    _pendingCommandIds.remove(lineId);
+    _errorMessage = error.message;
+  } finally {
+    _busyLineIds.remove(lineId);
     notifyListeners();
   }
-}</code></pre></section>
-<section><h2>2. Rollback snapshot</h2><p>เก็บค่าก่อน mutationและ operation ID หากมี optimisticหลายครั้งซ้อน rollbackเก่าไม่ควรทับ actionใหม่ ใช้ per-entity version/queueหรือ serialize command ไม่เก็บ reference mutableที่ถูกแก้ต่อจน snapshotไม่จริง</p></section>
-<section><h2>3. Pending state</h2><p>ทางกลางคือแสดง row/card pendingทันทีแต่ไม่รวมใน committed stockจน serverตอบ ผู้ใช้เห็น responsivenessและเข้าใจยังไม่เสร็จ เมื่อ failให้ retry/remove pending เมื่อ timeout/unknownให้ reconcileก่อนส่งซ้ำ</p></section>
-<section><h2>4. Warehouse risk</h2><p>การรับเข้า, หยิบ, putawayเปลี่ยน inventoryและอาจมีหลายเครื่องทำพร้อมกัน ควรรอ authoritative response/Conflictก่อนแสดง done WarehouseStoreหลาย commandตั้ง submittingแล้ว apply task/statusหลัง awaitซึ่งเป็น pessimisticที่เหมาะกว่า</p></section>
-<section><h2>5. Server reconciliation</h2><p>Rollback localไม่พอหาก server commitแต่ responseหาย Queryด้วย operation ID/entity versionหรือ refresh authoritative list WarehouseStoreกรณีออกจาก receive flowระหว่าง awaitไม่ restore UIเก่าแต่ unawaited reload receivingเพื่อ reconcile</p></section>
-<section><h2>6. Error UX</h2><p>บอกว่า actionถูก rollback, pendingหรือสถานะไม่แน่ชัด ไม่แสดง successแล้วเปลี่ยนเป็น errorเงียบ ๆ ให้ undoเฉพาะก่อน server commitหรือ endpointรองรับ compensating actionจริง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือก optimistic/pending/pessimisticสำหรับ favorite menu, scan serial, confirm pick</p><details><summary>เฉลย</summary><p>Favorite: optimistic+rollback; scan serialใน local draft: optimistic local acceptedแต่ commit batchภายหลัง; confirm pick: pessimistic/pendingพร้อม busyและ idempotencyเพราะกระทบ stock/concurrency</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า rollbackด้วยการ reloadแล้วคิดว่าปลอดภัยเสมอ Reloadอาจ fail/ช้าและมี actionใหม่แล้ว ต้องมี operation identity, conflict policyและ authoritative reconciliation</div></section>
+}</code></pre><p>ห้าบรรทัดที่มีหมายเลข คือสาระทั้งหมดของบทนี้</p></section>
+
+<section><h2>5. เก็บสำเนา ไม่ใช่เก็บตัวชี้</h2><p><code>final before = _lines[index];</code> ดูธรรมดา แต่ที่มันปลอดภัยเพราะ <code>PickLine</code> เป็นวัตถุที่แก้ไม่ได้</p><pre class="code-vs"><code>class PickLine {
+  const PickLine({required this.id, required this.palletCode,
+                  required this.quantity, this.done = false});
+  final String id;              // final ทุกตัว
+  final bool done;
+
+  PickLine copyWith({bool? done}) =&gt; PickLine(   // เปลี่ยน = สร้างตัวใหม่
+    id: id, palletCode: palletCode, quantity: quantity, done: done ?? this.done);
+}</code></pre><p>ถ้าเป็นวัตถุที่แก้ค่าในตัวเองได้ สำเนาจะไร้ความหมาย</p><pre class="code-vs"><code>// อันตราย ถ้า PickLine แก้ค่าในตัวเองได้
+final before = _lines[index];    // ชี้ไปที่วัตถุตัวเดียวกัน
+_lines[index].done = true;       // แก้ตัวเดียวกันนั้น
+// ตอนนี้ before.done == true ด้วย — ย้อนกลับไม่ได้แล้ว</code></pre><p>และด้วยเหตุผลเดียวกัน <code>_setLine</code> จึงสร้าง list ใหม่ทุกครั้ง</p><pre class="code-vs"><code>void _setLine(int index, PickLine line) {
+  final next = [..._lines];    // สำเนาใหม่
+  next[index] = line;
+  _lines = next;
+}</code></pre><p>เป็นหลักการเดียวกับที่ใช้ใน 4.4 — <strong>เปลี่ยนโดยสร้างของใหม่ ไม่ใช่แก้ของเดิม</strong></p></section>
+
+<section><h2>6. สามระดับของความมั่นใจ</h2><p>ไม่ใช่ทุกการกระทำที่ควรใช้วิธีเดียวกัน</p><table><thead><tr><th></th><th>optimistic</th><th>pending</th><th>pessimistic</th></tr></thead><tbody>
+<tr><td>จอแสดงทันที</td><td>ว่าเสร็จแล้ว</td><td>ว่ากำลังทำ</td><td>ไม่เปลี่ยนอะไร</td></tr>
+<tr><td>ความเร็วที่รู้สึก</td><td>เร็วที่สุด</td><td>เร็ว</td><td>ช้า</td></tr>
+<tr><td>ถ้าล้มเหลว</td><td>ต้องย้อนกลับ ผู้ใช้เห็นของเปลี่ยนเอง</td><td>เอาตัวที่รออยู่ออก ไม่มีอะไรเคยผิด</td><td>ไม่มีอะไรต้องทำ</td></tr>
+<tr><td>เหมาะกับ</td><td>ผลกระทบน้อย ย้อนง่าย</td><td>ผลกระทบปานกลาง</td><td>กระทบสต๊อกหรือเงิน</td></tr>
+</tbody></table><table><thead><tr><th>การกระทำ</th><th>เลือก</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ติดดาวเมนูโปรด</td><td>optimistic</td><td>ผิดก็แค่ดาวหาย ไม่มีใครเสียหาย</td></tr>
+<tr><td>ติ๊กว่าหยิบครบแล้ว</td><td>optimistic</td><td>ย้อนได้ และเห็นชัดว่าย้อน</td></tr>
+<tr><td>สแกนเก็บเข้ารายการร่าง</td><td>optimistic ในเครื่อง</td><td>ยังไม่ส่งไปไหน ส่งทีเดียวตอนยืนยัน</td></tr>
+<tr><td>ยืนยันรับเข้าทั้งใบ</td><td>pessimistic</td><td>เปลี่ยนสต๊อกจริง และมีคนอื่นทำพร้อมกัน</td></tr>
+<tr><td>ตัดจ่ายสินค้าออกจากคลัง</td><td>pessimistic</td><td>ย้อนไม่ได้ในโลกจริง</td></tr>
+</tbody></table><p><strong>ทำไม lab เลือก optimistic สำหรับปุ่มปิดงาน</strong> — เพราะมันเป็นการทำเครื่องหมายในรายการงาน ไม่ใช่การเปลี่ยนตัวเลขสต๊อก ถ้าย้อนกลับ ผู้ใช้แค่เห็นเครื่องหมายถูกหายไปพร้อมข้อความบอกเหตุผล ซึ่งเข้าใจได้และแก้ได้ทันที</p></section>
+
+<section><h2>7. ทางเลือกที่มักดีกว่าทั้งสองแบบ</h2><p>optimistic บอกว่า “เสร็จแล้ว” pessimistic บอกว่า “ยังไม่มีอะไรเกิดขึ้น” ทั้งคู่ไม่ตรงความจริง เพราะความจริงคือ <strong>“กำลังส่งอยู่”</strong></p><pre class="code-vs"><code>┌──────────────────────────────┐
+│ ○ PAL-0003  12 ชิ้น          │
+│ ✓ PAL-0004  8 ชิ้น           │
+│ ⟳ PAL-0005  20 ชิ้น  กำลังส่ง │  ← pending: ตรงกับความจริงที่สุด
+└──────────────────────────────┘</code></pre><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ไม่เคยแสดงข้อมูลที่ผิด</td><td>ต้องมีสถานะเพิ่มและหน้าตาเพิ่ม</td></tr>
+<tr><td>ผู้ใช้กดต่อได้เลย ไม่ต้องรอ</td><td>ตัวเลขสรุปต้องตัดสินว่านับอันที่รออยู่ด้วยไหม</td></tr>
+<tr><td>ถ้าล้มเหลว ไม่มีอะไร “ย้อน” ให้ตกใจ</td><td></td></tr>
+</tbody></table><p>ใน lab มี <code>isBusy(lineId)</code> อยู่แล้ว ซึ่งเป็นข้อมูลที่พอจะทำแบบนี้ได้ — เพียงแต่หน้าจอเลือกใช้มันแค่ปิดปุ่ม ไม่ได้แสดงเป็นสถานะแยก</p><div class="note">ถ้าไม่แน่ใจว่าควรใช้แบบไหน ให้เริ่มที่ pending ก่อน — มันบอกความจริง ซึ่งเป็นสิ่งที่อธิบายให้ผู้ใช้เข้าใจได้ง่ายที่สุดเสมอ</div></section>
+
+<section><h2>8. กรณีที่ยากที่สุด: ไม่รู้ว่าสำเร็จหรือไม่</h2><p>นี่คือจุดที่แยก optimistic ที่เขียนถูก ออกจากที่เขียนพอผ่าน</p><pre class="code-vs"><code>ยิงคำขอไป ─────────→ server รับ → บันทึกสำเร็จ ─────X (ตอบกลับหาย)
+                                                     ↑
+                                           เน็ตหลุดตรงนี้พอดี</code></pre><p>ฝั่งแอปได้แค่ “หมดเวลารอ” ซึ่งแปลได้สองอย่างที่ต่างกันสิ้นเชิง</p><table><thead><tr><th>ความจริงที่เป็นไปได้</th><th>ถ้าย้อนกลับ</th></tr></thead><tbody>
+<tr><td>คำขอไปไม่ถึงเลย</td><td>ถูกต้อง</td></tr>
+<tr><td>ถึงแล้ว บันทึกแล้ว แต่คำตอบหาย</td><td><strong>ผิด</strong> — จอบอกว่ายังไม่เสร็จ ทั้งที่เสร็จแล้ว</td></tr>
+</tbody></table><p>ถ้าย้อนกลับในกรณีที่สอง ผู้ใช้จะกดใหม่ แล้วงานเดียวถูกบันทึกสองครั้ง</p><p><code>PickException</code> จึงมีธงบอกไว้</p><pre class="code-vs"><code>class PickException implements Exception {
+  const PickException(this.message, {this.outcomeUnknown = false});
+  final String message;
+
+  /// true เมื่อไม่รู้ว่า server ทำสำเร็จหรือยัง เช่นหมดเวลารอ
+  final bool outcomeUnknown;
+}</code></pre><pre class="code-vs"><code>if (error.outcomeUnknown) {
+  _errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+  notifyListeners();
+  await load();        // ถามความจริงจากแหล่งที่ถือความจริง
+  return;              // ไม่ย้อนกลับ เพราะไม่รู้ว่าควรย้อนไหม
+}</code></pre><table><thead><tr><th>รู้ผลไหม</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>รู้ว่าล้มเหลว (เช่นถูกปฏิเสธ)</td><td>ย้อนกลับได้เลย ปลอดภัย</td></tr>
+<tr><td>ไม่รู้ผล (หมดเวลารอ)</td><td>อย่าเดา — โหลดใหม่แล้วให้เซิร์ฟเวอร์ตอบ</td></tr>
+</tbody></table><div class="warn">การเดาเมื่อไม่รู้ผล คือที่มาของ “ทำไมข้อมูลซ้ำสองรอบ” ซึ่งไล่หาสาเหตุยากมากเพราะฝั่งแอปดูเหมือนทำถูกทุกอย่าง</div></section>
+
+<section><h2>9. ย้อนกลับให้ถูกตัว</h2><pre class="code-vs"><code>void _rollback(String lineId, PickLine before) {
+  final index = _lines.indexWhere((line) =&gt; line.id == lineId);
+  if (index == -1) return;        // หายไปแล้ว ไม่ต้องย้อน
+  _setLine(index, before);
+}</code></pre><p>สังเกตว่ามันหา index ใหม่ ไม่ได้ใช้ index เดิมที่หาไว้ตอนต้น</p><pre class="code-vs"><code>// ผิด — index เก่าอาจไม่ใช่บรรทัดเดิมแล้ว
+_setLine(oldIndex, before);</code></pre><p>ระหว่างที่รอ อาจมี <code>load()</code> จาก polling เข้ามาเปลี่ยนรายการทั้งชุด บรรทัดที่ตำแหน่ง 3 อาจกลายเป็นคนละบรรทัด — การเขียนทับด้วย index เก่าคือการเอาข้อมูลของบรรทัดหนึ่งไปทับอีกบรรทัดหนึ่ง</p><p>นี่คือเหตุผลที่ต้องยึด <strong>id ไม่ใช่ตำแหน่ง</strong> ซึ่งเป็นหลักเดียวกับที่ใช้กับ <code>ValueKey</code> ใน 1.12</p></section>
+
+<section><h2>10. เมื่อผู้ใช้กดหลายบรรทัดพร้อมกัน</h2><p><code>_busyLineIds</code> เป็น <code>Set</code> ไม่ใช่ <code>bool</code> ซึ่งตั้งใจไว้</p><pre class="code-vs"><code>final Set&lt;String&gt; _busyLineIds = &lt;String&gt;{};
+
+bool isBusy(String lineId) =&gt; _busyLineIds.contains(lineId);</code></pre><table><thead><tr><th></th><th><code>bool _busy</code></th><th><code>Set&lt;String&gt;</code></th></tr></thead><tbody>
+<tr><td>กดบรรทัดที่ 2 ระหว่างที่ 1 ยังส่งอยู่</td><td>กดไม่ได้ ทั้งจอถูกล็อก</td><td>กดได้ ล็อกเฉพาะบรรทัดที่กด</td></tr>
+<tr><td>ปุ่มไหนถูกปิด</td><td>ทุกปุ่ม</td><td>เฉพาะปุ่มที่กำลังส่ง</td></tr>
+</tbody></table><p>บนหน้างานที่ต้องกดรัว ๆ 40 บรรทัด ความต่างนี้ใหญ่มาก — และเพราะแต่ละบรรทัดมี <code>before</code> เป็นตัวแปรท้องถิ่นของตัวเอง การย้อนกลับของบรรทัดหนึ่งจึงไม่ไปยุ่งกับอีกบรรทัด</p></section>
+
+<section><h2>11. บอกผู้ใช้ให้ตรงกับสิ่งที่เกิดจริง</h2><table><thead><tr><th>สิ่งที่เกิด</th><th>ควรบอกว่า</th><th>ห้ามบอกว่า</th></tr></thead><tbody>
+<tr><td>ย้อนกลับแล้วเพราะถูกปฏิเสธ</td><td>“ปิดงานไม่สำเร็จ: บรรทัดนี้ถูกยกเลิกแล้ว”</td><td>“เกิดข้อผิดพลาด”</td></tr>
+<tr><td>ไม่รู้ผล กำลังตรวจสอบ</td><td>“กำลังตรวจสอบสถานะล่าสุด”</td><td>“ปิดงานไม่สำเร็จ”</td></tr>
+<tr><td>สำเร็จ</td><td>ไม่ต้องบอกอะไร เครื่องหมายถูกก็พอ</td><td>เด้งข้อความทุกครั้ง</td></tr>
+</tbody></table><p>สิ่งที่แย่ที่สุดคือย้อนกลับเงียบ ๆ โดยไม่บอกอะไร — ผู้ใช้เห็นเครื่องหมายถูกหายไปเอง จะสรุปว่าแอปเสีย และจากนั้นจะไม่เชื่อสิ่งที่จอแสดงอีกเลย</p><p>ส่วนปุ่ม “เลิกทำ” ให้มีได้เฉพาะเมื่อ <strong>เซิร์ฟเวอร์รองรับการยกเลิกจริง</strong> ไม่ใช่แค่แก้ค่าในเครื่องกลับ</p></section>
+
+<section><h2>12. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ย้อนกลับแล้วได้ค่าเดียวกับที่เปลี่ยนไป</td><td>เก็บตัวชี้ไปยังวัตถุที่แก้ได้</td><td>ใช้วัตถุที่แก้ไม่ได้ + <code>copyWith</code></td></tr>
+<tr><td>ย้อนกลับไปทับบรรทัดอื่น</td><td>ใช้ index เก่าหลัง await</td><td>หาใหม่ด้วย id</td></tr>
+<tr><td>งานถูกบันทึกสองครั้ง</td><td>ย้อนกลับตอนที่ไม่รู้ผล แล้วผู้ใช้กดใหม่</td><td>แยก <code>outcomeUnknown</code> แล้วโหลดใหม่แทน</td></tr>
+<tr><td>กดบรรทัดหนึ่งแล้วทั้งจอกดไม่ได้</td><td>ใช้ <code>bool</code> เดียวคุมทั้งหน้า</td><td>ใช้ <code>Set</code> ต่อรายการ</td></tr>
+<tr><td>เครื่องหมายถูกหายไปเองโดยไม่มีคำอธิบาย</td><td>ย้อนกลับเงียบ</td><td>ตั้งข้อความและแสดงให้เห็น</td></tr>
+<tr><td>สต๊อกไม่ตรงกับความจริง</td><td>ใช้ optimistic กับสิ่งที่ย้อนไม่ได้</td><td>เปลี่ยนเป็น pessimistic</td></tr>
+<tr><td>ค่าที่แสดงกระพริบไปมา</td><td>polling ทับระหว่างที่ยังส่งไม่เสร็จ</td><td>ข้าม tick เมื่อไม่ว่าง (4.11)</td></tr>
+</tbody></table></section>
+
+<section><h2>13. แบบฝึกหัด</h2><p>หน้าจอนับสต๊อกให้กดปุ่มบวกลบเพื่อปรับจำนวนที่นับได้ แต่ละครั้งยิงไปเซิร์ฟเวอร์</p><pre class="code-vs"><code>Future&lt;void&gt; adjust(String lineId, int delta) async {
+  final index = _lines.indexWhere((l) =&gt; l.id == lineId);
+  _lines[index].counted += delta;      // CountLine แก้ค่าในตัวเองได้
+  notifyListeners();
+
+  try {
+    await repository.adjust(lineId, delta);
+  } catch (e) {
+    _lines[index].counted -= delta;
+    notifyListeners();
+  }
+}</code></pre><ol><li>หาข้อบกพร่องให้ได้อย่างน้อยห้าข้อ</li><li>เขียนใหม่</li><li>ตอบว่าการนับสต๊อกควรใช้ optimistic, pending หรือ pessimistic</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่ตรวจ <code>index == -1</code></td><td><code>RangeError</code> เมื่อบรรทัดหายไป</td></tr>
+<tr><td>2</td><td>แก้ค่าในวัตถุเดิม</td><td>ไม่มีสำเนาให้ย้อน และ widget อาจไม่วาดใหม่ (4.4)</td></tr>
+<tr><td>3</td><td>ใช้ index เก่าหลัง await</td><td>ย้อนไปทับบรรทัดอื่น</td></tr>
+<tr><td>4</td><td><code>catch (e)</code> จับทุกอย่าง</td><td>บั๊กถูกกลืน (4.8)</td></tr>
+<tr><td>5</td><td>ไม่แยกกรณีไม่รู้ผล</td><td>ปรับจำนวนซ้ำสองรอบ</td></tr>
+<tr><td>6</td><td>ไม่กันกดซ้ำ</td><td>กดรัว ๆ ได้คำขอซ้อนกันหลายอัน</td></tr>
+<tr><td>7</td><td>ย้อนแบบ <code>-= delta</code> ไม่ใช่คืนค่าเดิม</td><td>ถ้ามีคำขออื่นแทรก จะได้ค่าที่ไม่เคยมีอยู่จริง</td></tr>
+<tr><td>8</td><td>ไม่บอกอะไรผู้ใช้เมื่อล้มเหลว</td><td>ตัวเลขเปลี่ยนเองโดยไม่มีคำอธิบาย</td></tr>
+<tr><td>9</td><td>ไม่มี <code>finally</code></td><td>ถ้ามี exception นอก catch จะค้าง</td></tr>
+</tbody></table><p>ข้อ 7 ละเอียดที่สุด — <code>-= delta</code> เป็นการย้อน <em>การเปลี่ยนแปลง</em> ไม่ใช่การคืน <em>ค่า</em> ลองไล่ดู</p><pre class="code-vs"><code>counted = 10
+กด +1 → counted = 11, ยิงคำขอ A
+กด +1 → counted = 12, ยิงคำขอ B
+A ล้มเหลว → counted -= 1 → 11
+B สำเร็จ  → เซิร์ฟเวอร์มีค่า 11 แต่จอแสดง 11 ที่ได้มาจากทางที่ผิด
+           ถ้า B ล้มเหลวด้วย → counted = 10 ซึ่งบังเอิญถูก
+           แต่ถ้า A ล้มเหลวหลัง B สำเร็จ ลำดับจะเพี้ยนทันที</code></pre><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>Future&lt;void&gt; adjust(String lineId, int delta) async {
+  if (_busyLineIds.contains(lineId)) return;        // แก้ข้อ 6
+
+  final index = _lines.indexWhere((l) =&gt; l.id == lineId);
+  if (index == -1) return;                          // แก้ข้อ 1
+  final before = _lines[index];                     // แก้ข้อ 2, 7
+
+  final commandId = _pendingCommandIds.putIfAbsent(lineId, _createCommandId);
+  _busyLineIds.add(lineId);
+  _errorMessage = null;
+  _setLine(index, before.copyWith(counted: before.counted + delta));
+  notifyListeners();
+
+  try {
+    await repository.adjust(lineId, delta, commandId: commandId);
+    _pendingCommandIds.remove(lineId);
+  } on CountException catch (error) {               // แก้ข้อ 4
+    if (error.outcomeUnknown) {                     // แก้ข้อ 5
+      _errorMessage = '${error.message} กำลังตรวจสอบยอดล่าสุด';
+      notifyListeners();
+      await load();
+      return;
+    }
+    _rollback(lineId, before);                      // แก้ข้อ 3, 7
+    _pendingCommandIds.remove(lineId);
+    _errorMessage = 'ปรับยอดไม่สำเร็จ: ${error.message}';   // แก้ข้อ 8
+  } finally {                                       // แก้ข้อ 9
+    _busyLineIds.remove(lineId);
+    notifyListeners();
+  }
+}</code></pre><p>โดยที่ <code>CountLine</code> ต้องเปลี่ยนเป็นวัตถุที่แก้ไม่ได้</p><pre class="code-vs"><code>class CountLine {
+  const CountLine({required this.id, required this.counted});
+  final String id;
+  final int counted;
+  CountLine copyWith({int? counted}) =&gt;
+      CountLine(id: id, counted: counted ?? this.counted);
+}</code></pre><p>สังเกตว่า <code>_rollback</code> คืน <code>before</code> ทั้งก้อน ไม่ได้ลบ <code>delta</code> ออก — จึงได้ค่าที่เคยมีอยู่จริงเสมอ</p><p><strong>ข้อ 3 — ควรใช้แบบไหน</strong></p><p>คำตอบขึ้นกับว่าปุ่มนี้ทำอะไรจริง ๆ ซึ่งต้องแยกให้ออกก่อน</p><table><thead><tr><th>ถ้าปุ่มนี้คือ</th><th>เลือก</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ปรับตัวเลขในใบนับที่ยังไม่ยืนยัน</td><td>optimistic ในเครื่อง ไม่ยิงเลย</td><td>ยังเป็นแค่ร่าง ส่งทีเดียวตอนกดยืนยัน</td></tr>
+<tr><td>ปรับยอดในใบนับที่บันทึกทีละครั้ง</td><td>pending</td><td>ตัวเลขต้องถูกต้อง แต่ต้องกดต่อได้เร็ว</td></tr>
+<tr><td>ปรับยอดสต๊อกจริงในระบบ</td><td>pessimistic</td><td>กระทบสต๊อก และมีคนอื่นแก้พร้อมกันได้</td></tr>
+</tbody></table><p><strong>คำตอบที่ควรให้คือแบบแรก</strong> — การนับสต๊อกโดยธรรมชาติเป็นงานที่คนเดินนับไปเรื่อย ๆ แล้วยืนยันทั้งใบตอนจบ การยิงเซิร์ฟเวอร์ทุกครั้งที่กดบวกลบเป็นการออกแบบที่สร้างปัญหาให้ตัวเองโดยไม่จำเป็น</p><table><thead><tr><th>ยิงทุกครั้งที่กด</th><th>เก็บในเครื่องแล้วส่งทีเดียว</th></tr></thead><tbody>
+<tr><td>ต้องจัดการ race, rollback, idempotency ทุกปุ่ม</td><td>กดกี่ครั้งก็ไม่มีคำขอ ไม่มี race</td></tr>
+<tr><td>เน็ตหลุดแล้วนับต่อไม่ได้</td><td>เน็ตหลุดก็นับต่อได้ ส่งตอนมีสัญญาณ</td></tr>
+<tr><td>คำขอเป็นร้อยครั้งต่อใบ</td><td>คำขอเดียวต่อใบ</td></tr>
+<tr><td>ยกเลิกการนับกลางคันแล้วข้อมูลค้าง</td><td>ยกเลิกได้สะอาด ไม่มีอะไรถูกส่งไป</td></tr>
+</tbody></table><p>แต่ต้องแลกกับสองอย่าง — ต้องเก็บร่างไว้ในเครื่องไม่ให้หายเมื่อแอปถูกปิด และตอนยืนยันต้องรับมือกับกรณีที่มีคนอื่นแก้ยอดไปแล้วระหว่างที่กำลังนับ</p><p><strong>บทเรียนที่ควรจำ:</strong> คำถาม “optimistic หรือ pessimistic” มักมาจากการที่เราตั้งขอบเขตของคำสั่งเล็กเกินไป — ถ้าเปลี่ยนหนึ่งการกระทำของผู้ใช้ให้ตรงกับหนึ่งคำสั่งที่มีความหมายทางธุรกิจ คำถามนี้จะง่ายลงมาก</p><p><strong>ลองต่อ:</strong> ใน <code>test/pick_store_test.dart</code> มีเทสต์ที่ทำให้ repository ล้มเหลวแล้วตรวจว่า <code>done</code> กลับเป็น false ลองแก้ <code>_rollback</code> ให้ใช้ index ที่หาไว้ตอนต้นแทนการหาใหม่ แล้วเพิ่มเทสต์ที่ให้ <code>load()</code> เปลี่ยนลำดับรายการระหว่างที่คำขอค้างอยู่ — จะเห็นว่าย้อนไปผิดบรรทัดจริง</p></details></section>
+
+<section><h2>14. สรุปท้ายบท</h2><div class="success"><ul><li>optimistic คือการโกหกชั่วคราว — ทำได้เมื่อคำโกหกนั้นแก้กลับง่าย</li><li>เก็บสำเนาของค่าเดิมไว้ก่อนเปลี่ยนเสมอ และวัตถุต้องแก้ไม่ได้ สำเนาจึงมีความหมาย</li><li>ย้อนกลับด้วยการคืนค่าเดิมทั้งก้อน ไม่ใช่การลบส่วนต่างออก</li><li>หาตำแหน่งใหม่ด้วย id เสมอ อย่าใช้ index เก่าหลัง await</li><li>เมื่อไม่รู้ผล ห้ามเดา — ให้โหลดใหม่แล้วถามความจริงจากเซิร์ฟเวอร์</li><li>ล็อกต่อรายการด้วย <code>Set</code> ไม่ใช่ล็อกทั้งจอด้วย <code>bool</code></li><li>pending มักเป็นทางเลือกที่ดีที่สุด เพราะบอกความจริง</li><li>สิ่งที่กระทบสต๊อกหรือย้อนไม่ได้ในโลกจริง ต้องเป็น pessimistic</li><li>ห้ามย้อนกลับเงียบ ๆ ต้องบอกเหตุผลเสมอ</li></ul></div><p><strong>บทถัดไป:</strong> 4.14 จะตอบคำถามที่ค้างจากหัวข้อ 8 — เมื่อไม่รู้ผลแล้วต้องส่งซ้ำ จะทำอย่างไรให้เซิร์ฟเวอร์ไม่บันทึกงานเดียวกันสองครั้ง</p></section>

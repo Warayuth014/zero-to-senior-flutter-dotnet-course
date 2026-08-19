@@ -1,74 +1,215 @@
-<div class="note"><strong>Lab:</strong> สร้าง WarehouseTaskStore ที่ testได้โดยแยก repository/clock/ID generator, ใช้ immutable load state, generation token, polling lifecycle และ idempotent confirm แล้วพิสูจน์ transitionsด้วย fake repository + Completer</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>UIอ่าน immutable snapshotและเรียก commandsเท่านั้น</li><li>loadแยก initial/loading/data/error/refreshing</li><li>responseเก่าไม่ทับ queryใหม่</li><li>pollไม่ overlapและหยุดเมื่อ background/dispose</li><li>confirmซ้ำเรียก repositoryครั้งเดียว</li><li>timeout retryใช้ operation IDเดิมและ reconcileได้</li><li>ไม่มี BuildContextใน store</li></ul></section>
-<section><h2>2. Dependencies</h2><pre class="code-vs"><code>abstract interface class TaskRepository {
-  Future&lt;List&lt;Task&gt;&gt; fetchOpen();
-  Future&lt;Receipt&gt; confirm(String taskId, {required String operationId});
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ประกอบทั้ง Part 4 เป็น store ที่ทดสอบได้จริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.1–4.15 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียน store ที่รับมือกับเวลา ความล้มเหลว และการกดซ้ำได้ครบ พร้อมเทสต์ที่พิสูจน์ได้ทีละข้อ</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><p>Part 4 สอนมาทีละเรื่อง บทนี้จะประกอบทั้งหมดเข้าด้วยกัน แล้วเทียบกับ store ที่ใช้จริงในโปรเจกต์เพื่อดูว่ามันโตขึ้นไปหน้าตาแบบไหน</p><p>สิ่งที่จะทำมีสามอย่าง</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>lib/state_basics/</code> ทั้งหมดอีกครั้ง พร้อมรู้ว่าทุกบรรทัดมาจากบทไหน</td></tr>
+<tr><td>2</td><td>เขียน store ของตัวเองตามเกณฑ์ที่ให้ พร้อมเทสต์</td></tr>
+<tr><td>3</td><td>เปิด <code>lib/features/tasks/task_store.dart</code> แล้วเทียบว่าต่างกันตรงไหนและเพราะอะไร</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>รู้จักจากบท</th></tr></thead><tbody>
+<tr><td><code>pick_repository.dart</code></td><td>สัญญาว่าข้อมูลมาจากไหน + ชนิดความล้มเหลว</td><td>4.5, 4.13</td></tr>
+<tr><td><code>pick_store.dart</code></td><td>สถานะทั้งหมดและคำสั่ง</td><td>4.5–4.14</td></tr>
+<tr><td><code>state_basics_app.dart</code></td><td>หน้าจอที่ไม่มี <code>setState</code> เลย</td><td>4.6, 4.9</td></tr>
+<tr><td><code>test/pick_store_test.dart</code></td><td>เทสต์ตรรกะล้วน 16 ข้อ</td><td>4.10, 4.11, 4.14</td></tr>
+<tr><td><code>test/state_basics_test.dart</code></td><td>เทสต์หน้าจอ 7 ข้อ</td><td>4.7</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub</code></pre></section>
+
+<section><h2>3. ทุกบรรทัดใน markDone มาจากบทไหน</h2><p>ก่อนเขียนของตัวเอง ให้ไล่ดูว่า <code>markDone</code> คือ Part 4 ทั้งหมดย่อลงมาอยู่ในฟังก์ชันเดียว</p><pre class="code-vs"><code>Future&lt;void&gt; markDone(String lineId) async {
+  if (_busyLineIds.contains(lineId)) return;              // 4.14 กันกดซ้ำ
+  final index = _lines.indexWhere((line) =&gt; line.id == lineId);
+  if (index == -1) return;                                // 4.8  ตรวจก่อนล็อก
+  final before = _lines[index];                           // 4.13 เก็บสำเนา
+  if (before.done) return;                                // 4.2  อย่าทำซ้ำ
+
+  final commandId =
+      _pendingCommandIds.putIfAbsent(lineId, _createCommandId);   // 4.14
+  _busyLineIds.add(lineId);                               // 4.13 ล็อกรายบรรทัด
+  _errorMessage = null;                                   // 4.7  ล้างของเก่า
+  _setLine(index, before.copyWith(done: true));           // 4.13 optimistic
+  notifyListeners();                                      // 4.5
+
+  try {
+    await repository.markDone(lineId, commandId: commandId);
+    _pendingCommandIds.remove(lineId);                    // 4.14 สำเร็จ → ล้าง
+  } on PickException catch (error) {                      // 4.8  จับเฉพาะชนิดนี้
+    if (error.outcomeUnknown) {                           // 4.13 ไม่รู้ผล
+      _errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+      notifyListeners();
+      await load();                                       // 4.13 ถามความจริง
+      return;                                             // 4.14 คงรหัสเดิมไว้
+    }
+    _rollback(lineId, before);                            // 4.13 ย้อนด้วย id
+    _pendingCommandIds.remove(lineId);                    // 4.14 → รหัสใหม่
+    _errorMessage = error.message;
+  } finally {
+    _busyLineIds.remove(lineId);                          // 4.8  ปลดเสมอ
+    notifyListeners();
+  }
+}</code></pre><p>ถ้าอ่านแล้วยังมีบรรทัดไหนที่ตอบไม่ได้ว่าทำไมต้องมี ให้กลับไปอ่านบทที่กำกับไว้ก่อนทำต่อ</p></section>
+
+<section><h2>4. โจทย์</h2><p>สร้าง <code>CycleCountStore</code> สำหรับงานนับสต๊อกหน้าแร็ค ในโฟลเดอร์ใหม่ <code>lib/state_lab/</code></p><p><strong>สิ่งที่หน้าจอต้องทำได้</strong></p><ul><li>โหลดรายการที่ต้องนับของแร็คหนึ่ง</li><li>ผู้ใช้กดปุ่มบวกลบเพื่อปรับจำนวนที่นับได้ในแต่ละบรรทัด (เก็บในเครื่อง ยังไม่ส่ง)</li><li>กดยืนยันทั้งใบครั้งเดียว</li><li>รีเฟรชอัตโนมัติระหว่างที่ยังไม่ยืนยัน เพราะอาจมีคนแก้ยอดตั้งต้น</li></ul><p>การออกแบบนี้มาจากข้อสรุปของแบบฝึกหัด 4.13 — <strong>หนึ่งการกดยืนยัน คือหนึ่งคำสั่งทางธุรกิจ</strong> ส่วนการกดบวกลบเป็นแค่การแก้ร่างในเครื่อง</p></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>store ไม่ import อะไรจาก <code>material.dart</code> เลย</td><td>4.5</td></tr>
+<tr><td>2</td><td>ไม่มี <code>BuildContext</code> ใน store</td><td>4.9</td></tr>
+<tr><td>3</td><td>สถานะการโหลดเป็นค่าเดียว ครอบ idle/loading/ready/empty/failed</td><td>4.7</td></tr>
+<tr><td>4</td><td>ยอดรวมและจำนวนบรรทัดที่ยังไม่นับ ต้องคำนวณ ไม่ใช่เก็บ</td><td>4.2</td></tr>
+<tr><td>5</td><td>รายการที่เปิดเผยออกไปแก้จากข้างนอกไม่ได้</td><td>4.5</td></tr>
+<tr><td>6</td><td>ผลของ <code>load()</code> ครั้งเก่าต้องไม่ทับครั้งใหม่</td><td>4.10</td></tr>
+<tr><td>7</td><td>โหลดซ้ำต้องไม่ล้างยอดที่ผู้ใช้นับไปแล้ว</td><td>4.7, 4.13</td></tr>
+<tr><td>8</td><td>polling ต้องไม่ซ้อนกัน และข้ามรอบเมื่อกำลังยืนยัน</td><td>4.11</td></tr>
+<tr><td>9</td><td><code>dispose()</code> ยกเลิกตัวจับเวลาและเพิ่มเลขรุ่น</td><td>4.11, 4.12</td></tr>
+<tr><td>10</td><td>กดยืนยันซ้ำระหว่างที่ยังส่งอยู่ ต้องเรียก repository ครั้งเดียว</td><td>4.14</td></tr>
+<tr><td>11</td><td>ไม่รู้ผลแล้วส่งซ้ำ ต้องใช้รหัสคำสั่งเดิม</td><td>4.14</td></tr>
+<tr><td>12</td><td>ถูกปฏิเสธแล้วส่งใหม่ ต้องใช้รหัสใหม่</td><td>4.14</td></tr>
+<tr><td>13</td><td>ยืนยันไม่สำเร็จ ต้องกลับมาแก้ต่อได้โดยไม่เสียยอดที่นับไว้</td><td>4.15</td></tr>
+<tr><td>14</td><td>ทุกงานเก็บกวาดอยู่ใน <code>finally</code></td><td>4.8</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 7 คือข้อที่ยากที่สุดและไม่เคยมีในบทไหนตรง ๆ — ต้องรวมข้อมูลใหม่จากเซิร์ฟเวอร์เข้ากับยอดที่ผู้ใช้นับไว้แล้ว โดยไม่ทับของผู้ใช้</p></section>
+
+<section><h2>6. โครงที่แนะนำ</h2><pre class="code-vs"><code>// lib/state_lab/cycle_count_repository.dart
+class CountLine {
+  const CountLine({
+    required this.id,
+    required this.productCode,
+    required this.expected,
+    this.counted,
+  });
+
+  final String id;
+  final String productCode;
+  final int expected;
+  final int? counted;          // null = ยังไม่ได้นับ ต่างจาก 0 = นับได้ศูนย์
+
+  bool get isCounted =&gt; counted != null;
+  int get variance =&gt; (counted ?? 0) - expected;
+
+  CountLine copyWith({int? counted, int? expected}) =&gt; CountLine(
+    id: id, productCode: productCode,
+    expected: expected ?? this.expected,
+    counted: counted ?? this.counted,
+  );
 }
 
-abstract interface class IdGenerator { String next(); }
-abstract interface class Cancelable { void cancel(); }
-abstract interface class PollScheduler {
-  Cancelable schedulePeriodic(Duration interval, void Function() tick);
-}</code></pre><p>Production adaptersใช้ HTTP/Timer/UUID; testsใช้ fake deterministic</p></section>
-<section><h2>3. Immutable snapshot</h2><pre class="code-vs"><code>enum LoadPhase { initial, loading, data, failure }
+class CountException implements Exception {
+  const CountException(this.message, {this.outcomeUnknown = false});
+  final String message;
+  final bool outcomeUnknown;
+}
 
-class TaskSnapshot {
-  const TaskSnapshot({
-    this.phase = LoadPhase.initial,
-    this.tasks = const [],
-    this.refreshing = false,
-    this.error,
-    this.pendingOperationId,
+abstract interface class CycleCountRepository {
+  Future&lt;List&lt;CountLine&gt;&gt; fetchLines(String rackCode);
+  Future&lt;void&gt; submit(String rackCode, List&lt;CountLine&gt; lines,
+      {required String commandId});
+}</code></pre><div class="warn"><code>copyWith</code> ข้างบนมีข้อจำกัดที่ต้องรู้ตัว — มันตั้ง <code>counted</code> กลับเป็น <code>null</code> ไม่ได้ เพราะ <code>counted ?? this.counted</code> แปลว่า "ถ้าไม่ส่งมาก็ใช้ของเดิม" ถ้าต้องรองรับการล้างยอด ต้องใช้ค่ายามพิเศษหรือแยกเมธอด <code>clearCounted()</code> ออกมา ซึ่งเป็นกับดักคลาสสิกของ <code>copyWith</code> กับ field ที่เป็น null ได้</div><p>ส่วนสถานะของการยืนยัน แนะนำให้ใช้ <code>sealed class</code> ตาม 4.15</p><pre class="code-vs"><code>sealed class SubmitState { const SubmitState(); }
+class NotSubmitted extends SubmitState { const NotSubmitted(); }
+class Submitting extends SubmitState {
+  const Submitting(this.commandId);
+  final String commandId;
+}
+class SubmitFailed extends SubmitState {
+  const SubmitFailed(this.message, {this.canRetry = true});
+  final String message;
+  final bool canRetry;
+}
+class Submitted extends SubmitState { const Submitted(); }</code></pre><p>สังเกตว่ามีสองสถานะแยกกัน — <code>LoadState</code> สำหรับการโหลด และ <code>SubmitState</code> สำหรับการส่ง เพราะเป็นคนละเรื่องที่เกิดพร้อมกันได้ (โหลดใหม่ระหว่างที่ยังไม่ส่ง)</p></section>
+
+<section><h2>7. เกณฑ์ข้อ 7: รวมข้อมูลใหม่โดยไม่ทับของผู้ใช้</h2><p>ปัญหาคือ <code>load()</code> คืนรายการจากเซิร์ฟเวอร์ ซึ่งมี <code>counted</code> เป็น <code>null</code> ทั้งหมด — ถ้าเอามาแทนตรง ๆ ยอดที่ผู้ใช้นับมาสิบบรรทัดจะหายทันที</p><pre class="code-vs"><code>List&lt;CountLine&gt; _merge(List&lt;CountLine&gt; fromServer) {
+  final myCounts = {
+    for (final line in _lines)
+      if (line.isCounted) line.id: line.counted!,
+  };
+
+  return [
+    for (final line in fromServer)
+      myCounts.containsKey(line.id)
+          ? line.copyWith(counted: myCounts[line.id])   // เก็บของผู้ใช้ไว้
+          : line,                                        // ของใหม่จาก server
+  ];
+}</code></pre><table><thead><tr><th>กรณี</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td>บรรทัดเดิม ผู้ใช้นับแล้ว</td><td>ใช้ <code>expected</code> ใหม่ + <code>counted</code> ของผู้ใช้</td></tr>
+<tr><td>บรรทัดเดิม ยังไม่ได้นับ</td><td>ใช้ของเซิร์ฟเวอร์ทั้งหมด</td></tr>
+<tr><td>บรรทัดใหม่ที่เพิ่งเพิ่ม</td><td>เข้ามาตามปกติ</td></tr>
+<tr><td>บรรทัดที่ถูกลบไปแล้ว</td><td>หายไปพร้อมยอดที่นับ — ต้องแจ้งผู้ใช้</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นกรณีที่ต้องตัดสินใจ ไม่ใช่ปล่อยให้เกิดเอง — ถ้าผู้ใช้นับบรรทัดหนึ่งไปแล้วแต่คนอื่นลบทิ้ง การให้มันหายไปเงียบ ๆ คือการทิ้งงานของเขาโดยไม่บอก</p></section>
+
+<section><h2>8. เทสต์ที่ต้องเขียน</h2><p>ให้เขียนอย่างน้อย 14 ข้อ ข้อละหนึ่งเกณฑ์ ตัวอย่างสามข้อที่ยากที่สุด</p><pre class="code-vs"><code>test('โหลดซ้ำต้องไม่ล้างยอดที่นับไว้แล้ว', () async {
+  await store.load();
+  store.adjust('L-1', 5);
+  expect(store.lines.first.counted, 5);
+
+  repository.lines = [
+    const CountLine(id: 'L-1', productCode: 'P-1', expected: 20),  // แก้ยอดตั้งต้น
+  ];
+  await store.load();
+
+  expect(store.lines.first.counted, 5);      // ยอดของผู้ใช้ยังอยู่
+  expect(store.lines.first.expected, 20);    // ยอดตั้งต้นอัปเดตแล้ว
+});</code></pre><pre class="code-vs"><code>test('กดยืนยันซ้ำระหว่างส่ง ต้องเรียก repository ครั้งเดียว', () async {
+  final gate = Completer&lt;void&gt;();
+  repository.submitGate = gate;
+
+  final first = store.submit();
+  final second = store.submit();     // ถูกปฏิเสธด้วย guard
+
+  gate.complete();
+  await Future.wait([first, second]);
+
+  expect(repository.submitCount, 1);
+});</code></pre><pre class="code-vs"><code>test('polling ต้องข้ามรอบขณะกำลังยืนยัน', () {
+  fakeAsync((async) {
+    final gate = Completer&lt;void&gt;();
+    repository.submitGate = gate;
+    store.startPolling(const Duration(seconds: 5));
+    unawaited(store.submit());
+
+    async.elapse(const Duration(seconds: 12));
+    expect(repository.fetchCount, 0);      // ไม่ยิงเลยระหว่างส่ง
+
+    gate.complete();
+    async.elapse(const Duration(seconds: 6));
+    expect(repository.fetchCount, greaterThan(0));
   });
-  final LoadPhase phase;
-  final List&lt;Task&gt; tasks;
-  final bool refreshing;
-  final String? error;
-  final String? pendingOperationId;
-}</code></pre><p>ใน implementationใช้ copyWithที่แยก “ไม่เปลี่ยน” กับ “ตั้ง null” หรือ sealed statesเพื่อเลี่ยง nullable ambiguity</p></section>
-<section><h2>4. Load + generation</h2><pre class="code-vs"><code>int _generation = 0;
-Future&lt;void&gt; load({bool refresh = false}) async {
-  final token = ++_generation;
-  _emit(snapshot.loading(refresh: refresh));
-  try {
-    final tasks = await repository.fetchOpen();
-    if (token != _generation) return;
-    _emit(snapshot.data(List.unmodifiable(tasks)));
-  } catch (e) {
-    if (token != _generation) return;
-    _emit(snapshot.failure(mapError(e), keepData: true));
-  }
-}</code></pre></section>
-<section><h2>5. Idempotent confirm</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm(String taskId) async {
-  if (_confirmingTaskId != null) return;
-  final operationId = _pendingId ?? ids.next();
-  _confirmingTaskId = taskId;
-  _pendingId = operationId;
-  _publishPending();
-  try {
-    await repository.confirm(taskId, operationId: operationId);
-    _pendingId = null;
-    await load(refresh: true);
-  } on TimeoutException {
-    _publishUnknown(); // keep operationId for retry/reconcile
-  } finally {
-    _confirmingTaskId = null;
-    _publishIfAlive();
-  }
-}</code></pre></section>
-<section><h2>6. Lifecycle/polling</h2><p><code>startPolling</code> cancel handleเก่าก่อน schedule; tickเรียก load(refresh:true)เมื่อไม่ loading; <code>pause</code> cancel; <code>resume</code> loadทันทีแล้ว start; disposeเพิ่ม generation, cancel pollและ super.dispose UI WidgetsBindingObserverแปลง app lifecycleเป็น pause/resume commands</p></section>
-<section><h2>7. Tests</h2><pre class="code-vs"><code>test('stale load cannot replace latest data', () async {
-  final first = Completer&lt;List&lt;Task&gt;&gt;();
-  final second = Completer&lt;List&lt;Task&gt;&gt;();
-  repo.enqueue(first.future);
-  repo.enqueue(second.future);
+});</code></pre><p>รูปแบบของ repository ปลอมดูได้จาก <code>FakePickRepository</code> ใน <code>test/pick_store_test.dart</code> ซึ่งมีทั้งประตู <code>Completer</code> ตัวนับจำนวนครั้ง และรายการรหัสคำสั่งที่ได้รับ</p></section>
 
-  unawaited(store.load());
-  unawaited(store.load());
-  second.complete([taskB]);
-  first.complete([taskA]);
-  await Future.wait([first.future, second.future]);
+<section><h2>9. เทียบกับของจริง</h2><p>เปิด <code>lib/features/tasks/task_store.dart</code> ซึ่งเป็น store ที่ใช้จริงในโปรเจกต์ตัวอย่าง และจะเรียนเต็ม ๆ ใน Part 7–9</p><table><thead><tr><th>เรื่อง</th><th><code>PickStore</code> (บทเรียน)</th><th><code>TaskStore</code> (ของจริง)</th></tr></thead><tbody>
+<tr><td>สถานะการโหลด</td><td><code>enum LoadState</code></td><td><code>bool _loading</code> + getter <code>initialLoading</code> / <code>refreshing</code></td></tr>
+<tr><td>ตัวนับรุ่น</td><td><code>_generation</code></td><td><code>_requestGeneration</code> — เหมือนกัน</td></tr>
+<tr><td>ล็อกรายรายการ</td><td><code>Set&lt;String&gt; _busyLineIds</code></td><td><code>Set&lt;String&gt; _busyTaskIds</code> — เหมือนกัน</td></tr>
+<tr><td>รหัสคำสั่ง</td><td>เก็บใน map เพื่อใช้ซ้ำเมื่อไม่รู้ผล</td><td>สร้างใหม่ทุกครั้ง แล้วอาศัยการตรวจสอบซ้ำแทน</td></tr>
+<tr><td>เมื่อไม่รู้ผล</td><td>ไม่ลบรหัส แล้ว <code>load()</code></td><td><code>load(preserveError: true)</code> แล้วดูว่างานยังค้างอยู่ไหม</td></tr>
+<tr><td>ชนิดข้อผิดพลาด</td><td><code>PickException</code></td><td><code>ApiException</code> พร้อม <code>outcomeUnknown</code></td></tr>
+</tbody></table><p><strong>แถวที่ต่างกันจริงคือสองแถวล่าง</strong> และเป็นความต่างที่ตั้งใจ</p><pre class="code-vs"><code>// TaskStore — หลังไม่รู้ผล ไปดูความจริงแล้วสรุปให้ผู้ใช้ตรง ๆ
+await load(preserveError: true);
+final stillOpen = _tasks.any((item) =&gt; item.id == task.id);
+if (!stillOpen) {
+  _error = null;
+  _actionMessage = '${task.id} ไม่อยู่ในงานค้างแล้ว หลังตรวจสอบซ้ำ';
+} else {
+  _error = 'ยังยืนยันผลของ ${task.id} ไม่ได้ กรุณาตรวจสอบก่อนสั่งซ้ำ ...';
+}</code></pre><table><thead><tr><th>วิธี</th><th>ข้อดี</th><th>ข้อแลก</th></tr></thead><tbody>
+<tr><td>ใช้รหัสเดิมซ้ำ (<code>PickStore</code>)</td><td>ส่งซ้ำได้เลยอย่างปลอดภัย</td><td>ต้องมั่นใจว่าเซิร์ฟเวอร์จำรหัสจริง</td></tr>
+<tr><td>ตรวจสอบสถานะจริงแทน (<code>TaskStore</code>)</td><td>ไม่ต้องพึ่งว่าเซิร์ฟเวอร์จำรหัส</td><td>ต้องมีวิธีดูว่างานนั้นปิดไปหรือยัง และตอบช้ากว่า</td></tr>
+</tbody></table><p>ทั้งสองแบบถูกต้อง เพราะทั้งคู่ <strong>ไม่เดาผลลัพธ์เมื่อไม่รู้ผล</strong> ซึ่งเป็นกฎที่แท้จริงจาก 4.13 ส่วนวิธีการขึ้นกับว่าฝั่งเซิร์ฟเวอร์ให้อะไรมา</p><p>สังเกตอีกอย่างว่า <code>TaskStore</code> ไม่ได้ใช้ <code>enum LoadState</code> แต่ใช้ <code>bool</code> กับ getter สองตัว — ซึ่งพอสำหรับหน้าจอนั้น เพราะมันไม่มีสถานะ empty ที่ต้องพูดกับผู้ใช้ต่างจาก ready</p><div class="note">อย่าสรุปว่าของจริงต้อง “ดีกว่า” เสมอ — ให้ดูว่ามันตัดสินใจอะไรและแลกอะไร แล้วถามว่าเหตุผลนั้นใช้กับงานตรงหน้าได้ไหม</div></section>
 
-  expect(store.snapshot.tasks, [taskB]);
-});</code></pre><p>เพิ่ม tests loading→data/empty/error, refreshเก็บ stale data, no overlap polling, pause/dispose, double confirmหนึ่ง call, timeout retry keyเดิมและ repository error cleanup</p></section>
-<section><h2>8. Part 4 Exit Test</h2><div class="success"><ul><li>เลือก setState/ValueNotifier/ChangeNotifierตาม ownershipได้</li><li>ไม่เก็บ derived stateซ้ำและรักษา invariantsได้</li><li>model loading/error/empty/successและ partial refreshได้</li><li>จัด async cleanup, mounted, stale responseและ pollingได้</li><li>ออกแบบ optimistic/idempotent/FSMตามความเสี่ยงได้</li><li>สร้าง storeที่ dependency-injectedและ test raceด้วย Completerได้</li></ul></div></section>
+<section><h2>10. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ค้างไม่จบ</td><td><code>Completer</code> ไม่ถูก complete</td><td>ตรวจว่าทุกประตูถูกเปิดก่อนจบเทสต์</td></tr>
+<tr><td>เทสต์ผ่านบ้างไม่ผ่านบ้าง</td><td>ใช้เวลาจริงแทน <code>fakeAsync</code></td><td>เปลี่ยนไปใช้ <code>fakeAsync</code></td></tr>
+<tr><td><code>counted: 0</code> กลายเป็นยังไม่ได้นับ</td><td>ใช้ <code>0</code> แทน <code>null</code></td><td>แยก “ยังไม่นับ” ออกจาก “นับได้ศูนย์”</td></tr>
+<tr><td>ล้างยอดกลับเป็นยังไม่นับไม่ได้</td><td>กับดัก <code>copyWith</code> กับ field ที่เป็น null ได้</td><td>เพิ่มเมธอดแยกสำหรับล้างค่า</td></tr>
+<tr><td>โหลดซ้ำแล้วยอดที่นับหาย</td><td>แทนรายการทั้งชุด</td><td>รวมด้วย <code>_merge</code></td></tr>
+<tr><td>widget test ไม่เห็นสิ่งที่คาด</td><td>ลืม <code>pumpAndSettle</code></td><td>เหมือน Part 2</td></tr>
+<tr><td>เทสต์ตรวจสีหรือข้อความยาว ๆ</td><td>ผูกกับหน้าตามากเกินไป</td><td>ตรวจด้วย <code>Key</code> ตามที่ทำใน lab</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบทดสอบตัวเองก่อนจบ Part 4</h2><p>ตอบให้ได้โดยไม่เปิดเฉลย ถ้าข้อไหนตอบไม่ได้ ให้กลับไปอ่านบทที่วงเล็บไว้</p><ol><li>state ควรอยู่ที่ widget, <code>ValueNotifier</code> หรือ <code>ChangeNotifier</code> ตัดสินจากอะไร (4.1, 4.3, 4.4, 4.5)</li><li>ทำไมการเก็บ <code>remainingCount</code> ไว้เป็น field ถึงเป็นบั๊กรอเกิด (4.2)</li><li>boolean สามตัวสร้างสถานะได้กี่แบบ และมีความหมายจริงกี่แบบ (4.7)</li><li>ทำไมงานเก็บกวาดต้องอยู่ใน <code>finally</code> ไม่ใช่ท้าย <code>try</code> (4.8)</li><li><code>mounted</code> ตอบคำถามอะไรได้ และตอบอะไรไม่ได้ (4.9)</li><li>ตัวนับรุ่นต้องตรวจกี่จุด และแต่ละจุดกันอะไร (4.10)</li><li>ทำไมยกเลิกตัวจับเวลาแล้วยังต้องมีตัวนับรุ่น (4.11)</li><li>ทำไม <code>removeListener</code> ด้วย closure ถึงไม่ทำงาน (4.12)</li><li>เมื่อไม่รู้ว่าเซิร์ฟเวอร์ทำสำเร็จหรือยัง ทำไมห้ามย้อนกลับ (4.13)</li><li>ลองใหม่เมื่อไหร่ใช้รหัสคำสั่งเดิม เมื่อไหร่ใช้รหัสใหม่ (4.14)</li><li>ล้มเหลวกลางทางแล้วควรย้อนไปสถานะไหน ใช้หลักอะไรตัดสิน (4.15)</li></ol></section>
+
+<section><h2>12. สรุปท้าย Part 4</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>ตัดสินได้ว่า state ควรอยู่ที่ไหน และย้ายออกจาก widget เมื่อถึงเวลา</li><li>ออกแบบสถานะให้ค่าที่เป็นไปไม่ได้สร้างไม่ได้</li><li>เขียนงาน async ที่ปลดล็อกตัวเองเสมอ ไม่ว่าจะจบทางไหน</li><li>กันผลลัพธ์เก่าไม่ให้ทับข้อมูลล่าสุด</li><li>รีเฟรชอัตโนมัติโดยไม่ซ้อน ไม่กวนผู้ใช้ และหยุดเป็น</li><li>ทำให้จอตอบสนองทันทีและย้อนกลับได้อย่างปลอดภัย</li><li>ทำให้การส่งซ้ำไม่กลายเป็นข้อมูลซ้ำ</li><li>ใช้ <code>sealed class</code> จัดงานหลายขั้นให้ compiler ช่วยตรวจ</li><li>เขียนเทสต์ที่บังคับลำดับเวลาได้ด้วย <code>Completer</code> และ <code>fakeAsync</code></li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>store อยู่ข้ามหน้าจอ และการส่งต่อโดยไม่ผ่าน constructor</td><td>Part 5</td></tr>
+<tr><td>แปลง JSON เป็น model และกลับ</td><td>Part 6</td></tr>
+<tr><td>ต่อ API จริง จัดการรหัสตอบกลับและ token</td><td>Part 7–8</td></tr>
+<tr><td>เก็บข้อมูลลงเครื่องและทำงานตอนไม่มีเน็ต</td><td>Part 12</td></tr>
+<tr><td>ทางเลือกอื่นนอกจาก <code>ChangeNotifier</code> เช่น Provider, Riverpod, Bloc</td><td>Part 10</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 5 จะพาออกจากหน้าจอเดียว — เมื่อแอปมีหลายหน้า คำถามใหม่คือ store ตัวไหนอยู่ได้นานแค่ไหน ใครสร้าง ใครทำลาย และข้อมูลเดินทางข้ามหน้าจออย่างไร</p></section>

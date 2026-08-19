@@ -1,21 +1,208 @@
-<div class="note">Async actionที่แข็งแรงต้อง guard concurrent call, publish loading, map error, cleanupใน finally และรักษา state consistency ไม่ว่า success, exception, navigation หรือ disposeจะเกิด</div>
-<section><h2>1. try/finally pattern</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
-  if (_submitting) return;
-  _submitting = true; _error = null; notifyListeners();
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำให้ปุ่มไม่มีทางค้างอยู่สถานะ “กำลังส่ง”</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.7 (สถานะของงานที่ต้องรอ) และ D1.10 (exception)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนคำสั่ง async ที่ปลดล็อกตัวเองเสมอ ไม่ว่าจะจบด้วยทางไหน</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>อาการนี้เจอกันทุกทีม — <strong>กดปุ่มแล้วปุ่มค้างเป็น “กำลังส่ง...” ตลอดกาล ต้องปิดแอปแล้วเปิดใหม่</strong></p><pre class="code-vs"><code>Future&lt;void&gt; markDone(String lineId) async {
+  _busy = true;
+  notifyListeners();
+
+  await repository.markDone(lineId);   // ← ถ้าตรงนี้โยน exception
+
+  _busy = false;                        // ← บรรทัดนี้ไม่ถูกรัน ตลอดกาล
+  notifyListeners();
+}</code></pre><p>ผู้ใช้ไม่ได้ทำอะไรผิด และแอปก็ไม่ได้ crash ให้เห็น — มันแค่ <strong>ไม่กลับมา</strong> ซึ่งบนหน้างานคือแย่กว่า crash เพราะไม่มีใครรู้ว่าต้องทำอะไร</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>try</code></td><td>ก้อนที่อาจโยน exception</td></tr>
+<tr><td><code>on X catch</code></td><td>ดักเฉพาะ exception ชนิด X</td></tr>
+<tr><td><code>finally</code></td><td>ก้อนที่ทำงานเสมอ ไม่ว่าจะสำเร็จ ล้มเหลว หรือ <code>return</code> ออกไป</td></tr>
+<tr><td>busy lock</td><td>ธงกันไม่ให้คำสั่งเดิมถูกสั่งซ้ำระหว่างที่ยังไม่จบ</td></tr>
+<tr><td>cleanup</td><td>งานเก็บกวาดที่ต้องเกิดแน่นอน เช่นปลดล็อก</td></tr>
+<tr><td>rethrow</td><td>โยน exception เดิมต่อขึ้นไป</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ทางออกมีมากกว่าที่คิด</h2><p>เรามักคิดว่าฟังก์ชันจบได้สองแบบ — สำเร็จ หรือ พัง แต่จริง ๆ แล้ว</p><pre class="code-vs"><code>เข้าฟังก์ชัน
+    │
+    ├─→ ทำครบแล้ว return             ✓ นึกถึง
+    ├─→ return กลางทาง (guard)        ✗ มักลืม
+    ├─→ exception ที่เราดัก           ✓ นึกถึง
+    ├─→ exception ที่เราไม่ได้ดัก      ✗ มักลืม
+    └─→ exception จากใน catch เอง     ✗ ลืมสนิท</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าโค้ดปลดล็อกอยู่ในเส้นทางใดเส้นทางหนึ่ง มันจะถูกข้ามในเส้นทางที่เหลือ — ให้มันอยู่ใน <code>finally</code> ซึ่งเป็นที่เดียวที่ทุกเส้นทางต้องผ่าน</div></section>
+
+<section><h2>4. โครงที่ถูกต้อง</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code> ดูโครงของ <code>markDone</code></p><pre class="code-vs"><code>Future&lt;void&gt; markDone(String lineId) async {
+  if (_busyLineIds.contains(lineId)) return;   // ยังไม่ล็อก จึงยัง return ได้
+  final index = _lines.indexWhere((line) =&gt; line.id == lineId);
+  if (index == -1) return;
+  final before = _lines[index];
+  if (before.done) return;
+
+  _busyLineIds.add(lineId);                    // ← ล็อกตรงนี้
+  _errorMessage = null;
+  notifyListeners();
+
+  try {
+    await repository.markDone(lineId, commandId: commandId);
+  } on PickException catch (error) {
+    ...
+    _errorMessage = error.message;
+  } finally {
+    _busyLineIds.remove(lineId);               // ← ปลดล็อกเสมอ
+    notifyListeners();
+  }
+}</code></pre><p>สังเกตลำดับ — <strong>การตรวจทั้งหมดจบก่อนที่จะล็อก</strong></p><table><thead><tr><th>ถ้าล็อกก่อนตรวจ</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td><code>_busyLineIds.add(); if (index == -1) return;</code></td><td>เจอบรรทัดที่ไม่มีจริง แล้ว <code>return</code> ทั้งที่ล็อกไว้แล้ว — ล็อกค้างถาวร</td></tr>
+</tbody></table><p>นี่เป็นเหตุผลว่าทำไมกฎ “ตรวจให้จบก่อนแล้วค่อยล็อก” จึงสำคัญพอ ๆ กับ <code>finally</code> เอง</p></section>
+
+<section><h2>5. ทำไม finally ถึงจำเป็นจริง ๆ</h2><p>หลายคนคิดว่าเขียนแบบนี้ก็พอ</p><pre class="code-vs"><code>try {
+  await repository.markDone(lineId);
+  _busyLineIds.remove(lineId);    // ปลดในทางสำเร็จ
+  notifyListeners();
+} on PickException catch (error) {
+  _errorMessage = error.message;
+  _busyLineIds.remove(lineId);    // ปลดในทางล้มเหลว
+  notifyListeners();
+}</code></pre><p>ครอบสองทางแล้ว ดูเหมือนครบ แต่ยังพังในสามกรณี</p><table><thead><tr><th>กรณี</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>โยน exception ชนิดอื่นที่ไม่ใช่ <code>PickException</code> เช่น <code>FormatException</code></td><td><code>catch</code> ไม่ครอบ ล็อกค้าง</td></tr>
+<tr><td>เพิ่ม <code>return</code> ใน <code>catch</code> ทีหลัง (เกิดขึ้นจริงใน lab)</td><td>บรรทัดปลดล็อกที่อยู่หลัง <code>return</code> ถูกข้าม</td></tr>
+<tr><td>โค้ดใน <code>catch</code> เองโยน exception</td><td>ปลดล็อกไม่ทัน</td></tr>
+</tbody></table><p>และมีข้อเสียที่มองเห็นได้ทันทีคือ <strong>โค้ดปลดล็อกถูกเขียนซ้ำสองที่</strong> ซึ่งวันหนึ่งจะแก้ที่เดียวแล้วลืมอีกที่</p><p>ข้อสองไม่ใช่เรื่องสมมติ — <code>markDone</code> ใน lab มี <code>return</code> อยู่กลาง <code>catch</code> จริง ๆ</p><pre class="code-vs"><code>} on PickException catch (error) {
+  if (error.outcomeUnknown) {
+    _errorMessage = '${error.message} กำลังตรวจสอบสถานะล่าสุด';
+    notifyListeners();
+    await load();
+    return;              // ← ออกจากตรงนี้เลย
+  }
+  ...
+} finally {
+  _busyLineIds.remove(lineId);   // ← ยังทำงาน แม้ return ไปแล้ว
+  notifyListeners();
+}</code></pre><p><code>return</code> ใน <code>try</code> หรือ <code>catch</code> <strong>ไม่ข้าม <code>finally</code></strong> — Dart รัน <code>finally</code> ให้ก่อนแล้วจึงออกจากฟังก์ชันจริง</p></section>
+
+<section><h2>6. จับเฉพาะที่จัดการได้</h2><p>โค้ดที่เจอบ่อยและอันตรายเงียบ ๆ</p><pre class="code-vs"><code>} catch (e) {
+  _errorMessage = 'เกิดข้อผิดพลาด';   // กลืนทุกอย่าง
+}</code></pre><p><code>catch (e)</code> เปล่า ๆ จับ <em>ทุกอย่าง</em> รวมถึงบั๊กของเราเอง</p><table><thead><tr><th>สิ่งที่ถูกกลืนไปด้วย</th><th>สาเหตุจริง</th><th>สิ่งที่ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td><code>NoSuchMethodError</code></td><td>เผลอเรียกเมธอดบนค่า null</td><td>“เกิดข้อผิดพลาด”</td></tr>
+<tr><td><code>RangeError</code></td><td>เข้าถึง index เกินขอบ</td><td>“เกิดข้อผิดพลาด”</td></tr>
+<tr><td><code>TypeError</code></td><td>แปลง JSON ผิดชนิด</td><td>“เกิดข้อผิดพลาด”</td></tr>
+</tbody></table><p>ทั้งสามคือบั๊กที่ต้องแก้ที่โค้ด ไม่ใช่เรื่องที่ผู้ใช้ลองใหม่แล้วหาย แต่พอถูกกลืนเป็นข้อความเดียวกับ “เน็ตหลุด” ก็ไม่มีใครรู้ว่ามันมีอยู่ — จนกระทั่งข้อมูลเสียหายไปแล้ว</p><p>วิธีที่ถูกคือ <strong>ประกาศชนิดที่จัดการได้ให้ชัด</strong></p><pre class="code-vs"><code>} on PickException catch (error) {
+  _errorMessage = error.message;   // นี่คือสิ่งที่คาดไว้แล้ว
+}
+// ชนิดอื่นปล่อยผ่านขึ้นไป — จะเห็นตอนพัฒนา และเข้า crash report ตอนใช้จริง</code></pre><p>สังเกตว่า <code>PickException</code> ถูกสร้างขึ้นมาใน <code>pick_repository.dart</code> เพื่อการนี้โดยเฉพาะ — เป็นหน้าที่ของ repository ที่จะแปลงเรื่องระดับ HTTP ให้เป็นความล้มเหลวที่ store เข้าใจ (เรื่องนี้จะทำเต็มรูปแบบใน Part 8)</p><div class="note">ถ้าจำเป็นต้องจับกว้างจริง ๆ (เช่นชั้นบนสุดของแอป) ให้ log แล้ว <code>rethrow</code> — อย่าจับแล้วเงียบ</div></section>
+
+<section><h2>7. อ่านค่าที่ต้องใช้ก่อน await</h2><p>ระหว่าง <code>await</code> โลกไม่ได้หยุด — ผู้ใช้กดปุ่มอื่นได้ การโหลดซ้ำเสร็จได้ รายการเปลี่ยนได้</p><pre class="code-vs"><code>// เสี่ยง — อ่านหลัง await
+await repository.markDone(lineId);
+final index = _lines.indexWhere((line) =&gt; line.id == lineId);
+_lines[index] = ...;      // รายการอาจเปลี่ยนไปแล้ว index อาจไม่ใช่ตัวเดิม</code></pre><pre class="code-vs"><code>// ปลอดภัย — อ่านก่อน await เก็บไว้ในตัวแปรของตัวเอง
+final before = _lines[index];        // สำเนาที่ไม่มีใครแก้ได้
+await repository.markDone(lineId);
+// ใช้ before ต่อได้ตามที่ตั้งใจ</code></pre><p>ใน lab ตัวแปร <code>before</code> ถูกอ่านไว้ก่อนเสมอ ซึ่งเป็นสิ่งที่ทำให้ <code>_rollback</code> ใน 4.13 ทำงานถูกต้อง</p><p>ประเด็นนี้เป็นครึ่งหนึ่งของปัญหาใหญ่กว่า — อีกครึ่งคือ “ผลของคำขอเก่ามาถึงช้ากว่าคำขอใหม่” ซึ่งจะแก้ด้วยตัวนับรุ่นใน 4.10</p></section>
+
+<section><h2>8. ปลดล็อกใน store กับตรวจ mounted ใน widget เป็นคนละเรื่อง</h2><p>จุดที่สับสนกันบ่อย</p><table><thead><tr><th></th><th>store</th><th>widget</th></tr></thead><tbody>
+<tr><td>หลัง await ต้องตรวจอะไร</td><td>ไม่มี <code>mounted</code> ให้ตรวจ</td><td>ต้องตรวจ <code>mounted</code></td></tr>
+<tr><td>ถ้าหน้าจอปิดไปแล้ว</td><td>store ยังอยู่ ยัง <code>notifyListeners()</code> ได้ปกติ</td><td>เรียก <code>setState</code> ไม่ได้</td></tr>
+<tr><td>งานเก็บกวาด</td><td>ต้องทำเสมอใน <code>finally</code></td><td>ต้องทำเสมอเช่นกัน แต่ระวังการแตะ UI</td></tr>
+</tbody></table><p>สิ่งที่ห้ามทำคือข้ามงานเก็บกวาดเพราะคิดว่า “หน้าจอปิดไปแล้ว ไม่มีใครดู”</p><pre class="code-vs"><code>} finally {
+  if (hasListeners) {              // ผิด
+    _busyLineIds.remove(lineId);
+    notifyListeners();
+  }
+}</code></pre><p>ถ้าผู้ใช้ปิดหน้าจอแล้วเปิดใหม่ด้วย store ตัวเดิม ล็อกจะยังค้างอยู่จากรอบก่อน — ปุ่มนั้นจะกดไม่ได้ตลอดกาลโดยไม่มีใครหาสาเหตุเจอ</p><p>รายละเอียดของ <code>mounted</code> ฝั่ง widget อยู่ใน 4.9</p></section>
+
+<section><h2>9. เมื่อต้องรอหลายอย่างพร้อมกัน</h2><pre class="code-vs"><code>// เรียงกัน — ช้ากว่า เพราะรอทีละอัน
+final tasks = await repository.fetchTasks();      // 300ms
+final summary = await repository.fetchSummary();  // 300ms
+// รวม 600ms</code></pre><pre class="code-vs"><code>// พร้อมกัน
+await Future.wait([
+  repository.fetchTasks(),
+  repository.fetchSummary(),
+]);
+// รวม ~300ms</code></pre><p>แต่ <code>Future.wait</code> มีพฤติกรรมที่ต้องรู้ — <strong>ถ้ามีตัวใดตัวหนึ่งล้มเหลว ตัวรวมจะล้มเหลวทันที ทั้งที่ตัวอื่นยังวิ่งอยู่</strong> และผลของตัวที่สำเร็จจะหายไป</p><p>ทางแก้ที่ตรงกับสิ่งที่ต้องการใน 4.7 หัวข้อ 10 คือให้แต่ละงาน <strong>จัดการความล้มเหลวของตัวเองข้างใน</strong></p><pre class="code-vs"><code>Future&lt;void&gt; loadAll() async {
+  await Future.wait([
+    _loadTasks(),      // ข้างในมี try/catch ของตัวเอง ตั้ง _tasksState
+    _loadSummary(),    // ข้างในมี try/catch ของตัวเอง ตั้ง _summaryState
+  ]);
+  // มาถึงตรงนี้แปลว่าทั้งคู่ "จบแล้ว" ไม่ใช่ "สำเร็จทั้งคู่"
+}</code></pre><table><thead><tr><th>รูปแบบ</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>แต่ละงานจัดการ error เอง</td><td>บางส่วนล้มได้ หน้ายังใช้ได้ (พบบ่อยที่สุด)</td></tr>
+<tr><td>ปล่อยให้ <code>Future.wait</code> ล้มทั้งชุด</td><td>ต้องได้ครบทุกอย่างถึงจะทำต่อได้</td></tr>
+</tbody></table></section>
+
+<section><h2>10. งานที่ไม่ต้องรอผล</h2><p>บางงานสั่งแล้วไม่ต้องรอ เช่นรีเฟรชตัวเลขบนแท็บหลังจากปิดงานสำเร็จ</p><pre class="code-vs"><code>// เจตนาไม่ชัด — คนอ่านไม่รู้ว่าลืม await หรือตั้งใจ
+badgeStore.refresh();</code></pre><pre class="code-vs"><code>import 'dart:async';
+
+// เจตนาชัด
+unawaited(badgeStore.refresh());</code></pre><p>แต่มีเงื่อนไขที่ห้ามลืม — <strong>งานนั้นต้องจัดการ error ของตัวเองให้ครบข้างใน</strong> เพราะไม่มีใครรออยู่รับ ถ้ามันโยน exception ออกมาจะกลายเป็น unhandled error ที่ทำให้แอปพังในที่ที่ดูไม่เกี่ยวกันเลย</p><div class="warn">อย่าใช้ <code>unawaited</code> กับงานที่ขั้นถัดไปต้องใช้ผลลัพธ์ — ถ้าไม่แน่ใจ ให้ <code>await</code> ไว้ก่อน</div></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปุ่มค้าง “กำลังส่ง” ตลอดกาล</td><td>ปลดล็อกไม่ได้อยู่ใน <code>finally</code></td><td>ย้ายเข้า <code>finally</code></td></tr>
+<tr><td>ค้างเฉพาะบางกรณีที่หาไม่เจอ</td><td>มี <code>return</code> ก่อนถึงบรรทัดปลดล็อก</td><td><code>finally</code> ครอบให้แล้ว</td></tr>
+<tr><td>ล็อกค้างแม้ยังไม่ได้ยิงคำขอ</td><td>ล็อกก่อนตรวจเงื่อนไขจบ</td><td>ตรวจให้จบก่อนแล้วค่อยล็อก</td></tr>
+<tr><td>ทุกปัญหาขึ้น “เกิดข้อผิดพลาด” เหมือนกันหมด</td><td><code>catch (e)</code> จับทุกอย่าง</td><td>ใช้ <code>on X catch</code></td></tr>
+<tr><td>บั๊กจริงไม่เคยถูกรายงาน</td><td>ถูกกลืนใน catch กว้าง</td><td>log แล้ว <code>rethrow</code></td></tr>
+<tr><td>โหลดหลายอย่างแล้วได้ข้อมูลไม่ครบ</td><td><code>Future.wait</code> ล้มทั้งชุดเพราะตัวเดียว</td><td>ให้แต่ละงานจัดการ error เอง</td></tr>
+<tr><td>แอปพังในที่ที่ไม่เกี่ยวกันเลย</td><td>งาน fire-and-forget ไม่จัดการ error</td><td>ใส่ try/catch ในงานนั้น</td></tr>
+<tr><td>เปิดหน้าจอใหม่แล้วปุ่มกดไม่ได้</td><td>ข้ามการปลดล็อกเพราะหน้าจอปิดไปแล้ว</td><td>ปลดล็อกเสมอ ไม่ต้องสนใจว่ามีใครดูอยู่</td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><pre class="code-vs"><code>Future&lt;void&gt; confirmReceipt(String draftId) async {
+  _submitting = true;
+  _error = null;
+  notifyListeners();
+
+  final draft = _drafts.firstWhere((d) =&gt; d.id == draftId);
+
   try {
     final receipt = await repository.confirm(draft);
-    _receipt = receipt;
-  } on ApiException catch (e) {
-    _error = e.message;
-  } finally {
+    _receipts.add(receipt);
+    _submitting = false;
+    notifyListeners();
+  } catch (e) {
+    _error = 'ยืนยันไม่สำเร็จ';
     _submitting = false;
     notifyListeners();
   }
-}</code></pre></section>
-<section><h2>2. Catch เฉพาะที่จัดการได้</h2><p>แปลง known transport/domain exceptionเป็น state แต่ programming errorไม่ควรถูกกลืนเป็น “เกิดข้อผิดพลาด”แล้วเดินต่อผิด invariant ใช้ logging+rethrow/zoneตาม policy และให้ repositoryแปลง HTTPรายละเอียดเป็น typed failures</p></section>
-<section><h2>3. Future.wait</h2><p>WarehouseStore <code>loadAll</code> โหลดหลาย resourceขนานด้วย Future.wait ลดเวลารวม แต่ค่า default errorทำ Futureรวม failเมื่อหนึ่งงาน fail แม้งานอื่นยังวิ่ง แต่ละ loaderจับ errorตนเองจึงเหมาะกับ partial success งานที่ต้อง all-or-nothingต้องออกแบบ transaction/result aggregationชัด</p></section>
-<section><h2>4. unawaited อย่างตั้งใจ</h2><p>ใช้ <code>unawaited</code> เมื่อ fire-and-forgetจริง เช่น refresh badge/historyหลัง success แต่ futureต้องจัดการ errorภายใน ไม่ปล่อย unhandled exception และไม่ใช้เมื่อขั้นถัดไปต้องผลลัพธ์</p></section>
-<section><h2>5. Snapshot input</h2><p>อ่าน draft/entity IDใส่ localก่อน await ถ้า mutable fieldsเปลี่ยนระหว่างทาง resultต้อง applyเฉพาะ operationเดิม ใช้ generation/session token ไม่อ่าน current fieldหลัง awaitแล้วสมมติว่าเหมือนเดิม</p></section>
-<section><h2>6. Cleanup location</h2><p>Busyใน storeปลดใน finallyและ notify ส่วน UI setStateต้องตรวจ mounted แยก Resource cleanupไม่ควรถูกข้ามเพราะ UIหาย หาก commandถูกยกเลิกใช้ cancellation resultเฉพาะไม่เหมารวม error</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>โหลด tasksและsummaryพร้อมกัน Summary failแต่ tasksต้องแสดง จะใช้ Future.waitตรงไหน?</p><details><summary>เฉลย</summary><p>ให้ loadTasks/loadSummaryจับและ publish stateตนเอง แล้ว Future.waitเพื่อรอ completionทั้งหมด หรือใช้ record Results aggregate ไม่ปล่อย summary exceptionทำ global load error หาก summaryเป็น optional ส่วน critical dependenciesค่อย failทั้งหน้า</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">ห้าม set loading=falseเฉพาะ success/catchหลายทางเพราะ return/exceptionใหม่ทำค้าง ใช้ finally และอย่า notify successก่อน serverตอบเพียงเพื่อให้ UIเร็ว หากต้อง optimisticให้มี rollbackชัด</div></section>
+
+  unawaited(badgeStore.refresh());
+}</code></pre><ol><li>หาข้อบกพร่องให้ได้อย่างน้อยสี่ข้อ</li><li>เขียนใหม่</li><li>อธิบายว่าทำไม <code>firstWhere</code> ในตำแหน่งนี้จึงอันตราย</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>1</td><td>ล็อกก่อนหา draft</td><td>ถ้า <code>firstWhere</code> โยน จะค้าง <code>_submitting = true</code> ถาวร</td></tr>
+<tr><td>2</td><td>ไม่มี <code>finally</code></td><td>exception ชนิดอื่นทำให้ค้าง</td></tr>
+<tr><td>3</td><td><code>catch (e)</code> จับทุกอย่าง</td><td>บั๊กในโค้ดกลายเป็น “ยืนยันไม่สำเร็จ”</td></tr>
+<tr><td>4</td><td>ปลดล็อกเขียนซ้ำสองที่</td><td>วันหนึ่งจะแก้ที่เดียวแล้วลืมอีกที่</td></tr>
+<tr><td>5</td><td>ไม่กันการกดซ้ำ</td><td>กดรัว ๆ ได้ใบรับหลายใบ</td></tr>
+<tr><td>6</td><td><code>unawaited</code> ทำงานแม้ตอนล้มเหลว</td><td>รีเฟรชตัวเลขทั้งที่ไม่มีอะไรเปลี่ยน</td></tr>
+<tr><td>7</td><td>ไม่รู้ว่า <code>badgeStore.refresh()</code> จัดการ error เองไหม</td><td>อาจกลายเป็น unhandled error</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>Future&lt;void&gt; confirmReceipt(String draftId) async {
+  if (_submitting) return;                      // แก้ข้อ 5
+
+  // ตรวจให้จบก่อนล็อก — แก้ข้อ 1 และข้อ 3 ของแบบฝึกหัดข้อ 3
+  final index = _drafts.indexWhere((d) =&gt; d.id == draftId);
+  if (index == -1) {
+    _error = 'ไม่พบรายการที่ต้องการยืนยัน';
+    notifyListeners();
+    return;
+  }
+  final draft = _drafts[index];                 // อ่านก่อน await (หัวข้อ 7)
+
+  _submitting = true;
+  _error = null;
+  notifyListeners();
+
+  var succeeded = false;
+  try {
+    final receipt = await repository.confirm(draft);
+    _receipts.add(receipt);
+    succeeded = true;
+  } on ReceiptException catch (error) {         // แก้ข้อ 3
+    _error = error.message;
+  } finally {                                   // แก้ข้อ 2 และข้อ 4
+    _submitting = false;
+    notifyListeners();
+  }
+
+  if (succeeded) {                              // แก้ข้อ 6
+    unawaited(badgeStore.refresh());
+  }
+}</code></pre><p>เรื่องข้อ 7 — ต้องเข้าไปดู <code>badgeStore.refresh()</code> ว่ามี try/catch ของตัวเองหรือยัง ถ้ายังไม่มี ต้องเติม ไม่ใช่ห่อ try/catch ตรงจุดเรียก เพราะ <code>unawaited</code> แปลว่าเราไม่ได้รออยู่แล้ว exception จะไม่วิ่งมาถึงจุดนี้</p><p><strong>ข้อ 3 — ทำไม <code>firstWhere</code> ตรงนั้นอันตราย</strong></p><p>สามชั้นซ้อนกัน</p><p><em>ชั้นที่หนึ่ง</em> — <code>firstWhere</code> ที่ไม่มี <code>orElse</code> จะโยน <code>StateError</code> เมื่อหาไม่เจอ ไม่ได้คืน <code>null</code></p><p><em>ชั้นที่สอง</em> — มันอยู่ <strong>หลัง</strong> <code>_submitting = true</code> แต่ <strong>นอก</strong> <code>try</code> ดังนั้นเมื่อโยน จะไม่มีอะไรปลดล็อกให้เลย แม้จะมี <code>finally</code> ก็ตาม เพราะยังไม่ได้เข้า <code>try</code></p><pre class="code-vs"><code>_submitting = true;          // ล็อกแล้ว
+final draft = _drafts.firstWhere(...);   // โยนตรงนี้ → ออกจากฟังก์ชันเลย
+try { ... } finally { ... }              // ไม่เคยถึงบรรทัดนี้</code></pre><p>ผลคือปุ่มยืนยันค้างถาวร ต้องปิดแอป</p><p><em>ชั้นที่สาม</em> — <code>StateError</code> คือชนิดที่ปกติหมายถึงบั๊ก ทำให้ตอนไล่หาสาเหตุจะสับสนว่าเป็นปัญหาที่ไหน</p><p>ทางแก้คือใช้ <code>indexWhere</code> ที่คืน <code>-1</code> แทนการโยน แล้วตัดสินใจอย่างชัดเจนว่าจะทำอะไรเมื่อหาไม่เจอ — เป็นรูปแบบเดียวกับที่ <code>markDone</code> ใน lab ใช้</p><p><strong>ลองต่อ:</strong> ใน <code>test/pick_store_test.dart</code> ให้ลองย้าย <code>_busyLineIds.remove(lineId)</code> ออกจาก <code>finally</code> ไปไว้ท้าย <code>try</code> แล้วรัน <code>flutter test</code> — จะเห็นว่าเทสต์ที่ทำให้ repository ล้มเหลวจับได้ทันทีว่า <code>isBusy</code> ยังเป็น true อยู่</p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>ฟังก์ชันออกได้หลายทางมากกว่าที่นึก — <code>finally</code> คือที่เดียวที่ทุกทางต้องผ่าน</li><li><code>return</code> ใน <code>try</code> หรือ <code>catch</code> ไม่ข้าม <code>finally</code></li><li>ตรวจเงื่อนไขให้จบก่อน แล้วค่อยล็อก</li><li>จับเฉพาะ exception ชนิดที่จัดการได้จริง ชนิดอื่นปล่อยผ่านให้เห็น</li><li>อ่านค่าที่ต้องใช้เก็บไว้ก่อน <code>await</code></li><li>store ไม่มี <code>mounted</code> และห้ามข้ามงานเก็บกวาดเพราะหน้าจอปิด</li><li><code>Future.wait</code> ล้มทั้งชุดเมื่อมีตัวเดียวล้ม — ให้แต่ละงานจัดการ error เอง</li><li><code>unawaited</code> ใช้ได้เมื่องานนั้นจัดการ error ครบข้างในแล้ว</li></ul></div><p><strong>บทถัดไป:</strong> 4.9 จะข้ามไปฝั่ง widget — หลัง <code>await</code> หน้าจออาจถูกปิดไปแล้ว และการใช้ <code>context</code> ต่อจะทำให้เกิด exception ที่อ่านยากที่สุดชนิดหนึ่งใน Flutter</p></section>

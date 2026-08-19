@@ -4,31 +4,227 @@
 <title>Async UI States</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">04-07 · State &amp; Lifecycle</span><h1>Async UI States</h1><p>Part 4: State &amp; Async</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Sealed state</a></li><li><a href="#section-2">Empty เป็น Data</a></li><li><a href="#section-3">Initial load vs refresh</a></li><li><a href="#section-4">Partial failure</a></li><li><a href="#section-5">Retry semantics</a></li><li><a href="#section-6">Render exhaustive</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Loading/Error/Empty/Success เป็นสถานะคนละความหมาย ไม่ควรอนุมานทั้งหมดจาก listว่างและ boolเดียว เพราะ emptyอาจเป็นผลสำเร็จ, errorอาจยังมี stale data และ refreshไม่ควรแทนหน้าเดิมด้วย spinnerเต็มจอ</div>
-<section id="section-1"><h2>1. Sealed state</h2><pre class="code-vs"><code>sealed class LoadState&lt;T&gt; { const LoadState(); }
-class Initial&lt;T&gt; extends LoadState&lt;T&gt; { const Initial(); }
-class Loading&lt;T&gt; extends LoadState&lt;T&gt; { const Loading(); }
-class Data&lt;T&gt; extends LoadState&lt;T&gt; {
-  const Data(this.value, {this.refreshing = false});
-  final T value; final bool refreshing;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: สถานะคือคำถามว่า “ตอนนี้ควรวาดอะไร”</a></li><li><a href="#section-4">ทำไม boolean หลายตัวถึงไม่ใช่คำตอบ</a></li><li><a href="#section-5">enum: หนึ่งค่า หนึ่งความหมาย</a></li><li><a href="#section-6">switch ที่ครบทุกทาง</a></li><li><a href="#section-7">เมื่อสถานะต้องพกข้อมูลติดตัวมาด้วย</a></li><li><a href="#section-8">โหลดครั้งแรก ไม่เหมือนโหลดซ้ำ</a></li><li><a href="#section-9">ล้มเหลวตอนโหลดซ้ำ: ล้างรายการหรือไม่</a></li><li><a href="#section-10">หลายแหล่ง: อย่าให้ของไม่สำคัญล้มทั้งจอ</a></li><li><a href="#section-11">ปุ่มลองใหม่ไม่ได้เหมาะกับทุกความผิดพลาด</a></li><li><a href="#section-12">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-13">แบบฝึกหัด</a></li><li><a href="#section-14">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: แยกสถานะของงานที่ต้องรอให้ครบทุกทาง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.5 (<code>ChangeNotifier</code> และ <code>LoadState</code> ใน lab) และ D1.9 (enum) <br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบสถานะของงานที่ต้องรอให้ครบ และเขียนหน้าจอที่ไม่มีทาง “ค้างหมุน”</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>นี่คือโค้ดที่เกือบทุกคนเขียนในครั้งแรก</p><pre class="code-vs"><code>bool _loading = false;
+List&lt;PickLine&gt; _lines = [];
+
+// ในหน้าจอ
+if (_loading) return const CircularProgressIndicator();
+return ListView(children: _lines.map(...).toList());</code></pre><p>มันทำงานได้จนกว่าจะเจอสถานการณ์จริงข้อใดข้อหนึ่ง</p><table><thead><tr><th>สถานการณ์</th><th>สิ่งที่ผู้ใช้เห็น</th><th>สิ่งที่ควรเห็น</th></tr></thead><tbody>
+<tr><td>server ตอบสำเร็จ แต่ไม่มีงานเลย</td><td>จอว่างเปล่า ไม่มีอะไรบอก</td><td>“วันนี้ยังไม่มีงาน”</td></tr>
+<tr><td>เน็ตหลุด โหลดไม่สำเร็จ</td><td>จอว่างเปล่าเหมือนกัน</td><td>ข้อความผิดพลาด + ปุ่มลองใหม่</td></tr>
+<tr><td>ยังไม่เริ่มโหลดเลย</td><td>จอว่างเปล่าอีก</td><td>อะไรก็ได้ที่ไม่ทำให้เข้าใจผิด</td></tr>
+</tbody></table><p>สามสถานการณ์ที่ต่างกันสิ้นเชิง แต่ผู้ใช้เห็นเหมือนกันหมด เพราะ <strong>เราเก็บได้แค่สองสถานะจาก boolean ตัวเดียว</strong></p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>loading state</td><td>สถานะระหว่างรอผลลัพธ์</td></tr>
+<tr><td>empty state</td><td>โหลดสำเร็จ แต่ไม่มีข้อมูล — เป็นความสำเร็จ ไม่ใช่ความผิดพลาด</td></tr>
+<tr><td>error state</td><td>โหลดไม่สำเร็จ</td></tr>
+<tr><td>initial load</td><td>การโหลดครั้งแรก ยังไม่มีข้อมูลเดิมให้แสดง</td></tr>
+<tr><td>refresh</td><td>การโหลดซ้ำ มีข้อมูลเดิมอยู่แล้ว</td></tr>
+<tr><td>stale data</td><td>ข้อมูลเก่าที่ยังแสดงอยู่ ทั้งที่อาจไม่ตรงกับปัจจุบัน</td></tr>
+<tr><td>exhaustive</td><td>ครอบคลุมทุกกรณี ไม่มีทางตกหล่น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: สถานะคือคำถามว่า “ตอนนี้ควรวาดอะไร”</h2><p>อย่าคิดว่าสถานะคือ “ตัวแปรที่ต้องเก็บ” ให้คิดว่าเป็น <strong>คำตอบเดียวที่ตัดสินว่าจอนี้ควรแสดงอะไร</strong></p><pre class="code-vs"><code>สถานะเดียว  →  หน้าตาเดียว
+
+idle     →  ยังไม่เริ่ม
+loading  →  ตัวหมุน
+ready    →  รายการ
+empty    →  “ยังไม่มีงาน”
+failed   →  ข้อความผิดพลาด + ปุ่มลองใหม่</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าตอบไม่ได้ว่าตอนนี้อยู่สถานะไหนโดยดูค่าเดียว แสดงว่าสถานะยังออกแบบไม่เสร็จ</div></section>
+
+<section id="section-4"><h2>4. ทำไม boolean หลายตัวถึงไม่ใช่คำตอบ</h2><p>ทางแก้แรกที่คนคิดถึงคือเพิ่ม boolean</p><pre class="code-vs"><code>bool _loading = false;
+bool _failed = false;
+bool _empty = false;</code></pre><p>ลองนับดูว่า boolean สามตัวเก็บได้กี่แบบ — 2 × 2 × 2 = <strong>8 แบบ</strong> แต่แบบที่มีความหมายจริงมีแค่ 4</p><table><thead><tr><th>loading</th><th>failed</th><th>empty</th><th>หมายความว่าอะไร</th></tr></thead><tbody>
+<tr><td>true</td><td>false</td><td>false</td><td>กำลังโหลด ✓</td></tr>
+<tr><td>false</td><td>true</td><td>false</td><td>ล้มเหลว ✓</td></tr>
+<tr><td>false</td><td>false</td><td>true</td><td>ไม่มีข้อมูล ✓</td></tr>
+<tr><td>false</td><td>false</td><td>false</td><td>มีข้อมูล ✓</td></tr>
+<tr><td>true</td><td>true</td><td>false</td><td>กำลังโหลดและล้มเหลวพร้อมกัน? ✗</td></tr>
+<tr><td>true</td><td>false</td><td>true</td><td>กำลังโหลดแต่ไม่มีข้อมูล? ✗</td></tr>
+<tr><td>false</td><td>true</td><td>true</td><td>ล้มเหลวและว่างพร้อมกัน? ✗</td></tr>
+<tr><td>true</td><td>true</td><td>true</td><td>ทุกอย่างพร้อมกัน? ✗</td></tr>
+</tbody></table><p>สี่แบบล่างคือ <strong>สถานะที่ไม่ควรมีอยู่ได้เลย</strong> แต่ชนิดข้อมูลอนุญาตให้เกิดขึ้น และเมื่อเกิดขึ้นจริง (เช่นลืมเซ็ต <code>_failed = false</code> ก่อนโหลดใหม่) หน้าจอจะแสดงอะไรก็ไม่รู้</p><p>นี่คือหลักการเดียวกับ 4.2 — <strong>ถ้าค่าที่เป็นไปไม่ได้สร้างไม่ได้ตั้งแต่แรก ก็ไม่ต้องเขียนโค้ดกันมัน</strong></p></section>
+
+<section id="section-5"><h2>5. enum: หนึ่งค่า หนึ่งความหมาย</h2><p>เปิด <code>lib/state_basics/pick_store.dart</code></p><pre class="code-vs"><code>enum LoadState { idle, loading, ready, empty, failed }</code></pre><p>ค่าเดียว ห้าความหมาย และ <strong>ไม่มีทางเป็นสองอย่างพร้อมกัน</strong> เพราะภาษาบังคับไว้แล้ว</p><table><thead><tr><th>สถานะ</th><th>เกิดเมื่อไหร่</th></tr></thead><tbody>
+<tr><td><code>idle</code></td><td>สร้าง store แล้วแต่ยังไม่เรียก <code>load()</code></td></tr>
+<tr><td><code>loading</code></td><td>เริ่ม <code>load()</code> แล้ว ยังไม่ได้ผล</td></tr>
+<tr><td><code>ready</code></td><td>ได้ผลแล้ว และมีอย่างน้อยหนึ่งรายการ</td></tr>
+<tr><td><code>empty</code></td><td>ได้ผลแล้ว แต่รายการว่าง</td></tr>
+<tr><td><code>failed</code></td><td>เกิดข้อผิดพลาด</td></tr>
+</tbody></table><p>จุดสำคัญคือบรรทัดนี้ใน <code>load()</code></p><pre class="code-vs"><code>_state = result.isEmpty ? LoadState.empty : LoadState.ready;</code></pre><p>ทั้ง <code>empty</code> และ <code>ready</code> อยู่ในเส้นทางความสำเร็จทั้งคู่ — แยกกันแค่เพื่อให้หน้าจอพูดกับผู้ใช้ต่างกัน ไม่ใช่เพราะอันหนึ่งผิดพลาด</p></section>
+
+<section id="section-6"><h2>6. switch ที่ครบทุกทาง</h2><p>ใน <code>state_basics_app.dart</code></p><pre class="code-vs"><code>body: ListenableBuilder(
+  listenable: widget.store,
+  builder: (context, child) =&gt; switch (widget.store.state) {
+    LoadState.idle || LoadState.loading =&gt; const Center(
+      key: Key('loading-view'),
+      child: CircularProgressIndicator(),
+    ),
+    LoadState.empty =&gt; const Center(
+      key: Key('empty-view'),
+      child: Text('วันนี้ยังไม่มีงานหยิบสินค้า'),
+    ),
+    LoadState.failed =&gt; _FailedView(store: widget.store),
+    LoadState.ready =&gt; _LineListView(store: widget.store),
+  },
+),</code></pre><p>สิ่งที่ควรสังเกต</p><table><thead><tr><th>สิ่งที่เห็น</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td>ไม่มี <code>default:</code></td><td>ทำให้ compiler เตือนเมื่อเพิ่มค่าใหม่ใน enum แล้วลืมจัดการ</td></tr>
+<tr><td><code>idle || loading</code></td><td>สองสถานะแสดงเหมือนกันได้ แต่ยังแยกเก็บไว้</td></tr>
+<tr><td>ทุกทางคืน widget</td><td>ไม่มีทางที่จอจะว่างเปล่าโดยไม่ตั้งใจ</td></tr>
+</tbody></table><div class="note"><strong>ลองเอง:</strong> เพิ่ม <code>offline</code> เข้าไปใน <code>LoadState</code> แล้วรัน <code>flutter analyze</code> — จะได้ error ทันทีว่า switch ไม่ครบ นี่คือประโยชน์ที่ได้จากการไม่ใส่ <code>default:</code></div></section>
+
+<section id="section-7"><h2>7. เมื่อสถานะต้องพกข้อมูลติดตัวมาด้วย</h2><p><code>enum</code> เก็บได้แค่ “อยู่สถานะไหน” แต่บางสถานะมีข้อมูลของตัวเอง</p><table><thead><tr><th>สถานะ</th><th>ข้อมูลที่ควรมากับมัน</th></tr></thead><tbody>
+<tr><td><code>ready</code></td><td>รายการงาน</td></tr>
+<tr><td><code>failed</code></td><td>ข้อความผิดพลาด และลองใหม่ได้หรือไม่</td></tr>
+</tbody></table><p>ใน lab เราแก้ด้วยการเก็บแยกไว้ข้าง ๆ</p><pre class="code-vs"><code>LoadState _state = LoadState.idle;
+List&lt;PickLine&gt; _lines = const [];
+String? _errorMessage;</code></pre><p>ใช้ได้ดีสำหรับหน้าจอขนาดนี้ แต่มีจุดอ่อนที่ต้องรู้ตัว — <code>_errorMessage</code> เป็น <code>String?</code> ซึ่งแปลว่าตอนอยู่ <code>failed</code> มันก็ยัง <em>อาจจะ</em> เป็น <code>null</code> ได้ในสายตาของภาษา ต้องอาศัยวินัยของเราเองที่จะเซ็ตให้ครบ</p><p>ทางแก้ที่ปิดช่องนั้นได้จริงคือ <code>sealed class</code> ที่เคยใช้ใน 3.14</p><pre class="code-vs"><code>sealed class PickViewState { const PickViewState(); }
+
+class PickLoading extends PickViewState { const PickLoading(); }
+class PickEmpty extends PickViewState { const PickEmpty(); }
+
+class PickReady extends PickViewState {
+  const PickReady(this.lines);
+  final List&lt;PickLine&gt; lines;      // มีแน่นอน ไม่ต้องเช็ก null
 }
-class Failure&lt;T&gt; extends LoadState&lt;T&gt; {
-  const Failure(this.message, {this.previous});
-  final String message; final T? previous;
-}</code></pre></section>
-<section id="section-2"><h2>2. Empty เป็น Data</h2><p>โหลดสำเร็จได้ listว่างคือ empty stateที่มีคำอธิบาย/action เช่น “ยังไม่มีงาน” ไม่ใช่ errorหรือ loading Skeleton/spinnerต้องใช้เมื่อ requestยังไม่จบเท่านั้น</p></section>
-<section id="section-3"><h2>3. Initial load vs refresh</h2><p>Initialไม่มี dataจึงแสดง skeleton/full progress; refreshมี dataเดิมควรรักษารายการและแสดง indicatorเล็ก ป้องกันหน้ากระพริบทุก polling Absoluteหลาย loaderคง listเดิมระหว่าง fetchและ notifyเมื่อผลมา แต่ควรมี per-resource refreshing/errorชัดเมื่อ UXต้องการ</p></section>
-<section id="section-4"><h2>4. Partial failure</h2><p>Dashboardโหลด tasks, inventory, summaryพร้อมกัน ถ้า summary informational failไม่ควรบล็อก tasks WarehouseStoreจับ error summaryแล้วเงียบเพื่อให้หน้าใช้ได้ แต่ productionควรมี logging/telemetry แยก stateต่อ resourceแทน global errorก้อนเดียว</p></section>
-<section id="section-5"><h2>5. Retry semantics</h2><p>Error stateบอก retryableหรือไม่ และ retry commandต้องรักษา input/context 401→login, 409→refresh/reconcile, timeout→retryได้, validation→แก้ input อย่าแสดงปุ่ม Retryเดียวทุกชนิด</p></section>
-<section id="section-6"><h2>6. Render exhaustive</h2><pre class="code-vs"><code>return switch (state) {
-  Initial() || Loading() =&gt; const TaskSkeleton(),
-  Data(value: final tasks) when tasks.isEmpty =&gt; const EmptyTasks(),
-  Data(value: final tasks) =&gt; TaskList(tasks: tasks),
-  Failure(:final message, previous: null) =&gt; ErrorPanel(message),
-  Failure(:final previous) =&gt; TaskListWithError(previous!),
-};</code></pre></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Pollingครั้งใหม่ failแต่มี tasksจากครั้งก่อน ควรล้าง listไหม?</p><details><summary>เฉลย</summary><p>โดยทั่วไปเก็บ stale dataพร้อม timestamp/error bannerและ retry ไม่ล้างจน emptyเพราะทำงานต่อไม่ได้ แต่ actionที่ต้องข้อมูลสดอาจ disableและระบุ offline/stale ตามความเสี่ยง Domain policyต้องบอกอายุที่ยอมรับได้</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>if (items.isEmpty) CircularProgressIndicator()</code> จะ spinตลอดเมื่อ serverตอบ empty ต้องมี statusแยกจาก data และ test empty successโดยตรง</div></section>
+
+class PickFailed extends PickViewState {
+  const PickFailed(this.message, {this.canRetry = true});
+  final String message;             // มีแน่นอน
+  final bool canRetry;
+}</code></pre><pre class="code-vs"><code>return switch (state) {
+  PickLoading() =&gt; const LoadingView(),
+  PickEmpty() =&gt; const EmptyView(),
+  PickReady(:final lines) =&gt; LineListView(lines: lines),
+  PickFailed(:final message, :final canRetry) =&gt; FailedView(message, canRetry),
+};</code></pre><table><thead><tr><th></th><th><code>enum</code> + field แยก</th><th><code>sealed class</code></th></tr></thead><tbody>
+<tr><td>อ่านง่าย</td><td>ง่ายกว่า</td><td>ต้องเขียนคลาสหลายตัว</td></tr>
+<tr><td>ข้อมูลผูกกับสถานะ</td><td>ไม่ผูก ต้องระวังเอง</td><td>ผูกแน่น ภาษาบังคับ</td></tr>
+<tr><td>เหมาะกับ</td><td>สถานะเรียบง่าย ข้อมูลน้อย</td><td>สถานะที่แต่ละแบบพกข้อมูลต่างกัน</td></tr>
+</tbody></table><p>เราจะกลับมาเรื่องนี้เต็ม ๆ ใน 4.15</p></section>
+
+<section id="section-8"><h2>8. โหลดครั้งแรก ไม่เหมือนโหลดซ้ำ</h2><p>ปัญหาที่จะเจอทันทีที่เพิ่มการโหลดซ้ำ (4.11)</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  _state = LoadState.loading;    // ← ทำให้รายการที่มีอยู่หายไปทั้งจอ
+  notifyListeners();
+  ...
+}</code></pre><p>ถ้าโหลดซ้ำทุก 10 วินาที ผู้ใช้จะเห็นรายการหายไปแล้วกลับมาทุก 10 วินาที — และถ้ากำลังเลื่อนอยู่ ตำแหน่งจะเด้งกลับด้วย</p><table><thead><tr><th></th><th>โหลดครั้งแรก</th><th>โหลดซ้ำ</th></tr></thead><tbody>
+<tr><td>มีข้อมูลเดิมไหม</td><td>ไม่มี</td><td>มี</td></tr>
+<tr><td>ควรแสดง</td><td>ตัวหมุนเต็มจอ</td><td>รายการเดิม + ตัวบอกเล็ก ๆ</td></tr>
+<tr><td>ถ้าล้มเหลว</td><td>หน้าผิดพลาดเต็มจอ</td><td>รายการเดิม + แถบเตือน</td></tr>
+</tbody></table><pre class="code-vs"><code>// แนวทาง: เข้าสู่ loading เฉพาะเมื่อยังไม่มีอะไรให้แสดง
+if (_lines.isEmpty) {
+  _state = LoadState.loading;
+  notifyListeners();
+}</code></pre><p>หลักคิดคือ <strong>อย่าเอาของที่ใช้งานได้อยู่ออกจากจอ เพียงเพราะกำลังจะไปหาของใหม่</strong></p></section>
+
+<section id="section-9"><h2>9. ล้มเหลวตอนโหลดซ้ำ: ล้างรายการหรือไม่</h2><p>คนหน้างานยืนอยู่หน้าแร็ค มีรายการหยิบ 12 บรรทัดบนจอ แล้วเน็ตหลุด</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ล้างรายการ แสดงหน้าผิดพลาด</td><td>ทำงานต่อไม่ได้เลย ทั้งที่ข้อมูลเมื่อ 10 วินาทีก่อนยังใช้ได้</td></tr>
+<tr><td>เก็บรายการเดิม + แถบเตือน</td><td>ทำงานต่อได้ และรู้ว่าข้อมูลอาจไม่สด</td></tr>
+</tbody></table><p>โดยทั่วไปเลือกทางที่สอง แต่ต้องแยกให้ออกว่าอะไร “อ่าน” และอะไร “เขียน”</p><table><thead><tr><th>การกระทำ</th><th>ตอนออฟไลน์</th></tr></thead><tbody>
+<tr><td>ดูรายการ เลื่อนดู</td><td>ทำได้ ข้อมูลเก่ายังมีประโยชน์</td></tr>
+<tr><td>กดปิดงาน</td><td>ต้องบอกให้ชัดว่าส่งไม่ได้ ไม่ใช่ทำเป็นว่าสำเร็จ</td></tr>
+</tbody></table><div class="warn">ข้อมูลเก่าที่ไม่บอกว่าเก่า อันตรายกว่าไม่มีข้อมูล — ถ้าเก็บ stale data ไว้ ต้องแสดงให้เห็นเสมอว่าอัปเดตล่าสุดเมื่อไหร่</div></section>
+
+<section id="section-10"><h2>10. หลายแหล่ง: อย่าให้ของไม่สำคัญล้มทั้งจอ</h2><p>หน้าสรุปงานหนึ่งหน้าอาจโหลดสามอย่างพร้อมกัน</p><table><thead><tr><th>ข้อมูล</th><th>สำคัญแค่ไหน</th><th>ถ้าล้มเหลว</th></tr></thead><tbody>
+<tr><td>รายการงาน</td><td>ขาดไม่ได้</td><td>หน้าใช้ไม่ได้ ต้องแสดงผิดพลาด</td></tr>
+<tr><td>ยอดคงเหลือคลัง</td><td>มีก็ดี</td><td>ซ่อนส่วนนั้น ที่เหลือใช้ต่อได้</td></tr>
+<tr><td>ประกาศจากระบบ</td><td>ไม่จำเป็น</td><td>ซ่อนไปเงียบ ๆ</td></tr>
+</tbody></table><p>ถ้าใช้สถานะก้อนเดียวคุมทั้งหน้า พอประกาศโหลดไม่ได้ ทั้งหน้าก็ขึ้นผิดพลาด — ทั้งที่รายการงานมาครบแล้ว</p><p>วิธีแก้คือ <strong>ให้แต่ละแหล่งมีสถานะของตัวเอง</strong> แล้วหน้าจอตัดสินว่าอันไหนถึงขั้นบล็อกทั้งหน้า</p><pre class="code-vs"><code>LoadState _tasksState = LoadState.idle;     // สำคัญ
+LoadState _summaryState = LoadState.idle;   // เสริม</code></pre><div class="warn">ถ้าเลือกซ่อนความล้มเหลวของส่วนเสริม ต้องยังบันทึก log ไว้เสมอ ไม่งั้นจะกลายเป็นปัญหาที่ไม่มีใครรู้ว่ามีอยู่</div></section>
+
+<section id="section-11"><h2>11. ปุ่มลองใหม่ไม่ได้เหมาะกับทุกความผิดพลาด</h2><table><thead><tr><th>ชนิดความผิดพลาด</th><th>ลองใหม่ช่วยไหม</th><th>ควรทำอะไร</th></tr></thead><tbody>
+<tr><td>หมดเวลารอ / เน็ตหลุด</td><td>ช่วย</td><td>ปุ่มลองใหม่</td></tr>
+<tr><td>server ขัดข้อง (500)</td><td>อาจช่วย</td><td>ปุ่มลองใหม่ แต่เว้นระยะ</td></tr>
+<tr><td>ยังไม่ล็อกอิน (401)</td><td>ไม่ช่วย</td><td>พาไปหน้าเข้าสู่ระบบ</td></tr>
+<tr><td>ข้อมูลถูกคนอื่นแก้ไปแล้ว (409)</td><td>ไม่ช่วย</td><td>โหลดข้อมูลใหม่แล้วให้ตัดสินใจอีกครั้ง</td></tr>
+<tr><td>กรอกข้อมูลผิด</td><td>ไม่ช่วย</td><td>พากลับไปแก้ช่องที่ผิด</td></tr>
+</tbody></table><p>การกดลองใหม่กับ 401 คือการทำสิ่งเดิมซ้ำและได้ผลเดิม ซึ่งทำให้ผู้ใช้รู้สึกว่าแอปพัง ทั้งที่แอปแค่บอกไม่ถูกว่าต้องทำอะไร</p><p>รายละเอียดการแปลงรหัสตอบกลับเป็นการกระทำจะอยู่ใน Part 8</p></section>
+
+<section id="section-12"><h2>12. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หมุนไม่หยุดทั้งที่ server ตอบแล้ว</td><td><code>if (items.isEmpty) spinner</code> — เดาสถานะจากข้อมูล</td><td>แยกสถานะออกจากข้อมูล</td></tr>
+<tr><td>โหลดไม่สำเร็จแล้วจอว่าง ไม่มีอะไรบอก</td><td>ไม่มีสถานะ failed</td><td>เพิ่มสถานะและหน้าจอของมัน</td></tr>
+<tr><td>ลองใหม่แล้วยังขึ้นข้อความผิดพลาดเดิม</td><td>ไม่ล้าง <code>_errorMessage</code> ตอนเริ่มโหลด</td><td>เคลียร์ทุกครั้งที่เข้า loading</td></tr>
+<tr><td>รายการกระพริบทุกครั้งที่โหลดซ้ำ</td><td>เข้า loading ทั้งที่มีข้อมูลอยู่</td><td>เข้า loading เฉพาะเมื่อยังว่าง</td></tr>
+<tr><td>เพิ่มสถานะใหม่แล้วบางจอไม่รองรับ</td><td>มี <code>default:</code> ใน switch</td><td>ตัด <code>default:</code> ให้ compiler ช่วยหา</td></tr>
+<tr><td>ส่วนเสริมล้มแล้วทั้งหน้าใช้ไม่ได้</td><td>สถานะก้อนเดียวคุมทุกแหล่ง</td><td>แยกสถานะต่อแหล่ง</td></tr>
+<tr><td>ข้อมูลบนจอไม่ตรงความจริงแต่ไม่มีใครรู้</td><td>เก็บ stale data โดยไม่บอก</td><td>แสดงเวลาที่อัปเดตล่าสุด</td></tr>
+</tbody></table></section>
+
+<section id="section-13"><h2>13. แบบฝึกหัด</h2><p>หน้าจอหนึ่งใช้โค้ดนี้</p><pre class="code-vs"><code>bool _loading = false;
+String? _error;
+List&lt;PickLine&gt; _lines = [];
+
+Future&lt;void&gt; load() async {
+  _loading = true;
+  notifyListeners();
+  try {
+    _lines = await repository.fetchLines();
+  } catch (e) {
+    _error = 'โหลดไม่สำเร็จ';
+  }
+  _loading = false;
+  notifyListeners();
+}
+
+Widget build() {
+  if (_loading) return const CircularProgressIndicator();
+  if (_error != null) return Text(_error!);
+  return LineList(lines: _lines);
+}</code></pre><ol><li>ระบุข้อบกพร่องให้ได้อย่างน้อยสามข้อ (มีมากกว่านั้น)</li><li>เขียนใหม่ด้วย <code>LoadState</code></li><li>ตอบว่าถ้าโหลดซ้ำแล้วล้มเหลว ควรล้างรายการเดิมไหม เพราะอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่ผู้ใช้เจอ</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่มีสถานะ empty</td><td>ไม่มีงานจริง กับ ยังโหลดไม่เสร็จ หน้าตาเหมือนกัน</td></tr>
+<tr><td>2</td><td>ไม่ล้าง <code>_error</code> ตอนเริ่มโหลด</td><td>กดลองใหม่แล้วสำเร็จ แต่ยังขึ้นข้อความผิดพลาดค้างอยู่</td></tr>
+<tr><td>3</td><td><code>_loading = false</code> ไม่ได้อยู่ใน <code>finally</code></td><td>ถ้ามี exception ชนิดที่ <code>catch</code> ไม่ครอบ จะหมุนค้างถาวร (4.8)</td></tr>
+<tr><td>4</td><td><code>catch (e)</code> จับทุกอย่าง</td><td>บั๊กในโค้ดเราเองก็กลายเป็น “โหลดไม่สำเร็จ” หาสาเหตุไม่เจอ (4.8)</td></tr>
+<tr><td>5</td><td>ล้มเหลวแล้ว <code>_lines</code> ยังค้างของเดิม</td><td>ลำดับ if ทำให้ซ่อนไว้ แต่สถานะจริงขัดกัน</td></tr>
+<tr><td>6</td><td>ไม่แยกโหลดครั้งแรกกับโหลดซ้ำ</td><td>รายการกระพริบทุกครั้งที่รีเฟรช</td></tr>
+<tr><td>7</td><td>ไม่มีปุ่มลองใหม่</td><td>ล้มเหลวแล้วตัน ต้องปิดแอป</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>enum LoadState { idle, loading, ready, empty, failed }
+
+LoadState _state = LoadState.idle;
+List&lt;PickLine&gt; _lines = const [];
+String? _errorMessage;
+
+LoadState get state =&gt; _state;
+List&lt;PickLine&gt; get lines =&gt; List.unmodifiable(_lines);
+String? get errorMessage =&gt; _errorMessage;
+
+Future&lt;void&gt; load() async {
+  _errorMessage = null;                 // แก้ข้อ 2
+  if (_lines.isEmpty) {                 // แก้ข้อ 6
+    _state = LoadState.loading;
+  }
+  notifyListeners();
+  try {
+    final result = await repository.fetchLines();
+    _lines = result;
+    _state = result.isEmpty             // แก้ข้อ 1
+        ? LoadState.empty
+        : LoadState.ready;
+  } on PickException catch (error) {    // แก้ข้อ 4
+    _state = LoadState.failed;
+    _errorMessage = error.message;
+  } finally {                           // แก้ข้อ 3
+    notifyListeners();
+  }
+}</code></pre><pre class="code-vs"><code>Widget build(BuildContext context) =&gt; switch (store.state) {
+  LoadState.idle || LoadState.loading =&gt; const LoadingView(),
+  LoadState.empty =&gt; const EmptyView('วันนี้ยังไม่มีงาน'),
+  LoadState.failed =&gt; FailedView(                     // แก้ข้อ 7
+    message: store.errorMessage ?? 'โหลดไม่สำเร็จ',
+    onRetry: store.load,
+  ),
+  LoadState.ready =&gt; LineList(lines: store.lines),
+};</code></pre><p>สังเกตว่าเมื่อสถานะครบแล้ว หน้าจอไม่ต้องเดาอะไรเลย — มันแค่แปลสถานะเป็นหน้าตา ซึ่งทำให้ทดสอบง่ายด้วย เพราะตั้งสถานะแล้วตรวจว่าเห็นอะไรได้ตรง ๆ</p><p><strong>ข้อ 3 — โหลดซ้ำแล้วล้มเหลว</strong></p><p>ไม่ควรล้าง โดยมีเงื่อนไข</p><p>เหตุผลที่ไม่ล้าง — คนหน้างานถือ PDA ยืนอยู่หน้าแร็ค รายการหยิบ 12 บรรทัดที่โหลดมาเมื่อ 10 วินาทีก่อนยังใช้ทำงานได้ การล้างทิ้งเพราะรีเฟรชไม่ผ่านคือการหยุดงานเขาโดยไม่จำเป็น</p><p>เงื่อนไขที่ต้องมี</p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>แสดงแถบเตือนว่ารีเฟรชไม่สำเร็จ</td><td>ไม่ให้เข้าใจผิดว่าข้อมูลสด</td></tr>
+<tr><td>แสดงเวลาที่อัปเดตล่าสุด</td><td>ให้ตัดสินเองได้ว่าเก่าเกินไปหรือยัง</td></tr>
+<tr><td>การกดปิดงานต้องบอกชัดถ้าส่งไม่ได้</td><td>อ่านข้อมูลเก่าได้ แต่เขียนต้องถึง server จริง</td></tr>
+</tbody></table><p>ข้อยกเว้นที่ควรล้าง — เมื่อความล้มเหลวบอกว่าข้อมูลเดิม <strong>ผิดแน่นอน</strong> เช่น 401 (สิทธิ์หมดอายุ ไม่ควรให้ดูต่อ) หรือ 409 พร้อมข้อมูลว่ามีคนแก้ไปแล้ว</p><p>สรุปเป็นหลักเดียว — <em>เก็บข้อมูลเก่าไว้เมื่อมันยังน่าจะจริง และล้างเมื่อรู้ว่ามันไม่จริงแล้ว</em></p></details></section>
+
+<section id="section-14"><h2>14. สรุปท้ายบท</h2><div class="success"><ul><li>boolean ตัวเดียวเก็บได้สองสถานะ แต่ของจริงมีอย่างน้อยห้า</li><li>boolean หลายตัวเปิดช่องให้เกิดสถานะที่ไม่ควรมีอยู่</li><li><code>enum</code> ทำให้เป็นได้ทีละหนึ่งสถานะเท่านั้น</li><li><code>empty</code> เป็นความสำเร็จ ไม่ใช่ความผิดพลาด</li><li>switch ที่ไม่มี <code>default:</code> ทำให้ compiler ช่วยหาจุดที่ลืม</li><li>เมื่อแต่ละสถานะพกข้อมูลต่างกัน ให้ใช้ <code>sealed class</code> (4.15)</li><li>โหลดครั้งแรกกับโหลดซ้ำต้องแสดงต่างกัน</li><li>เก็บข้อมูลเก่าไว้เมื่อยังน่าจะจริง และต้องบอกเสมอว่าเก่า</li><li>แยกสถานะต่อแหล่ง อย่าให้ส่วนเสริมล้มทั้งหน้า</li><li>ปุ่มลองใหม่เหมาะกับความผิดพลาดบางชนิดเท่านั้น</li></ul></div><p><strong>บทถัดไป:</strong> 4.8 จะเจาะบรรทัด <code>finally</code> ที่โผล่มาในบทนี้ — ทำไมมันคือสิ่งเดียวที่กันหน้าจอค้างหมุนได้จริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
