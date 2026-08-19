@@ -1,16 +1,109 @@
-<div class="note">Debounce จัดการ event ต่อเนื่องตามเวลา ส่วน duplicate detection จัดการค่าซ้ำตาม identity และ business window ทั้งสองเรื่องต่างกัน และไม่แทน idempotency ของ backend</div>
-<section><h2>1. Debounce vs throttle vs lock</h2><ul><li>Debounce: รอเงียบช่วงหนึ่งแล้วใช้ event ล่าสุด เหมาะ search-as-you-type</li><li>Throttle: รับไม่เกินหนึ่งครั้งต่อช่วง เหมาะ telemetry/UI action</li><li>Busy lock: ไม่รับ commandใหม่จนงานเดิมจบ เหมาะ scan→API</li><li>Duplicate set/window: ปฏิเสธ canonical code ที่เคยรับใน session/ช่วงเวลา</li></ul></section>
-<section><h2>2. Scanner ที่มี Enter ไม่ต้อง debounce text</h2><p>เมื่อ wedge ส่ง terminatorชัด ให้ submitที่ onSubmitted การ debounce onChanged อาจยิงก่อนอักขระสุดท้ายบนเครื่องช้า ใช้ busy lock และ duplicate policy แทน Debounce เหมาะกับช่องค้นหา filter ที่ไม่มี commit event</p></section>
-<section><h2>3. Duplicate ใน session</h2><pre class="code-vs"><code>final scanned = &lt;String&gt;{};
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: กันไม่ให้ยิงของชิ้นเดิมซ้ำ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.6 (ค่ามาตรฐาน) และ D1.5 (<code>Set</code> กับการกันค่าซ้ำ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบการกันซ้ำที่ถูกต้องตามชนิดข้อมูล และรู้ว่าการยิงซ้ำบางกรณีเป็นเรื่องที่ถูกต้อง</div>
 
-ScanDecision acceptSerial(String raw) {
-  final serial = normalizeSerial(raw);
-  if (!available.contains(serial)) return const UnknownSerial();
-  if (!scanned.add(serial)) return DuplicateSerial(serial);
-  return AcceptedSerial(serial);
-}</code></pre><p>wmsapp SerialSelect ตรวจ available ก่อน แล้วตรวจ <code>_scanned.contains(sn)</code> พร้อมคืน focus Set ช่วย lookup O(1) และ add แบบ atomicใน isolateเดียว</p></section>
-<section><h2>4. Same code อาจถูกต้อง</h2><p>Product barcode อาจต้องสแกนซ้ำเพื่อเพิ่ม quantity แต่ serial ต้อง unique และ pallet scanซ้ำระหว่าง workflowอาจเป็น retry กำหนด duplicate policy ตาม entity/state: ignore, increment, warn, replace หรือ reject ไม่สร้าง global “last barcode” rule</p></section>
-<section><h2>5. Time window</h2><p>เครื่องบางรุ่นส่ง Enterซ้ำหรือผู้ใช้กด triggerค้าง ใช้ last accepted canonical value + timestamp ป้องกันซ้ำใน 300–800msได้ แต่ต้อง clock injectable สำหรับ test และห้ามปฏิเสธการสแกน codeเดิมที่ธุรกิจอนุญาตหลัง window</p></section>
-<section><h2>6. Backend idempotency</h2><p>Mobile lock ป้องกัน UX duplicateใน processเดียว แต่ retry/network timeout/appสองเครื่องยังทำ commitซ้ำได้ Endpoint mutation ควรรับ idempotency/operation key หรือมี unique constraint/version/invariant ฝั่ง .NET แล้วคืนผลเดิม/Conflictอย่างชัดเจน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Serial เดียวกันถูก triggerสองครั้งห่าง 40ms และ requestแรกยังวิ่ง ต้องป้องกันที่ใดบ้าง?</p><details><summary>แนวคำตอบ</summary><p>UI busy lock ปิด submitที่สอง, local canonical Set/window ให้ feedback duplicate, requestมี operation ID และ backend unique constraint/idempotency ป้องกันข้าม retry/device เมื่อ requestจบให้คืน focusและไม่ลบ accepted stateหาก response timeoutแต่ serverอาจ commitแล้ว ต้อง reconcile</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">Timer debounce อย่างเดียวไม่รับประกันไม่ซ้ำ และ busy boolean อย่างเดียวไม่กัน retryหลัง timeout ออกแบบทั้ง event semantics, local session identity และ server transaction/idempotency ตามระดับความเสียหาย</div></section>
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในคลังจริง การยิงซ้ำเกิดขึ้นตลอดเวลาด้วยเหตุผลที่ไม่ใช่ความผิดของใคร</p><ul><li>พนักงานกดปุ่มยิงค้างไว้ เครื่องยิงสองครั้ง</li><li>ไม่แน่ใจว่าเข้าหรือยัง เลยยิงซ้ำเพื่อความมั่นใจ</li><li>กล่องเดียวกันถูกวางไว้สองที่ แล้วยิงทั้งสองรอบ</li></ul><p>ถ้าไม่กัน ผลคือรายงานบอกว่ารับของ 240 ชิ้นทั้งที่จริงมี 120 — ซึ่งเป็นความเสียหายที่แก้ยากเพราะไม่มีใครรู้ว่าตัวเลขไหนถูก</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>duplicate</td><td>ค่าที่เคยรับไปแล้วในรอบนี้</td></tr>
+<tr><td>session</td><td>ขอบเขตของ “รอบนี้” เช่นหนึ่งกะ หรือหนึ่งใบงาน</td></tr>
+<tr><td>debounce</td><td>รอให้เงียบสักครู่ก่อนทำงาน</td></tr>
+<tr><td>busy lock</td><td>ไม่รับคำสั่งใหม่จนกว่าคำสั่งเดิมจะเสร็จ</td></tr>
+<tr><td>idempotent</td><td>ทำซ้ำกี่ครั้งก็ได้ผลเหมือนทำครั้งเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ทะเบียนที่เคยเจอ</h2><p>ทบทวนจากแบบฝึกหัด D1.5 — เราต้องการทั้งลำดับสำหรับแสดงผล และการตรวจซ้ำที่เร็ว จึงใช้สองโครงสร้างคู่กัน</p><pre class="code-vs"><code>final List&lt;String&gt; _accepted = &lt;String&gt;[];   // ลำดับสำหรับหน้าจอ
+final Set&lt;String&gt; _seen = &lt;String&gt;{};        // ตรวจซ้ำแบบเร็ว</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทะเบียนต้องเก็บ <em>ค่ามาตรฐาน</em> ที่ผ่านการแปลงจาก 3.6 แล้ว — ถ้าเก็บค่าดิบ การกันซ้ำจะไม่ทำงานเมื่อตัวพิมพ์หรือช่องว่างต่างกัน</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>ScanOutcome accept(String raw) {
+  if (_busy) return ScanOutcome.busy;
+
+  final code = normalizeBarcode(raw);
+  if (code.isEmpty) return ScanOutcome.empty;
+  if (!isValidPalletCode(code)) return ScanOutcome.badFormat;
+  if (!_seen.add(code)) return ScanOutcome.duplicate;   // ← กันซ้ำตรงนี้
+
+  _accepted.add(code);
+  return ScanOutcome.accepted;
+}</code></pre><p>สังเกตว่า <code>_seen.add(code)</code> ทำสองอย่างในบรรทัดเดียว — มันเพิ่มเข้าไปและคืน <code>false</code> ถ้ามีอยู่แล้ว จึงไม่ต้องเรียก <code>contains</code> ก่อนแล้วค่อย <code>add</code> ซึ่งเป็นการอ่านสองรอบโดยไม่จำเป็น (เรื่องนี้อยู่ในเฉลย D1.5 แล้ว)</p><p>เทสต์ยืนยันพฤติกรรมสองข้อ</p><pre class="code-vs"><code>test('ยิงซ้ำถูกปฏิเสธ แม้ตัวพิมพ์และช่องว่างต่างกัน', () {
+  session.accept('PAL-1001');
+
+  expect(session.accept('  pal-1001'), ScanOutcome.duplicate);
+  expect(session.count, 1);        // ไม่เพิ่มซ้ำ
+});</code></pre></section>
+
+<section><h2>5. ยิงซ้ำไม่ได้แปลว่าผิดเสมอไป</h2><p>นี่คือจุดที่สำคัญที่สุดของบทนี้ และเป็นที่ที่คนมักออกแบบผิด — <strong>กฎการกันซ้ำขึ้นกับว่าเรากำลังยิงอะไร</strong></p><table><thead><tr><th>ยิงอะไร</th><th>ยิงซ้ำหมายถึง</th><th>ควรทำอย่างไร</th></tr></thead><tbody>
+<tr><td>ซีเรียลของสินค้าชิ้นเดียว</td><td>ผิดแน่นอน — ของชิ้นเดียวมีซีเรียลเดียว</td><td>ปฏิเสธ</td></tr>
+<tr><td>รหัสพาเลทในรอบรับเข้า</td><td>ผิด — พาเลทใบเดิมรับซ้ำไม่ได้</td><td>ปฏิเสธ</td></tr>
+<tr><td>บาร์โค้ดสินค้าตอนนับสต็อก</td><td><strong>ถูกต้อง</strong> — ยิงหนึ่งครั้งต่อหนึ่งชิ้น</td><td>เพิ่มจำนวน</td></tr>
+<tr><td>รหัสตำแหน่งตอนเดินตรวจ</td><td><strong>ถูกต้อง</strong> — เดินผ่านซ้ำได้</td><td>ยอมรับตามปกติ</td></tr>
+</tbody></table><div class="warn">อย่าสร้างกฎกลางแบบ “ห้ามยิงรหัสเดิมซ้ำภายใน 3 วินาที” แล้วใช้ทั้งแอป เพราะหน้าจอนับสต็อกจะพังทันที — พนักงานยิงสินค้าชนิดเดียวกันติด ๆ กัน 20 ชิ้นเป็นเรื่องปกติ</div><p>ให้กำหนดกฎ <strong>ต่อหน้าจอ</strong> ตามความหมายทางธุรกิจของสิ่งที่กำลังยิง</p></section>
+
+<section><h2>6. ขอบเขตของ “รอบนี้”</h2><p>คำถามถัดมาคือทะเบียนควรเก็บไว้นานแค่ไหน</p><table><thead><tr><th>ขอบเขต</th><th>เหมาะกับ</th><th>ล้างเมื่อ</th></tr></thead><tbody>
+<tr><td>หนึ่งใบงาน</td><td>รับเข้าตามใบสั่งซื้อ</td><td>กดบันทึกสำเร็จ</td></tr>
+<tr><td>หนึ่งกะ</td><td>ตรวจนับทั้งโซน</td><td>ปิดกะ</td></tr>
+<tr><td>ไม่กันเลย</td><td>นับสต็อกทีละชิ้น</td><td>—</td></tr>
+</tbody></table><p>ใน lab ทะเบียนอยู่ใน <code>ScanSession</code> ซึ่งมีอายุเท่ากับหน้าจอ — เมื่อออกจากหน้าจอแล้วเข้าใหม่ ทะเบียนจะว่าง ซึ่งเหมาะกับงานรับเข้าทีละใบ</p><p>สิ่งที่ต้องระวังคือ <strong>อย่าเก็บทะเบียนไว้นานกว่าที่ธุรกิจต้องการ</strong> เพราะพนักงานจะยิงพาเลทใบเดิมไม่ได้ในวันถัดไปทั้งที่ควรได้</p></section>
+
+<section><h2>7. สามชั้นที่ต้องมีครบ</h2><p>การกันซ้ำที่แอปเป็นเพียงชั้นเดียวจากสามชั้น</p><table><thead><tr><th>ชั้น</th><th>กันอะไร</th><th>กันไม่ได้</th></tr></thead><tbody>
+<tr><td>ทะเบียนในหน้าจอ</td><td>ยิงซ้ำในรอบเดียวกัน</td><td>เปิดแอปใหม่แล้วยิงซ้ำ</td></tr>
+<tr><td>ล็อกระหว่างบันทึก</td><td>กดบันทึกซ้อนกัน (3.8)</td><td>ส่งซ้ำจากคนละเครื่อง</td></tr>
+<tr><td>กฎที่ server</td><td>ทุกกรณีที่เหลือ</td><td>—</td></tr>
+</tbody></table><p>เหตุผลที่ชั้นที่สามขาดไม่ได้</p><ul><li>พนักงานสองคนอาจยิงพาเลทใบเดียวกันจากคนละเครื่อง</li><li>เน็ตหลุดตอนบันทึก แอปลองใหม่ แต่ครั้งแรกอาจถึง server ไปแล้ว</li><li>ผู้ใช้ปิดแอปแล้วเปิดใหม่ ทะเบียนหายไป</li></ul><p>ทางที่ server ใช้กันคือให้แต่ละคำสั่งมีรหัสประจำตัว ถ้าได้รับรหัสเดิมซ้ำก็คืนผลเดิมโดยไม่บันทึกใหม่ — เรื่องนี้จะลงรายละเอียดใน Part 7</p></section>
+
+<section><h2>8. debounce ไม่ใช่ทางแก้ของเรื่องนี้</h2><table><thead><tr><th></th><th>debounce</th><th>ทะเบียนกันซ้ำ</th></tr></thead><tbody>
+<tr><td>ตัดสินจาก</td><td>เวลา</td><td>ค่าที่เคยเจอ</td></tr>
+<tr><td>เหมาะกับ</td><td>ช่องค้นหาที่พิมพ์ไปเรื่อย ๆ</td><td>การยิงบาร์โค้ด</td></tr>
+<tr><td>ทดสอบซ้ำได้ไหม</td><td>ยาก ขึ้นกับจังหวะ</td><td>ง่าย ตรวจค่าตรง ๆ</td></tr>
+</tbody></table><p>เหตุผลที่ debounce ไม่เหมาะกับการยิงบาร์โค้ดคือเรารู้ชัดอยู่แล้วว่าข้อมูลจบเมื่อไหร่ — ตอนที่เครื่องสแกนกด Enter ตามที่คุยใน 3.5 จึงไม่ต้องเดาจากเวลา</p><p>ถ้าเจอปัญหาเครื่องยิงซ้ำจากการกดค้าง ให้แก้ที่การตั้งค่าเครื่องก่อนตามหลักใน 3.5 แล้วให้ทะเบียนเป็นตาข่ายรองรับ</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กันซ้ำไม่ทำงาน</td><td>เก็บค่าดิบในทะเบียน</td><td>เก็บค่ามาตรฐานจาก 3.6</td></tr>
+<tr><td>หน้าจอนับสต็อกยิงชิ้นที่สองไม่ได้</td><td>ใช้กฎกันซ้ำผิดบริบท</td><td>กำหนดกฎต่อหน้าจอตามความหมายทางธุรกิจ</td></tr>
+<tr><td>วันถัดไปยิงพาเลทเดิมไม่ได้</td><td>ทะเบียนมีอายุยาวเกินไป</td><td>ล้างเมื่อจบใบงาน</td></tr>
+<tr><td>ข้อมูลซ้ำถึง server ได้</td><td>กันแค่ที่แอป</td><td>ให้ server มีกฎกันซ้ำด้วย</td></tr>
+<tr><td>ใช้ <code>contains</code> แล้ว <code>add</code> แยกกัน</td><td>อ่านสองรอบโดยไม่จำเป็น</td><td>ใช้ค่าที่ <code>add</code> คืนมา</td></tr>
+<tr><td>เอา debounce มากันซ้ำ</td><td>สับสนระหว่างเวลากับตัวตน</td><td>ใช้ทะเบียนค่าที่เคยเจอ</td></tr>
+<tr><td>ปฏิเสธเงียบ ๆ ผู้ใช้ไม่รู้</td><td>ไม่ได้แจ้งผล</td><td>บอกให้ชัดว่าเป็นการซ้ำ (3.11)</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>แอปหนึ่งมีสามหน้าจอที่ใช้เครื่องสแกน จงกำหนดกฎการกันซ้ำของแต่ละหน้าพร้อมเหตุผล</p><table><thead><tr><th>หน้าจอ</th><th>สิ่งที่ยิง</th><th>บริบท</th></tr></thead><tbody>
+<tr><td>รับเข้าตามใบสั่งซื้อ</td><td>รหัสพาเลท</td><td>หนึ่งใบสั่งซื้อมีหลายพาเลท แต่ละใบรับครั้งเดียว</td></tr>
+<tr><td>นับสต็อกในโซน</td><td>บาร์โค้ดสินค้า</td><td>ยิงหนึ่งครั้งต่อหนึ่งชิ้นที่นับได้</td></tr>
+<tr><td>ตรวจซีเรียลก่อนส่งออก</td><td>ซีเรียลสินค้า</td><td>แต่ละชิ้นมีซีเรียลไม่ซ้ำ</td></tr>
+</tbody></table><ol><li>ระบุกฎของแต่ละหน้า</li><li>เขียนโครงโค้ดของหน้านับสต็อก ซึ่งต่างจาก lab</li><li>อธิบายว่าถ้าใช้กฎของหน้ารับเข้ากับหน้านับสต็อก จะเกิดอะไรขึ้น</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>หน้าจอ</th><th>กฎ</th><th>ผลเมื่อยิงซ้ำ</th></tr></thead><tbody>
+<tr><td>รับเข้า</td><td>ปฏิเสธ</td><td>แจ้ง “สแกนซ้ำ” จำนวนไม่เพิ่ม</td></tr>
+<tr><td>นับสต็อก</td><td><strong>เพิ่มจำนวน</strong></td><td>ตัวนับของสินค้านั้นเพิ่มขึ้นหนึ่ง</td></tr>
+<tr><td>ตรวจซีเรียล</td><td>ปฏิเสธ</td><td>แจ้ง “ซีเรียลนี้ตรวจไปแล้ว”</td></tr>
+</tbody></table><pre class="code-vs"><code>/// หน้านับสต็อก — ยิงซ้ำคือเพิ่มจำนวน ไม่ใช่ความผิดพลาด
+class CountSession {
+  final Map&lt;String, int&gt; _counts = &lt;String, int&gt;{};
+
+  Map&lt;String, int&gt; get counts =&gt; Map.unmodifiable(_counts);
+
+  int get totalItems =&gt; _counts.values.fold(0, (sum, n) =&gt; sum + n);
+
+  CountOutcome accept(String raw) {
+    final code = normalizeBarcode(raw);
+    if (code.isEmpty) return CountOutcome.empty;
+    if (!isValidProductCode(code)) return CountOutcome.badFormat;
+
+    // ต่างจาก ScanSession ตรงนี้ — เพิ่มแทนที่จะปฏิเสธ
+    _counts[code] = (_counts[code] ?? 0) + 1;
+    return CountOutcome.counted;
+  }
+
+  /// ต้องมี เพราะพนักงานนับเกินแล้วต้องแก้ได้
+  bool undo(String raw) {
+    final code = normalizeBarcode(raw);
+    final current = _counts[code];
+    if (current == null || current == 0) return false;
+    if (current == 1) {
+      _counts.remove(code);
+    } else {
+      _counts[code] = current - 1;
+    }
+    return true;
+  }
+}</code></pre><p><strong>สิ่งที่เหมือนกันกับ lab</strong></p><ul><li>แปลงค่าก่อนเสมอ (3.6)</li><li>ตรวจรูปแบบก่อนใช้</li><li>คืนผลเป็น enum ที่มีความหมาย ไม่ใช่ <code>bool</code></li><li>คืน collection แบบแก้ไม่ได้ออกไป (D1.7)</li></ul><p><strong>สิ่งที่ต่างกัน</strong> — ใช้ <code>Map&lt;String, int&gt;</code> แทน <code>Set</code> เพราะสิ่งที่ต้องจำไม่ใช่ “เคยเจอไหม” แต่เป็น “เจอกี่ครั้ง” ซึ่งเป็นการเลือกโครงสร้างข้อมูลจากคำถามที่จะถาม ตามหลักใน D1.5</p><p><strong>ข้อ 3 — ถ้าใช้กฎของหน้ารับเข้ากับหน้านับสต็อก</strong></p><p>พนักงานจะนับสินค้าชนิดเดียวกันได้แค่ชิ้นเดียว ชิ้นที่สองเป็นต้นไปจะถูกปฏิเสธด้วยข้อความ “สแกนซ้ำ” ผลที่ตามมา</p><ol><li><strong>ยอดนับผิดทั้งหมด</strong> — ถ้าโซนนั้นมีเทปกาว 240 ม้วน ระบบจะบันทึกว่ามี 1</li><li><strong>พนักงานจะหาทางเลี่ยง</strong> — เช่นออกจากหน้าจอแล้วเข้าใหม่ทุกครั้งเพื่อล้างทะเบียน ซึ่งช้ามากและอาจทำให้ข้อมูลที่นับไว้หาย</li><li><strong>ไม่มีใครรายงานว่าเป็นบั๊ก</strong> — เพราะข้อความ “สแกนซ้ำ” ดูเหมือนระบบทำงานถูกต้อง คนใช้จะคิดว่าตัวเองทำผิด</li></ol><p>ข้อสามคือสิ่งที่อันตรายที่สุด — บั๊กที่ระบบแจ้งข้อความสมเหตุสมผลจะอยู่ในระบบได้นานมาก เพราะไม่มีใครสงสัย</p><p><strong>ทำไมต้องมี <code>undo</code></strong></p><p>เพราะเมื่อการยิงซ้ำถือเป็นเรื่องปกติ ความผิดพลาดจากการยิงเกินก็เป็นเรื่องปกติตามไปด้วย — พนักงานเผลอยิงกล่องเดิมสองครั้งย่อมเกิดขึ้น ถ้าไม่มีทางแก้ เขาจะต้องเริ่มนับใหม่ทั้งโซน</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ว่ายิงบาร์โค้ดเดียวกันสามครั้งแล้ว <code>counts</code> ของรหัสนั้นเป็น 3 และ <code>totalItems</code> เป็น 3 จากนั้นเรียก <code>undo</code> หนึ่งครั้งแล้วตรวจว่าเหลือ 2 — เทสต์นี้จะจับได้ทันทีถ้ามีคนเผลอเปลี่ยนไปใช้ <code>Set</code></p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ทะเบียนกันซ้ำต้องเก็บค่ามาตรฐาน ไม่ใช่ค่าดิบ</li><li>ใช้ <code>Set</code> คู่กับ <code>List</code> เพื่อได้ทั้งความเร็วและลำดับ</li><li><code>set.add()</code> คืน <code>false</code> เมื่อมีอยู่แล้ว ใช้ประโยชน์ได้เลย</li><li>กฎการกันซ้ำขึ้นกับความหมายทางธุรกิจของสิ่งที่ยิง</li><li>บางหน้าจอการยิงซ้ำคือเรื่องถูกต้อง เช่นการนับสต็อก</li><li>กำหนดขอบเขตของ “รอบนี้” ให้ตรงกับงานจริง</li><li>ต้องกันสามชั้น — ที่หน้าจอ ระหว่างบันทึก และที่ server</li><li>debounce แก้ปัญหาคนละเรื่อง อย่าเอามาใช้แทน</li></ul></div><p><strong>บทถัดไป:</strong> 3.8 จะจัดการชั้นที่สองจากสามชั้นในหัวข้อ 7 — การกันไม่ให้คำสั่งบันทึกถูกส่งซ้อนกัน ซึ่งต่างจากการกันยิงซ้ำและต้องทำทั้งคู่</p></section>

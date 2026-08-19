@@ -4,23 +4,158 @@
 <title>Quantity Validation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-09 · Flutter UI</span><h1>Quantity Validation</h1><p>Part 3: Forms &amp; Barcode Scanner</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Integer parsing</a></li><li><a href="#section-2">Input formatter เป็น UX ชั้นแรก</a></li><li><a href="#section-3">Range และ remaining</a></li><li><a href="#section-4">Decimal และหน่วย</a></li><li><a href="#section-5">Stepper + manual edit</a></li><li><a href="#section-6">Leading zero และ empty state</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Quantity เป็นจำนวนเชิงโดเมน ไม่ใช่ข้อความ ขั้นตอนคือรับ String → parseอย่างปลอดภัย → validate min/max/precision → สร้าง numeric value แล้วให้ backendตรวจ invariantล่าสุดอีกครั้ง</div>
-<section id="section-1"><h2>1. Integer parsing</h2><pre class="code-vs"><code>int? parseQuantity(String raw) {
-  final value = int.tryParse(raw.trim());
-  if (value == null || value &lt;= 0) return null;
-  return value;
-}</code></pre><p>ใช้ tryParse ไม่ให้ FormatExceptionหลุดถึง UI และอย่าแปลง invalidเป็น 0 เพราะ 0อาจมีความหมายต่างกัน</p></section>
-<section id="section-2"><h2>2. Input formatter เป็น UX ชั้นแรก</h2><pre class="code-vs"><code>TextFormField(
-  keyboardType: TextInputType.number,
-  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-  validator: (raw) =&gt; validateQty(raw, remaining: remaining),
-)</code></pre><p>Formatterลดความผิดพลาดแต่ paste/hardware/logicยังต้อง parse+validate และต้อง import <code>package:flutter/services.dart</code></p></section>
-<section id="section-3"><h2>3. Range และ remaining</h2><p>Validate <code>min ≤ qty ≤ remaining</code> จาก snapshotปัจจุบัน แต่ serverอาจเปลี่ยน stockพร้อมกันจึงต้องตรวจซ้ำ UIควรแสดง “เหลือ 7” ใกล้ field และเมื่อ Conflictให้ refresh/reconcileไม่กล่าวโทษผู้ใช้</p></section>
-<section id="section-4"><h2>4. Decimal และหน่วย</h2><p>ถ้าหน่วยอนุญาตทศนิยม อย่าใช้ doubleกับค่าที่ต้องแม่นตรงโดยไม่กำหนด scale ใช้ decimal package/จำนวนหน่วยย่อย integer/contractเดียวกับ .NET ระบุ locale decimal separator และ rounding policy ห้าม parse <code>1,5</code> แบบเดาสุ่ม</p></section>
-<section id="section-5"><h2>5. Stepper + manual edit</h2><p>Absolute quantity selector มีปุ่มลด/เพิ่มพร้อม min/max และ dialogกรอกเลข ปุ่มเหมาะกับปรับเล็กน้อย manualเหมาะกับจำนวนมาก แต่ผลจากทั้งสองทางต้องวิ่งผ่าน validator/commandเดียว ไม่ให้ onSetรับนอกช่วงเพราะ dialog parseได้อย่างเดียว</p></section>
-<section id="section-6"><h2>6. Leading zero และ empty state</h2><p>Quantity <code>005</code> parseเป็น 5ได้ แต่ UIอาจ normalizeแสดง “5” หลัง submit ขณะ fieldว่างไม่ควรเท่ากับ 0 แยก null/not entered จาก zero และกำหนดว่า zeroห้ามหรือใช้ clear operation</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>remaining=12 ผู้ใช้ส่ง “ 013 ”, “1.5”, “abc”, “” และ “05” ผลควรเป็นอะไรสำหรับ integer piece?</p><details><summary>เฉลย</summary><p>013→13แต่ rejectเกิน remaining; 1.5→parse fail; abc→parse fail; empty→required; 05→5และผ่าน ทั้งหมดต้องมีข้อความเฉพาะและไม่ยิง APIจน local validationผ่าน</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ controller text เป็นจำนวนระหว่าง business calculationทุกจุด Parseครั้งเดียวเป็น int/decimal typed value แล้วส่งต่อ มิฉะนั้น trim/invalid/rangeจะกระจายและได้ผลต่างกันระหว่างหน้าจอ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: สามขั้นที่ต้องแยกกัน</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">ทำไมต้อง tryParse ไม่ใช่ parse</a></li><li><a href="#section-6">ศูนย์นำหน้ากับรหัส</a></li><li><a href="#section-7">ทศนิยมและหน่วยนับ</a></li><li><a href="#section-8">เพดานที่มาจากข้อมูลจริง</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ตรวจจำนวนให้ครบทุกกรณีขอบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.3 (validator) และ D1.2 (<code>int.tryParse</code> กับ <code>int.parse</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนการตรวจจำนวนที่ครอบคลุมกรณีขอบทั้งหมด และรู้ว่าทำไมการแปลงค่าผิดพลาดถึงกระทบสต็อกจริง</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>การตรวจจำนวนดูเหมือนง่ายที่สุดในบทนี้ — แค่ตรวจว่าเป็นตัวเลขและมากกว่าศูนย์ แต่ในงานจริงมีกรณีขอบมากกว่าที่คิด และเป็นจุดที่ความผิดพลาดกระทบสต็อกโดยตรง</p><pre class="code-vs"><code>' 12 '      ← มีช่องว่าง
+'012'       ← มีศูนย์นำหน้า
+'1.5'       ← ทศนิยมทั้งที่นับเป็นชิ้น
+'12abc'     ← ผู้ใช้พิมพ์ต่อท้ายโดยไม่ตั้งใจ
+'-5'        ← ติดลบ
+''          ← ยังไม่กรอก
+'999999'    ← เกินความเป็นจริง</code></pre></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>parse</td><td>แปลงข้อความเป็นตัวเลข</td></tr>
+<tr><td>range</td><td>ช่วงค่าที่ยอมรับได้</td></tr>
+<tr><td>remaining</td><td>จำนวนที่เหลืออยู่จริงตามข้อมูล</td></tr>
+<tr><td>snapshot</td><td>ข้อมูล ณ ขณะที่โหลดมา ซึ่งอาจล้าสมัยแล้ว</td></tr>
+<tr><td>unit</td><td>หน่วยนับ เช่นชิ้น กล่อง กิโลกรัม</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: สามขั้นที่ต้องแยกกัน</h2><pre class="code-vs"><code>'  012  '
+    ↓ 1. ตัดช่องว่าง
+'012'
+    ↓ 2. แปลงเป็นตัวเลข
+12
+    ↓ 3. ตรวจว่าอยู่ในช่วงที่ยอมรับ
+ผ่าน / ไม่ผ่านพร้อมเหตุผล</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ต้องแยกให้ชัดว่า “แปลงไม่ได้” กับ “แปลงได้แต่ค่าไม่ถูกต้อง” เป็นคนละเรื่อง เพราะผู้ใช้ต้องแก้คนละแบบ</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>String? validateQuantity(String? raw, {int max = 999}) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return 'กรุณากรอกจำนวน';
+
+  final value = int.tryParse(text);
+  if (value == null) return 'จำนวนต้องเป็นตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (value &gt; max) return 'จำนวนต้องไม่เกิน $max';
+  return null;
+}</code></pre><p>สังเกตว่าแต่ละกรณีมีข้อความของตัวเอง ไม่ใช่ “จำนวนไม่ถูกต้อง” เหมือนกันหมด เพราะผู้ใช้ต้องรู้ว่าต้องแก้อะไร</p><table><thead><tr><th>ค่าที่ใส่</th><th>ผลลัพธ์</th><th>ผู้ใช้ควรทำอะไร</th></tr></thead><tbody>
+<tr><td><code>''</code></td><td>กรุณากรอกจำนวน</td><td>กรอก</td></tr>
+<tr><td><code>'มาก'</code></td><td>จำนวนต้องเป็นตัวเลข</td><td>พิมพ์เป็นเลข</td></tr>
+<tr><td><code>'0'</code></td><td>จำนวนต้องมากกว่า 0</td><td>ใส่เลขที่มากกว่า 0</td></tr>
+<tr><td><code>'1000'</code></td><td>จำนวนต้องไม่เกิน 999</td><td>ลดจำนวน หรือแยกเป็นสองรายการ</td></tr>
+<tr><td><code>' 012 '</code></td><td>ผ่าน ได้ค่า 12</td><td>—</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. ทำไมต้อง tryParse ไม่ใช่ parse</h2><pre class="code-vs"><code>int.parse('มาก')      // โยน FormatException — โปรแกรมพัง
+int.tryParse('มาก')   // คืน null — จัดการต่อได้</code></pre><p>ทบทวนจาก D1.2 หัวข้อ 7: ใช้ <code>tryParse</code> เมื่อค่ามาจากผู้ใช้หรือเครือข่าย เพราะเราควบคุมไม่ได้ว่าจะได้อะไรมา</p><div class="warn"><strong>อย่าเขียน <code>int.tryParse(text) ?? 0</code></strong> ในการตรวจจำนวน เพราะจะทำให้ข้อความที่แปลงไม่ได้กลายเป็นเลข 0 เงียบ ๆ แล้วไปตกที่กฎ “ต้องมากกว่า 0” ผู้ใช้จะเห็นข้อความว่า “จำนวนต้องมากกว่า 0” ทั้งที่ปัญหาจริงคือพิมพ์ตัวอักษรปน — เป็นความผิดพลาดแบบเดียวกับที่ D1.19 เตือนเรื่องการกลบข้อมูลเสีย</div></section>
+
+<section id="section-6"><h2>6. ศูนย์นำหน้ากับรหัส</h2><p>ทบทวนจาก 3.6 — รหัสห้ามแปลงเป็นตัวเลข แต่จำนวนแปลงได้ ความต่างอยู่ที่ความหมาย</p><table><thead><tr><th></th><th>รหัส เช่น <code>001234</code></th><th>จำนวน เช่น <code>012</code></th></tr></thead><tbody>
+<tr><td>ศูนย์นำหน้ามีความหมายไหม</td><td>มี — เป็นส่วนหนึ่งของรหัส</td><td>ไม่มี — 012 กับ 12 คือจำนวนเดียวกัน</td></tr>
+<tr><td>เก็บเป็นชนิดอะไร</td><td>ข้อความ</td><td>ตัวเลข</td></tr>
+<tr><td>แปลงเป็นตัวเลขได้ไหม</td><td><strong>ห้าม</strong></td><td>ได้</td></tr>
+</tbody></table><p>ดังนั้น <code>int.tryParse(' 012 ')</code> ได้ <code>12</code> ซึ่งถูกต้องสำหรับจำนวน — และควรแสดงกลับเป็น <code>12</code> หลังบันทึก เพื่อไม่ให้ผู้ใช้สับสน</p></section>
+
+<section id="section-7"><h2>7. ทศนิยมและหน่วยนับ</h2><p>ก่อนเขียนการตรวจ ต้องถามก่อนว่าหน่วยนับอนุญาตทศนิยมไหม</p><table><thead><tr><th>หน่วย</th><th>ทศนิยม</th><th>ชนิดที่ควรใช้</th></tr></thead><tbody>
+<tr><td>ชิ้น กล่อง พาเลท</td><td>ไม่</td><td><code>int</code></td></tr>
+<tr><td>กิโลกรัม เมตร ลิตร</td><td>ได้</td><td>ต้องตกลงจำนวนทศนิยมกับ server</td></tr>
+</tbody></table><div class="warn">ถ้าหน่วยเป็นชิ้นแล้วผู้ใช้ใส่ <code>1.5</code> ต้องปฏิเสธด้วยข้อความที่ชัด เช่น “จำนวนชิ้นต้องเป็นจำนวนเต็ม” ไม่ใช่ปัดเป็น 1 หรือ 2 เงียบ ๆ — การปัดเศษที่ผู้ใช้ไม่รู้ตัวทำให้สต็อกไม่ตรงและไม่มีใครหาสาเหตุเจอ</div><p>สำหรับหน่วยที่มีทศนิยม อย่าใช้ <code>double</code> กับค่าที่ต้องแม่นยำโดยไม่กำหนดจำนวนทศนิยมให้ตรงกับฝั่ง .NET เพราะการคำนวณทศนิยมมีการปัดเศษที่มองไม่เห็น</p></section>
+
+<section id="section-8"><h2>8. เพดานที่มาจากข้อมูลจริง</h2><p>เพดานคงที่อย่าง <code>max: 999</code> ใช้ได้เป็นตาข่ายกันพิมพ์ผิด แต่งานจริงมักมีเพดานที่มาจากข้อมูล</p><pre class="code-vs"><code>String? validateMoveQuantity(String? raw, {required int available}) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return 'กรุณากรอกจำนวน';
+
+  final value = int.tryParse(text);
+  if (value == null) return 'จำนวนต้องเป็นตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (value &gt; available) return 'มีอยู่เพียง $available ชิ้น';
+  return null;
+}</code></pre><p>สองข้อที่ต้องจำเกี่ยวกับเพดานแบบนี้</p><ol><li><strong>ต้องแสดงค่าให้ผู้ใช้เห็นใกล้ช่องกรอก</strong> เช่น “เหลือ 7 ชิ้น” ไม่ใช่ให้เขาลองใส่แล้วถูกปฏิเสธ</li><li><strong>ค่านั้นอาจล้าสมัยแล้ว</strong> — เป็นภาพนิ่งจากตอนที่โหลดมา ระหว่างที่พนักงานกรอก คนอื่นอาจหยิบของไปแล้ว</li></ol><p>ข้อสองคือเหตุผลที่ 3.3 หัวข้อ 7 บอกว่า server ต้องตรวจซ้ำ และเมื่อ server ปฏิเสธ ต้องแสดงข้อความที่ไม่ทำให้ผู้ใช้รู้สึกว่าตัวเองผิด เพราะเขาทำถูกตามข้อมูลที่เห็น</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปพังเมื่อผู้ใช้พิมพ์ตัวอักษร</td><td>ใช้ <code>int.parse</code></td><td>เปลี่ยนเป็น <code>int.tryParse</code></td></tr>
+<tr><td>ข้อความบอกว่า “ต้องมากกว่า 0” ทั้งที่พิมพ์ตัวอักษร</td><td>ใช้ <code>?? 0</code> กลบค่าที่แปลงไม่ได้</td><td>แยกกรณีแปลงไม่ได้ออกมา</td></tr>
+<tr><td>สต็อกไม่ตรงโดยหาสาเหตุไม่เจอ</td><td>ปัดเศษทศนิยมเงียบ ๆ</td><td>ปฏิเสธพร้อมข้อความชัด</td></tr>
+<tr><td>ผู้ใช้ลองใส่หลายครั้งกว่าจะผ่าน</td><td>ไม่ได้แสดงเพดานให้เห็น</td><td>แสดง “เหลือ N ชิ้น” ใกล้ช่อง</td></tr>
+<tr><td>ผ่านที่แอปแต่ server ปฏิเสธ</td><td>ข้อมูลที่แอปถือล้าสมัย</td><td>แสดงข้อความจาก server และเสนอให้โหลดใหม่</td></tr>
+<tr><td>ทุกข้อผิดพลาดขึ้นข้อความเดียวกัน</td><td>รวมทุกกรณีเป็น “ไม่ถูกต้อง”</td><td>แยกข้อความตามสาเหตุ</td></tr>
+<tr><td>ช่องว่างถูกนับเป็น 0</td><td>ไม่แยก “ยังไม่กรอก” จาก “กรอกเป็นศูนย์”</td><td>ตรวจ <code>isEmpty</code> ก่อน</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอย้ายสินค้ามีของเหลือ 12 ชิ้น หน่วยเป็นชิ้น ผู้ใช้ลองใส่ค่าเหล่านี้</p><table><thead><tr><th>ค่าที่ใส่</th><th>ผลที่ควรได้</th></tr></thead><tbody>
+<tr><td><code>' 013 '</code></td><td>?</td></tr>
+<tr><td><code>'1.5'</code></td><td>?</td></tr>
+<tr><td><code>'abc'</code></td><td>?</td></tr>
+<tr><td><code>''</code></td><td>?</td></tr>
+<tr><td><code>'05'</code></td><td>?</td></tr>
+<tr><td><code>'-3'</code></td><td>?</td></tr>
+</tbody></table><ol><li>เติมตารางให้ครบพร้อมข้อความที่ผู้ใช้จะเห็น</li><li>เขียน validator ที่ให้ผลตามตาราง</li><li>เขียนเทสต์ครบทุกแถว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>ค่าที่ใส่</th><th>ผลลัพธ์</th><th>ข้อความ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>' 013 '</code></td><td>ไม่ผ่าน</td><td>มีอยู่เพียง 12 ชิ้น</td><td>ตัดช่องว่างและศูนย์นำหน้าได้ 13 ซึ่งเกิน</td></tr>
+<tr><td><code>'1.5'</code></td><td>ไม่ผ่าน</td><td>จำนวนชิ้นต้องเป็นจำนวนเต็ม</td><td>หน่วยเป็นชิ้น ทศนิยมไม่มีความหมาย</td></tr>
+<tr><td><code>'abc'</code></td><td>ไม่ผ่าน</td><td>จำนวนต้องเป็นตัวเลข</td><td>แปลงไม่ได้เลย</td></tr>
+<tr><td><code>''</code></td><td>ไม่ผ่าน</td><td>กรุณากรอกจำนวน</td><td>ยังไม่กรอก คนละเรื่องกับกรอกผิด</td></tr>
+<tr><td><code>'05'</code></td><td><strong>ผ่าน</strong></td><td>—</td><td>ได้ 5 ซึ่งอยู่ในช่วง</td></tr>
+<tr><td><code>'-3'</code></td><td>ไม่ผ่าน</td><td>จำนวนต้องมากกว่า 0</td><td>ติดลบไม่มีความหมายในการย้ายของ</td></tr>
+</tbody></table><pre class="code-vs"><code>String? validateMoveQuantity(String? raw, {required int available}) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return 'กรุณากรอกจำนวน';
+
+  // แยกกรณีทศนิยมออกมาก่อน เพื่อให้ข้อความตรงกับปัญหาจริง
+  if (text.contains('.') || text.contains(',')) {
+    return 'จำนวนชิ้นต้องเป็นจำนวนเต็ม';
+  }
+
+  final value = int.tryParse(text);
+  if (value == null) return 'จำนวนต้องเป็นตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (value &gt; available) return 'มีอยู่เพียง $available ชิ้น';
+  return null;
+}</code></pre><pre class="code-vs"><code>void main() {
+  const available = 12;
+
+  test('เกินจำนวนที่มี', () {
+    expect(
+      validateMoveQuantity(' 013 ', available: available),
+      'มีอยู่เพียง 12 ชิ้น',
+    );
+  });
+
+  test('ทศนิยมถูกปฏิเสธด้วยข้อความเฉพาะ', () {
+    expect(
+      validateMoveQuantity('1.5', available: available),
+      'จำนวนชิ้นต้องเป็นจำนวนเต็ม',
+    );
+  });
+
+  test('ตัวอักษรถูกปฏิเสธคนละข้อความกับทศนิยม', () {
+    expect(
+      validateMoveQuantity('abc', available: available),
+      'จำนวนต้องเป็นตัวเลข',
+    );
+  });
+
+  test('ค่าว่างต่างจากศูนย์', () {
+    expect(validateMoveQuantity('', available: available), 'กรุณากรอกจำนวน');
+    expect(
+      validateMoveQuantity('0', available: available),
+      'จำนวนต้องมากกว่า 0',
+    );
+  });
+
+  test('ศูนย์นำหน้าผ่านได้', () {
+    expect(validateMoveQuantity('05', available: available), isNull);
+  });
+
+  test('ติดลบถูกปฏิเสธ', () {
+    expect(
+      validateMoveQuantity('-3', available: available),
+      'จำนวนต้องมากกว่า 0',
+    );
+  });
+}</code></pre><p><strong>ทำไมต้องดักทศนิยมก่อน <code>tryParse</code></strong></p><p>เพราะ <code>int.tryParse('1.5')</code> คืน <code>null</code> เหมือนกับ <code>int.tryParse('abc')</code> ทุกประการ ถ้าไม่แยกออกมาก่อน ผู้ใช้ที่พิมพ์ <code>1.5</code> จะเห็นข้อความ “จำนวนต้องเป็นตัวเลข” ทั้งที่เขาพิมพ์ตัวเลข — ข้อความนั้นทำให้เขางงและลองพิมพ์ใหม่แบบเดิม</p><p>การแยกออกมาทำให้ข้อความบอกปัญหาจริงว่าหน่วยนี้ไม่รับทศนิยม ซึ่งผู้ใช้แก้ได้ทันที</p><p><strong>ทำไมตรวจทั้ง <code>.</code> และ <code>,</code></strong></p><p>เพราะบางประเทศใช้จุลภาคเป็นตัวคั่นทศนิยม และผู้ใช้ที่คุ้นกับรูปแบบนั้นอาจพิมพ์ <code>1,5</code> — การไม่ดักไว้จะทำให้ได้ข้อความที่ไม่ตรงปัญหาเช่นกัน</p><p><strong>จุดที่คนมักพลาดในเทสต์:</strong> เขียนแค่ <code>expect(validateMoveQuantity('abc', ...), isNotNull)</code> ซึ่งผ่านแม้ข้อความจะผิด — การตรวจข้อความจริงทำให้เทสต์จับได้เมื่อมีคนรวมกรณีเข้าด้วยกันในภายหลัง</p><p><strong>ลองต่อ:</strong> ลบการดักทศนิยมออก แล้วรันเทสต์ — ตัวที่สองจะล้มเหลวโดยบอกว่าได้ “จำนวนต้องเป็นตัวเลข” แทน ซึ่งยืนยันว่าเทสต์จับความต่างของข้อความได้จริง</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>แยกสามขั้น — ตัดช่องว่าง แปลง ตรวจช่วง</li><li>ใช้ <code>int.tryParse</code> เสมอ ไม่ใช่ <code>int.parse</code></li><li>อย่าใช้ <code>?? 0</code> กลบค่าที่แปลงไม่ได้</li><li>แต่ละกรณีต้องมีข้อความของตัวเอง ผู้ใช้จะได้รู้ว่าแก้อะไร</li><li>ศูนย์นำหน้าไม่มีความหมายในจำนวน แต่มีในรหัส</li><li>อย่าปัดเศษทศนิยมเงียบ ๆ ให้ปฏิเสธพร้อมบอกเหตุผล</li><li>แสดงเพดานให้ผู้ใช้เห็นใกล้ช่องกรอก</li><li>ค่าที่แอปถืออาจล้าสมัย server ต้องตรวจซ้ำเสมอ</li></ul></div><p><strong>บทถัดไป:</strong> 3.10 จะดูการขอยืนยันก่อนทำสิ่งที่ย้อนกลับยาก และเตือนว่าการถามบ่อยเกินไปทำให้ผู้ใช้กดตกลงโดยไม่อ่าน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,28 +4,166 @@
 <title>Duplicate Submit Guard</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-08 · Flutter UI</span><h1>Duplicate Submit Guard</h1><p>Part 3: Forms &amp; Barcode Scanner</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Guard ก่อนงาน async</a></li><li><a href="#section-2">ปิดทุก trigger</a></li><li><a href="#section-3">Snapshot ก่อน clear</a></li><li><a href="#section-4">try/catch/finally</a></li><li><a href="#section-5">Cancel กับ ignore stale result</a></li><li><a href="#section-6">Optimistic vs pessimistic</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">การป้องกัน submitซ้ำต้องทำที่ command boundary ก่อน await แล้วสะท้อนใน UI พร้อม <code>try/finally</code> ไม่ใช่แค่ทำปุ่มเป็นสีเทา เพราะ Enter/scanner/callbackอื่นยังเรียก methodได้</div>
-<section id="section-1"><h2>1. Guard ก่อนงาน async</h2><pre class="code-vs"><code>Future&lt;void&gt; submitScan() async {
-  if (_busy) return;
-  final code = normalize(controller.text);
-  if (code.isEmpty) return;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ปิดปุ่มไม่ใช่การป้องกัน</a></li><li><a href="#section-4">รูปแบบที่ถูกต้อง</a></li><li><a href="#section-5">ทำไมต้องตั้งธงก่อน await</a></li><li><a href="#section-6">เทสต์ที่พิสูจน์ได้จริง</a></li><li><a href="#section-7">ปิดทุกทางที่เข้าถึงได้</a></li><li><a href="#section-8">ยังไม่ครบถ้าไม่มีที่ server</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: กันไม่ให้คำสั่งบันทึกถูกส่งซ้อนกัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.15 (การกันกดซ้ำและ <code>finally</code>) และ 1.6 (<code>mounted</code> หลัง <code>await</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> กันการส่งซ้อนได้ครบทุกทาง และรู้ว่าทำไมการปิดปุ่มอย่างเดียวไม่พอ</div>
 
-  setState(() =&gt; _busy = true);
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>3.7 กันการยิงบาร์โค้ดซ้ำ ส่วนบทนี้กันคนละเรื่อง — การส่งข้อมูลขึ้น server ซ้อนกัน</p><table><thead><tr><th></th><th>กันยิงซ้ำ (3.7)</th><th>กันส่งซ้อน (บทนี้)</th></tr></thead><tbody>
+<tr><td>กันอะไร</td><td>ค่าเดิมถูกรับสองครั้ง</td><td>คำสั่งเดียวถูกส่งสองครั้ง</td></tr>
+<tr><td>ตัดสินจาก</td><td>ค่าที่เคยเจอ</td><td>งานก่อนหน้าเสร็จหรือยัง</td></tr>
+<tr><td>ผลถ้าไม่กัน</td><td>ยอดเกินจริง</td><td>ใบงานซ้ำในระบบ</td></tr>
+</tbody></table><p>ทั้งสองต้องมี — กันอย่างเดียวไม่พอ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>guard</td><td>เงื่อนไขที่ออกจากฟังก์ชันทันทีเมื่อไม่ควรทำงาน</td></tr>
+<tr><td>busy flag</td><td>ธงที่บอกว่ากำลังทำงานอยู่</td></tr>
+<tr><td>synchronous</td><td>ทำเสร็จทันทีก่อนไปบรรทัดถัดไป</td></tr>
+<tr><td>race</td><td>สองอย่างเกิดใกล้กันจนลำดับไม่แน่นอน</td></tr>
+<tr><td>stale response</td><td>ผลลัพธ์เก่าที่กลับมาช้ากว่าผลลัพธ์ใหม่</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ปิดปุ่มไม่ใช่การป้องกัน</h2><p>สิ่งที่คนใหม่มักคิดคือปิดปุ่มแล้วจบ ซึ่งไม่จริงด้วยเหตุผลสองข้อ</p><ol><li><strong>ปุ่มไม่ใช่ทางเดียว</strong> — ยังมีการกด Enter เครื่องสแกน และปุ่มลัด</li><li><strong>ปุ่มปิดช้ากว่าที่คิด</strong> — การปิดปุ่มเกิดหลังวาดหน้าจอใหม่ ซึ่งช้ากว่าการแตะสองครั้งติดกัน</li></ol><pre class="code-vs"><code>ผู้ใช้แตะครั้งที่ 1  →  _submit() เริ่มทำงาน
+ผู้ใช้แตะครั้งที่ 2  →  _submit() เริ่มทำงานอีกครั้ง   ← ปุ่มยังไม่ทันปิด
+                    →  setState ทำให้ปุ่มปิด          ← สายไปแล้ว</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การป้องกันจริงต้องอยู่ที่ <em>บรรทัดแรกของฟังก์ชัน</em> และต้องตั้งธง <em>ก่อน</em> <code>await</code> ตัวแรก — ส่วนการปิดปุ่มเป็นการสื่อสารกับผู้ใช้ ไม่ใช่การป้องกัน</div></section>
+
+<section id="section-4"><h2>4. รูปแบบที่ถูกต้อง</h2><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  if (_submitting || _session.isEmpty) return;      // 1. ตรวจก่อน
+  if (!(_formKey.currentState?.validate() ?? false)) return;
+
+  final confirmed = await _confirmSubmit();
+  if (!mounted || confirmed != true) return;
+
+  setState(() =&gt; _submitting = true);               // 2. ตั้งธงก่อน await
+  _session.beginSubmit();
   try {
-    final result = await repository.validate(code);
+    final send = widget.onSubmit;
+    final ok = send == null ? true : await send(_session.accepted);
     if (!mounted) return;
-    apply(result);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(ok ? 'บันทึกสำเร็จ' : 'บันทึกไม่สำเร็จ')),
+    );
   } finally {
-    if (mounted) setState(() =&gt; _busy = false);
+    _session.endSubmit();                           // 3. ปลดใน finally เสมอ
+    if (mounted) setState(() =&gt; _submitting = false);
   }
-}</code></pre></section>
-<section id="section-2"><h2>2. ปิดทุก trigger</h2><p>TextField <code>enabled: !busy</code>, ปุ่ม <code>onPressed: busy ? null : submit</code> และ command guardเป็นชั้นสุดท้าย Absolute ScanBox ปิด fieldตอน busy และแสดง progress label แต่ ownerยังต้อง guard callback เพราะ busy propอาจอัปเดตหลัง eventสองอันเข้าคิวใกล้กัน</p></section>
-<section id="section-3"><h2>3. Snapshot ก่อน clear</h2><p>อ่าน raw/canonicalใส่ local variableก่อน await จากนั้นเลือก clearทันทีเพื่อรับรู้ว่า requestรับแล้ว หรือ clearหลัง successเพื่อให้แก้/retryง่าย Absolute clearก่อน awaitแล้วคืน focusภายหลัง; wmsappบาง flow clearเมื่อ error/success Designต้องบอกผู้ใช้ codeที่กำลัง validateหากช่องถูกล้าง</p></section>
-<section id="section-4"><h2>4. try/catch/finally</h2><p>Network exceptionต้องไม่ทิ้ง busy=true ใช้ finallyปลด lock และแปลง exceptionเป็น UI state ตรวจ mountedก่อน setState/context แต่ resource/domain storeอาจต้อง completeแม้ widgetหาย จึงวาง async ownershipให้ถูกระดับ</p></section>
-<section id="section-5"><h2>5. Cancel กับ ignore stale result</h2><p>HTTP Futureทั่วไปอาจยกเลิกไม่ได้ เมื่อเปลี่ยน task/routeให้ใช้ request generation/token เปรียบเทียบก่อน apply result หรือ cancellationที่ clientรองรับ Busy lockกันเฉพาะ concurrent commandของ stateเดียว ไม่กัน responseเก่าทับ taskใหม่</p></section>
-<section id="section-6"><h2>6. Optimistic vs pessimistic</h2><p>Warehouse commitที่กระทบ stockมัก pessimistic: รอ serverยืนยันก่อนเพิ่ม committed count อาจแสดง pending rowเพื่อความเร็ว แต่ต้อง reconcile/rollbackเมื่อ fail อย่าแสดง “สำเร็จ” จากการกดก่อน HTTP result</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ยิง scannerและแตะปุ่มส่งเกือบพร้อมกัน ทำไม disabled buttonอย่างเดียวอาจไม่พอ?</p><details><summary>เฉลย</summary><p>ทั้งสอง callbackอาจถูกเรียกก่อน frame rebuildให้ disabled จึงต้องตรวจ/set busy synchronouslyที่ต้น commandใน event loopเดียว จากนั้น UI disableทุก trigger และ backendใช้ idempotency/constraintอีกชั้น</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">ถ้า return หลัง <code>await</code> เพราะ <code>!mounted</code> ก่อนปลด busyโดยไม่มี finally state ownerอื่นอาจค้าง งาน cleanupต้องอยู่ finally; UI updateจึงค่อยตรวจ mounted</div></section>
+}</code></pre><p>สามขั้นที่ต้องครบ ตรงกับ D1.15 หัวข้อ 7 ทุกประการ</p><table><thead><tr><th>ขั้น</th><th>ถ้าขาดจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td>ตรวจก่อน</td><td>ส่งซ้อนได้</td></tr>
+<tr><td>ตั้งธงก่อน <code>await</code></td><td>การเรียกครั้งที่สองผ่านการตรวจไปได้</td></tr>
+<tr><td>ปลดใน <code>finally</code></td><td>ปุ่มค้างตลอดไปเมื่อเกิดข้อผิดพลาด</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. ทำไมต้องตั้งธงก่อน await</h2><p>นี่คือจุดที่ละเอียดที่สุดของบทนี้</p><pre class="code-vs"><code>// ผิด — ตั้งธงหลัง await
+Future&lt;void&gt; _submit() async {
+  if (_submitting) return;
+
+  final confirmed = await _confirmSubmit();   // ← ระหว่างนี้ _submitting ยังเป็น false
+  setState(() =&gt; _submitting = true);
+  ...
+}</code></pre><p>ทบทวนจาก D1.15: โค้ดก่อน <code>await</code> ทำงานทันที ส่วนโค้ดหลัง <code>await</code> ทำงานทีหลัง — ระหว่างที่รอกล่องยืนยัน ถ้ามีการเรียก <code>_submit()</code> อีกครั้ง มันจะผ่าน <code>if (_submitting) return;</code> ไปได้เพราะธงยังไม่ถูกตั้ง</p><p>ใน lab เราแก้ด้วยการมีธงสองระดับ</p><pre class="code-vs"><code>// ระดับหน้าจอ — คุมปุ่มและช่องกรอก
+bool _submitting = false;
+
+// ระดับตรรกะ — คุมการรับบาร์โค้ด
+_session.beginSubmit();</code></pre><p>โดย <code>_session.beginSubmit()</code> ทำให้ <code>accept()</code> คืน <code>ScanOutcome.busy</code> ทันที ซึ่งเป็นการป้องกันที่ไม่ขึ้นกับหน้าจอเลย</p></section>
+
+<section id="section-6"><h2>6. เทสต์ที่พิสูจน์ได้จริง</h2><p>การกันส่งซ้อนทดสอบยาก เพราะต้องจำลอง “ระหว่างที่ยังไม่เสร็จ” ให้ได้ — lab ใช้ <code>Completer</code> ซึ่งเป็นสวิตช์ที่เราควบคุมเองว่าจะให้งานเสร็จเมื่อไหร่</p><pre class="code-vs"><code>testWidgets('กดบันทึกรัวไม่ทำให้ส่งซ้ำ', (tester) async {
+  var sent = 0;
+  final gate = Completer&lt;bool&gt;();
+
+  await tester.pumpWidget(
+    MaterialApp(
+      home: ReceiveScreen(
+        onSubmit: (codes) {
+          sent++;
+          return gate.future;          // ค้างไว้จนกว่าเราจะปล่อย
+        },
+      ),
+    ),
+  );
+
+  await scan(tester, 'PAL-1001');
+  await tester.tap(find.byKey(const Key('submit-button')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('confirm-ok')));
+  await tester.pump();
+
+  // ระหว่างที่ยังบันทึกไม่เสร็จ กดซ้ำอีกสองครั้ง
+  await tester.tap(find.byKey(const Key('submit-button')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('submit-button')));
+  await tester.pump();
+
+  gate.complete(true);
+  await tester.pumpAndSettle();
+
+  expect(sent, 1);
+});</code></pre><p><code>Completer</code> คือ <code>Future</code> ที่เราสั่งให้เสร็จเองได้ ทำให้ควบคุมเวลาในเทสต์ได้เต็มที่ — ต่างจากการใช้ <code>Future.delayed</code> ซึ่งขึ้นกับจังหวะและทำให้เทสต์ไม่แน่นอน</p><p>อีกเทสต์หนึ่งพิสูจน์ว่าการยิงบาร์โค้ดถูกกันด้วย</p><pre class="code-vs"><code>testWidgets('ระหว่างบันทึก ยิงบาร์โค้ดเพิ่มไม่ได้', (tester) async {
+  // ... กดยืนยันแล้วค้างไว้ ...
+  expect(countText(tester), 'รับแล้ว 1 รายการ');
+});</code></pre></section>
+
+<section id="section-7"><h2>7. ปิดทุกทางที่เข้าถึงได้</h2><table><thead><tr><th>ทาง</th><th>ปิดอย่างไร</th><th>ระดับ</th></tr></thead><tbody>
+<tr><td>ปุ่มบันทึก</td><td><code>onPressed: _submitting ? null : _submit</code></td><td>สื่อสารกับผู้ใช้</td></tr>
+<tr><td>ช่องกรอก</td><td><code>enabled: !_submitting</code></td><td>สื่อสารกับผู้ใช้</td></tr>
+<tr><td>ปุ่มลบรายการ</td><td><code>onPressed: _submitting ? null : ...</code></td><td>สื่อสารกับผู้ใช้</td></tr>
+<tr><td>ตัวฟังก์ชันเอง</td><td><code>if (_submitting) return;</code></td><td><strong>ป้องกันจริง</strong></td></tr>
+<tr><td>ตรรกะการรับสแกน</td><td><code>if (_busy) return ScanOutcome.busy;</code></td><td><strong>ป้องกันจริง</strong></td></tr>
+</tbody></table><p>สามแถวแรกทำให้ผู้ใช้เห็นว่าระบบกำลังทำงานอยู่ ซึ่งสำคัญต่อประสบการณ์ใช้งาน — แต่ถ้ามีแค่สามแถวแรกโดยไม่มีสองแถวหลัง ระบบจะยังส่งซ้อนได้</p></section>
+
+<section id="section-8"><h2>8. ยังไม่ครบถ้าไม่มีที่ server</h2><p>ทบทวนจาก 3.7 หัวข้อ 7 — ธงในแอปกันได้เฉพาะในเครื่องเดียวและในการทำงานครั้งเดียว</p><table><thead><tr><th>สถานการณ์</th><th>ธงในแอปกันได้ไหม</th></tr></thead><tbody>
+<tr><td>กดปุ่มรัว</td><td>ได้</td></tr>
+<tr><td>เน็ตหลุดตอนส่ง แล้วผู้ใช้กดใหม่</td><td><strong>ไม่ได้</strong> — ครั้งแรกอาจถึง server แล้ว</td></tr>
+<tr><td>แอปค้างแล้วเปิดใหม่ ส่งซ้ำ</td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td>สองคนส่งใบเดียวกันจากคนละเครื่อง</td><td><strong>ไม่ได้</strong></td></tr>
+</tbody></table><p>แถวที่สองสำคัญเป็นพิเศษและเชื่อมกับ D1.15 หัวข้อ 6 — <strong>การหมดเวลาแปลว่าเราเลิกรอ ไม่ได้แปลว่า server ไม่ได้ทำงาน</strong> คำสั่งนั้นอาจสำเร็จไปแล้ว การให้ผู้ใช้กดใหม่จึงเสี่ยงสร้างใบงานซ้ำ</p><p>ทางแก้ที่ถูกคือให้แต่ละคำสั่งมีรหัสประจำตัว ส่งไปกับข้อมูล ถ้า server เจอรหัสเดิมก็คืนผลเดิมโดยไม่บันทึกใหม่ — จะทำจริงใน Part 7</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดรัวแล้วเกิดใบงานซ้ำ</td><td>ปิดแค่ปุ่ม ไม่มี guard ในฟังก์ชัน</td><td>เพิ่ม <code>if (_submitting) return;</code> บรรทัดแรก</td></tr>
+<tr><td>ยังส่งซ้อนได้ทั้งที่มี guard</td><td>ตั้งธงหลัง <code>await</code></td><td>ตั้งก่อน <code>await</code> ตัวแรก</td></tr>
+<tr><td>ปุ่มค้างกดไม่ได้หลังเกิดข้อผิดพลาด</td><td>ปลดธงไว้ท้าย <code>try</code></td><td>ย้ายไป <code>finally</code></td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>เรียกหลังผู้ใช้ออกจากหน้าจอ</td><td>ตรวจ <code>mounted</code> ก่อนเรียก แต่ปลดธงในตรรกะโดยไม่ตรวจ</td></tr>
+<tr><td>ยิงบาร์โค้ดเข้ามาระหว่างบันทึก</td><td>กันแค่ที่ปุ่ม</td><td>กันที่ตรรกะการรับด้วย</td></tr>
+<tr><td>เน็ตหลุดแล้วกดใหม่ ได้ใบงานสองใบ</td><td>ไม่มีกฎที่ server</td><td>ใช้รหัสประจำคำสั่ง</td></tr>
+<tr><td>เทสต์การกันซ้อนไม่แน่นอน ผ่านบ้างไม่ผ่านบ้าง</td><td>ใช้ <code>Future.delayed</code> จำลอง</td><td>ใช้ <code>Completer</code> ควบคุมเวลาเอง</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>โค้ดนี้มีปัญหาสามข้อ จงหาให้ครบและแก้</p><pre class="code-vs"><code>bool _saving = false;
+
+Future&lt;void&gt; _save() async {
+  final confirmed = await _showConfirmDialog();
+  if (confirmed != true) return;
+
+  if (_saving) return;
+  setState(() =&gt; _saving = true);
+
+  final result = await api.save(_items);
+  setState(() =&gt; _message = result.message);
+  setState(() =&gt; _saving = false);
+}</code></pre><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ปัญหาที่ 1 — ตรวจธงหลัง <code>await</code></strong></p><p>บรรทัด <code>if (_saving) return;</code> อยู่หลังการรอกล่องยืนยัน ระหว่างที่กล่องเปิดอยู่ ธงยังเป็น <code>false</code> ดังนั้นถ้ามีการเรียก <code>_save()</code> อีกครั้ง กล่องยืนยันจะเปิดซ้อนขึ้นมาอีกใบ และเมื่อผู้ใช้กดยืนยันทั้งสองใบ ก็จะส่งสองครั้ง</p><p><strong>ปัญหาที่ 2 — ไม่มี <code>finally</code></strong></p><p>ถ้า <code>api.save()</code> โยนข้อผิดพลาด บรรทัดปลดธงจะไม่ถูกเรียก ธงค้างเป็น <code>true</code> ตลอดไป ปุ่มจะกดไม่ได้อีกเลยจนกว่าจะปิดแอป — และผู้ใช้จะไม่เห็นข้อความอะไรด้วย เพราะข้อผิดพลาดหลุดออกไปโดยไม่มีใครดัก</p><p><strong>ปัญหาที่ 3 — ไม่ตรวจ <code>mounted</code></strong></p><p>ถ้าผู้ใช้กดย้อนกลับระหว่างที่กำลังบันทึก การเรียก <code>setState</code> หลังจากนั้นจะเกิด <code>setState() called after dispose()</code> ตามที่เตือนไว้ใน 1.6</p><pre class="code-vs"><code>Future&lt;void&gt; _save() async {
+  // 1. ตรวจธงเป็นสิ่งแรกสุด ก่อน await ใด ๆ
+  if (_saving) return;
+
+  final confirmed = await _showConfirmDialog();
+  if (!mounted || confirmed != true) return;
+
+  // 2. ตั้งธงก่อน await ที่ทำงานจริง
+  setState(() =&gt; _saving = true);
+  try {
+    final result = await api.save(_items);
+    if (!mounted) return;
+    setState(() =&gt; _message = result.message);
+  } on Exception catch (error) {
+    if (!mounted) return;
+    setState(() =&gt; _message = 'บันทึกไม่สำเร็จ กรุณาลองใหม่');
+    debugPrint('save failed: $error');       // รายละเอียดเข้า log (D1.14)
+  } finally {
+    // 3. ปลดธงเสมอ ไม่ว่าจะสำเร็จ ล้มเหลว หรือออกจากหน้าจอ
+    if (mounted) setState(() =&gt; _saving = false);
+  }
+}</code></pre><p><strong>จุดที่ต้องคิดเพิ่ม — ธงที่ปลดไม่ได้เมื่อออกจากหน้าจอ</strong></p><p>สังเกตว่า <code>finally</code> ยังมี <code>if (mounted)</code> ครอบอยู่ ซึ่งถูกต้องสำหรับ <code>setState</code> แต่ถ้าธงนั้นเป็นของสิ่งที่อยู่ยาวกว่าหน้าจอ เช่น <code>ScanSession</code> ใน lab จะต้องปลดโดยไม่ตรวจ <code>mounted</code></p><pre class="code-vs"><code>} finally {
+  _session.endSubmit();                      // ปลดเสมอ ไม่ขึ้นกับหน้าจอ
+  if (mounted) setState(() =&gt; _submitting = false);   // อัปเดตจอเมื่อยังอยู่
+}</code></pre><p>ความต่างคือ <code>_session</code> เป็นตรรกะที่อาจถูกใช้ต่อ ส่วน <code>setState</code> เป็นการแตะหน้าจอซึ่งทำได้เฉพาะเมื่อหน้าจอยังอยู่ — เป็นเหตุผลว่าทำไม lab ถึงแยกสองบรรทัดนี้ออกจากกัน</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่กดยืนยันแล้วถอด widget ออกก่อนงานเสร็จ แล้วตรวจว่าไม่มี exception — ดูรูปแบบได้จากเทสต์ “ออกจากหน้าจอระหว่างบันทึกแล้วไม่พัง” ใน lab</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>กันยิงซ้ำกับกันส่งซ้อนเป็นคนละเรื่อง ต้องทำทั้งคู่</li><li>ปิดปุ่มคือการสื่อสาร ไม่ใช่การป้องกัน</li><li>ตรวจธงเป็นบรรทัดแรก และตั้งธงก่อน <code>await</code> ตัวแรก</li><li>ปลดธงใน <code>finally</code> เสมอ</li><li>ปิดทุกทางที่เข้าถึงได้ รวมถึงการรับบาร์โค้ด</li><li>ใช้ <code>Completer</code> ในเทสต์เพื่อควบคุมเวลาเอง</li><li>ธงในแอปกันไม่ได้ทุกกรณี — ต้องมีกฎที่ server ด้วย</li></ul></div><p><strong>บทถัดไป:</strong> 3.9 จะกลับมาที่การตรวจจำนวน ซึ่งดูง่ายแต่มีกรณีขอบเยอะกว่าที่คิด และเป็นจุดที่ข้อมูลผิดพลาดแล้วกระทบสต็อกจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

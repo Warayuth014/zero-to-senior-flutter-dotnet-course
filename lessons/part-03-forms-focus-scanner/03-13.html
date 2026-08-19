@@ -4,25 +4,176 @@
 <title>mounted after await</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-13 · Flutter UI</span><h1>mounted after await</h1><p>Part 3: Forms &amp; Barcode Scanner</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">State.mounted</a></li><li><a href="#section-2">context.mounted</a></li><li><a href="#section-3">ตัวอย่างจริง</a></li><li><a href="#section-4">mounted ไม่รับประกัน resultยัง relevant</a></li><li><a href="#section-5">finally และ cleanup</a></li><li><a href="#section-6">Async context across dialog/navigation</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">หลัง <code>await</code> เวลาและโลกเปลี่ยนได้: routeอาจปิด, Stateอาจ dispose, taskอาจเปลี่ยน และ responseเก่าอาจกลับทีหลัง ต้องตรวจทั้ง lifecycle และความสดของ operationก่อนใช้ context/setState</div>
-<section id="section-1"><h2>1. State.mounted</h2><pre class="code-vs"><code>final result = await repository.preview(code);
-if (!mounted) return;
-setState(() =&gt; _preview = result);
-ScaffoldMessenger.of(context).showSnackBar(/* ... */);</code></pre><p><code>mounted</code> trueเมื่อ Stateยังผูก Element ใช้ใน State methodก่อน setState/contextหลัง async gap</p></section>
-<section id="section-2"><h2>2. context.mounted</h2><pre class="code-vs"><code>onPressed: () async {
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ระหว่างที่รอ ผู้ใช้ทำอะไรก็ได้</a></li><li><a href="#section-4">mounted กับ context.mounted</a></li><li><a href="#section-5">mounted ไม่ได้กันผลลัพธ์เก่า</a></li><li><a href="#section-6">ทางแก้: ตรวจว่ายังตรงกับที่ต้องการอยู่ไหม</a></li><li><a href="#section-7">mounted ใช้กับการแตะหน้าจอ ไม่ใช่กับการเก็บกวาด</a></li><li><a href="#section-8">อย่าใช้ mounted แก้ปัญหาที่ควรแก้ที่โครงสร้าง</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จัดการกับสิ่งที่เปลี่ยนไประหว่างที่เรารอ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.15 (โลกเปลี่ยนไประหว่างรอ), 1.6 (<code>mounted</code>) และ 3.8 (การกันส่งซ้อน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตรวจสถานะให้ถูกก่อนแตะหน้าจอหลังงานที่ต้องรอ และรู้ว่า <code>mounted</code> อย่างเดียวยังไม่พอ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>เราเจอ <code>if (!mounted) return;</code> มาหลายบทแล้ว บทนี้จะอธิบายให้ครบว่าทำไมต้องมี และที่สำคัญกว่าคือ <strong>กรณีที่ <code>mounted</code> เป็น <code>true</code> แต่ผลลัพธ์ยังใช้ไม่ได้</strong></p><p>สองปัญหาที่ต่างกัน</p><table><thead><tr><th>ปัญหา</th><th>อาการ</th><th>แก้ด้วย</th></tr></thead><tbody>
+<tr><td>หน้าจอหายไปแล้ว</td><td><code>setState() called after dispose()</code></td><td><code>mounted</code></td></tr>
+<tr><td>ผลลัพธ์เก่ามาถึงทีหลังผลใหม่</td><td>หน้าจอแสดงข้อมูลผิดใบ</td><td>ตรวจว่ายังตรงกับสิ่งที่ต้องการอยู่ไหม</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>mounted</code></td><td>บอกว่า <code>State</code> นี้ยังอยู่ในหน้าจอหรือยัง</td></tr>
+<tr><td><code>context.mounted</code></td><td>บอกว่า context ตัวนั้นยังใช้ได้ไหม</td></tr>
+<tr><td>async gap</td><td>ช่วงที่โค้ดหยุดรอ <code>await</code></td></tr>
+<tr><td>stale response</td><td>ผลลัพธ์เก่าที่มาถึงช้ากว่าผลใหม่</td></tr>
+<tr><td>generation</td><td>หมายเลขรุ่นของคำขอ ใช้แยกว่าผลไหนใหม่กว่า</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ระหว่างที่รอ ผู้ใช้ทำอะไรก็ได้</h2><pre class="code-vs"><code>await api.load(code);     ← ระหว่างบรรทัดนี้ ผู้ใช้อาจ...
+                             • กดย้อนกลับออกจากหน้าจอ
+                             • ยิงบาร์โค้ดใบใหม่
+                             • ออกจากระบบ
+                             • สลับไปหน้าจออื่น
+if (!mounted) return;     ← จึงต้องตรวจก่อนแตะอะไร</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกครั้งที่เห็น <code>await</code> ให้ถามว่า “ถ้าตอนที่ผลกลับมา สถานการณ์เปลี่ยนไปแล้ว บรรทัดถัดไปยังถูกต้องอยู่ไหม” — คำถามนี้ยกมาจาก D1.15 หัวข้อ 8 และตอนนี้ถึงเวลาตอบแล้ว</div></section>
+
+<section id="section-4"><h2>4. mounted กับ context.mounted</h2><pre class="code-vs"><code>// ใช้ mounted เมื่อจะเรียก setState
+Future&lt;void&gt; _load() async {
+  final result = await api.load(code);
+  if (!mounted) return;
+  setState(() =&gt; _data = result);
+}
+
+// ใช้ context.mounted เมื่อจะใช้ context ตัวนั้นโดยเฉพาะ
+onPressed: () async {
   final ok = await confirm(context);
   if (!context.mounted || ok != true) return;
   Navigator.of(context).pop();
-}</code></pre><p>เหมาะ callback/local BuildContext ที่ไม่จำเป็นต้องอ้าง State โดย contextที่ตรวจควรเป็นตัวเดียวกับที่จะใช้</p></section>
-<section id="section-3"><h2>3. ตัวอย่างจริง</h2><p>CheckIn ของ wmsapp ตรวจ <code>if (!mounted) return</code> หลัง preview API และหลัง destination dialogก่อน setState/open slot Absolute ScanBox await onScanแล้วคืน focusเฉพาะ mounted รูปแบบนี้ป้องกัน “setState called after dispose” และ FocusNodeใช้หลังปิดหน้า</p></section>
-<section id="section-4"><h2>4. mounted ไม่รับประกัน resultยัง relevant</h2><p>หน้าอาจยัง mountedแต่ผู้ใช้เปลี่ยน taskหรือยิง requestใหม่ ใช้ generation ID/current entity check:</p><pre class="code-vs"><code>final requestId = ++_requestId;
-final result = await repository.load(code);
-if (!mounted || requestId != _requestId) return;
-setState(() =&gt; _result = result);</code></pre></section>
-<section id="section-5"><h2>5. finally และ cleanup</h2><p>ใช้ mountedเพื่อ UI update ไม่ใช่ข้าม cleanupทั้งหมด Busy/resourceใน storeต้องปลดใน finallyแม้ widgetหาย หาก busyอยู่ใน Stateและ Stateตายแล้วไม่ต้อง setState แต่ network/client operationอาจยังต้อง closeตาม owner</p></section>
-<section id="section-6"><h2>6. Async context across dialog/navigation</h2><p>หลัง await dialogอาจมี navigationอื่นเกิดขึ้น ตรวจ mountedและ current stateก่อน commit/เปิด route อย่าเก็บ dialogContextไปใช้หลัง dialogถูก pop Contextมีความหมายตาม Element lifetimeไม่ใช่ global handle</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Request A สำหรับ pallet Aช้า ผู้ใช้เปลี่ยนเป็น Bและ request Bเสร็จก่อน A หน้าไม่ถูก dispose mountedยัง true จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>เก็บ request generationหรือ expected pallet ID แล้ว apply responseเมื่อยังตรง current state ยกเลิก Aถ้า clientรองรับ และให้ repository/cacheแยก keyตาม pallet Mountedอย่างเดียวกัน crashแต่ไม่กัน stale data</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">การเติม <code>if (!mounted) return</code> ทุกบรรทัดไม่แก้ architecture ถ้างานควรอยู่ต่อหลังหน้าปิดให้ย้ายไป store/service ownerและให้ UI subscribe state ส่วนงานเฉพาะหน้าเท่านั้นที่หยุด applyเมื่อ unmounted</div></section>
+}</code></pre><table><thead><tr><th>ใช้ตัวไหน</th><th>เมื่อ</th></tr></thead><tbody>
+<tr><td><code>mounted</code></td><td>อยู่ใน <code>State</code> และจะเรียก <code>setState</code></td></tr>
+<tr><td><code>context.mounted</code></td><td>อยู่ใน callback ที่มี context เป็นตัวแปร</td></tr>
+</tbody></table><p>ใน lab ใช้ทั้งสองแบบตามสถานการณ์</p><pre class="code-vs"><code>final confirmed = await _confirmSubmit();
+if (!mounted || confirmed != true) return;   // อยู่ใน State จึงใช้ mounted</code></pre></section>
+
+<section id="section-5"><h2>5. mounted ไม่ได้กันผลลัพธ์เก่า</h2><p>นี่คือส่วนที่สำคัญที่สุดของบทนี้ ลองดูสถานการณ์นี้</p><pre class="code-vs"><code>เวลา 0.0 วิ  ผู้ใช้ยิง PAL-1001  →  เริ่มโหลด (ช้า 3 วินาที)
+เวลา 0.5 วิ  ผู้ใช้ยิง PAL-1002  →  เริ่มโหลด (เร็ว 0.5 วินาที)
+เวลา 1.0 วิ  ผลของ PAL-1002 กลับมา  →  แสดงบนจอ  ✓
+เวลา 3.0 วิ  ผลของ PAL-1001 กลับมา  →  แสดงทับ    ✗ ผิด!</code></pre><p>หน้าจอไม่ได้หายไปไหน <code>mounted</code> จึงเป็น <code>true</code> ตลอด แต่ผลที่แสดงเป็นของพาเลทใบเก่า — พนักงานจะเห็นข้อมูลของ PAL-1001 ทั้งที่เพิ่งยิง PAL-1002</p><p>ในงานคลังนี่คือความเสียหายจริง เพราะเขาอาจยืนยันการหยิบของตามข้อมูลที่เห็น</p></section>
+
+<section id="section-6"><h2>6. ทางแก้: ตรวจว่ายังตรงกับที่ต้องการอยู่ไหม</h2><p><strong>วิธีที่ 1 — เทียบกับสิ่งที่กำลังรออยู่</strong></p><pre class="code-vs"><code>String? _pendingCode;
+
+Future&lt;void&gt; _load(String code) async {
+  _pendingCode = code;
+
+  final result = await api.load(code);
+  if (!mounted) return;
+  if (_pendingCode != code) return;     // มีคนยิงใบใหม่แล้ว ทิ้งผลนี้ไป
+
+  setState(() =&gt; _data = result);
+}</code></pre><p><strong>วิธีที่ 2 — ใช้หมายเลขรุ่น</strong></p><pre class="code-vs"><code>int _generation = 0;
+
+Future&lt;void&gt; _load(String code) async {
+  final myGeneration = ++_generation;
+
+  final result = await api.load(code);
+  if (!mounted) return;
+  if (myGeneration != _generation) return;   // มีคำขอใหม่กว่าแล้ว
+
+  setState(() =&gt; _data = result);
+}</code></pre><table><thead><tr><th></th><th>เทียบกับสิ่งที่รออยู่</th><th>หมายเลขรุ่น</th></tr></thead><tbody>
+<tr><td>อ่านง่าย</td><td>ง่ายกว่า</td><td>ต้องเข้าใจแนวคิด</td></tr>
+<tr><td>ยิงรหัสเดิมซ้ำ</td><td>ผลเก่าอาจผ่านได้</td><td>กันได้ถูกต้อง</td></tr>
+<tr><td>เหมาะกับ</td><td>กรณีทั่วไป</td><td>เมื่อยิงรหัสเดิมซ้ำได้</td></tr>
+</tbody></table><p>ทางที่ง่ายที่สุดซึ่ง lab ใช้คือ <strong>ไม่ให้เกิดสองคำขอพร้อมกันตั้งแต่แรก</strong> ด้วยธงจาก 3.8 — เมื่อมีคำขอเดียวในแต่ละครั้ง ปัญหาผลลัพธ์เก่าก็ไม่เกิด</p><pre class="code-vs"><code>ScanOutcome accept(String raw) {
+  if (_busy) return ScanOutcome.busy;   // ไม่รับใบใหม่ระหว่างที่ยังไม่เสร็จ
+  ...
+}</code></pre></section>
+
+<section id="section-7"><h2>7. mounted ใช้กับการแตะหน้าจอ ไม่ใช่กับการเก็บกวาด</h2><pre class="code-vs"><code>} finally {
+  _session.endSubmit();                              // ปลดเสมอ ไม่ตรวจ mounted
+  if (mounted) setState(() =&gt; _submitting = false);  // แตะจอ จึงตรวจ
+}</code></pre><p>ความต่างที่ต้องเข้าใจ</p><table><thead><tr><th>สิ่งที่ทำ</th><th>ตรวจ <code>mounted</code> ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>setState</code></td><td><strong>ตรวจ</strong></td><td>แตะหน้าจอที่อาจไม่มีแล้ว</td></tr>
+<tr><td>ใช้ <code>context</code></td><td><strong>ตรวจ</strong></td><td>context ผูกกับหน้าจอ</td></tr>
+<tr><td>ปลดธงในตรรกะ</td><td>ไม่ตรวจ</td><td>ตรรกะอาจถูกใช้ต่อ ต้องอยู่ในสถานะที่ถูกต้อง</td></tr>
+<tr><td>ปิดการเชื่อมต่อ</td><td>ไม่ตรวจ</td><td>ต้องปิดไม่ว่าหน้าจอจะอยู่หรือไม่</td></tr>
+</tbody></table><div class="warn">การเขียน <code>if (!mounted) return;</code> ไว้ต้น <code>finally</code> เป็นความผิดพลาดที่พบบ่อย — เพราะจะทำให้การเก็บกวาดทั้งหมดถูกข้ามเมื่อผู้ใช้ออกจากหน้าจอ ธงจะค้าง การเชื่อมต่อจะไม่ถูกปิด</div></section>
+
+<section id="section-8"><h2>8. อย่าใช้ mounted แก้ปัญหาที่ควรแก้ที่โครงสร้าง</h2><p>ถ้าพบว่าต้องเขียน <code>if (!mounted) return;</code> เต็มไปหมดจนอ่านยาก ให้ถามว่างานนั้นควรอยู่ที่หน้าจอจริงหรือเปล่า</p><table><thead><tr><th>งาน</th><th>ควรอยู่ที่ไหน</th><th>เมื่อออกจากหน้าจอ</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลมาแสดง</td><td>หน้าจอ</td><td>ทิ้งผลไปได้</td></tr>
+<tr><td>บันทึกข้อมูลขึ้น server</td><td>ควรอยู่ที่ชั้นนอกหน้าจอ</td><td>ต้องทำงานต่อจนจบ</td></tr>
+<tr><td>อัปโหลดไฟล์ขนาดใหญ่</td><td>ควรอยู่ที่ชั้นนอกหน้าจอ</td><td>ต้องทำงานต่อจนจบ</td></tr>
+</tbody></table><p>งานสองแถวล่างไม่ควรหยุดเพียงเพราะผู้ใช้กดย้อนกลับ — ซึ่งเป็นเหตุผลที่ Part 4 และ Part 9 จะย้ายงานเหล่านี้ออกไปอยู่ชั้นที่มีอายุยาวกว่าหน้าจอ</p><p>ใน lab เราแยกไว้บางส่วนแล้ว — <code>ScanSession</code> ถือสถานะการทำงาน ส่วนหน้าจอถือแค่การแสดงผล</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>setState() called after dispose()</code></td><td>ไม่ตรวจ <code>mounted</code> หลัง <code>await</code></td><td>ตรวจก่อนเรียก</td></tr>
+<tr><td>หน้าจอแสดงข้อมูลของใบเก่า</td><td><code>mounted</code> ไม่ได้กันผลลัพธ์เก่า</td><td>เทียบว่ายังตรงกับที่ต้องการ หรือกันไม่ให้มีสองคำขอ</td></tr>
+<tr><td>ธงค้าง ปุ่มกดไม่ได้อีก</td><td>ใส่ <code>mounted</code> ไว้ต้น <code>finally</code></td><td>ปลดธงก่อน แล้วค่อยตรวจ <code>mounted</code> สำหรับ <code>setState</code></td></tr>
+<tr><td>ข้อผิดพลาดเรื่อง context ที่หมดอายุ</td><td>ใช้ context หลัง <code>await</code> โดยไม่ตรวจ</td><td>ใช้ <code>context.mounted</code></td></tr>
+<tr><td>งานบันทึกหยุดกลางคันเมื่อกดย้อนกลับ</td><td>งานผูกกับหน้าจอ</td><td>ย้ายไปชั้นที่อายุยาวกว่า</td></tr>
+<tr><td>ใส่ <code>mounted</code> ทุกบรรทัดจนอ่านไม่ออก</td><td>แก้ปลายเหตุ</td><td>ทบทวนว่างานควรอยู่ที่ไหน</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอตรวจข้อมูลพาเลททำงานแบบนี้ — ยิงรหัส แล้วโหลดรายละเอียดมาแสดง</p><pre class="code-vs"><code>Future&lt;void&gt; _onScan(String code) async {
+  setState(() =&gt; _loading = true);
+  final detail = await api.loadPallet(code);
+  setState(() {
+    _detail = detail;
+    _loading = false;
+  });
+}</code></pre><ol><li>ระบุปัญหาทั้งหมดที่โค้ดนี้มี</li><li>แก้ให้ครบ</li><li>เขียนเทสต์ที่พิสูจน์ว่าปัญหาเรื่องผลลัพธ์เก่าถูกแก้แล้ว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ปัญหาที่พบ</strong></p><table><thead><tr><th>ปัญหา</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>ไม่ตรวจ <code>mounted</code></td><td>พังเมื่อผู้ใช้กดย้อนกลับระหว่างโหลด</td></tr>
+<tr><td>ไม่กันผลลัพธ์เก่า</td><td>ยิงเร็ว ๆ สองใบแล้วเห็นข้อมูลผิดใบ</td></tr>
+<tr><td>ไม่มี <code>try/finally</code></td><td>ถ้าโหลดล้มเหลว <code>_loading</code> ค้างเป็น <code>true</code> ตลอดไป</td></tr>
+<tr><td>ไม่ดักข้อผิดพลาด</td><td>ผู้ใช้ไม่เห็นอะไรเลยเมื่อเน็ตหลุด</td></tr>
+</tbody></table><pre class="code-vs"><code>String? _pendingCode;
+
+Future&lt;void&gt; _onScan(String code) async {
+  _pendingCode = code;
+  setState(() {
+    _loading = true;
+    _error = null;
+  });
+
+  try {
+    final detail = await api.loadPallet(code);
+    if (!mounted) return;
+    if (_pendingCode != code) return;      // มีใบใหม่แล้ว ทิ้งผลนี้
+
+    setState(() =&gt; _detail = detail);
+  } on Exception catch (error) {
+    if (!mounted || _pendingCode != code) return;
+    setState(() =&gt; _error = 'โหลดข้อมูลไม่สำเร็จ');
+    debugPrint('loadPallet failed: $error');
+  } finally {
+    // ปลดสถานะเฉพาะเมื่อยังเป็นคำขอล่าสุด
+    // ไม่งั้นคำขอเก่าที่จบทีหลังจะปิดตัวโหลดของคำขอใหม่
+    if (mounted &amp;&amp; _pendingCode == code) {
+      setState(() =&gt; _loading = false);
+    }
+  }
+}</code></pre><p><strong>จุดที่ละเอียดที่สุด — เงื่อนไขใน <code>finally</code></strong></p><p>ถ้าเขียนแค่ <code>if (mounted) setState(() =&gt; _loading = false);</code> จะเกิดปัญหาตามลำดับนี้</p><pre class="code-vs"><code>ยิงใบที่ 1  →  _loading = true
+ยิงใบที่ 2  →  _loading = true
+ผลใบที่ 2 กลับมา  →  แสดงข้อมูล, _loading = false   ✓
+ผลใบที่ 1 กลับมา  →  ทิ้งข้อมูล แต่ finally ยังทำงาน
+                     _loading = false อีกครั้ง — ไม่เสียหายในกรณีนี้</code></pre><p>กรณีนี้ยังไม่เสียหาย แต่ถ้าสลับลำดับ — ใบที่ 1 กลับมาก่อน แล้วใบที่ 2 ยังโหลดอยู่ — <code>finally</code> ของใบที่ 1 จะปิดตัวโหลดทั้งที่ใบที่ 2 ยังไม่เสร็จ ผู้ใช้จะเห็นหน้าจอว่างเปล่าโดยไม่มีตัวบอกว่ากำลังโหลด</p><p>การเทียบ <code>_pendingCode == code</code> ใน <code>finally</code> จึงจำเป็น</p><p><strong>ข้อ 3 — เทสต์</strong></p><pre class="code-vs"><code>testWidgets('ผลของใบเก่าที่มาช้าต้องไม่ทับใบใหม่', (tester) async {
+  final slow = Completer&lt;PalletDetail&gt;();
+  final fast = Completer&lt;PalletDetail&gt;();
+
+  final api = FakeApi(responses: {
+    'PAL-1001': slow.future,
+    'PAL-1002': fast.future,
+  });
+
+  await tester.pumpWidget(MaterialApp(home: PalletScreen(api: api)));
+
+  await scan(tester, 'PAL-1001');     // เริ่มคำขอที่ช้า
+  await scan(tester, 'PAL-1002');     // เริ่มคำขอที่เร็ว
+
+  fast.complete(const PalletDetail(code: 'PAL-1002', quantity: 20));
+  await tester.pumpAndSettle();
+  expect(find.text('PAL-1002'), findsOneWidget);
+
+  // ผลของใบเก่ากลับมาทีหลัง
+  slow.complete(const PalletDetail(code: 'PAL-1001', quantity: 99));
+  await tester.pumpAndSettle();
+
+  // ต้องยังเป็นใบใหม่อยู่
+  expect(find.text('PAL-1002'), findsOneWidget);
+  expect(find.text('PAL-1001'), findsNothing);
+});</code></pre><p><strong>ทำไมเทสต์นี้จำเป็น</strong></p><p>เพราะปัญหาผลลัพธ์เก่า <strong>แทบไม่มีทางเจอด้วยการทดสอบด้วยมือ</strong> — บนเครื่องพัฒนาที่เน็ตเร็ว คำขอจบเรียงตามลำดับเสมอ ปัญหาจะโผล่เฉพาะในคลังที่สัญญาณ WiFi ไม่สม่ำเสมอ ซึ่งเป็นที่ที่เราไปนั่งดีบักไม่ได้</p><p>การใช้ <code>Completer</code> สองตัวทำให้เราควบคุมลำดับการจบได้เอง ตามรูปแบบเดียวกับที่ใช้ใน 3.8</p><p><strong>ลองต่อ:</strong> ลบบรรทัด <code>if (_pendingCode != code) return;</code> ออกแล้วรันเทสต์ — จะเห็นว่าล้มเหลวเพราะหน้าจอกลับไปแสดง PAL-1001 ซึ่งยืนยันว่าเทสต์จับปัญหานี้ได้จริง</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ระหว่าง <code>await</code> ผู้ใช้ทำอะไรก็ได้ — ต้องตรวจก่อนแตะหน้าจอ</li><li>ใช้ <code>mounted</code> ใน <code>State</code> และ <code>context.mounted</code> ใน callback</li><li><code>mounted</code> กันหน้าจอที่หายไป แต่ไม่กันผลลัพธ์เก่า</li><li>ผลลัพธ์เก่าที่มาช้าอาจทับผลใหม่ ต้องตรวจว่ายังตรงกับที่ต้องการ</li><li>ทางที่ง่ายที่สุดคือไม่ให้มีสองคำขอพร้อมกัน</li><li><code>mounted</code> ใช้กับการแตะหน้าจอ ไม่ใช่กับการเก็บกวาดใน <code>finally</code></li><li>ถ้าต้องใส่ <code>mounted</code> เต็มไปหมด ให้ทบทวนว่างานควรอยู่ที่ไหน</li></ul></div><p><strong>บทถัดไป:</strong> 3.14 คือ lab ปิด Part — รวมทุกอย่างเป็นเครื่องสถานะที่ควบคุมการไหลของงานสแกนตั้งแต่ต้นจนจบ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

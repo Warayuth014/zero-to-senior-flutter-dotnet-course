@@ -4,33 +4,177 @@
 <title>Confirmation Dialog</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-10 · Flutter UI</span><h1>Confirmation Dialog</h1><p>Part 3: Forms &amp; Barcode Scanner</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Typed dialog result</a></li><li><a href="#section-2">Preview before commit</a></li><li><a href="#section-3">Context ของ dialog</a></li><li><a href="#section-4">Focus และ scanner ระหว่าง dialog</a></li><li><a href="#section-5">Double confirmation ไม่แทน transaction</a></li><li><a href="#section-6">Dialog ใช้เมื่อไร</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Dialog ยืนยันควรใช้กับ actionที่ย้อนคืนยากหรือมีผลกว้าง ไม่ใช่ทุก scan มิฉะนั้นทำลาย throughput และผู้ใช้จะกดตกลงโดยไม่อ่าน Confirmationต้องสรุปสิ่งที่จะ commit และคืน typed resultให้ owner</div>
-<section id="section-1"><h2>1. Typed dialog result</h2><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(
-  context: context,
-  barrierDismissible: false,
-  builder: (dialogContext) =&gt; AlertDialog(
-    title: const Text('ยืนยันการย้ายสินค้า'),
-    content: Text('$pallet → $destination\nจำนวน $quantity'),
-    actions: [
-      TextButton(
-        onPressed: () =&gt; Navigator.pop(dialogContext, false),
-        child: const Text('ยกเลิก'),
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กล่องคืนค่ากลับมาเป็น Future</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">เนื้อหาต้องบอกสิ่งที่จะเกิดขึ้นจริง</a></li><li><a href="#section-6">เมื่อไหร่ควรถาม เมื่อไหร่ไม่ควร</a></li><li><a href="#section-7">กันไม่ให้กล่องถูกกดโดยไม่ตั้งใจ</a></li><li><a href="#section-8">ยืนยันแล้วไม่ได้แปลว่าสำเร็จ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ขอยืนยันก่อนทำสิ่งที่ย้อนกลับยาก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.7 (context ของกล่องโต้ตอบ) และ 3.8 (การกันส่งซ้อน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เปิดกล่องยืนยันและรับผลกลับมาอย่างถูกต้อง และตัดสินได้ว่าเมื่อไหร่ควรถามและเมื่อไหร่ไม่ควร</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>บางการกระทำย้อนกลับยาก — บันทึกรายการรับเข้า ยกเลิกใบงาน ลบข้อมูลที่สแกนไว้ทั้งหมด การถามยืนยันก่อนช่วยลดความเสียหาย</p><p>แต่ปัญหาที่ตามมาคือ <strong>ถ้าถามบ่อยเกินไป ผู้ใช้จะกดตกลงโดยไม่อ่าน</strong> ซึ่งทำให้กล่องยืนยันไร้ประโยชน์และยังทำให้ทำงานช้าลง — พนักงานที่ต้องยืนยัน 100 ครั้งต่อกะจะกดปุ่มเป็นอัตโนมัติภายในวันแรก</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>showDialog</code></td><td>เปิดกล่องโต้ตอบและรอผล</td></tr>
+<tr><td><code>AlertDialog</code></td><td>กล่องมาตรฐานที่มีหัวข้อ เนื้อหา และปุ่ม</td></tr>
+<tr><td><code>Navigator.pop</code></td><td>ปิดกล่องพร้อมส่งค่ากลับ</td></tr>
+<tr><td><code>barrierDismissible</code></td><td>แตะนอกกล่องแล้วปิดได้ไหม</td></tr>
+<tr><td>destructive</td><td>การกระทำที่ทำให้ข้อมูลหายหรือย้อนยาก</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กล่องคืนค่ากลับมาเป็น Future</h2><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(...);
+// ตรงนี้กล่องปิดไปแล้ว และเรามีคำตอบ
+
+if (confirmed == true)  →  ผู้ใช้กดยืนยัน
+if (confirmed == false) →  ผู้ใช้กดยกเลิก
+if (confirmed == null)  →  ผู้ใช้แตะนอกกล่องหรือกดย้อนกลับ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ผลลัพธ์เป็น <code>bool?</code> ไม่ใช่ <code>bool</code> — ต้องเขียน <code>confirmed != true</code> ไม่ใช่ <code>!confirmed</code> เพราะกรณี <code>null</code> ต้องถือว่าไม่ยืนยัน</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>Future&lt;bool?&gt; _confirmSubmit() {
+  return showDialog&lt;bool&gt;(
+    context: context,
+    builder: (dialogContext) =&gt; AlertDialog(
+      title: const Text('ยืนยันการบันทึก'),
+      content: Text('บันทึก ${_session.count} รายการใช่หรือไม่'),
+      actions: [
+        TextButton(
+          key: const Key('confirm-cancel'),
+          // ใช้ context ของกล่อง ไม่ใช่ของหน้าจอ (1.7)
+          onPressed: () =&gt; Navigator.pop(dialogContext, false),
+          child: const Text('ยกเลิก'),
+        ),
+        FilledButton(
+          key: const Key('confirm-ok'),
+          onPressed: () =&gt; Navigator.pop(dialogContext, true),
+          child: const Text('ยืนยัน'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><p>และฝั่งที่เรียกใช้</p><pre class="code-vs"><code>final confirmed = await _confirmSubmit();
+if (!mounted || confirmed != true) return;   // ตรวจทั้งสองอย่าง</code></pre><p>ทบทวนจาก 1.7 — ต้องใช้ <code>dialogContext</code> ที่ <code>builder</code> ให้มา ไม่ใช่ <code>context</code> ของหน้าจอ ไม่งั้นอาจปิดทั้งหน้าจอแทนที่จะปิดแค่กล่อง</p><p>และตรวจ <code>mounted</code> ด้วยเสมอ เพราะระหว่างที่กล่องเปิดอยู่ ผู้ใช้อาจกดย้อนกลับออกจากหน้าจอไปแล้ว</p></section>
+
+<section id="section-5"><h2>5. เนื้อหาต้องบอกสิ่งที่จะเกิดขึ้นจริง</h2><table><thead><tr><th>แย่</th><th>ดี</th></tr></thead><tbody>
+<tr><td>“คุณแน่ใจหรือไม่”</td><td>“บันทึก 12 รายการใช่หรือไม่”</td></tr>
+<tr><td>“ยืนยันการทำรายการ”</td><td>“ย้าย PAL-1001 ไปที่ A-01-02 จำนวน 24 ชิ้น”</td></tr>
+<tr><td>ปุ่ม “ตกลง / ไม่”</td><td>ปุ่ม “บันทึก / ยกเลิก”</td></tr>
+</tbody></table><p>เหตุผลสองข้อ</p><ol><li><strong>ผู้ใช้ต้องตรวจได้ว่าถูกต้อง</strong> — กล่องที่ไม่บอกตัวเลขไม่ได้ช่วยอะไรเลย เป็นแค่ขั้นตอนที่เพิ่มมา</li><li><strong>ปุ่มที่บอกกริยาชัดจะกดผิดยากกว่า</strong> — เมื่อพนักงานกวาดตาเร็ว ๆ คำว่า “บันทึก” กับ “ยกเลิก” แยกกันชัดกว่า “ตกลง” กับ “ไม่”</li></ol></section>
+
+<section id="section-6"><h2>6. เมื่อไหร่ควรถาม เมื่อไหร่ไม่ควร</h2><table><thead><tr><th>สถานการณ์</th><th>ถามไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>บันทึกรายการทั้งชุดขึ้น server</td><td><strong>ถาม</strong></td><td>ย้อนยาก กระทบสต็อกจริง</td></tr>
+<tr><td>ยกเลิกใบงานที่ทำไปครึ่งทาง</td><td><strong>ถาม</strong></td><td>งานที่ทำไปแล้วหายหมด</td></tr>
+<tr><td>ลบรายการที่สแกนไว้ทั้งหมด</td><td><strong>ถาม</strong></td><td>ต้องยิงใหม่ทั้งหมด</td></tr>
+<tr><td>ยิงบาร์โค้ดทีละใบ</td><td>ไม่ถาม</td><td>เกิดบ่อยมาก และลบทีละใบได้ง่าย</td></tr>
+<tr><td>เอารายการออกทีละใบ</td><td>ไม่ถาม</td><td>ยิงใหม่ได้ทันที</td></tr>
+</tbody></table><div class="warn"><strong>กฎที่ใช้ตัดสินได้:</strong> ถามเมื่อการยกเลิกทำได้ยากกว่าการทำใหม่ — ถ้าผู้ใช้แก้ได้เองในสองวินาที อย่าถาม ให้ทำเลยแล้วมีปุ่มเลิกทำแทน</div><p>ใน lab เราถามครั้งเดียวตอนบันทึกทั้งชุด ไม่ถามตอนยิงแต่ละใบ — ซึ่งเป็นการวางจุดถามที่ถูก เพราะการยิงผิดใบเดียวแก้ได้ด้วยการกดถังขยะข้างรายการนั้น</p></section>
+
+<section id="section-7"><h2>7. กันไม่ให้กล่องถูกกดโดยไม่ตั้งใจ</h2><p>ปัญหาเฉพาะของงานสแกน — เครื่องสแกนกด Enter ให้ และ Enter อาจไปกดปุ่มที่โฟกัสอยู่ในกล่อง</p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  _session.beginSubmit();               // ปิดรับสแกนก่อนเปิดกล่อง
+  try {
+    final confirmed = await _confirmSubmit();
+    if (!mounted || confirmed != true) return;
+    // ... บันทึก ...
+  } finally {
+    _session.endSubmit();
+    if (mounted) _barcodeFocus.requestFocus();   // คืนโฟกัสหลังปิด (3.2)
+  }
+}</code></pre><p>สำหรับการกระทำที่ย้อนยากมาก ควรทำเพิ่มอีกสองอย่าง</p><table><thead><tr><th>ทำอะไร</th><th>เพื่ออะไร</th></tr></thead><tbody>
+<tr><td><code>barrierDismissible: false</code></td><td>ต้องเลือกอย่างใดอย่างหนึ่ง แตะนอกกล่องปิดไม่ได้</td></tr>
+<tr><td>ให้โฟกัสเริ่มที่ปุ่มยกเลิก</td><td>ถ้ามีการกด Enter โดยไม่ตั้งใจ จะได้ยกเลิกแทนที่จะยืนยัน</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. ยืนยันแล้วไม่ได้แปลว่าสำเร็จ</h2><p>ลำดับที่ถูกต้องคือ ยืนยัน แล้วส่ง แล้วรอผล แล้วค่อยบอกว่าสำเร็จ</p><pre class="code-vs"><code>// ผิด — บอกว่าสำเร็จตั้งแต่ยังไม่ส่ง
+if (confirmed == true) {
+  showSnackBar('บันทึกสำเร็จ');
+  api.save(items);
+}
+
+// ถูก — รอผลจริงก่อน
+if (confirmed != true || !mounted) return;
+final ok = await api.save(items);
+if (!mounted) return;
+showSnackBar(ok ? 'บันทึกสำเร็จ' : 'บันทึกไม่สำเร็จ');</code></pre><p>และเมื่อเน็ตหลุดจนไม่รู้ผล <strong>อย่าเปิดกล่องยืนยันใหม่แล้วให้ผู้ใช้กดส่งซ้ำทันที</strong> เพราะครั้งแรกอาจถึง server ไปแล้วตามที่คุยใน 3.8 หัวข้อ 8 — ควรบอกว่าสถานะไม่แน่ชัดและให้โหลดข้อมูลใหม่เพื่อตรวจสอบก่อน</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดยกเลิกแล้วยังบันทึก</td><td>เขียน <code>if (!confirmed)</code> กับค่า nullable</td><td>ใช้ <code>if (confirmed != true) return;</code></td></tr>
+<tr><td>ปิดกล่องแล้วออกจากหน้าจอไปเลย</td><td>ใช้ <code>context</code> ของหน้าจอไปปิดกล่อง</td><td>ใช้ <code>dialogContext</code></td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>ไม่ตรวจ <code>mounted</code> หลังกล่องปิด</td><td>ตรวจทุกครั้งหลัง <code>await</code></td></tr>
+<tr><td>ยิงบาร์โค้ดตอนกล่องเปิด แล้วกดยืนยันเอง</td><td>ไม่ได้ปิดรับสแกน</td><td>ปิดก่อนเปิดกล่อง</td></tr>
+<tr><td>ผู้ใช้กดตกลงโดยไม่อ่าน</td><td>ถามบ่อยเกินไป</td><td>ถามเฉพาะที่ย้อนยาก</td></tr>
+<tr><td>กล่องบอกแค่ “แน่ใจหรือไม่”</td><td>ไม่ได้สรุปสิ่งที่จะเกิด</td><td>ใส่ตัวเลขและรายละเอียดจริง</td></tr>
+<tr><td>บอกว่าสำเร็จทั้งที่ยังไม่ได้ส่ง</td><td>แสดงผลตั้งแต่กดยืนยัน</td><td>รอผลจาก server ก่อน</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>หน้าจอตรวจซีเรียลก่อนส่งออก ผู้ใช้ยิงซีเรียล 50 ชิ้นต่อหนึ่งใบงาน</p><ol><li>ควรถามยืนยันตรงจุดไหนบ้าง และไม่ถามตรงไหน</li><li>เขียนกล่องยืนยันสำหรับจุดที่เลือก โดยเนื้อหาต้องช่วยให้ผู้ใช้ตรวจได้จริง</li><li>อธิบายว่าจะกันการกด Enter โดยไม่ตั้งใจอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — จุดที่ควรถามและไม่ควรถาม</strong></p><table><thead><tr><th>การกระทำ</th><th>ถามไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ยิงซีเรียลแต่ละชิ้น</td><td><strong>ไม่</strong></td><td>เกิด 50 ครั้ง ถ้าถามทุกครั้งจะใช้เวลาเพิ่มเท่าตัวและผู้ใช้จะกดโดยไม่อ่าน</td></tr>
+<tr><td>เอาซีเรียลออกทีละชิ้น</td><td><strong>ไม่</strong></td><td>ยิงกลับเข้ามาใหม่ได้ในสองวินาที</td></tr>
+<tr><td>ล้างทั้งใบงาน</td><td><strong>ถาม</strong></td><td>ต้องยิงใหม่ทั้ง 50 ชิ้น</td></tr>
+<tr><td>ปิดใบงานและส่งขึ้น server</td><td><strong>ถาม</strong></td><td>ย้อนยาก และกระทบข้อมูลการส่งออกจริง</td></tr>
+</tbody></table><p><strong>ข้อ 2 — กล่องยืนยันตอนปิดใบงาน</strong></p><pre class="code-vs"><code>Future&lt;bool?&gt; _confirmClose({
+  required int scanned,
+  required int expected,
+  required List&lt;String&gt; missing,
+}) {
+  final hasProblem = scanned != expected;
+
+  return showDialog&lt;bool&gt;(
+    context: context,
+    barrierDismissible: false,        // ต้องเลือกอย่างใดอย่างหนึ่ง
+    builder: (dialogContext) =&gt; AlertDialog(
+      title: const Text('ปิดใบงานและส่งข้อมูล'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('ตรวจแล้ว $scanned จาก $expected ชิ้น'),
+          if (hasProblem) ...[
+            const SizedBox(height: 8),
+            Text(
+              'ยังขาดอีก ${expected - scanned} ชิ้น',
+              style: TextStyle(
+                color: Theme.of(dialogContext).colorScheme.error,
+              ),
+            ),
+            if (missing.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              // แสดงตัวอย่างให้ตรวจได้ แต่ไม่ยาวจนล้นจอ (2.11)
+              Text(
+                'เช่น ${missing.take(3).join(', ')}'
+                '${missing.length &gt; 3 ? ' และอีก ${missing.length - 3}' : ''}',
+                style: Theme.of(dialogContext).textTheme.bodySmall,
+              ),
+            ],
+          ],
+        ],
       ),
-      FilledButton(
-        onPressed: () =&gt; Navigator.pop(dialogContext, true),
-        child: const Text('ยืนยัน'),
-      ),
-    ],
-  ),
-);
-if (confirmed != true || !mounted) return;</code></pre></section>
-<section id="section-2"><h2>2. Preview before commit</h2><p>Flow CheckIn ของ wmsapp scan→preview API→destination dialog→pending pack แล้วจึงมี action commit การแยก preview/commitช่วยตรวจ pallet/location/quantityก่อน mutation และ dialogแสดงข้อมูลจาก serverไม่ใช่เดาจาก barcodeอย่างเดียว</p></section>
-<section id="section-3"><h2>3. Context ของ dialog</h2><p>ใช้ <code>dialogContext</code> pop dialog ไม่ pop routeหลัก หลัง awaitตรวจ mounted/context.mountedก่อนใช้ owner context Dialog builderอาจอยู่คนละ navigatorเมื่อ nested navigator จึงกำหนด <code>useRootNavigator</code> ตาม architectureหากจำเป็น</p></section>
-<section id="section-4"><h2>4. Focus และ scanner ระหว่าง dialog</h2><p>ปิด/lock scannerก่อนเปิด dialog ไม่ให้ Enterจาก triggerเดิมกดยืนยันโดยไม่ตั้งใจ กำหนด focusเริ่มที่ safe actionสำหรับ destructive command และหลัง dialogปิดคืน focusตาม current workflow state</p></section>
-<section id="section-5"><h2>5. Double confirmation ไม่แทน transaction</h2><p>ผู้ใช้ยืนยันแล้ว serverยังต้องตรวจ authorization, concurrency, stock และ idempotency หาก network timeoutห้ามเปิด dialogใหม่แล้ว commitซ้ำทันที ต้อง query/retryด้วย operation keyหรือแสดงสถานะไม่แน่ชัดให้ reconcile</p></section>
-<section id="section-6"><h2>6. Dialog ใช้เมื่อไร</h2><ul><li>ควรใช้: delete, close task, moveผิดปลายทางแล้วกระทบ stock, bulk commit</li><li>อาจไม่ใช้: scan serialทีละชิ้นที่ undoได้และมี feedbackชัด</li><li>ใช้ review screenแทน: transactionหลายรายการ/ต้องตรวจรายละเอียดมาก</li></ul></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้สแกน serial 50 ชิ้น ควรถามยืนยันทุกชิ้นหรือจุดไหน?</p><details><summary>แนวคำตอบ</summary><p>validate/feedbackแต่ละ serialทันทีและให้ undo; ยืนยันครั้งเดียวตอน commit batchโดยสรุป part, expected/scanned count, pallet/destination และรายการผิดปกติ ลด modal fatigueแต่ยังมี controlก่อน mutationสำคัญ</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าให้ปุ่มยืนยันและยกเลิกชื่อกำกวม เช่น “OK/No” ใช้คำกริยาตรง action, แยก destructive style, รองรับ back/barrierตามความเสี่ยง และอย่าปิด dialogพร้อมยิง APIโดยไม่มี loading/duplicate guard</div></section>
+      actions: [
+        TextButton(
+          onPressed: () =&gt; Navigator.pop(dialogContext, false),
+          child: const Text('กลับไปตรวจต่อ'),   // กริยาชัด ไม่ใช่ "ไม่"
+        ),
+        FilledButton(
+          onPressed: () =&gt; Navigator.pop(dialogContext, true),
+          child: Text(hasProblem ? 'ปิดทั้งที่ยังขาด' : 'ปิดใบงาน'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><p><strong>สิ่งที่ทำให้กล่องนี้มีประโยชน์จริง</strong></p><ul><li><strong>บอกตัวเลขเทียบกัน</strong> — “ตรวจแล้ว 47 จาก 50” ทำให้ผู้ใช้เห็นปัญหาทันทีโดยไม่ต้องคิดเอง</li><li><strong>ยกตัวอย่างที่ขาด</strong> — ช่วยให้เขานึกออกว่าลืมตรงไหน แต่จำกัดไว้สามตัวเพื่อไม่ให้กล่องยาวเกิน</li><li><strong>ข้อความปุ่มเปลี่ยนตามสถานการณ์</strong> — “ปิดทั้งที่ยังขาด” ทำให้ผู้ใช้รู้ตัวว่ากำลังทำอะไร ต่างจาก “ยืนยัน” ที่กดผ่านได้โดยไม่คิด</li><li><strong>ปุ่มยกเลิกบอกว่าจะไปไหนต่อ</strong> — “กลับไปตรวจต่อ” ชัดกว่า “ยกเลิก”</li></ul><p><strong>ข้อ 3 — กันการกด Enter โดยไม่ตั้งใจ</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _closeTask() async {
+  if (_closing) return;                    // กันส่งซ้อน (3.8)
+
+  _session.beginSubmit();                  // ปิดรับสแกนก่อนเปิดกล่อง
+  try {
+    final confirmed = await _confirmClose(...);
+    if (!mounted || confirmed != true) return;
+
+    setState(() =&gt; _closing = true);
+    final ok = await api.closeTask(...);
+    if (!mounted) return;
+    _showResult(ok);
+  } finally {
+    _session.endSubmit();                  // ปลดเสมอ
+    if (mounted) {
+      setState(() =&gt; _closing = false);
+      _serialFocus.requestFocus();         // คืนโฟกัสหลังกล่องปิด (3.2)
+    }
+  }
+}</code></pre><p>สามชั้นที่ทำงานร่วมกัน</p><ol><li><code>_session.beginSubmit()</code> ทำให้ <code>accept()</code> ปฏิเสธทันทีถ้ามีรหัสหลุดเข้ามา</li><li><code>barrierDismissible: false</code> ทำให้ปิดกล่องได้เฉพาะผ่านปุ่ม</li><li>ปุ่มยกเลิกอยู่ตำแหน่งแรก จึงเป็นตัวที่ได้โฟกัสก่อน — ถ้ามี Enter หลุดเข้ามา ผลคือกลับไปตรวจต่อ ซึ่งปลอดภัยกว่าปิดใบงาน</li></ol><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่เปิดกล่องแล้วยิงบาร์โค้ดเข้าไป จากนั้นตรวจว่าจำนวนที่ตรวจแล้วไม่เพิ่ม — ดูรูปแบบได้จากเทสต์ “ระหว่างบันทึก ยิงบาร์โค้ดเพิ่มไม่ได้” ใน lab</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ผลของกล่องเป็น <code>bool?</code> — ต้องเขียน <code>confirmed != true</code></li><li>ใช้ <code>dialogContext</code> ในการปิดกล่อง ไม่ใช่ context ของหน้าจอ</li><li>ตรวจ <code>mounted</code> หลังกล่องปิดเสมอ</li><li>เนื้อหาต้องบอกสิ่งที่จะเกิดขึ้นจริงพร้อมตัวเลข</li><li>ปุ่มต้องใช้คำกริยาที่ชัด ไม่ใช่ “ตกลง/ไม่”</li><li>ถามเฉพาะเมื่อการยกเลิกยากกว่าการทำใหม่</li><li>ปิดรับสแกนก่อนเปิดกล่อง และคืนโฟกัสหลังปิด</li><li>ยืนยันแล้วยังไม่ใช่สำเร็จ ต้องรอผลจาก server</li></ul></div><p><strong>บทถัดไป:</strong> 3.11 จะดูการให้สัญญาณตอบรับที่พนักงานรับรู้ได้โดยไม่ต้องมองจอ ซึ่งเป็นสิ่งที่ทำให้งานสแกนเร็วขึ้นจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

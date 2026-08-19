@@ -4,27 +4,199 @@
 <title>Dispose Controllers</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">03-12 · Flutter UI</span><h1>Dispose Controllers</h1><p>Part 3: Forms &amp; Barcode Scanner</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Lifecycle template</a></li><li><a href="#section-2">External vs internal resource</a></li><li><a href="#section-3">addListener ต้อง remove</a></li><li><a href="#section-4">Dynamic maps</a></li><li><a href="#section-5">Timer และ async callback</a></li><li><a href="#section-6">dispose order</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">กฎ ownership: ใครสร้าง resource คนนั้น dispose และ lifetimeต้องตรงกับสิ่งที่ resourceควบคุม Controller/FocusNode/Timer/Subscription/listenerที่หลุดจะทำให้ memory leak, callbackหลังปิดหน้า หรือใช้ objectที่ถูก disposeแล้ว</div>
-<section id="section-1"><h2>1. Lifecycle template</h2><pre class="code-vs"><code>class _ScanState extends State&lt;ScanPage&gt; {
-  final _controller = TextEditingController();
-  final _focus = FocusNode();
-  Timer? _duplicateTimer;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: บัญชีคู่</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">ลำดับใน dispose</a></li><li><a href="#section-6">ของที่ยืมมาจากภายนอก</a></li><li><a href="#section-7">เมื่อมีของหลายชิ้นตามข้อมูล</a></li><li><a href="#section-8">อาการที่บอกว่าลืมคืน</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: คืนทรัพยากรให้ครบทุกชิ้น</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.6 (วงจรชีวิตและกฎความเป็นเจ้าของ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ไล่ตรวจได้ว่าหน้าจอหนึ่งมีอะไรต้องคืนบ้าง และจัดการกรณีที่รับของมาจากภายนอกได้ถูกต้อง</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>หน้าจอสแกนหนึ่งหน้ามีของที่ต้องคืนหลายชิ้น มากกว่าหน้าจอแสดงผลธรรมดามาก</p><pre class="code-vs"><code>final _barcodeController = TextEditingController();
+final _quantityController = TextEditingController(text: '1');
+final _barcodeFocus = FocusNode();</code></pre><p>ยังไม่นับตัวจับเวลา การฟังเหตุการณ์ และตัวควบคุมการเลื่อน — ถ้าลืมคืนแม้ชิ้นเดียว จะเกิดอาการที่หาสาเหตุยากมาก เพราะมันไม่พังทันที แต่ค่อย ๆ สะสม</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>resource</td><td>สิ่งที่ยึดหน่วยความจำหรือทำงานอยู่เบื้องหลัง</td></tr>
+<tr><td>leak</td><td>ทรัพยากรที่ไม่ถูกคืน สะสมไปเรื่อย ๆ</td></tr>
+<tr><td>ownership</td><td>ใครเป็นเจ้าของและต้องเป็นคนคืน</td></tr>
+<tr><td>lifetime</td><td>ช่วงเวลาที่สิ่งนั้นมีชีวิตอยู่</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: บัญชีคู่</h2><p>ทบทวนกฎจาก 1.6 — ทุกอย่างที่เริ่มไว้ต้องมีคู่ตรงข้ามที่ปิด</p><table><thead><tr><th>เริ่ม</th><th>ต้องคู่กับ</th></tr></thead><tbody>
+<tr><td><code>TextEditingController()</code></td><td><code>.dispose()</code></td></tr>
+<tr><td><code>FocusNode()</code></td><td><code>.dispose()</code></td></tr>
+<tr><td><code>ScrollController()</code></td><td><code>.dispose()</code></td></tr>
+<tr><td><code>ValueNotifier()</code></td><td><code>.dispose()</code></td></tr>
+<tr><td><code>Timer.periodic()</code></td><td><code>.cancel()</code></td></tr>
+<tr><td><code>.addListener()</code></td><td><code>.removeListener()</code></td></tr>
+<tr><td><code>.listen()</code></td><td><code>.cancel()</code></td></tr>
+</tbody></table><div class="note"><strong>วิธีตรวจที่ใช้ได้เสมอ:</strong> ไล่อ่าน field ทั้งหมดของ <code>State</code> จากบนลงล่าง แล้วถามทีละตัวว่า “ตัวนี้มีคู่ใน <code>dispose</code> หรือยัง” — ถ้าทำเป็นนิสัยจะไม่มีทางลืม</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>class _ReceiveScreenState extends State&lt;ReceiveScreen&gt; {
+  // ของที่เราสร้าง เราต้องคืน (1.6)
+  final _barcodeController = TextEditingController();
+  final _quantityController = TextEditingController(text: '1');
+  final _barcodeFocus = FocusNode();
+  final _formKey = GlobalKey&lt;FormState&gt;();
+
+  final _session = ScanSession(operatorName: 'สมชาย');
 
   @override
   void dispose() {
-    _duplicateTimer?.cancel();
-    _controller.dispose();
-    _focus.dispose();
+    _barcodeController.dispose();
+    _quantityController.dispose();
+    _barcodeFocus.dispose();
     super.dispose();
   }
+  ...
+}</code></pre><p>สังเกตว่า <strong>ไม่ใช่ทุก field ที่ต้องคืน</strong></p><table><thead><tr><th>field</th><th>ต้องคืนไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>controller ทั้งสอง</td><td><strong>ต้อง</strong></td><td>ยึดทรัพยากรของระบบ</td></tr>
+<tr><td><code>_barcodeFocus</code></td><td><strong>ต้อง</strong></td><td>ยึดทรัพยากรของระบบ</td></tr>
+<tr><td><code>_formKey</code></td><td>ไม่ต้อง</td><td>เป็นแค่ที่จับ ไม่ได้ยึดอะไร</td></tr>
+<tr><td><code>_session</code></td><td>ไม่ต้อง</td><td>เป็น object ธรรมดา ไม่มีอะไรทำงานอยู่</td></tr>
+</tbody></table><p>เกณฑ์คือ <strong>ถ้ามันมี method ชื่อ <code>dispose</code> หรือ <code>cancel</code> แปลว่าต้องเรียก</strong> — ถ้าไม่มี ก็ไม่ต้องทำอะไร</p></section>
+
+<section id="section-5"><h2>5. ลำดับใน dispose</h2><pre class="code-vs"><code>@override
+void dispose() {
+  _timer?.cancel();                    // 1. หยุดสิ่งที่ยังทำงานอยู่ก่อน
+  _scanner.removeListener(_onScan);    // 2. เลิกฟัง
+  _controller.dispose();               // 3. คืนตัวควบคุม
+  _focus.dispose();
+  super.dispose();                     // 4. ท้ายสุดเสมอ
+}</code></pre><p>เหตุผลของลำดับ — ถ้าคืนตัวควบคุมก่อนหยุดตัวจับเวลา ตัวจับเวลาที่ยิงพอดีจะไปแตะตัวควบคุมที่ถูกคืนไปแล้ว แล้วได้ error</p><p>ส่วน <code>super.dispose()</code> ต้องอยู่ท้ายสุดเสมอ ตรงข้ามกับ <code>super.initState()</code> ที่อยู่บนสุด</p></section>
+
+<section id="section-6"><h2>6. ของที่ยืมมาจากภายนอก</h2><p>เมื่อ widget รับตัวควบคุมมาจากแม่ผ่าน constructor <strong>ห้ามคืน</strong> เพราะแม่อาจยังใช้ต่อ</p><pre class="code-vs"><code>class ScanField extends StatefulWidget {
+  const ScanField({super.key, this.controller});
+
+  final TextEditingController? controller;   // อาจส่งมาหรือไม่ก็ได้
+  ...
+}
+
+class _ScanFieldState extends State&lt;ScanField&gt; {
+  TextEditingController? _owned;
+
+  // ใช้ของแม่ถ้ามี ไม่งั้นใช้ของตัวเอง
+  TextEditingController get _controller =&gt; widget.controller ?? _owned!;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller == null) {
+      _owned = TextEditingController();     // สร้างเองเมื่อไม่มีคนให้
+    }
+  }
+
+  @override
+  void dispose() {
+    _owned?.dispose();                      // คืนเฉพาะที่สร้างเอง
+    super.dispose();
+  }
+}</code></pre><p>รูปแบบนี้ทำให้ widget ใช้ได้สองแบบ — แม่ที่ต้องการควบคุมค่าเองก็ส่งตัวควบคุมมา ส่วนแม่ที่ไม่สนใจก็ไม่ต้องส่ง</p><div class="warn"><strong>การคืนของที่ยืมมาอันตรายพอ ๆ กับการลืมคืน</strong> — จะได้ error ว่า <code>A TextEditingController was used after being disposed</code> ตอนที่แม่พยายามใช้ต่อ ซึ่งเกิดห่างจากจุดที่เขียนผิดมาก จึงหายาก</div></section>
+
+<section id="section-7"><h2>7. เมื่อมีของหลายชิ้นตามข้อมูล</h2><p>หน้าจอนับสต็อกที่มีช่องกรอกหนึ่งช่องต่อสินค้าหนึ่งชนิด ต้องสร้างตัวควบคุมหลายตัว</p><pre class="code-vs"><code>final Map&lt;String, TextEditingController&gt; _controllers = {};
+
+TextEditingController _controllerFor(String productCode) {
+  return _controllers.putIfAbsent(productCode, TextEditingController.new);
+}
+
+@override
+void dispose() {
+  for (final controller in _controllers.values) {
+    controller.dispose();               // คืนทุกตัว
+  }
+  _controllers.clear();
+  super.dispose();
+}</code></pre><p>สองข้อที่ต้องระวังเป็นพิเศษ</p><ol><li><strong>ใช้รหัสจริงเป็นกุญแจ ไม่ใช่ตำแหน่ง</strong> — เพราะเมื่อรายการเรียงใหม่ ตัวควบคุมจะย้ายไปอยู่กับสินค้าคนละตัว เป็นปัญหาเดียวกับ key ใน 1.8</li><li><strong>เมื่อรายการหายไป ต้องคืนตัวควบคุมของมัน</strong> ไม่งั้นจะสะสมไปเรื่อย ๆ ตลอดอายุหน้าจอ</li></ol><pre class="code-vs"><code>void _removeProduct(String productCode) {
+  _controllers.remove(productCode)?.dispose();   // เอาออกแล้วคืนทันที
+  setState(() =&gt; _products.removeWhere((p) =&gt; p.code == productCode));
 }</code></pre></section>
-<section id="section-2"><h2>2. External vs internal resource</h2><p>ถ้า childรับ controller/focusจาก constructor ห้าม dispose เพราะ ownerอาจใช้กับ sibling/หลัง childหาย หาก optionalและ childสร้าง fallback ให้เก็บ fieldแยกเช่น <code>_ownController</code> แล้ว disposeเฉพาะของตน Absolute ScanBoxทำ patternนี้กับ controller</p></section>
-<section id="section-3"><h2>3. addListener ต้อง remove</h2><p>สำหรับ controllerที่ตน dispose การ disposeจะล้าง listeners แต่ explicit removeช่วยเมื่อ listenerผูกกับ external objectหรือเปลี่ยน sourceใน didUpdateWidget Patternคือ unsubscribe old → assign new → subscribe new และ unsubscribeใน dispose</p></section>
-<section id="section-4"><h2>4. Dynamic maps</h2><p>Cycle Count สร้าง controller/focusต่อ product codeใน Map เมื่อ listเปลี่ยนต้อง dispose entriesที่ถูกลบ และ disposeทุก valueตอนหน้าปิด ไม่ใช้ indexเป็น keyเพราะ reorderทำ resourceย้าย item ใช้ stable product/line ID</p></section>
-<section id="section-5"><h2>5. Timer และ async callback</h2><p>Timer cancelใน disposeและ cancelตัวเก่าก่อน replace เช่น toast/flash ของ Absolute Callbackยังควรตรวจ mountedเพราะ cancelอาจแข่งกับ callbackที่เริ่มแล้ว Futureยกเลิกไม่ได้โดยอัตโนมัติจึงต้อง ignore stale result/cancel requestตาม owner</p></section>
-<section id="section-6"><h2>6. dispose order</h2><p>หยุด producerก่อน consumer: cancel timer/subscription, remove listeners/observers, dispose controllers/notifiers แล้ว <code>super.dispose()</code> ตาม patternของ framework ห้าม setStateใน dispose และอย่าเรียก requestFocusหลัง nodeถูก dispose</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ScanFieldรับ optional controllerและ optional focusNode ควรจัด ownershipอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>เก็บ <code>_ownController</code>/<code>_ownFocus</code> เฉพาะเมื่อ inputเป็น null, gettersเลือก externalหรือ own, disposeเฉพาะ own หาก widget updateจาก own→external/กลับกันต้องจัด create/disposeใน didUpdateWidget หรือออกแบบ contractไม่เปลี่ยน ownerกลาง lifetimeและ assert/documentไว้</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Disposeสองครั้ง/child dispose resourceของ parentอันตรายพอ ๆ กับไม่ dispose อาการมักเกิดหลัง navigation/rebuildจึงหาได้ยาก เขียน ownershipใน constructor docและทดสอบ mount→replace→unmount</div></section>
+
+<section id="section-8"><h2>8. อาการที่บอกว่าลืมคืน</h2><table><thead><tr><th>อาการ</th><th>ลืมคืนอะไร</th></tr></thead><tbody>
+<tr><td>เข้าออกหน้าจอซ้ำ ๆ แล้วแอปช้าลงเรื่อย ๆ</td><td>ตัวควบคุมหรือตัวจับเวลา</td></tr>
+<tr><td>โค้ดของหน้าจอเก่ายังทำงานหลังออกไปแล้ว</td><td>ตัวจับเวลาหรือการฟังเหตุการณ์</td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>งานที่รออยู่ยังทำงานต่อ (1.6)</td></tr>
+<tr><td>ข้อมูลของหน้าจอเก่าโผล่มาทับหน้าจอใหม่</td><td>การฟังเหตุการณ์ที่ไม่ได้ยกเลิก</td></tr>
+</tbody></table><p>อาการทั้งหมดนี้มีจุดร่วมคือ <strong>ไม่พังทันที</strong> — จึงผ่านการทดสอบด้วยมือได้สบาย และไปโผล่ตอนพนักงานใช้งานยาว ๆ ทั้งกะ</p><p>ทางที่ดีที่สุดคือเขียนเทสต์ที่ประกอบหน้าจอ ถอดออก แล้วตรวจว่าไม่มีอะไรทำงานต่อ ตามรูปแบบในแบบฝึกหัด 1.6</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปช้าลงเมื่อใช้งานนาน</td><td>ลืมคืนตัวควบคุม</td><td>ไล่ตรวจ field ทุกตัวว่ามีคู่ใน <code>dispose</code></td></tr>
+<tr><td><code>used after being disposed</code></td><td>คืนของที่ยืมมาจากแม่</td><td>คืนเฉพาะที่สร้างเอง</td></tr>
+<tr><td>คืนสองครั้ง</td><td>ทั้งแม่และลูกคืน</td><td>ตกลงกันให้ชัดว่าใครเป็นเจ้าของ</td></tr>
+<tr><td>ตัวจับเวลาไปแตะของที่คืนแล้ว</td><td>ลำดับใน <code>dispose</code> ผิด</td><td>หยุดตัวจับเวลาก่อนคืนตัวควบคุม</td></tr>
+<tr><td>ตัวควบคุมย้ายไปอยู่กับสินค้าคนละตัว</td><td>ใช้ตำแหน่งเป็นกุญแจ</td><td>ใช้รหัสจริง</td></tr>
+<tr><td>ตัวควบคุมสะสมเมื่อลบรายการ</td><td>ลบข้อมูลแต่ไม่คืนตัวควบคุม</td><td>คืนตอนที่ลบ</td></tr>
+<tr><td>เรียก <code>setState</code> ใน <code>dispose</code></td><td>เข้าใจว่าต้องอัปเดตหน้าจอ</td><td>ไม่ต้องทำ หน้าจอกำลังถูกทำลายอยู่แล้ว</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>โค้ดนี้มีปัญหาเรื่องการคืนทรัพยากรสี่จุด จงหาให้ครบและแก้</p><pre class="code-vs"><code>class _CountScreenState extends State&lt;CountScreen&gt; {
+  final Map&lt;int, TextEditingController&gt; _controllers = {};
+  final _scrollController = ScrollController();
+  Timer? _autoSaveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoSaveTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) =&gt; _autoSave(),
+    );
+    widget.scanner.addListener(_onScan);
+  }
+
+  TextEditingController _controllerFor(int index) {
+    return _controllers.putIfAbsent(index, TextEditingController.new);
+  }
+
+  void _removeLine(int index) {
+    setState(() =&gt; _lines.removeAt(index));
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+}</code></pre><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ปัญหาที่พบ</strong></p><table><thead><tr><th>จุด</th><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่ได้คืนตัวควบคุมใน <code>_controllers</code></td><td>สะสมทุกครั้งที่เข้าหน้าจอ</td></tr>
+<tr><td>2</td><td>ไม่ได้หยุด <code>_autoSaveTimer</code></td><td>บันทึกอัตโนมัติทำงานต่อไปตลอดอายุแอป</td></tr>
+<tr><td>3</td><td>ไม่ได้เลิกฟัง <code>widget.scanner</code></td><td>โค้ดของหน้าจอเก่ายังทำงานเมื่อยิงบาร์โค้ด</td></tr>
+<tr><td>4</td><td>ใช้ <code>index</code> เป็นกุญแจ และลบรายการโดยไม่คืนตัวควบคุม</td><td>ตัวควบคุมย้ายไปอยู่กับรายการคนละตัวหลังลบ</td></tr>
+</tbody></table><pre class="code-vs"><code>class _CountScreenState extends State&lt;CountScreen&gt; {
+  // แก้ปัญหาที่ 4 — ใช้รหัสจริงเป็นกุญแจ ไม่ใช่ตำแหน่ง
+  final Map&lt;String, TextEditingController&gt; _controllers = {};
+  final _scrollController = ScrollController();
+  Timer? _autoSaveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoSaveTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) =&gt; _autoSave(),
+    );
+    widget.scanner.addListener(_onScan);
+  }
+
+  TextEditingController _controllerFor(String productCode) {
+    return _controllers.putIfAbsent(productCode, TextEditingController.new);
+  }
+
+  void _removeLine(String productCode) {
+    // แก้ปัญหาที่ 4 — คืนตัวควบคุมของรายการที่ถูกลบทันที
+    _controllers.remove(productCode)?.dispose();
+    setState(() =&gt; _lines.removeWhere((line) =&gt; line.code == productCode));
+  }
+
+  @override
+  void dispose() {
+    _autoSaveTimer?.cancel();                    // แก้ที่ 2 — หยุดก่อน
+    widget.scanner.removeListener(_onScan);      // แก้ที่ 3 — เลิกฟัง
+    for (final controller in _controllers.values) {
+      controller.dispose();                      // แก้ที่ 1 — คืนทุกตัว
+    }
+    _controllers.clear();
+    _scrollController.dispose();
+    super.dispose();
+  }
+}</code></pre><p><strong>ทำไมปัญหาที่ 3 ร้ายแรงที่สุด</strong></p><p>เพราะ <code>widget.scanner</code> เป็นของที่อยู่ <em>ยาวกว่าหน้าจอ</em> — เมื่อเราเลิกฟังไม่ทัน มันจะยังถือ callback ของหน้าจอที่ตายไปแล้วไว้ ผลคือ</p><ul><li>หน้าจอเก่าถูกยึดไว้ไม่ให้คืนหน่วยความจำ พร้อมทุกอย่างที่มันถืออยู่</li><li>เมื่อพนักงานยิงบาร์โค้ดในหน้าจอใหม่ โค้ดของหน้าจอเก่าจะทำงานด้วย</li><li>ถ้าหน้าจอเก่าเรียก <code>setState</code> จะได้ <code>setState() called after dispose()</code></li></ul><p>และถ้าเข้าออกหน้าจอสิบครั้ง จะมีสิบตัวที่ฟังอยู่พร้อมกัน — การยิงหนึ่งครั้งทำให้โค้ดทำงานสิบรอบ</p><p><strong>ทำไมปัญหาที่ 4 ถึงตรวจไม่เจอด้วยการทดสอบทั่วไป</strong></p><p>เพราะมันเกิดเฉพาะเมื่อ <em>ลบรายการที่ไม่ใช่ตัวสุดท้าย</em> — เมื่อลบรายการที่ตำแหน่ง 2 รายการที่เคยอยู่ตำแหน่ง 3 จะเลื่อนมาเป็น 2 แล้วได้ตัวควบคุมของรายการที่ถูกลบไป พร้อมตัวเลขที่พนักงานกรอกไว้</p><p>ผลคือจำนวนของสินค้าคนละชนิดสลับกัน โดยหน้าจอดูปกติทุกอย่าง — เป็นปัญหาเดียวกับที่ 1.8 อธิบายเรื่อง key ทุกประการ ต่างแค่เกิดกับตัวควบคุมแทนที่จะเกิดกับ widget</p><p><strong>ลองต่อ:</strong> เขียนเทสต์ที่ประกอบหน้าจอ กรอกค่าลงรายการที่สอง ลบรายการแรก แล้วตรวจว่าค่าที่กรอกยังอยู่กับสินค้าเดิม — เทสต์นี้จะล้มเหลวทันทีถ้าใช้ <code>index</code> เป็นกุญแจ</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ทุกอย่างที่สร้างต้องมีคู่ใน <code>dispose</code></li><li>ไล่อ่าน field ทุกตัวแล้วถามว่ามีคู่หรือยัง</li><li>ถ้ามี <code>dispose</code> หรือ <code>cancel</code> แปลว่าต้องเรียก</li><li>ลำดับ — หยุดสิ่งที่ทำงานอยู่ก่อน แล้วค่อยคืนตัวควบคุม</li><li><code>super.dispose()</code> อยู่ท้ายสุดเสมอ</li><li>คืนเฉพาะของที่สร้างเอง อย่าคืนของที่ยืมมา</li><li>เมื่อมีของหลายชิ้นตามข้อมูล ให้ใช้รหัสจริงเป็นกุญแจ และคืนตอนลบ</li><li>อาการของการลืมคืนไม่พังทันที จึงต้องใช้เทสต์จับ</li></ul></div><p><strong>บทถัดไป:</strong> 3.13 จะรวบเรื่องที่แตะมาหลายบทให้ชัด — การตรวจว่าหน้าจอยังอยู่ก่อนแตะมัน หลังจากงานที่ต้องรอทำงานเสร็จ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,21 +1,148 @@
-<div class="note"><code>FocusNode</code> เป็น handle ของ focus tree ไม่ใช่แค่คำสั่งเปิด keyboard Workflow scanner ต้องกำหนดว่า field ใดรับ keystrokes ตอนแต่ละ state และคืน focus หลัง success/error/dialog อย่างตั้งใจ</div>
-<section><h2>1. Focus ownership</h2><pre class="code-vs"><code>final _scanFocus = FocusNode(debugLabel: 'pallet-scan');
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ควบคุมว่าช่องไหนกำลังรับข้อมูล</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.1 (<code>TextEditingController</code>) และ 1.6 (วงจรชีวิตกับการคืนทรัพยากร)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ควบคุมโฟกัสได้ตามที่ต้องการ และเข้าใจว่าทำไมบางครั้งสั่งโฟกัสแล้วไม่ติด</div>
 
-@override
-void dispose() {
-  _scanFocus.dispose();
-  super.dispose();
-}</code></pre><p>สร้างหนึ่งครั้งตาม lifetime ของ State และส่งเข้า TextField ห้ามสร้างใน build เพราะ focus attachment เปลี่ยนระหว่างพิมพ์</p></section>
-<section><h2>2. autofocus กับ requestFocus</h2><p><code>autofocus: true</code> ขอ focus เมื่อ scope แสดงครั้งแรก เหมาะกับ route/dialog ที่ชัดว่ามี field หลัก ส่วน <code>requestFocus</code> ใช้เมื่อ state transition เลือก field ถัดไป เช่น scan part ผ่านแล้วไป serial ถ้า widget เพิ่ง mount ให้เรียก post-frame เพื่อรอ focus attachment</p></section>
-<section><h2>3. Post-frame เริ่ม workflow</h2><pre class="code-vs"><code>@override
-void initState() {
-  super.initState();
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>บนมือถือทั่วไป โฟกัสเป็นเรื่องเล็ก — ผู้ใช้แตะช่องที่ต้องการเอง แต่บน PDA มันเป็นเรื่องใหญ่ที่สุดของงานสแกน</p><p>เหตุผลคือเครื่องสแกนทำงานเหมือนแป้นพิมพ์ มันพิมพ์รหัสลงในช่องที่ <strong>กำลังโฟกัสอยู่</strong> แล้วกด Enter ให้ ถ้าไม่มีช่องไหนโฟกัสอยู่ รหัสจะหายไปเฉย ๆ โดยไม่มี error อะไรเลย</p><p>อาการที่พนักงานจะรายงานคือ “ยิงแล้วไม่เข้า” ซึ่งหาสาเหตุยากมากถ้าไม่รู้เรื่องนี้</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>FocusNode</code></td><td>ตัวแทนของ “ความเป็นช่องที่รับข้อมูลอยู่”</td></tr>
+<tr><td><code>autofocus</code></td><td>ขอโฟกัสทันทีที่แสดงครั้งแรก</td></tr>
+<tr><td><code>requestFocus()</code></td><td>สั่งให้โฟกัสมาที่ช่องนี้</td></tr>
+<tr><td><code>unfocus()</code></td><td>ปล่อยโฟกัส ทำให้แป้นพิมพ์ปิด</td></tr>
+<tr><td>post-frame callback</td><td>โค้ดที่ทำงานหลังวาดหน้าจอเสร็จ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: มีได้ทีละหนึ่ง</h2><p>ในหน้าจอหนึ่ง มีช่องที่โฟกัสอยู่ได้ทีละช่องเดียวเท่านั้น เหมือนไฟฉายที่ส่องได้ทีละจุด</p><pre class="code-vs"><code>เครื่องสแกนยิง "PAL-1001" + Enter
+        ↓
+ระบบส่งไปที่ช่องที่โฟกัสอยู่
+        ↓
+    ┌───────────┐
+    │ ช่องบาร์โค้ด │  ← โฟกัสอยู่ ได้รับ
+    └───────────┘
+    ┌───────────┐
+    │ ช่องจำนวน   │  ← ไม่ได้รับ
+    └───────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ในงานสแกน หน้าที่ของเราคือ <em>ทำให้ช่องบาร์โค้ดโฟกัสอยู่เสมอ</em> — ทุกครั้งที่โฟกัสหลุดไปโดยไม่ตั้งใจ คือรหัสที่หายไปหนึ่งตัว</div></section>
+
+<section><h2>4. สร้างและคืน FocusNode</h2><pre class="code-vs"><code>class _ReceiveScreenState extends State&lt;ReceiveScreen&gt; {
+  final _barcodeFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _barcodeFocus.dispose();      // คู่ตรงข้ามของการสร้าง (1.6)
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: _barcodeController,
+      focusNode: _barcodeFocus,
+      autofocus: true,            // โฟกัสทันทีที่เปิดหน้าจอ
+      ...
+    );
+  }
+}</code></pre><p>กฎเดียวกับ controller ใน 3.1 ทุกประการ — สร้างเป็น field ของ <code>State</code> ห้ามสร้างใน <code>build</code> และคืนใน <code>dispose</code></p></section>
+
+<section><h2>5. คืนโฟกัสหลังยิงเสร็จ</h2><p>นี่คือบรรทัดที่สำคัญที่สุดของหน้าจอสแกนทั้งหน้า</p><pre class="code-vs"><code>void _handleScan() {
+  final outcome = _session.accept(_barcodeController.text);
+
+  if (outcome.shouldClearInput) {
+    _barcodeController.clear();
+  }
+  _giveFeedback(outcome);
+  setState(() =&gt; _lastOutcome = outcome);
+
+  // คืนโฟกัสทันที เพื่อให้ยิงตัวถัดไปได้โดยไม่ต้องแตะจอ
+  _barcodeFocus.requestFocus();
+}</code></pre><p>ถ้าไม่มีบรรทัดสุดท้าย พนักงานจะต้องแตะจอก่อนยิงทุกครั้ง ซึ่งเมื่อทำงาน 100 ครั้งต่อกะแปลว่าแตะจอเพิ่ม 100 ครั้งโดยไม่จำเป็น</p><p>เทสต์ใน lab ตรวจข้อนี้ไว้แล้ว</p><pre class="code-vs"><code>expect(field.controller?.text, isEmpty);      // ล้างแล้ว
+expect(field.focusNode?.hasFocus, isTrue);    // และโฟกัสกลับมาแล้ว</code></pre></section>
+
+<section><h2>6. ทำไมบางครั้งสั่งโฟกัสแล้วไม่ติด</h2><p>อาการที่งงที่สุดของบทนี้ — สั่ง <code>requestFocus()</code> แล้วไม่มีอะไรเกิดขึ้น</p><pre class="code-vs"><code>// ไม่ติด — ช่องปลายทางยังไม่มีอยู่ในหน้าจอ
+void _goToNextStep() {
+  setState(() =&gt; _step = ScanStep.quantity);
+  _quantityFocus.requestFocus();      // ช่องจำนวนยังไม่ถูกสร้าง
+}</code></pre><p>เหตุผลตรงกับสิ่งที่เรียนใน 1.5 — <code>setState</code> ไม่ได้วาดหน้าจอใหม่ทันที มันแค่ทำเครื่องหมายไว้ การวาดจริงเกิดในรอบถัดไป ดังนั้นตอนที่เราสั่งโฟกัส ช่องจำนวนยังไม่มีตัวตนอยู่ใน tree เลย</p><pre class="code-vs"><code>// ติด — รอให้วาดเสร็จก่อน
+void _goToNextStep() {
+  setState(() =&gt; _step = ScanStep.quantity);
+
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (mounted) _scanFocus.requestFocus();
+    if (!mounted) return;                  // ผู้ใช้อาจออกไปแล้ว (1.6)
+    _quantityFocus.requestFocus();
   });
-}</code></pre><p>wmsapp ใช้รูปแบบนี้ใน CheckIn และ SerialSelect การตรวจ mounted ป้องกัน callback ที่ค้างหลัง route ถูกปิดก่อน frame</p></section>
-<section><h2>4. Focus ตาม state machine</h2><p>อย่าให้ทุก field ตั้ง autofocus พร้อมกัน Owner ต้อง map state → focus target: <code>scanPallet → palletFocus</code>, <code>scanPart → partFocus</code>, <code>scanSerial → serialFocus</code>, <code>quantity → qtyFocus</code> แล้วเรียกหลัง transition/post-frame เพื่อให้ field ใหม่อยู่ใน tree</p></section>
-<section><h2>5. Dialog และคืน focus</h2><p>Dialog สร้าง FocusScope ของตนและแย่ง focus เมื่อปิดให้ await result ก่อน แล้วถ้า context/state ยังอยู่จึงคืน focus ช่อง scanner การ request ก่อน dialog pop อาจถูก focus scope เก่ากินและ keyboard wedge ส่ง Enter ไปผิดที่</p></section>
-<section><h2>6. unfocus และ traversal</h2><p><code>FocusScope.of(context).unfocus()</code> ใช้ปิด editing เมื่อแตะพื้น/ก่อน action ที่ไม่ต้องรับ key ส่วน form manual ใช้ <code>nextFocus</code> กับ TextInputAction.next และกำหนด FocusTraversalGroup/order เมื่อลำดับ visual ไม่ตรง tree Scanner flow มัก request เป้าหมายโดยตรงเพื่อคงความเร็ว</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หลัง scan API สำเร็จ UI เปลี่ยนจากช่อง source เป็น destination แต่ requestFocus(destination) ทันทีแล้วไม่ติด เพราะอะไร?</p><details><summary>แนวคำตอบ</summary><p>setState ยังไม่สร้าง destination field/attach FocusNode จน frame ถัดไป ให้เปลี่ยน state แล้ว schedule post-frame ตรวจ mounted และ current state ก่อน requestFocus หาก destination มีอยู่แล้วแต่ dialog ยังเปิด ต้องรอ dialog ปิดก่อน</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">การ requestFocus ใน build ทำ side effect ทุก rebuild เกิด keyboard กระพริบ/ขโมย focus จากผู้ใช้ ให้ผูกกับ event/lifecycle/state transition และตรวจว่า current state ยังต้องการ target เดิมเมื่อ callback ทำงาน</div></section>
+}</code></pre><p><code>addPostFrameCallback</code> แปลว่า “ทำหลังวาดหน้าจอรอบนี้เสร็จ” ซึ่งเป็นตอนที่ช่องใหม่มีตัวตนแล้ว</p><div class="warn">อย่าลืม <code>if (!mounted) return;</code> เพราะโค้ดนี้ทำงานทีหลัง และระหว่างนั้นผู้ใช้อาจกดย้อนกลับไปแล้ว — เป็นเรื่องเดียวกับที่ 1.6 หัวข้อ 8 เตือนไว้</div></section>
+
+<section><h2>7. กล่องโต้ตอบแย่งโฟกัสไป</h2><p>เมื่อเปิดกล่องยืนยัน โฟกัสจะย้ายไปที่กล่องนั้น เมื่อปิดกล่องแล้วต้องคืนโฟกัสกลับมาเอง</p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  final confirmed = await _confirmSubmit();
+  if (!mounted || confirmed != true) return;
+
+  // ... บันทึก ...
+
+  if (mounted) _barcodeFocus.requestFocus();   // คืนโฟกัสหลังกล่องปิด
+}</code></pre><p>ลำดับสำคัญ — ต้อง <code>await</code> ให้กล่องปิดก่อน แล้วค่อยขอโฟกัส ถ้าขอตอนกล่องยังเปิดอยู่ กล่องจะแย่งกลับไป และที่แย่กว่านั้นคือถ้าพนักงานยิงบาร์โค้ดตอนกล่องเปิดอยู่ รหัสจะไปโผล่ในที่ที่ไม่ควร</p></section>
+
+<section><h2>8. อย่าสั่งโฟกัสใน build</h2><pre class="code-vs"><code>// ผิด — เป็นผลข้างเคียงใน build (1.9)
+@override
+Widget build(BuildContext context) {
+  _barcodeFocus.requestFocus();     // ทำงานทุกครั้งที่วาดใหม่
+  return TextField(...);
+}</code></pre><table><thead><tr><th>อาการที่จะเจอ</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>แป้นพิมพ์กระพริบขึ้นลง</td><td>ขอโฟกัสซ้ำ ๆ ทุกรอบ</td></tr>
+<tr><td>ผู้ใช้แตะช่องอื่นแล้วเด้งกลับ</td><td>โค้ดแย่งโฟกัสคืนทันที</td></tr>
+<tr><td>พิมพ์ในช่องจำนวนไม่ได้</td><td>โฟกัสถูกดึงกลับไปช่องบาร์โค้ดตลอด</td></tr>
+</tbody></table><p>ให้ผูกการสั่งโฟกัสกับ <strong>เหตุการณ์</strong> เสมอ — ยิงเสร็จ ปิดกล่อง เปลี่ยนขั้นตอน ไม่ใช่ผูกกับการวาดหน้าจอ</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยิงบาร์โค้ดแล้วไม่มีอะไรเกิดขึ้น</td><td>ไม่มีช่องไหนโฟกัสอยู่</td><td>ใส่ <code>autofocus</code> และคืนโฟกัสหลังยิงทุกครั้ง</td></tr>
+<tr><td>สั่ง <code>requestFocus</code> แล้วไม่ติด</td><td>ช่องปลายทางยังไม่ถูกสร้าง</td><td>ใช้ <code>addPostFrameCallback</code></td></tr>
+<tr><td>แป้นพิมพ์กระพริบ</td><td>สั่งโฟกัสใน <code>build</code></td><td>ผูกกับเหตุการณ์แทน</td></tr>
+<tr><td>รหัสไปโผล่ในช่องจำนวน</td><td>โฟกัสอยู่ผิดช่อง</td><td>คืนโฟกัสไปช่องบาร์โค้ดหลังจบทุกขั้นตอน</td></tr>
+<tr><td>หลังปิดกล่องแล้วยิงไม่เข้า</td><td>ไม่ได้คืนโฟกัส</td><td>ขอโฟกัสหลัง <code>await</code> กล่องปิด</td></tr>
+<tr><td>ทุกช่องตั้ง <code>autofocus: true</code> แล้วสับสน</td><td>มีหลายช่องแย่งกัน</td><td>ตั้งได้ช่องเดียวต่อหน้าจอ</td></tr>
+<tr><td>แอปกินหน่วยความจำเพิ่ม</td><td>ลืม <code>dispose</code> FocusNode</td><td>คืนทุกตัวใน <code>dispose</code></td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>หน้าจอหยิบสินค้ามีสองขั้นตอน</p><ol><li>ยิงรหัสพาเลท เมื่อสำเร็จให้ไปขั้นที่ 2</li><li>ยิงรหัสตำแหน่ง เมื่อสำเร็จให้กลับไปขั้นที่ 1 เพื่อรับใบถัดไป</li></ol><p>จงเขียนโครงการจัดการโฟกัส และอธิบายว่าทำไมสั่งโฟกัสตรง ๆ หลัง <code>setState</code> ถึงไม่พอ</p><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>enum PickStep { pallet, location }
+
+class _PickScreenState extends State&lt;PickScreen&gt; {
+  final _palletFocus = FocusNode(debugLabel: 'pallet');
+  final _locationFocus = FocusNode(debugLabel: 'location');
+  final _palletController = TextEditingController();
+  final _locationController = TextEditingController();
+
+  PickStep _step = PickStep.pallet;
+
+  @override
+  void dispose() {
+    _palletFocus.dispose();
+    _locationFocus.dispose();
+    _palletController.dispose();
+    _locationController.dispose();
+    super.dispose();
+  }
+
+  /// จุดเดียวที่จัดการโฟกัส — อ่านจากสถานะปัจจุบันเสมอ
+  void _focusCurrentStep() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      switch (_step) {
+        case PickStep.pallet:
+          _palletFocus.requestFocus();
+        case PickStep.location:
+          _locationFocus.requestFocus();
+      }
+    });
+  }
+
+  void _onPalletScanned() {
+    _palletController.clear();
+    setState(() =&gt; _step = PickStep.location);
+    _focusCurrentStep();
+  }
+
+  void _onLocationScanned() {
+    _locationController.clear();
+    setState(() =&gt; _step = PickStep.pallet);
+    _focusCurrentStep();
+  }
+}</code></pre><p><strong>ทำไมสั่งโฟกัสตรง ๆ หลัง <code>setState</code> ไม่พอ</strong></p><p>เพราะ <code>setState</code> เพียงทำเครื่องหมายว่าต้องวาดใหม่ ตามที่เรียนใน 1.5 หัวข้อ 5 — ณ บรรทัดถัดไป ช่องของขั้นตอนใหม่ยังไม่ถูกสร้าง <code>FocusNode</code> ของมันจึงยังไม่ได้ผูกกับอะไร การสั่ง <code>requestFocus</code> ตอนนั้นจึงไม่มีผล</p><p>ที่ทำให้บั๊กนี้ยากคือ <strong>บางครั้งมันติด</strong> — ถ้าช่องปลายทางบังเอิญมีอยู่แล้วในรอบก่อน (เช่นแค่ซ่อนไว้ไม่ได้ถอดออก) การสั่งตรง ๆ จะทำงาน ผู้พัฒนาจึงคิดว่าโค้ดถูก แล้วไปพังตอนที่โครงหน้าจอเปลี่ยน</p><p><strong>ทำไมรวมการจัดการโฟกัสไว้ที่ <code>_focusCurrentStep</code> จุดเดียว</strong></p><p>เพราะมันอ่านจาก <code>_step</code> ปัจจุบันเสมอ ไม่ใช่จำว่าใครเรียกมา ข้อดีคือเมื่อเพิ่มขั้นตอนที่สามในอนาคต เราแก้ที่เดียว และ <code>switch</code> บน enum จะให้ analyzer เตือนถ้าลืมกรณีใหม่ ตามที่เรียนใน D1.10</p><p><strong>จุดที่คนมักพลาด:</strong> เขียนเป็น <code>_locationFocus.requestFocus()</code> ตรง ๆ ในแต่ละ method ซึ่งได้ผลเหมือนกันตอนนี้ แต่เมื่อมีเส้นทางที่สามที่พาไปขั้นตอนเดิม จะมีจุดที่ลืมสั่งโฟกัส และเกิดอาการ “ยิงแล้วไม่เข้า” เฉพาะบางเส้นทาง</p><p><strong>ลองต่อ:</strong> ลบ <code>addPostFrameCallback</code> ออกแล้วเปลี่ยนเป็นสั่งตรง ๆ จากนั้นทดสอบสลับขั้นตอนไปมา — บนเครื่องที่เร็วอาจดูเหมือนทำงานได้ ให้ลองบน PDA จริงหรือเพิ่มความซับซ้อนของหน้าจอ จะเห็นอาการชัดขึ้น</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>มีช่องที่โฟกัสอยู่ได้ทีละช่องเดียว และเครื่องสแกนส่งข้อมูลไปที่ช่องนั้น</li><li>ถ้าไม่มีช่องไหนโฟกัส รหัสที่ยิงมาจะหายไปเงียบ ๆ</li><li>สร้าง <code>FocusNode</code> เป็น field ของ <code>State</code> และคืนใน <code>dispose</code></li><li>คืนโฟกัสหลังยิงเสร็จทุกครั้ง เพื่อไม่ให้ต้องแตะจอ</li><li>สั่งโฟกัสไปยังช่องที่เพิ่งถูกสร้าง ต้องใช้ <code>addPostFrameCallback</code></li><li>กล่องโต้ตอบแย่งโฟกัส ต้อง <code>await</code> ให้ปิดก่อนแล้วคืน</li><li>อย่าสั่งโฟกัสใน <code>build</code></li></ul></div><p><strong>บทถัดไป:</strong> 3.3 จะสอนการตรวจข้อมูลด้วย <code>Form</code> ซึ่งเป็นเครื่องมือที่ Flutter ให้มาสำหรับตรวจหลายช่องพร้อมกันและแสดงข้อความผิดพลาดใต้แต่ละช่อง</p></section>

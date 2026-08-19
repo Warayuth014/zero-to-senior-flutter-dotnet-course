@@ -1,69 +1,216 @@
-<div class="note"><strong>Lab:</strong> สร้าง Scan → Normalize → Validate → Preview → Confirm → Commit เป็น state machine ที่ testได้ โดย UIรับ raw text/focusและ render state ส่วน controller/use caseถือ transition, duplicate policy และ async concurrency</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>Enterและปุ่ม submitใช้ commandเดียว</li><li>canonical pallet trim+uppercase; serialรักษา caseตาม policy</li><li>busyป้องกัน requestซ้ำและ fieldถูก disable</li><li>previewไม่เท่ากับ commit ต้อง confirmก่อน mutation</li><li>error/duplicate/network uncertainมี stateและ feedbackต่างกัน</li><li>หลังทุก recoverable outcome focusกลับช่องที่ถูกตาม state</li><li>backend commitรับ operation ID/idempotency key</li></ul></section>
-<section><h2>2. State model</h2><pre class="code-vs"><code>sealed class ScanState { const ScanState(); }
-class AwaitingScan extends ScanState { const AwaitingScan(); }
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–90 นาที</span><span>ลงมือทำ: ประกอบทั้ง Part เป็นเครื่องสถานะที่ทดสอบได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.1–3.13 ทั้งหมด บทนี้ไม่มีเนื้อหาใหม่<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบการไหลของงานสแกนเป็นสถานะที่ชัดเจน ทดสอบได้โดยไม่ต้องมีหน้าจอ และรู้ว่าสถานะที่ผิดเขียนออกมาไม่ได้เลย</div>
+
+<section><h2>1. ปัญหาที่ lab นี้แก้</h2><p>ตลอด Part นี้เราเพิ่มธงเข้าไปทีละตัว — <code>_submitting</code>, <code>_busy</code>, <code>_lastOutcome</code>, <code>_pendingCode</code> ซึ่งใช้ได้กับหน้าจอที่มีขั้นตอนเดียว</p><p>แต่งานจริงอย่างการหยิบของมีหลายขั้น และเมื่อใช้ <code>bool</code> หลายตัว จะเกิดชุดค่าที่เป็นไปไม่ได้ตามที่เตือนไว้ใน D1.10</p><pre class="code-vs"><code>bool _validating = false;
+bool _reviewing = false;
+bool _committing = false;
+
+// _validating = true พร้อม _committing = true — เป็นไปไม่ได้ แต่เขียนออกมาได้</code></pre><p>ทางแก้คือทำให้ <strong>สถานะที่ผิดเขียนออกมาไม่ได้เลย</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>state machine</td><td>ระบบที่มีสถานะจำกัดและมีกฎว่าย้ายจากสถานะไหนไปไหนได้</td></tr>
+<tr><td>transition</td><td>การย้ายจากสถานะหนึ่งไปอีกสถานะ</td></tr>
+<tr><td>preview</td><td>การถามข้อมูลก่อนบันทึกจริง</td></tr>
+<tr><td>commit</td><td>การบันทึกจริงที่เปลี่ยนข้อมูลใน server</td></tr>
+<tr><td>controller</td><td>ตัวที่ถือสถานะและกฎการย้าย โดยไม่รู้จักหน้าจอ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. ขั้นที่ 1: กำหนดสถานะ</h2><p>ใช้ <code>sealed class</code> จาก D1.12 เพราะแต่ละสถานะพกข้อมูลคนละชุด ซึ่ง enum ทำไม่ได้</p><pre class="code-vs"><code>sealed class ScanState {
+  const ScanState();
+}
+
+/// พร้อมรับการยิงบาร์โค้ด
+class AwaitingScan extends ScanState {
+  const AwaitingScan();
+}
+
+/// กำลังถามข้อมูลจาก server ว่ารหัสนี้คืออะไร
 class Validating extends ScanState {
-  const Validating(this.code); final String code;
+  const Validating(this.code);
+  final String code;                    // จำไว้ว่ากำลังรอใบไหน (3.13)
 }
+
+/// ได้ข้อมูลแล้ว รอผู้ใช้ยืนยัน
 class Review extends ScanState {
-  const Review(this.preview); final ScanPreview preview;
+  const Review(this.preview);
+  final PalletPreview preview;
 }
+
+/// กำลังบันทึกจริง
 class Committing extends ScanState {
-  const Committing(this.preview); final ScanPreview preview;
+  const Committing(this.preview);
+  final PalletPreview preview;
 }
-class Succeeded extends ScanState {
-  const Succeeded(this.receipt); final ScanReceipt receipt;
-}
+
+/// ล้มเหลว พร้อมบอกว่าลองใหม่ได้ไหม
 class Failed extends ScanState {
   const Failed(this.message, {required this.retryable});
-  final String message; final bool retryable;
-}</code></pre></section>
-<section><h2>3. Transition map</h2><pre class="code-vs"><code>AwaitingScan --submit valid---&gt; Validating
-Validating  --preview ok-----&gt; Review
-Validating  --reject/error--&gt; Failed --ack/retry--&gt; AwaitingScan
-Review      --cancel--------&gt; AwaitingScan
-Review      --confirm------&gt; Committing
-Committing  --success------&gt; Succeeded --next--&gt; AwaitingScan
-Committing  --conflict-----&gt; Failed/Reconcile</code></pre><p>กำหนด eventที่อนุญาตต่อ state ป้องกัน Enterระหว่าง Reviewหรือ commitซ้ำ</p></section>
-<section><h2>4. Controller command</h2><pre class="code-vs"><code>Future&lt;void&gt; submitRaw(String raw) async {
-  if (state is! AwaitingScan) return;
-  final code = normalizePallet(raw);
-  final error = validatePallet(code);
-  if (error != null) return emit(Failed(error, retryable: false));
+  final String message;
+  final bool retryable;
+}</code></pre><div class="note"><strong>ประโยชน์ที่ได้ทันที:</strong> ไม่มีทางที่จะอยู่ในสถานะ <code>Validating</code> และ <code>Committing</code> พร้อมกัน เพราะตัวแปรเก็บได้ค่าเดียว — สถานะที่ขัดแย้งกันเองถูกกำจัดตั้งแต่ตอนออกแบบชนิดข้อมูล</div></section>
 
-  emit(Validating(code));
-  try {
-    final preview = await repository.preview(code);
-    if (state case Validating(code: final current) when current == code) {
-      emit(Review(preview));
+<section><h2>4. ขั้นที่ 2: กำหนดว่าย้ายไปไหนได้บ้าง</h2><pre class="code-vs"><code>AwaitingScan  ──ยิงรหัสที่ถูกรูปแบบ──→  Validating
+AwaitingScan  ──ยิงรหัสผิดรูปแบบ────→  Failed
+
+Validating    ──server ตอบว่ามีจริง──→  Review
+Validating    ──server ปฏิเสธ────────→  Failed
+
+Review        ──ผู้ใช้ยกเลิก─────────→  AwaitingScan
+Review        ──ผู้ใช้ยืนยัน─────────→  Committing
+
+Committing    ──บันทึกสำเร็จ─────────→  AwaitingScan (พร้อมใบถัดไป)
+Committing    ──บันทึกไม่สำเร็จ──────→  Failed
+
+Failed        ──ผู้ใช้รับทราบ────────→  AwaitingScan</code></pre><p>แผนภาพนี้ตอบคำถามที่โค้ดแบบ <code>bool</code> หลายตัวตอบไม่ได้ — <strong>ยิงบาร์โค้ดตอนอยู่ในสถานะ <code>Review</code> ได้ไหม</strong> คำตอบคือไม่ได้ เพราะไม่มีลูกศรจาก <code>Review</code> ที่รับการยิง</p></section>
+
+<section><h2>5. ขั้นที่ 3: เขียน controller</h2><pre class="code-vs"><code>class ScanController extends ChangeNotifier {
+  ScanController({required this.repository});
+
+  final PalletRepository repository;
+
+  ScanState _state = const AwaitingScan();
+  ScanState get state =&gt; _state;
+
+  void _emit(ScanState next) {
+    _state = next;
+    notifyListeners();          // ลืมบรรทัดนี้ = หน้าจอไม่อัปเดต (1.13)
+  }
+
+  Future&lt;void&gt; submitRaw(String raw) async {
+    // กฎการย้าย — ยิงได้เฉพาะตอนพร้อมรับ
+    if (_state is! AwaitingScan) return;
+
+    final code = normalizeBarcode(raw);              // 3.6
+    if (code.isEmpty) {
+      return _emit(const Failed('ไม่มีข้อมูล', retryable: false));
     }
-  } catch (e) {
-    emit(Failed(mapError(e), retryable: true));
+    if (!isValidPalletCode(code)) {
+      return _emit(const Failed('รูปแบบไม่ถูกต้อง', retryable: false));
+    }
+
+    _emit(Validating(code));
+    try {
+      final preview = await repository.preview(code);
+
+      // ตรวจว่ายังรอใบนี้อยู่ไหม — กันผลลัพธ์เก่า (3.13)
+      if (_state case Validating(code: final current) when current == code) {
+        _emit(Review(preview));
+      }
+    } on Exception catch (error) {
+      if (_state is Validating) {
+        _emit(Failed('เชื่อมต่อไม่ได้', retryable: true));
+        debugPrint('preview failed: $error');
+      }
+    }
   }
-}</code></pre><p>UIไม่ยิง APIใน build/widget field และ controllerตรวจ current stateกัน stale response</p></section>
-<section><h2>5. UI + focus effects</h2><p>Awaiting/Failedแสดง ScanBox enabled; Validating/Committingแสดง busy; Reviewแสดง summary+confirm; Succeededแสดง receipt/next ใช้ listenerแยก one-shot effectsจาก render state: accepted haptic, error flash, dialogหรือ focus request post-frame อย่าเล่นเสียงใน build</p></section>
-<section><h2>6. Commit และ idempotency</h2><pre class="code-vs"><code>Future&lt;void&gt; confirm() async {
-  final review = state;
-  if (review is! Review) return;
-  final operationId = uuid.v4();
-  emit(Committing(review.preview));
+}</code></pre><p>สังเกตสามอย่างที่มาจากบทก่อน ๆ</p><table><thead><tr><th>บรรทัด</th><th>มาจากบท</th></tr></thead><tbody>
+<tr><td><code>if (_state is! AwaitingScan) return;</code></td><td>3.8 — กันคำสั่งซ้อน แต่แม่นกว่าเพราะรู้ว่าอยู่สถานะไหน</td></tr>
+<tr><td><code>normalizeBarcode(raw)</code></td><td>3.6 — แปลงก่อนใช้เสมอ</td></tr>
+<tr><td><code>if (_state case Validating(code: ...) when ...)</code></td><td>3.13 — กันผลลัพธ์เก่า</td></tr>
+</tbody></table><p>บรรทัดสุดท้ายใช้ pattern matching จาก D1.12 — ตรวจทั้งชนิดของสถานะและค่าข้างในพร้อมกันในบรรทัดเดียว</p></section>
+
+<section><h2>6. ขั้นที่ 4: การบันทึกที่ทนต่อการส่งซ้ำ</h2><pre class="code-vs"><code>String? _operationId;
+
+Future&lt;void&gt; confirm() async {
+  final current = _state;
+  if (current is! Review) return;        // ยืนยันได้เฉพาะตอนอยู่ในขั้นทบทวน
+
+  // สร้างรหัสประจำคำสั่งครั้งเดียว แล้วใช้ซ้ำเมื่อลองใหม่ (3.8)
+  _operationId ??= _newOperationId();
+
+  _emit(Committing(current.preview));
   try {
-    final receipt = await repository.commit(
-      review.preview, operationId: operationId,
-    );
-    emit(Succeeded(receipt));
-  } on Conflict catch (e) {
-    emit(Failed(e.message, retryable: false));
+    await repository.commit(current.preview, operationId: _operationId!);
+    _operationId = null;                 // สำเร็จแล้วจึงเริ่มรหัสใหม่ครั้งหน้า
+    _emit(const AwaitingScan());
+  } on ConflictException catch (error) {
+    _operationId = null;                 // ขัดแย้งแล้ว ลองซ้ำไม่ช่วย
+    _emit(Failed(error.message, retryable: false));
+  } on Exception {
+    // ไม่ล้างรหัส — ถ้าลองใหม่จะใช้รหัสเดิม server จึงไม่บันทึกซ้ำ
+    _emit(const Failed('บันทึกไม่สำเร็จ', retryable: true));
   }
-}</code></pre><p>Retry requestเดิมต้อง reuse operationId; เริ่ม business operationใหม่จึงสร้าง IDใหม่</p></section>
-<section><h2>7. Tests ที่ต้องมี</h2><pre class="code-vs"><code>test('second submit is ignored while validating', () async {
-  final pending = Completer&lt;ScanPreview&gt;();
-  repo.previewResult = pending.future;
+}</code></pre><div class="warn"><strong>จุดที่ต้องคิดให้ดีที่สุดในทั้ง Part</strong> — เมื่อเน็ตหลุดตอนบันทึก เราไม่รู้ว่า server บันทึกไปแล้วหรือยัง ตามที่คุยใน 3.8 หัวข้อ 8 การเก็บรหัสประจำคำสั่งไว้แล้วส่งรหัสเดิมเมื่อลองใหม่ ทำให้ server รู้ว่าเป็นคำสั่งเดิม จึงคืนผลเดิมแทนที่จะบันทึกซ้ำ</div></section>
 
-  unawaited(controller.submitRaw(' p-001 '));
-  await controller.submitRaw('P-002');
+<section><h2>7. ขั้นที่ 5: หน้าจออ่านสถานะแล้ววาด</h2><pre class="code-vs"><code>Widget build(BuildContext context) {
+  return ListenableBuilder(
+    listenable: controller,
+    builder: (context, child) =&gt; switch (controller.state) {
+      AwaitingScan() =&gt; ScanField(
+          enabled: true,
+          onSubmitted: controller.submitRaw,
+        ),
+      Validating(code: final code) =&gt; BusyView(message: 'กำลังตรวจสอบ $code'),
+      Review(preview: final preview) =&gt; ReviewView(
+          preview: preview,
+          onCancel: controller.cancel,
+          onConfirm: controller.confirm,
+        ),
+      Committing() =&gt; const BusyView(message: 'กำลังบันทึก'),
+      Failed(message: final message, retryable: final retryable) =&gt; FailedView(
+          message: message,
+          onRetry: retryable ? controller.retry : null,
+          onDismiss: controller.acknowledge,
+        ),
+    },
+  );
+}</code></pre><p>หน้าจอไม่มีตรรกะเลย — มันแค่แปลงสถานะเป็นหน้าตา ซึ่งเป็นความหมายของ “build คือการถ่ายรูป” จาก 1.9</p><p>และเพราะ <code>ScanState</code> เป็น <code>sealed</code> เมื่อเพิ่มสถานะใหม่ analyzer จะชี้ทันทีว่า <code>switch</code> นี้ยังไม่ครอบคลุม ตามที่เรียนใน D1.12</p></section>
 
-  expect(repo.previewCalls, ['P-001']);
+<section><h2>8. ขั้นที่ 6: แยกสิ่งที่เกิดครั้งเดียวออกจากการวาด</h2><p>เสียง การสั่น และการคืนโฟกัส เป็นสิ่งที่ต้องเกิด <strong>ครั้งเดียวตอนสถานะเปลี่ยน</strong> ไม่ใช่ทุกครั้งที่วาดหน้าจอ</p><pre class="code-vs"><code>ScanState? _previous;
+
+void _onStateChanged() {
+  final current = controller.state;
+  if (current == _previous) return;
+
+  switch (current) {
+    case Failed():
+      HapticFeedback.heavyImpact();          // 3.11
+    case AwaitingScan():
+      HapticFeedback.lightImpact();
+      _focusNode.requestFocus();             // 3.2
+    default:
+      break;
+  }
+  _previous = current;
+}</code></pre><div class="warn">อย่าเรียกการสั่นหรือเล่นเสียงใน <code>build</code> เพราะ <code>build</code> ถูกเรียกได้บ่อยและคาดเดาไม่ได้ตาม 1.9 — ผลคือเครื่องสั่นรัวทุกครั้งที่หน้าจอวาดใหม่</div></section>
+
+<section><h2>9. ขั้นที่ 7: เทสต์ที่ต้องมี</h2><p>ข้อดีที่ใหญ่ที่สุดของการแยก controller ออกมาคือ <strong>ทดสอบได้โดยไม่ต้องประกอบหน้าจอเลย</strong></p><pre class="code-vs"><code>test('ยิงซ้ำระหว่างที่กำลังตรวจสอบ ถูกเพิกเฉย', () async {
+  final pending = Completer&lt;PalletPreview&gt;();
+  final repo = FakeRepository(previewResult: pending.future);
+  final controller = ScanController(repository: repo);
+
+  unawaited(controller.submitRaw(' pal-1001 '));
+  await controller.submitRaw('PAL-1002');       // ถูกปฏิเสธเพราะไม่ใช่ AwaitingScan
+
+  expect(repo.previewCalls, &lt;String&gt;['PAL-1001']);
   expect(controller.state, isA&lt;Validating&gt;());
-});</code></pre><p>เพิ่ม normalize, empty, duplicate serial, preview reject, cancel review, commit success/conflict/timeout, stale response, unmount/focus และ widget testว่า Enterกับปุ่มส่ง commandเดียวกัน</p></section>
-<section><h2>8. Part 3 Exit Test</h2><div class="success"><ul><li>จัด ownership/controller/focus lifecycleได้</li><li>แยก raw, canonical, parsed และ domain validationได้</li><li>อธิบาย keyboard wedge/profile/terminatorได้</li><li>ป้องกัน debounce/duplicate/concurrent submitถูกระดับได้</li><li>จัด confirm, feedback, mounted และ stale resultได้</li><li>สร้างและทดสอบ scan state machineที่เชื่อม .NET APIอย่างปลอดภัยได้</li></ul></div></section>
+});
+
+test('ผลของใบเก่าที่มาช้าไม่ทับสถานะปัจจุบัน', () async {
+  // ... ตั้งค่าให้ใบแรกช้า แล้วยกเลิกกลับไป AwaitingScan
+  // ... เมื่อผลใบแรกกลับมา สถานะต้องยังเป็น AwaitingScan
+});
+
+test('ลองบันทึกใหม่ใช้รหัสคำสั่งเดิม', () async {
+  // ... บันทึกครั้งแรกล้มเหลวด้วยข้อผิดพลาดเครือข่าย
+  // ... กดลองใหม่
+  expect(repo.operationIds.toSet(), hasLength(1));   // ต้องเป็นรหัสเดียว
+});</code></pre><p>รายการเทสต์ที่ควรมีครบ</p><table><thead><tr><th>เทสต์</th><th>ปกป้องอะไร</th><th>บท</th></tr></thead><tbody>
+<tr><td>แปลงค่าก่อนใช้</td><td>กันซ้ำทำงานถูก</td><td>3.6</td></tr>
+<tr><td>รูปแบบผิดไปที่ <code>Failed</code></td><td>ข้อความตรงกับปัญหา</td><td>3.9</td></tr>
+<tr><td>ยิงซ้ำระหว่างตรวจสอบถูกเพิกเฉย</td><td>กันคำสั่งซ้อน</td><td>3.8</td></tr>
+<tr><td>ผลเก่ามาช้าไม่ทับ</td><td>ข้อมูลไม่สลับใบ</td><td>3.13</td></tr>
+<tr><td>ยืนยันได้เฉพาะจาก <code>Review</code></td><td>ไม่บันทึกโดยไม่ผ่านการทบทวน</td><td>3.10</td></tr>
+<tr><td>ลองใหม่ใช้รหัสเดิม</td><td>ไม่บันทึกซ้ำเมื่อเน็ตหลุด</td><td>3.8</td></tr>
+</tbody></table><p>ทุกเทสต์ข้างบนรันได้ในไม่กี่มิลลิวินาที เพราะไม่มี widget เกี่ยวข้องเลย — ส่วนเทสต์ระดับหน้าจอเหลือแค่ตรวจว่าปุ่มกับ Enter เรียกคำสั่งเดียวกันจริง ตาม 3.4</p></section>
+
+<section><h2>10. เทียบกับ lab ที่ทำมาทั้ง Part</h2><table><thead><tr><th></th><th><code>ScanSession</code> ใน lab</th><th><code>ScanController</code> ในบทนี้</th></tr></thead><tbody>
+<tr><td>ขั้นตอน</td><td>ขั้นเดียว — รับหรือปฏิเสธ</td><td>หลายขั้น มีการทบทวนก่อนบันทึก</td></tr>
+<tr><td>ติดต่อ server</td><td>ไม่มี</td><td>มี ทั้งขั้นตรวจและขั้นบันทึก</td></tr>
+<tr><td>สถานะ</td><td><code>bool _busy</code></td><td><code>sealed class</code></td></tr>
+<tr><td>เหมาะกับ</td><td>รับเข้าทีละใบแล้วบันทึกทั้งชุด</td><td>งานที่แต่ละใบต้องยืนยันแยก</td></tr>
+</tbody></table><p><strong>ทั้งสองแบบถูกต้อง</strong> — ขึ้นกับว่างานจริงเป็นแบบไหน อย่าเปลี่ยนทุกหน้าจอเป็นเครื่องสถานะเพียงเพราะดูเป็นระเบียบกว่า</p><p>เกณฑ์ตัดสิน: ถ้ามีตั้งแต่สามขั้นขึ้นไป หรือมีขั้นที่ผู้ใช้ต้องตัดสินใจกลางทาง ให้ใช้เครื่องสถานะ — ถ้าเป็นรับหรือปฏิเสธจบในตัว ธงเดียวก็พอ</p></section>
+
+<section><h2>11. แบบทดสอบตัวเองก่อนไป Part 4</h2><div class="success"><p>คุณพร้อมไปต่อเมื่อทำสิ่งเหล่านี้ได้โดยไม่เปิดดูเฉลย</p><ul><li>อธิบายได้ว่าเครื่องสแกนของ PDA ส่งข้อมูลถึงแอปอย่างไร</li><li>บอกได้ว่าทำไมโฟกัสเป็นเรื่องคอขาดบาดตายของงานสแกน</li><li>เขียน validator ที่ทดสอบแยกได้และมีข้อความเฉพาะแต่ละกรณี</li><li>ระบุได้ว่าข้อมูลชนิดไหนแปลงตัวพิมพ์ได้และชนิดไหนห้าม</li><li>แยกได้ว่ากันยิงซ้ำกับกันส่งซ้อนต่างกันอย่างไร</li><li>บอกได้ว่าทำไมปิดปุ่มอย่างเดียวไม่พอ</li><li>ออกแบบสัญญาณตอบรับที่รับรู้ได้โดยไม่มองจอ</li><li>ไล่ตรวจได้ว่าหน้าจอหนึ่งมีอะไรต้องคืนบ้าง</li><li>อธิบายได้ว่าทำไม <code>mounted</code> ไม่ได้กันผลลัพธ์เก่า</li></ul></div></section>
+
+<section><h2>12. สรุปปิด Part 3</h2><div class="success"><ul><li>เครื่องสแกนคือแป้นพิมพ์ — ทุกอย่างที่เรียนเรื่องช่องกรอกใช้ได้ตรง ๆ</li><li>ถ้าไม่มีช่องที่โฟกัสอยู่ ข้อมูลที่ยิงมาหายไปเงียบ ๆ</li><li>ข้อมูลดิบต้องผ่านการแปลงและตรวจก่อนเข้าสู่ตรรกะเสมอ</li><li>กฎการกันซ้ำขึ้นกับความหมายทางธุรกิจ ไม่ใช่กฎกลางทั้งแอป</li><li>การป้องกันจริงอยู่ในตรรกะ ส่วนการปิดปุ่มเป็นการสื่อสาร</li><li>พนักงานไม่ได้มองจอ ต้องมีสัญญาณที่รับรู้ได้โดยไม่มอง</li><li>ทุกอย่างที่สร้างต้องมีคนคืน</li><li>โลกเปลี่ยนไปได้ระหว่างที่เรารอ ต้องตรวจทั้งว่าหน้าจอยังอยู่และผลยังตรง</li><li>ตรรกะที่แยกออกจากหน้าจอได้ คือตรรกะที่ทดสอบได้</li></ul></div><p><strong>ต่อจากนี้:</strong> Part 4 จะขยายเรื่องสถานะและงานที่ต้องรอให้เป็นระบบ — จากธงและเครื่องสถานะในหน้าจอเดียว ไปสู่การจัดการสถานะที่หลายหน้าจอใช้ร่วมกัน ซึ่งเป็นสิ่งที่แอปคลังจริงต้องมี</p></section>

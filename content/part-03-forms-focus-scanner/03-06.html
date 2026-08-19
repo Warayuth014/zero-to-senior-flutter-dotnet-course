@@ -1,15 +1,117 @@
-<div class="note">Normalization แปลง input หลายรูปแบบให้เป็น canonical value ก่อน validate/compare แต่ต้องเป็น policy ตามชนิดรหัส ไม่ใช่เรียก <code>trim().toUpperCase()</code> กับข้อมูลทุกชนิดโดยอัตโนมัติ</div>
-<section><h2>1. Pipeline ที่ชัด</h2><pre class="code-vs"><code>String normalizePallet(String raw) =&gt; raw.trim().toUpperCase();
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ทำให้ข้อมูลที่ยิงมาเทียบกันได้เสมอ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.5 (เครื่องสแกนคือแป้นพิมพ์) และ D1.19 (ด่านตรวจข้อมูล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> จัดรูปแบบบาร์โค้ดให้เป็นมาตรฐานเดียว และรู้ว่าข้อมูลชนิดไหนห้ามแปลง</div>
 
-final raw = controller.text;
-final pallet = normalizePallet(raw);
-final error = validatePallet(pallet);
-if (error != null) return showError(error);
-await repository.previewPallet(pallet);</code></pre><p>Normalize หนึ่งครั้งที่ input boundary แล้วส่ง canonical value ต่อ ลดการ compare คนละกฎใน UI/store/API</p></section>
-<section><h2>2. trim แบบไหน</h2><p><code>trim()</code> ตัด whitespace หัวท้ายซึ่งมักมาจาก scanner suffix/paste แต่ whitespace ภายในอาจเป็นข้อมูลจริง ห้าม replace ทั้งหมดโดยไม่รู้ contract หาก scanner ส่ง CR/LF แปลกให้ normalize line ending/prefixตาม profileอย่างเจาะจง</p></section>
-<section><h2>3. Case sensitivity</h2><p>Pallet/location มัก case-insensitiveจึง uppercase ได้; serial, token, password หรือ GS1 data อาจ case-sensitive ห้ามเปลี่ยน case wmsapp ใช้ trim+uppercase กับ packing/pallet ID แต่ SerialSelect ใช้ trim อย่างเดียว สะท้อนว่ารหัสคนละชนิดต้องคนละ policy</p></section>
-<section><h2>4. Leading zeros และ numeric-looking codes</h2><p><code>001234</code> เป็น identifier ไม่ใช่ integer การ parse จะทำศูนย์หาย เก็บ barcode/location/serial เป็น String ส่วน quantity จึง parse เป็น int/decimal แยกชนิดตั้งแต่ model/API contract</p></section>
-<section><h2>5. Prefix/symbology</h2><p>บาง label มี application identifier, prefix vendor หรือ check digit เช่น GS1 ควรมี parser ที่คืน typed result/error ไม่ใช้ substring magic ใน widget เก็บทั้ง raw/canonical เมื่อ audit ต้องรู้สิ่งที่สแกนจริง และ redact log ตาม policy</p></section>
-<section><h2>6. Equality และ duplicate</h2><p>Set/List สำหรับ duplicate ต้องเก็บ canonical value ถ้า available set มี rawคนละ case ต้อง normalizeชุด reference ด้วยกฎเดียวกันครั้งเดียว ไม่ normalizeเฉพาะค่าที่สแกนแล้ว compare กับข้อมูลดิบ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>กำหนด normalization สำหรับ pallet <code>" ab-001\r\n"</code>, serial <code>"Sn-aB9 "</code> และ quantity <code>" 005 "</code></p><details><summary>เฉลย</summary><p>Pallet: trim→uppercase = AB-001 หาก contract case-insensitive; serial: trim = Sn-aB9 รักษา case; quantity: trim→int.tryParse = 5 แล้ว validate range อย่าใช้ normalizer เดียวทั้งสามชนิด</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า normalize หลังส่ง API หรือ normalizeซ้ำคนละกฎหลายชั้นจนหา bug ไม่พบ กำหนด canonical contract ที่ boundary และให้ backendบันทึก/ตอบรูปแบบมาตรฐาน แต่ยัง validate server-side</div></section>
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ข้อมูลที่ยิงมาจากเครื่องสแกนไม่เคยสะอาด และความไม่สะอาดนั้นมองไม่เห็นด้วยตา</p><pre class="code-vs"><code>'PAL-1001'      ← ยิงจากเครื่อง A
+'pal-1001'      ← ยิงจากเครื่อง B ที่ตั้งค่าต่างกัน
+'PAL-1001 '     ← มีช่องว่างท้ายจากการตั้ง suffix
+' PAL-1001'     ← ผู้ใช้พิมพ์เองแล้วเผลอเคาะช่องว่าง</code></pre><p>ทั้งสี่บรรทัดคือพาเลทใบเดียวกัน แต่ถ้าเทียบด้วยเครื่องหมายเท่ากับตรง ๆ จะได้ว่าเป็นคนละใบทั้งหมด — ผลคือระบบกันซ้ำไม่ทำงาน และรายงานสต็อกมีพาเลทใบเดียวปรากฏสี่รายการ</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>normalize</td><td>แปลงหลายรูปแบบให้เป็นรูปแบบมาตรฐานเดียว</td></tr>
+<tr><td>canonical value</td><td>รูปแบบมาตรฐานที่ระบบใช้เทียบและบันทึก</td></tr>
+<tr><td>raw value</td><td>ค่าดิบที่ได้รับมาก่อนแปลง</td></tr>
+<tr><td>case-sensitive</td><td>ตัวพิมพ์เล็กใหญ่มีความหมายต่างกัน</td></tr>
+<tr><td>identifier</td><td>รหัสที่ใช้ระบุตัวตน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: จุดเดียวที่แปลง</h2><pre class="code-vs"><code>ข้อความดิบจากช่องกรอก
+        ↓
+   [ normalize ]      ← ที่นี่ที่เดียว
+        ↓
+   ค่ามาตรฐาน  ──→ เทียบ / เก็บ / ส่งขึ้น server</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> แปลงครั้งเดียวตอนรับเข้า แล้วใช้ค่ามาตรฐานตลอดทั้งระบบ — ถ้ามีการแปลงกระจายอยู่หลายที่ วันหนึ่งจะมีที่ที่ใช้กฎไม่ตรงกัน แล้วเทียบไม่เจอโดยไม่มีใครรู้ว่าทำไม</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>/// จัดรูปแบบบาร์โค้ดที่อ่านได้ ให้เทียบกันได้เสมอ
+///
+/// เครื่องสแกนบางรุ่นแถมช่องว่าง บางรุ่นส่งตัวพิมพ์เล็ก
+/// ถ้าไม่จัดรูปแบบก่อน 'pal-1001' กับ 'PAL-1001 ' จะถูกนับเป็นคนละใบ
+String normalizeBarcode(String raw) => raw.trim().toUpperCase();
+
+/// รหัสพาเลทที่ระบบนี้ยอมรับ
+bool isValidPalletCode(String normalized) =&gt;
+    RegExp(r'^PAL-\d{4,6}$').hasMatch(normalized);</code></pre><p>และจุดที่เรียกใช้มีที่เดียว</p><pre class="code-vs"><code>ScanOutcome accept(String raw) {
+  if (_busy) return ScanOutcome.busy;
+
+  final code = normalizeBarcode(raw);          // แปลงที่นี่
+  if (code.isEmpty) return ScanOutcome.empty;
+  if (!isValidPalletCode(code)) return ScanOutcome.badFormat;
+  if (!_seen.add(code)) return ScanOutcome.duplicate;
+
+  _accepted.add(code);                          // เก็บค่ามาตรฐาน
+  return ScanOutcome.accepted;
+}</code></pre><p>สังเกตลำดับสามขั้น — <strong>แปลง แล้วตรวจรูปแบบ แล้วค่อยเทียบซ้ำ</strong> ถ้าสลับลำดับจะพัง เช่นถ้าเทียบซ้ำก่อนแปลง ก็กันซ้ำไม่ได้ตามที่ยกตัวอย่างในหัวข้อ 1</p><p>เทสต์ยืนยันไว้แล้ว</p><pre class="code-vs"><code>test('ยิงซ้ำถูกปฏิเสธ แม้ตัวพิมพ์และช่องว่างต่างกัน', () {
+  final session = ScanSession(operatorName: 'สมชาย');
+  session.accept('PAL-1001');
+
+  expect(session.accept('  pal-1001'), ScanOutcome.duplicate);
+  expect(session.count, 1);
+});</code></pre></section>
+
+<section><h2>5. ไม่ใช่ทุกอย่างที่แปลงได้</h2><p>นี่คือจุดที่คนพลาดบ่อยที่สุด — เขียนฟังก์ชัน <code>normalize</code> ตัวเดียวแล้วเอาไปใช้กับข้อมูลทุกชนิด</p><table><thead><tr><th>ชนิดข้อมูล</th><th>แปลงอย่างไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท ตำแหน่ง</td><td>ตัดช่องว่าง + ตัวพิมพ์ใหญ่</td><td>ระบบไม่สนตัวพิมพ์</td></tr>
+<tr><td>ซีเรียลของผู้ผลิต</td><td><strong>ตัดช่องว่างอย่างเดียว</strong></td><td>บางระบบ <code>aB9</code> กับ <code>AB9</code> คนละตัว</td></tr>
+<tr><td>รหัสผ่าน</td><td><strong>ห้ามแปลงอะไรเลย</strong></td><td>ตัวพิมพ์มีความหมายเสมอ</td></tr>
+<tr><td>จำนวน</td><td>ตัดช่องว่างแล้วแปลงเป็นตัวเลข</td><td>เป็นตัวเลขจริง ไม่ใช่รหัส</td></tr>
+</tbody></table><div class="warn"><strong>กับดักเรื่องเลขศูนย์นำหน้า</strong> — รหัส <code>001234</code> ถ้าเผลอแปลงเป็นตัวเลขจะกลายเป็น <code>1234</code> แล้วเทียบกับข้อมูลใน server ไม่เจอ ให้เก็บรหัสทุกชนิดเป็น <strong>ข้อความ</strong> เสมอ และแปลงเป็นตัวเลขเฉพาะสิ่งที่เป็นจำนวนจริง ๆ (ทบทวน D1.19)</div></section>
+
+<section><h2>6. เก็บค่าดิบไว้ด้วยเมื่อจำเป็น</h2><p>เมื่อยิงแล้วถูกปฏิเสธ ผู้ใช้ต้องเห็นว่ายิงอะไรเข้าไป ไม่ใช่เห็นค่าที่แปลงแล้ว</p><pre class="code-vs"><code>if (outcome.shouldClearInput) {
+  _barcodeController.clear();      // ล้างเฉพาะเมื่อสำเร็จ
+}</code></pre><p>ใน lab เราจึงล้างช่องเฉพาะกรณีสำเร็จ ส่วนกรณีอื่นเก็บค่าดิบไว้ตามที่เทสต์ยืนยัน</p><pre class="code-vs"><code>// เก็บค่าไว้ให้ผู้ใช้เห็นว่ายิงอะไรเข้าไป
+expect(field.controller?.text, '  pal-1001  ');</code></pre><p>ประโยชน์จริงในหน้างาน — เมื่อพนักงานเห็นว่ารหัสที่ยิงมามีอักขระแปลกปน เขาจะรู้เองว่าฉลากเสียหรือเครื่องสแกนตั้งค่าผิด แทนที่จะยิงซ้ำสิบครั้งแล้วเรียกช่างไอที</p></section>
+
+<section><h2>7. แปลงชุดเปรียบเทียบด้วยกฎเดียวกัน</h2><p>ข้อผิดพลาดที่ละเอียดอ่อนและหายาก — แปลงเฉพาะค่าที่ยิงมา แต่ลืมแปลงข้อมูลที่เอามาเทียบ</p><pre class="code-vs"><code>// ผิด — ข้อมูลจาก server ยังเป็นค่าดิบ
+final scanned = normalizeBarcode(input);       // 'PAL-1001'
+if (allowedCodes.contains(scanned)) { ... }    // ข้างในเป็น 'pal-1001'
+
+// ถูก — แปลงทั้งสองฝั่งด้วยกฎเดียวกัน ครั้งเดียวตอนโหลด
+final allowed = rawCodes.map(normalizeBarcode).toSet();
+if (allowed.contains(scanned)) { ... }</code></pre><p>สังเกตว่าเราแปลงชุดข้อมูลอ้างอิง <strong>ครั้งเดียวตอนโหลด</strong> ไม่ใช่แปลงทุกครั้งที่เทียบ ซึ่งทั้งถูกต้องและเร็วกว่า</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กันซ้ำไม่ทำงาน ทั้งที่ยิงรหัสเดิม</td><td>ไม่ได้แปลงก่อนเทียบ</td><td>แปลงก่อนเสมอ</td></tr>
+<tr><td>รายงานมีพาเลทใบเดียวหลายรายการ</td><td>เก็บค่าดิบลงฐานข้อมูล</td><td>เก็บค่ามาตรฐาน</td></tr>
+<tr><td>เลขศูนย์นำหน้าหายไป</td><td>แปลงรหัสเป็นตัวเลข</td><td>เก็บรหัสเป็นข้อความเสมอ</td></tr>
+<tr><td>ซีเรียลที่ถูกต้องถูกปฏิเสธ</td><td>แปลงเป็นตัวพิมพ์ใหญ่ทั้งที่ระบบแยกตัวพิมพ์</td><td>ใช้กฎแยกตามชนิดข้อมูล</td></tr>
+<tr><td>เทียบกับข้อมูลจาก server ไม่เจอ</td><td>แปลงฝั่งเดียว</td><td>แปลงทั้งสองฝั่งด้วยกฎเดียวกัน</td></tr>
+<tr><td>ยิงผิดแล้วไม่รู้ว่าผิดเพราะอะไร</td><td>ล้างช่องทุกกรณี</td><td>ล้างเฉพาะเมื่อสำเร็จ</td></tr>
+<tr><td>หาบั๊กไม่เจอเพราะแปลงหลายที่</td><td>มีการแปลงกระจายอยู่</td><td>รวมไว้ที่ฟังก์ชันเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ระบบรับข้อมูลสามชนิดจากเครื่องสแกน จงกำหนดกฎการแปลงของแต่ละชนิดพร้อมเหตุผล</p><table><thead><tr><th>ชนิด</th><th>ตัวอย่างค่าดิบ</th><th>ข้อมูลเพิ่มเติม</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท</td><td><code>' pal-001234 \r\n'</code></td><td>ระบบไม่แยกตัวพิมพ์</td></tr>
+<tr><td>ซีเรียลผู้ผลิต</td><td><code>'Sn-aB9 '</code></td><td>ผู้ผลิตยืนยันว่าแยกตัวพิมพ์</td></tr>
+<tr><td>จำนวน</td><td><code>' 005 '</code></td><td>เป็นจำนวนชิ้น</td></tr>
+</tbody></table><ol><li>เขียนฟังก์ชันแปลงของแต่ละชนิด</li><li>อธิบายว่าทำไมใช้ฟังก์ชันเดียวกันทั้งสามไม่ได้</li><li>เขียนเทสต์ที่จับความผิดพลาดถ้ามีคนเผลอใช้กฎผิด</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>/// รหัสพาเลท — ไม่แยกตัวพิมพ์ จึงแปลงเป็นตัวพิมพ์ใหญ่ได้
+String normalizePalletCode(String raw) =&gt; raw.trim().toUpperCase();
+
+/// ซีเรียล — แยกตัวพิมพ์ จึงตัดช่องว่างอย่างเดียว
+String normalizeSerial(String raw) =&gt; raw.trim();
+
+/// จำนวน — เป็นตัวเลขจริง จึงแปลงเป็น int ได้
+int? parseQuantity(String raw) =&gt; int.tryParse(raw.trim());</code></pre><p>ผลลัพธ์กับค่าตัวอย่าง</p><table><thead><tr><th>ค่าดิบ</th><th>ผลลัพธ์</th><th>สังเกต</th></tr></thead><tbody>
+<tr><td><code>' pal-001234 \r\n'</code></td><td><code>'PAL-001234'</code></td><td>เลขศูนย์นำหน้ายังอยู่ครบ</td></tr>
+<tr><td><code>'Sn-aB9 '</code></td><td><code>'Sn-aB9'</code></td><td>ตัวพิมพ์เดิมถูกรักษาไว้</td></tr>
+<tr><td><code>' 005 '</code></td><td><code>5</code></td><td>กลายเป็นตัวเลขจริง</td></tr>
+</tbody></table><p><strong>ข้อ 2 — ทำไมใช้ฟังก์ชันเดียวกันไม่ได้</strong></p><p>ถ้าใช้ <code>trim().toUpperCase()</code> กับทั้งสามชนิด จะเกิดความเสียหายคนละแบบ</p><ul><li><strong>ซีเรียลจะพัง</strong> — <code>'Sn-aB9'</code> กลายเป็น <code>'SN-AB9'</code> ซึ่งผู้ผลิตถือว่าเป็นคนละตัว ระบบจะเทียบกับฐานข้อมูลไม่เจอ และที่แย่กว่าคือถ้าบังเอิญเจอ อาจไปตรงกับซีเรียลของสินค้าคนละชิ้น</li><li><strong>จำนวนจะยังเป็นข้อความ</strong> — <code>'005'</code> เอาไปบวกลบไม่ได้ และถ้าเทียบกับ <code>'5'</code> จะได้ว่าไม่เท่ากัน</li></ul><p>และถ้าใช้ <code>int.tryParse</code> กับทั้งสาม รหัสพาเลท <code>PAL-001234</code> จะแปลงไม่ได้เลย ส่วนถ้ารหัสเป็นตัวเลขล้วน <code>001234</code> จะกลายเป็น <code>1234</code> แล้วเลขศูนย์หายไปสี่ตัวโดยไม่มี error อะไร — เป็นบั๊กที่เงียบที่สุดในบทนี้</p><p><strong>ข้อ 3 — เทสต์ที่จับการใช้กฎผิด</strong></p><pre class="code-vs"><code>test('รหัสพาเลทเก็บเลขศูนย์นำหน้าไว้', () {
+  expect(normalizePalletCode(' pal-001234 '), 'PAL-001234');
+});
+
+test('ซีเรียลรักษาตัวพิมพ์เดิม', () {
+  expect(normalizeSerial('Sn-aB9 '), 'Sn-aB9');
+
+  // เทสต์เชิงลบ — ถ้ามีคนเผลอเปลี่ยนไปใช้กฎของพาเลท เทสต์นี้จะล้ม
+  expect(normalizeSerial('Sn-aB9'), isNot('SN-AB9'));
+});
+
+test('ซีเรียลที่ต่างกันแค่ตัวพิมพ์ ถือเป็นคนละตัว', () {
+  final seen = &lt;String&gt;{};
+  seen.add(normalizeSerial('Sn-aB9'));
+
+  expect(seen.contains(normalizeSerial('SN-AB9')), isFalse);
+});
+
+test('จำนวนแปลงเป็นตัวเลขและตัดเลขศูนย์นำหน้าได้', () {
+  expect(parseQuantity(' 005 '), 5);
+  expect(parseQuantity('abc'), isNull);
+});</code></pre><p><strong>ทำไมเทสต์ตัวที่สองมี <code>isNot</code></strong></p><p>เพราะเทสต์ปกติตรวจว่า “ได้ผลที่ถูก” แต่ไม่ได้กันคนเผลอเปลี่ยนกฎ — <code>expect(normalizeSerial('Sn-aB9'), 'Sn-aB9')</code> จะล้มถ้ามีคนเปลี่ยนเป็น <code>toUpperCase()</code> จริง แต่การเขียน <code>isNot</code> เพิ่มทำให้ <strong>เจตนาชัดขึ้นสำหรับคนอ่าน</strong> ว่าตัวพิมพ์ต่างกันคือคนละตัว ไม่ใช่แค่บังเอิญผลตรง</p><p>เทสต์ตัวที่สามคือตัวที่มีค่าที่สุด เพราะมันทดสอบ <em>พฤติกรรมของระบบ</em> ไม่ใช่แค่ผลของฟังก์ชัน — มันตอบคำถามว่า “ถ้ายิงซีเรียลที่ตัวพิมพ์ต่างกัน ระบบจะนับเป็นคนละตัวหรือไม่” ซึ่งเป็นสิ่งที่ธุรกิจสนใจจริง</p><p><strong>ลองต่อ:</strong> เปลี่ยน <code>normalizeSerial</code> ให้ใช้ <code>toUpperCase()</code> แล้วรันเทสต์ — ควรเห็นสองตัวล้มเหลว ซึ่งยืนยันว่าเทสต์จับได้จริง จากนั้นแก้กลับ</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>ข้อมูลที่ยิงมาไม่เคยสะอาด และความไม่สะอาดมองไม่เห็นด้วยตา</li><li>แปลงครั้งเดียวตอนรับเข้า แล้วใช้ค่ามาตรฐานตลอดระบบ</li><li>ลำดับคือ แปลง → ตรวจรูปแบบ → เทียบซ้ำ</li><li>กฎการแปลงต่างกันตามชนิดข้อมูล ไม่ใช่ฟังก์ชันเดียวใช้ทุกที่</li><li>เก็บรหัสเป็นข้อความเสมอ อย่าแปลงเป็นตัวเลข</li><li>แปลงข้อมูลที่เอามาเทียบด้วยกฎเดียวกัน</li><li>เมื่อยิงผิด ให้เก็บค่าดิบไว้ให้ผู้ใช้เห็น</li></ul></div><p><strong>บทถัดไป:</strong> 3.7 จะใช้ค่ามาตรฐานที่ได้จากบทนี้ไปทำสิ่งที่สำคัญที่สุดอย่างหนึ่งของงานคลัง — กันไม่ให้ยิงพาเลทใบเดิมซ้ำ</p></section>

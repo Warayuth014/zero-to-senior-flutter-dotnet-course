@@ -1,26 +1,134 @@
-<div class="note"><code>TextField</code> รับ input ระดับพื้นฐาน ส่วน <code>TextEditingController</code> คือ owner ของ text/selection/composing state เมื่อหน้าต้องอ่าน เขียน ล้าง หรือฟังค่าจากภายนอก ต้องกำหนด ownership และ lifecycle ให้ชัด</div>
-<section><h2>1. Controlled input</h2><pre class="code-vs"><code>final _scanController = TextEditingController();
+<div class="meta"><span>ระดับ: เริ่มต้น</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: รับข้อความจากผู้ใช้และอ่านค่าออกมาใช้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.5 (<code>StatefulWidget</code>) และ 1.6 (ใครสร้างต้องคืน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>TextField</code> คู่กับ <code>TextEditingController</code> อ่านและล้างค่าได้ และรู้ว่าทำไมห้ามสร้าง controller ใน <code>build</code></div>
 
-TextField(
-  controller: _scanController,
-  decoration: const InputDecoration(labelText: 'Pallet barcode'),
-  onSubmitted: (_) =&gt; _submitScan(),
-)</code></pre><p>อ่านค่าที่ boundary ของ action ด้วย <code>controller.text</code> ไม่ต้อง setState ทุก keystroke หาก UI ส่วนอื่นไม่ได้ขึ้นกับข้อความนั้น</p></section>
-<section><h2>2. TextEditingValue มีมากกว่า text</h2><p>Controller ถือ <code>TextEditingValue</code> ซึ่งรวม text, selection และ composing range การตั้ง <code>controller.text</code> จะ reset selection/composing หากต้องแก้ค่าและรักษา cursor ให้กำหนด <code>controller.value = value.copyWith(...)</code> อย่างระวัง โดยเฉพาะ IME ภาษาไทย</p></section>
-<section><h2>3. initialValue กับ controller</h2><p><code>TextFormField</code> ห้ามส่งทั้ง initialValue และ controller เมื่อมี controller ให้กำหนดค่าเริ่มที่ constructor/initState เช่น <code>TextEditingController(text: model.code)</code> และ sync ใน <code>didUpdateWidget</code> เฉพาะเมื่อ external model เปลี่ยนจริง เพื่อไม่เขียนทับสิ่งที่ผู้ใช้กำลังพิมพ์ทุก build</p></section>
-<section><h2>4. ตัวอย่างจากสอง WMS</h2><p>wmsapp สร้าง controller ใน State ของ workflow เช่น <code>_scanCtrl</code>, <code>_serialScanCtrl</code>, <code>_qtyEntryCtrl</code> แล้วส่งให้ presentational field ส่วน Absolute <code>ScanBox</code> รับ controller ภายนอกได้ หรือสร้าง <code>_own</code> เมื่อไม่มี ทำให้ ownership แยกได้ชัด</p></section>
-<section><h2>5. Controller ไม่ใช่ business state</h2><p>ข้อความดิบในช่องเป็น UI/editing state หลัง normalize/validate แล้วควรแปลงเป็น domain value เช่น PalletCode และส่งเข้า store/use case ไม่เก็บ controller ใน repository หรือ serialize controller ลง state การ reset form จึงล้าง UI โดยไม่ทำลายผล scan ที่ commit แล้ว</p></section>
-<section><h2>6. Listener ใช้เมื่อจำเป็น</h2><pre class="code-vs"><code>@override
-void initState() {
-  super.initState();
-  _scanController.addListener(_updateClearButton);
-}
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>Part 1 และ 2 เราแสดงข้อมูลอย่างเดียว ยังไม่เคยรับอะไรจากผู้ใช้เลย แต่งานคลังทั้งหมดเริ่มจากการรับข้อมูล — ยิงบาร์โค้ด กรอกจำนวน ระบุตำแหน่ง</p><p>คำถามแรกที่ต้องตอบคือ <strong>ข้อความที่ผู้ใช้พิมพ์เก็บอยู่ที่ไหน และเราจะอ่านมันอย่างไร</strong></p></section>
 
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>TextField</code></td><td>ช่องรับข้อความ</td></tr>
+<tr><td><code>TextEditingController</code></td><td>ตัวที่ถือข้อความจริง อ่านและเขียนได้จากภายนอก</td></tr>
+<tr><td><code>onChanged</code></td><td>callback ที่ยิงทุกครั้งที่ตัวอักษรเปลี่ยน</td></tr>
+<tr><td><code>onSubmitted</code></td><td>callback ที่ยิงเมื่อกด Enter หรือปุ่มยืนยันบนแป้นพิมพ์</td></tr>
+<tr><td><code>InputDecoration</code></td><td>หน้าตาของช่อง เช่นป้ายกำกับ กรอบ ข้อความแนะนำ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ช่องคือหน้าจอ controller คือข้อมูล</h2><p><code>TextField</code> เป็น widget จึงถูกสร้างใหม่ทุกครั้งที่หน้าจอวาดใหม่ ตามที่เรียนใน 1.3 — ดังนั้นมันเก็บข้อความไว้เองไม่ได้</p><pre class="code-vs"><code>TextEditingController   ← ถือข้อความจริง อยู่ยาว
+        ↕
+    TextField           ← แค่แสดงและรับการพิมพ์ ถูกสร้างใหม่เรื่อย ๆ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าอยากอ่านหรือล้างข้อความจากโค้ด ต้องมี controller — ถ้าแค่รับค่าแล้วส่งต่อทันที ใช้ <code>onChanged</code> อย่างเดียวก็พอ</div></section>
+
+<section><h2>4. ใช้งานพื้นฐาน</h2><pre class="code-vs"><code>class _ReceiveScreenState extends State&lt;ReceiveScreen&gt; {
+  final _barcodeController = TextEditingController();   // สร้างครั้งเดียว
+
+  @override
+  void dispose() {
+    _barcodeController.dispose();                       // คืนเสมอ (1.6)
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _barcodeController,
+      decoration: const InputDecoration(
+        labelText: 'บาร์โค้ดพาเลท',
+        hintText: 'PAL-1001',
+        border: OutlineInputBorder(),
+      ),
+      onSubmitted: (_) =&gt; _handleScan(),
+    );
+  }
+}</code></pre><p>สิ่งที่ทำได้ผ่าน controller</p><table><thead><tr><th>คำสั่ง</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>controller.text</code></td><td>อ่านข้อความปัจจุบัน</td></tr>
+<tr><td><code>controller.text = 'PAL-1'</code></td><td>ตั้งค่าใหม่</td></tr>
+<tr><td><code>controller.clear()</code></td><td>ล้างข้อความ</td></tr>
+<tr><td><code>TextEditingController(text: '1')</code></td><td>กำหนดค่าเริ่มต้น</td></tr>
+</tbody></table></section>
+
+<section><h2>5. ดูของจริงใน lab</h2><pre class="code-vs"><code>Set-Location .\labs\flutter_wms_companion
+flutter run -d chrome -t lib/scanner_basics/scanner_basics_app.dart</code></pre><p>เปิด <code>lib/scanner_basics/scanner_basics_app.dart</code> จะเห็น controller สองตัว</p><pre class="code-vs"><code>final _barcodeController = TextEditingController();
+final _quantityController = TextEditingController(text: '1');   // มีค่าเริ่มต้น</code></pre><p>และตอนรับบาร์โค้ด เราอ่านค่าจาก controller แล้วล้างเมื่อสำเร็จ</p><pre class="code-vs"><code>void _handleScan() {
+  final outcome = _session.accept(_barcodeController.text);
+
+  if (outcome.shouldClearInput) {
+    _barcodeController.clear();          // ล้างเฉพาะเมื่อสำเร็จ
+  }
+  ...
+}</code></pre><p>สังเกตว่า <strong>ล้างเฉพาะเมื่อสำเร็จ</strong> — ถ้าสแกนซ้ำหรือรูปแบบผิด เราเก็บค่าไว้ให้ผู้ใช้เห็นว่ายิงอะไรเข้าไป ซึ่งช่วยให้เขาแก้ปัญหาได้เอง เรื่องนี้จะขยายใน 3.11</p></section>
+
+<section><h2>6. onChanged กับ controller เลือกอย่างไร</h2><table><thead><tr><th>สถานการณ์</th><th>ใช้</th></tr></thead><tbody>
+<tr><td>รับค่าแล้วส่งต่อทันที ไม่ต้องอ่านย้อนหลัง</td><td><code>onChanged</code> อย่างเดียว</td></tr>
+<tr><td>ต้องล้างช่องจากโค้ด</td><td>ต้องมี controller</td></tr>
+<tr><td>ต้องตั้งค่าเริ่มต้นแล้วแก้ได้</td><td>ต้องมี controller</td></tr>
+<tr><td>อ่านค่าตอนกดปุ่มยืนยัน</td><td>ต้องมี controller</td></tr>
+</tbody></table><div class="warn"><strong>อย่าเรียก <code>setState</code> ใน <code>onChanged</code> ทุกตัวอักษร</strong> ถ้าไม่มีอะไรบนหน้าจอที่ต้องเปลี่ยนตาม — เพราะจะทำให้ทั้งหน้าจอวาดใหม่ทุกครั้งที่พิมพ์ ซึ่งบน PDA จะรู้สึกหน่วง (ทบทวน 1.10 เรื่องขอบเขต rebuild)</div><p>ถ้าจำเป็นต้องให้บางส่วนเปลี่ยนตามการพิมพ์ เช่นปุ่มล้างที่โผล่มาเมื่อมีข้อความ ให้ใช้เทคนิคจำกัดขอบเขตจาก 1.13</p></section>
+
+<section><h2>7. ห้ามสร้าง controller ใน build</h2><pre class="code-vs"><code>// ผิด — สร้างใหม่ทุกครั้งที่วาดหน้าจอ
 @override
-void dispose() {
-  _scanController.removeListener(_updateClearButton);
-  _scanController.dispose();
-  super.dispose();
-}</code></pre><p>ถ้าใช้ <code>onChanged</code> ได้จะเห็น contract ใกล้ widget กว่า Listener เหมาะกับ logic ที่ owner ต้องฟัง независимоจาก field callback</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ScanBox reusable ควร dispose controller ที่ parent ส่งมาให้หรือไม่?</p><details><summary>เฉลย</summary><p>ไม่ควร Controller ภายนอกเป็นของ parent; child dispose เฉพาะ controller ที่ตนสร้าง Absolute ใช้ <code>_own?.dispose()</code> จึงไม่ทำลาย external controller หลักเดียวกันใช้กับ FocusNode, AnimationController และ ScrollController</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าสร้าง <code>TextEditingController()</code> ใน build เพราะ rebuild จะสร้าง object ใหม่ ทำ text/cursor หายและ controller เก่าไม่ถูก dispose ให้สร้างใน State หรือส่งจาก owner ที่มี lifetime ตรงกับช่อง input</div></section>
+Widget build(BuildContext context) {
+  final controller = TextEditingController();    // ข้อความหายทุกรอบ
+  return TextField(controller: controller);
+}</code></pre><p>อาการที่จะเจอคือ <strong>พิมพ์แล้วตัวอักษรหายทันที</strong> เพราะทุกครั้งที่หน้าจอวาดใหม่ controller ตัวใหม่ที่ว่างเปล่าถูกสร้างขึ้นมาแทน</p><p>เหตุผลตรงกับกฎใน 1.9 ที่ว่าห้ามสร้างสิ่งที่ต้องคืนทรัพยากรใน <code>build</code> — และยังทำให้ controller ตัวเก่าไม่ถูกคืน สะสมไปเรื่อย ๆ</p></section>
+
+<section><h2>8. ข้อความดิบไม่ใช่ข้อมูลของระบบ</h2><p>ข้อความใน controller คือสิ่งที่ผู้ใช้กำลังพิมพ์ ซึ่งอาจยังไม่สมบูรณ์ ยังไม่ผ่านการตรวจ และมีช่องว่างเกิน</p><pre class="code-vs"><code>'  pal-1001  '     ← ข้อความดิบใน controller
+      ↓ จัดรูปแบบและตรวจ (3.6)
+'PAL-1001'         ← ข้อมูลที่ระบบใช้จริง</code></pre><p>อย่าส่งข้อความดิบเข้าไปในตรรกะธุรกิจโดยตรง — ใน lab เราส่งเข้า <code>ScanSession.accept()</code> ซึ่งจัดรูปแบบและตรวจให้ก่อนเสมอ นี่เป็นแนวคิดเดียวกับด่านตรวจใน D1.19</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พิมพ์แล้วตัวอักษรหายทันที</td><td>สร้าง controller ใน <code>build</code></td><td>ย้ายไปเป็น field ของ <code>State</code></td></tr>
+<tr><td>แอปกินหน่วยความจำเพิ่มเมื่อเข้าออกหน้าจอซ้ำ</td><td>ลืม <code>dispose</code></td><td>คืนใน <code>dispose</code> ทุกตัว</td></tr>
+<tr><td><code>A TextEditingController was used after being disposed</code></td><td>คืน controller ที่ยืมมาจากแม่</td><td>คืนเฉพาะที่สร้างเอง (1.6)</td></tr>
+<tr><td>พิมพ์แล้วหน้าจอหน่วง</td><td>เรียก <code>setState</code> ทุกตัวอักษร</td><td>อ่านค่าตอนกดยืนยันแทน</td></tr>
+<tr><td>ใส่ทั้ง <code>controller</code> และ <code>initialValue</code> แล้ว error</td><td>สองตัวนี้ใช้ร่วมกันไม่ได้</td><td>เลือกอย่างใดอย่างหนึ่ง</td></tr>
+<tr><td>ตั้งค่าใหม่แล้วเคอร์เซอร์เด้งไปต้นบรรทัด</td><td>ตั้ง <code>controller.text</code> ระหว่างที่ผู้ใช้พิมพ์อยู่</td><td>ตั้งค่าเฉพาะเมื่อจำเป็นจริง เช่นหลังยิงสำเร็จ</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>สร้างหน้าจอที่มีช่องรับรหัสพาเลทหนึ่งช่อง โดย</p><ol><li>กด Enter แล้วเพิ่มรหัสลงรายการด้านล่าง</li><li>ล้างช่องหลังเพิ่มสำเร็จ</li><li>ถ้าช่องว่าง ไม่ต้องเพิ่มอะไร</li><li>แสดงจำนวนรายการที่มี</li><li>ห้ามใช้ <code>setState</code> ใน <code>onChanged</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>class _CodeListScreenState extends State&lt;CodeListScreen&gt; {
+  final _controller = TextEditingController();
+  final List&lt;String&gt; _codes = &lt;String&gt;[];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    final code = _controller.text.trim();
+    if (code.isEmpty) return;              // ข้อ 3
+    setState(() =&gt; _codes.add(code));      // เรียกตอนกด Enter เท่านั้น
+    _controller.clear();                   // ข้อ 2
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('รับแล้ว ${_codes.length} รายการ')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'รหัสพาเลท',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (_) =&gt; _add(),   // ข้อ 1
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _codes.length,
+              itemBuilder: (context, index) =&gt; ListTile(
+                key: ValueKey&lt;String&gt;(_codes[index]),
+                title: Text(_codes[index]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}</code></pre><p><strong>ทำไม <code>setState</code> อยู่ที่ <code>_add</code> ไม่ใช่ <code>onChanged</code>:</strong> เพราะสิ่งที่ต้องเปลี่ยนบนหน้าจอคือ <em>รายการ</em> ไม่ใช่ข้อความที่กำลังพิมพ์ ตัวช่องกรอกจัดการการแสดงข้อความของตัวเองผ่าน controller อยู่แล้ว ถ้าเรียก <code>setState</code> ทุกตัวอักษร รายการทั้งหมดจะถูกวาดใหม่โดยไม่มีอะไรเปลี่ยน</p><p><strong>ทำไม <code>_controller.clear()</code> อยู่นอก <code>setState</code>:</strong> เพราะการล้าง controller ทำให้ช่องอัปเดตตัวเองอยู่แล้ว ไม่ต้องบอก Flutter ให้วาดใหม่ — ใส่ในหรือนอกก็ทำงานได้ แต่การแยกออกมาทำให้เห็นชัดว่า <code>setState</code> ครอบเฉพาะสิ่งที่เป็นสถานะของหน้าจอจริง ๆ</p><p><strong>ทำไมยังมี <code>.trim()</code> ทั้งที่ยังไม่ถึงบทเรื่องจัดรูปแบบ:</strong> เพราะถ้าไม่ตัดช่องว่าง การกด Enter ในช่องที่มีแต่ช่องว่างจะเพิ่มรายการว่างเข้าไป — เป็นตัวอย่างเล็ก ๆ ของสิ่งที่ 3.6 จะทำอย่างเป็นระบบ</p><p><strong>ลองต่อ:</strong> ย้าย <code>final _controller = TextEditingController();</code> เข้าไปใน <code>build</code> แล้วรัน จะเห็นว่าพิมพ์แล้วตัวอักษรหายทันที ซึ่งยืนยันหัวข้อ 7 ด้วยตาตัวเอง</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li><code>TextField</code> แสดงและรับ ส่วน <code>TextEditingController</code> ถือข้อความจริง</li><li>สร้าง controller เป็น field ของ <code>State</code> และคืนใน <code>dispose</code> เสมอ</li><li>ห้ามสร้างใน <code>build</code> เพราะข้อความจะหายทุกรอบ</li><li>ใช้ <code>onChanged</code> เมื่อไม่ต้องอ่านย้อนหลัง ใช้ controller เมื่อต้องอ่านหรือล้าง</li><li>อย่าเรียก <code>setState</code> ทุกตัวอักษรถ้าไม่มีอะไรต้องเปลี่ยน</li><li>ข้อความดิบต้องผ่านการจัดรูปแบบและตรวจก่อนเข้าสู่ตรรกะธุรกิจ</li></ul></div><p><strong>บทถัดไป:</strong> 3.2 จะจัดการเรื่องโฟกัส ซึ่งเป็นหัวใจของงานสแกน — เพราะถ้าไม่มีช่องที่โฟกัสอยู่ รหัสที่เครื่องสแกนยิงมาจะหายไปเฉย ๆ</p></section>

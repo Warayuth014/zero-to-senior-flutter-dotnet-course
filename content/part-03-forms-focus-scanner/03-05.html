@@ -1,14 +1,99 @@
-<div class="note">Keyboard-wedge scanner แปลงบาร์โค้ดเป็นชุด key events เช่น <code>PALLET-001</code> แล้วต่อ suffix Enter/Tab ดังนั้น TextField ที่ focus อยู่รับค่าเหมือนคนพิมพ์เร็วมาก ไม่ได้คุยกับกล้องหรือ Bluetooth API โดยตรง</div>
-<section><h2>1. เส้นทาง event</h2><pre class="code-vs"><code>Barcode → Scanner firmware/profile
-        → key events: P A L L E T - 0 0 1 ENTER
-        → OS focused control
-        → Flutter TextField controller
-        → onSubmitted
-        → normalize/validate/use case</code></pre></section>
-<section><h2>2. Scanner profile สำคัญ</h2><p>ตั้ง prefix/suffix, keyboard locale, character delay, symbology และการเปิด soft keyboardที่ตัวอุปกรณ์ บางรุ่นส่ง CR, LF, Enter, Tab หรือไม่มี terminator ต้องบันทึก profile ที่รองรับใน deployment ไม่แก้ Flutter อย่างเดียวแล้วคาดว่าทุกเครื่องเหมือนกัน</p></section>
-<section><h2>3. TextField-first approach</h2><p>ถ้า wedge ส่งข้อความ + Enter ปกติ TextField/onSubmitted ง่ายที่สุด รองรับ manual fallback, selection และ accessibility Absolute <code>ScanBox</code> ใช้ autofocus, monospace, hint “scan then Enter” และปิด field เมื่อ busy</p></section>
-<section><h2>4. Raw key events ใช้เมื่อจำเป็น</h2><p>ใช้ KeyboardListener/HardwareKeyboard เมื่อ scanner ไม่ควรลง TextField, ต้องจับ function key หรือประกอบ buffer ตาม timing แต่ต้องจัด key down/up, modifier, IME, focus และ platform differences เอง เริ่มด้วย TextField ก่อนถ้า contract รองรับ</p></section>
-<section><h2>5. Timing ไม่ใช่ identity ที่เชื่อถือได้</h2><p>การเดาว่า “พิมพ์เร็วกว่า 30ms = scanner” เปราะต่อเครื่อง/โหลด/การตั้ง delay ผู้ใช้ยัง paste ได้ ถ้าต้องแยก source ให้ใช้ SDK ของ vendor, prefixเฉพาะ หรือ scanner profile ที่รับรอง Timing ใช้เป็น heuristic เสริม ไม่ใช่ security</p></section>
-<section><h2>6. Focus และ route transitions</h2><p>Wedge ส่งไป control ที่ focus ณ ขณะนั้น Dialog/menu อาจขโมย focus จึงต้อง disable scan ระหว่าง overlay, คืน focusหลังปิด และแสดง target ปัจจุบันชัด เช่น “สแกน Location ปลายทาง” เพื่อป้องกัน barcode ถูกตีความเป็นคนละ entity</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Scanner รุ่นหนึ่งเติม Tab แทน Enter ทำให้ focus ไปปุ่มถัดไปแต่ไม่ submit ควรแก้อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ทางหลักคือกำหนด deployment profile ให้ suffix Enter สม่ำเสมอ หากควบคุมไม่ได้ให้รองรับ Tab/RawKey อย่างมี test และ consume event เฉพาะ scan field พร้อม manual submit fallback อย่าเพิ่ม onChanged auto-submit เพราะไม่รู้ว่าข้อมูลจบเมื่อไร</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าสมมติ barcode ทุกชนิดเป็น uppercase ASCII หรือไม่มี leading zero ต้องตกลง contract กับ backend/label/scanner และเก็บ raw value เพื่อ diagnostics โดยไม่ log ข้อมูลอ่อนไหวเกินจำเป็น</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เข้าใจว่าเครื่องสแกนคุยกับแอปอย่างไร</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.2 (โฟกัส) และ 3.4 (<code>onSubmitted</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายเส้นทางของข้อมูลจากบาร์โค้ดจนถึงโค้ดของเรา และแก้ปัญหาที่เกิดจากการตั้งค่าเครื่องสแกนได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>คนที่เพิ่งทำแอปคลังครั้งแรกมักคิดว่าต้องเขียนโค้ดคุยกับเครื่องสแกนโดยตรง เช่นเปิดกล้อง เชื่อม Bluetooth หรือเรียก SDK ของผู้ผลิต</p><p>ความจริงคือ <strong>เครื่องสแกนของ PDA ส่วนใหญ่ไม่ต้องเขียนโค้ดอะไรเลย</strong> เพราะมันปลอมตัวเป็นแป้นพิมพ์ — และเมื่อรู้ข้อนี้ การออกแบบหน้าจอทั้งหมดจะเปลี่ยนไป</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>keyboard wedge</td><td>โหมดที่เครื่องสแกนส่งข้อมูลเหมือนแป้นพิมพ์</td></tr>
+<tr><td>suffix</td><td>อักขระที่เครื่องสแกนเติมท้ายอัตโนมัติ เช่น Enter</td></tr>
+<tr><td>prefix</td><td>อักขระที่เติมหน้า</td></tr>
+<tr><td>symbology</td><td>ชนิดของบาร์โค้ด เช่น Code 128, QR</td></tr>
+<tr><td>scanner profile</td><td>ชุดการตั้งค่าของเครื่องสแกน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เครื่องสแกนคือคนพิมพ์เร็วมาก</h2><pre class="code-vs"><code>บาร์โค้ดบนกล่อง
+      ↓ พนักงานกดปุ่มยิง
+เครื่องสแกนอ่านและแปลงเป็นข้อความ
+      ↓ ส่งเป็นการกดแป้นพิมพ์ทีละตัว
+P  A  L  -  1  0  0  1  [Enter]
+      ↓ ระบบส่งไปที่ช่องที่โฟกัสอยู่
+TextField ได้รับข้อความ
+      ↓ Enter ทำให้ onSubmitted ทำงาน
+_handleScan()</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ไม่มีอะไรพิเศษเลยในโค้ด — มันคือ <code>TextField</code> ธรรมดาที่บังเอิญมีคนพิมพ์เร็วมาก ทุกอย่างที่เรียนใน 3.1 ถึง 3.4 ใช้ได้ตรง ๆ</div><p>ผลที่ตามมาซึ่งสำคัญที่สุด — <strong>ทุกเรื่องที่คุยกันใน 3.2 เรื่องโฟกัส กลายเป็นเรื่องคอขาดบาดตาย</strong> เพราะถ้าไม่มีช่องไหนโฟกัสอยู่ ข้อความจะไปไหนไม่รู้</p></section>
+
+<section><h2>4. ทำไมรูปแบบนี้ถึงดี</h2><table><thead><tr><th>ข้อดี</th><th>ผลในทางปฏิบัติ</th></tr></thead><tbody>
+<tr><td>ไม่ต้องพึ่ง SDK ของผู้ผลิต</td><td>เปลี่ยนยี่ห้อเครื่องสแกนได้โดยไม่แก้โค้ด</td></tr>
+<tr><td>ทดสอบได้ด้วยแป้นพิมพ์ธรรมดา</td><td>พัฒนาบนเครื่องคอมได้โดยไม่ต้องมี PDA</td></tr>
+<tr><td>มีทางป้อนเองสำรองอยู่แล้ว</td><td>บาร์โค้ดเสียหายก็พิมพ์เองได้ทันที</td></tr>
+<tr><td>เขียนเทสต์ได้</td><td>จำลองการยิงในเทสต์ได้ตรง ๆ</td></tr>
+</tbody></table><p>ข้อสุดท้ายคือสิ่งที่ lab ทำ</p><pre class="code-vs"><code>/// จำลองการยิงบาร์โค้ด — เครื่องสแกนพิมพ์รหัสแล้วกด Enter ให้
+Future&lt;void&gt; scan(WidgetTester tester, String code) async {
+  await tester.enterText(find.byKey(const Key('barcode-field')), code);
+  await tester.testTextInput.receiveAction(TextInputAction.done);
+  await tester.pump();
+}</code></pre><p>สองบรรทัดนี้คือทั้งหมดที่ต้องใช้จำลองเครื่องสแกน — พิมพ์ข้อความ แล้วส่งสัญญาณยืนยัน เพราะนั่นคือสิ่งที่เครื่องสแกนทำจริง ๆ</p></section>
+
+<section><h2>5. การตั้งค่าเครื่องสแกนที่ต้องรู้</h2><p>สิ่งที่ตั้งได้ที่ตัวเครื่อง ไม่ใช่ในโค้ด</p><table><thead><tr><th>ตั้งค่า</th><th>ควรตั้งเป็น</th><th>ถ้าตั้งผิดจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td>suffix</td><td>Enter</td><td>ถ้าเป็น Tab จะย้ายโฟกัสแทนที่จะยืนยัน</td></tr>
+<tr><td>prefix</td><td>ไม่มี</td><td>จะมีอักขระแปลกนำหน้ารหัสทุกครั้ง</td></tr>
+<tr><td>หน่วงระหว่างตัวอักษร</td><td>ต่ำสุดที่ยังไม่ตกหล่น</td><td>สูงไปจะยิงช้า ต่ำไปตัวอักษรอาจหาย</td></tr>
+<tr><td>ภาษาแป้นพิมพ์</td><td>ตรงกับที่ระบบตั้งไว้</td><td>อักขระบางตัวเพี้ยน เช่นขีดกลางกลายเป็นตัวอื่น</td></tr>
+</tbody></table><div class="warn"><strong>อาการคลาสสิกที่โทษกันไปมา:</strong> พนักงานบอกว่า “ยิงแล้วเด้งไปช่องอื่น” ซึ่งฟังดูเหมือนบั๊กของแอป แต่จริง ๆ คือเครื่องสแกนถูกตั้ง suffix เป็น Tab ไม่ใช่ Enter — Tab แปลว่า “ไปช่องถัดไป” ในทุกระบบ ไม่ใช่ “ยืนยัน”</div><p>ทางแก้ที่ถูกคือแก้ที่การตั้งค่าเครื่อง และบันทึกไว้เป็นเอกสารการติดตั้ง ไม่ใช่เขียนโค้ดรองรับ Tab เพิ่ม เพราะจะกลายเป็นว่าแต่ละเครื่องพฤติกรรมไม่เหมือนกัน</p></section>
+
+<section><h2>6. อย่าเดาจากความเร็วในการพิมพ์</h2><p>บางคนพยายามแยกว่า “ถ้าพิมพ์เร็วกว่า 30 มิลลิวินาทีต่อตัว แปลว่ามาจากเครื่องสแกน” ซึ่งใช้ไม่ได้จริง</p><table><thead><tr><th>ทำไมใช้ไม่ได้</th></tr></thead><tbody>
+<tr><td>เครื่องสแกนแต่ละรุ่นตั้งหน่วงต่างกัน</td></tr>
+<tr><td>เมื่อ PDA ทำงานหนัก จังหวะจะเพี้ยน</td></tr>
+<tr><td>ผู้ใช้วางข้อความจากที่อื่นได้ ซึ่งเร็วกว่าเครื่องสแกนอีก</td></tr>
+<tr><td>ทดสอบซ้ำได้ยาก เพราะขึ้นกับสภาพเครื่อง ณ ขณะนั้น</td></tr>
+</tbody></table><p>ถ้าจำเป็นต้องแยกจริง ๆ ให้ตั้ง prefix เฉพาะที่ตัวเครื่องสแกน แล้วตรวจจากอักขระนั้น ซึ่งแน่นอนและทดสอบได้</p></section>
+
+<section><h2>7. ผลต่อการออกแบบหน้าจอ</h2><p>เมื่อรู้ว่าเครื่องสแกนคือแป้นพิมพ์ ข้อกำหนดของหน้าจอจะชัดขึ้นทันที</p><ol><li><strong>ต้องมีช่องที่โฟกัสอยู่เสมอ</strong> — ตาม 3.2</li><li><strong>ต้องบอกให้ชัดว่ากำลังรออะไร</strong> — เช่นป้าย “สแกนพาเลท” เทียบกับ “สแกนตำแหน่ง” ไม่งั้นพนักงานยิงผิดประเภท</li><li><strong>ต้องปิดช่องเมื่อไม่พร้อมรับ</strong> — เช่นระหว่างบันทึก ไม่งั้นรหัสจะเข้ามาปนกับข้อมูลที่กำลังส่ง</li><li><strong>ต้องมีปุ่มพิมพ์เองสำรอง</strong> — บาร์โค้ดเปียกน้ำหรือฉีกขาดเกิดขึ้นทุกวัน</li></ol><p>ใน lab ข้อ 3 ถูกจัดการไว้แล้วสองชั้น</p><pre class="code-vs"><code>// ชั้นที่ 1 — ปิดช่องกรอกทางหน้าจอ
+TextFormField(
+  enabled: !_submitting,
+  ...
+)
+
+// ชั้นที่ 2 — ปฏิเสธที่ตรรกะด้วย
+ScanOutcome accept(String raw) {
+  if (_busy) return ScanOutcome.busy;
+  ...
+}</code></pre><p>เหตุผลที่ต้องมีสองชั้นเหมือนกับที่คุยใน 2.13 — การปิดช่องเป็นการสื่อสารกับผู้ใช้ ส่วนการปฏิเสธที่ตรรกะเป็นการป้องกันจริง ซึ่งเทสต์ตรวจไว้แล้ว</p><pre class="code-vs"><code>test('ระหว่างบันทึก ไม่รับตัวใหม่', () {
+  final session = ScanSession(operatorName: 'สมชาย');
+  session.beginSubmit();
+
+  expect(session.accept('PAL-1001'), ScanOutcome.busy);
+  expect(session.count, 0);
+});</code></pre></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยิงแล้วเด้งไปช่องอื่นแทนที่จะยืนยัน</td><td>เครื่องสแกนตั้ง suffix เป็น Tab</td><td>แก้ที่การตั้งค่าเครื่อง</td></tr>
+<tr><td>ยิงแล้วไม่มีอะไรเกิดขึ้นเลย</td><td>ไม่มีช่องไหนโฟกัส</td><td>ทบทวน 3.2</td></tr>
+<tr><td>มีอักขระแปลกนำหน้ารหัสทุกครั้ง</td><td>ตั้ง prefix ไว้</td><td>แก้ที่การตั้งค่าเครื่อง</td></tr>
+<tr><td>ขีดกลางกลายเป็นอักขระอื่น</td><td>ภาษาแป้นพิมพ์ไม่ตรงกัน</td><td>ตั้งภาษาให้ตรงทั้งเครื่องสแกนและระบบ</td></tr>
+<tr><td>บางตัวอักษรหายไป</td><td>หน่วงระหว่างตัวอักษรต่ำเกิน</td><td>เพิ่มหน่วงเล็กน้อยที่เครื่อง</td></tr>
+<tr><td>ยิงระหว่างบันทึกแล้วข้อมูลปนกัน</td><td>ไม่ได้ปิดรับระหว่างบันทึก</td><td>ปิดทั้งที่หน้าจอและที่ตรรกะ</td></tr>
+<tr><td>พยายามเขียนโค้ดคุยกับเครื่องสแกนโดยตรง</td><td>ไม่รู้ว่ามันเป็นแป้นพิมพ์</td><td>ใช้ <code>TextField</code> ธรรมดา</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมติดตั้งรายงานปัญหาสามข้อจากหน้างานจริง จงระบุว่าแต่ละข้อควรแก้ที่แอปหรือที่การตั้งค่าเครื่อง พร้อมเหตุผล</p><ol><li>ยิงบาร์โค้ดแล้วโฟกัสเด้งไปที่ปุ่มบันทึก แต่ไม่มีอะไรถูกเพิ่ม</li><li>ยิงแล้วได้รหัสถูกต้อง แต่ระบบบอกว่ารูปแบบไม่ถูกต้องทุกครั้ง เมื่อดูในช่องกรอกเห็นเป็น <code>]C1PAL-1001</code></li><li>ยิงตอนกล่องยืนยันเปิดอยู่ แล้วรหัสไปโผล่ในหน้าจอถัดไปหลังกดยืนยัน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><table><thead><tr><th>ข้อ</th><th>แก้ที่</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td>การตั้งค่าเครื่อง</td><td>suffix เป็น Tab ไม่ใช่ Enter</td></tr>
+<tr><td>2</td><td>การตั้งค่าเครื่อง</td><td>เปิดการส่งรหัส symbology นำหน้าไว้</td></tr>
+<tr><td>3</td><td>แอป</td><td>ไม่ได้ปิดรับระหว่างที่กล่องเปิดอยู่</td></tr>
+</tbody></table><p><strong>ข้อ 1 — ทำไมไม่แก้ที่แอป</strong></p><p>เราเขียนโค้ดรองรับ Tab เพิ่มได้ แต่จะเกิดปัญหาสองอย่าง — เครื่องที่ตั้ง Enter ถูกต้องอยู่แล้วจะมีพฤติกรรมต่างจากเครื่องนี้ และเมื่อมีเครื่องรุ่นที่สามที่ตั้งเป็นอย่างอื่นอีก โค้ดจะกลายเป็นชุด <code>if</code> ที่ไม่มีใครกล้าแตะ</p><p>ทางที่ถูกคือกำหนดเป็นข้อกำหนดการติดตั้งว่า <strong>ทุกเครื่องต้องตั้ง suffix เป็น Enter</strong> แล้วเขียนไว้ในเอกสาร ซึ่งทำให้แอปทำงานเหมือนกันทุกเครื่อง</p><p><strong>ข้อ 2 — ทำไมไม่ตัดอักขระนำหน้าในโค้ด</strong></p><p><code>]C1</code> คือรหัสบอกชนิดบาร์โค้ดที่เครื่องสแกนเติมมาให้ ถ้าเราเขียนโค้ดตัดสามตัวหน้าออก จะพังทันทีเมื่อเจอบาร์โค้ดชนิดอื่นที่รหัสนำหน้ายาวไม่เท่ากัน หรือเมื่อมีคนไปปิดการตั้งค่านี้ที่เครื่อง</p><p>อย่างไรก็ตาม <strong>ถ้าตัดสินใจว่าจะใช้รหัสนำหน้าเพื่อแยกชนิด</strong> ให้เขียนตัวแปลงที่คืนผลแบบมีความหมาย ไม่ใช่ตัดด้วยตำแหน่งตัวอักษร</p><pre class="code-vs"><code>// ถ้าจำเป็นต้องรองรับจริง — คืนผลที่มีความหมาย ไม่ใช่ substring ลอย ๆ
+({String code, String? symbology}) parseScannerPayload(String raw) {
+  final match = RegExp(r'^\](\w\d)(.*)$').firstMatch(raw);
+  if (match == null) return (code: raw, symbology: null);
+  return (code: match.group(2)!, symbology: match.group(1));
+}</code></pre><p><strong>ข้อ 3 — ทำไมข้อนี้เป็นของแอป</strong></p><p>เพราะไม่มีการตั้งค่าใดของเครื่องสแกนที่รู้ว่ากล่องยืนยันเปิดอยู่ — นั่นเป็นสถานะของแอปล้วน ๆ</p><p>ทางแก้คือปิดรับระหว่างที่กล่องเปิด แล้วคืนโฟกัสหลังปิด ตามที่คุยใน 3.2 หัวข้อ 7</p><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  _session.beginSubmit();                    // ปิดรับทันที
+  try {
+    final confirmed = await _confirmSubmit();
+    if (!mounted || confirmed != true) return;
+    // ... บันทึก ...
+  } finally {
+    _session.endSubmit();                    // เปิดรับเสมอ แม้ยกเลิก
+    if (mounted) _barcodeFocus.requestFocus();
+  }
+}</code></pre><p><strong>หลักที่ใช้ตัดสินได้ทุกครั้ง:</strong> ถ้าอาการเกี่ยวกับ <em>รูปแบบของข้อมูลที่ส่งมา</em> ให้แก้ที่เครื่อง ถ้าเกี่ยวกับ <em>สถานะของแอป ณ ขณะนั้น</em> ให้แก้ที่แอป</p><p><strong>ลองต่อ:</strong> ในเทสต์ของ lab ลองเปลี่ยน <code>receiveAction(TextInputAction.done)</code> เป็นไม่เรียกเลย แล้วดูว่าเทสต์ล้มเหลวอย่างไร — นั่นคือการจำลองเครื่องที่ไม่มี suffix เลย</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>เครื่องสแกนของ PDA ส่วนใหญ่ทำงานเหมือนแป้นพิมพ์ ไม่ต้องเขียนโค้ดพิเศษ</li><li>ทุกอย่างที่เรียนใน 3.1–3.4 ใช้ได้ตรง ๆ</li><li>จึงทดสอบด้วยแป้นพิมพ์ธรรมดาและเขียนเทสต์จำลองได้</li><li>suffix ต้องเป็น Enter ไม่ใช่ Tab</li><li>อย่าเดาแหล่งที่มาจากความเร็วในการพิมพ์</li><li>ต้องบอกให้ชัดว่ากำลังรอสแกนอะไร และปิดรับเมื่อไม่พร้อม</li><li>ปัญหาเรื่องรูปแบบข้อมูลแก้ที่เครื่อง ปัญหาเรื่องสถานะแก้ที่แอป</li></ul></div><p><strong>บทถัดไป:</strong> 3.6 จะจัดการกับความจริงที่ว่าข้อมูลที่ยิงมาไม่เคยสะอาด — ต้องจัดรูปแบบให้เป็นมาตรฐานเดียวก่อนนำไปเทียบหรือบันทึก</p></section>

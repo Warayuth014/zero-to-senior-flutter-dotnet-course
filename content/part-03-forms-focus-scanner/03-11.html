@@ -1,12 +1,141 @@
-<div class="note">งานสแกนเกิดเร็วและผู้ใช้ไม่ได้มองจอตลอด Feedbackควรหลายช่องทาง: ภาพ + haptic + เสียง +ข้อความ โดยแต่ละผลมี patternต่างกันและยังทำงานได้เมื่ออุปกรณ์ปิดเสียง/ไม่รองรับ vibration</div>
-<section><h2>1. HapticFeedback</h2><pre class="code-vs"><code>Future&lt;void&gt; feedback(ScanOutcome outcome) =&gt; switch (outcome) {
-  ScanAccepted() =&gt; HapticFeedback.mediumImpact(),
-  ScanRejected() =&gt; HapticFeedback.heavyImpact(),
-};</code></pre><p>importจาก <code>flutter/services.dart</code> และไม่ assumeว่าอุปกรณ์ทุกเครื่องสั่น การเรียกไม่ควร block state transition; Absolute ใช้ medium/heavy impact คู่ flashสี</p></section>
-<section><h2>2. Visual flash และ status</h2><p>สีเขียว/แดง flashสั้นช่วย peripheral vision แต่ต้องมี icon/text “รับแล้ว/ไม่พบ serial” เพราะตาบอดสีและแสงคลัง Timerต้อง cancelของเดิมก่อนตั้งใหม่เพื่อไม่ให้ flashเก่าล้าง stateใหม่ และ cancelใน dispose</p></section>
-<section><h2>3. เสียงตอบรับ</h2><p>ใช้ <code>SystemSound.play</code> สำหรับเสียงระบบที่รองรับ หรือ audio asset/packageเมื่อ productต้องการ patternเฉพาะ โหลด/เตรียม playerล่วงหน้าเพื่อลด latency คุม volume/channelและเคารพ silent policy อย่าเล่นไฟล์ใหม่ทุก scanจน resourceสะสม</p></section>
-<section><h2>4. Scanner beep vs app sound</h2><p>เสียง scannerมักแปลว่า “อ่านบาร์โค้ดทางกายภาพได้” ไม่ได้แปลว่า backendยอมรับ App feedbackต้องแยก accepted/rejectedอย่างชัด ผู้ใช้จึงไม่เข้าใจ beepแรกว่า transactionสำเร็จแล้ว</p></section>
-<section><h2>5. Feedback matrix</h2><table><thead><tr><th>Outcome</th><th>ภาพ</th><th>Haptic/เสียง</th><th>Focus</th></tr></thead><tbody><tr><td>Accepted</td><td>เขียว + count</td><td>สั้น/สูง</td><td>ช่องถัดไปหรือเดิม</td></tr><tr><td>Duplicate</td><td>ส้ม + code</td><td>สองจังหวะ</td><td>เดิม</td></tr><tr><td>Rejected</td><td>แดง + วิธีแก้</td><td>หนัก/ต่ำ</td><td>เดิมพร้อม retry</td></tr><tr><td>Network uncertain</td><td>เหลือง + reconcile</td><td>ไม่ใช้เสียง success</td><td>lockตาม policy</td></tr></tbody></table></section>
-<section><h2>6. Accessibility และ preference</h2><p>เพิ่ม Semantics live region/announcementอย่างไม่ spam, เคารพ reduce motion, ตั้งปิดเสียง/hapticได้ และไม่พึ่ง animationอย่างเดียว Feedbackต้องสั้นแต่ข้อมูล errorเต็มยังเปิดดูได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Scanner beepทุกครั้งแม้ serialซ้ำ ควรออกแบบ app feedbackให้ผู้ใช้แยกได้ทันทีอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>เสียง hardwareเป็น “อ่าน labelได้”; app duplicateใช้ amber banner + icon duplicate + haptic/เสียง patternต่างจาก accepted, แสดง serialและไม่เพิ่ม count คืน focusช่องเดิม ผู้ใช้จึงรู้ว่าต้อง scanชิ้นอื่นแม้ไม่ได้อ่านประโยคยาว</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแจ้ง successก่อน await server commit และอย่าใช้ SnackBarยาวกองทุก scan จนผลล่าสุดถูกบัง ใช้ status area/flashที่ replaceได้และเก็บ audit/historyแยกเมื่อจำเป็น</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: บอกผลให้รู้โดยไม่ต้องมองจอ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 2.12 (สถานะหลายช่องทาง) และ 3.7 (ผลลัพธ์ของการยิงมีหลายแบบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบสัญญาณตอบรับที่พนักงานรับรู้ได้ขณะมองของในมือ และแยกผลแต่ละแบบออกจากกันได้ทันที</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ความจริงของงานสแกนในคลัง — <strong>พนักงานไม่ได้มองหน้าจอ</strong> เขามองของที่อยู่ในมือ มองฉลากบนกล่อง มองทางเดิน หน้าจอเป็นสิ่งที่เขาเงยขึ้นมาดูเป็นครั้งคราว</p><p>ถ้าเราบอกผลด้วยข้อความบนจออย่างเดียว พนักงานจะยิงต่อไปเรื่อย ๆ โดยไม่รู้ว่ามีอันที่ไม่เข้า แล้วมารู้ตอนจบว่ายอดไม่ตรง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>haptic</td><td>การสั่นตอบรับ</td></tr>
+<tr><td><code>HapticFeedback</code></td><td>คลาสของ Flutter ที่สั่งให้อุปกรณ์สั่น</td></tr>
+<tr><td>peripheral vision</td><td>การเห็นด้วยหางตาโดยไม่ได้จ้อง</td></tr>
+<tr><td>scanner beep</td><td>เสียงของเครื่องสแกนเอง ไม่ใช่ของแอป</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สามช่องทางที่ไม่ต้องมองจอ</h2><table><thead><tr><th>ช่องทาง</th><th>รับรู้ได้เมื่อ</th><th>ข้อจำกัด</th></tr></thead><tbody>
+<tr><td>การสั่น</td><td>ถือเครื่องอยู่ในมือ</td><td>บางเครื่องไม่รองรับ</td></tr>
+<tr><td>เสียง</td><td>คลังไม่เสียงดังเกินไป</td><td>อาจปิดเสียงไว้</td></tr>
+<tr><td>สีที่เห็นด้วยหางตา</td><td>เครื่องอยู่ในระยะสายตา</td><td>ผู้ใช้ตาบอดสีแยกไม่ออก</td></tr>
+</tbody></table><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกช่องทางมีข้อจำกัด จึงต้องมีหลายช่องทางพร้อมกัน — และต้องมีข้อความบนจอเป็นตัวยืนยันสุดท้ายเสมอ</div></section>
+
+<section><h2>4. ดูของจริงใน lab</h2><pre class="code-vs"><code>import 'package:flutter/services.dart';
+
+/// สัญญาณตอบรับหลายช่องทาง — พนักงานกำลังมองของในมือ ไม่ได้มองจอ
+void _giveFeedback(ScanOutcome outcome) {
+  if (outcome.isFailure) {
+    HapticFeedback.heavyImpact();      // สั่นแรง = มีปัญหา
+  } else {
+    HapticFeedback.lightImpact();      // สั่นเบา = ผ่าน
+  }
+}</code></pre><p>ความต่างของแรงสั่นสำคัญกว่าที่คิด — พนักงานเรียนรู้ได้ภายในไม่กี่นาทีว่าสั่นเบาคือผ่าน สั่นแรงคือต้องเงยหน้ามาดู หลังจากนั้นเขาจะยิงได้เร็วโดยแทบไม่ต้องมองจอเลย</p><p>ส่วนบนจอ lab แสดงแถบที่มีครบสามอย่างตาม 2.12</p><pre class="code-vs"><code>class ScanFeedbackBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final failed = outcome.isFailure;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: failed ? scheme.errorContainer : scheme.tertiaryContainer,
+      ),
+      child: Row(
+        children: [
+          Icon(failed ? Icons.error_outline : Icons.check_circle_outline),
+          const SizedBox(width: 8),
+          Expanded(child: Text(outcome.message)),
+        ],
+      ),
+    );
+  }
+}</code></pre></section>
+
+<section><h2>5. ข้อความมาจาก enum ที่เดียว</h2><pre class="code-vs"><code>enum ScanOutcome {
+  accepted('รับเข้าแล้ว'),
+  duplicate('สแกนซ้ำ'),
+  empty('ไม่มีข้อมูล'),
+  badFormat('รูปแบบบาร์โค้ดไม่ถูกต้อง'),
+  busy('กำลังบันทึกรายการก่อนหน้า');
+
+  const ScanOutcome(this.message);
+
+  final String message;
+
+  bool get isFailure =&gt; this != ScanOutcome.accepted;
+}</code></pre><p>ประโยชน์ตรงกับที่คุยใน 2.12 — เมื่อเพิ่มผลลัพธ์แบบใหม่ในอนาคต เราต้องกำหนดข้อความให้มันตั้งแต่บรรทัดที่ประกาศ ไม่มีทางลืม</p><p>และมี <code>shouldClearInput</code> ผูกไว้กับผลลัพธ์ด้วย</p><pre class="code-vs"><code>/// สำเร็จเท่านั้นที่ควรล้างช่องกรอก — กรณีอื่นเก็บค่าไว้ให้ผู้ใช้ตรวจ
+bool get shouldClearInput =&gt; this == ScanOutcome.accepted;</code></pre><p>นี่คือส่วนหนึ่งของการตอบรับที่คนมักมองข้าม — <strong>การเก็บค่าที่ยิงผิดไว้ในช่องคือการบอกผู้ใช้ว่าเกิดอะไรขึ้น</strong> เขาจะเห็นเองว่ารหัสมีอักขระแปลกปน หรือยิงผิดใบ</p></section>
+
+<section><h2>6. ตารางการตอบรับที่ควรมี</h2><table><thead><tr><th>ผลลัพธ์</th><th>สั่น</th><th>สีและไอคอน</th><th>ช่องกรอก</th><th>โฟกัส</th></tr></thead><tbody>
+<tr><td>รับเข้าแล้ว</td><td>เบา หนึ่งครั้ง</td><td>เขียว เครื่องหมายถูก</td><td>ล้าง</td><td>กลับมาที่เดิม</td></tr>
+<tr><td>สแกนซ้ำ</td><td>แรง</td><td>ส้ม ไอคอนซ้ำ</td><td><strong>ไม่ล้าง</strong></td><td>กลับมาที่เดิม</td></tr>
+<tr><td>รูปแบบผิด</td><td>แรง</td><td>แดง เครื่องหมายตกใจ</td><td><strong>ไม่ล้าง</strong></td><td>กลับมาที่เดิม</td></tr>
+<tr><td>กำลังบันทึกอยู่</td><td>แรง</td><td>เทา ไอคอนนาฬิกา</td><td>ไม่ล้าง</td><td>รอจนเสร็จ</td></tr>
+</tbody></table><p>สังเกตว่าทุกกรณีที่ไม่สำเร็จมีสองอย่างเหมือนกัน — สั่นแรง และไม่ล้างช่อง ซึ่งเป็นสัญญาณที่สอดคล้องกันว่า “หยุดแล้วดู”</p></section>
+
+<section><h2>7. เสียงของเครื่องสแกนไม่ใช่เสียงของเรา</h2><p>นี่คือความเข้าใจผิดที่ทำให้ยอดไม่ตรงบ่อยที่สุด</p><pre class="code-vs"><code>ยิงบาร์โค้ด
+   ↓
+"ปี๊บ"  ← เสียงจากเครื่องสแกน แปลว่า "อ่านฉลากได้"
+   ↓
+แอปรับข้อมูล ตรวจ แล้วอาจปฏิเสธ
+   ↓
+ต้องมีสัญญาณของแอปแยกต่างหาก</code></pre><div class="warn"><strong>พนักงานส่วนใหญ่เข้าใจว่าเสียงปี๊บแปลว่าสำเร็จ</strong> ซึ่งไม่จริง — มันแปลว่าเครื่องอ่านฉลากออก แต่แอปอาจปฏิเสธด้วยเหตุผลอะไรก็ได้ ถ้าแอปไม่มีสัญญาณของตัวเอง พนักงานจะยิงต่อไปโดยเข้าใจว่าทุกอันเข้าหมด</div><p>ทางแก้คือทำให้สัญญาณของแอป <strong>ต่างจากเสียงปี๊บอย่างชัดเจน</strong> เช่นใช้การสั่นเป็นหลัก เพราะเครื่องสแกนไม่สั่น จึงไม่มีทางสับสน</p></section>
+
+<section><h2>8. ห้ามบอกว่าสำเร็จก่อนสำเร็จจริง</h2><pre class="code-vs"><code>// ผิด — สั่นแบบสำเร็จตั้งแต่ยังไม่ได้ส่ง
+void _submit() {
+  HapticFeedback.lightImpact();
+  api.save(items);
+}
+
+// ถูก — รอผลจริงก่อน
+Future&lt;void&gt; _submit() async {
+  final ok = await api.save(items);
+  if (!mounted) return;
+  ok ? HapticFeedback.lightImpact() : HapticFeedback.heavyImpact();
+}</code></pre><p>เป็นเรื่องเดียวกับที่ 3.10 หัวข้อ 8 เตือนไว้ — และเมื่อผลไม่แน่ชัดเพราะเน็ตหลุด <strong>อย่าใช้สัญญาณของกรณีสำเร็จ</strong> ให้ใช้สัญญาณอีกแบบพร้อมข้อความว่าต้องตรวจสอบ</p></section>
+
+<section><h2>9. อย่าให้ข้อความกองทับกัน</h2><table><thead><tr><th>วิธี</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>แสดงข้อความลอยขึ้นมาทุกครั้งที่ยิง</td><td>ยิง 100 ครั้งได้ข้อความ 100 อัน กองซ้อนกันจนอันล่าสุดถูกบัง</td></tr>
+<tr><td>ใช้แถบสถานะที่แทนที่ตัวเดิม</td><td>เห็นผลล่าสุดเสมอ — วิธีที่ควรใช้</td></tr>
+</tbody></table><p>ใน lab เราใช้แถบสถานะที่แสดงผลล่าสุดเพียงอันเดียว</p><pre class="code-vs"><code>if (outcome != null)
+  ScanFeedbackBanner(
+    key: const Key('feedback-banner'),
+    outcome: outcome,
+  ),</code></pre><p>ส่วนข้อความลอยแบบชั่วคราวเก็บไว้ใช้กับเหตุการณ์ที่เกิดไม่บ่อย เช่นผลการบันทึกทั้งชุด</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พนักงานไม่รู้ว่ามีอันที่ไม่เข้า</td><td>บอกผลด้วยข้อความบนจออย่างเดียว</td><td>เพิ่มการสั่นที่ต่างกันตามผล</td></tr>
+<tr><td>เข้าใจว่าเสียงปี๊บคือสำเร็จ</td><td>แอปไม่มีสัญญาณของตัวเอง</td><td>ใช้การสั่นซึ่งเครื่องสแกนไม่มี</td></tr>
+<tr><td>ยิงผิดแล้วไม่รู้ว่ายิงอะไรไป</td><td>ล้างช่องทุกกรณี</td><td>ล้างเฉพาะเมื่อสำเร็จ</td></tr>
+<tr><td>ข้อความกองซ้อนกันจนอ่านไม่ทัน</td><td>ใช้ข้อความลอยทุกครั้งที่ยิง</td><td>ใช้แถบสถานะที่แทนที่ตัวเดิม</td></tr>
+<tr><td>ผู้ใช้ตาบอดสีแยกไม่ออก</td><td>ใช้สีอย่างเดียว</td><td>เพิ่มไอคอนและข้อความ (2.12)</td></tr>
+<tr><td>บอกว่าสำเร็จทั้งที่ยังไม่ส่ง</td><td>ให้สัญญาณตั้งแต่กดปุ่ม</td><td>รอผลจาก server</td></tr>
+<tr><td>ทุกความผิดพลาดได้สัญญาณเหมือนกันหมด</td><td>ไม่แยกชนิดของผลลัพธ์</td><td>ใช้ enum ที่มีข้อความและพฤติกรรมของตัวเอง</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>พนักงานรายงานปัญหาว่า “ยิงไปแล้ว 50 ชิ้น แต่ระบบขึ้นแค่ 43” และบอกว่าไม่เห็นมีอะไรผิดปกติระหว่างทาง เมื่อไปดูโค้ดพบว่า</p><pre class="code-vs"><code>void _handleScan() {
+  final outcome = _session.accept(_controller.text);
+  _controller.clear();                              // ล้างทุกกรณี
+  setState(() =&gt; _lastMessage = outcome.message);   // ข้อความเล็ก ๆ ด้านล่าง
+  _focus.requestFocus();
+}</code></pre><ol><li>อธิบายว่าทำไมพนักงานถึงไม่เห็นความผิดปกติ</li><li>แก้โค้ดให้ปัญหานี้ไม่เกิดอีก</li><li>อธิบายว่าการแก้แต่ละจุดช่วยอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ทำไมไม่เห็น</strong></p><p>สามเหตุผลที่รวมกันจนกลายเป็นปัญหาใหญ่</p><ol><li><strong>ไม่มีสัญญาณที่รับรู้ได้โดยไม่มองจอ</strong> — พนักงานมองของในมือตลอด ข้อความเล็ก ๆ ด้านล่างจอจึงไม่มีใครเห็น</li><li><strong>ล้างช่องทุกกรณี</strong> — แม้จะเงยหน้ามาดู ก็ไม่เห็นว่ายิงอะไรผิดไป เพราะช่องว่างเปล่าเหมือนกันหมด</li><li><strong>เครื่องสแกนปี๊บทุกครั้ง</strong> — พนักงานได้ยินเสียงเดิมทั้ง 50 ครั้ง จึงเข้าใจว่าเข้าครบ</li></ol><p>ที่ทำให้ปัญหานี้ร้ายแรงคือ <strong>ไม่มีใครรู้ว่าอันไหนหายไป</strong> — พอยอดไม่ตรงตอนจบ ต้องยิงใหม่ทั้ง 50 ชิ้นเพราะไล่ไม่ถูกว่าขาดใบไหน</p><pre class="code-vs"><code>void _handleScan() {
+  final outcome = _session.accept(_controller.text);
+
+  // 1. ล้างเฉพาะเมื่อสำเร็จ — ยิงผิดจะเห็นค่าค้างอยู่
+  if (outcome.shouldClearInput) {
+    _controller.clear();
+  }
+
+  // 2. สั่นต่างกันตามผล — รับรู้ได้โดยไม่ต้องมองจอ
+  if (outcome.isFailure) {
+    HapticFeedback.heavyImpact();
+  } else {
+    HapticFeedback.lightImpact();
+  }
+
+  setState(() =&gt; _lastOutcome = outcome);
+  _focus.requestFocus();
+}</code></pre><pre class="code-vs"><code>// 3. แถบสถานะที่เห็นชัดด้วยหางตา แทนข้อความเล็ก ๆ
+if (outcome != null)
+  ScanFeedbackBanner(outcome: outcome),</code></pre><p><strong>ข้อ 3 — การแก้แต่ละจุดช่วยอะไร</strong></p><table><thead><tr><th>แก้อะไร</th><th>ช่วยตอนไหน</th></tr></thead><tbody>
+<tr><td>สั่นแรงเมื่อผิด</td><td>รู้ทันทีขณะยิง โดยไม่ต้องเงยหน้า</td></tr>
+<tr><td>ไม่ล้างช่องเมื่อผิด</td><td>เมื่อเงยหน้ามาดู เห็นว่ายิงอะไรผิดไป</td></tr>
+<tr><td>แถบสีชัดแทนข้อความเล็ก</td><td>เห็นด้วยหางตาโดยไม่ต้องอ่าน</td></tr>
+</tbody></table><p><strong>สิ่งที่ควรเพิ่มอีกอย่าง</strong> — แสดงจำนวนที่รับแล้วให้เห็นตลอดเวลา</p><pre class="code-vs"><code>Text('รับแล้ว ${_session.count} รายการ', key: const Key('accepted-count'))</code></pre><p>เพราะพนักงานที่นับของในมือไปด้วยจะเทียบได้เองว่าตัวเลขตรงไหม โดยไม่ต้องรอจนจบงาน — เป็นการให้เขาตรวจสอบระบบได้ระหว่างทาง ซึ่งสำคัญกว่าการบอกผลทีละครั้งด้วยซ้ำ</p><p><strong>บทเรียนที่ใช้ได้ต่อไป:</strong> เมื่อได้ยินคำว่า “ระบบทำงานปกติแต่ยอดไม่ตรง” ให้สงสัยเรื่องการตอบรับก่อนเสมอ — บ่อยครั้งระบบทำถูกทุกอย่างและปฏิเสธอย่างถูกต้อง แต่ไม่มีใครรู้ว่ามันปฏิเสธ</p><p><strong>ลองต่อ:</strong> ในเทสต์ของ lab ตัวที่ตรวจ “ยิงซ้ำไม่เพิ่มรายการ และไม่ล้างช่องกรอก” ให้ลบเงื่อนไข <code>shouldClearInput</code> ออกจากโค้ด แล้วรัน — เทสต์จะล้มเหลวที่บรรทัดตรวจค่าในช่อง ซึ่งยืนยันว่าเทสต์ปกป้องพฤติกรรมนี้ไว้</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>พนักงานไม่ได้มองจอ ต้องมีสัญญาณที่รับรู้ได้โดยไม่มอง</li><li>ใช้หลายช่องทางพร้อมกัน เพราะแต่ละช่องทางมีข้อจำกัด</li><li>สั่นเบาเมื่อผ่าน สั่นแรงเมื่อมีปัญหา</li><li>เสียงปี๊บของเครื่องสแกนไม่ได้แปลว่าสำเร็จ</li><li>ล้างช่องเฉพาะเมื่อสำเร็จ เพื่อให้เห็นว่ายิงอะไรผิด</li><li>ใช้แถบสถานะที่แทนที่ตัวเดิม ไม่ใช่ข้อความที่กองทับกัน</li><li>อย่าให้สัญญาณสำเร็จก่อนสำเร็จจริง</li><li>แสดงจำนวนสะสมให้ผู้ใช้ตรวจสอบเองได้ระหว่างทาง</li></ul></div><p><strong>บทถัดไป:</strong> 3.12 จะรวบเรื่องการคืนทรัพยากรที่กระจายอยู่ตลอด Part นี้ให้เป็นกฎเดียว เพราะหน้าจอสแกนหนึ่งหน้ามีของที่ต้องคืนหลายชิ้น</p></section>

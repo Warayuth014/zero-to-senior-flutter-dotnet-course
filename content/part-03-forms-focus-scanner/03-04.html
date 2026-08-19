@@ -1,19 +1,110 @@
-<div class="note">Keyboard configuration เป็น hint ให้ IME และเป็นส่วนของ flow แต่ไม่ใช่ security/validation Hardware scanner แบบ wedge อาจไม่สน keyboardType และส่งตัวอักษรพร้อม Enter เหมือนแป้นพิมพ์จริง</div>
-<section><h2>1. keyboardType</h2><ul><li><code>TextInputType.number</code>: แนะนำแป้นตัวเลข</li><li><code>numberWithOptions(decimal: true)</code>: จำนวนทศนิยม</li><li><code>text/emailAddress/url</code>: ปรับ IME ตามชนิด</li><li><code>visiblePassword</code>: ปิด suggestion บางส่วนสำหรับรหัส</li></ul><p>ผู้ใช้ยัง paste/keyboard hardware ค่าอื่นได้ จึงต้อง validate/input formatter เพิ่มตามกฎ</p></section>
-<section><h2>2. TextInputAction</h2><pre class="code-vs"><code>TextField(
-  textInputAction: TextInputAction.search,
-  onSubmitted: (_) =&gt; submitScan(),
-)</code></pre><p>wmsapp <code>ScanTextField</code> ใช้ search action และ suffix button เรียก callback เดียวกัน Manual form หลายช่องใช้ next/done ตามลำดับ focus</p></section>
-<section><h2>3. onChanged, onSubmitted, onEditingComplete</h2><p><code>onChanged</code> ทุกการแก้ข้อความ, <code>onSubmitted</code> ส่งค่าหลัง IME action, <code>onEditingComplete</code> ควบคุม behavior เมื่อ editing จบ ปกติเลือก onSubmitted สำหรับ wedge ที่เติม Enter แล้ว route ทุก trigger (Enter/ปุ่ม) เข้า command เดียว</p></section>
-<section><h2>4. InputFormatters</h2><pre class="code-vs"><code>inputFormatters: [
-  FilteringTextInputFormatter.digitsOnly,
-  LengthLimitingTextInputFormatter(6),
-]</code></pre><p>เหมาะกับ quantity integer แต่ barcode อาจมี dash/letter/leading zero อย่าใช้ digitsOnly กับ scanner โดยไม่รู้ symbology/contract Formatter ทำงานระหว่าง editing และต้องระวัง composing text</p></section>
-<section><h2>5. submit source เดียว</h2><pre class="code-vs"><code>Future&lt;void&gt; _submitScan() async {
-  if (_busy) return;
-  final raw = _controller.text;
-  // normalize → validate → execute
-}</code></pre><p>onSubmitted และปุ่มส่งเรียก method เดียว ไม่คัดลอก logicสองชุด มิฉะนั้น normalization/loading/error อาจต่างกัน</p></section>
-<section><h2>6. Keyboard dismissal</h2><p>PDA ที่ใช้ wedge อาจต้องคง field focusแต่ไม่ต้องการ soft keyboard ขึ้น ทั้งนี้ขึ้นกับอุปกรณ์/SDK สามารถตั้ง scanner profile ไม่เรียก IME, ใช้ readOnly + hardware event เฉพาะเมื่อออกแบบครบ หรือจัด toggle manual input อย่าปิด keyboard จนผู้ใช้ไม่มี fallback</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ช่อง Quantity รับ Enter จาก scanner และปุ่ม Done จาก IME ต้องทำให้ผลเหมือนกันอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>ใช้ controller + <code>TextInputAction.done</code> + onSubmitted เรียก <code>submitQuantity()</code>; ปุ่ม confirm เรียก command เดียวกัน Command อ่าน snapshot, parse/validate, lock busy และเปลี่ยน state ส่วน UI event ไม่ทำ logicแยก</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าเชื่อว่า numeric keyboard ส่งแต่เลข และอย่าใช้ keyboardType เป็น validation ผู้ใช้ paste, hardware keyboard/scanner หรือ accessibility input ได้ Backend ต้อง validate domain value อีกครั้งเสมอ</div></section>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: รับสัญญาณกด Enter จากทุกทาง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.1 (<code>onSubmitted</code>) และ D1.11 (callback)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งค่าแป้นพิมพ์ให้เหมาะกับข้อมูลแต่ละชนิด และรวมทุกทางที่ผู้ใช้ยืนยันข้อมูลให้ไปที่โค้ดชุดเดียว</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ผู้ใช้ยืนยันข้อมูลได้หลายทาง — กดปุ่มบนหน้าจอ กด Enter บนแป้นพิมพ์ หรือให้เครื่องสแกนกด Enter ให้</p><p>ถ้าเราเขียนโค้ดแยกกันสำหรับแต่ละทาง วันหนึ่งจะมีทางที่ลืมแก้ ผลคือ “กดปุ่มแล้วได้ผลอย่างหนึ่ง กด Enter แล้วได้อีกอย่าง” ซึ่งเป็นบั๊กที่หาสาเหตุยากเพราะไม่มีใครทดสอบครบทุกทาง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>keyboardType</code></td><td>บอกระบบว่าควรแสดงแป้นพิมพ์แบบไหน</td></tr>
+<tr><td><code>textInputAction</code></td><td>ปุ่มมุมขวาล่างของแป้นพิมพ์จะเป็นอะไร</td></tr>
+<tr><td><code>onSubmitted</code></td><td>ยิงเมื่อกดปุ่มยืนยันบนแป้นพิมพ์หรือ Enter</td></tr>
+<tr><td><code>inputFormatters</code></td><td>ตัวกรองที่จำกัดสิ่งที่พิมพ์ลงไปได้</td></tr>
+<tr><td>keyboard wedge</td><td>เครื่องสแกนที่ทำงานเหมือนแป้นพิมพ์</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ทุกทางไปที่เดียว</h2><pre class="code-vs"><code>กดปุ่มบนหน้าจอ ──┐
+กด Enter        ──┼──→  _handleScan()  ──→  ตรรกะเดียว
+เครื่องสแกนยิง   ──┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกทางที่ผู้ใช้ยืนยันต้องเรียก method เดียวกัน — ถ้าต้องคัดลอกตรรกะไปอีกที่ แปลว่าออกแบบผิดแล้ว</div><p>ใน lab เราทำแบบนี้</p><pre class="code-vs"><code>TextFormField(
+  ...
+  // เครื่องสแกนกด Enter ให้ จึงเข้าทางนี้เป็นหลัก
+  onFieldSubmitted: (_) =&gt; _handleScan(),
+)</code></pre><p>สังเกตว่า <code>onFieldSubmitted</code> รับค่าที่พิมพ์เข้ามาด้วย แต่เราไม่ใช้ (เขียนเป็น <code>_</code>) แล้วไปอ่านจาก controller แทน — เพราะ <code>_handleScan</code> ต้องเรียกจากปุ่มได้ด้วย ซึ่งปุ่มไม่มีค่าให้ส่ง การอ่านจากแหล่งเดียวคือ controller ทำให้ทั้งสองทางได้ค่าตรงกันแน่นอน</p></section>
+
+<section><h2>4. เลือกแป้นพิมพ์ให้เหมาะกับข้อมูล</h2><table><thead><tr><th><code>keyboardType</code></th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>TextInputType.number</code></td><td>จำนวน</td></tr>
+<tr><td><code>TextInputType.numberWithOptions(decimal: true)</code></td><td>น้ำหนัก</td></tr>
+<tr><td><code>TextInputType.text</code></td><td>ข้อความทั่วไป (ค่าเริ่มต้น)</td></tr>
+<tr><td><code>TextInputType.visiblePassword</code></td><td>รหัสที่ไม่อยากให้ระบบเดาคำให้</td></tr>
+</tbody></table><pre class="code-vs"><code>TextFormField(
+  controller: _quantityController,
+  keyboardType: TextInputType.number,      // แป้นตัวเลขสะดวกกว่า
+  validator: (value) =&gt; validateQuantity(value),
+)</code></pre><div class="warn"><strong><code>keyboardType</code> เป็นแค่คำแนะนำ ไม่ใช่การบังคับ</strong> — ผู้ใช้ยังวางข้อความจากที่อื่นได้ ต่อแป้นพิมพ์จริงได้ และเครื่องสแกนก็ส่งอะไรก็ได้ ดังนั้น <strong>ต้องมี validator เสมอ</strong> ไม่ว่าจะตั้ง <code>keyboardType</code> ไว้อย่างไร</div></section>
+
+<section><h2>5. textInputAction: ปุ่มมุมขวาล่าง</h2><table><thead><tr><th>ค่า</th><th>ปุ่มแสดงเป็น</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>done</code></td><td>เสร็จสิ้น</td><td>ช่องสุดท้ายหรือช่องเดียว</td></tr>
+<tr><td><code>next</code></td><td>ถัดไป</td><td>ฟอร์มหลายช่องเรียงกัน</td></tr>
+<tr><td><code>search</code></td><td>ค้นหา</td><td>ช่องค้นหา</td></tr>
+<tr><td><code>send</code></td><td>ส่ง</td><td>ช่องข้อความที่ส่งทันที</td></tr>
+</tbody></table><p>สำหรับช่องรับบาร์โค้ด ใช้ <code>done</code> เพราะการยิงหนึ่งครั้งคือการจบหนึ่งรายการ ไม่ใช่การไปช่องถัดไป</p><pre class="code-vs"><code>textInputAction: TextInputAction.done,</code></pre></section>
+
+<section><h2>6. inputFormatters: กรองตั้งแต่ตอนพิมพ์</h2><pre class="code-vs"><code>TextFormField(
+  keyboardType: TextInputType.number,
+  inputFormatters: [
+    FilteringTextInputFormatter.digitsOnly,      // รับเฉพาะตัวเลข
+    LengthLimitingTextInputFormatter(4),         // ไม่เกิน 4 หลัก
+  ],
+)</code></pre><p>ต่างจาก validator ตรงที่ตัวกรองทำงาน <strong>ระหว่างพิมพ์</strong> — ตัวอักษรที่ไม่ผ่านจะไม่ปรากฏเลย ส่วน validator ทำงานตอนตรวจ</p><table><thead><tr><th></th><th>inputFormatters</th><th>validator</th></tr></thead><tbody>
+<tr><td>ทำงานเมื่อ</td><td>ทุกครั้งที่พิมพ์</td><td>ตอนสั่งตรวจ</td></tr>
+<tr><td>ผู้ใช้เห็นอะไร</td><td>พิมพ์ไม่ออก</td><td>ข้อความบอกเหตุผล</td></tr>
+<tr><td>เหมาะกับ</td><td>กันสิ่งที่ไม่ควรมีเลย</td><td>บอกว่าค่านั้นผิดเพราะอะไร</td></tr>
+</tbody></table><div class="warn"><strong>ห้ามใช้ <code>digitsOnly</code> กับช่องบาร์โค้ด</strong> เพราะบาร์โค้ดจริงมักมีขีดกลางและตัวอักษร เช่น <code>PAL-1001</code> ถ้ากรองเหลือแต่ตัวเลข เครื่องสแกนจะยิงมาแล้วได้ <code>1001</code> ซึ่งผิด และผู้ใช้จะไม่รู้ว่าเกิดอะไรขึ้นเพราะไม่มีข้อความอะไรบอก</div><p>โดยทั่วไปสำหรับช่องบาร์โค้ด ให้ <strong>รับทุกอย่างเข้ามาก่อน</strong> แล้วค่อยจัดรูปแบบและตรวจในตรรกะ ซึ่งเป็นเรื่องของ 3.6</p></section>
+
+<section><h2>7. รวมทุกทางไว้ที่เดียว</h2><pre class="code-vs"><code>// method เดียวที่ทุกทางเรียก
+void _handleScan() {
+  final outcome = _session.accept(_barcodeController.text);
+  ...
+}
+
+// ทางที่ 1 — เครื่องสแกนหรือกด Enter
+onFieldSubmitted: (_) =&gt; _handleScan(),
+
+// ทางที่ 2 — ปุ่มบนหน้าจอ (ถ้ามี)
+IconButton(onPressed: _handleScan, icon: const Icon(Icons.qr_code_scanner)),</code></pre><p>สังเกตว่าปุ่มส่ง <code>_handleScan</code> ไปตรง ๆ โดยไม่ใส่วงเล็บ ตามที่เรียนใน D1.11 — ส่วนทางแรกต้องห่อด้วย <code>(_) =&gt;</code> เพราะ <code>onFieldSubmitted</code> ส่งค่ามาให้ด้วยแต่ <code>_handleScan</code> ไม่รับ</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยิงบาร์โค้ดแล้วได้แต่ตัวเลข ขีดกลางหาย</td><td>ใช้ <code>digitsOnly</code> กับช่องบาร์โค้ด</td><td>เอาตัวกรองออก แล้วตรวจในตรรกะแทน</td></tr>
+<tr><td>กดปุ่มกับกด Enter ได้ผลต่างกัน</td><td>เขียนตรรกะสองชุด</td><td>รวมเป็น method เดียว</td></tr>
+<tr><td>ตั้ง <code>keyboardType: number</code> แล้วยังมีตัวอักษรเข้ามา</td><td>เข้าใจว่าเป็นการบังคับ</td><td>ต้องมี validator เสมอ</td></tr>
+<tr><td>กด Enter แล้วไม่มีอะไรเกิดขึ้น</td><td>ไม่ได้ต่อ <code>onSubmitted</code></td><td>เพิ่ม <code>onFieldSubmitted</code></td></tr>
+<tr><td>เครื่องสแกนยิงแล้วข้อมูลไม่ครบ</td><td>จำกัดความยาวไว้สั้นเกิน</td><td>ตรวจความยาวจริงของบาร์โค้ดที่ใช้</td></tr>
+<tr><td>ใช้ <code>onChanged</code> เรียกตรรกะแล้วทำงานทุกตัวอักษร</td><td>เครื่องสแกนพิมพ์ทีละตัว</td><td>ใช้ <code>onSubmitted</code> เพราะยิงครั้งเดียวตอนจบ</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญมากและเป็นกับดักที่เจอบ่อย — เครื่องสแกนพิมพ์รหัสทีละตัวอักษรเหมือนคนพิมพ์เร็วมาก ถ้าเราผูกตรรกะไว้กับ <code>onChanged</code> รหัส <code>PAL-1001</code> จะทำให้ตรรกะทำงาน 8 ครั้ง โดย 7 ครั้งแรกเป็นข้อมูลที่ยังไม่ครบ</p></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หน้าจอนับสต็อกมีสองช่อง</p><ul><li>ช่องบาร์โค้ด — รับจากเครื่องสแกน</li><li>ช่องจำนวน — พิมพ์เอง ไม่เกิน 4 หลัก</li></ul><ol><li>ตั้งค่า <code>keyboardType</code>, <code>textInputAction</code> และ <code>inputFormatters</code> ของแต่ละช่องให้เหมาะสม</li><li>ทำให้กด Enter ที่ช่องบาร์โค้ดแล้วไปช่องจำนวน และกด Enter ที่ช่องจำนวนแล้วบันทึก</li><li>อธิบายว่าทำไมช่องบาร์โค้ดไม่ควรมี <code>inputFormatters</code></li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>// ช่องบาร์โค้ด — รับทุกอย่าง แล้วไปตรวจในตรรกะ
+TextFormField(
+  controller: _barcodeController,
+  focusNode: _barcodeFocus,
+  autofocus: true,
+  // ไม่ตั้ง keyboardType เพราะบาร์โค้ดมีทั้งตัวอักษรและตัวเลข
+  textInputAction: TextInputAction.next,        // ข้อ 2
+  // ไม่มี inputFormatters — ดูข้อ 3
+  decoration: const InputDecoration(
+    labelText: 'บาร์โค้ด',
+    border: OutlineInputBorder(),
+  ),
+  onFieldSubmitted: (_) =&gt; _onBarcodeEntered(),
+),
+
+// ช่องจำนวน — พิมพ์เอง จึงกรองได้เต็มที่
+TextFormField(
+  controller: _quantityController,
+  focusNode: _quantityFocus,
+  keyboardType: TextInputType.number,
+  textInputAction: TextInputAction.done,        // ข้อ 2
+  inputFormatters: [
+    FilteringTextInputFormatter.digitsOnly,
+    LengthLimitingTextInputFormatter(4),
+  ],
+  validator: (value) =&gt; validateQuantity(value, max: 9999),
+  onFieldSubmitted: (_) =&gt; _submit(),
+),</code></pre><pre class="code-vs"><code>void _onBarcodeEntered() {
+  final outcome = _session.accept(_barcodeController.text);
+  if (outcome.isFailure) {
+    _barcodeFocus.requestFocus();     // ผิด -&gt; อยู่ที่เดิมให้แก้
+    return;
+  }
+  _barcodeController.clear();
+  _quantityFocus.requestFocus();      // ถูก -&gt; ไปช่องจำนวน (3.2)
+}</code></pre><p><strong>ข้อ 3 — ทำไมช่องบาร์โค้ดไม่ควรมี <code>inputFormatters</code></strong></p><p>สามเหตุผลที่ทำงานร่วมกัน</p><ol><li><strong>บาร์โค้ดมีอักขระหลากหลาย</strong> — ขีดกลาง ตัวอักษร บางระบบมีจุดหรือทับ ถ้ากรองผิดจะตัดข้อมูลสำคัญทิ้ง</li><li><strong>ตัวกรองไม่บอกอะไรผู้ใช้เลย</strong> — เมื่อเครื่องสแกนยิงมาแล้วบางส่วนถูกกรองทิ้ง หน้าจอจะแสดงรหัสที่ไม่ครบโดยไม่มีข้อความอะไร พนักงานจะคิดว่าเครื่องสแกนเสีย</li><li><strong>เราต้องการเห็นสิ่งที่ยิงมาจริง</strong> — เมื่อยิงผิด การเก็บค่าดิบไว้ให้ผู้ใช้เห็นช่วยให้เขาแก้ปัญหาได้เอง ตามที่ทำใน lab</li></ol><p>ทางที่ถูกคือรับทุกอย่างเข้ามา แล้วให้ <code>ScanSession.accept()</code> เป็นคนตัดสินว่ารูปแบบถูกหรือไม่ พร้อมบอกเหตุผล — ซึ่งเป็นการแยกหน้าที่ตามหลักด่านตรวจใน D1.19</p><p><strong>ข้อสังเกตของ <code>_onBarcodeEntered</code>:</strong> โฟกัสไปคนละที่ตามผลลัพธ์ — ถ้าผิดให้อยู่ที่เดิมเพื่อให้ยิงใหม่ได้ทันที ถ้าถูกจึงไปช่องจำนวน นี่คือการใช้ผลลัพธ์ที่มีความหมายจาก enum ให้เป็นประโยชน์ แทนที่จะคืนแค่ <code>bool</code></p><p><strong>ลองต่อ:</strong> ใส่ <code>FilteringTextInputFormatter.digitsOnly</code> ที่ช่องบาร์โค้ดแล้วยิง <code>PAL-1001</code> ดู จะเห็นว่าได้ <code>1001</code> และระบบปฏิเสธด้วยข้อความ “รูปแบบบาร์โค้ดไม่ถูกต้อง” ทั้งที่พนักงานยิงถูก — เป็นตัวอย่างของบั๊กที่โทษกันไปมาระหว่างทีมแอปกับทีมอุปกรณ์</p></details></section>
+
+<section><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>ทุกทางที่ผู้ใช้ยืนยันต้องเรียก method เดียวกัน</li><li>อ่านค่าจาก controller ไม่ใช่จาก parameter ของ callback เพื่อให้ทุกทางได้ค่าตรงกัน</li><li><code>keyboardType</code> เป็นคำแนะนำ ไม่ใช่การบังคับ — ต้องมี validator เสมอ</li><li><code>inputFormatters</code> กรองตอนพิมพ์ ส่วน validator บอกเหตุผลตอนตรวจ</li><li>ห้ามใช้ตัวกรองกับช่องบาร์โค้ด</li><li>ใช้ <code>onSubmitted</code> ไม่ใช่ <code>onChanged</code> เพราะเครื่องสแกนพิมพ์ทีละตัว</li></ul></div><p><strong>บทถัดไป:</strong> 3.5 จะอธิบายว่าเครื่องสแกนของ PDA ทำงานอย่างไรจริง ๆ และผลของมันต่อการออกแบบหน้าจอทั้งหมด</p></section>

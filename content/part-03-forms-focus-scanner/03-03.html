@@ -1,24 +1,150 @@
-<div class="note"><code>Form</code> รวม field validation/save/reset ภายใต้ FormState แต่ validation ฝั่ง client มีหน้าที่ให้ feedback เร็ว ไม่แทนกฎธุรกิจและ authorization ที่ backend ต้องตรวจซ้ำ</div>
-<section><h2>1. Form + GlobalKey</h2><pre class="code-vs"><code>final _formKey = GlobalKey&lt;FormState&gt;();
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ตรวจข้อมูลก่อนบันทึกและแสดงข้อความผิดพลาด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 3.1 (<code>TextEditingController</code>) และ D1.4 (ฟังก์ชันที่คืน <code>String?</code> เมื่อผิด)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>Form</code> ตรวจหลายช่องพร้อมกัน เขียน validator ที่ทดสอบแยกได้ และรู้ว่าการตรวจฝั่งแอปไม่ได้แทนการตรวจฝั่ง server</div>
 
-Form(
-  key: _formKey,
-  child: TextFormField(
-    controller: _locationController,
-    validator: validateLocation,
-  ),
-)
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เมื่อมีหลายช่องที่ต้องถูกต้องพร้อมกันก่อนบันทึก การเขียน <code>if</code> ตรวจทีละช่องแล้วแสดงข้อความเองจะยาวและซ้ำ</p><p>Flutter ให้ <code>Form</code> มาแก้เรื่องนี้ — ตรวจทุกช่องพร้อมกันด้วยคำสั่งเดียว และแสดงข้อความผิดพลาดใต้ช่องที่ผิดให้อัตโนมัติ</p></section>
 
-if (!(_formKey.currentState?.validate() ?? false)) return;</code></pre><p>Key เป็น identity/handle เข้าถึง FormState ต้องสร้างครั้งเดียวใน State ไม่สร้างใน build</p></section>
-<section><h2>2. Validator contract</h2><p>คืน <code>null</code> เมื่อผ่าน หรือข้อความ error เมื่อไม่ผ่าน Validator ควร synchronous, deterministic และไม่แก้ controller/state ห้ามยิง API ใน validator เพราะอาจถูกเรียกหลายครั้งและทำ UX ช้า แยก remote validation ไป action/state machine</p></section>
-<section><h2>3. Pure validation</h2><pre class="code-vs"><code>String? validatePallet(String? raw) {
-  final value = raw?.trim() ?? '';
-  if (value.isEmpty) return 'กรุณาสแกน Pallet';
-  if (value.length &gt; 64) return 'รหัสยาวเกินกำหนด';
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Form</code></td><td>ตัวห่อที่รวมช่องกรอกหลายช่องเข้าด้วยกัน</td></tr>
+<tr><td><code>TextFormField</code></td><td><code>TextField</code> ที่รู้จัก <code>Form</code> และรับ <code>validator</code></td></tr>
+<tr><td><code>validator</code></td><td>ฟังก์ชันที่คืน <code>null</code> เมื่อผ่าน หรือข้อความเมื่อผิด</td></tr>
+<tr><td><code>GlobalKey&lt;FormState&gt;</code></td><td>ที่จับสำหรับสั่งให้ <code>Form</code> ตรวจ</td></tr>
+<tr><td><code>autovalidateMode</code></td><td>ตั้งว่าจะตรวจตอนไหน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: null แปลว่าผ่าน</h2><p>ข้อตกลงของ validator ใน Flutter ตรงกับที่เราเขียนไว้ในแบบฝึกหัด D1.4 พอดี</p><pre class="code-vs"><code>String? validateQuantity(String? raw, {int max = 999}) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return 'กรุณากรอกจำนวน';
+
+  final value = int.tryParse(text);
+  if (value == null) return 'จำนวนต้องเป็นตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (value &gt; max) return 'จำนวนต้องไม่เกิน $max';
+  return null;                              // ผ่าน
+}</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>null</code> แปลว่าผ่าน — ดูแปลกตอนแรก แต่ทำให้เขียน <code>if (error != null)</code> ได้ตรงไปตรงมา และบอกเหตุผลของความผิดพลาดไปพร้อมกัน (ทบทวน D1.13)</div></section>
+
+<section><h2>4. ประกอบเข้าด้วยกัน</h2><pre class="code-vs"><code>class _ReceiveScreenState extends State&lt;ReceiveScreen&gt; {
+  final _formKey = GlobalKey&lt;FormState&gt;();     // สร้างครั้งเดียว ไม่สร้างใน build
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        children: [
+          TextFormField(
+            controller: _quantityController,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              labelText: 'จำนวนต่อพาเลท',
+              border: OutlineInputBorder(),
+            ),
+            validator: (value) =&gt; validateQuantity(value),
+          ),
+          ...
+        ],
+      ),
+    );
+  }
+
+  Future&lt;void&gt; _submit() async {
+    // ตรวจทุกช่องพร้อมกัน ถ้าไม่ผ่านจะแสดงข้อความใต้ช่องเอง
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    ...
+  }
+}</code></pre><p>ทบทวนจาก 1.8: <code>GlobalKey</code> ต้องสร้างเป็น field ของ <code>State</code> ห้ามสร้างใน <code>build</code> ไม่งั้นจะได้ตัวใหม่ทุกรอบและ <code>currentState</code> จะเป็น <code>null</code></p><p>ส่วน <code>?? false</code> จำเป็นเพราะ <code>currentState</code> เป็น nullable — ถ้าเป็น <code>null</code> แปลว่าฟอร์มยังไม่ถูกสร้าง ซึ่งควรถือว่าไม่ผ่าน</p></section>
+
+<section><h2>5. validator ต้องเป็นฟังก์ชันธรรมดา</h2><p>ใน lab เราแยก <code>validateQuantity</code> ออกไปไว้ใน <code>scan_session.dart</code> ซึ่งไม่ import Flutter เลย ผลคือทดสอบได้โดยไม่ต้องประกอบหน้าจอ</p><pre class="code-vs"><code>test('ปฏิเสธค่าว่าง ตัวอักษร ศูนย์ ติดลบ และเกินเพดาน', () {
+  expect(validateQuantity(''), 'กรุณากรอกจำนวน');
+  expect(validateQuantity('มาก'), 'จำนวนต้องเป็นตัวเลข');
+  expect(validateQuantity('0'), 'จำนวนต้องมากกว่า 0');
+  expect(validateQuantity('-3'), 'จำนวนต้องมากกว่า 0');
+  expect(validateQuantity('1000'), 'จำนวนต้องไม่เกิน 999');
+});</code></pre><table><thead><tr><th>validator ควรเป็น</th><th>ห้ามเป็น</th></tr></thead><tbody>
+<tr><td>ทำงานเสร็จทันที</td><td>งานที่ต้องรอ เช่นถาม server</td></tr>
+<tr><td>ให้ผลเหมือนเดิมเสมอเมื่อค่าเหมือนเดิม</td><td>ขึ้นกับเวลาหรือสิ่งภายนอก</td></tr>
+<tr><td>ไม่เปลี่ยนอะไรข้างนอก</td><td>แก้ controller หรือเรียก <code>setState</code></td></tr>
+</tbody></table><div class="warn"><strong>ห้ามยิง API ใน validator</strong> เพราะ <code>validate()</code> เรียก validator ทุกตัวทันทีและอาจถูกเรียกหลายครั้ง — จะกลายเป็นยิง API รัวโดยไม่ตั้งใจ และ validator ต้องคืนคำตอบทันที รอไม่ได้ การตรวจกับ server เป็นเรื่องของขั้นตอนบันทึก ไม่ใช่ของ validator</div></section>
+
+<section><h2>6. ตรวจตอนไหน</h2><table><thead><tr><th><code>autovalidateMode</code></th><th>ตรวจเมื่อ</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>disabled</code> (ค่าเริ่มต้น)</td><td>เมื่อเราสั่ง <code>validate()</code> เท่านั้น</td><td>งานคลังส่วนใหญ่</td></tr>
+<tr><td><code>onUserInteraction</code></td><td>หลังผู้ใช้แตะช่องแล้ว</td><td>ฟอร์มยาวที่อยากบอกเร็ว</td></tr>
+<tr><td><code>always</code></td><td>ทุกครั้งที่วาดหน้าจอ</td><td>แทบไม่ควรใช้</td></tr>
+</tbody></table><p>สำหรับหน้าจอสแกน ค่าเริ่มต้นดีที่สุด — เพราะการขึ้นข้อความสีแดงตั้งแต่ยังไม่ทันกรอกอะไรทำให้ผู้ใช้รู้สึกว่าทำผิดตลอดเวลา ให้ตรวจตอนกดบันทึกแล้วบอกทีเดียว</p></section>
+
+<section><h2>7. ตรวจฝั่งแอปไม่ได้แทนฝั่ง server</h2><p>เรื่องนี้สำคัญและมักถูกมองข้าม การตรวจในแอปมีไว้ให้ผู้ใช้รู้เร็ว <strong>ไม่ใช่เพื่อความปลอดภัยหรือความถูกต้องของข้อมูล</strong></p><table><thead><tr><th>ระดับ</th><th>ตรวจอะไร</th><th>ตรวจที่ไหน</th></tr></thead><tbody>
+<tr><td>รูปแบบ</td><td>ว่างไหม เป็นตัวเลขไหม ยาวเกินไหม</td><td>validator ในแอป</td></tr>
+<tr><td>กฎในหน้าจอ</td><td>จำนวนไม่เกินที่เหลือ ไม่ซ้ำในรอบนี้</td><td>ตรรกะในแอป</td></tr>
+<tr><td>ข้อมูลจริง</td><td>พาเลทนี้มีอยู่จริงไหม ช่องนี้ว่างไหม</td><td>server</td></tr>
+<tr><td>สิทธิ์และความถูกต้องสุดท้าย</td><td>คนนี้มีสิทธิ์ไหม ของยังอยู่ไหม</td><td>server เท่านั้น</td></tr>
+</tbody></table><p>เหตุผลง่าย ๆ คือแอปทำงานบนเครื่องของผู้ใช้ซึ่งเราควบคุมไม่ได้ และระหว่างที่พนักงานกรอกอยู่ คนอื่นอาจหยิบของไปแล้ว — server เป็นแหล่งความจริงเดียว เรื่องนี้จะลงลึกใน Part 7</p></section>
+
+<section><h2>8. ดูของจริงใน lab</h2><pre class="code-vs"><code>flutter test --no-pub test/scanner_basics_test.dart</code></pre><pre class="code-vs"><code>testWidgets('จำนวนที่ไม่ถูกต้องทำให้บันทึกไม่ผ่าน', (tester) async {
+  await scan(tester, 'PAL-1001');
+  await tester.enterText(find.byKey(const Key('quantity-field')), '0');
+  await tester.tap(find.byKey(const Key('submit-button')));
+  await tester.pumpAndSettle();
+
+  expect(find.text('จำนวนต้องมากกว่า 0'), findsOneWidget);
+  expect(sent, 0);        // ไม่ควรถึงขั้นส่ง
+});</code></pre><p>เทสต์นี้ตรวจสองอย่างที่ต่างกัน — ข้อความผิดพลาดปรากฏ <strong>และ</strong> ข้อมูลไม่ถูกส่งออกไป ถ้าตรวจแค่ข้อความ เทสต์จะผ่านทั้งที่ข้อมูลผิดถูกส่งไปแล้ว</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>currentState</code> เป็น <code>null</code> ตลอด</td><td>สร้าง <code>GlobalKey</code> ใน <code>build</code></td><td>ย้ายไปเป็น field ของ <code>State</code></td></tr>
+<tr><td>ใส่ <code>validator</code> แล้วไม่ทำงาน</td><td>ใช้ <code>TextField</code> แทน <code>TextFormField</code></td><td>เปลี่ยนเป็น <code>TextFormField</code></td></tr>
+<tr><td>validator ไม่ถูกเรียกเลย</td><td>ช่องไม่ได้อยู่ใต้ <code>Form</code></td><td>ตรวจว่า <code>Form</code> ครอบอยู่จริง</td></tr>
+<tr><td>ข้อความแดงขึ้นตั้งแต่เปิดหน้าจอ</td><td>ตั้ง <code>autovalidateMode: always</code></td><td>ใช้ค่าเริ่มต้น</td></tr>
+<tr><td>ยิง API รัวโดยไม่ตั้งใจ</td><td>เรียก API ใน validator</td><td>ย้ายไปขั้นตอนบันทึก</td></tr>
+<tr><td>ผ่าน validator แต่ server ปฏิเสธ</td><td>กฎสองฝั่งไม่ตรงกัน</td><td>ยอมรับว่า server คือแหล่งความจริง แล้วแสดงข้อความที่ server ส่งมา</td></tr>
+<tr><td>ใช้ <code>GlobalKey</code> ตัวเดียวกับสองฟอร์ม</td><td>เข้าใจว่าเป็นตัวแปรกลาง</td><td>หนึ่งฟอร์มหนึ่ง key</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ฟอร์มย้ายสินค้ามีสามช่อง</p><ul><li>รหัสพาเลท — ต้องขึ้นต้นด้วย <code>PAL-</code> ตามด้วยตัวเลข 4–6 หลัก</li><li>ตำแหน่งปลายทาง — รูปแบบ <code>A-01-02</code></li><li>จำนวน — 1 ถึงจำนวนที่มีอยู่จริง ซึ่งส่งเข้ามาเป็นค่า</li></ul><ol><li>เขียน validator ทั้งสามตัวแยกเป็นฟังก์ชันธรรมดา</li><li>เขียนเทสต์ของ validator โดยไม่ต้องประกอบหน้าจอ</li><li>อธิบายว่าอะไรใน 3 ข้อนี้ที่ยัง <strong>ต้อง</strong> ตรวจซ้ำที่ server</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><pre class="code-vs"><code>// ไฟล์ตรรกะล้วน — ไม่ import Flutter
+String? validatePalletCode(String? raw) {
+  final value = raw?.trim().toUpperCase() ?? '';
+  if (value.isEmpty) return 'กรุณาสแกนรหัสพาเลท';
+  if (!RegExp(r'^PAL-\d{4,6}$').hasMatch(value)) {
+    return 'รูปแบบต้องเป็น PAL-1001';
+  }
   return null;
-}</code></pre><p>แยก function pure ทำ unit test ได้ และใช้ raw/normalized policyเดียวกับ submit เพื่อไม่ให้ validator ผ่านแต่ actionตีความต่างกัน</p></section>
-<section><h2>4. autovalidateMode</h2><p>หน้าคลังไม่ควรแสดง error ก่อนผู้ใช้เริ่ม ใช้ disabled จนกด submit หรือ <code>onUserInteraction</code> หลัง interaction สำหรับ scanner ที่ submit ด้วย Enter มัก validate ตอน event แล้วแสดง status banner; Form เหมาะเมื่อหลายช่องต้องผ่านพร้อมกัน</p></section>
-<section><h2>5. Validation หลายระดับ</h2><ol><li>Parsing/shape: ว่าง, ตัวเลข, ความยาว</li><li>Local domain: quantity ≤ remaining, serial ไม่ซ้ำใน session</li><li>Remote domain: pallet มีจริง, location ว่าง, task ยัง active</li><li>Server commit: concurrency/auth/invariant ล่าสุด</li></ol><p>UI ต้องแยกข้อความและ retry behavior ของแต่ละระดับ</p></section>
-<section><h2>6. reset และ pending data</h2><p><code>FormState.reset</code> reset field state/initialValue แต่ controller ที่กำหนดเองอาจต้อง clear/restore explicit อย่าล้าง pending scan ที่ valid แล้วเมื่อ remote step ถัดไป fail กำหนด transaction boundary ว่า reset input, preview และ committed state ต่างกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Quantity ต้องเป็น 1–remaining และ pallet ต้องมีจริงใน server อะไรอยู่ validator?</p><details><summary>เฉลย</summary><p>parse + range 1–remaining อยู่ pure validator/local domain; การมีอยู่ของ pallet เป็น async validation ใน submit state โดย disable duplicate submit และแสดง loading/error Backend ยังตรวจ quantity/stock/pallet ซ้ำตอน commit</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">GlobalKey ไม่ใช่ global variable อย่าแชร์ Form key หนึ่งอันข้ามหลาย Form/route และอย่าใช้เพื่อข้าม architecture ทุกอย่าง ใช้ callback/controller/state owner ตามปกติ; key มีไว้ระบุ FormState เฉพาะ subtree นั้น</div></section>
+}
+
+String? validateLocation(String? raw) {
+  final value = raw?.trim().toUpperCase() ?? '';
+  if (value.isEmpty) return 'กรุณาระบุตำแหน่งปลายทาง';
+  if (!RegExp(r'^[A-Z]-\d{2}-\d{2}$').hasMatch(value)) {
+    return 'รูปแบบต้องเป็น A-01-02';
+  }
+  return null;
+}
+
+String? validateMoveQuantity(String? raw, {required int available}) {
+  final text = raw?.trim() ?? '';
+  if (text.isEmpty) return 'กรุณากรอกจำนวน';
+
+  final value = int.tryParse(text);
+  if (value == null) return 'จำนวนต้องเป็นตัวเลข';
+  if (value &lt;= 0) return 'จำนวนต้องมากกว่า 0';
+  if (value &gt; available) return 'มีอยู่เพียง $available ชิ้น';
+  return null;
+}</code></pre><pre class="code-vs"><code>void main() {
+  test('รหัสพาเลท', () {
+    expect(validatePalletCode('pal-1001'), isNull);      // normalize ให้ก่อน
+    expect(validatePalletCode(''), 'กรุณาสแกนรหัสพาเลท');
+    expect(validatePalletCode('PAL-1'), 'รูปแบบต้องเป็น PAL-1001');
+    expect(validatePalletCode('BOX-1001'), 'รูปแบบต้องเป็น PAL-1001');
+  });
+
+  test('จำนวนเทียบกับของที่มีจริง', () {
+    expect(validateMoveQuantity('5', available: 10), isNull);
+    expect(validateMoveQuantity('11', available: 10), 'มีอยู่เพียง 10 ชิ้น');
+    expect(validateMoveQuantity('0', available: 10), 'จำนวนต้องมากกว่า 0');
+  });
+}</code></pre><p><strong>ทำไม <code>available</code> ส่งเข้ามาเป็น parameter</strong></p><p>เพราะถ้า validator ไปอ่านค่านี้จากที่เก็บข้อมูลเอง มันจะเลิกเป็นฟังก์ชันธรรมดาทันที ทดสอบยากขึ้น และผลลัพธ์จะขึ้นกับสิ่งภายนอก — การรับเข้ามาทำให้เทสต์กำหนดสถานการณ์ได้ทุกแบบในบรรทัดเดียว</p><p><strong>ข้อ 3 — อะไรต้องตรวจซ้ำที่ server</strong></p><table><thead><tr><th>เรื่อง</th><th>ตรวจซ้ำไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>รูปแบบรหัสพาเลท</td><td>ควรตรวจ</td><td>ป้องกันข้อมูลผิดรูปเข้าฐานข้อมูลจากช่องทางอื่น</td></tr>
+<tr><td>พาเลทนี้มีอยู่จริงไหม</td><td><strong>ต้อง</strong></td><td>แอปไม่มีทางรู้ ต้องถาม server</td></tr>
+<tr><td>ตำแหน่งปลายทางว่างไหม</td><td><strong>ต้อง</strong></td><td>อาจมีคนอื่นวางของไปแล้วระหว่างที่เรากรอก</td></tr>
+<tr><td>จำนวนไม่เกินที่มี</td><td><strong>ต้อง</strong></td><td>ค่า <code>available</code> ที่แอปถืออาจเก่าไปแล้ว</td></tr>
+<tr><td>คนนี้มีสิทธิ์ย้ายของไหม</td><td><strong>ต้อง</strong></td><td>แอปเปลี่ยนแปลงได้ ไม่ใช่แหล่งความจริงเรื่องสิทธิ์</td></tr>
+</tbody></table><p><strong>บทเรียนที่สำคัญที่สุด:</strong> validator ในแอปตรวจ <em>รูปแบบ</em> ได้ครบถ้วน แต่ตรวจ <em>ความจริง ณ ขณะนั้น</em> ไม่ได้เลย — ข้อมูลที่แอปถืออยู่เป็นภาพนิ่งจากตอนที่โหลดมา ซึ่งอาจล้าสมัยไปแล้วตอนที่พนักงานกดบันทึก</p><p><strong>ลองต่อ:</strong> เพิ่มเทสต์กรณี <code>available: 0</code> แล้วดูว่าข้อความที่ได้คือ “มีอยู่เพียง 0 ชิ้น” ซึ่งอ่านแล้วแปลก — ลองแก้ให้แสดงข้อความที่เหมาะกว่า เช่น “ไม่มีของให้ย้าย” นี่คือตัวอย่างว่าเทสต์ช่วยให้เห็นกรณีที่ลืมคิด</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>validator คืน <code>null</code> เมื่อผ่าน และคืนข้อความเมื่อผิด</li><li><code>Form</code> ตรวจทุกช่องพร้อมกันและแสดงข้อความให้เอง</li><li>สร้าง <code>GlobalKey</code> เป็น field ของ <code>State</code> ห้ามสร้างใน <code>build</code></li><li>ใช้ <code>TextFormField</code> ไม่ใช่ <code>TextField</code> เมื่อต้องการ validator</li><li>เขียน validator เป็นฟังก์ชันธรรมดาที่ทดสอบแยกได้</li><li>ห้ามยิง API หรือเรียก <code>setState</code> ใน validator</li><li>การตรวจในแอปมีไว้ให้รู้เร็ว ไม่ได้แทนการตรวจที่ server</li></ul></div><p><strong>บทถัดไป:</strong> 3.4 จะดูการตั้งค่าแป้นพิมพ์และการรับสัญญาณกด Enter ซึ่งเป็นสะพานไปสู่การรับข้อมูลจากเครื่องสแกนในบทถัดไป</p></section>
