@@ -1,4 +1,166 @@
-<div class="note">JSON numberอาจเข้า Dartเป็น int/double และระบบเก่าอาจส่ง numeric string จึงต้องมี converterกลางตาม contract</div>
-<section><h2>1. Double</h2><pre class="code-vs"><code>double? readDouble(Object? v) =&gt; switch (v) {
-  num n =&gt; n.toDouble(), String s =&gt; double.tryParse(s.trim()), _ =&gt; null,
-};</code></pre></section><section><h2>2. Int</h2><p>รับ numเฉพาะเมื่อเป็นจำนวนเต็มตาม policy ไม่ truncate 1.9เงียบ</p></section><section><h2>3. String</h2><p>Identifierควร Stringและรักษา leading zero ไม่ stringify objectทุกอย่าง</p></section><section><h2>4. Decimal</h2><p>จำนวนเงิน/หน่วยแม่นตรงใช้ decimalหรือหน่วยย่อยร่วมกับ .NET decimal</p></section><section><h2>5. Locale</h2><p>Wire formatใช้ invariant culture จุดทศนิยม ไม่ parseตามภาษา UI</p></section><section><h2>6. Error path</h2><p>ระบุ <code>items[3].qty</code> ใน contract errorเพื่อ debug</p></section><section><h2>7. แบบฝึกหัด</h2><p>ค่า 5, 5.0, "5"?</p><details><summary>เฉลย</summary><p>รับได้ถ้า contractประกาศ tolerant; normalizeเป็นชนิด domainเดียวและ testทั้งสาม</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn">Default invalidเป็น 0อาจสร้าง transactionผิด ให้ distinguish missing/invalid/zero</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านตัวเลขจาก JSON โดยไม่ทำให้ยอดเพี้ยน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (ตัวช่วยอ่านค่า) และ D1.3 (ชนิดตัวเลขใน Dart)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าเมื่อไหร่ควรผ่อนให้เซิร์ฟเวอร์ และเมื่อไหร่การผ่อนแปลว่าของหาย</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่ดูปลอดภัยแล้ว</p><pre class="code-vs"><code>quantity: json['quantity'] as int,</code></pre><p>พังในสามกรณีที่เกิดจริงทั้งหมด</p><table><thead><tr><th>เซิร์ฟเวอร์ส่ง</th><th>เกิดอะไร</th><th>ทำไมเซิร์ฟเวอร์ส่งแบบนั้น</th></tr></thead><tbody>
+<tr><td><code>12</code></td><td>ผ่าน</td><td>ปกติ</td></tr>
+<tr><td><code>12.0</code></td><td><strong>พัง</strong></td><td>ฝั่ง .NET ประกาศเป็น <code>decimal</code> หรือ <code>double</code></td></tr>
+<tr><td><code>"12"</code></td><td><strong>พัง</strong></td><td>ระบบเก่าเก็บเป็นข้อความในฐานข้อมูล</td></tr>
+</tbody></table><p>สองแถวล่างเป็นเรื่องปกติมากในระบบที่ต่อกับของเดิม และไม่ใช่ความผิดของใคร — เป็นแค่ความจริงที่ต้องรับมือ</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>num</code></td><td>ชนิดแม่ของ <code>int</code> และ <code>double</code> ใน Dart</td></tr>
+<tr><td><code>as</code></td><td>บอก compiler ว่าค่านี้เป็นชนิดนี้ — ถ้าไม่ใช่จะพังตอนรัน</td></tr>
+<tr><td><code>tryParse</code></td><td>แปลงข้อความเป็นตัวเลข ถ้าไม่ได้จะคืน <code>null</code> แทนการพัง</td></tr>
+<tr><td>invariant culture</td><td>รูปแบบตัวเลขมาตรฐานที่ใช้จุดเป็นทศนิยม</td></tr>
+<tr><td>precision</td><td>ความละเอียดของตัวเลขที่เก็บได้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: JSON ไม่รู้จัก int กับ double</h2><pre class="code-vs"><code>ใน JSON มีแค่ "number" ชนิดเดียว
+
+{"quantity": 12}     ← Dart อ่านได้เป็น int
+{"quantity": 12.0}   ← Dart อ่านได้เป็น double
+                       แต่ในสายตา JSON มันคือเลขเดียวกัน</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ชนิดที่ Dart อ่านได้ ขึ้นกับว่าเซิร์ฟเวอร์เขียนจุดทศนิยมมาหรือเปล่า ซึ่งเป็นเรื่องที่เราควบคุมไม่ได้ — จึงต้องรับได้ทั้งสองแบบเสมอ</div><p>และตัวที่ทำให้ยากขึ้นอีกชั้นคือ <code>as</code> ไม่ได้แปลงค่า มันแค่ตรวจ</p><pre class="code-vs"><code>final value = 12.0;
+value as int;      // พัง — ไม่ได้แปลงให้ แค่บอกว่าไม่ใช่</code></pre></section>
+
+<section><h2>4. ตัวแปลงกลาง</h2><p>เปิด <code>lib/json_basics/json_read.dart</code></p><pre class="code-vs"><code>double? _toDouble(Object? value) =&gt; switch (value) {
+  num n =&gt; n.toDouble(),
+  String s =&gt; double.tryParse(s.trim()),
+  _ =&gt; null,
+};</code></pre><table><thead><tr><th>รับได้</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td><code>12</code></td><td><code>12.0</code></td></tr>
+<tr><td><code>12.5</code></td><td><code>12.5</code></td></tr>
+<tr><td><code>"12.5"</code></td><td><code>12.5</code></td></tr>
+<tr><td><code>" 12.5 "</code></td><td><code>12.5</code> — ตัดช่องว่างให้</td></tr>
+<tr><td><code>"สิบสอง"</code></td><td><code>null</code> → กลายเป็นข้อผิดพลาด</td></tr>
+<tr><td><code>true</code></td><td><code>null</code> → กลายเป็นข้อผิดพลาด</td></tr>
+</tbody></table><p><code>num n =&gt; n.toDouble()</code> ครอบทั้ง <code>int</code> และ <code>double</code> ในบรรทัดเดียว เพราะทั้งคู่เป็นลูกของ <code>num</code></p></section>
+
+<section><h2>5. จำนวนเต็มต้องเข้มกว่า</h2><pre class="code-vs"><code>/// จำนวนชิ้นต้องเป็นจำนวนเต็ม
+///
+/// รับ 5 และ 5.0 เพราะเป็นจำนวนเต็มเท่ากัน แต่ปฏิเสธ 1.9
+/// การปัดเศษเงียบ ๆ ในงานคลังคือของหายหรือของเกิน
+int requireInt(Map&lt;String, dynamic&gt; json, String key, {String path = ''}) {
+  final value = _require(json, key, path);
+  final parsed = _toDouble(value);
+  if (parsed == null) {
+    throw ContractException(
+      _at(path, key),
+      'ต้องเป็นตัวเลข แต่ได้ ${value.runtimeType} ($value)',
+    );
+  }
+  if (parsed != parsed.roundToDouble()) {
+    throw ContractException(_at(path, key), 'ต้องเป็นจำนวนเต็ม แต่ได้ $value');
+  }
+  return parsed.toInt();
+}</code></pre><p>บรรทัด <code>parsed != parsed.roundToDouble()</code> คือหัวใจ — มันแยก “เขียนคนละแบบ” ออกจาก “เป็นคนละค่า”</p><table><thead><tr><th>ค่าที่ได้</th><th>ผลลัพธ์</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>12</code></td><td>ผ่าน → <code>12</code></td><td>จำนวนเต็มอยู่แล้ว</td></tr>
+<tr><td><code>12.0</code></td><td>ผ่าน → <code>12</code></td><td>ค่าเดียวกัน เขียนคนละแบบ</td></tr>
+<tr><td><code>"12"</code></td><td>ผ่าน → <code>12</code></td><td>ค่าเดียวกัน เขียนคนละแบบ</td></tr>
+<tr><td><code>1.9</code></td><td><strong>ปฏิเสธ</strong></td><td>ไม่ใช่จำนวนเต็ม — ไม่รู้ว่าที่ถูกคือ 1 หรือ 2</td></tr>
+</tbody></table></section>
+
+<section><h2>6. ทำไมการปัดเศษถึงอันตรายกว่าการพัง</h2><pre class="code-vs"><code>// ทางที่ดูใจดี
+quantity: (json['quantity'] as num).toInt(),      // 1.9 → 1 เงียบ ๆ</code></pre><p>ลองไล่ว่าเกิดอะไรบนหน้างาน</p><pre class="code-vs"><code>เซิร์ฟเวอร์บอกให้หยิบ 1.9 ลัง (ซึ่งผิดอยู่แล้ว)
+  → แอปแสดง "1 ลัง"
+  → คนหน้างานหยิบ 1 ลัง แล้วปิดงาน
+  → ระบบบันทึกว่าจ่ายครบ
+  → ของขาดไป 0.9 ลัง โดยไม่มีใครรู้จนถึงรอบนับสต๊อก</code></pre><table><thead><tr><th>ถ้าปัดเงียบ</th><th>ถ้าปฏิเสธ</th></tr></thead><tbody>
+<tr><td>ปัญหาถูกซ่อน แล้วโผล่ทีหลังในรูปยอดไม่ตรง</td><td>เห็นทันทีว่ามีอะไรผิดที่ต้นทาง</td></tr>
+<tr><td>ไล่หาสาเหตุย้อนหลังเป็นสัปดาห์</td><td>รู้ทันทีว่างานไหน field ไหน</td></tr>
+<tr><td>ไม่มีใครรู้ว่าฝั่งหลังบ้านมีบั๊ก</td><td>แจ้งไปแก้ได้</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 6.1 หัวข้อ 6 — <strong>ค่าที่แปลว่ามีบั๊ก ต้องดัง ไม่ใช่ถูกทำให้ดูดี</strong></p></section>
+
+<section><h2>7. เลขที่เป็นรหัส ต้องเป็นข้อความเสมอ</h2><pre class="code-vs"><code>{"barcode": 0012345678}    ← อันตราย</code></pre><table><thead><tr><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ศูนย์นำหน้าหาย</td><td><code>0012345678</code> กลายเป็น <code>12345678</code> — สแกนไม่เจอ</td></tr>
+<tr><td>เลขยาวเกิน</td><td>บาร์โค้ด 18 หลักเกินความละเอียดที่เก็บได้แม่น</td></tr>
+<tr><td>ถูกเอาไปคำนวณ</td><td>บวกลบรหัสสินค้าไม่มีความหมาย แต่โค้ดทำได้</td></tr>
+</tbody></table><p>เกณฑ์ที่ใช้ตัดสิน — ถามว่า <strong>เอาไปบวกลบแล้วมีความหมายไหม</strong></p><table><thead><tr><th>ข้อมูล</th><th>บวกลบมีความหมาย</th><th>ควรเป็น</th></tr></thead><tbody>
+<tr><td>จำนวนชิ้น</td><td>มี</td><td>ตัวเลข</td></tr>
+<tr><td>น้ำหนัก</td><td>มี</td><td>ตัวเลข</td></tr>
+<tr><td>รหัสพาเลท</td><td>ไม่มี</td><td>ข้อความ</td></tr>
+<tr><td>บาร์โค้ด</td><td>ไม่มี</td><td>ข้อความ</td></tr>
+<tr><td>เลขที่ใบรับเข้า</td><td>ไม่มี</td><td>ข้อความ</td></tr>
+</tbody></table><p>ถ้าเซิร์ฟเวอร์ส่งรหัสมาเป็นตัวเลขอยู่แล้ว ให้แปลงเป็นข้อความที่ขอบทันที และคุยกับฝั่งหลังบ้านให้เปลี่ยนในระยะยาว</p></section>
+
+<section><h2>8. เงินและหน่วยที่ต้องแม่น</h2><p><code>double</code> เก็บทศนิยมฐานสองไม่ได้แม่นทุกค่า</p><pre class="code-vs"><code>0.1 + 0.2 == 0.3     // false ใน Dart และแทบทุกภาษา</code></pre><p>สำหรับจำนวนชิ้นไม่มีปัญหา เพราะเป็นจำนวนเต็ม แต่สำหรับเงินหรือหน่วยที่มีทศนิยม จะสะสมความคลาดเคลื่อน</p><table><thead><tr><th>ทางแก้</th><th>วิธี</th><th>ข้อแลก</th></tr></thead><tbody>
+<tr><td>เก็บเป็นหน่วยย่อยที่สุด</td><td>เก็บเป็นสตางค์ หรือกรัม เป็น <code>int</code></td><td>ต้องแปลงตอนแสดงผล</td></tr>
+<tr><td>เก็บเป็นข้อความแล้วใช้ไลบรารีทศนิยม</td><td>ตรงกับ <code>decimal</code> ฝั่ง .NET</td><td>ต้องเพิ่มไลบรารี</td></tr>
+<tr><td>ใช้ <code>double</code> ต่อไป</td><td>—</td><td>ยอมรับความคลาดเคลื่อนได้เฉพาะงานที่ไม่แม่นก็ได้</td></tr>
+</tbody></table><p>สิ่งที่ต้องทำแน่ ๆ คือ <strong>ตกลงกับฝั่งหลังบ้านว่าใช้หน่วยอะไรและกี่ตำแหน่ง</strong> — ถ้าฝั่ง .NET ใช้ <code>decimal</code> แล้วฝั่งแอปใช้ <code>double</code> ตัวเลขจะไม่ตรงกันในบางค่า และจะเถียงกันว่าฝั่งไหนผิด</p></section>
+
+<section><h2>9. รูปแบบตัวเลขต้องเป็นแบบเดียวเสมอ</h2><pre class="code-vs"><code>"245.5"     ← รับได้ — จุดเป็นทศนิยม
+"245,5"     ← ปฏิเสธ — บางประเทศใช้จุลภาคเป็นทศนิยม
+"1,245.50"  ← ปฏิเสธ — มีตัวคั่นหลักพัน</code></pre><p><code>double.tryParse</code> รับเฉพาะแบบแรก ซึ่งถูกต้องแล้ว — <strong>รูปแบบบนสายต้องเป็นแบบมาตรฐานเสมอ ไม่ขึ้นกับภาษาของผู้ใช้</strong></p><table><thead><tr><th></th><th>บนสาย</th><th>บนหน้าจอ</th></tr></thead><tbody>
+<tr><td>รูปแบบ</td><td>มาตรฐานเดียว จุดเป็นทศนิยม</td><td>ตามภาษาและถิ่นของผู้ใช้</td></tr>
+<tr><td>ใครแปลง</td><td>—</td><td>ชั้นแสดงผลเท่านั้น</td></tr>
+</tbody></table><p>การเผลอใช้รูปแบบตามภาษาตอนแปลงจาก JSON คือบั๊กที่โผล่เฉพาะเมื่อเปลี่ยนภาษาเครื่อง — หาเจอยากมาก</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>type 'double' is not a subtype of type 'int'</code></td><td><code>as int</code> กับค่า <code>12.0</code></td><td>อ่านผ่านตัวแปลงกลาง</td></tr>
+<tr><td>ยอดขาดไปเศษหนึ่ง</td><td>ปัดเศษเงียบ ๆ</td><td>ปฏิเสธค่าที่ไม่ใช่จำนวนเต็ม</td></tr>
+<tr><td>สแกนบาร์โค้ดแล้วไม่เจอ</td><td>รหัสถูกเก็บเป็นตัวเลข ศูนย์นำหน้าหาย</td><td>เก็บรหัสเป็นข้อความ</td></tr>
+<tr><td>ยอดเงินต่างกันสตางค์เดียว</td><td>ฝั่งหนึ่งใช้ <code>decimal</code> อีกฝั่งใช้ <code>double</code></td><td>ตกลงหน่วยและความละเอียด</td></tr>
+<tr><td>ตัวเลขอ่านไม่ได้เมื่อเปลี่ยนภาษาเครื่อง</td><td>แปลงตามภาษาผู้ใช้</td><td>ใช้รูปแบบมาตรฐานบนสาย</td></tr>
+<tr><td>ค่าผิดกลายเป็น 0 แล้วสร้างรายการผิด</td><td>ใช้ <code>?? 0</code> เมื่อแปลงไม่ได้</td><td>แยก “ไม่มี” จาก “แปลงไม่ได้” จาก “เป็นศูนย์จริง”</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์ส่งบรรทัดสินค้ามาแบบนี้</p><pre class="code-vs"><code>{
+  "productCode": 1001,
+  "quantity": 24.0,
+  "unitWeight": "1.25",
+  "lotNumber": 20260815,
+  "discountPercent": 7.5
+}</code></pre><ol><li>ระบุว่า field ไหนควรอ่านด้วยตัวช่วยตัวไหน และ field ไหนมีปัญหาเชิงออกแบบ</li><li>เขียน <code>fromJson</code></li><li>ตอบว่าถ้า <code>quantity</code> ส่งมาเป็น <code>24.3</code> ควรทำอย่างไร และคำตอบจะเปลี่ยนไหมถ้าสินค้าขายเป็นกิโลกรัม</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แต่ละ field</strong></p><table><thead><tr><th>field</th><th>อ่านด้วย</th><th>ปัญหาเชิงออกแบบ</th></tr></thead><tbody>
+<tr><td><code>productCode</code></td><td>ต้องเป็นข้อความ</td><td><strong>มี</strong> — เป็นรหัส แต่ส่งมาเป็นตัวเลข</td></tr>
+<tr><td><code>quantity</code></td><td><code>requireInt</code></td><td>ไม่มี — <code>24.0</code> คือ 24</td></tr>
+<tr><td><code>unitWeight</code></td><td><code>requireDouble</code></td><td>ไม่มี — ข้อความที่แปลงได้</td></tr>
+<tr><td><code>lotNumber</code></td><td>ต้องเป็นข้อความ</td><td><strong>มี</strong> — เป็นรหัส แต่ส่งมาเป็นตัวเลข</td></tr>
+<tr><td><code>discountPercent</code></td><td><code>requireDouble</code></td><td>ไม่มี</td></tr>
+</tbody></table><p>สอง field ที่มีปัญหาเป็นเรื่องเดียวกัน — <strong>รหัสที่ถูกส่งมาเป็นตัวเลข</strong></p><pre class="code-vs"><code>"productCode": 1001      → ถ้ารหัสจริงคือ "0001001" ศูนย์นำหน้าหายไปแล้ว
+"lotNumber": 20260815    → ถ้าล็อตชื่อ "20260815A" จะส่งมาแบบนี้ไม่ได้</code></pre><p>เรื่องนี้ต้องแก้ที่ต้นทาง แต่ระหว่างที่ยังแก้ไม่ได้ ต้องรับไว้และแปลงเป็นข้อความที่ขอบ</p><pre class="code-vs"><code>/// รับรหัสที่เซิร์ฟเวอร์เผลอส่งมาเป็นตัวเลข แล้วแปลงเป็นข้อความ
+///
+/// เป็นทางผ่านชั่วคราวจนกว่าฝั่งหลังบ้านจะเปลี่ยนเป็นข้อความ
+/// กันไม่ได้ถ้ารหัสจริงมีศูนย์นำหน้า — จึงต้องตามไปแก้ที่ต้นทาง
+String requireCode(Map&lt;String, dynamic&gt; json, String key, {String path = ''}) {
+  final value = _require(json, key, path);
+  return switch (value) {
+    String s when s.trim().isNotEmpty =&gt; s.trim(),
+    int i =&gt; i.toString(),
+    _ =&gt; throw ContractException(
+      _at(path, key),
+      'รหัสต้องเป็นข้อความหรือจำนวนเต็ม แต่ได้ ${value.runtimeType}',
+    ),
+  };
+}</code></pre><p>รับเฉพาะ <code>int</code> ไม่รับ <code>double</code> — เพราะ <code>1001.0</code> แปลงเป็นข้อความจะได้ <code>"1001.0"</code> ซึ่งไม่ใช่รหัสที่ต้องการ</p><p><strong>ข้อ 2 — fromJson</strong></p><pre class="code-vs"><code>factory OrderLineDto.fromJson(Map&lt;String, dynamic&gt; json, {String path = ''}) =&gt;
+    OrderLineDto(
+      productCode: requireCode(json, 'productCode', path: path),
+      quantity: requireInt(json, 'quantity', path: path),
+      unitWeight: requireDouble(json, 'unitWeight', path: path),
+      lotNumber: requireCode(json, 'lotNumber', path: path),
+      discountPercent: requireDouble(json, 'discountPercent', path: path),
+    );</code></pre><p><strong>ข้อ 3 — <code>quantity</code> เป็น <code>24.3</code></strong></p><p>คำตอบขึ้นกับ <strong>หน่วยของสินค้า</strong> และนี่คือประเด็นของข้อนี้</p><table><thead><tr><th>สินค้าขายเป็น</th><th><code>24.3</code> แปลว่า</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ชิ้น / ลัง / พาเลท</td><td>ค่าที่เป็นไปไม่ได้</td><td><strong>ปฏิเสธ</strong></td></tr>
+<tr><td>กิโลกรัม / เมตร / ลิตร</td><td>ค่าปกติ</td><td><strong>รับ</strong></td></tr>
+</tbody></table><p>แปลว่า <code>requireInt</code> ไม่ใช่คำตอบที่ถูกเสมอ — มันถูกเฉพาะกับสินค้าที่นับเป็นชิ้น</p><p><strong>สิ่งที่บอกว่าออกแบบยังไม่เสร็จ</strong></p><p>ถ้า field เดียวกันบางครั้งต้องเป็นจำนวนเต็ม บางครั้งไม่ต้อง แปลว่าสัญญายังขาดข้อมูลหนึ่งชิ้น — <strong>หน่วย</strong></p><pre class="code-vs"><code>{
+  "productCode": "1001",
+  "quantity": 24.3,
+  "unitOfMeasure": "KG"     ← ที่ขาดไป
+}</code></pre><pre class="code-vs"><code>enum UnitOfMeasure { piece, box, pallet, kilogram, meter, liter, unknown }
+
+/// หน่วยที่นับเป็นชิ้น จะมีเศษไม่ได้
+bool get mustBeWhole => switch (this) {
+  UnitOfMeasure.piece || UnitOfMeasure.box || UnitOfMeasure.pallet => true,
+  _ => false,
+};</code></pre><pre class="code-vs"><code>// ตรวจตอนแปลงเป็นชนิดของธุรกิจ ซึ่งเป็นที่ที่รู้จักหน่วยแล้ว (6.1)
+OrderLine toOrderLine(OrderLineDto dto, {String path = ''}) {
+  final unit = parseUnitOfMeasure(dto.unitOfMeasure);
+  if (unit.mustBeWhole &amp;&amp; dto.quantity != dto.quantity.roundToDouble()) {
+    throw ContractException(
+      path.isEmpty ? 'quantity' : '$path.quantity',
+      'สินค้าหน่วย ${dto.unitOfMeasure} ต้องเป็นจำนวนเต็ม แต่ได้ ${dto.quantity}',
+    );
+  }
+  ...
+}</code></pre><p>สังเกตว่าการตรวจย้ายจากชั้น DTO ไปชั้นธุรกิจ — เพราะ <strong>กฎนี้ต้องรู้เรื่องหน่วยก่อนถึงจะตัดสินได้</strong> และชั้น DTO ไม่ควรรู้เรื่องกฎธุรกิจ</p><p><strong>บทเรียนที่ควรจำ:</strong> เมื่อพบว่าตอบคำถาม “ค่านี้ถูกต้องไหม” ไม่ได้ ให้ดูก่อนว่าขาดข้อมูลอะไรในสัญญา — บ่อยครั้งคำตอบไม่ใช่การเลือกกฎที่เข้มหรือหลวมกว่า แต่คือการขอ field ที่หายไปจากฝั่งหลังบ้าน</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>JSON มี number ชนิดเดียว — Dart จะได้ <code>int</code> หรือ <code>double</code> ขึ้นกับว่ามีจุดหรือไม่</li><li><code>as</code> ไม่ได้แปลงค่า มันแค่ตรวจแล้วพัง</li><li>ใช้ <code>num</code> ครอบทั้ง <code>int</code> และ <code>double</code> ในตัวแปลงกลาง</li><li>รับ <code>12</code>, <code>12.0</code>, <code>"12"</code> ได้ เพราะเป็นค่าเดียวกันที่เขียนคนละแบบ</li><li>ปฏิเสธ <code>1.9</code> เมื่อคาดว่าเป็นจำนวนเต็ม เพราะเป็นคนละค่า</li><li>การปัดเศษเงียบ ๆ ในงานคลังคือของหายหรือของเกิน</li><li>รหัสต้องเป็นข้อความเสมอ — เกณฑ์คือเอาไปบวกลบแล้วมีความหมายไหม</li><li>เงินและหน่วยที่ต้องแม่น ให้เก็บเป็นหน่วยย่อยที่สุดหรือใช้ทศนิยมที่แม่นจริง</li><li>รูปแบบตัวเลขบนสายต้องเป็นแบบมาตรฐาน ไม่ขึ้นกับภาษาผู้ใช้</li></ul></div><p><strong>บทถัดไป:</strong> 6.4 จะแยกให้ชัดระหว่าง “ไม่มีค่า” “ยังไม่รู้ค่า” และ “ค่าคือศูนย์” ซึ่งทั้งสามอย่างมักถูกยุบเป็นอันเดียวกันโดยไม่ตั้งใจ</p></section>

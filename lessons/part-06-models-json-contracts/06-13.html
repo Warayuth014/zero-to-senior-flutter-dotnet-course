@@ -4,10 +4,172 @@
 <title>JSON Contract Tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-13 · Flutter + .NET</span><h1>JSON Contract Tests</h1><p>Part 6: Models &amp; JSON</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Fixture</a></li><li><a href="#section-2">Golden payload</a></li><li><a href="#section-3">Variants</a></li><li><a href="#section-4">Request</a></li><li><a href="#section-5">.NET</a></li><li><a href="#section-6">CI</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Contract testใช้ JSON fixturesจาก APIตัวแทนเพื่อล็อก parsing, casing, null, numeric variantsและ backward compatibility โดยไม่ต้องเปิด server</div>
-<section id="section-1"><h2>1. Fixture</h2><pre class="code-vs"><code>final json = jsonDecode(fixture('tasks_page.json')) as Map&lt;String,dynamic&gt;;
-final page = TaskPageDto.fromJson(json);
-expect(page.items.first.id, 'T-001');</code></pre></section><section id="section-2"><h2>2. Golden payload</h2><p>เก็บ sanitized responseจริงและระบุ schema/version</p></section><section id="section-3"><h2>3. Variants</h2><p>camel/Pascal, int/double, missing optional, unknown enum, malformed required</p></section><section id="section-4"><h2>4. Request</h2><p>assert toJson exact keys/value/timezone ไม่เพียง response</p></section><section id="section-5"><h2>5. .NET</h2><p>ฝั่ง API serialize DTO testหรือ OpenAPI schema testเพื่อจับ driftสองฝั่ง</p></section><section id="section-6"><h2>6. CI</h2><p>รัน fixture testsเร็วทุก commit; integration testแยก environment</p></section><section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ควร fixture tokenจริงไหม?</p><details><summary>เฉลย</summary><p>ไม่ Sanitize PII/secretsแต่รักษา shape/type/edge cases</p></details></section><section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Fixtureเดียว happy pathไม่พิสูจน์ tolerant parsingหรือ failure diagnostics</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: เทสต์คือที่เก็บเหตุผล</a></li><li><a href="#section-4">ไฟล์ตัวอย่างจากของจริง</a></li><li><a href="#section-5">ไฟล์ตัวอย่างมาจากไหน</a></li><li><a href="#section-6">ต้องมีทั้งไฟล์ที่ดีและที่เสีย</a></li><li><a href="#section-7">รายการกรณีที่ควรครอบ</a></li><li><a href="#section-8">อย่าลืมทิศทางขาขึ้น</a></li><li><a href="#section-9">ตรวจสองฝั่งถึงจะจับ drift ได้</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ตรึงสัญญาด้วยเทสต์ที่ไม่ต้องมีเซิร์ฟเวอร์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.12 (ด่านตรวจสอบ) และ 4.10 (เทสต์ที่บังคับลำดับได้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนเทสต์ที่จับได้ทันทีเมื่อสัญญากับเซิร์ฟเวอร์เปลี่ยน โดยไม่ต้องต่อเน็ต</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ทุกอย่างที่ตกลงกันไว้ใน Part 6 อยู่ในโค้ด แต่ไม่มีอะไรพิสูจน์ว่ายังจริงอยู่</p><table><thead><tr><th>สิ่งที่ตกลงไว้</th><th>ถ้าไม่มีเทสต์</th></tr></thead><tbody>
+<tr><td>รับ <code>"12"</code> ที่เป็นข้อความได้</td><td>วันหนึ่งมีคนแก้ให้เข้มขึ้น แล้ว endpoint เก่าพัง</td></tr>
+<tr><td>เวลาต้องมีเขตเวลา</td><td>มีคนผ่อนกฎเพื่อให้ผ่านเทสต์ที่ตัวเองเขียน</td></tr>
+<tr><td>สถานะที่ไม่รู้จักไม่ทำให้พัง</td><td>มีคนเปลี่ยนเป็นโยนข้อผิดพลาดเพราะดู “ถูกต้อง” กว่า</td></tr>
+<tr><td>รหัสคำสั่งส่งไปกับทุกคำสั่ง</td><td>ลบไปตอน refactor แล้วไม่มีใครรู้</td></tr>
+</tbody></table><p>ปัญหาไม่ใช่ว่าโค้ดผิด — ปัญหาคือ <strong>เหตุผลที่โค้ดเขียนแบบนั้นอยู่ในหัวคนเขียนคนเดียว</strong> และคนถัดไปจะเห็นแค่โค้ดที่ดูแปลก แล้วแก้ให้ “ดีขึ้น”</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>fixture</td><td>ไฟล์ตัวอย่างข้อมูลที่ใช้ในเทสต์</td></tr>
+<tr><td>contract test</td><td>เทสต์ที่ตรวจว่าสัญญาระหว่างสองระบบยังตรงกัน</td></tr>
+<tr><td>golden payload</td><td>ข้อมูลจริงที่เก็บไว้เป็นตัวอย่างอ้างอิง</td></tr>
+<tr><td>sanitize</td><td>ลบข้อมูลอ่อนไหวออกก่อนเก็บ</td></tr>
+<tr><td>drift</td><td>การที่สองฝั่งค่อย ๆ ไม่ตรงกัน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: เทสต์คือที่เก็บเหตุผล</h2><pre class="code-vs"><code>โค้ด        บอกว่า "ทำอะไร"
+เทสต์       บอกว่า "ทำไมถึงต้องทำแบบนั้น"</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกครั้งที่เขียนโค้ดที่ดูแปลก ให้ถามว่ามีเทสต์ที่จะแดงไหมถ้ามีคนแก้ให้ดูปกติ — ถ้าไม่มี วันหนึ่งจะมีคนแก้จริง</div><p>ชื่อเทสต์ใน lab จึงเขียนเป็นประโยคที่บอกเหตุผล ไม่ใช่ชื่อเมธอด</p><pre class="code-vs"><code>test('รับทั้ง 12, 12.0 และ "12" เพราะ JSON ไม่แยกชนิด', ...);
+test('ปฏิเสธเศษ ไม่ปัดให้เงียบ ๆ', ...);
+test('ค่าที่ไม่รู้จักต้องไม่ทำให้พัง แต่ต้องทำงานต่อไม่ได้', ...);</code></pre></section>
+
+<section id="section-4"><h2>4. ไฟล์ตัวอย่างจากของจริง</h2><p>เปิด <code>test/fixtures/tasks_page.json</code></p><pre class="code-vs"><code>{
+  "items": [
+    {"id": "T-001", ..., "quantity": 12, "createdAt": "2026-08-15T03:00:00Z"},
+    {"id": "T-002", ..., "quantity": 8.0, "createdAt": "2026-08-15T03:05:00+07:00"},
+    {"id": "T-003", ..., "quantity": "20", "createdAt": "2026-08-15T03:10:00Z"}
+  ],
+  "totalCount": 137
+}</code></pre><p>สังเกตว่าไฟล์เดียวครอบหลายเรื่องพร้อมกัน</p><table><thead><tr><th>แถว</th><th>ครอบอะไร</th></tr></thead><tbody>
+<tr><td>T-001</td><td>กรณีปกติ มีหมายเหตุ เวลาเป็น <code>Z</code></td></tr>
+<tr><td>T-002</td><td>จำนวนเป็น <code>double</code>, เวลามี offset, หมายเหตุเป็น <code>null</code></td></tr>
+<tr><td>T-003</td><td>จำนวนเป็นข้อความ, สถานะใช้ชื่อเล่น <code>COMPLETED</code>, ไม่มีคีย์หมายเหตุ</td></tr>
+<tr><td><code>totalCount</code></td><td>ไม่เท่ากับ <code>items.length</code></td></tr>
+</tbody></table><p>การใส่ความหลากหลายไว้ในไฟล์เดียว ทำให้เทสต์เดียวจับได้หลายอย่าง</p><pre class="code-vs"><code>Map&lt;String, dynamic&gt; fixture(String name) =&gt;
+    jsonDecode(File('test/fixtures/$name').readAsStringSync())
+        as Map&lt;String, dynamic&gt;;</code></pre></section>
+
+<section id="section-5"><h2>5. ไฟล์ตัวอย่างมาจากไหน</h2><table><thead><tr><th>แหล่ง</th><th>ดีตรงไหน</th><th>ต้องระวัง</th></tr></thead><tbody>
+<tr><td>คัดลอกจาก response จริง</td><td>ตรงกับความจริงที่สุด</td><td>ต้องลบข้อมูลอ่อนไหวก่อน</td></tr>
+<tr><td>เขียนเองตามเอกสาร</td><td>ทำได้ก่อนที่ API จะเสร็จ</td><td>อาจไม่ตรงกับของจริง</td></tr>
+<tr><td>ให้ฝั่งหลังบ้านส่งมาให้</td><td>ทั้งสองฝั่งเห็นตรงกัน</td><td>ต้องอัปเดตเมื่อสัญญาเปลี่ยน</td></tr>
+</tbody></table><div class="warn">ห้ามเก็บ token ชื่อลูกค้าจริง เบอร์โทร หรือราคาไว้ในไฟล์ตัวอย่าง — ไฟล์เหล่านี้อยู่ใน git และคนทั้งทีมเห็น ให้แทนด้วยค่าสมมติที่ <strong>รักษาหน้าตาและความยาวเดิม</strong> เช่นเปลี่ยนชื่อจริงเป็น “บริษัท ซัพพลาย จำกัด” แต่ยังเป็นภาษาไทยและยาวใกล้เคียงกัน</div><p>เหตุผลที่ต้องรักษาหน้าตาไว้ — ถ้าเปลี่ยนชื่อไทยยาว ๆ เป็น <code>"test"</code> จะไม่มีวันเจอบั๊กเรื่องข้อความยาวเกินหรือการเข้ารหัสภาษาไทย</p></section>
+
+<section id="section-6"><h2>6. ต้องมีทั้งไฟล์ที่ดีและที่เสีย</h2><p>ไฟล์ที่ถูกต้องพิสูจน์ได้แค่ว่าอ่านได้ — ไม่ได้พิสูจน์ว่าจับความผิดพลาดได้</p><pre class="code-vs"><code>test('แถวที่พังต้องบอกว่าเป็นแถวที่เท่าไหร่', () {
+  final json = {
+    'items': [taskJson(), taskJson({'id': 'T-002'})..remove('quantity')],
+    'totalCount': 2,
+  };
+
+  expect(
+    () =&gt; TaskPageDto.fromJson(json),
+    throwsA(isA&lt;ContractException&gt;()
+        .having((e) =&gt; e.path, 'path', 'items[1].quantity')),
+  );
+});</code></pre><p>สังเกตว่าเทสต์ที่ทดสอบความล้มเหลว <strong>ไม่ได้ใช้ไฟล์</strong> แต่สร้าง JSON ในเทสต์แล้วแก้เฉพาะจุด</p><pre class="code-vs"><code>Map&lt;String, dynamic&gt; taskJson([Map&lt;String, Object?&gt; overrides = const {}]) =&gt; {
+  'id': 'T-001',
+  'palletCode': 'PAL-0101',
+  'quantity': 12,
+  'status': 'PENDING',
+  'createdAt': '2026-08-15T03:00:00Z',
+  ...overrides,
+};</code></pre><table><thead><tr><th></th><th>ไฟล์ fixture</th><th>ตัวช่วยสร้างในเทสต์</th></tr></thead><tbody>
+<tr><td>เหมาะกับ</td><td>กรณีที่ถูกต้อง และหน้าตาของจริง</td><td>กรณีที่ผิด ทีละจุด</td></tr>
+<tr><td>อ่านง่ายไหม</td><td>เห็นข้อมูลทั้งก้อน</td><td>เห็นว่าเทสต์นี้สนใจอะไร</td></tr>
+<tr><td>ถ้ามี 20 กรณีผิด</td><td>ต้องมี 20 ไฟล์</td><td>เขียน 20 บรรทัด</td></tr>
+</tbody></table><p>การมีทั้งสองแบบทำให้ไฟล์ไม่บานปลาย และเทสต์แต่ละข้ออ่านแล้วรู้ทันทีว่าทดสอบอะไร</p></section>
+
+<section id="section-7"><h2>7. รายการกรณีที่ควรครอบ</h2><table><thead><tr><th>กลุ่ม</th><th>กรณี</th><th>บท</th></tr></thead><tbody>
+<tr><td>ค่าที่จำเป็น</td><td>ไม่มีคีย์ / คีย์มีแต่เป็น null / ข้อความว่าง</td><td>6.2, 6.4</td></tr>
+<tr><td>ตัวเลข</td><td><code>12</code> / <code>12.0</code> / <code>"12"</code> / <code>1.9</code> / ข้อความที่ไม่ใช่เลข</td><td>6.3</td></tr>
+<tr><td>เวลา</td><td>มี <code>Z</code> / มี offset / ไม่มีเขตเวลา / รูปแบบผิด</td><td>6.6</td></tr>
+<tr><td>ชื่อคีย์</td><td>camelCase / PascalCase</td><td>6.7</td></tr>
+<tr><td>สถานะ</td><td>ค่าที่รู้จัก / ชื่อเล่น / ค่าที่ไม่รู้จัก</td><td>6.9</td></tr>
+<tr><td>ซอง</td><td>ปกติ / ว่าง / <code>totalCount</code> ขัดแย้ง / <code>items</code> ไม่ใช่ array</td><td>6.10</td></tr>
+<tr><td>ชั้นซ้อน</td><td>ปกติ / แถวในพัง / รายการในว่าง</td><td>6.5</td></tr>
+<tr><td>ตอนส่ง</td><td>คีย์ครบ รวมคีย์ที่ค่าเป็น null</td><td>6.2</td></tr>
+</tbody></table><p>lab มี 27 เทสต์ที่ครอบตารางนี้ทั้งหมด ซึ่งรันจบใน <strong>ไม่ถึงหนึ่งวินาที</strong> เพราะไม่ต้องต่อเน็ตและไม่ต้องสร้างหน้าจอ</p></section>
+
+<section id="section-8"><h2>8. อย่าลืมทิศทางขาขึ้น</h2><p>คนส่วนใหญ่เทสต์แค่การอ่าน แต่การส่งผิดสัญญาก็เสียหายเท่ากัน</p><pre class="code-vs"><code>test('ส่งคีย์ครบตามที่ตกลง รวมถึงคีย์ที่ค่าเป็น null', () {
+  const request = CompleteTaskRequest(
+    taskId: 'T-001',
+    quantity: 12,
+    commandId: 'cmd-1',
+  );
+
+  expect(request.toJson(), {
+    'taskId': 'T-001',
+    'quantity': 12,
+    'commandId': 'cmd-1',
+    'note': null,
+  });
+});</code></pre><p>จุดสำคัญคือ <strong>เทียบทั้ง map ไม่ใช่เช็กทีละคีย์</strong></p><table><thead><tr><th>วิธีเทียบ</th><th>จับอะไรได้</th></tr></thead><tbody>
+<tr><td><code>expect(json['taskId'], 'T-001')</code></td><td>จับได้ว่าคีย์นี้ถูก</td></tr>
+<tr><td><code>expect(json, {...})</code></td><td>จับได้ทั้งคีย์ที่หาย คีย์ที่เกิน และชื่อคีย์ที่เปลี่ยน</td></tr>
+</tbody></table><p>คีย์ที่เกินมาโดยไม่ตั้งใจอันตรายกว่าที่คิด — บาง endpoint จะปฏิเสธคำขอที่มีคีย์แปลกปลอม และบางตัวจะรับไปแล้วทำอะไรที่ไม่ได้ตั้งใจ</p></section>
+
+<section id="section-9"><h2>9. ตรวจสองฝั่งถึงจะจับ drift ได้</h2><p>เทสต์ฝั่งแอปพิสูจน์ได้แค่ว่า <strong>แอปอ่านไฟล์ตัวอย่างได้</strong> ไม่ได้พิสูจน์ว่าเซิร์ฟเวอร์ยังส่งแบบนั้นอยู่</p><pre class="code-vs"><code>ไฟล์ตัวอย่างในแอป  ←──?──→  สิ่งที่เซิร์ฟเวอร์ส่งจริงวันนี้</code></pre><table><thead><tr><th>วิธีปิดช่องว่างนี้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ฝั่ง .NET มีเทสต์ที่ตรวจผลของการแปลงเป็น JSON</td><td>ยืนยันว่าชื่อคีย์และชนิดยังเหมือนเดิม</td></tr>
+<tr><td>ใช้ไฟล์ตัวอย่างชุดเดียวกันทั้งสองฝั่ง</td><td>ถ้าฝั่งไหนเปลี่ยน อีกฝั่งจะแดง</td></tr>
+<tr><td>มีเทสต์ที่ยิงเข้าเซิร์ฟเวอร์จริงเป็นระยะ</td><td>รันแยกจากเทสต์ปกติ เพราะช้าและต้องมีเซิร์ฟเวอร์</td></tr>
+</tbody></table><p>รายละเอียดฝั่ง .NET อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a> ส่วนการยิงเข้าเซิร์ฟเวอร์จริงจะทำใน Part 14</p><div class="note">แม้ยังไม่ได้ทำสองฝั่ง เทสต์ฝั่งแอปก็ยังคุ้มมาก — เพราะมันจับ <strong>การเปลี่ยนแปลงที่มาจากฝั่งเราเอง</strong> ได้ทั้งหมด ซึ่งเป็นสาเหตุของปัญหาส่วนใหญ่</div></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>มีคนแก้กฎที่ตั้งใจไว้ แล้วเทสต์ยังเขียว</td><td>ไม่มีเทสต์ตรึงกฎนั้น</td><td>เขียนเทสต์ที่ชื่อบอกเหตุผล</td></tr>
+<tr><td>เทสต์ผ่านหมดแต่ของจริงพัง</td><td>มีแต่ไฟล์ที่ถูกต้อง</td><td>เพิ่มกรณีที่ผิด</td></tr>
+<tr><td>ไฟล์ตัวอย่างมี 40 ไฟล์</td><td>สร้างไฟล์ใหม่ทุกกรณีผิด</td><td>ใช้ตัวช่วยสร้างในเทสต์</td></tr>
+<tr><td>token หลุดเข้า git</td><td>คัดลอก response จริงมาทั้งก้อน</td><td>ลบข้อมูลอ่อนไหวก่อน</td></tr>
+<tr><td>ไม่เคยเจอบั๊กภาษาไทยจนขึ้น production</td><td>แทนข้อมูลจริงด้วย <code>"test"</code></td><td>รักษาหน้าตาและความยาวเดิม</td></tr>
+<tr><td>ส่งคีย์เกินไปแล้วเซิร์ฟเวอร์ปฏิเสธ</td><td>เช็ก <code>toJson</code> ทีละคีย์</td><td>เทียบทั้ง map</td></tr>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนแล้วแอปไม่รู้</td><td>ตรวจฝั่งเดียว</td><td>ให้ฝั่งหลังบ้านมีเทสต์ด้วย</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ทีมกำลังจะทำ endpoint ใหม่สำหรับใบเบิก และได้สัญญามาแล้ว</p><pre class="code-vs"><code>{
+  "requestNo": "RQ-2026-0451",
+  "statusCode": 20,
+  "requestedAt": "2026-08-15T03:00:00Z",
+  "lines": [
+    {"productCode": "SKU-1001", "quantity": 5, "pickedQuantity": null}
+  ],
+  "totalCount": 1
+}</code></pre><ol><li>เขียนรายการเทสต์ที่ควรมี อย่างน้อยสิบข้อ พร้อมชื่อที่บอกเหตุผล</li><li>ตัดสินว่าข้อไหนควรใช้ไฟล์ และข้อไหนควรสร้าง JSON ในเทสต์</li><li>ตอบว่าจะรู้ได้อย่างไรว่าเทสต์ที่เขียนครอบพอแล้ว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 และ 2 — รายการเทสต์</strong></p><table><thead><tr><th>#</th><th>ชื่อเทสต์</th><th>ใช้</th></tr></thead><tbody>
+<tr><td>1</td><td>อ่านใบเบิกที่ถูกต้องได้ครบทุก field</td><td>ไฟล์</td></tr>
+<tr><td>2</td><td>รับ PascalCase จาก endpoint เก่า</td><td>ไฟล์</td></tr>
+<tr><td>3</td><td>ไม่มี requestNo ต้องบอกว่าคีย์ไหนหาย</td><td>ในเทสต์</td></tr>
+<tr><td>4</td><td>requestNo เป็นข้อความว่าง ไม่นับว่ามีค่า</td><td>ในเทสต์</td></tr>
+<tr><td>5</td><td>รับ quantity ทั้ง 5, 5.0 และ "5"</td><td>ในเทสต์</td></tr>
+<tr><td>6</td><td>ปฏิเสธ quantity ที่มีเศษ ไม่ปัดให้</td><td>ในเทสต์</td></tr>
+<tr><td>7</td><td>เวลาที่ไม่บอกเขตเวลาต้องถูกปฏิเสธ</td><td>ในเทสต์</td></tr>
+<tr><td>8</td><td>เวลาที่มี offset ต้องถูกแปลงเป็น UTC</td><td>ในเทสต์</td></tr>
+<tr><td>9</td><td>statusCode ที่ไม่รู้จักต้องเป็น unknown ไม่ใช่พัง</td><td>ในเทสต์</td></tr>
+<tr><td>10</td><td>statusCode ที่ไม่รู้จักต้องกดทำงานต่อไม่ได้</td><td>ในเทสต์</td></tr>
+<tr><td>11</td><td>pickedQuantity เป็น null แปลว่ายังไม่เริ่มหยิบ</td><td>ในเทสต์</td></tr>
+<tr><td>12</td><td>บรรทัดที่พังต้องบอกว่าเป็นบรรทัดที่เท่าไหร่</td><td>ในเทสต์</td></tr>
+<tr><td>13</td><td>lines ที่ไม่ใช่ array ต้องพังที่ lines</td><td>ในเทสต์</td></tr>
+<tr><td>14</td><td>totalCount น้อยกว่าจำนวนที่ส่งมาคือข้อมูลขัดแย้ง</td><td>ในเทสต์</td></tr>
+<tr><td>15</td><td>คำสั่งยืนยันส่งคีย์ครบ รวมคีย์ที่ค่าเป็น null</td><td>ในเทสต์</td></tr>
+</tbody></table><p>เกณฑ์แยกสองแบบ</p><table><thead><tr><th>ใช้ไฟล์เมื่อ</th><th>สร้างในเทสต์เมื่อ</th></tr></thead><tbody>
+<tr><td>อยากเห็นหน้าตาของจริงทั้งก้อน</td><td>สนใจแค่จุดเดียวที่เปลี่ยน</td></tr>
+<tr><td>เป็นกรณีที่ถูกต้อง</td><td>เป็นกรณีที่ผิด</td></tr>
+<tr><td>ใช้ซ้ำได้หลายเทสต์</td><td>ใช้ครั้งเดียว</td></tr>
+</tbody></table><p>สังเกตว่ามีแค่สองข้อที่ใช้ไฟล์ จาก 15 ข้อ — <strong>ไฟล์มีไว้แสดงหน้าตาของจริง ส่วนกรณีขอบใช้การแก้ทีละจุด</strong></p><p>ตัวอย่างข้อ 11 ที่คนมักลืม</p><pre class="code-vs"><code>test('pickedQuantity เป็น null แปลว่ายังไม่เริ่มหยิบ', () {
+  final line = PickLineDto.fromJson(lineJson({'pickedQuantity': null}));
+  expect(toPickLine(line).pickedQuantity, 0);
+});
+
+test('pickedQuantity เป็น 0 ก็แปลว่ายังไม่หยิบเหมือนกัน', () {
+  final line = PickLineDto.fromJson(lineJson({'pickedQuantity': 0}));
+  expect(toPickLine(line).pickedQuantity, 0);
+});</code></pre><p>สองข้อนี้ดูซ้ำกัน แต่ตรึงคนละเรื่อง — ข้อแรกตรึงว่า <code>null</code> แปลงเป็น <code>0</code> ได้ ข้อที่สองตรึงว่าไม่ได้เผลอปฏิเสธ <code>0</code> ที่ส่งมาจริง</p><p><strong>ข้อ 3 — จะรู้ได้อย่างไรว่าครอบพอ</strong></p><p>ไม่มีตัวเลขความครอบคลุมที่ตอบได้ แต่มีคำถามสามข้อที่ตอบได้</p><p><em>คำถามที่หนึ่ง — ลบโค้ดตรวจสอบออกทีละบรรทัด มีเทสต์แดงไหม</em></p><pre class="code-vs"><code>// ลองลบบรรทัดนี้ออกจาก requireInt
+if (parsed != parsed.roundToDouble()) { throw ... }
+→ เทสต์ 'ปฏิเสธเศษ ไม่ปัดให้เงียบ ๆ' ต้องแดง</code></pre><p>ถ้าลบแล้วเทสต์ยังเขียวหมด แปลว่าบรรทัดนั้นไม่ได้ถูกทดสอบ — วิธีนี้ตรงกว่าการดูเปอร์เซ็นต์ความครอบคลุม เพราะความครอบคลุมบอกแค่ว่าบรรทัดถูกรัน ไม่ได้บอกว่าผลถูกตรวจ</p><p><em>คำถามที่สอง — ทุกการตัดสินใจที่อธิบายยาก มีเทสต์ไหม</em></p><table><thead><tr><th>การตัดสินใจ</th><th>มีเทสต์ไหม</th></tr></thead><tbody>
+<tr><td>ทำไมรับ <code>"5"</code> ที่เป็นข้อความ</td><td>ข้อ 5</td></tr>
+<tr><td>ทำไมไม่ปัด <code>1.9</code></td><td>ข้อ 6</td></tr>
+<tr><td>ทำไม unknown ไม่โยนข้อผิดพลาด</td><td>ข้อ 9</td></tr>
+<tr><td>ทำไม <code>null</code> กลายเป็น <code>0</code> ได้ตรงนี้</td><td>ข้อ 11</td></tr>
+</tbody></table><p>ถ้ามีการตัดสินใจไหนที่ตอบว่า “ไม่มี” นั่นคือช่องที่ต้องเติม</p><p><em>คำถามที่สาม — ถ้าเซิร์ฟเวอร์เปลี่ยนแบบที่เคยเกิดมาก่อน จะจับได้ไหม</em></p><table><thead><tr><th>การเปลี่ยนที่เคยเกิดจริง</th><th>เทสต์ข้อไหนจับได้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนชื่อคีย์</td><td>ข้อ 3</td></tr>
+<tr><td>เปลี่ยน <code>int</code> เป็น <code>decimal</code></td><td>ข้อ 5</td></tr>
+<tr><td>เพิ่มสถานะใหม่</td><td>ข้อ 9, 10</td></tr>
+<tr><td>เลิกส่ง field ที่ไม่ค่อยได้ใช้</td><td>ข้อ 3</td></tr>
+<tr><td>เปลี่ยนจาก <code>DateTime</code> เป็น <code>DateTimeOffset</code></td><td>ข้อ 7, 8</td></tr>
+</tbody></table><p><strong>บทเรียนที่ควรจำ:</strong> เทสต์ที่ดีของ Part นี้ไม่ได้วัดที่จำนวน แต่วัดที่ว่า <em>ทุกบรรทัดที่มีคนอาจอยากลบ มีเทสต์คอยแดงให้</em> — เพราะโค้ดตรวจสอบทั้งหมดใน Part 6 หน้าตาเหมือนโค้ดที่ระแวงเกินไป จนกว่าจะรู้ว่าทำไมถึงต้องมี</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>เทสต์คือที่เก็บเหตุผลว่าทำไมโค้ดถึงเขียนแบบนั้น</li><li>ตั้งชื่อเทสต์เป็นประโยคที่บอกเหตุผล ไม่ใช่ชื่อเมธอด</li><li>ไฟล์ตัวอย่างใช้แสดงหน้าตาของจริง ส่วนกรณีผิดสร้างในเทสต์</li><li>ใส่ความหลากหลายในไฟล์เดียว เพื่อให้ครอบหลายเรื่องพร้อมกัน</li><li>ลบข้อมูลอ่อนไหวออก แต่รักษาหน้าตาและความยาวเดิม</li><li>ต้องมีทั้งกรณีที่ถูกและที่ผิด</li><li>อย่าลืมทดสอบทิศทางขาขึ้น และเทียบทั้ง map</li><li>เทสต์ฝั่งแอปจับการเปลี่ยนจากฝั่งเราได้ แต่ต้องมีสองฝั่งถึงจะจับ drift ได้</li><li>วัดความพอด้วยการลองลบโค้ดตรวจสอบ แล้วดูว่ามีเทสต์แดงไหม</li></ul></div><p><strong>บทถัดไป:</strong> 6.14 เป็นบทปฏิบัติปิดท้าย Part 6 — ประกอบสัญญาของใบรับเข้าทั้งชุด ตั้งแต่ไฟล์ตัวอย่างจนถึง model ที่พร้อมใช้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

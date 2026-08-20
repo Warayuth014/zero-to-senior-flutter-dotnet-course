@@ -1,5 +1,206 @@
-<div class="note"><code>fromJson</code> คือ untrusted boundary; <code>toJson</code> คือ request contract ทั้งสองควร testและไม่ assumeชนิด runtime</div>
-<section><h2>1. Parse</h2><pre class="code-vs"><code>factory TaskDto.fromJson(Map&lt;String, dynamic&gt; j) =&gt; TaskDto(
-  id: requireString(j, 'id'),
-  qty: readDouble(j['qty']),
-);</code></pre></section><section><h2>2. Serialize</h2><pre class="code-vs"><code>Map&lt;String, Object?&gt; toJson() =&gt; {'taskId': id, 'qty': qty};</code></pre></section><section><h2>3. Direction</h2><p>Response DTOกับ request DTOอาจคนละ shape อย่าฝืนใช้ classเดียว</p></section><section><h2>4. Unknown keys</h2><p>โดยทั่วไป ignoreเพื่อ forward compatibility แต่ log schema violationสำคัญ</p></section><section><h2>5. Required keys</h2><p>throw typed FormatException/ContractExceptionพร้อม path ไม่ใช้ <code>!</code></p></section><section><h2>6. Generated code</h2><p>json_serializableลด boilerplateแต่ custom converter/invariantยังต้องออกแบบ</p></section><section><h2>7. แบบฝึกหัด</h2><p>Serverเพิ่ม fieldใหม่ควรพังไหม?</p><details><summary>เฉลย</summary><p>ไม่ควรหาก clientไม่ใช้; missing/ชนิดผิดของ required fieldจึง failชัด</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn">อย่า castตรง <code>j['qty'] as double</code>; JSON integerอาจเป็น int</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: เขียนตัวแปลง JSON ที่ไม่พังแบบอธิบายไม่ได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.1 (การแยกชั้น) และ D1.19 (JSON และ dynamic)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียน <code>fromJson</code>/<code>toJson</code> ที่บอกได้ว่าพังตรงไหน และรู้ว่าเมื่อไหร่ควรพัง เมื่อไหร่ไม่ควร</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่ทุกคนเขียนครั้งแรก</p><pre class="code-vs"><code>factory TaskDto.fromJson(Map&lt;String, dynamic&gt; json) =&gt; TaskDto(
+  id: json['id'] as String,
+  quantity: json['quantity'] as int,
+  status: json['status'] as String,
+);</code></pre><p>ใช้ได้ตอนทดสอบ แล้ววันหนึ่งได้ข้อความนี้จากหน้างาน</p><pre class="code-vs"><code>type 'Null' is not a subtype of type 'String' in type cast</code></pre><table><thead><tr><th>คำถามที่ข้อความนี้ตอบไม่ได้</th></tr></thead><tbody>
+<tr><td>field ไหนที่เป็น null</td></tr>
+<tr><td>แถวที่เท่าไหร่ในรายการ 40 แถว</td></tr>
+<tr><td>เป็นเพราะเซิร์ฟเวอร์ผิด หรือแอปอ่านผิด</td></tr>
+</tbody></table><p>ผลคือต้องไปเปิด log ดู payload ดิบทั้งก้อนแล้วไล่หาเอง ซึ่งบางทีก็ไม่มี log เก็บไว้</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>jsonDecode</code></td><td>แปลงข้อความ JSON เป็นวัตถุ Dart</td></tr>
+<tr><td>boundary / ขอบ</td><td>จุดที่ข้อมูลจากภายนอกเข้ามาในแอป</td></tr>
+<tr><td>untrusted</td><td>ข้อมูลที่ยังเชื่อไม่ได้ ต้องตรวจก่อน</td></tr>
+<tr><td>cast</td><td>การบอก compiler ว่าค่านี้เป็นชนิดนี้</td></tr>
+<tr><td>forward compatible</td><td>ทนได้เมื่ออีกฝั่งเพิ่มของใหม่</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ทุกอย่างที่มาจากสายคือของแปลกหน้า</h2><pre class="code-vs"><code>jsonDecode(body)  →  Map&lt;String, dynamic&gt;
+                          │
+                          └─ dynamic แปลว่า "อะไรก็ได้"
+                             compiler ช่วยอะไรไม่ได้เลยตั้งแต่จุดนี้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>fromJson</code> คือด่านที่ข้อมูลจากโลกภายนอกเข้ามา — สิ่งที่ผ่านด่านนี้ไปได้ ต้องเชื่อถือได้แล้ว ส่วนที่ผ่านไม่ได้ ต้องบอกให้ชัดว่าทำไม</div><p>ที่สำคัญคือ <strong>ข้อมูลที่ผิดไม่ได้แปลว่ามีคนโจมตีเสมอไป</strong> ส่วนใหญ่มาจากเซิร์ฟเวอร์คนละรุ่น ข้อมูลเก่าในฐานข้อมูล หรือบั๊กฝั่งหลังบ้าน — ซึ่งทั้งหมดเกิดขึ้นจริงและบ่อย</p></section>
+
+<section><h2>4. อ่านผ่านตัวช่วยกลาง ไม่อ่านเอง</h2><p>เปิด <code>lib/json_basics/json_read.dart</code></p><pre class="code-vs"><code>/// ตัวอ่านค่าจาก JSON ที่ใช้ร่วมกันทั้งแอป
+///
+/// ทุก model ต้องอ่านผ่านไฟล์นี้ ไม่เขียน `json['x'] as String` เอง
+/// เพราะกฎการแปลงค่าต้องเหมือนกันทุกที่ และข้อความผิดพลาดต้องบอกตำแหน่งได้</code></pre><pre class="code-vs"><code>class ContractException implements Exception {
+  const ContractException(this.path, this.message);
+
+  /// ตำแหน่งในก้อน JSON เช่น `items[3].quantity`
+  final String path;
+  final String message;
+
+  @override
+  String toString() =&gt; 'ContractException ที่ $path: $message';
+}</code></pre><p>ทำไมต้องมีชนิดข้อผิดพลาดของตัวเอง แทนที่จะใช้ <code>FormatException</code></p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>พก <code>path</code> มาด้วย</td><td>รู้ว่าพังตรงไหนในก้อนที่ซ้อนหลายชั้น</td></tr>
+<tr><td>แยกจากความผิดพลาดชนิดอื่นได้</td><td>“เน็ตหลุด” กับ “ข้อมูลผิดสัญญา” ต้องรับมือคนละแบบ (4.8)</td></tr>
+<tr><td>ดักได้ตรงจุด</td><td><code>on ContractException catch</code> ไม่กลืนบั๊กอื่น</td></tr>
+</tbody></table></section>
+
+<section><h2>5. fromJson ที่อ่านง่ายเพราะไม่มีเงื่อนไข</h2><p>เปิด <code>lib/json_basics/task_dto.dart</code></p><pre class="code-vs"><code>factory TaskDto.fromJson(Map&lt;String, dynamic&gt; json, {String path = ''}) =&gt;
+    TaskDto(
+      id: requireString(json, 'id', path: path),
+      palletCode: requireString(json, 'palletCode', path: path),
+      quantity: requireInt(json, 'quantity', path: path),
+      status: requireString(json, 'status', path: path),
+      createdAt: requireUtcTime(json, 'createdAt', path: path),
+      note: readString(json, 'note', path: path),
+    );</code></pre><p>สังเกตว่า <strong>ไม่มี <code>if</code> เลยสักตัว</strong> — เงื่อนไขทั้งหมดอยู่ในตัวช่วย ทำให้ตัวแปลงอ่านแล้วเห็นทันทีว่าเซิร์ฟเวอร์ต้องส่งอะไรมาบ้าง</p><table><thead><tr><th>ตัวช่วย</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>requireXxx</code></td><td>ต้องมี ถ้าไม่มีคือผิดสัญญา</td></tr>
+<tr><td><code>readXxx</code></td><td>มีก็ได้ ไม่มีก็ได้</td></tr>
+</tbody></table><p>ชื่อสองแบบนี้ทำให้อ่านโค้ดแล้วรู้ทันทีว่า field ไหนจำเป็น โดยไม่ต้องเปิดเอกสาร</p></section>
+
+<section><h2>6. แยกให้ออก: ไม่มีคีย์ กับ มีคีย์แต่เป็น null</h2><p>สองอย่างนี้ต่างกัน และ <code>json['x'] == null</code> แยกไม่ออก</p><pre class="code-vs"><code>{"note": null}   →  json['note'] เป็น null
+{}               →  json['note'] เป็น null เหมือนกัน</code></pre><p>ใน lab จึงใช้ค่าพิเศษแทน “ไม่มีคีย์”</p><pre class="code-vs"><code>/// ค่าที่ใช้แทน "ไม่มีคีย์นี้เลย" ซึ่งต่างจาก "มีคีย์แต่ค่าเป็น null"
+const Object _absent = Object();</code></pre><pre class="code-vs"><code>Object? _require(Map&lt;String, dynamic&gt; json, String key, String path) {
+  final value = _raw(json, key);
+  if (identical(value, _absent)) {
+    throw ContractException(_at(path, key), 'ไม่มีคีย์นี้ในข้อมูลที่ได้รับ');
+  }
+  if (value == null) {
+    throw ContractException(_at(path, key), 'ค่าต้องไม่เป็น null');
+  }
+  return value;
+}</code></pre><p>ทำไมต้องแยก — เพราะสองกรณีนี้บอกคนละเรื่องตอนไล่หาสาเหตุ</p><table><thead><tr><th>ข้อความ</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>“ไม่มีคีย์นี้”</td><td>เซิร์ฟเวอร์คนละรุ่น หรือเราสะกดชื่อคีย์ผิด</td></tr>
+<tr><td>“ค่าต้องไม่เป็น null”</td><td>เซิร์ฟเวอร์รู้จักคีย์นี้ แต่ข้อมูลในฐานข้อมูลไม่ครบ</td></tr>
+</tbody></table><p>เทสต์ใน lab ตรึงความต่างนี้ไว้สองข้อ</p><pre class="code-vs"><code>test('ไม่มีคีย์ ต้องบอกว่าคีย์ไหนหาย', ...);
+test('คีย์มีอยู่แต่ค่าเป็น null ต้องบอกคนละอย่างกับคีย์หาย', ...);</code></pre></section>
+
+<section><h2>7. ทิศทางขึ้นกับทิศทางลง เป็นคนละก้อน</h2><pre class="code-vs"><code>/// คำสั่งที่ส่งขึ้นไป — คนละก้อนกับที่รับลงมา
+class CompleteTaskRequest {
+  const CompleteTaskRequest({
+    required this.taskId,
+    required this.quantity,
+    required this.commandId,
+    this.note,
+  });
+
+  Map&lt;String, Object?&gt; toJson() =&gt; {
+    'taskId': taskId,
+    'quantity': quantity,
+    'commandId': commandId,
+    'note': note,
+  };
+}</code></pre><p>เทียบกับ <code>TaskDto</code> ที่รับลงมา</p><table><thead><tr><th>field</th><th>ตอนรับ</th><th>ตอนส่ง</th></tr></thead><tbody>
+<tr><td><code>id</code> / <code>taskId</code></td><td>มี ชื่อ <code>id</code></td><td>มี ชื่อ <code>taskId</code></td></tr>
+<tr><td><code>createdAt</code></td><td>มี</td><td>ไม่มี — เซิร์ฟเวอร์เป็นคนกำหนด</td></tr>
+<tr><td><code>commandId</code></td><td>ไม่มี</td><td>มี — เพื่อกันการบันทึกซ้ำ (4.14)</td></tr>
+<tr><td><code>status</code></td><td>มี</td><td>ไม่มี — การส่งคำสั่งคือการขอเปลี่ยนสถานะอยู่แล้ว</td></tr>
+</tbody></table><p>การใช้คลาสเดียวทั้งขึ้นและลง จะบังคับให้ทุก field เป็น <code>nullable</code> เพื่อให้ใช้ได้ทั้งสองทาง ซึ่งทำให้ไม่มีอะไรบังคับได้อีกเลยว่าตอนส่งต้องมีอะไรบ้าง</p></section>
+
+<section><h2>8. ส่งคีย์ที่ค่าเป็น null หรือไม่ส่งเลย</h2><pre class="code-vs"><code>// ส่งคีย์ไปเสมอแม้ค่าเป็น null เพื่อให้เซิร์ฟเวอร์แยกได้ว่า
+// "ตั้งใจล้างหมายเหตุ" ต่างจาก "ไม่ได้แตะหมายเหตุ"
+'note': note,</code></pre><table><thead><tr><th>สิ่งที่ส่ง</th><th>เซิร์ฟเวอร์ควรเข้าใจว่า</th></tr></thead><tbody>
+<tr><td><code>{"note": "ของแตก"}</code></td><td>ตั้งหมายเหตุเป็นข้อความนี้</td></tr>
+<tr><td><code>{"note": null}</code></td><td>ล้างหมายเหตุทิ้ง</td></tr>
+<tr><td>ไม่มีคีย์ <code>note</code> เลย</td><td>ไม่ได้แตะหมายเหตุ ใช้ค่าเดิม</td></tr>
+</tbody></table><p>สามความหมายนี้ต่างกัน และต้องตกลงกับฝั่งหลังบ้านให้ชัดว่าใช้แบบไหน — ถ้าไม่ตกลงกัน จะเจออาการ “แก้หมายเหตุแล้วหายไปเอง” ซึ่งไล่หาสาเหตุยากมาก</p><p>เทสต์ใน lab จึงตรึงคีย์ที่ส่งไว้ทั้งหมด รวมคีย์ที่ค่าเป็น <code>null</code> ด้วย</p><pre class="code-vs"><code>expect(request.toJson(), {
+  'taskId': 'T-001',
+  'quantity': 12,
+  'commandId': 'cmd-1',
+  'note': null,
+});</code></pre><p>สังเกตว่าเทียบทั้ง map ไม่ใช่เช็กทีละคีย์ — ทำให้จับได้ทั้งคีย์ที่หายและคีย์ที่เกินมาโดยไม่ตั้งใจ</p></section>
+
+<section><h2>9. คีย์ที่ไม่รู้จัก ต้องไม่ทำให้พัง</h2><p>วันหนึ่งฝั่งหลังบ้านเพิ่ม field ใหม่</p><pre class="code-vs"><code>{
+  "id": "T-001",
+  "quantity": 12,
+  "priority": "HIGH"      ← ของใหม่ที่แอปรุ่นนี้ไม่รู้จัก
+}</code></pre><p>ตัวแปลงที่เขียนแบบนี้จะไม่สนใจคีย์ที่ไม่ได้อ่าน จึงทำงานต่อได้ตามปกติ — และนั่นถูกต้อง</p><table><thead><tr><th>ถ้าพังเมื่อเจอคีย์ใหม่</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ทุกเครื่องที่ยังไม่อัปเดตใช้งานไม่ได้ทันที</td><td>ต้องหยุดทั้งคลังเพื่ออัปเดตแอป</td></tr>
+<tr><td>ฝั่งหลังบ้านเพิ่มอะไรไม่ได้เลย</td><td>ทุกการเปลี่ยนแปลงต้องปล่อยพร้อมกันสองฝั่ง</td></tr>
+</tbody></table><p>กฎที่ได้คือ <strong>เข้มกับสิ่งที่เราต้องใช้ ผ่อนกับสิ่งที่เราไม่ได้ใช้</strong></p><table><thead><tr><th>สถานการณ์</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>คีย์ที่ต้องใช้ หายไป</td><td>พัง — เพราะทำงานต่อไม่ได้</td></tr>
+<tr><td>คีย์ที่ต้องใช้ ชนิดผิด</td><td>พัง</td></tr>
+<tr><td>คีย์ใหม่ที่ไม่รู้จัก</td><td>ไม่สนใจ</td></tr>
+<tr><td>คีย์ที่ไม่จำเป็น หายไป</td><td>ใช้ค่าตั้งต้นตามที่ตกลง</td></tr>
+</tbody></table></section>
+
+<section><h2>10. เขียนเองหรือให้เครื่องสร้างให้</h2><p>Dart มีเครื่องมือสร้าง <code>fromJson</code>/<code>toJson</code> ให้อัตโนมัติ</p><table><thead><tr><th></th><th>เขียนเอง</th><th>ให้เครื่องสร้าง</th></tr></thead><tbody>
+<tr><td>โค้ดที่ต้องเขียน</td><td>มากกว่า</td><td>น้อยกว่ามาก</td></tr>
+<tr><td>ควบคุมการแปลงค่าได้แค่ไหน</td><td>ทั้งหมด</td><td>ต้องเขียนตัวแปลงเสริมอยู่ดี</td></tr>
+<tr><td>ข้อความผิดพลาด</td><td>กำหนดเองได้</td><td>ตามที่เครื่องมือให้</td></tr>
+<tr><td>เข้าใจว่าเกิดอะไรขึ้น</td><td>เห็นหมด</td><td>ต้องไปอ่านไฟล์ที่ถูกสร้าง</td></tr>
+</tbody></table><p>บทนี้ให้เขียนเองก่อน เพราะ <strong>เครื่องมือช่วยลดการพิมพ์ แต่ไม่ได้ตัดสินใจเรื่องยากแทนเรา</strong> — เรื่องที่ยากคือรับ <code>"12"</code> ไหม เวลาที่ไม่มีเขตเวลาทำอย่างไร สถานะที่ไม่รู้จักแปลว่าอะไร ซึ่งทั้งหมดยังต้องเราตัดสินเองอยู่ดี</p><p>การสร้างอัตโนมัติจะเรียนใน Part 30</p></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>type 'Null' is not a subtype of type 'String'</code></td><td>ใช้ <code>as</code> ตรง ๆ</td><td>อ่านผ่านตัวช่วยที่ตรวจก่อน</td></tr>
+<tr><td>รู้ว่าพังแต่ไม่รู้ว่าตรงไหน</td><td>ไม่มี path ในข้อความ</td><td>ส่ง path ลงไปทุกชั้น</td></tr>
+<tr><td>แก้หมายเหตุแล้วหายไปเอง</td><td>ไม่ได้ตกลงว่า null แปลว่าอะไร</td><td>ตกลงกับหลังบ้านให้ชัด</td></tr>
+<tr><td>ฝั่งหลังบ้านเพิ่ม field แล้วแอปพังทั้งคลัง</td><td>เข้มกับคีย์ที่ไม่ได้ใช้</td><td>ไม่สนใจคีย์ที่ไม่รู้จัก</td></tr>
+<tr><td>ตอนส่งลืมใส่ field ที่จำเป็น</td><td>ใช้คลาสเดียวทั้งขึ้นและลง</td><td>แยกคลาสตามทิศทาง</td></tr>
+<tr><td>ทุก model เขียนกฎการแปลงเอง คนละแบบ</td><td>ไม่มีตัวช่วยกลาง</td><td>รวมไว้ไฟล์เดียว</td></tr>
+<tr><td>บั๊กในโค้ดเราถูกกลืนเป็น “ข้อมูลผิด”</td><td>ดักกว้างเกินไป</td><td>ใช้ชนิดข้อผิดพลาดของตัวเอง</td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์ส่งข้อมูลพาเลทมาแบบนี้</p><pre class="code-vs"><code>{
+  "palletCode": "PAL-0101",
+  "locationCode": "A-01-02",
+  "totalWeight": 245.5,
+  "sealNo": "",
+  "lastMovedAt": "2026-08-15T03:00:00Z"
+}</code></pre><p>โดยที่ <code>locationCode</code> เป็น <code>null</code> ได้เมื่อพาเลทยังไม่ถูกเก็บเข้าช่อง และ <code>sealNo</code> เป็นข้อความว่างเมื่อไม่มีซีล</p><ol><li>เขียน <code>fromJson</code></li><li>เขียน <code>toJson</code> สำหรับคำสั่งย้ายพาเลท ซึ่งส่ง <code>palletCode</code>, <code>toLocationCode</code> และ <code>commandId</code></li><li>ตอบว่าถ้าเซิร์ฟเวอร์ส่ง <code>"totalWeight": "245.5"</code> เป็นข้อความ ควรรับหรือปฏิเสธ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — fromJson</strong></p><pre class="code-vs"><code>class PalletDto {
+  const PalletDto({
+    required this.palletCode,
+    required this.totalWeight,
+    required this.lastMovedAt,
+    this.locationCode,
+    this.sealNo,
+  });
+
+  factory PalletDto.fromJson(Map&lt;String, dynamic&gt; json, {String path = ''}) =&gt;
+      PalletDto(
+        palletCode: requireString(json, 'palletCode', path: path),
+        totalWeight: requireDouble(json, 'totalWeight', path: path),
+        lastMovedAt: requireUtcTime(json, 'lastMovedAt', path: path),
+        locationCode: readString(json, 'locationCode', path: path),
+        sealNo: readString(json, 'sealNo', path: path),
+      );
+
+  final String palletCode;
+  final double totalWeight;
+  final DateTime lastMovedAt;
+  final String? locationCode;
+  final String? sealNo;
+}</code></pre><p>จุดที่ต้องสังเกตคือ <code>sealNo</code> — โจทย์บอกว่าเซิร์ฟเวอร์ส่งข้อความว่างมาเมื่อไม่มีซีล และ <code>readString</code> แปลงข้อความว่างเป็น <code>null</code> ให้แล้ว</p><pre class="code-vs"><code>final trimmed = value.trim();
+return trimmed.isEmpty ? null : trimmed;</code></pre><p>ผลคือทั้งฝั่งที่ส่ง <code>null</code> และฝั่งที่ส่ง <code>""</code> ให้ผลเหมือนกันในแอป ซึ่งถูกต้องเพราะทั้งคู่แปลว่า “ไม่มีซีล”</p><p><strong>ข้อ 2 — toJson</strong></p><pre class="code-vs"><code>class MovePalletRequest {
+  const MovePalletRequest({
+    required this.palletCode,
+    required this.toLocationCode,
+    required this.commandId,
+  });
+
+  final String palletCode;
+  final String toLocationCode;
+  final String commandId;
+
+  Map&lt;String, Object?&gt; toJson() =&gt; {
+    'palletCode': palletCode,
+    'toLocationCode': toLocationCode,
+    'commandId': commandId,
+  };
+}</code></pre><p>สังเกตว่า <strong>ไม่มี field ไหนเป็น nullable เลย</strong> — เพราะการย้ายพาเลทโดยไม่ระบุปลายทางไม่มีความหมาย การประกาศเป็น <code>required</code> ทำให้ compiler กันไม่ให้ลืมตั้งแต่ตอนเขียน</p><p>และไม่ส่ง <code>fromLocationCode</code> ไปด้วย เพราะเซิร์ฟเวอร์รู้อยู่แล้วว่าพาเลทนี้อยู่ไหน — การส่งไปมีแต่จะทำให้เกิดคำถามว่าถ้าไม่ตรงกับที่เซิร์ฟเวอร์มีจะเชื่อฝั่งไหน</p><p><strong>ข้อ 3 — <code>"245.5"</code> เป็นข้อความ</strong></p><p>คำตอบคือ <strong>รับได้ แต่ต้องเป็นการตัดสินใจที่บันทึกไว้ ไม่ใช่เพราะบังเอิญ</strong></p><p>ใน lab <code>requireDouble</code> รับข้อความที่แปลงเป็นตัวเลขได้</p><pre class="code-vs"><code>double? _toDouble(Object? value) =&gt; switch (value) {
+  num n =&gt; n.toDouble(),
+  String s =&gt; double.tryParse(s.trim()),
+  _ =&gt; null,
+};</code></pre><table><thead><tr><th>เหตุผลที่รับ</th><th>เหตุผลที่ไม่ควรรับ</th></tr></thead><tbody>
+<tr><td>ระบบเก่าบางตัวส่งตัวเลขเป็นข้อความจริง ๆ</td><td>ปิดบังปัญหาฝั่งหลังบ้าน</td></tr>
+<tr><td>ปฏิเสธแล้วคนหน้างานทำงานไม่ได้ ทั้งที่ข้อมูลอ่านออก</td><td>วันหนึ่งจะเจอ <code>"245,5"</code> ที่ใช้จุลภาค แล้วพัง</td></tr>
+</tbody></table><p><strong>สิ่งที่ทำให้การรับนี้ปลอดภัย</strong></p><table><thead><tr><th>ต้องมี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>อยู่ในตัวช่วยกลางที่เดียว</td><td>กฎเหมือนกันทุก model และเปลี่ยนที่เดียวได้</td></tr>
+<tr><td>มีเทสต์ครอบทั้งสามแบบ</td><td>ยืนยันว่าตั้งใจ ไม่ใช่บังเอิญ</td></tr>
+<tr><td>บันทึก log เมื่อเจอข้อความ</td><td>รู้ว่าเซิร์ฟเวอร์ตัวไหนยังส่งแบบเก่า จะได้ตามไปแก้</td></tr>
+</tbody></table><pre class="code-vs"><code>test('รับทั้ง 12, 12.0 และ "12" เพราะ JSON ไม่แยกชนิด', () {
+  for (final raw in &lt;Object&gt;[12, 12.0, '12']) {
+    expect(TaskDto.fromJson(taskJson({'quantity': raw})).quantity, 12);
+  }
+});</code></pre><p><strong>สิ่งที่ยังห้ามรับแม้จะผ่อนแล้ว</strong></p><p><code>requireInt</code> ยังปฏิเสธ <code>1.9</code></p><pre class="code-vs"><code>if (parsed != parsed.roundToDouble()) {
+  throw ContractException(_at(path, key), 'ต้องเป็นจำนวนเต็ม แต่ได้ $value');
+}</code></pre><p>ความต่างคือ — <code>"12"</code> กับ <code>12</code> เป็นค่าเดียวกันที่เขียนคนละแบบ ส่วน <code>1.9</code> กับ <code>2</code> เป็นคนละค่า การปัดให้จึงเป็นการตัดสินใจแทนธุรกิจ ซึ่งในงานคลังแปลว่าของขาดหรือของเกิน</p><p><strong>หลักที่ได้:</strong> ผ่อนได้กับ <em>รูปแบบการเขียน</em> แต่ห้ามผ่อนกับ <em>ความหมายของค่า</em></p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li><code>fromJson</code> คือด่านที่ข้อมูลจากภายนอกเข้ามา ต้องตรวจก่อนเชื่อ</li><li>อย่าใช้ <code>as</code> ตรง ๆ เพราะข้อความผิดพลาดบอกอะไรไม่ได้</li><li>รวมกฎการอ่านไว้ที่เดียว และให้ข้อผิดพลาดพก path มาด้วย</li><li>ใช้ชนิดข้อผิดพลาดของตัวเอง เพื่อแยกจากบั๊กและจากปัญหาเครือข่าย</li><li>แยก <code>requireXxx</code> กับ <code>readXxx</code> ให้อ่านโค้ดแล้วรู้ว่า field ไหนจำเป็น</li><li>“ไม่มีคีย์” กับ “มีคีย์แต่เป็น null” ต้องแยกกัน</li><li>คลาสที่ส่งขึ้นกับที่รับลงเป็นคนละก้อน</li><li>ตกลงกับหลังบ้านว่า null ในคำสั่งแปลว่าล้างค่า หรือไม่แตะ</li><li>เข้มกับสิ่งที่ต้องใช้ ผ่อนกับสิ่งที่ไม่ได้ใช้</li><li>ผ่อนได้กับรูปแบบการเขียน แต่ห้ามผ่อนกับความหมายของค่า</li></ul></div><p><strong>บทถัดไป:</strong> 6.3 จะเจาะเรื่องตัวเลขโดยเฉพาะ — ทำไม JSON ถึงทำให้ <code>int</code> กับ <code>double</code> ปนกัน และทำไมการปัดเศษเงียบ ๆ ถึงอันตรายในงานคลัง</p></section>

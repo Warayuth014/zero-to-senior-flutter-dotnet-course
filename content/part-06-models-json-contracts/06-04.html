@@ -1,2 +1,185 @@
-<div class="note">Null, missing และ empty stringอาจคนละความหมาย ต้องตกลง contractและ mapอย่าง explicit</div>
-<section><h2>1. Nullable</h2><p>ใช้ <code>String?</code> เมื่อ APIอนุญาตจริง ไม่เติม ?เพื่อหยุด compiler</p></section><section><h2>2. Required</h2><p>missing required fieldเป็น contract failure ไม่ใช่ค่า defaultสุ่ม</p></section><section><h2>3. Defaults</h2><p>ใช้เฉพาะ semantic default เช่น list missing→emptyเมื่อ APIรับรอง backward compatibility</p></section><section><h2>4. Empty</h2><p>normalize whitespace/emptyเป็น nullเฉพาะ fieldที่ policyกำหนด</p></section><section><h2>5. UI</h2><p>แสดง “—” สำหรับ unknown แต่ไม่เขียนค่าตกแต่งกลับ domain</p></section><section><h2>6. .NET</h2><p>เปิด nullable reference typesและให้ DTO annotationsตรง OpenAPI/runtime validation</p></section><section><h2>7. แบบฝึกหัด</h2><p>description null แต่ id null?</p><details><summary>เฉลย</summary><p>Descriptionยอม null/default UI; idต้อง reject responseเพราะระบุ entityไม่ได้</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn"><code>?? ''</code> ทุก fieldซ่อน server regressionและทำ domainมี invalid entity</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แยกไม่มีค่า ไม่รู้ค่า และค่าเป็นศูนย์ ออกจากกัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (<code>requireXxx</code> กับ <code>readXxx</code>) และ D1.13 (null safety)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่า field ไหนควรเป็น nullable จริง ๆ และเมื่อไหร่ค่าตั้งต้นเป็นการโกหก</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่เขียนเพื่อให้ compiler เลิกบ่น</p><pre class="code-vs"><code>id: json['id'] as String? ?? '',
+quantity: json['quantity'] as int? ?? 0,
+palletCode: json['palletCode'] as String? ?? '',</code></pre><p>คอมไพล์ผ่าน ไม่พังตอนรัน และ <strong>เป็นโค้ดที่อันตรายที่สุดในบทนี้</strong></p><pre class="code-vs"><code>เซิร์ฟเวอร์ส่งข้อมูลไม่ครบ
+  → แอปสร้างงานที่ id เป็นข้อความว่าง จำนวน 0 พาเลทว่าง
+  → หน้าจอแสดงงานนั้นตามปกติ
+  → คนหน้างานกดปิดงานที่ไม่มีตัวตน
+  → เซิร์ฟเวอร์ปฏิเสธ แต่ไม่มีใครเข้าใจว่าทำไม</code></pre><p>ปัญหาไม่ใช่ว่ามันพัง — ปัญหาคือ <strong>มันไม่พัง</strong> แล้วเดินหน้าต่อด้วยข้อมูลที่ไม่มีอยู่จริง</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>nullable</td><td>ชนิดที่เป็น <code>null</code> ได้ เขียนด้วย <code>?</code></td></tr>
+<tr><td>required</td><td>ต้องมีค่าเสมอ</td></tr>
+<tr><td>default</td><td>ค่าที่ใช้แทนเมื่อไม่มีค่าส่งมา</td></tr>
+<tr><td>sentinel</td><td>ค่าพิเศษที่ใช้แทนความหมายอื่น</td></tr>
+<tr><td>invariant</td><td>กฎที่ต้องเป็นจริงเสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สามอย่างที่หน้าตาเหมือนกัน</h2><pre class="code-vs"><code>{"receivedQty": 0}        → รับไปแล้ว 0 ชิ้น  (รู้ค่า และค่าคือศูนย์)
+{"receivedQty": null}     → ยังไม่ได้เริ่มรับ  (ไม่มีค่า แต่รู้ว่าทำไม)
+{}                        → เซิร์ฟเวอร์ไม่ได้บอก (ไม่รู้เลย)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ก่อนใส่ <code>?</code> หรือ <code>?? 0</code> ให้ตอบก่อนว่าค่านั้น <em>ไม่มี</em> เพราะอะไร — ถ้าตอบไม่ได้ แปลว่ายังไม่ควรใส่</div></section>
+
+<section><h2>4. เกณฑ์ตัดสินว่า field ไหนควรเป็น nullable</h2><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>มีสถานะปกติของธุรกิจที่ค่านี้ไม่มีจริง ๆ ไหม</td><td>เป็น nullable ได้</td></tr>
+<tr><td>ใส่ <code>?</code> เพราะ compiler บ่นหรือเปล่า</td><td><strong>ไม่ควรเป็น nullable</strong></td></tr>
+</tbody></table><p>ดูของจริงใน <code>lib/json_basics/task_dto.dart</code></p><pre class="code-vs"><code>final String id;              // ไม่มีทางไม่มี — งานที่ไม่มีรหัสไม่ใช่งาน
+final String palletCode;      // ไม่มีทางไม่มี
+final int quantity;           // ไม่มีทางไม่มี
+final DateTime createdAt;     // ไม่มีทางไม่มี
+final String? note;           // มีสถานะปกติที่ไม่มีหมายเหตุ</code></pre><p>มีแค่ <code>note</code> ตัวเดียวที่เป็น nullable และมีเหตุผลชัดเจน — <strong>งานส่วนใหญ่ไม่มีหมายเหตุ ซึ่งเป็นเรื่องปกติ ไม่ใช่ข้อมูลขาด</strong></p><p>เทียบกับ <code>lib/json_basics/inbound_dto.dart</code></p><pre class="code-vs"><code>final DateTime? expectedAt;   // เวลาที่คาดว่าของจะมาถึง อาจยังไม่รู้</code></pre><p>อันนี้ก็มีเหตุผล — ใบรับเข้าที่ยังไม่ได้นัดวันส่งของ ก็ยังไม่มีเวลาที่คาดไว้</p></section>
+
+<section><h2>5. สิ่งที่จำเป็นแต่ไม่มี คือความล้มเหลว</h2><pre class="code-vs"><code>Object? _require(Map&lt;String, dynamic&gt; json, String key, String path) {
+  final value = _raw(json, key);
+  if (identical(value, _absent)) {
+    throw ContractException(_at(path, key), 'ไม่มีคีย์นี้ในข้อมูลที่ได้รับ');
+  }
+  if (value == null) {
+    throw ContractException(_at(path, key), 'ค่าต้องไม่เป็น null');
+  }
+  return value;
+}</code></pre><p>เหตุผลที่ต้องโยนแทนที่จะใส่ค่าตั้งต้น</p><table><thead><tr><th>สิ่งที่เกิด</th><th>ถ้าใส่ค่าตั้งต้น</th><th>ถ้าโยน</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนชื่อ field</td><td>ทุกงานมี id ว่าง แต่หน้าจอยังแสดงปกติ</td><td>เห็นทันทีว่าคีย์ไหนหาย</td></tr>
+<tr><td>ข้อมูลในฐานข้อมูลไม่ครบ</td><td>คนหน้างานทำงานกับข้อมูลที่ไม่มีจริง</td><td>รู้ว่าใบไหนมีปัญหา</td></tr>
+<tr><td>เราสะกดชื่อคีย์ผิด</td><td>ทุกอย่างว่างเปล่าโดยไม่รู้สาเหตุ</td><td>ข้อความบอกชื่อคีย์ที่หาไม่เจอ</td></tr>
+</tbody></table><p>สังเกตว่าทั้งสามกรณีในคอลัมน์กลาง <strong>ไม่มีอะไรพัง</strong> — ซึ่งทำให้ปัญหาอยู่ในระบบได้นานเป็นเดือน</p></section>
+
+<section><h2>6. ค่าตั้งต้นที่ใช้ได้ กับที่ใช้ไม่ได้</h2><p>ไม่ใช่ว่าค่าตั้งต้นผิดเสมอ — มันผิดเมื่อเป็นการเดา</p><table><thead><tr><th>สถานการณ์</th><th>ค่าตั้งต้น</th><th>ใช้ได้ไหม</th></tr></thead><tbody>
+<tr><td><code>details</code> ไม่มี และตกลงกันว่าแปลว่าไม่มีบรรทัด</td><td><code>[]</code></td><td>ได้</td></tr>
+<tr><td><code>receivedQty</code> เป็น <code>null</code> และตกลงกันว่าแปลว่ายังไม่เริ่มรับ</td><td><code>0</code></td><td>ได้</td></tr>
+<tr><td><code>quantity</code> ไม่มี และไม่รู้ว่าทำไม</td><td><code>0</code></td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td><code>id</code> ไม่มี</td><td><code>''</code></td><td><strong>ไม่ได้</strong></td></tr>
+</tbody></table><p>ความต่างอยู่ที่ประโยคเดียว — <strong>ตกลงกันไว้แล้วหรือกำลังเดา</strong></p><pre class="code-vs"><code>// ตกลงกันแล้ว — บันทึกเหตุผลไว้ในโค้ด
+/// เซิร์ฟเวอร์ไม่ส่ง receivedQty มาเมื่อยังไม่เริ่มรับของ
+/// ซึ่งตกลงกันแล้วว่าหมายถึง 0 (ยืนยันกับทีมหลังบ้าน 2026-08-10)
+final received = dto.receivedQty ?? 0;</code></pre><p>ถ้าเขียนเหตุผลไม่ได้ แปลว่ายังไม่ได้ตกลง และยังใส่ค่าตั้งต้นไม่ได้</p></section>
+
+<section><h2>7. ข้อความว่างกับ null</h2><p>ฝั่ง .NET มักส่งข้อความว่างแทน <code>null</code> เพราะเป็นค่าตั้งต้นของบางการตั้งค่า</p><pre class="code-vs"><code>{"note": ""}      ← ไม่มีหมายเหตุ
+{"note": null}    ← ไม่มีหมายเหตุเหมือนกัน
+{}                ← ไม่มีหมายเหตุเหมือนกันอีก</code></pre><p>ใน lab จึงยุบทั้งสามเป็นอันเดียว</p><pre class="code-vs"><code>/// อ่านข้อความที่เซิร์ฟเวอร์อนุญาตให้ไม่มีได้
+///
+/// ทั้งไม่มีคีย์ ค่าเป็น null และข้อความว่าง ถือเป็น null เหมือนกัน
+/// เพราะทั้งสามหมายถึง "ไม่มีข้อมูล" ในความหมายของหน้าจอ
+String? readString(Map&lt;String, dynamic&gt; json, String key, {String path = ''}) {
+  final value = _raw(json, key);
+  if (identical(value, _absent) || value == null) return null;
+  ...
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}</code></pre><p>เทสต์ตรึงไว้ว่าทั้งสามให้ผลเหมือนกัน</p><pre class="code-vs"><code>test('หมายเหตุที่ไม่มี ค่า null และข้อความว่าง ให้ผลเหมือนกัน', () {
+  expect(TaskDto.fromJson(taskJson()).note, isNull);
+  expect(TaskDto.fromJson(taskJson({'note': null})).note, isNull);
+  expect(TaskDto.fromJson(taskJson({'note': '  '})).note, isNull);
+});</code></pre><div class="warn">แต่การยุบนี้ต้องเป็นการตัดสินใจ ไม่ใช่ค่าตั้งต้นของทุก field — ถ้ามีระบบไหนที่ข้อความว่างแปลว่า “ตั้งใจล้างค่า” ต่างจาก <code>null</code> ที่แปลว่า “ไม่แตะ” การยุบจะทำให้ความหมายหายไป</div></section>
+
+<section><h2>8. ข้อความว่างไม่ผ่านสำหรับ field ที่จำเป็น</h2><pre class="code-vs"><code>final trimmed = value.trim();
+if (trimmed.isEmpty) {
+  throw ContractException(_at(path, key), 'ต้องไม่เป็นข้อความว่าง');
+}
+return trimmed;</code></pre><p>เพราะรหัสพาเลทที่เป็นข้อความว่าง ก็เท่ากับไม่มีรหัสพาเลท — การปล่อยผ่านแค่เพราะ “คีย์มีอยู่จริง” คือการยอมรับข้อมูลที่ใช้ไม่ได้</p><p>และการ <code>trim()</code> ก่อนก็สำคัญ เพราะ <code>"  "</code> ที่มีแต่ช่องว่างไม่ต่างจากว่างเปล่า</p></section>
+
+<section><h2>9. อย่าให้หน้าจอเขียนค่าตกแต่งกลับเข้าข้อมูล</h2><pre class="code-vs"><code>// หน้าจอแสดงแบบนี้ได้
+Text(task.note ?? '—')</code></pre><pre class="code-vs"><code>// แต่ห้ามเขียนกลับ
+task.copyWith(note: task.note ?? '—')     // ตอนนี้หมายเหตุคือ "—" จริง ๆ แล้ว</code></pre><p>ขีดกลางเป็นสิ่งที่ผู้ใช้ควรเห็นเมื่อไม่มีข้อมูล ไม่ใช่ค่าของข้อมูล ถ้ามันเข้าไปอยู่ในข้อมูลจริง วันหนึ่งจะถูกส่งกลับขึ้นเซิร์ฟเวอร์</p><table><thead><tr><th>ชั้น</th><th>รู้จัก <code>null</code> ไหม</th></tr></thead><tbody>
+<tr><td>ข้อมูล</td><td>รู้ — <code>null</code> แปลว่าไม่มี</td></tr>
+<tr><td>หน้าจอ</td><td>แปลง <code>null</code> เป็นสิ่งที่อ่านได้ ตอนแสดงเท่านั้น</td></tr>
+</tbody></table></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปแสดงงานที่ไม่มีอยู่จริง</td><td>ใส่ <code>?? ''</code> ให้ field ที่จำเป็น</td><td>ปฏิเสธเมื่อไม่มี</td></tr>
+<tr><td>ยอดรวมเพี้ยนโดยไม่มีใครรู้</td><td>ใส่ <code>?? 0</code> ให้จำนวนที่หายไป</td><td>แยก “ไม่มี” จาก “เป็นศูนย์”</td></tr>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนชื่อ field แล้วไม่มีใครรู้เป็นเดือน</td><td>ค่าตั้งต้นกลบทุกอย่าง</td><td>ให้ field ที่จำเป็นดังเมื่อหาย</td></tr>
+<tr><td><code>?</code> เต็มไปหมดจนต้องเช็ก null ทุกบรรทัด</td><td>ใส่ <code>?</code> เพราะ compiler บ่น</td><td>ถามก่อนว่ามีสถานะปกติที่ไม่มีค่าไหม</td></tr>
+<tr><td>หมายเหตุกลายเป็น <code>"—"</code> ในฐานข้อมูล</td><td>เขียนค่าตกแต่งกลับเข้าข้อมูล</td><td>แปลงตอนแสดงเท่านั้น</td></tr>
+<tr><td>รหัสพาเลทเป็นข้อความว่างแล้วผ่าน</td><td>ตรวจแค่ว่ามีคีย์</td><td>ตรวจว่าไม่ว่างด้วย</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมหลังบ้านส่งสัญญาของใบเบิกมาให้</p><pre class="code-vs"><code>{
+  "requestNo": "RQ-2026-0451",
+  "requesterName": "สมชาย ใจดี",
+  "approverName": null,
+  "approvedAt": null,
+  "remark": "",
+  "totalItems": 5,
+  "pickedItems": null,
+  "cancelReason": null
+}</code></pre><p>โดยที่ใบนี้อยู่ในสถานะ “รออนุมัติ”</p><ol><li>ตัดสินว่า field ไหนควรเป็น nullable ใน DTO และเพราะอะไร</li><li>ออกแบบ domain model ที่ทำให้สถานะที่เป็นไปไม่ได้ สร้างไม่ได้</li><li>ตอบว่า <code>pickedItems: null</code> ควรกลายเป็น <code>0</code> หรือไม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — nullable ใน DTO</strong></p><table><thead><tr><th>field</th><th>nullable</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>requestNo</code></td><td>ไม่</td><td>ใบที่ไม่มีเลขที่ไม่ใช่ใบ</td></tr>
+<tr><td><code>requesterName</code></td><td>ไม่</td><td>ต้องมีคนขอเสมอ</td></tr>
+<tr><td><code>approverName</code></td><td><strong>ใช่</strong></td><td>ยังไม่อนุมัติ ก็ยังไม่มีคนอนุมัติ</td></tr>
+<tr><td><code>approvedAt</code></td><td><strong>ใช่</strong></td><td>เหตุผลเดียวกัน</td></tr>
+<tr><td><code>remark</code></td><td>ใช่ (ผ่าน <code>readString</code>)</td><td>ไม่มีหมายเหตุเป็นเรื่องปกติ</td></tr>
+<tr><td><code>totalItems</code></td><td>ไม่</td><td>ใบเบิกต้องมีจำนวนรายการเสมอ</td></tr>
+<tr><td><code>pickedItems</code></td><td><strong>ใช่</strong></td><td>ยังไม่เริ่มหยิบ</td></tr>
+<tr><td><code>cancelReason</code></td><td><strong>ใช่</strong></td><td>ยังไม่ยกเลิก</td></tr>
+</tbody></table><p>สังเกตว่า nullable ทุกตัวมีเหตุผลร่วมกันข้อเดียว — <strong>มันขึ้นกับว่าใบอยู่สถานะไหน</strong></p><p><strong>ข้อ 2 — domain model ที่กันสถานะที่เป็นไปไม่ได้</strong></p><p>ถ้าลอกโครง DTO มาตรง ๆ จะได้แบบนี้</p><pre class="code-vs"><code>// ยังไม่ดี — สร้างสิ่งที่เป็นไปไม่ได้ได้
+class PickRequest {
+  final String? approverName;
+  final DateTime? approvedAt;
+  final int? pickedItems;
+  final String? cancelReason;
+}</code></pre><p>ปัญหาคือมันอนุญาตให้สร้างสถานะแบบนี้</p><table><thead><tr><th>สถานะที่สร้างได้</th><th>แปลว่าอะไร</th></tr></thead><tbody>
+<tr><td>มี <code>approverName</code> แต่ไม่มี <code>approvedAt</code></td><td>มีคนอนุมัติแต่ไม่รู้เมื่อไหร่?</td></tr>
+<tr><td>มีทั้ง <code>approvedAt</code> และ <code>cancelReason</code></td><td>อนุมัติแล้วและยกเลิกแล้วพร้อมกัน?</td></tr>
+<tr><td>มี <code>pickedItems</code> แต่ยังไม่อนุมัติ</td><td>หยิบของก่อนได้รับอนุมัติ?</td></tr>
+</tbody></table><p>ทางแก้คือใช้ <code>sealed class</code> ตาม 4.15 — ให้แต่ละสถานะพกเฉพาะสิ่งที่มันมีจริง</p><pre class="code-vs"><code>sealed class PickRequest {
+  const PickRequest({required this.requestNo, required this.requesterName,
+      required this.totalItems, this.remark});
+
+  final String requestNo;
+  final String requesterName;
+  final int totalItems;
+  final String? remark;
+}
+
+class PendingApproval extends PickRequest {
+  const PendingApproval({required super.requestNo, required super.requesterName,
+      required super.totalItems, super.remark});
+  // ไม่มี approver ไม่มี pickedItems — เพราะยังไม่มีจริง
+}
+
+class Approved extends PickRequest {
+  const Approved({required super.requestNo, required super.requesterName,
+      required super.totalItems, super.remark,
+      required this.approverName, required this.approvedAt,
+      required this.pickedItems});
+
+  final String approverName;      // มีแน่นอน
+  final DateTime approvedAt;      // มีแน่นอน
+  final int pickedItems;          // มีแน่นอน — เริ่มที่ 0
+
+  bool get isComplete =&gt; pickedItems &gt;= totalItems;
+}
+
+class Cancelled extends PickRequest {
+  const Cancelled({required super.requestNo, required super.requesterName,
+      required super.totalItems, super.remark, required this.reason});
+
+  final String reason;            // มีแน่นอน
+}</code></pre><p>ผลที่ได้คือ <strong><code>?</code> หายไปเกือบหมด</strong> และสามสถานะที่เป็นไปไม่ได้ข้างบนสร้างไม่ได้อีกเลย</p><p>ส่วนตัวแปลงเป็นคนตัดสินว่าใบนี้อยู่สถานะไหน</p><pre class="code-vs"><code>PickRequest toPickRequest(PickRequestDto dto, {String path = ''}) {
+  if (dto.cancelReason != null) {
+    return Cancelled(..., reason: dto.cancelReason!);
+  }
+  if (dto.approvedAt != null) {
+    // อนุมัติแล้วต้องมีชื่อผู้อนุมัติด้วย ไม่งั้นข้อมูลขัดกันเอง
+    final approver = dto.approverName;
+    if (approver == null) {
+      throw ContractException(
+        path.isEmpty ? 'approverName' : '$path.approverName',
+        'ใบที่อนุมัติแล้วต้องมีชื่อผู้อนุมัติ',
+      );
+    }
+    return Approved(..., approverName: approver,
+        approvedAt: dto.approvedAt!, pickedItems: dto.pickedItems ?? 0);
+  }
+  return PendingApproval(...);
+}</code></pre><p>สังเกตว่า <code>!</code> ที่เหลืออยู่สองตัว อยู่หลังการตรวจแล้วทั้งคู่ — ต่างจากการเขียน <code>!</code> เพราะเชื่อว่ามันน่าจะมี</p><p><strong>ข้อ 3 — <code>pickedItems: null</code> ควรเป็น <code>0</code> ไหม</strong></p><p><strong>ขึ้นกับว่าใบอยู่สถานะไหน</strong> ซึ่งเป็นคำตอบที่โครงในข้อ 2 ทำให้เห็นชัด</p><table><thead><tr><th>สถานะ</th><th><code>pickedItems: null</code> แปลว่า</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>รออนุมัติ</td><td>ยังไม่มีสิทธิ์หยิบ</td><td><strong>ไม่ควรมี field นี้เลย</strong></td></tr>
+<tr><td>อนุมัติแล้ว</td><td>อนุมัติแล้วแต่ยังไม่เริ่มหยิบ</td><td>แปลงเป็น <code>0</code> ได้</td></tr>
+<tr><td>ยกเลิกแล้ว</td><td>ไม่เกี่ยวข้องแล้ว</td><td>ไม่ควรมี field นี้</td></tr>
+</tbody></table><p>ในโจทย์ใบนี้อยู่สถานะ “รออนุมัติ” ดังนั้น <strong>คำตอบคือไม่ควรแปลงเป็น 0 แต่ควรไม่มี field นี้ตั้งแต่แรก</strong></p><p>เหตุผลที่การแปลงเป็น <code>0</code> ในสถานะนี้เป็นการโกหก</p><pre class="code-vs"><code>หน้าจอแสดง "หยิบไปแล้ว 0 จาก 5 รายการ"
+  → ผู้ใช้เข้าใจว่างานเริ่มแล้ว แค่ยังไม่ได้หยิบอะไร
+  → ความจริงคือยังไม่ได้รับอนุมัติ ยังหยิบไม่ได้เลย</code></pre><p>สองอย่างนี้ต่างกันสิ้นเชิงในสายตาผู้ใช้ แต่แสดงผลเหมือนกันถ้ายุบเป็น <code>0</code></p><p><strong>บทเรียนที่ควรจำ:</strong> คำถาม “null ควรกลายเป็นอะไร” มักตอบไม่ได้ตราบใดที่ยังมองทีละ field — พอจัดสถานะให้ถูกต้องแล้ว จะพบว่า field ส่วนใหญ่ไม่ควรมีอยู่ในสถานะนั้นตั้งแต่แรก และคำถามก็หายไปเอง</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>“ไม่มีค่า” “ไม่รู้ค่า” และ “ค่าเป็นศูนย์” เป็นคนละเรื่อง</li><li>ใส่ <code>?</code> เมื่อมีสถานะปกติของธุรกิจที่ค่านั้นไม่มี ไม่ใช่เพราะ compiler บ่น</li><li>field ที่จำเป็นแต่ไม่มี ต้องดัง ไม่ใช่ถูกแทนด้วยค่าตั้งต้น</li><li>ค่าตั้งต้นใช้ได้เมื่อตกลงความหมายกันไว้แล้ว และควรบันทึกเหตุผลไว้ในโค้ด</li><li>ข้อความว่าง <code>null</code> และไม่มีคีย์ ยุบเป็นอันเดียวได้ ถ้าตั้งใจ</li><li>ข้อความว่างไม่ผ่านสำหรับ field ที่จำเป็น</li><li>ค่าตกแต่งอย่าง <code>—</code> อยู่ที่ชั้นแสดงผล ห้ามเขียนกลับเข้าข้อมูล</li><li>เมื่อ nullable เยอะเกินไป ให้ดูว่าจริง ๆ แล้วมันคือหลายสถานะที่ควรแยกกัน</li></ul></div><p><strong>บทถัดไป:</strong> 6.5 จะจัดการ JSON ที่ซ้อนกันหลายชั้น ซึ่งเป็นจุดที่ข้อความผิดพลาดต้องบอกตำแหน่งให้ได้ ไม่งั้นจะไล่หาสาเหตุไม่เจอ</p></section>

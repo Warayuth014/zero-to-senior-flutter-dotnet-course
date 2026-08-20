@@ -1,2 +1,201 @@
-<div class="note">DTO สะท้อน wire contract, domain model สะท้อนกฎธุรกิจ, UI model สะท้อนสิ่งที่หน้าจอต้อง render การแยกชั้นช่วยไม่ให้ชื่อ JSON/null จาก API แพร่ทั่วแอป</div>
-<section><h2>1. DTO</h2><p>รับ field ตาม API แม้ nullable/ชื่อไม่สวย และ parseอย่าง defensive</p></section><section><h2>2. Domain</h2><p>ใช้ชนิดที่รักษา invariant เช่น TaskId, Quantity, TaskStatus และไม่มี BuildContext</p></section><section><h2>3. UI model</h2><p>รวม title, badge, enabled ที่ deriveแล้ว แต่ไม่ทำ HTTP</p></section><section><h2>4. Mapping</h2><pre class="code-vs"><code>Task toDomain(TaskDto d) =&gt; Task(id: d.id, status: parseStatus(d.status));</code></pre></section><section><h2>5. เมื่อไม่ต้องแยก</h2><p>CRUDเล็ก contractเสถียรอาจใช้ modelเดียว แต่บันทึก trade-off</p></section><section><h2>6. WMS</h2><p>Repositoryควรแปลง API DTOก่อนส่ง WarehouseStore ไม่ให้ UIรู้ PascalCase/fallback keys</p></section><section><h2>7. แบบฝึกหัด</h2><p>DTO qty nullableแต่ domainห้าม null ทำที่ไหน?</p><details><summary>เฉลย</summary><p>Mapper validate/rejectหรือใช้ defaultที่ contractรับรอง ไม่ซ่อน nullเป็น 0โดยเดา</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn">อย่าสร้าง God modelหนึ่งตัวมี JSON, mutable UI stateและbusiness methodsทั้งหมด</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แยกสิ่งที่เซิร์ฟเวอร์ส่งมา ออกจากสิ่งที่แอปใช้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> D1.6 (คลาสและ constructor) และ 4.2 (อย่าเก็บสิ่งที่คำนวณได้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่าควรมี model กี่ชั้น และรู้ว่าการมีชั้นเดียวจะเจอปัญหาอะไร</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตลอดห้า Part ที่ผ่านมา ข้อมูลทั้งหมดเป็นของปลอมที่เขียนไว้ในโค้ด</p><pre class="code-vs"><code>const NavTask(id: 'T-001', palletCode: 'PAL-0101', quantity: 12),</code></pre><p>ของจริงที่มาจากเซิร์ฟเวอร์หน้าตาแบบนี้</p><pre class="code-vs"><code>{
+  "id": "T-001",
+  "palletCode": "PAL-0101",
+  "quantity": 12,
+  "status": "PENDING",
+  "createdAt": "2026-08-15T03:00:00Z",
+  "note": null
+}</code></pre><p>ทางที่ง่ายที่สุดคือทำคลาสเดียวให้ตรงกับ JSON แล้วใช้ทั้งแอป ซึ่งได้ผลจนกระทั่งเจอสิ่งเหล่านี้</p><table><thead><tr><th>สิ่งที่เกิดขึ้นจริง</th><th>ผลถ้ามี model ชั้นเดียว</th></tr></thead><tbody>
+<tr><td><code>status</code> เป็นข้อความ</td><td>เขียน <code>if (task.status == 'PENDING')</code> กระจายทั่วหน้าจอ</td></tr>
+<tr><td>เซิร์ฟเวอร์เก่าส่ง <code>"Id"</code> ตัวใหญ่</td><td>ต้องเขียน <code>json['id'] ?? json['Id']</code> ในทุก model</td></tr>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนชื่อ field</td><td>ต้องแก้ทุกที่ที่ใช้ ตั้งแต่ปุ่มยันข้อความบนจอ</td></tr>
+<tr><td>บางครั้ง <code>quantity</code> เป็น <code>null</code></td><td>ต้องเขียน <code>?? 0</code> เต็มไปหมด แล้วยอดคลาดเคลื่อน</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>JSON</td><td>รูปแบบข้อความที่ใช้ส่งข้อมูลระหว่างแอปกับเซิร์ฟเวอร์</td></tr>
+<tr><td>wire / บนสาย</td><td>รูปแบบของข้อมูลตอนเดินทาง</td></tr>
+<tr><td>DTO</td><td>คลาสที่สะท้อนหน้าตาของข้อมูลบนสายตรง ๆ</td></tr>
+<tr><td>domain model</td><td>คลาสที่สะท้อนสิ่งที่ธุรกิจสนใจ</td></tr>
+<tr><td>mapper</td><td>ตัวแปลงจากชั้นหนึ่งไปอีกชั้น</td></tr>
+<tr><td>contract / สัญญา</td><td>ข้อตกลงว่าข้อมูลจะมีหน้าตาแบบไหน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สองภาษาที่ต้องแปล</h2><pre class="code-vs"><code>ภาษาของสาย                       ภาษาของธุรกิจ
+─────────────                    ──────────────
+status: "PENDING"      ──แปล──→  status: TaskStatus.pending
+quantity: "12"                   quantity: 12
+createdAt: "...+07:00"           createdAt: DateTime (UTC)
+note: ""                         note: null</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เซิร์ฟเวอร์พูดภาษาของมัน แอปพูดภาษาของเรา — งานของชั้นแปลคือทำให้ทั้งสองฝั่งไม่ต้องรู้จักกัน</div><p>ประโยชน์ที่ได้ทันทีคือ <strong>เมื่อเซิร์ฟเวอร์เปลี่ยน มีแค่ที่เดียวที่ต้องแก้</strong></p></section>
+
+<section><h2>4. สองชั้นที่ต้องมี</h2><p>เปิด <code>lib/json_basics/task_dto.dart</code></p><pre class="code-vs"><code>/// สิ่งที่เซิร์ฟเวอร์ส่งมาจริง — ไม่ใช่สิ่งที่แอปอยากได้
+class TaskDto {
+  final String id;
+  final String palletCode;
+  final int quantity;
+  final String status;         // ยังเป็นข้อความ
+  final DateTime createdAt;
+  final String? note;
+}</code></pre><p>เปิด <code>lib/json_basics/task_domain.dart</code></p><pre class="code-vs"><code>/// งานหนึ่งชิ้นในภาษาของธุรกิจ ไม่ใช่ภาษาของสาย
+class Task {
+  final String id;
+  final String palletCode;
+  final int quantity;
+  final TaskStatus status;     // เป็น enum แล้ว
+  final DateTime createdAt;
+  final String? note;
+}</code></pre><p>ดูเผิน ๆ เหมือนซ้ำซ้อน แต่ต่างกันสามอย่างที่สำคัญ</p><table><thead><tr><th></th><th><code>TaskDto</code></th><th><code>Task</code></th></tr></thead><tbody>
+<tr><td><code>status</code></td><td><code>String</code> — เพราะเซิร์ฟเวอร์อาจส่งค่าที่เราไม่รู้จัก</td><td><code>TaskStatus</code> — เพราะแอปต้องตัดสินใจจากมัน</td></tr>
+<tr><td>ค่าถูกตรวจแล้วหรือยัง</td><td>ตรวจแค่รูปแบบ</td><td>ตรวจกฎธุรกิจแล้ว เช่นจำนวนต้องมากกว่าศูนย์</td></tr>
+<tr><td>ใครใช้</td><td>ชั้นที่คุยกับเซิร์ฟเวอร์เท่านั้น</td><td>ทุกที่ในแอป</td></tr>
+</tbody></table><div class="warn">ห้ามส่ง <code>TaskDto</code> เข้าไปในหน้าจอเด็ดขาด — ทันทีที่ทำ หน้าจอจะต้องรู้เรื่องชื่อ field ของเซิร์ฟเวอร์ และการเปลี่ยนฝั่งเซิร์ฟเวอร์จะลามไปทั้งแอป</div></section>
+
+<section><h2>5. ตัวแปลงคือด่านสุดท้าย</h2><pre class="code-vs"><code>Task toTask(TaskDto dto, {String path = ''}) {
+  if (dto.quantity &lt;= 0) {
+    throw ContractException(
+      path.isEmpty ? 'quantity' : '$path.quantity',
+      'จำนวนต้องมากกว่าศูนย์ แต่ได้ ${dto.quantity}',
+    );
+  }
+
+  return Task(
+    id: dto.id,
+    palletCode: dto.palletCode,
+    quantity: dto.quantity,
+    status: parseTaskStatus(dto.status),    // ข้อความ → enum
+    createdAt: dto.createdAt,
+    note: dto.note,
+  );
+}</code></pre><p>สองอย่างที่เกิดตรงนี้</p><table><thead><tr><th>สิ่งที่ทำ</th><th>ทำไมต้องทำที่นี่</th></tr></thead><tbody>
+<tr><td>ตรวจกฎธุรกิจ</td><td>ผ่านด่านนี้แล้ว ที่อื่นไม่ต้องตรวจซ้ำอีก</td></tr>
+<tr><td>แปลงข้อความเป็น enum</td><td>ทำที่เดียว ไม่ใช่ที่ทุกหน้าจอ</td></tr>
+</tbody></table><p>ผลที่ได้คือ <strong>ถ้ามี <code>Task</code> อยู่ในมือ แปลว่ามันถูกต้องแน่นอน</strong> ซึ่งเป็นหลักเดียวกับ 4.7 — ทำให้ค่าที่เป็นไปไม่ได้สร้างไม่ได้ตั้งแต่แรก</p></section>
+
+<section><h2>6. ทำไมจำนวนติดลบต้องปฏิเสธ ไม่ใช่ปรับเป็นศูนย์</h2><pre class="code-vs"><code>// ทางที่ดูใจดี แต่อันตราย
+quantity: dto.quantity &lt; 0 ? 0 : dto.quantity,</code></pre><p>ถ้าเซิร์ฟเวอร์ส่งจำนวน <code>-5</code> มา แปลว่ามีบางอย่างผิดอยู่แล้ว — อาจเป็นบั๊กฝั่งหลังบ้าน หรือข้อมูลในฐานข้อมูลเสีย</p><table><thead><tr><th>ถ้าปรับเป็นศูนย์เงียบ ๆ</th><th>ถ้าปฏิเสธ</th></tr></thead><tbody>
+<tr><td>คนหน้างานหยิบของ 0 ชิ้นแล้วปิดงาน</td><td>เห็นข้อผิดพลาดทันที และแจ้งได้</td></tr>
+<tr><td>ยอดในระบบเพี้ยนโดยไม่มีใครรู้</td><td>ปัญหาถูกพบตั้งแต่วันแรก</td></tr>
+<tr><td>ไล่หาสาเหตุไม่ได้ เพราะไม่มีร่องรอย</td><td>รู้ว่าพังที่ไหนและเพราะอะไร</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 4.8 หัวข้อ 6 — <strong>อย่ากลืนสิ่งที่แปลว่ามีบั๊ก</strong> ให้มันดังตั้งแต่ตอนที่ยังหาสาเหตุได้</p></section>
+
+<section><h2>7. ชั้นที่สาม: model ของหน้าจอ</h2><p>บางครั้งหน้าจอต้องการสิ่งที่ธุรกิจไม่มีคำเรียก</p><pre class="code-vs"><code>class TaskTileViewModel {
+  const TaskTileViewModel({
+    required this.title,
+    required this.subtitle,
+    required this.badgeColor,
+    required this.canTap,
+  });
+  ...
+}</code></pre><table><thead><tr><th>สิ่งที่หน้าจอต้องการ</th><th>ธุรกิจมีคำนี้ไหม</th></tr></thead><tbody>
+<tr><td>สีของป้ายสถานะ</td><td>ไม่มี</td></tr>
+<tr><td>ข้อความ “12 ชิ้น · เมื่อ 3 นาทีที่แล้ว”</td><td>ไม่มี</td></tr>
+<tr><td>แตะได้หรือไม่</td><td>ใกล้เคียง แต่ไม่ตรง</td></tr>
+</tbody></table><p>แต่ <strong>ส่วนใหญ่ยังไม่ต้องมีชั้นนี้</strong> — สร้างเมื่อพบว่าหน้าจอต้องคำนวณเรื่องเดิมซ้ำหลายที่จริง ๆ ไม่ใช่สร้างไว้ก่อน</p><p>ใน lab จึงมีแค่สองชั้น เพราะหน้าจอคำนวณสิ่งที่ต้องใช้จาก <code>Task</code> ได้โดยตรง</p></section>
+
+<section><h2>8. เมื่อไหร่ที่สองชั้นก็ยังเยอะเกิน</h2><table><thead><tr><th>สถานการณ์</th><th>ควรมีกี่ชั้น</th></tr></thead><tbody>
+<tr><td>ข้อมูลตั้งค่าง่าย ๆ ที่แอปแค่แสดง</td><td>ชั้นเดียวก็พอ</td></tr>
+<tr><td>ข้อมูลที่มีสถานะ กฎ หรือการคำนวณ</td><td>สองชั้น</td></tr>
+<tr><td>ข้อมูลที่หน้าจอต้องจัดรูปแบบเยอะ</td><td>สามชั้น</td></tr>
+</tbody></table><p>เกณฑ์ที่ใช้ตัดสิน — ถามว่า <strong>หน้าตาของ JSON กับสิ่งที่ธุรกิจสนใจ ต่างกันไหม</strong></p><table><thead><tr><th>ถ้าตอบว่า</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td>เหมือนกันเป๊ะ และไม่มีกฎอะไร</td><td>ชั้นเดียวพอ แต่บันทึกไว้ว่าทำไม</td></tr>
+<tr><td>ต่างกันแม้แต่เรื่องเดียว</td><td>แยกสองชั้น</td></tr>
+</tbody></table><p>และเมื่อเลือกชั้นเดียว ให้รู้ตัวว่ากำลังแลกอะไร — วันที่เซิร์ฟเวอร์เปลี่ยน จะไม่มีที่กันการเปลี่ยนแปลงนั้นไม่ให้ลามเข้ามา</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนชื่อ field แล้วต้องแก้สิบไฟล์</td><td>ใช้ DTO ทั้งแอป</td><td>แยก domain model</td></tr>
+<tr><td><code>if (status == 'PENDING')</code> กระจายทั่วหน้าจอ</td><td>ไม่ได้แปลงเป็น enum</td><td>แปลงที่ mapper</td></tr>
+<tr><td>ยอดเพี้ยนโดยไม่มีใครรู้</td><td>ใส่ <code>?? 0</code> ให้ค่าที่ผิด</td><td>ปฏิเสธค่าที่ผิด</td></tr>
+<tr><td>คลาสเดียวมีทั้ง <code>fromJson</code> สีของป้าย และกฎธุรกิจ</td><td>ยัดทุกอย่างไว้ที่เดียว</td><td>แยกตามหน้าที่</td></tr>
+<tr><td>สร้างสามชั้นตั้งแต่วันแรกแล้วเขียนโค้ดซ้ำ</td><td>แยกชั้นเกินจำเป็น</td><td>เริ่มสองชั้น เพิ่มเมื่อเจอปัญหาจริง</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์ส่งข้อมูลใบรับเข้ามาแบบนี้</p><pre class="code-vs"><code>{
+  "orderNo": "IN-2026-0812",
+  "supplierName": "บริษัท ซัพพลาย จำกัด",
+  "statusCode": 20,
+  "expectedAt": "2026-08-16T01:00:00Z",
+  "receivedQty": null,
+  "expectedQty": 130
+}</code></pre><p>โดยที่ <code>statusCode</code> มีความหมายตามนี้ — 10 คือรอรับ, 20 คือกำลังรับ, 30 คือรับครบแล้ว</p><ol><li>ออกแบบ DTO และ domain model</li><li>เขียนตัวแปลง พร้อมตัดสินว่า <code>receivedQty</code> ที่เป็น <code>null</code> ควรกลายเป็นอะไร</li><li>ตอบว่าถ้าเซิร์ฟเวอร์ส่ง <code>statusCode: 40</code> ที่ไม่มีในเอกสาร ควรทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สองชั้น</strong></p><pre class="code-vs"><code>// ชั้นสาย — รับมาตามที่ส่งมา ไม่ตัดสินอะไร
+class InboundOrderDto {
+  const InboundOrderDto({
+    required this.orderNo,
+    required this.supplierName,
+    required this.statusCode,      // ยังเป็นตัวเลข
+    required this.expectedQty,
+    this.expectedAt,
+    this.receivedQty,              // ยังเป็น null ได้
+  });
+
+  final String orderNo;
+  final String supplierName;
+  final int statusCode;
+  final int expectedQty;
+  final DateTime? expectedAt;
+  final int? receivedQty;
+}</code></pre><pre class="code-vs"><code>// ชั้นธุรกิจ — ตรวจแล้ว แปลงแล้ว ใช้ได้เลย
+enum InboundStatus { waiting, receiving, completed, unknown }
+
+class InboundOrder {
+  const InboundOrder({
+    required this.orderNo,
+    required this.supplierName,
+    required this.status,
+    required this.expectedQuantity,
+    required this.receivedQuantity,   // ไม่เป็น null แล้ว
+    this.expectedAt,
+  });
+
+  final String orderNo;
+  final String supplierName;
+  final InboundStatus status;
+  final int expectedQuantity;
+  final int receivedQuantity;
+  final DateTime? expectedAt;
+
+  // คำนวณเอา ไม่เก็บ (4.2)
+  int get remainingQuantity =&gt; expectedQuantity - receivedQuantity;
+  bool get isFullyReceived =&gt; receivedQuantity &gt;= expectedQuantity;
+}</code></pre><p><strong>ข้อ 2 — ตัวแปลง และ <code>receivedQty</code> ที่เป็น null</strong></p><pre class="code-vs"><code>InboundStatus parseInboundStatus(int code) =&gt; switch (code) {
+  10 =&gt; InboundStatus.waiting,
+  20 =&gt; InboundStatus.receiving,
+  30 =&gt; InboundStatus.completed,
+  _ =&gt; InboundStatus.unknown,
+};
+
+InboundOrder toInboundOrder(InboundOrderDto dto) {
+  if (dto.expectedQty &lt;= 0) {
+    throw const ContractException('expectedQty', 'จำนวนที่คาดต้องมากกว่าศูนย์');
+  }
+
+  final received = dto.receivedQty ?? 0;
+  if (received &lt; 0) {
+    throw const ContractException('receivedQty', 'จำนวนที่รับต้องไม่ติดลบ');
+  }
+
+  return InboundOrder(
+    orderNo: dto.orderNo,
+    supplierName: dto.supplierName,
+    status: parseInboundStatus(dto.statusCode),
+    expectedQuantity: dto.expectedQty,
+    receivedQuantity: received,
+    expectedAt: dto.expectedAt,
+  );
+}</code></pre><p><strong>ทำไม <code>receivedQty</code> ที่เป็น null กลายเป็น 0 ได้ ทั้งที่หัวข้อ 6 บอกว่าห้าม</strong></p><p>นี่คือจุดที่ต้องแยกให้ออก และเป็นสาระของข้อนี้</p><table><thead><tr><th></th><th><code>receivedQty: null</code></th><th><code>quantity: -5</code></th></tr></thead><tbody>
+<tr><td>แปลว่าอะไร</td><td>ยังไม่เริ่มรับ — เป็นสถานะปกติ</td><td>ค่าที่เป็นไปไม่ได้ — ต้องมีอะไรผิด</td></tr>
+<tr><td>เดาได้ไหมว่าควรเป็นเท่าไหร่</td><td>ได้ — ยังไม่รับ ก็คือรับไป 0</td><td>ไม่ได้ — ไม่รู้ว่าที่ถูกคือเท่าไหร่</td></tr>
+<tr><td>ควรทำอย่างไร</td><td>ใส่ค่าตั้งต้นได้</td><td>ปฏิเสธ</td></tr>
+</tbody></table><p>เกณฑ์คือ <strong>ถ้า <code>null</code> มีความหมายที่ตกลงกันไว้แล้ว ให้แปลงตามความหมายนั้น แต่ถ้ามันแปลว่า "ไม่รู้" ห้ามเดา</strong></p><p>และต้องยืนยันกับฝั่งหลังบ้านก่อนว่า <code>null</code> ตรงนี้แปลว่า “ยังไม่รับ” จริง ไม่ใช่ “ลืมใส่มา” — ถ้าตอบไม่ได้ ก็ยังเดาไม่ได้</p><p><strong>ข้อ 3 — <code>statusCode: 40</code> ที่ไม่มีในเอกสาร</strong></p><p>ต้องไม่พัง แต่ต้องไม่แกล้งทำเป็นรู้จัก</p><pre class="code-vs"><code>_ =&gt; InboundStatus.unknown,</code></pre><p>เหตุผลที่ไม่ควรโยนข้อผิดพลาด</p><table><thead><tr><th>ถ้าโยน</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ทั้งรายการโหลดไม่ได้</td><td>ใบอื่นอีก 40 ใบที่ปกติดี ก็ใช้ไม่ได้ไปด้วย</td></tr>
+<tr><td>คนหน้างานทำงานไม่ได้เลย</td><td>ทั้งที่ปัญหาคือใบเดียว</td></tr>
+</tbody></table><p>เหตุผลที่ไม่ควรเดาว่าเป็นอย่างอื่น</p><pre class="code-vs"><code>_ =&gt; InboundStatus.waiting,     // อันตราย</code></pre><p>ถ้า 40 หมายถึง “ยกเลิกแล้ว” แต่แอปแสดงว่า “รอรับ” คนหน้างานจะไปรับของที่ถูกยกเลิกไปแล้ว</p><p><strong>สิ่งที่ต้องทำคู่กับ unknown</strong></p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>แสดงว่า “สถานะไม่รู้จัก” ตรง ๆ</td><td>ผู้ใช้จะได้ไม่เข้าใจผิด</td></tr>
+<tr><td>ห้ามให้กดทำงานต่อ</td><td>ไม่รู้ว่าทำได้หรือไม่</td></tr>
+<tr><td>บันทึก log ว่าเจอค่าอะไร</td><td>ทีมจะได้รู้ว่าต้องอัปเดตแอป</td></tr>
+<tr><td>บอกให้ผู้ใช้อัปเดตแอป</td><td>เป็นทางแก้จริงของปัญหานี้</td></tr>
+</tbody></table><p>ใน lab เห็นแนวคิดนี้ได้ที่ <code>TaskStatus.unknown</code> ซึ่งมี <code>canWorkOn</code> เป็น <code>false</code> — รู้จักว่ามีอยู่ แต่ไม่ให้ทำอะไรกับมัน</p><p>เรื่องนี้จะลงลึกใน 6.9</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>เซิร์ฟเวอร์พูดภาษาของมัน แอปพูดภาษาของเรา ต้องมีชั้นแปล</li><li>DTO สะท้อนหน้าตาบนสาย ไม่ตัดสินอะไร</li><li>domain model สะท้อนสิ่งที่ธุรกิจสนใจ และถูกตรวจแล้ว</li><li>ห้ามส่ง DTO เข้าหน้าจอ ไม่งั้นการเปลี่ยนฝั่งเซิร์ฟเวอร์จะลามทั้งแอป</li><li>ตัวแปลงคือด่านสุดท้าย — ผ่านแล้วที่อื่นไม่ต้องตรวจซ้ำ</li><li>ค่าที่แปลว่ามีบั๊ก ต้องปฏิเสธ ไม่ใช่ปรับให้ดูดี</li><li><code>null</code> ที่มีความหมายตกลงไว้แล้ว แปลงได้ แต่ <code>null</code> ที่แปลว่าไม่รู้ ห้ามเดา</li><li>ชั้นที่สามสำหรับหน้าจอ สร้างเมื่อเจอปัญหาจริง ไม่ใช่สร้างไว้ก่อน</li></ul></div><p><strong>บทถัดไป:</strong> 6.2 จะลงมือเขียน <code>fromJson</code> และ <code>toJson</code> จริง พร้อมกฎที่ทำให้มันไม่พังเมื่อข้อมูลไม่เป็นอย่างที่คิด</p></section>

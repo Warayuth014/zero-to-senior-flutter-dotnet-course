@@ -4,9 +4,158 @@
 <title>dynamic &amp; Runtime Cast</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-08 · Flutter + .NET</span><h1>dynamic &amp; Runtime Cast</h1><p>Part 6: Models &amp; JSON</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Decode</a></li><li><a href="#section-2">Cast</a></li><li><a href="#section-3">Pattern</a></li><li><a href="#section-4">Boundary</a></li><li><a href="#section-5">Error</a></li><li><a href="#section-6">Logging</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>dynamic</code> เลื่อน type errorไปรันไทม์ จึงควรกักไว้ที่ decode boundaryแล้วคืน typed DTO/Resultให้ชั้นอื่น</div>
-<section id="section-1"><h2>1. Decode</h2><pre class="code-vs"><code>final decoded = jsonDecode(body);
-if (decoded is! Map&lt;String, dynamic&gt;) throw ContractException('root');</code></pre></section><section id="section-2"><h2>2. Cast</h2><p><code>as</code> assertไม่ convert; num as doubleอาจพัง</p></section><section id="section-3"><h2>3. Pattern</h2><p>ใช้ switch/type promotionตรวจ Object?ก่อนอ่าน</p></section><section id="section-4"><h2>4. Boundary</h2><p>ApiClientคืน decoded rawได้เฉพาะ repository parser ไม่ส่ง dynamicถึง widget</p></section><section id="section-5"><h2>5. Error</h2><p>แยก malformed JSON, wrong shapeและdomain validation</p></section><section id="section-6"><h2>6. Logging</h2><p>log path/type/status ไม่ dump token/PIIทั้ง body</p></section><section id="section-7"><h2>7. แบบฝึกหัด</h2><p><code>json['qty'] as int</code> เมื่อ 5.0?</p><details><summary>เฉลย</summary><p>พัง ใช้ num converterและตรวจ integer semantics</p></details></section><section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ด้วย dynamicทั้ง modelเพียงให้ compileผ่าน</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: dynamic คือการปิดสวิตช์ความปลอดภัย</a></li><li><a href="#section-4">as ไม่ได้แปลงค่า</a></li><li><a href="#section-5">ตรวจด้วย is แล้ว compiler จะช่วยต่อ</a></li><li><a href="#section-6">ตรวจก้อนนอกสุดก่อนเสมอ</a></li><li><a href="#section-7">แยกความผิดพลาดสามชนิด</a></li><li><a href="#section-8">กัก dynamic ไว้ที่ชั้นเดียว</a></li><li><a href="#section-9">บันทึกให้พอไล่หาสาเหตุ แต่ไม่มากเกินไป</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: กัก dynamic ไว้ที่ขอบ ไม่ให้หลุดเข้าแอป</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (ตัวช่วยอ่านค่า) และ D1.19 (dynamic และ cast)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่า <code>as</code> ทำอะไรจริง ๆ และแยกความผิดพลาดสามชนิดที่มักถูกยุบรวมกัน</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ทุกอย่างที่ผ่านมาในบทนี้เริ่มจากบรรทัดเดียว</p><pre class="code-vs"><code>final decoded = jsonDecode(responseBody);</code></pre><p><code>decoded</code> มีชนิดเป็น <code>dynamic</code> ซึ่งแปลว่า <strong>compiler เลิกช่วยตั้งแต่จุดนี้</strong></p><pre class="code-vs"><code>decoded.items.first.quantity + 1     // คอมไพล์ผ่าน
+decoded.thisMethodDoesNotExist()     // คอมไพล์ผ่านเหมือนกัน
+decoded['items'][0]['qty'] * 2       // ผ่านอีก</code></pre><p>ทั้งสามบรรทัดจะพังตอนรัน และพังคนละแบบ โดยที่ไม่มีอะไรเตือนตอนเขียน</p><p>สิ่งที่ทำให้เรื่องนี้ร้ายกว่าที่คิดคือ <code>dynamic</code> <strong>แพร่ต่อได้</strong> — ถ้าปล่อยให้มันหลุดออกจากชั้นที่แปลงข้อมูล มันจะไหลไปถึงหน้าจอ และทุกจุดที่แตะมันจะกลายเป็นจุดที่พังได้ตอนรัน</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>dynamic</code></td><td>ชนิดที่แปลว่า “อะไรก็ได้” — compiler ไม่ตรวจอะไรเลย</td></tr>
+<tr><td><code>Object?</code></td><td>ชนิดที่แปลว่า “อะไรก็ได้ แต่ต้องตรวจก่อนใช้”</td></tr>
+<tr><td><code>as</code></td><td>ยืนยันว่าเป็นชนิดนี้ — ถ้าไม่ใช่จะพัง</td></tr>
+<tr><td><code>is</code></td><td>ถามว่าเป็นชนิดนี้ไหม — คืน <code>true</code> หรือ <code>false</code></td></tr>
+<tr><td>type promotion</td><td>compiler เลื่อนชนิดให้เองหลังจากตรวจด้วย <code>is</code></td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: dynamic คือการปิดสวิตช์ความปลอดภัย</h2><pre class="code-vs"><code>dynamic value = ...;
+value.anything();      // compiler: "ได้เลย ไม่ตรวจ"
+
+Object? value = ...;
+value.anything();      // compiler: "ไม่ได้ ต้องตรวจก่อน"</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ใช้ <code>Object?</code> แทน <code>dynamic</code> ทุกที่ที่ทำได้ — ทั้งคู่รับค่าอะไรก็ได้เหมือนกัน แต่ <code>Object?</code> บังคับให้ตรวจก่อนใช้ ส่วน <code>dynamic</code> ปล่อยผ่าน</div><p>สังเกตว่าตัวช่วยใน lab รับ <code>Object?</code> ไม่ใช่ <code>dynamic</code></p><pre class="code-vs"><code>Map&lt;String, dynamic&gt; requireMap(Object? value, String path) {
+  if (value is Map&lt;String, dynamic&gt;) return value;
+  throw ContractException(path, 'ต้องเป็น object แต่ได้ ${value.runtimeType}');
+}</code></pre></section>
+
+<section id="section-4"><h2>4. as ไม่ได้แปลงค่า</h2><p>ความเข้าใจผิดที่พบบ่อยที่สุดเรื่องนี้</p><pre class="code-vs"><code>final value = 12.0;
+value as int;      // พัง — ไม่ได้แปลงให้ แค่ตรวจแล้วบอกว่าไม่ใช่</code></pre><table><thead><tr><th>คำสั่ง</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>value as int</code></td><td>ยืนยันว่าเป็น <code>int</code> อยู่แล้ว ถ้าไม่ใช่ก็พัง</td></tr>
+<tr><td><code>value.toInt()</code></td><td>แปลงจริง</td></tr>
+</tbody></table><p>ตัวที่ทำให้สับสนคือบางครั้ง <code>as</code> ก็ผ่าน</p><pre class="code-vs"><code>final Object value = 12;
+value as num;      // ผ่าน — int เป็นลูกของ num
+value as int;      // ผ่าน — เป็น int จริง
+value as double;   // พัง — int ไม่ใช่ double</code></pre><p>ซึ่งอธิบายว่าทำไม <code>json['quantity'] as int</code> ถึงผ่านบ้างพังบ้าง โดยขึ้นกับว่าเซิร์ฟเวอร์เขียนจุดทศนิยมมาหรือไม่ ตามที่เจอใน 6.3</p></section>
+
+<section id="section-5"><h2>5. ตรวจด้วย is แล้ว compiler จะช่วยต่อ</h2><pre class="code-vs"><code>if (value is Map&lt;String, dynamic&gt;) return value;
+//                                        └─ ตรงนี้ value มีชนิดเป็น Map แล้ว
+//                                           ไม่ต้องเขียน as อีก</code></pre><p>นี่คือ type promotion ที่เคยเจอใน D1.13 — พอตรวจด้วย <code>is</code> แล้ว compiler รู้เองว่าในบล็อกนั้นค่ามีชนิดอะไร</p><p>ใช้กับ <code>switch</code> ได้ด้วย ซึ่งอ่านง่ายกว่าเมื่อมีหลายกรณี</p><pre class="code-vs"><code>double? _toDouble(Object? value) =&gt; switch (value) {
+  num n =&gt; n.toDouble(),                 // n มีชนิด num
+  String s =&gt; double.tryParse(s.trim()), // s มีชนิด String
+  _ =&gt; null,
+};</code></pre><table><thead><tr><th></th><th><code>as</code></th><th><code>is</code> / <code>switch</code></th></tr></thead><tbody>
+<tr><td>ถ้าชนิดไม่ตรง</td><td>พังทันที</td><td>ไปทางอื่นได้</td></tr>
+<tr><td>ควบคุมข้อความผิดพลาด</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>เขียนสั้นกว่า</td><td>ใช่</td><td>ยาวกว่าเล็กน้อย</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. ตรวจก้อนนอกสุดก่อนเสมอ</h2><pre class="code-vs"><code>final decoded = jsonDecode(body);
+if (decoded is! Map&lt;String, dynamic&gt;) {
+  throw const ContractException('', 'ก้อนนอกสุดต้องเป็น object');
+}
+final page = TaskPageDto.fromJson(decoded);</code></pre><p>ทำไมต้องตรวจ ทั้งที่รู้ว่าเซิร์ฟเวอร์ส่ง object มา</p><table><thead><tr><th>สิ่งที่อาจได้แทน</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td><code>List</code></td><td>บาง endpoint คืน array ตรง ๆ</td></tr>
+<tr><td><code>String</code></td><td>เซิร์ฟเวอร์ตอบข้อความผิดพลาดกลับมาเป็นข้อความล้วน</td></tr>
+<tr><td><code>null</code></td><td>ตอบ 204 แล้ว body ว่าง</td></tr>
+<tr><td>โยน <code>FormatException</code></td><td>ได้หน้า HTML แทน JSON เพราะ proxy หรือหน้า login</td></tr>
+</tbody></table><p>แถวสุดท้ายเจอบ่อยในคลังที่มีระบบเครือข่ายภายใน — พอ session หมดอายุ proxy จะตอบหน้า login กลับมา แล้ว <code>jsonDecode</code> ก็โยน <code>FormatException</code> ที่หน้าตาไม่เกี่ยวอะไรกับเรื่องจริงเลย</p></section>
+
+<section id="section-7"><h2>7. แยกความผิดพลาดสามชนิด</h2><p>สิ่งที่มักถูกยุบรวมกันจนไล่หาสาเหตุไม่ได้</p><table><thead><tr><th>ชนิด</th><th>แปลว่า</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ข้อความไม่ใช่ JSON</td><td>ได้ HTML หรือข้อความเปล่า</td><td>ตรวจว่าที่อยู่ถูกไหม หรือ session หมดอายุ</td></tr>
+<tr><td>เป็น JSON แต่โครงผิด</td><td>สัญญาไม่ตรงกัน</td><td>แจ้งทีมหลังบ้าน</td></tr>
+<tr><td>โครงถูก แต่ค่าผิดกฎธุรกิจ</td><td>ข้อมูลในระบบมีปัญหา</td><td>แจ้งพร้อมระบุรายการ</td></tr>
+</tbody></table><pre class="code-vs"><code>Map&lt;String, dynamic&gt; decodeJsonObject(String body) {
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(body);
+  } on FormatException catch (error) {
+    // ไม่ใช่ JSON เลย — คนละปัญหากับ JSON ที่โครงผิด
+    throw ContractException('', 'ข้อมูลที่ได้ไม่ใช่ JSON: ${error.message}');
+  }
+  return requireMap(decoded, '');
+}</code></pre><p>ทั้งสามชนิดควรแยกจาก <strong>ปัญหาเครือข่าย</strong> ด้วย — เน็ตหลุดกับข้อมูลผิดสัญญาต้องรับมือคนละแบบ ตาม 4.8 และจะทำเต็มรูปแบบใน Part 8</p></section>
+
+<section id="section-8"><h2>8. กัก dynamic ไว้ที่ชั้นเดียว</h2><pre class="code-vs"><code>HTTP → jsonDecode → dynamic ─┐
+                             │  ← dynamic อยู่ได้แค่ในกรอบนี้
+    DTO.fromJson ────────────┘
+         ↓
+    Task (domain)  ← ไม่มี dynamic แล้ว
+         ↓
+    store, หน้าจอ  ← ไม่มี dynamic เลย</code></pre><p>เกณฑ์ที่ตรวจได้ง่าย — <strong>ค้นคำว่า <code>dynamic</code> ในโปรเจกต์ ถ้าเจอนอกโฟลเดอร์ที่แปลงข้อมูล แปลว่ามีอะไรรั่ว</strong></p><pre class="code-vs"><code>// สัญญาณอันตราย
+class TaskStore extends ChangeNotifier {
+  List&lt;dynamic&gt; _rawTasks = [];        // dynamic หลุดเข้ามาถึง store แล้ว
+}</code></pre><table><thead><tr><th>ถ้า dynamic หลุดเข้ามา</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>หน้าจอเขียน <code>task['quantity']</code></td><td>พิมพ์ชื่อคีย์ผิดแล้วรู้ตอนใช้งานจริง</td></tr>
+<tr><td>ทุกจุดที่แตะข้อมูลกลายเป็นจุดเสี่ยง</td><td>เปลี่ยนสัญญาแล้วไม่มีอะไรบอกว่าต้องแก้ตรงไหน</td></tr>
+<tr><td>เขียนเทสต์ยาก</td><td>ต้องสร้าง map ปลอมแทนที่จะสร้างวัตถุ</td></tr>
+</tbody></table><p>สังเกตว่า <code>Map&lt;String, dynamic&gt;</code> ยังอยู่ในลายเซ็นของ <code>fromJson</code> ซึ่งไม่เป็นไร เพราะ <code>dynamic</code> ตรงนั้นคือค่าที่ยังไม่ได้ตรวจ และมันจะถูกตรวจในบรรทัดถัดไปทันที</p></section>
+
+<section id="section-9"><h2>9. บันทึกให้พอไล่หาสาเหตุ แต่ไม่มากเกินไป</h2><table><thead><tr><th>ควรบันทึก</th><th>ห้ามบันทึก</th></tr></thead><tbody>
+<tr><td>ที่อยู่ของ endpoint</td><td>token หรือรหัสผ่าน</td></tr>
+<tr><td>รหัสตอบกลับ</td><td>ข้อมูลส่วนบุคคล</td></tr>
+<tr><td><code>path</code> ที่พัง</td><td>เนื้อหาทั้งก้อน</td></tr>
+<tr><td>ชนิดที่ได้รับจริง</td><td>ค่าที่อ่อนไหว</td></tr>
+</tbody></table><pre class="code-vs"><code>// พอไล่หาได้ โดยไม่หลุดข้อมูลอ่อนไหว
+logger.warn('contract violation', {
+  'endpoint': '/api/v2/tasks',
+  'path': error.path,
+  'message': error.message,
+});</code></pre><p>เหตุผลที่ไม่ควรบันทึกทั้งก้อน — payload ของงานคลังมีทั้งชื่อลูกค้า ที่อยู่ และราคา ซึ่งไม่ควรอยู่ในไฟล์ log ที่หลายคนเข้าถึงได้</p><p>ส่วน <code>path</code> กับ <code>message</code> ที่ออกแบบไว้ตั้งแต่ 6.2 พอสำหรับไล่หาสาเหตุแล้วโดยไม่ต้องเปิด payload</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พิมพ์ชื่อเมธอดผิดแล้วคอมไพล์ผ่าน</td><td>ค่าเป็น <code>dynamic</code></td><td>ใช้ <code>Object?</code> แทน</td></tr>
+<tr><td><code>type 'double' is not a subtype of type 'int'</code></td><td>คิดว่า <code>as</code> แปลงค่าให้</td><td>ใช้ตัวแปลงจริง</td></tr>
+<tr><td><code>FormatException: Unexpected character</code></td><td>ได้ HTML แทน JSON</td><td>ตรวจว่าที่อยู่ถูกและ session ยังอยู่</td></tr>
+<tr><td>ทุกปัญหาขึ้นข้อความเดียวกัน</td><td>ไม่แยกชนิดความผิดพลาด</td><td>แยกสามชนิดตามหัวข้อ 7</td></tr>
+<tr><td>หน้าจอเขียน <code>task['quantity']</code></td><td><code>dynamic</code> รั่วออกจากชั้นแปลง</td><td>คืน DTO ที่มีชนิดชัดเจน</td></tr>
+<tr><td>log เต็มไปด้วยข้อมูลลูกค้า</td><td>บันทึก payload ทั้งก้อน</td><td>บันทึกเฉพาะ path และชนิด</td></tr>
+<tr><td>แก้ด้วยการเปลี่ยนทุกอย่างเป็น <code>dynamic</code></td><td>อยากให้คอมไพล์ผ่านเร็ว ๆ</td><td>แก้ที่ชนิดจริง</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>โค้ดนี้อยู่ในชั้นที่คุยกับเซิร์ฟเวอร์</p><pre class="code-vs"><code>Future&lt;List&lt;dynamic&gt;&gt; fetchTasks() async {
+  final response = await client.get('/api/v2/tasks');
+  final decoded = jsonDecode(response.body);
+  return decoded['items'] as List&lt;dynamic&gt;;
+}</code></pre><p>และหน้าจอใช้แบบนี้</p><pre class="code-vs"><code>final tasks = await repository.fetchTasks();
+Text('${tasks[index]['palletCode']} · ${tasks[index]['quantity']} ชิ้น')</code></pre><ol><li>ระบุจุดที่จะพังตอนรัน และแต่ละจุดพังเพราะอะไร</li><li>เขียนใหม่ให้ <code>dynamic</code> ไม่หลุดออกจากชั้นนี้</li><li>ตอบว่าถ้าเซิร์ฟเวอร์เปลี่ยนชื่อ <code>palletCode</code> เป็น <code>palletNo</code> โค้ดสองแบบจะให้ประสบการณ์ต่างกันอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — จุดที่จะพัง</strong></p><table><thead><tr><th>#</th><th>จุด</th><th>พังเพราะ</th></tr></thead><tbody>
+<tr><td>1</td><td><code>jsonDecode(response.body)</code></td><td>ได้ HTML แทน JSON เมื่อ session หมดอายุ</td></tr>
+<tr><td>2</td><td><code>decoded['items']</code></td><td>ถ้า <code>decoded</code> เป็น <code>List</code> หรือ <code>null</code> จะพัง</td></tr>
+<tr><td>3</td><td><code>as List&lt;dynamic&gt;</code></td><td>ถ้า <code>items</code> ไม่ใช่ array</td></tr>
+<tr><td>4</td><td><code>tasks[index]['palletCode']</code></td><td>พิมพ์ชื่อคีย์ผิดได้โดยไม่มีอะไรเตือน</td></tr>
+<tr><td>5</td><td><code>['quantity']</code> ใน <code>Text</code></td><td>ถ้าเป็น <code>null</code> จะแสดงคำว่า "null" บนจอ</td></tr>
+</tbody></table><p>จุดที่ 5 อันตรายที่สุดในทางปฏิบัติ เพราะ <strong>มันไม่พัง</strong> — คนหน้างานจะเห็น “PAL-0101 · null ชิ้น” แล้วไม่รู้ว่าควรหยิบกี่ชิ้น</p><p>และจุดที่ 4 พังไกลจากต้นเหตุมาก — ข้อความผิดพลาดจะชี้ไปที่ไฟล์หน้าจอ ทั้งที่ปัญหาอยู่ที่สัญญากับเซิร์ฟเวอร์</p><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>Future&lt;List&lt;Task&gt;&gt; fetchTasks() async {
+  final response = await client.get('/api/v2/tasks');
+
+  final Object? decoded;
+  try {
+    decoded = jsonDecode(response.body);
+  } on FormatException catch (error) {
+    throw ContractException('', 'ข้อมูลที่ได้ไม่ใช่ JSON: ${error.message}');
+  }
+
+  final page = TaskPageDto.fromJson(requireMap(decoded, ''));
+
+  // แปลงเป็นชนิดของธุรกิจก่อนส่งออกจากชั้นนี้ (6.1)
+  return [
+    for (var index = 0; index &lt; page.items.length; index++)
+      toTask(page.items[index], path: 'items[$index]'),
+  ];
+}</code></pre><pre class="code-vs"><code>// หน้าจอได้ชนิดที่ชัดเจน
+Text('${task.palletCode} · ${task.quantity} ชิ้น')</code></pre><p>สิ่งที่เปลี่ยนไป</p><table><thead><tr><th>เดิม</th><th>ใหม่</th></tr></thead><tbody>
+<tr><td>คืน <code>List&lt;dynamic&gt;</code></td><td>คืน <code>List&lt;Task&gt;</code></td></tr>
+<tr><td>หน้าจออ่านด้วยชื่อคีย์</td><td>หน้าจออ่านด้วยชื่อ field</td></tr>
+<tr><td><code>jsonDecode</code> พังแบบไม่มีบริบท</td><td>แยกเป็น <code>ContractException</code></td></tr>
+<tr><td>ไม่รู้ว่าแถวไหนพัง</td><td>มี path บอก</td></tr>
+</tbody></table><p><strong>ข้อ 3 — เมื่อเซิร์ฟเวอร์เปลี่ยนชื่อคีย์</strong></p><p>นี่คือคำถามที่แสดงคุณค่าจริงของทั้งบทนี้</p><table><thead><tr><th></th><th>แบบเดิม (<code>dynamic</code>)</th><th>แบบใหม่ (typed)</th></tr></thead><tbody>
+<tr><td>รู้ตอนไหน</td><td>ตอนผู้ใช้เปิดหน้าจอที่หน้างาน</td><td>ตอนแรกที่ยิงคำขอ ในการทดสอบ</td></tr>
+<tr><td>เห็นอะไร</td><td>“PAL-0101 · null ชิ้น” หรือ “null · 12 ชิ้น”</td><td>ข้อความผิดพลาดพร้อม path</td></tr>
+<tr><td>ข้อความบอกอะไร</td><td>ไม่มีข้อความ — มันไม่พัง</td><td>“ที่ items[0].palletCode: ไม่มีคีย์นี้”</td></tr>
+<tr><td>ใครเจอก่อน</td><td>คนหน้างาน</td><td>เทสต์ในเครื่องพัฒนา</td></tr>
+<tr><td>ความเสียหาย</td><td>หยิบของผิด เพราะจอแสดงข้อมูลไม่ครบ</td><td>ไม่มี — แก้ก่อนปล่อย</td></tr>
+</tbody></table><p><strong>ทำไมแบบเดิมถึงไม่พัง</strong></p><pre class="code-vs"><code>tasks[index]['palletCode']    // คีย์ไม่มี → คืน null
+'${null} · 12 ชิ้น'           // กลายเป็นข้อความ "null"</code></pre><p>Dart แปลงอะไรก็ได้เป็นข้อความใน string interpolation รวมถึง <code>null</code> ด้วย — จึงไม่มีอะไรพัง มีแต่ข้อมูลที่ผิด</p><p><strong>บทเรียนที่ควรจำ:</strong> <code>dynamic</code> ไม่ได้ทำให้บั๊กเยอะขึ้น แต่ทำให้บั๊ก <em>เจอช้าลง</em> และ <em>เจอไกลจากต้นเหตุ</em> — ในงานคลังนั้นแปลว่าคนหน้างานเป็นคนเจอ แทนที่จะเป็นเทสต์</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>jsonDecode</code> คืน <code>dynamic</code> ซึ่งแปลว่า compiler เลิกช่วย</li><li>ใช้ <code>Object?</code> แทน <code>dynamic</code> เพราะบังคับให้ตรวจก่อนใช้</li><li><code>as</code> ไม่ได้แปลงค่า แค่ตรวจแล้วพัง</li><li>ตรวจด้วย <code>is</code> หรือ <code>switch</code> แล้ว compiler จะเลื่อนชนิดให้เอง</li><li>ตรวจก้อนนอกสุดก่อนเสมอ เพราะอาจไม่ใช่ object</li><li>แยกความผิดพลาดสามชนิด — ไม่ใช่ JSON, โครงผิด, ค่าผิดกฎ</li><li>กัก <code>dynamic</code> ไว้ในชั้นที่แปลงข้อมูลเท่านั้น</li><li>บันทึก path และชนิด แต่ไม่บันทึก payload ทั้งก้อน</li><li><code>dynamic</code> ทำให้บั๊กเจอช้าลงและไกลจากต้นเหตุ</li></ul></div><p><strong>บทถัดไป:</strong> 6.9 จะกลับมาที่ <code>status</code> ที่ยังเป็นข้อความอยู่ — วิธีแปลงเป็น enum และคำถามที่ยากกว่าคือจะทำอย่างไรเมื่อเจอค่าที่ไม่รู้จัก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

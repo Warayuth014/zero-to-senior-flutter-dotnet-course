@@ -1,2 +1,186 @@
-<div class="note">เวลาใน wireควรเป็น ISO-8601พร้อม offset/UTC ส่วน UIค่อยแปลง timezone การส่ง local timeไร้ offsetทำให้คลังหลายเขตตีความต่างกัน</div>
-<section><h2>1. Parse</h2><pre class="code-vs"><code>final createdAt = DateTime.parse(requireString(j, 'createdAt')).toUtc();</code></pre></section><section><h2>2. Serialize</h2><p>ส่ง <code>date.toUtc().toIso8601String()</code> และ .NETใช้ DateTimeOffset</p></section><section><h2>3. Display</h2><p>แปลง <code>toLocal()</code>/timezone packageที่ presentationเท่านั้น</p></section><section><h2>4. Date-only</h2><p>วันหมดอายุที่ไม่มีเวลาใช้ date-only contract ไม่ยัด midnight UTC</p></section><section><h2>5. Clock</h2><p>Inject clockใน tests/expiry logic ไม่ใช้ DateTime.nowกระจาย</p></section><section><h2>6. Precision</h2><p>ตกลง millisecondsและ database precisionก่อน compare</p></section><section><h2>7. แบบฝึกหัด</h2><p>"2026-08-15T10:00:00" ขาดอะไร?</p><details><summary>เฉลย</summary><p>ขาด offset/Z จึง ambiguous ควร rejectหรือ contract legacyระบุ zoneชัด</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn">อย่าลบ Zหรือบวก 7 ชั่วโมงเองหลายชั้น</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งและรับเวลาโดยไม่ให้ใครตีความคนละอย่าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (ตัวช่วยอ่านค่า) และ 6.4 (ค่าที่อาจไม่มี)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บเวลาเป็น UTC แปลงตอนแสดง และปฏิเสธเวลาที่ตีความไม่ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เซิร์ฟเวอร์ส่งเวลามาแบบนี้</p><pre class="code-vs"><code>"createdAt": "2026-08-15T10:00:00"</code></pre><p>คำถามที่ตอบไม่ได้ — <strong>10 โมงของที่ไหน</strong></p><table><thead><tr><th>ถ้าตีความว่า</th><th>เวลาไทยคือ</th></tr></thead><tbody>
+<tr><td>UTC</td><td>17:00</td></tr>
+<tr><td>เวลาไทยอยู่แล้ว</td><td>10:00</td></tr>
+<tr><td>เวลาของเซิร์ฟเวอร์ที่ตั้งเป็น UTC+8</td><td>09:00</td></tr>
+</tbody></table><p>ต่างกันเจ็ดชั่วโมง ซึ่งบนงานคลังแปลว่า “ของถึงตอนเช้า” กับ “ของถึงตอนเย็น”</p><p>สิ่งที่ทำให้บั๊กนี้ร้ายคือ <strong>มันดูถูกต้องเสมอบนเครื่องพัฒนา</strong> เพราะเครื่องพัฒนา เซิร์ฟเวอร์ทดสอบ และคนทดสอบ อยู่เขตเวลาเดียวกันหมด</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>UTC</td><td>เวลามาตรฐานที่ทั้งโลกใช้อ้างอิง</td></tr>
+<tr><td>offset</td><td>ระยะห่างจาก UTC เช่น <code>+07:00</code></td></tr>
+<tr><td>ISO-8601</td><td>รูปแบบมาตรฐานของการเขียนเวลา</td></tr>
+<tr><td><code>Z</code></td><td>ตัวอักษรที่แปลว่า UTC</td></tr>
+<tr><td>local time</td><td>เวลาตามเขตเวลาของเครื่อง</td></tr>
+<tr><td>date-only</td><td>วันที่ล้วน ไม่มีเวลา</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เวลาเดียว หลายวิธีเขียน</h2><pre class="code-vs"><code>ช่วงเวลาเดียวกัน เขียนได้หลายแบบ
+
+"2026-08-15T03:00:00Z"        ← UTC
+"2026-08-15T10:00:00+07:00"   ← เวลาไทย ชี้จุดเดียวกัน
+"2026-08-15T11:00:00+08:00"   ← เวลาสิงคโปร์ ชี้จุดเดียวกัน
+
+"2026-08-15T10:00:00"         ← ชี้จุดไหนก็ไม่รู้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เวลาที่ไม่มีเขตเวลา ไม่ใช่เวลา — มันคือข้อความที่หน้าตาเหมือนเวลา และต้องปฏิเสธตั้งแต่ขอบ</div></section>
+
+<section><h2>4. ปฏิเสธเวลาที่ตีความไม่ได้</h2><p>เปิด <code>lib/json_basics/json_read.dart</code></p><pre class="code-vs"><code>/// เวลาต้องมี Z หรือ offset เสมอ
+///
+/// "2026-08-15T10:00:00" ตีความไม่ได้ว่าเป็นเวลาที่ไหน — คลังที่อยู่คนละ
+/// เขตเวลาจะอ่านได้คนละความหมาย จึงต้องปฏิเสธตั้งแต่ขอบ
+final RegExp _hasZone = RegExp(r'(Z|[+-]\d{2}:?\d{2})$');
+
+DateTime requireUtcTime(Map&lt;String, dynamic&gt; json, String key, {
+  String path = '',
+}) {
+  final raw = requireString(json, key, path: path);
+  if (!_hasZone.hasMatch(raw)) {
+    throw ContractException(
+      _at(path, key),
+      'เวลาต้องระบุเขตเวลาด้วย Z หรือ offset แต่ได้ "$raw"',
+    );
+  }
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null) {
+    throw ContractException(_at(path, key), 'รูปแบบเวลาไม่ถูกต้อง: "$raw"');
+  }
+  return parsed.toUtc();
+}</code></pre><p>ทำไมต้องตรวจเองทั้งที่ <code>DateTime.parse</code> รับได้</p><pre class="code-vs"><code>DateTime.parse('2026-08-15T10:00:00')
+// ได้ DateTime ที่ isUtc เป็น false โดยไม่บ่นอะไรเลย
+// แล้ว toUtc() จะแปลงตามเขตเวลาของเครื่องที่รันอยู่</code></pre><p>ผลคือ <strong>ผู้ใช้คนละเครื่องจะเห็นเวลาต่างกัน จากข้อมูลก้อนเดียวกัน</strong> ซึ่งเป็นบั๊กที่ทำซ้ำไม่ได้ถ้าไม่ได้ตั้งเขตเวลาเครื่องให้ต่างกัน</p></section>
+
+<section><h2>5. แปลงเป็น UTC ทันทีที่รับเข้ามา</h2><pre class="code-vs"><code>return parsed.toUtc();</code></pre><p>ไม่ว่าเซิร์ฟเวอร์จะส่ง <code>Z</code> หรือ <code>+07:00</code> มา ในแอปจะเป็น UTC เสมอ</p><pre class="code-vs"><code>test('แปลง offset เป็น UTC ให้เสมอ', () {
+  final dto = TaskDto.fromJson(
+    taskJson({'createdAt': '2026-08-15T10:00:00+07:00'}),
+  );
+
+  expect(dto.createdAt.isUtc, isTrue);
+  expect(dto.createdAt, DateTime.utc(2026, 8, 15, 3));
+});</code></pre><table><thead><tr><th>ได้อะไรจากการเก็บเป็น UTC เสมอ</th></tr></thead><tbody>
+<tr><td>เปรียบเทียบเวลาสองค่าได้ตรง ๆ โดยไม่ต้องคิดเรื่องเขตเวลา</td></tr>
+<tr><td>เรียงลำดับได้ถูกต้องเสมอ</td></tr>
+<tr><td>คำนวณระยะเวลาได้ถูก แม้ข้ามช่วงเปลี่ยนเวลาตามฤดูกาล</td></tr>
+<tr><td>บันทึก log แล้วเทียบกับฝั่งเซิร์ฟเวอร์ได้ทันที</td></tr>
+</tbody></table><p>ในไฟล์ตัวอย่างของ lab มีทั้งสองแบบปนกันโดยตั้งใจ</p><pre class="code-vs"><code>"createdAt": "2026-08-15T03:00:00Z"
+"createdAt": "2026-08-15T03:05:00+07:00"</code></pre><p>เพื่อยืนยันว่าตัวแปลงรับได้ทั้งคู่ และให้ผลเป็น UTC เหมือนกัน</p></section>
+
+<section><h2>6. แปลงเป็นเวลาท้องถิ่นตอนแสดงเท่านั้น</h2><pre class="code-vs"><code>// ในข้อมูล — UTC เสมอ
+final Task task;                        // task.createdAt เป็น UTC
+
+// ในหน้าจอ — แปลงตอนแสดง
+Text(formatTime(task.createdAt.toLocal()))</code></pre><table><thead><tr><th>ชั้น</th><th>ใช้เวลาแบบไหน</th></tr></thead><tbody>
+<tr><td>รับจาก JSON</td><td>แปลงเป็น UTC ทันที</td></tr>
+<tr><td>เก็บใน store</td><td>UTC</td></tr>
+<tr><td>เปรียบเทียบและคำนวณ</td><td>UTC</td></tr>
+<tr><td>แสดงบนหน้าจอ</td><td>แปลงเป็นเวลาท้องถิ่น</td></tr>
+<tr><td>ส่งกลับขึ้นเซิร์ฟเวอร์</td><td>UTC พร้อม <code>Z</code></td></tr>
+</tbody></table><pre class="code-vs"><code>// ตอนส่ง
+'completedAt': completedAt.toUtc().toIso8601String(),
+// ได้ "2026-08-15T03:00:00.000Z"</code></pre><div class="warn">อย่าบวกหรือลบชั่วโมงเอง — โค้ดแบบ <code>time.add(const Duration(hours: 7))</code> จะพังทันทีที่แอปถูกใช้ในเขตเวลาอื่น และจะพังสองเท่าถ้ามีคนเผลอทำซ้ำอีกชั้นในโค้ดคนละที่</div></section>
+
+<section><h2>7. วันที่ล้วนไม่ใช่เวลา</h2><p>บาง field เป็นวันที่จริง ๆ ไม่มีเวลา เช่นวันหมดอายุของสินค้า</p><pre class="code-vs"><code>"expiryDate": "2026-12-31"</code></pre><p>ถ้าเอาไปแปลงเป็นเวลา จะเกิดปัญหาทันที</p><pre class="code-vs"><code>DateTime.parse('2026-12-31').toUtc()
+// ได้ 2026-12-31T00:00:00Z
+// พอแสดงเป็นเวลาไทย กลายเป็น 2026-12-31 07:00 ซึ่งยังโอเค
+
+// แต่ถ้าเซิร์ฟเวอร์อยู่ฝั่งตะวันตกและส่ง 2026-12-31T00:00:00-05:00
+// แปลงเป็นเวลาไทยจะกลายเป็น 2026-12-31 12:00 ก็ยังโอเค
+// ปัญหาคือถ้าเป็น 2026-12-31T00:00:00+13:00 → เวลาไทยคือ 2026-12-30
+// วันหมดอายุเลื่อนไปหนึ่งวัน</code></pre><table><thead><tr><th>ทางแก้</th><th>วิธี</th></tr></thead><tbody>
+<tr><td>เก็บเป็นข้อความ</td><td><code>final String expiryDate;</code> แล้วแสดงตรง ๆ</td></tr>
+<tr><td>เก็บเป็นสามตัวเลข</td><td>ปี เดือน วัน แยกกัน</td></tr>
+<tr><td>ใช้ชนิดของตัวเอง</td><td>คลาส <code>PlainDate</code> ที่ไม่มีเวลาและเขตเวลา</td></tr>
+</tbody></table><p>สิ่งที่ห้ามทำคือ <strong>ยัดวันที่ล้วนให้กลายเป็นเวลาเที่ยงคืน UTC</strong> แล้วหวังว่าจะไม่มีใครแปลงกลับ</p><p>เกณฑ์ตัดสิน — ถามว่า <strong>ค่านี้เปลี่ยนตามที่คนดูอยู่ไหม</strong></p><table><thead><tr><th>ข้อมูล</th><th>เปลี่ยนตามผู้ดู</th><th>เก็บเป็น</th></tr></thead><tbody>
+<tr><td>เวลาที่ปิดงาน</td><td>เปลี่ยน — คนละเขตเวลาเห็นคนละเวลา</td><td>เวลาพร้อมเขตเวลา</td></tr>
+<tr><td>วันหมดอายุที่พิมพ์บนกล่อง</td><td>ไม่เปลี่ยน — เขียนว่า 31 ธ.ค. ก็คือ 31 ธ.ค.</td><td>วันที่ล้วน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. อย่าเรียก DateTime.now() กระจายทั่วแอป</h2><pre class="code-vs"><code>// เลี่ยง — ทดสอบไม่ได้
+bool get isOverdue =&gt; DateTime.now().isAfter(dueAt);</code></pre><p>ปัญหาคือเทสต์จะให้ผลต่างกันตามวันที่รัน และทดสอบกรณี “เลยกำหนดพอดี” ไม่ได้เลย</p><pre class="code-vs"><code>// ดีกว่า — รับเวลาปัจจุบันเข้ามา
+bool isOverdueAt(DateTime now) =&gt; now.isAfter(dueAt);</code></pre><pre class="code-vs"><code>test('งานที่เลยกำหนดแล้ว', () {
+  final task = ...;   // dueAt = 2026-08-15T03:00:00Z
+  expect(task.isOverdueAt(DateTime.utc(2026, 8, 15, 4)), isTrue);
+  expect(task.isOverdueAt(DateTime.utc(2026, 8, 15, 2)), isFalse);
+});</code></pre><p>เป็นหลักเดียวกับการฉีด repository ใน 4.5 — <strong>สิ่งที่ควบคุมไม่ได้ ให้รับเข้ามาแทนที่จะไปหยิบเอง</strong></p></section>
+
+<section><h2>9. ความละเอียดที่ต้องตกลงกัน</h2><table><thead><tr><th>ฝั่ง</th><th>เก็บละเอียดแค่ไหน</th></tr></thead><tbody>
+<tr><td>Dart <code>DateTime</code></td><td>ไมโครวินาที</td></tr>
+<tr><td>.NET <code>DateTimeOffset</code></td><td>ละเอียดกว่านั้นอีก</td></tr>
+<tr><td>SQL Server <code>datetime</code> แบบเก่า</td><td>ประมาณ 3 มิลลิวินาที</td></tr>
+</tbody></table><p>ผลคือเวลาที่ส่งขึ้นไปกับที่อ่านกลับมา อาจไม่เท่ากันเป๊ะ</p><pre class="code-vs"><code>ส่งขึ้น  2026-08-15T03:00:00.123456Z
+อ่านกลับ 2026-08-15T03:00:00.123000Z    ← ปัดตอนบันทึกลงฐานข้อมูล</code></pre><p>ถ้ามีโค้ดที่เทียบเวลาแบบ <code>==</code> เพื่อดูว่าข้อมูลเปลี่ยนหรือยัง จะได้ผลว่าเปลี่ยนตลอดเวลา</p><p>ทางแก้คือตกลงความละเอียดกันไว้ แล้วปัดให้ตรงกันตั้งแต่ก่อนส่ง — หรือเลิกใช้เวลาเป็นตัวเทียบว่าข้อมูลเปลี่ยนหรือไม่ ซึ่งมักเป็นทางที่ดีกว่า</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เวลาเพี้ยนไป 7 ชั่วโมง</td><td>เซิร์ฟเวอร์ส่งเวลาไม่มีเขตเวลา</td><td>ปฏิเสธที่ขอบ แล้วแจ้งหลังบ้าน</td></tr>
+<tr><td>เวลาเพี้ยน 14 ชั่วโมง</td><td>มีคนบวกเองสองที่</td><td>อย่าบวกเอง ใช้ <code>toLocal()</code></td></tr>
+<tr><td>ผู้ใช้คนละเครื่องเห็นเวลาต่างกัน</td><td>เก็บเป็นเวลาท้องถิ่น</td><td>เก็บเป็น UTC เสมอ</td></tr>
+<tr><td>วันหมดอายุเลื่อนไปหนึ่งวัน</td><td>ยัดวันที่ล้วนเป็นเวลา</td><td>เก็บวันที่ล้วนแยกจากเวลา</td></tr>
+<tr><td>เทสต์ผ่านวันนี้ พรุ่งนี้แดง</td><td>เรียก <code>DateTime.now()</code> ในตรรกะ</td><td>รับเวลาปัจจุบันเข้ามา</td></tr>
+<tr><td>ระบบคิดว่าข้อมูลเปลี่ยนตลอดเวลา</td><td>เทียบเวลาที่ความละเอียดไม่ตรงกัน</td><td>ตกลงความละเอียด หรือเลิกใช้เวลาเป็นตัวเทียบ</td></tr>
+<tr><td>เรียงลำดับผิดเมื่อข้ามเขตเวลา</td><td>เรียงด้วยข้อความแทนที่จะเป็นเวลา</td><td>แปลงเป็น UTC ก่อนเรียง</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมหลังบ้านส่งสัญญาของใบรับเข้ามาให้ตรวจ</p><pre class="code-vs"><code>{
+  "orderNo": "IN-2026-0812",
+  "createdAt": "2026-08-15T10:30:00",
+  "expectedDate": "2026-08-16",
+  "receivedAt": "2026-08-16T08:15:00+07:00",
+  "expiryDate": "2027-02-28T00:00:00Z"
+}</code></pre><ol><li>ระบุปัญหาของแต่ละ field</li><li>เขียนสัญญาที่ควรเป็น พร้อมเหตุผลที่จะอธิบายให้ทีมหลังบ้านฟัง</li><li>ตอบว่าถ้าทีมหลังบ้านแก้ไม่ได้ในตอนนี้ ฝั่งแอปควรทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ปัญหาของแต่ละ field</strong></p><table><thead><tr><th>field</th><th>ปัญหา</th><th>ความเสียหาย</th></tr></thead><tbody>
+<tr><td><code>createdAt</code></td><td><strong>ไม่มีเขตเวลา</strong></td><td>ตีความได้หลายแบบ ต่างกันได้ถึง 26 ชั่วโมง</td></tr>
+<tr><td><code>expectedDate</code></td><td>เป็นวันที่ล้วน — ถูกแล้ว</td><td>ไม่มี ถ้าฝั่งแอปไม่เอาไปแปลงเป็นเวลา</td></tr>
+<tr><td><code>receivedAt</code></td><td>ถูกต้อง</td><td>ไม่มี</td></tr>
+<tr><td><code>expiryDate</code></td><td><strong>วันที่ล้วนถูกยัดให้เป็นเวลา</strong></td><td>วันหมดอายุอาจเลื่อนหนึ่งวัน</td></tr>
+</tbody></table><p>สังเกตว่าสองปัญหาเป็นคนละแบบและต้องแก้คนละทาง</p><table><thead><tr><th></th><th><code>createdAt</code></th><th><code>expiryDate</code></th></tr></thead><tbody>
+<tr><td>ผิดอย่างไร</td><td>เป็นเวลาแต่ขาดข้อมูล</td><td>เป็นวันที่แต่แกล้งเป็นเวลา</td></tr>
+<tr><td>แก้อย่างไร</td><td>เติมเขตเวลา</td><td>ถอดเวลาออก</td></tr>
+</tbody></table><p><strong>ข้อ 2 — สัญญาที่ควรเป็น</strong></p><pre class="code-vs"><code>{
+  "orderNo": "IN-2026-0812",
+  "createdAt": "2026-08-15T03:30:00Z",
+  "expectedDate": "2026-08-16",
+  "receivedAt": "2026-08-16T01:15:00Z",
+  "expiryDate": "2027-02-28"
+}</code></pre><p><strong>เหตุผลที่จะอธิบายให้ทีมหลังบ้าน</strong></p><p>สำหรับ <code>createdAt</code></p><blockquote><p>ตอนนี้แอปได้ <code>"2026-08-15T10:30:00"</code> ซึ่งไม่มีอะไรบอกว่าเป็นเวลาที่ไหน แอปต้องเดา และถ้าเดาผิดเวลาจะเพี้ยนเจ็ดชั่วโมง ปัญหาคือมันดูถูกต้องบนเครื่องทดสอบเพราะเราอยู่เขตเวลาเดียวกัน แต่จะเพี้ยนทันทีถ้าเซิร์ฟเวอร์ย้ายไปคลาวด์ที่ตั้งเป็น UTC</p><p>ขอเป็น <code>DateTimeOffset</code> แทน <code>DateTime</code> ฝั่ง .NET แล้ว serialize จะได้ offset ติดมาเอง</p></blockquote><p>สำหรับ <code>expiryDate</code></p><blockquote><p>วันหมดอายุที่พิมพ์บนกล่องคือ 28 ก.พ. ไม่ว่าใครจะดูจากที่ไหน แต่พอส่งเป็น <code>"2027-02-28T00:00:00Z"</code> มันกลายเป็นช่วงเวลาที่แปลงตามเขตเวลาได้ ถ้ามีสาขาที่ UTC+13 จะเห็นเป็นวันที่ 27 ก.พ.</p><p>ขอเป็นข้อความ <code>"2027-02-28"</code> ตรง ๆ</p></blockquote><p>สังเกตว่าทั้งสองข้อ <strong>อธิบายด้วยผลที่จะเกิดกับธุรกิจ ไม่ใช่ด้วยศัพท์เทคนิค</strong> — “วันหมดอายุเลื่อนหนึ่งวัน” เข้าใจง่ายกว่า “ควรใช้ date-only contract”</p><p><strong>ข้อ 3 — ถ้าหลังบ้านแก้ไม่ได้ตอนนี้</strong></p><p>ทั้งสองกรณีทำได้ แต่ต้องทำอย่างมีเงื่อนไข</p><p><em>สำหรับ <code>createdAt</code> ที่ไม่มีเขตเวลา</em></p><pre class="code-vs"><code>/// รับเวลาที่ไม่มีเขตเวลา โดยตีความว่าเป็นเวลาไทย
+///
+/// ใช้ชั่วคราวกับ endpoint เก่าที่ยังส่ง DateTime แทน DateTimeOffset
+/// (ยืนยันกับทีมหลังบ้าน 2026-08-15 ว่าเซิร์ฟเวอร์ตั้งเป็น Asia/Bangkok)
+/// ต้องลบทิ้งเมื่อ endpoint เปลี่ยนเป็น DateTimeOffset แล้ว
+DateTime requireLegacyBangkokTime(
+  Map&lt;String, dynamic&gt; json,
+  String key, {
+  String path = '',
+}) {
+  final raw = requireString(json, key, path: path);
+  if (_hasZone.hasMatch(raw)) return requireUtcTime(json, key, path: path);
+
+  final naive = DateTime.tryParse(raw);
+  if (naive == null) {
+    throw ContractException(_at(path, key), 'รูปแบบเวลาไม่ถูกต้อง: "$raw"');
+  }
+  // ตีความว่าเป็นเวลาไทย แล้วแปลงเป็น UTC
+  return DateTime.utc(
+    naive.year, naive.month, naive.day,
+    naive.hour, naive.minute, naive.second,
+  ).subtract(const Duration(hours: 7));
+}</code></pre><p>สามอย่างที่ทำให้ทางลัดนี้ยอมรับได้</p><table><thead><tr><th>ต้องมี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ชื่อมีคำว่า <code>legacy</code></td><td>ไม่มีใครเผลอใช้กับ endpoint ใหม่</td></tr>
+<tr><td>บันทึกว่าใครยืนยันและเมื่อไหร่</td><td>ถ้าสมมติฐานผิด จะรู้ว่าต้องไปถามใคร</td></tr>
+<tr><td>เขียนไว้ว่าต้องลบเมื่อไหร่</td><td>ไม่งั้นมันจะอยู่ตลอดไป</td></tr>
+</tbody></table><p>และต้องบันทึก log ทุกครั้งที่ใช้ทางนี้ เพื่อรู้ว่ายังมี endpoint ไหนเหลืออยู่</p><p><em>สำหรับ <code>expiryDate</code> ที่มีเวลาติดมา</em></p><pre class="code-vs"><code>/// ตัดส่วนเวลาทิ้ง เก็บเฉพาะวันที่ตามที่เซิร์ฟเวอร์เขียนมา
+///
+/// ไม่แปลงเขตเวลาเด็ดขาด เพราะ "28 ก.พ." คือ 28 ก.พ. ไม่ว่าใครดู
+String requireDateOnly(Map&lt;String, dynamic&gt; json, String key, {
+  String path = '',
+}) {
+  final raw = requireString(json, key, path: path);
+  final datePart = raw.split('T').first;
+  if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(datePart)) {
+    throw ContractException(_at(path, key), 'ต้องเป็นวันที่ yyyy-MM-dd: "$raw"');
+  }
+  return datePart;
+}</code></pre><p>วิธีนี้ปลอดภัยกว่าอันแรก เพราะ <strong>ไม่ได้เดาอะไรเลย</strong> — แค่ตัดส่วนที่ไม่ควรมีอยู่แต่แรกทิ้ง</p><p><strong>ความต่างที่ควรจำ</strong></p><table><thead><tr><th></th><th><code>createdAt</code></th><th><code>expiryDate</code></th></tr></thead><tbody>
+<tr><td>ทางลัดต้องเดาไหม</td><td>ต้อง — เดาว่าเซิร์ฟเวอร์ใช้เขตเวลาอะไร</td><td>ไม่ต้อง</td></tr>
+<tr><td>ผิดแล้วรู้ตัวไหม</td><td>ไม่รู้ — เวลาเพี้ยนแต่ดูเหมือนปกติ</td><td>รู้ทันที ถ้ารูปแบบไม่ตรง</td></tr>
+<tr><td>เร่งด่วนแค่ไหน</td><td>ต้องตามแก้ที่ต้นทาง</td><td>อยู่กับทางลัดนี้ได้นาน</td></tr>
+</tbody></table><p><strong>หลักที่ได้:</strong> ทางลัดที่ต้องเดาสมมติฐาน ต้องมีวันหมดอายุ ส่วนทางลัดที่แค่ทำความสะอาดข้อมูล อยู่ได้นานกว่า — และทั้งสองแบบต้องเขียนเหตุผลไว้ในโค้ด ไม่ใช่ในหัวคนเขียน</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>เวลาที่ไม่มีเขตเวลา ไม่ใช่เวลา — ต้องปฏิเสธที่ขอบ</li><li><code>DateTime.parse</code> รับเวลาที่ไม่มีเขตเวลาโดยไม่บ่น จึงต้องตรวจเอง</li><li>แปลงเป็น UTC ทันทีที่รับเข้ามา และเก็บเป็น UTC ตลอด</li><li>แปลงเป็นเวลาท้องถิ่นตอนแสดงเท่านั้น</li><li>อย่าบวกลบชั่วโมงเอง</li><li>วันที่ล้วนไม่ใช่เวลา — เกณฑ์คือค่านั้นเปลี่ยนตามที่คนดูอยู่ไหม</li><li>รับเวลาปัจจุบันเข้ามาแทนการเรียก <code>DateTime.now()</code> ในตรรกะ</li><li>ตกลงความละเอียดของเวลากับฝั่งหลังบ้าน</li></ul></div><p><strong>บทถัดไป:</strong> 6.7 จะจัดการเรื่องชื่อคีย์ที่ไม่ตรงกันระหว่างเซิร์ฟเวอร์รุ่นเก่ากับรุ่นใหม่ ซึ่งเป็นปัญหาที่พบเสมอเมื่อระบบมีอายุ</p></section>

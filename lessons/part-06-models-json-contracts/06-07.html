@@ -4,9 +4,172 @@
 <title>JSON Key Casing</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-07 · Flutter + .NET</span><h1>JSON Key Casing</h1><p>Part 6: Models &amp; JSON</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Preferred</a></li><li><a href="#section-2">Presence</a></li><li><a href="#section-3">Precedence</a></li><li><a href="#section-4">Centralize</a></li><li><a href="#section-5">.NET</a></li><li><a href="#section-6">Migration</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">ASP.NETมัก serialize camelCaseแต่ระบบเก่าอาจ PascalCase Fallback keyช่วย migrationชั่วคราว ต้องรวม converterและวัด usageเพื่อถอดได้</div>
-<section id="section-1"><h2>1. Preferred</h2><pre class="code-vs"><code>Object? readKey(Map&lt;String,dynamic&gt; j, String camel, String pascal) =&gt;
-  j.containsKey(camel) ? j[camel] : j[pascal];</code></pre></section><section id="section-2"><h2>2. Presence</h2><p>ใช้ containsKeyแยก keyมีค่า nullจาก keyไม่มี</p></section><section id="section-3"><h2>3. Precedence</h2><p>ถ้ามีสอง keyแต่ค่าต่างให้ preferredชนะและ telemetryเตือน</p></section><section id="section-4"><h2>4. Centralize</h2><p>อย่าเขียน <code>j['id'] ?? j['Id']</code>ทุก model</p></section><section id="section-5"><h2>5. .NET</h2><p>กำหนด JsonNamingPolicy/OpenAPIชัดและ contract test</p></section><section id="section-6"><h2>6. Migration</h2><p>ติด metric fallback usageแล้วลบหลัง serverทุก environmentอัปเดต</p></section><section id="section-7"><h2>7. แบบฝึกหัด</h2><p>camel keyมี nullแต่ Pascalมีค่า?</p><details><summary>เฉลย</summary><p>Preferred keyมีอยู่จึง null; ไม่ fallbackด้วย ?? เพราะซ่อน conflict</p></details></section><section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Case-insensitive scanทุก keyช้าและซ่อน typo contract</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ความยุ่งควรอยู่ที่เดียว</a></li><li><a href="#section-4">รวมไว้ในตัวอ่านกลาง</a></li><li><a href="#section-5">ลำดับสำคัญ: ชื่อที่ต้องการต้องชนะ</a></li><li><a href="#section-6">อย่าไล่หาแบบไม่สนตัวพิมพ์</a></li><li><a href="#section-7">ทางที่ดีกว่าคือแก้ที่ต้นทาง</a></li><li><a href="#section-8">เมื่อชื่อต่างกันมากกว่าตัวพิมพ์</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: รองรับชื่อคีย์สองแบบโดยไม่ให้ลามทั้งโปรเจกต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (ตัวช่วยอ่านค่ากลาง) และ 6.4 (การแยกไม่มีคีย์ออกจากค่า null)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รองรับ endpoint ที่ตั้งชื่อคีย์คนละแบบ โดยเก็บความยุ่งไว้ที่เดียวและถอดออกได้ในภายหลัง</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ระบบที่มีอายุมักมี endpoint สองรุ่นอยู่พร้อมกัน</p><pre class="code-vs"><code>// endpoint ใหม่
+{"id": "T-001", "palletCode": "PAL-0101"}
+
+// endpoint เก่าที่ยังมีคนใช้อยู่
+{"Id": "T-001", "PalletCode": "PAL-0101"}</code></pre><p>ทางแก้ที่คนทำก่อนคือเขียนสองทางไว้ในทุก model</p><pre class="code-vs"><code>id: (json['id'] ?? json['Id']) as String,
+palletCode: (json['palletCode'] ?? json['PalletCode']) as String,
+quantity: (json['quantity'] ?? json['Quantity']) as int,</code></pre><table><thead><tr><th>ปัญหาที่ตามมา</th></tr></thead><tbody>
+<tr><td>ต้องเขียนซ้ำในทุก field ของทุก model</td></tr>
+<tr><td>ลืมสักที่หนึ่งแล้วพังเฉพาะ endpoint เก่า ซึ่งอาจไม่มีใครทดสอบ</td></tr>
+<tr><td>วันที่เซิร์ฟเวอร์เลิกส่งแบบเก่าแล้ว ไม่มีใครกล้าลบ เพราะไม่รู้ว่าลบได้หรือยัง</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>camelCase</td><td><code>palletCode</code> — ขึ้นต้นตัวเล็ก</td></tr>
+<tr><td>PascalCase</td><td><code>PalletCode</code> — ขึ้นต้นตัวใหญ่</td></tr>
+<tr><td>naming policy</td><td>กติกาที่ฝั่งเซิร์ฟเวอร์ใช้ตั้งชื่อคีย์</td></tr>
+<tr><td>fallback</td><td>ทางสำรองเมื่อทางหลักไม่มี</td></tr>
+<tr><td>migration</td><td>ช่วงเปลี่ยนผ่านจากของเก่าไปของใหม่</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ความยุ่งควรอยู่ที่เดียว</h2><pre class="code-vs"><code>ผิด                          ถูก
+─────                        ─────
+TaskDto    ← รู้เรื่อง casing   TaskDto    ─┐
+OrderDto   ← รู้เรื่อง casing   OrderDto   ─┼→ json_read ← รู้เรื่อง casing
+PalletDto  ← รู้เรื่อง casing   PalletDto  ─┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าต้องแก้หลายไฟล์เมื่อเซิร์ฟเวอร์เปลี่ยนกติกาการตั้งชื่อ แปลว่าความรู้เรื่องนั้นกระจายอยู่ผิดที่</div></section>
+
+<section id="section-4"><h2>4. รวมไว้ในตัวอ่านกลาง</h2><p>เปิด <code>lib/json_basics/json_read.dart</code></p><pre class="code-vs"><code>/// อ่านค่าดิบ โดยลองทั้ง camelCase และ PascalCase
+///
+/// ASP.NET รุ่นใหม่ส่ง camelCase แต่ระบบเก่าอาจส่ง PascalCase
+/// การรองรับทั้งสองแบบไว้ที่เดียวทำให้ model ทุกตัวไม่ต้องรู้เรื่องนี้
+Object? _raw(Map&lt;String, dynamic&gt; json, String key) {
+  if (json.containsKey(key)) return json[key];
+  final pascal = key[0].toUpperCase() + key.substring(1);
+  if (json.containsKey(pascal)) return json[pascal];
+  return _absent;
+}</code></pre><p>ผลคือ model ทุกตัวเขียนเหมือนเดิมทุกอย่าง</p><pre class="code-vs"><code>id: requireString(json, 'id', path: path),          // ได้ทั้ง id และ Id
+palletCode: requireString(json, 'palletCode', path: path),</code></pre><p>และเทสต์ยืนยันว่าไฟล์ตัวอย่างที่เป็น PascalCase ทั้งก้อน อ่านได้เหมือนกัน</p><pre class="code-vs"><code>test('รับ PascalCase จากระบบเก่าได้ด้วย', () {
+  final page = TaskPageDto.fromJson(fixture('tasks_page_pascal.json'));
+
+  expect(page.items.single.id, 'T-101');
+  expect(page.items.single.quantity, 5);
+  expect(page.hasMore, isFalse);
+});</code></pre><p>สังเกตว่าไฟล์ตัวอย่างเป็น PascalCase ทั้งหมด รวมถึง <code>Items</code> และ <code>TotalCount</code> ที่อยู่ชั้นนอกด้วย</p></section>
+
+<section id="section-5"><h2>5. ลำดับสำคัญ: ชื่อที่ต้องการต้องชนะ</h2><pre class="code-vs"><code>if (json.containsKey(key)) return json[key];       // ลองชื่อใหม่ก่อน
+...
+if (json.containsKey(pascal)) return json[pascal];  // แล้วค่อยชื่อเก่า</code></pre><p>จุดที่ต้องระวังคือใช้ <code>containsKey</code> ไม่ใช่ <code>??</code></p><pre class="code-vs"><code>// อันตราย
+return json[key] ?? json[pascal];</code></pre><p>ต่างกันเมื่อ JSON มีทั้งสองคีย์ และคีย์ใหม่มีค่าเป็น <code>null</code></p><pre class="code-vs"><code>{"note": null, "Note": "ของแตก"}</code></pre><table><thead><tr><th>วิธี</th><th>ได้อะไร</th><th>ถูกไหม</th></tr></thead><tbody>
+<tr><td><code>??</code></td><td><code>"ของแตก"</code></td><td><strong>ผิด</strong> — คีย์ใหม่บอกว่าไม่มีหมายเหตุ</td></tr>
+<tr><td><code>containsKey</code></td><td><code>null</code></td><td>ถูก</td></tr>
+</tbody></table><p>กรณีนี้ฟังดูแปลก แต่เกิดจริงตอนที่ฝั่งเซิร์ฟเวอร์กำลังย้ายระบบและส่งทั้งสองคีย์มาชั่วคราว — ถ้าค่าไม่ตรงกัน คีย์ใหม่คือคีย์ที่ควรเชื่อ เพราะเป็นตัวที่กำลังจะอยู่ต่อ</p><p>และควรบันทึก log ไว้เมื่อเจอทั้งสองคีย์ที่มีค่าต่างกัน เพราะนั่นแปลว่าฝั่งเซิร์ฟเวอร์มีปัญหาที่ต้องแก้</p></section>
+
+<section id="section-6"><h2>6. อย่าไล่หาแบบไม่สนตัวพิมพ์</h2><pre class="code-vs"><code>// เลี่ยง
+Object? findIgnoreCase(Map&lt;String, dynamic&gt; json, String key) {
+  for (final entry in json.entries) {
+    if (entry.key.toLowerCase() == key.toLowerCase()) return entry.value;
+  }
+  return null;
+}</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ช้า</td><td>ต้องวนทุกคีย์ในทุก field ของทุกแถว</td></tr>
+<tr><td>ซ่อนคำสะกดผิด</td><td>ถ้าเซิร์ฟเวอร์ส่ง <code>"palletcode"</code> มาโดยผิด จะผ่านไปเงียบ ๆ</td></tr>
+<tr><td>ไม่รู้ว่ารองรับอะไรอยู่</td><td>อ่านโค้ดแล้วไม่เห็นว่ารับชื่อแบบไหนได้บ้าง</td></tr>
+</tbody></table><p>การรองรับสองแบบที่ระบุชัด ดีกว่าการรองรับทุกแบบที่ไม่ระบุ — เพราะสิ่งที่ไม่ได้ตั้งใจรองรับ ควรพัง</p></section>
+
+<section id="section-7"><h2>7. ทางที่ดีกว่าคือแก้ที่ต้นทาง</h2><p>การรองรับสองชื่อเป็นทางผ่าน ไม่ใช่ปลายทาง</p><p>ฝั่ง .NET กำหนดกติกาการตั้งชื่อได้ที่เดียวทั้งโปรเจกต์</p><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+builder.Services.ConfigureHttpJsonOptions(options =&gt;
+{
+    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+});</code></pre><p>เมื่อทุก endpoint ใช้กติกาเดียวกันแล้ว ฝั่งแอปก็ถอดตัวสำรองออกได้</p><table><thead><tr><th>ขั้นตอนการถอด</th></tr></thead><tbody>
+<tr><td>1. บันทึก log ทุกครั้งที่ต้องใช้ชื่อแบบเก่า</td></tr>
+<tr><td>2. ดูว่ายังมี endpoint ไหนเหลืออยู่</td></tr>
+<tr><td>3. ตามไปแก้ฝั่งเซิร์ฟเวอร์ทีละตัว</td></tr>
+<tr><td>4. เมื่อไม่มี log มาแล้วสักระยะ จึงลบตัวสำรองออก</td></tr>
+</tbody></table><p>ถ้าไม่มีขั้นที่หนึ่ง จะไม่มีวันถึงขั้นที่สี่ — เพราะไม่มีใครกล้าลบสิ่งที่ไม่รู้ว่ายังมีคนใช้หรือเปล่า</p><div class="warn">การรองรับสองชื่อโดยไม่มีแผนถอด จะกลายเป็นหนี้ถาวร และวันหนึ่งจะมีคนเพิ่มชื่อที่สามเข้ามาเพราะ “ก็มีสองชื่ออยู่แล้วนี่”</div></section>
+
+<section id="section-8"><h2>8. เมื่อชื่อต่างกันมากกว่าตัวพิมพ์</h2><p>บางครั้งชื่อคีย์เปลี่ยนไปเลย ไม่ใช่แค่ตัวพิมพ์</p><pre class="code-vs"><code>// เก่า
+{"qty": 12, "loc": "A-01"}
+
+// ใหม่
+{"quantity": 12, "locationCode": "A-01"}</code></pre><p>กรณีนี้ใส่ในตัวอ่านกลางไม่ได้ เพราะเดาไม่ได้ — ต้องระบุที่ model</p><pre class="code-vs"><code>/// รองรับชื่อคีย์เก่าของ endpoint /api/v1/tasks
+///
+/// endpoint v2 ใช้ชื่อเต็มแล้ว — ลบเมื่อ v1 ถูกปิด (คาดว่า Q4 2026)
+int _readQuantity(Map&lt;String, dynamic&gt; json, String path) {
+  if (hasKey(json, 'quantity')) return requireInt(json, 'quantity', path: path);
+  return requireInt(json, 'qty', path: path);
+}</code></pre><p>สิ่งที่ทำให้แบบนี้ยอมรับได้</p><table><thead><tr><th>ต้องมี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>อยู่ใน model ที่เกี่ยวข้องเท่านั้น</td><td>ไม่ลามไป model อื่นที่ไม่มีปัญหานี้</td></tr>
+<tr><td>เขียนว่าเป็นของ endpoint ไหน</td><td>รู้ว่าจะลบได้เมื่อไหร่</td></tr>
+<tr><td>เขียนว่าคาดว่าจะลบเมื่อไหร่</td><td>มีวันหมดอายุ</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พังเฉพาะ endpoint เก่า</td><td>ลืมใส่ทางสำรองบาง field</td><td>รวมไว้ในตัวอ่านกลาง</td></tr>
+<tr><td>ค่าที่ตั้งใจล้าง กลับได้ค่าเก่า</td><td>ใช้ <code>??</code> แทน <code>containsKey</code></td><td>เช็กการมีอยู่ของคีย์</td></tr>
+<tr><td>คำสะกดผิดของเซิร์ฟเวอร์ผ่านไปได้</td><td>ไล่หาแบบไม่สนตัวพิมพ์</td><td>ระบุชื่อที่รองรับให้ชัด</td></tr>
+<tr><td>แอปช้าลงเมื่อรายการยาว</td><td>วนหาคีย์ทุกครั้ง</td><td>ใช้ <code>containsKey</code> ที่เร็วกว่า</td></tr>
+<tr><td>ทางสำรองอยู่มาสามปีแล้วไม่มีใครกล้าลบ</td><td>ไม่มี log ว่ายังใช้อยู่ไหม</td><td>บันทึกทุกครั้งที่ใช้</td></tr>
+<tr><td>มีชื่อที่สามและสี่โผล่มาเรื่อย ๆ</td><td>ไม่มีแผนถอด</td><td>แก้ที่ต้นทาง</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>แอปต้องต่อกับ endpoint สองตัวที่ให้ข้อมูลพาเลทเหมือนกัน</p><pre class="code-vs"><code>// /api/v2/pallets — ตัวใหม่
+{"palletCode": "PAL-0101", "locationCode": "A-01", "totalWeight": 245.5}
+
+// /api/v1/pallets — ตัวเก่าที่ยังมีสองสาขาใช้อยู่
+{"PalletCode": "PAL-0101", "Loc": "A-01", "Weight": 245.5}</code></pre><ol><li>แยกว่าความต่างข้อไหนแก้ได้ที่ตัวอ่านกลาง และข้อไหนต้องแก้ที่ model</li><li>เขียนโค้ดสำหรับส่วนที่ต้องแก้ที่ model</li><li>ตอบว่าจะรู้ได้อย่างไรว่าลบทางสำรองได้แล้ว</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แยกสองประเภท</strong></p><table><thead><tr><th>ความต่าง</th><th>ประเภท</th><th>แก้ที่</th></tr></thead><tbody>
+<tr><td><code>palletCode</code> ↔ <code>PalletCode</code></td><td>แค่ตัวพิมพ์</td><td><strong>ตัวอ่านกลาง</strong> — ทำอยู่แล้ว</td></tr>
+<tr><td><code>locationCode</code> ↔ <code>Loc</code></td><td>คนละชื่อ</td><td>model</td></tr>
+<tr><td><code>totalWeight</code> ↔ <code>Weight</code></td><td>คนละชื่อ</td><td>model</td></tr>
+</tbody></table><p>เกณฑ์แยกคือ <strong>เดาชื่ออีกแบบได้จากชื่อที่มีหรือไม่</strong> — <code>PalletCode</code> เดาได้จาก <code>palletCode</code> ด้วยกฎเดียว แต่ <code>Loc</code> เดาจาก <code>locationCode</code> ไม่ได้</p><p><strong>ข้อ 2 — โค้ดฝั่ง model</strong></p><pre class="code-vs"><code>class PalletDto {
+  const PalletDto({
+    required this.palletCode,
+    required this.locationCode,
+    required this.totalWeight,
+  });
+
+  factory PalletDto.fromJson(Map&lt;String, dynamic&gt; json, {String path = ''}) =&gt;
+      PalletDto(
+        // ตัวพิมพ์ต่างกัน — ตัวอ่านกลางจัดการให้แล้ว
+        palletCode: requireString(json, 'palletCode', path: path),
+        locationCode: _readLocationCode(json, path),
+        totalWeight: _readTotalWeight(json, path),
+      );
+
+  final String palletCode;
+  final String locationCode;
+  final double totalWeight;
+
+  /// v1 ใช้ชื่อ Loc — ลบเมื่อสาขาที่เหลือย้ายไป v2 หมดแล้ว
+  static String _readLocationCode(Map&lt;String, dynamic&gt; json, String path) {
+    if (hasKey(json, 'locationCode')) {
+      return requireString(json, 'locationCode', path: path);
+    }
+    _logLegacyKey('pallets', 'Loc');
+    return requireString(json, 'loc', path: path);
+  }
+
+  /// v1 ใช้ชื่อ Weight — ลบพร้อมกับ Loc
+  static double _readTotalWeight(Map&lt;String, dynamic&gt; json, String path) {
+    if (hasKey(json, 'totalWeight')) {
+      return requireDouble(json, 'totalWeight', path: path);
+    }
+    _logLegacyKey('pallets', 'Weight');
+    return requireDouble(json, 'weight', path: path);
+  }
+}</code></pre><p>สังเกตว่าเรียก <code>requireString(json, 'loc', ...)</code> ด้วยตัวเล็ก — เพราะตัวอ่านกลางจะลอง <code>Loc</code> ให้เองอยู่แล้ว ไม่ต้องเขียนสองชื่อซ้ำอีก</p><p>และเรียก <code>_logLegacyKey</code> ก่อนอ่านทุกครั้ง ซึ่งเป็นคำตอบของข้อ 3</p><p><strong>ข้อ 3 — จะรู้ได้อย่างไรว่าลบได้แล้ว</strong></p><p>คำตอบที่หลายคนให้คือ “ถามทีมหลังบ้าน” ซึ่งไม่พอ เพราะทีมหลังบ้านรู้ว่า endpoint ไหนยังเปิดอยู่ แต่ไม่รู้ว่ายังมีเครื่องไหนเรียกอยู่</p><p><strong>สิ่งที่ต้องมีคือข้อมูลจากของจริง</strong></p><pre class="code-vs"><code>void _logLegacyKey(String endpoint, String key) {
+  // ส่งเป็นเหตุการณ์นับจำนวน ไม่ใช่ log ทุกครั้งที่อ่าน
+  // ไม่งั้นรายการ 200 แถวจะสร้าง log 200 บรรทัด
+  telemetry.count('json.legacy_key', tags: {
+    'endpoint': endpoint,
+    'key': key,
+    'appVersion': appVersion,
+  });
+}</code></pre><p>แล้วดูสามอย่าง</p><table><thead><tr><th>ดูอะไร</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>จำนวนครั้งต่อวัน</td><td>ยังมีคนใช้อยู่ไหม</td></tr>
+<tr><td>มาจากรุ่นแอปไหน</td><td>ถ้ามาจากรุ่นเก่าอย่างเดียว รอให้อัปเดตแล้วลบได้</td></tr>
+<tr><td>มาจากสาขาไหน</td><td>ตามไปคุยกับสาขานั้นได้ตรง</td></tr>
+</tbody></table><p><strong>เกณฑ์ที่ใช้ตัดสินว่าลบได้</strong></p><table><thead><tr><th>เงื่อนไข</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ไม่มีเหตุการณ์นี้เลยติดต่อกันนานพอ</td><td>นานพอต้องครอบรอบการทำงานที่ยาวที่สุด เช่นงานปิดบัญชีรายเดือน</td></tr>
+<tr><td>ยืนยันกับหลังบ้านว่า v1 ถูกปิดแล้ว</td><td>กันกรณีที่มีคนเรียกนาน ๆ ครั้ง</td></tr>
+<tr><td>แอปรุ่นที่ยังใช้ทางสำรอง หมดอายุแล้ว</td><td>PDA บางเครื่องไม่ได้อัปเดตนานมาก</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญเป็นพิเศษกับ PDA — เครื่องที่อยู่ในคลังอาจไม่ได้อัปเดตแอปเป็นปี ต่างจากโทรศัพท์ที่อัปเดตเอง</p><p><strong>ข้อสังเกตสุดท้าย:</strong> ทางสำรองที่ไม่มีวิธีวัดว่ายังถูกใช้อยู่หรือไม่ จะอยู่ตลอดไป — <strong>การเพิ่มทางสำรองกับการเพิ่มวิธีวัด ต้องทำพร้อมกันเสมอ</strong> ไม่ใช่ทำอันแรกแล้วบอกว่าเดี๋ยวค่อยทำอันหลัง</p></details></section>
+
+<section id="section-11"><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ความรู้เรื่องชื่อคีย์ควรอยู่ที่ตัวอ่านกลาง ไม่กระจายไปทุก model</li><li>ความต่างที่เดาได้จากกฎเดียว แก้ที่ตัวอ่านกลาง</li><li>ความต่างที่เดาไม่ได้ ต้องระบุที่ model ของ endpoint นั้น</li><li>ใช้ <code>containsKey</code> ไม่ใช่ <code>??</code> เพื่อไม่ให้ค่าที่ตั้งใจเป็น null ถูกแทน</li><li>ชื่อที่ต้องการต้องชนะเสมอเมื่อมีทั้งสองคีย์</li><li>อย่าไล่หาแบบไม่สนตัวพิมพ์ เพราะซ่อนคำสะกดผิดและช้า</li><li>ทางที่ดีที่สุดคือแก้กติกาการตั้งชื่อที่ฝั่งเซิร์ฟเวอร์</li><li>ทางสำรองต้องมาพร้อมวิธีวัดว่ายังถูกใช้อยู่หรือไม่ ไม่งั้นจะลบไม่ได้ตลอดไป</li></ul></div><p><strong>บทถัดไป:</strong> 6.8 จะกลับไปที่รากของทุกอย่างในบทนี้ — <code>dynamic</code> ที่ได้จาก <code>jsonDecode</code> และวิธีกักมันไว้ไม่ให้หลุดเข้าไปในแอป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

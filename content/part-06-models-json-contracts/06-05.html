@@ -1,4 +1,215 @@
-<div class="note">Nested JSONต้องตรวจ containerก่อน map และรายงาน pathของ childที่เสีย ไม่ cast list/mapลึกแบบ blind</div>
-<section><h2>1. Object</h2><pre class="code-vs"><code>final raw = json['destination'];
-final dto = raw is Map&lt;String, dynamic&gt; ? DestinationDto.fromJson(raw) : null;</code></pre></section><section><h2>2. List</h2><pre class="code-vs"><code>final items = requireList(json, 'items')
-  .mapIndexed((i, e) =&gt; TaskDto.fromJson(requireMap(e, 'items[$i]'))).toList();</code></pre></section><section><h2>3. Null elements</h2><p>เลือก rejectหรือ skipพร้อม telemetry ห้าม skipเงียบใน stock transaction</p></section><section><h2>4. Empty list</h2><p>เป็น success emptyไม่ใช่ loading/error</p></section><section><h2>5. Deep model</h2><p>แยก DTOย่อยและ mapper ไม่เขียน factoryหนึ่งอันร้อยบรรทัด</p></section><section><h2>6. Performance</h2><p>ข้อมูลมหาศาลพิจารณา isolate/paginationหลัง profile</p></section><section><h2>7. แบบฝึกหัด</h2><p>itemsเป็น objectแทน array?</p><details><summary>เฉลย</summary><p>โยน contract errorที่ items ไม่พยายาม iterate map valuesโดยเดา</p></details></section><section><h2>8. จุดพลาด</h2><div class="warn"><code>(json['items'] as List).cast&lt;Map...&gt;()</code> พัง runtimeโดยไม่มี pathดี</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่าน JSON ที่ซ้อนกันโดยรู้ว่าพังตรงไหน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.2 (ตัวช่วยอ่านค่าและ path) และ D1.5 (List และ Map)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แปลง JSON หลายชั้นพร้อมบอกตำแหน่งที่พังได้ถึงระดับบรรทัด</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ใบรับเข้าใบเดียวมีบรรทัดสินค้าหลายบรรทัด</p><pre class="code-vs"><code>{
+  "orderNo": "IN-2026-0812",
+  "supplierName": "บริษัท ซัพพลาย จำกัด",
+  "details": [
+    {"productCode": "SKU-1001", "expectedQuantity": 24},
+    {"productCode": "SKU-1002", "expectedQuantity": 6},
+    {"productCode": "SKU-1003"}                          ← ขาด expectedQuantity
+  ]
+}</code></pre><p>โค้ดแบบนี้จะพัง แต่พังแบบที่ช่วยอะไรไม่ได้</p><pre class="code-vs"><code>details: (json['details'] as List)
+    .map((e) =&gt; InboundDetailDto.fromJson(e as Map&lt;String, dynamic&gt;))
+    .toList(),</code></pre><pre class="code-vs"><code>ContractException ที่ expectedQuantity: ไม่มีคีย์นี้ในข้อมูลที่ได้รับ</code></pre><p>ข้อความบอกว่า field ไหน แต่ไม่บอกว่า <strong>บรรทัดไหน</strong> — ถ้าใบมี 60 บรรทัด ก็ยังหาไม่เจออยู่ดี</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>nested</td><td>ซ้อนอยู่ข้างใน</td></tr>
+<tr><td>container</td><td>ตัวครอบ คือ object หรือ array</td></tr>
+<tr><td>element</td><td>สมาชิกหนึ่งตัวใน array</td></tr>
+<tr><td>path</td><td>เส้นทางที่ชี้ตำแหน่งในก้อน JSON</td></tr>
+<tr><td>traversal</td><td>การเดินไล่เข้าไปในโครงสร้าง</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ที่อยู่ของค่าที่พัง</h2><pre class="code-vs"><code>{                              ← ''
+  "details": [                 ← 'details'
+    { ... },                   ← 'details[0]'
+    { ... },                   ← 'details[1]'
+    { "productCode": "..." }   ← 'details[2]'
+                                  └─ ขาด → 'details[2].expectedQuantity'
+  ]
+}</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกครั้งที่เดินลึกเข้าไปอีกชั้น ต้องต่อ path ให้ยาวขึ้นด้วย — ไม่งั้นข้อความผิดพลาดจะบอกได้แค่ชื่อ field ที่อาจซ้ำกันเป็นสิบที่</div></section>
+
+<section><h2>4. ตรวจตัวครอบก่อนเดินเข้าไป</h2><p>เปิด <code>lib/json_basics/json_read.dart</code></p><pre class="code-vs"><code>/// ตรวจว่าเป็น object จริงก่อนอ่านข้างใน
+Map&lt;String, dynamic&gt; requireMap(Object? value, String path) {
+  if (value is Map&lt;String, dynamic&gt;) return value;
+  throw ContractException(path, 'ต้องเป็น object แต่ได้ ${value.runtimeType}');
+}
+
+/// ตรวจว่าเป็น array จริงก่อนวนอ่าน
+List&lt;Object?&gt; requireList(Map&lt;String, dynamic&gt; json, String key, {
+  String path = '',
+}) {
+  final value = _require(json, key, path);
+  if (value is List) return value;
+  throw ContractException(
+    _at(path, key),
+    'ต้องเป็น array แต่ได้ ${value.runtimeType}',
+  );
+}</code></pre><p>เทียบกับการ cast ตรง ๆ</p><table><thead><tr><th></th><th><code>as List</code></th><th><code>requireList</code></th></tr></thead><tbody>
+<tr><td>ถ้าเซิร์ฟเวอร์ส่ง object มาแทน array</td><td><code>type '_Map' is not a subtype of type 'List'</code></td><td>“ที่ items: ต้องเป็น array แต่ได้ _Map”</td></tr>
+<tr><td>รู้ว่าพังที่คีย์ไหน</td><td>ไม่รู้</td><td>รู้</td></tr>
+</tbody></table><p>เทสต์ตรึงไว้ว่าต้องพังที่ตัวครอบ ไม่ใช่ที่อื่น</p><pre class="code-vs"><code>test('items ที่ไม่ใช่ array ต้องพังที่ items ไม่ใช่ที่อื่น', () {
+  expect(
+    () =&gt; TaskPageDto.fromJson({'items': {'0': {}}, 'totalCount': 1}),
+    throwsA(isA&lt;ContractException&gt;().having((e) =&gt; e.path, 'path', 'items')),
+  );
+});</code></pre></section>
+
+<section><h2>5. ส่ง path ลงไปทุกชั้น</h2><p>เปิด <code>lib/json_basics/task_dto.dart</code></p><pre class="code-vs"><code>factory TaskPageDto.fromJson(Map&lt;String, dynamic&gt; json) {
+  final rawItems = requireList(json, 'items');
+  final items = &lt;TaskDto&gt;[];
+  for (var index = 0; index &lt; rawItems.length; index++) {
+    // ส่ง path ลงไปด้วย เพื่อให้ error บอกได้ว่าพังที่แถวไหน
+    final path = 'items[$index]';
+    items.add(TaskDto.fromJson(requireMap(rawItems[index], path), path: path));
+  }
+  ...
+}</code></pre><p>สังเกตสามอย่าง</p><table><thead><tr><th>สิ่งที่เห็น</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ใช้ <code>for</code> ธรรมดา ไม่ใช้ <code>map</code></td><td>ต้องใช้ <code>index</code> เพื่อสร้าง path</td></tr>
+<tr><td><code>requireMap(rawItems[index], path)</code></td><td>ตรวจว่าสมาชิกเป็น object ก่อน</td></tr>
+<tr><td>ส่ง <code>path:</code> ต่อเข้าไปใน <code>fromJson</code></td><td>ให้ชั้นในต่อ path ได้อีก</td></tr>
+</tbody></table><p>ผลลัพธ์คือข้อความที่ชี้ตำแหน่งได้จริง</p><pre class="code-vs"><code>test('แถวที่พังต้องบอกว่าเป็นแถวที่เท่าไหร่', () {
+  ...
+  expect(
+    () =&gt; TaskPageDto.fromJson(json),
+    throwsA(isA&lt;ContractException&gt;()
+        .having((e) =&gt; e.path, 'path', 'items[1].quantity')),
+  );
+});</code></pre></section>
+
+<section><h2>6. ซ้อนสองชั้นก็ยังบอกได้</h2><p>เปิด <code>lib/json_basics/inbound_dto.dart</code></p><pre class="code-vs"><code>final detailPath = path.isEmpty
+    ? 'details[$index]'
+    : '$path.details[$index]';
+details.add(
+  InboundDetailDto.fromJson(
+    requireMap(rawDetails[index], detailPath),
+    path: detailPath,
+  ),
+);</code></pre><p>เงื่อนไข <code>path.isEmpty</code> ทำให้ path อ่านสวยทั้งสองกรณี</p><table><thead><tr><th>ใบเดี่ยว</th><th>ใบที่อยู่ในรายการ</th></tr></thead><tbody>
+<tr><td><code>details[2].expectedQuantity</code></td><td><code>orders[5].details[2].expectedQuantity</code></td></tr>
+</tbody></table><p>เทสต์ยืนยันว่าลงลึกได้ถึงชั้นใน</p><pre class="code-vs"><code>test('บรรทัดที่พังต้องบอกตำแหน่งลึกถึงชั้นใน', () {
+  final json = fixture('inbound_order.json');
+  (json['details'] as List)[2] = {'productCode': 'SKU-1003'};
+
+  expect(
+    () =&gt; InboundOrderDto.fromJson(json),
+    throwsA(isA&lt;ContractException&gt;()
+        .having((e) =&gt; e.path, 'path', 'details[2].expectedQuantity')),
+  );
+});</code></pre><p>ข้อความที่ได้บอกครบสามอย่าง — ชั้นไหน บรรทัดที่เท่าไหร่ และ field ไหน ซึ่งพอที่จะเปิดดูข้อมูลต้นทางได้ทันที</p></section>
+
+<section><h2>7. object ที่อาจไม่มี</h2><p>ตัวครอบที่เป็น <code>null</code> ได้ ต้องตรวจก่อนเดินเข้าไป</p><pre class="code-vs"><code>// ผิด — พังถ้า destination เป็น null
+destination: DestinationDto.fromJson(json['destination']),</code></pre><pre class="code-vs"><code>// ถูก — ตรวจก่อน
+final rawDestination = json['destination'];
+final destination = rawDestination == null
+    ? null
+    : DestinationDto.fromJson(
+        requireMap(rawDestination, _at(path, 'destination')),
+        path: _at(path, 'destination'),
+      );</code></pre><p>เหมือนที่ทำกับ <code>expectedAt</code> ใน lab</p><pre class="code-vs"><code>// เวลาที่คาดว่าของจะมาถึง อาจยังไม่รู้ จึงเป็น null ได้
+expectedAt: hasKey(json, 'expectedAt') &amp;&amp; json['expectedAt'] != null
+    ? requireUtcTime(json, 'expectedAt', path: path)
+    : null,</code></pre></section>
+
+<section><h2>8. สมาชิกที่เสียในรายการ: ข้ามหรือปฏิเสธ</h2><p>คำถามที่ต้องตัดสินตอนออกแบบ ไม่ใช่ตอนเจอปัญหา</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ได้</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>ปฏิเสธทั้งก้อน</td><td>ผู้ใช้ไม่เห็นอะไรเลย แต่ไม่มีข้อมูลผิด</td><td>งานที่กระทบสต๊อก</td></tr>
+<tr><td>ข้ามแถวที่เสีย</td><td>เห็นแถวที่เหลือ แต่ไม่รู้ว่ามีแถวหาย</td><td>รายการที่แค่ดูเฉย ๆ</td></tr>
+<tr><td>ข้ามแล้วบอกจำนวนที่ข้าม</td><td>เห็นแถวที่เหลือ และรู้ว่าไม่ครบ</td><td>ทางสายกลาง</td></tr>
+</tbody></table><p>lab เลือกปฏิเสธทั้งก้อน เพราะเป็นรายการงานที่ต้องทำจริง</p><pre class="code-vs"><code>if (details.isEmpty) {
+  throw ContractException(
+    path.isEmpty ? 'details' : '$path.details',
+    'ใบรับเข้าต้องมีอย่างน้อยหนึ่งบรรทัด',
+  );
+}</code></pre><div class="warn">การข้ามแถวเงียบ ๆ ในงานคลังอันตรายมาก — ถ้าใบรับเข้ามี 20 บรรทัดแต่แสดงแค่ 19 คนหน้างานจะรับของไม่ครบแล้วปิดใบว่าเสร็จ โดยที่ไม่มีอะไรบอกว่ามีของหายไปหนึ่งบรรทัด</div><p>ถ้าจำเป็นต้องข้ามจริง ๆ ต้องบันทึกไว้เสมอว่าข้ามอะไรไป เพื่อให้ตามไปแก้ที่ต้นทางได้</p></section>
+
+<section><h2>9. รายการว่างคือความสำเร็จ</h2><pre class="code-vs"><code>test('รายการว่างคือความสำเร็จ ไม่ใช่ความผิดพลาด', () {
+  final page = TaskPageDto.fromJson({'items': [], 'totalCount': 0});
+
+  expect(page.items, isEmpty);
+  expect(page.hasMore, isFalse);
+});</code></pre><p>เป็นเรื่องเดียวกับ 4.7 — <strong>“ไม่มีงานวันนี้” เป็นคำตอบที่ถูกต้อง ไม่ใช่ข้อผิดพลาด</strong></p><p>แต่สังเกตว่า lab ปฏิเสธ <code>details</code> ที่ว่างในใบรับเข้า ซึ่งดูขัดกัน — ความต่างคือ</p><table><thead><tr><th></th><th>รายการงานว่าง</th><th>ใบรับเข้าไม่มีบรรทัด</th></tr></thead><tbody>
+<tr><td>เกิดขึ้นได้ตามปกติไหม</td><td>ได้ — วันนี้อาจไม่มีงาน</td><td>ไม่ได้ — ใบที่ไม่มีของคือใบที่ไม่มีความหมาย</td></tr>
+<tr><td>ควรทำ</td><td>ยอมรับ</td><td>ปฏิเสธ</td></tr>
+</tbody></table><p>เกณฑ์คือ <strong>ถามว่าค่าว่างนั้นเป็นสถานะปกติของธุรกิจหรือไม่</strong> ซึ่งเป็นคำถามเดียวกับ 6.4</p></section>
+
+<section><h2>10. แยก DTO ย่อยเมื่อชั้นเริ่มลึก</h2><pre class="code-vs"><code>// เลี่ยง — ตัวแปลงเดียวอ่านทุกชั้น
+factory InboundOrderDto.fromJson(Map&lt;String, dynamic&gt; json) =&gt; InboundOrderDto(
+  details: (json['details'] as List).map((d) =&gt; ...50 บรรทัด...).toList(),
+);</code></pre><p>lab แยกเป็นสองคลาส ซึ่งได้สามอย่าง</p><table><thead><tr><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>ทดสอบบรรทัดสินค้าแยกจากใบได้</td></tr>
+<tr><td>เอา <code>InboundDetailDto</code> ไปใช้กับ endpoint อื่นที่ส่งบรรทัดมาเดี่ยว ๆ ได้</td></tr>
+<tr><td>อ่านแล้วเห็นโครงข้อมูลตรงกับ JSON</td></tr>
+</tbody></table><p>กฎง่าย ๆ — <strong>ทุก object ใน JSON ควรมีคลาสของตัวเอง</strong> แม้จะมีแค่สอง field</p></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>รู้ว่า field ไหนพัง แต่ไม่รู้แถวไหน</td><td>ไม่ได้ส่ง path ลงไป</td><td>ต่อ path ทุกชั้น</td></tr>
+<tr><td><code>type '_Map' is not a subtype of type 'List'</code></td><td>cast ตัวครอบตรง ๆ</td><td><code>requireList</code> / <code>requireMap</code></td></tr>
+<tr><td>ใบรับของไม่ครบโดยไม่มีใครรู้</td><td>ข้ามแถวที่เสียเงียบ ๆ</td><td>ปฏิเสธทั้งก้อน หรือบอกจำนวนที่ข้าม</td></tr>
+<tr><td>รายการว่างขึ้นหน้าผิดพลาด</td><td>ถือว่าว่างคือพัง</td><td>ยอมรับถ้าเป็นสถานะปกติ</td></tr>
+<tr><td>ตัวแปลงยาวเป็นร้อยบรรทัด</td><td>อ่านทุกชั้นในที่เดียว</td><td>แยกคลาสตาม object</td></tr>
+<tr><td>พังเมื่อ object ชั้นในเป็น null</td><td>เดินเข้าไปโดยไม่ตรวจ</td><td>ตรวจก่อนแล้วคืน null</td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์ส่งข้อมูลรอบส่งของมาแบบนี้</p><pre class="code-vs"><code>{
+  "shipmentNo": "SH-2026-0091",
+  "vehicle": {
+    "plateNo": "70-1234",
+    "driver": {"name": "สมชาย ใจดี", "phone": null}
+  },
+  "stops": [
+    {
+      "sequence": 1,
+      "customerName": "ร้านค้า ก",
+      "orders": [
+        {"orderNo": "SO-001", "boxCount": 12},
+        {"orderNo": "SO-002", "boxCount": 8}
+      ]
+    },
+    {
+      "sequence": 2,
+      "customerName": "ร้านค้า ข",
+      "orders": []
+    }
+  ]
+}</code></pre><ol><li>ระบุว่าควรมีกี่คลาส และแต่ละคลาสรับผิดชอบอะไร</li><li>เขียน path ที่ควรได้ ถ้า <code>boxCount</code> ของ <code>SO-002</code> หายไป</li><li>ตัดสินว่า <code>orders</code> ที่ว่างของจุดส่งที่สอง ควรยอมรับหรือปฏิเสธ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — คลาสที่ควรมี</strong></p><table><thead><tr><th>คลาส</th><th>ตรงกับ object ไหน</th></tr></thead><tbody>
+<tr><td><code>ShipmentDto</code></td><td>ก้อนนอกสุด</td></tr>
+<tr><td><code>VehicleDto</code></td><td><code>vehicle</code></td></tr>
+<tr><td><code>DriverDto</code></td><td><code>vehicle.driver</code></td></tr>
+<tr><td><code>StopDto</code></td><td>สมาชิกใน <code>stops</code></td></tr>
+<tr><td><code>StopOrderDto</code></td><td>สมาชิกใน <code>stops[].orders</code></td></tr>
+</tbody></table><p>ห้าคลาส ตรงกับจำนวน object ที่มีใน JSON พอดี ตามกฎในหัวข้อ 10</p><pre class="code-vs"><code>factory ShipmentDto.fromJson(Map&lt;String, dynamic&gt; json, {String path = ''}) {
+  final rawStops = requireList(json, 'stops', path: path);
+  final stops = &lt;StopDto&gt;[];
+  for (var index = 0; index &lt; rawStops.length; index++) {
+    final stopPath = path.isEmpty ? 'stops[$index]' : '$path.stops[$index]';
+    stops.add(
+      StopDto.fromJson(requireMap(rawStops[index], stopPath), path: stopPath),
+    );
+  }
+
+  final vehiclePath = path.isEmpty ? 'vehicle' : '$path.vehicle';
+  return ShipmentDto(
+    shipmentNo: requireString(json, 'shipmentNo', path: path),
+    vehicle: VehicleDto.fromJson(
+      requireMap(json['vehicle'], vehiclePath),
+      path: vehiclePath,
+    ),
+    stops: stops,
+  );
+}</code></pre><p>ส่วน <code>phone: null</code> ของคนขับใช้ <code>readString</code> ได้เลย เพราะคนขับที่ไม่ได้ให้เบอร์เป็นเรื่องปกติ</p><p><strong>ข้อ 2 — path ที่ควรได้</strong></p><pre class="code-vs"><code>stops[0].orders[1].boxCount</code></pre><p>อ่านแล้วเดินตามได้ทันทีโดยไม่ต้องเดา — จุดส่งแรก ใบสั่งที่สอง field <code>boxCount</code></p><p>เทียบกับสิ่งที่ได้ถ้าไม่ส่ง path</p><table><thead><tr><th>ข้อความ</th><th>ต้องทำอะไรต่อ</th></tr></thead><tbody>
+<tr><td><code>boxCount: ไม่มีคีย์นี้</code></td><td>เปิด payload ดิบมาไล่หาเองทุกจุดส่ง</td></tr>
+<tr><td><code>stops[0].orders[1].boxCount: ไม่มีคีย์นี้</code></td><td>เปิดไปดูตรงจุดนั้นได้เลย</td></tr>
+</tbody></table><p>ความต่างนี้ยิ่งสำคัญเมื่อรอบส่งมี 30 จุด จุดละ 10 ใบ</p><p><strong>ข้อ 3 — <code>orders</code> ที่ว่าง</strong></p><p>ต้องถามก่อนว่า <strong>จุดส่งที่ไม่มีใบสั่งเลย เกิดขึ้นได้ตามปกติไหม</strong></p><table><thead><tr><th>ถ้าเป็นไปได้</th><th>ตัวอย่างสถานการณ์</th></tr></thead><tbody>
+<tr><td>จุดแวะรับของกลับ</td><td>ไปรับของคืนอย่างเดียว ไม่มีของไปส่ง</td></tr>
+<tr><td>จุดที่ใบถูกยกเลิกไปแล้ว</td><td>ลูกค้ายกเลิกหลังจัดรอบแล้ว</td></tr>
+<tr><td>จุดพักรถ</td><td>ไม่ใช่จุดส่งของ</td></tr>
+</tbody></table><p><strong>คำตอบคือยอมรับ แต่ต้องยืนยันกับฝั่งหลังบ้านก่อน</strong> — และถ้ายอมรับ ต้องทำสองอย่างเพิ่ม</p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>หน้าจอต้องบอกให้ชัดว่าจุดนี้ไม่มีของส่ง</td><td>ไม่งั้นคนขับจะคิดว่าแอปโหลดไม่ครบ</td></tr>
+<tr><td>ต้องรู้ว่าทำไมถึงว่าง</td><td>“ยกเลิกแล้ว” กับ “จุดพักรถ” ต้องแสดงต่างกัน</td></tr>
+</tbody></table><p>ข้อสองมักเผยว่าสัญญายังขาดข้อมูล — ถ้าตอบไม่ได้ว่าจุดนั้นว่างเพราะอะไร แปลว่าควรขอ field เพิ่ม เช่น <code>stopType</code> ซึ่งเป็นข้อสรุปเดียวกับ 6.3 แบบฝึกหัดข้อ 3</p><p><strong>เปรียบเทียบกับใบรับเข้าใน lab</strong></p><table><thead><tr><th></th><th>ใบรับเข้าไม่มีบรรทัด</th><th>จุดส่งไม่มีใบสั่ง</th></tr></thead><tbody>
+<tr><td>เป็นสถานะปกติไหม</td><td>ไม่ — ใบที่ไม่มีของไม่มีความหมาย</td><td>ได้ — มีเหตุผลที่อธิบายได้</td></tr>
+<tr><td>ทำอย่างไร</td><td>ปฏิเสธ</td><td>ยอมรับ</td></tr>
+</tbody></table><p><strong>บทเรียนที่ควรจำ:</strong> คำถาม “รายการว่างยอมรับได้ไหม” ไม่มีคำตอบสำเร็จรูป ต้องกลับไปถามธุรกิจทุกครั้ง — และการตอบว่า “ไม่แน่ใจ” คือสัญญาณว่ายังไม่ควรเขียนโค้ดส่วนนั้น</p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>ตรวจว่าตัวครอบเป็น object หรือ array จริง ก่อนเดินเข้าไป</li><li>ต่อ path ทุกครั้งที่ลงลึกอีกชั้น</li><li>ใช้ <code>for</code> พร้อม index แทน <code>map</code> เพื่อสร้าง path ของแต่ละสมาชิก</li><li>ทุก object ใน JSON ควรมีคลาสของตัวเอง</li><li>สมาชิกที่เสีย — ข้ามเงียบ ๆ อันตรายที่สุดในงานคลัง</li><li>รายการว่างเป็นความสำเร็จหรือความล้มเหลว ขึ้นกับว่าเป็นสถานะปกติของธุรกิจไหม</li><li>object ชั้นในที่อาจไม่มี ต้องตรวจก่อนแล้วคืน null</li><li>ข้อความผิดพลาดที่ดีต้องบอกได้ว่า ชั้นไหน แถวไหน field ไหน</li></ul></div><p><strong>บทถัดไป:</strong> 6.6 จะจัดการเวลา ซึ่งเป็นชนิดข้อมูลที่ผิดง่ายที่สุดและตรวจเจอยากที่สุด เพราะมันดูถูกต้องเสมอจนกว่าจะข้ามเขตเวลา</p></section>

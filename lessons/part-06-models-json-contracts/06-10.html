@@ -4,8 +4,246 @@
 <title>Grid Response Envelope</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-10 · Flutter + .NET</span><h1>Grid Response Envelope</h1><p>Part 6: Models &amp; JSON</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">DTO</a></li><li><a href="#section-2">Parse</a></li><li><a href="#section-3">Meaning</a></li><li><a href="#section-4">Paging</a></li><li><a href="#section-5">Filters</a></li><li><a href="#section-6">Empty</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Grid envelopeแยก itemsจาก metadata เช่น totalCount/page เพื่อ paginationที่ถูกต้อง ไม่ใช้ items.lengthแทนจำนวนทั้งหมด</div>
-<section id="section-1"><h2>1. DTO</h2><pre class="code-vs"><code>typedef GridPage&lt;T&gt; = ({List&lt;T&gt; items, int totalCount});</code></pre></section><section id="section-2"><h2>2. Parse</h2><p>ตรวจ items listและ totalCount non-negative รองรับ key migrationกลาง</p></section><section id="section-3"><h2>3. Meaning</h2><p>items.lengthคือหน้านี้; totalCountคือผล queryทั้งหมด</p></section><section id="section-4"><h2>4. Paging</h2><p>หยุดเมื่อ loaded≥totalCountหรือ server next cursorหมด</p></section><section id="section-5"><h2>5. Filters</h2><p>Totalผูก query/filter/sort generation ป้องกัน responseเก่า</p></section><section id="section-6"><h2>6. Empty</h2><p>items=[] total=0คือ success empty</p></section><section id="section-7"><h2>7. แบบฝึกหัด</h2><p>items 20 total 137?</p><details><summary>เฉลย</summary><p>ยังมีหน้า; UIแสดง 20 loaded/137 และ requestหน้าถัดตาม page/cursor contract</p></details></section><section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่ารวม pagesแล้ว appendซ้ำโดยไม่ dedupe stable ID</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: สองตัวเลขที่ตอบคนละคำถาม</a></li><li><a href="#section-4">ซองที่ตรวจตัวเองได้</a></li><li><a href="#section-5">อย่าเดาว่าโหลดครบแล้วจากจำนวนที่ได้</a></li><li><a href="#section-6">รวมหน้าต่อกันโดยไม่ให้ซ้ำ</a></li><li><a href="#section-7">ผูกจำนวนทั้งหมดกับเงื่อนไขการค้นหา</a></li><li><a href="#section-8">รายการว่างคือความสำเร็จ</a></li><li><a href="#section-9">ซองที่มีรูปแบบต่างกัน</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านซองที่ห่อรายการ และแบ่งหน้าให้ถูก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.5 (JSON ที่ซ้อนกัน) และ 4.10 (ตัวนับรุ่น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกจำนวนในหน้านี้ออกจากจำนวนทั้งหมด และโหลดหน้าถัดไปโดยไม่ได้ข้อมูลซ้ำหรือขาด</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>เมื่อรายการมีเป็นพัน เซิร์ฟเวอร์จะไม่ส่งมาทั้งหมด แต่ส่งมาทีละหน้าพร้อมบอกว่ามีทั้งหมดเท่าไหร่</p><pre class="code-vs"><code>{
+  "items": [ ... 20 รายการ ... ],
+  "totalCount": 137
+}</code></pre><p>สองตัวเลขนี้มักถูกใช้ผิดตัว</p><table><thead><tr><th>โค้ดที่เขียน</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td><code>Text('มีงาน ${items.length} รายการ')</code></td><td>แสดง 20 ทั้งที่มีจริง 137</td></tr>
+<tr><td><code>if (items.isEmpty) แสดง "ไม่มีงาน"</code></td><td>ถูก แต่บังเอิญถูก</td></tr>
+<tr><td><code>if (items.length &lt; 20) หยุดโหลด</code></td><td>พังเมื่อหน้าสุดท้ายมี 20 พอดี</td></tr>
+</tbody></table><p>แถวแรกทำให้คนหน้างานวางแผนงานผิด เพราะคิดว่าเหลืองานอีก 20 ชิ้น ทั้งที่จริงเหลือ 137</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>envelope / ซอง</td><td>ก้อนนอกที่ห่อรายการพร้อมข้อมูลประกอบ</td></tr>
+<tr><td>pagination</td><td>การแบ่งข้อมูลเป็นหน้า</td></tr>
+<tr><td>page</td><td>ข้อมูลหนึ่งชุดที่ส่งมาในครั้งเดียว</td></tr>
+<tr><td>cursor</td><td>ตัวชี้ว่าอ่านมาถึงไหนแล้ว</td></tr>
+<tr><td>offset</td><td>จำนวนรายการที่ข้ามไปแล้ว</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: สองตัวเลขที่ตอบคนละคำถาม</h2><pre class="code-vs"><code>items.length  → "หน้านี้มีกี่รายการ"        ใช้วนแสดงผล
+totalCount    → "ทั้งหมดมีกี่รายการ"        ใช้บอกผู้ใช้และคำนวณว่าโหลดครบหรือยัง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ก่อนใช้ตัวเลขใดตัวเลขหนึ่ง ให้ถามว่ากำลังตอบคำถามข้อไหน — สองตัวนี้เท่ากันเฉพาะตอนที่ข้อมูลมีหน้าเดียว ซึ่งเป็นกรณีที่เจอตอนทดสอบพอดี</div></section>
+
+<section id="section-4"><h2>4. ซองที่ตรวจตัวเองได้</h2><p>เปิด <code>lib/json_basics/task_dto.dart</code></p><pre class="code-vs"><code>class TaskPageDto {
+  const TaskPageDto({required this.items, required this.totalCount});
+
+  factory TaskPageDto.fromJson(Map&lt;String, dynamic&gt; json) {
+    final rawItems = requireList(json, 'items');
+    final items = &lt;TaskDto&gt;[];
+    for (var index = 0; index &lt; rawItems.length; index++) {
+      final path = 'items[$index]';
+      items.add(TaskDto.fromJson(requireMap(rawItems[index], path), path: path));
+    }
+
+    final totalCount = requireInt(json, 'totalCount');
+    if (totalCount &lt; items.length) {
+      throw const ContractException(
+        'totalCount',
+        'จำนวนทั้งหมดต้องไม่น้อยกว่าจำนวนในหน้านี้',
+      );
+    }
+
+    return TaskPageDto(items: items, totalCount: totalCount);
+  }
+
+  final List&lt;TaskDto&gt; items;
+  final int totalCount;
+
+  bool get hasMore =&gt; items.length &lt; totalCount;
+}</code></pre><p>สองอย่างที่ตั้งใจ</p><table><thead><tr><th>สิ่งที่ทำ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ตรวจว่า <code>totalCount</code> ไม่น้อยกว่าจำนวนที่ส่งมา</td><td>ถ้าน้อยกว่า แปลว่าข้อมูลขัดแย้งกันเอง</td></tr>
+<tr><td>มี <code>hasMore</code> เป็น getter</td><td>คำนวณเอา ไม่เก็บ (4.2) และไม่ให้ที่อื่นคำนวณเองผิด ๆ</td></tr>
+</tbody></table><pre class="code-vs"><code>test('totalCount น้อยกว่าจำนวนที่ส่งมา คือข้อมูลขัดแย้งกันเอง', () {
+  expect(
+    () =&gt; TaskPageDto.fromJson({'items': [taskJson()], 'totalCount': 0}),
+    throwsA(isA&lt;ContractException&gt;()),
+  );
+});</code></pre></section>
+
+<section id="section-5"><h2>5. อย่าเดาว่าโหลดครบแล้วจากจำนวนที่ได้</h2><pre class="code-vs"><code>// พังเมื่อหน้าสุดท้ายมีพอดี 20 รายการ
+if (page.items.length &lt; pageSize) {
+  hasMore = false;
+}</code></pre><pre class="code-vs"><code>ทั้งหมด 40 รายการ ขนาดหน้า 20
+  หน้า 1 → ได้ 20 → เดาว่ายังมีต่อ ✓
+  หน้า 2 → ได้ 20 → เดาว่ายังมีต่อ ✗ ผิด แต่ยังไม่รู้
+  หน้า 3 → ได้ 0  → ถึงจะรู้ว่าหมดแล้ว</code></pre><p>ผลคือยิงคำขอเกินไปหนึ่งครั้งเสมอ และผู้ใช้เห็นตัวหมุนโหลดค้างอยู่ท้ายรายการโดยไม่จำเป็น</p><pre class="code-vs"><code>// ถูก — ใช้ตัวเลขที่เซิร์ฟเวอร์บอกมา
+bool get hasMore =&gt; loadedItems.length &lt; totalCount;</code></pre></section>
+
+<section id="section-6"><h2>6. รวมหน้าต่อกันโดยไม่ให้ซ้ำ</h2><pre class="code-vs"><code>// เสี่ยง — ต่อท้ายอย่างเดียว
+_tasks = [..._tasks, ...page.items];</code></pre><p>ปัญหาเกิดเมื่อข้อมูลฝั่งเซิร์ฟเวอร์เปลี่ยนระหว่างที่กำลังโหลดหน้าถัดไป</p><pre class="code-vs"><code>โหลดหน้า 1 → ได้รายการที่ 1–20
+มีคนเพิ่มงานใหม่เข้ามา 1 รายการ ซึ่งเรียงมาเป็นอันดับที่ 1
+โหลดหน้า 2 (ข้าม 20 รายการแรก) → ได้รายการที่ 20–39
+                                    └─ รายการที่ 20 ซ้ำกับที่โหลดไปแล้ว</code></pre><p>ทางแก้คือกรองด้วย id ก่อนต่อ</p><pre class="code-vs"><code>void appendPage(List&lt;Task&gt; newItems) {
+  final seenIds = {for (final task in _tasks) task.id};
+  _tasks = [
+    ..._tasks,
+    for (final task in newItems)
+      if (seenIds.add(task.id)) task,
+  ];
+}</code></pre><p>เป็นรูปแบบเดียวกับการกันสแกนซ้ำใน 3.9 — <strong>ยึด id ไม่ใช่ตำแหน่ง</strong></p><div class="warn">การแบ่งหน้าด้วยตำแหน่งมีจุดอ่อนนี้ตามธรรมชาติ ถ้าข้อมูลเปลี่ยนบ่อย ควรขอให้ฝั่งหลังบ้านใช้ตัวชี้ที่ผูกกับรายการสุดท้ายที่ได้ไปแทน ซึ่งจะไม่มีปัญหานี้เลย</div></section>
+
+<section id="section-7"><h2>7. ผูกจำนวนทั้งหมดกับเงื่อนไขการค้นหา</h2><p><code>totalCount</code> ไม่ใช่จำนวนงานทั้งหมดในระบบ แต่เป็นจำนวนที่ตรงกับเงื่อนไขที่ถามไป</p><pre class="code-vs"><code>ค้นหา ""       → totalCount = 137
+ค้นหา "PAL-01" → totalCount = 8</code></pre><p>ปัญหาเกิดเมื่อผู้ใช้เปลี่ยนเงื่อนไขระหว่างที่คำขอเก่ายังไม่กลับ</p><pre class="code-vs"><code>0.0s  ค้นหา "" → ยิงคำขอ A
+0.3s  ค้นหา "PAL-01" → ยิงคำขอ B
+0.8s  B กลับ → totalCount = 8, แสดง 8 รายการ
+1.5s  A กลับ → totalCount = 137, ต่อท้ายอีก 20 รายการที่ไม่ตรงเงื่อนไข</code></pre><p>นี่คือปัญหาเดียวกับ 4.10 และแก้ด้วยตัวนับรุ่นเหมือนกัน</p><pre class="code-vs"><code>Future&lt;void&gt; search(String query) async {
+  final generation = ++_generation;
+  final page = await repository.fetchTasks(query: query, skip: 0);
+  if (generation != _generation) return;      // ผลของคำขอเก่า ทิ้งไป
+  _tasks = page.items;
+  _totalCount = page.totalCount;
+  _query = query;
+  notifyListeners();
+}</code></pre><p>และตอนโหลดหน้าถัดไป ต้องส่งเงื่อนไขเดิมไปด้วยเสมอ ไม่ใช่ส่งแค่ตำแหน่ง</p></section>
+
+<section id="section-8"><h2>8. รายการว่างคือความสำเร็จ</h2><pre class="code-vs"><code>test('รายการว่างคือความสำเร็จ ไม่ใช่ความผิดพลาด', () {
+  final page = TaskPageDto.fromJson({'items': [], 'totalCount': 0});
+
+  expect(page.items, isEmpty);
+  expect(page.hasMore, isFalse);
+});</code></pre><p>ต่อกับ 4.7 โดยตรง — แต่ตอนนี้มีข้อมูลมากขึ้นให้แยกกรณี</p><table><thead><tr><th>สิ่งที่ได้</th><th>แปลว่า</th><th>ควรแสดง</th></tr></thead><tbody>
+<tr><td><code>items: []</code>, <code>totalCount: 0</code>, ไม่มีเงื่อนไขค้นหา</td><td>วันนี้ไม่มีงาน</td><td>“วันนี้ยังไม่มีงาน”</td></tr>
+<tr><td><code>items: []</code>, <code>totalCount: 0</code>, มีเงื่อนไขค้นหา</td><td>ไม่พบผลลัพธ์</td><td>“ไม่พบงานที่ตรงกับ ...” + ปุ่มล้างเงื่อนไข</td></tr>
+<tr><td><code>items: []</code> แต่ <code>totalCount: 137</code></td><td>ขอหน้าที่เกินไปแล้ว</td><td>ไม่ควรเกิด — เป็นบั๊กของฝั่งเรา</td></tr>
+</tbody></table><p>สองแถวแรกต้องแสดงต่างกัน เพราะผู้ใช้ต้องทำต่างกัน — แถวแรกคือรอ ส่วนแถวสองคือแก้เงื่อนไข</p></section>
+
+<section id="section-9"><h2>9. ซองที่มีรูปแบบต่างกัน</h2><p>แต่ละ endpoint อาจห่อรายการไม่เหมือนกัน</p><pre class="code-vs"><code>{"items": [...], "totalCount": 137}
+{"data": [...], "total": 137}
+{"rows": [...], "recordsTotal": 137}
+{"result": {"list": [...], "count": 137}}</code></pre><p>ทางที่ดีคือ <strong>แปลงให้เป็นรูปแบบเดียวที่ขอบ</strong> แล้วชั้นอื่นเห็นแบบเดียวกันหมด</p><pre class="code-vs"><code>class Page&lt;T&gt; {
+  const Page({required this.items, required this.totalCount});
+  final List&lt;T&gt; items;
+  final int totalCount;
+  bool get hasMore =&gt; items.length &lt; totalCount;
+}</code></pre><p>แล้วแต่ละ endpoint มีตัวแปลงของตัวเอง แต่คืน <code>Page&lt;T&gt;</code> เหมือนกัน</p><p>ผลคือ store และหน้าจอไม่ต้องรู้ว่า endpoint ไหนใช้ชื่ออะไร — เป็นหลักเดียวกับ 6.7</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แสดงจำนวนงานน้อยกว่าความจริง</td><td>ใช้ <code>items.length</code> แทน <code>totalCount</code></td><td>ใช้ตัวเลขให้ตรงกับคำถาม</td></tr>
+<tr><td>ยิงคำขอเกินหนึ่งครั้งเสมอ</td><td>เดาว่าหมดจากจำนวนที่ได้</td><td>เทียบกับ <code>totalCount</code></td></tr>
+<tr><td>รายการซ้ำเมื่อเลื่อนลง</td><td>ต่อท้ายโดยไม่กรอง</td><td>กรองด้วย id</td></tr>
+<tr><td>ผลค้นหาปนกับผลก่อนหน้า</td><td>ไม่มีตัวนับรุ่น</td><td>ตรวจรุ่นก่อนเขียนลง state (4.10)</td></tr>
+<tr><td>โหลดหน้าถัดไปแล้วได้ข้อมูลไม่ตรงเงื่อนไข</td><td>ส่งแต่ตำแหน่ง ไม่ส่งเงื่อนไข</td><td>ส่งเงื่อนไขไปทุกครั้ง</td></tr>
+<tr><td>“ไม่พบผลลัพธ์” กับ “ยังไม่มีงาน” เหมือนกัน</td><td>ไม่แยกกรณีค้นหา</td><td>ดูว่ามีเงื่อนไขค้นหาอยู่หรือไม่</td></tr>
+<tr><td>ทุก endpoint มีวิธีอ่านซองของตัวเอง</td><td>ไม่ได้แปลงเป็นรูปแบบเดียว</td><td>ใช้ชนิดกลางอย่าง <code>Page&lt;T&gt;</code></td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>หน้าจอค้นหางานมีรายการที่โหลดเพิ่มเมื่อเลื่อนถึงท้าย และมีช่องค้นหา</p><pre class="code-vs"><code>class SearchStore extends ChangeNotifier {
+  List&lt;Task&gt; _tasks = [];
+  int _totalCount = 0;
+  bool _loading = false;
+
+  Future&lt;void&gt; search(String query) async {
+    _loading = true;
+    notifyListeners();
+    final page = await repository.fetchTasks(query: query, skip: 0);
+    _tasks = page.items;
+    _totalCount = page.totalCount;
+    _loading = false;
+    notifyListeners();
+  }
+
+  Future&lt;void&gt; loadMore() async {
+    if (_tasks.length &gt;= _totalCount) return;
+    final page = await repository.fetchTasks(query: '', skip: _tasks.length);
+    _tasks = [..._tasks, ...page.items];
+    notifyListeners();
+  }
+}</code></pre><ol><li>หาข้อบกพร่องให้ได้อย่างน้อยห้าข้อ</li><li>เขียนใหม่</li><li>ตอบว่าถ้าผู้ใช้เลื่อนถึงท้ายรายการพอดีตอนที่กำลังพิมพ์ค้นหาใหม่ จะเกิดอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อบกพร่อง</strong></p><table><thead><tr><th>#</th><th>ข้อบกพร่อง</th><th>ผลที่เกิด</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td><code>loadMore</code> ส่ง <code>query: ''</code> ทิ้งเงื่อนไขเดิม</td><td>โหลดหน้าถัดไปได้งานที่ไม่ตรงเงื่อนไข</td><td>6.10</td></tr>
+<tr><td>2</td><td>ไม่มีตัวนับรุ่น</td><td>ผลค้นหาเก่าทับผลใหม่</td><td>4.10</td></tr>
+<tr><td>3</td><td>ต่อท้ายโดยไม่กรองซ้ำ</td><td>รายการซ้ำเมื่อข้อมูลเปลี่ยนระหว่างโหลด</td><td>6.10</td></tr>
+<tr><td>4</td><td>ไม่กันการเรียก <code>loadMore</code> ซ้อน</td><td>เลื่อนเร็ว ๆ ยิงคำขอเดียวกันหลายครั้ง</td><td>4.14</td></tr>
+<tr><td>5</td><td>ไม่มี try/catch และ <code>_loading</code> ไม่อยู่ใน <code>finally</code></td><td>เน็ตหลุดแล้วตัวหมุนค้างถาวร</td><td>4.8</td></tr>
+<tr><td>6</td><td><code>loadMore</code> ไม่อัปเดต <code>_totalCount</code></td><td>ถ้าจำนวนเปลี่ยน จะหยุดโหลดผิดจังหวะ</td><td>6.10</td></tr>
+<tr><td>7</td><td>ไม่เก็บ query ที่ใช้อยู่</td><td>เป็นสาเหตุของข้อ 1</td><td>4.2</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เขียนใหม่</strong></p><pre class="code-vs"><code>class SearchStore extends ChangeNotifier {
+  List&lt;Task&gt; _tasks = const [];
+  int _totalCount = 0;
+  String _query = '';                   // แก้ข้อ 7
+  bool _loading = false;
+  bool _loadingMore = false;
+  int _generation = 0;
+  String? _errorMessage;
+
+  List&lt;Task&gt; get tasks =&gt; List.unmodifiable(_tasks);
+  int get totalCount =&gt; _totalCount;
+  bool get hasMore =&gt; _tasks.length &lt; _totalCount;
+
+  Future&lt;void&gt; search(String query) async {
+    final generation = ++_generation;   // แก้ข้อ 2
+    _loading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final page = await repository.fetchTasks(query: query, skip: 0);
+      if (generation != _generation) return;
+      _tasks = page.items;
+      _totalCount = page.totalCount;
+      _query = query;                   // จำเงื่อนไขที่ใช้จริง
+    } on ContractException catch (error) {
+      if (generation != _generation) return;
+      _errorMessage = 'ข้อมูลจากเซิร์ฟเวอร์ไม่ถูกต้อง: ${error.path}';
+    } finally {                          // แก้ข้อ 5
+      if (generation == _generation) {
+        _loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future&lt;void&gt; loadMore() async {
+    if (_loadingMore || _loading || !hasMore) return;   // แก้ข้อ 4
+    final generation = _generation;      // ไม่เพิ่ม — เกาะรุ่นของการค้นหาปัจจุบัน
+    _loadingMore = true;
+    notifyListeners();
+    try {
+      final page = await repository.fetchTasks(
+        query: _query,                   // แก้ข้อ 1
+        skip: _tasks.length,
+      );
+      if (generation != _generation) return;   // มีการค้นหาใหม่ระหว่างรอ
+
+      // แก้ข้อ 3 — กรองซ้ำด้วย id
+      final seenIds = {for (final task in _tasks) task.id};
+      _tasks = [
+        ..._tasks,
+        for (final task in page.items)
+          if (seenIds.add(task.id)) task,
+      ];
+      _totalCount = page.totalCount;     // แก้ข้อ 6
+    } on ContractException catch (error) {
+      if (generation != _generation) return;
+      _errorMessage = 'โหลดเพิ่มไม่สำเร็จ: ${error.path}';
+    } finally {
+      if (generation == _generation) {
+        _loadingMore = false;
+        notifyListeners();
+      }
+    }
+  }
+}</code></pre><p>จุดที่ควรสังเกตคือ <code>loadMore</code> <strong>ไม่เพิ่ม</strong> เลขรุ่น แต่จำรุ่นปัจจุบันไว้แล้วเทียบทีหลัง</p><table><thead><tr><th></th><th><code>search</code></th><th><code>loadMore</code></th></tr></thead><tbody>
+<tr><td>ทำอะไรกับรุ่น</td><td>เพิ่ม — เริ่มชุดข้อมูลใหม่</td><td>จำไว้ — ต่อของเดิม</td></tr>
+<tr><td>ถ้ารุ่นเปลี่ยนระหว่างรอ</td><td>ทิ้งผล</td><td>ทิ้งผล</td></tr>
+</tbody></table><p>ถ้า <code>loadMore</code> เพิ่มรุ่นด้วย การค้นหาที่กำลังวิ่งอยู่จะถูกยกเลิกโดยไม่มีเหตุผล</p><p><strong>ข้อ 3 — เลื่อนถึงท้ายพอดีตอนพิมพ์ค้นหาใหม่</strong></p><p>ไล่ตามลำดับเวลากับโค้ดที่แก้แล้ว</p><pre class="code-vs"><code>0.0s  ผู้ใช้เลื่อนถึงท้าย → loadMore() เริ่ม
+      generation = 5, query = "" , skip = 20
+0.2s  ผู้ใช้พิมพ์ "PAL" → search("PAL") เริ่ม
+      _generation กลายเป็น 6
+0.7s  search กลับมา → generation 6 == 6 → เขียนลง state
+      _tasks = ผลของ "PAL" 12 รายการ, _totalCount = 12
+1.4s  loadMore กลับมา → generation 5 != 6 → return ทิ้งไป ✓</code></pre><p><strong>ถ้าไม่มีการตรวจรุ่นใน <code>loadMore</code></strong> จะเกิดสิ่งนี้แทน</p><pre class="code-vs"><code>1.4s  loadMore เขียนต่อท้าย
+      _tasks = ผลของ "PAL" 12 รายการ + งานที่ไม่ตรงเงื่อนไขอีก 20 รายการ
+      _totalCount = 137 ทับของเดิม
+      → ผู้ใช้ค้นหา "PAL" แต่เห็นงานที่ไม่มี PAL อยู่ด้วย
+      → และหัวรายการบอกว่ามี 137 รายการ</code></pre><p>อาการนี้ทำซ้ำยากมากเพราะต้องพิมพ์พอดีจังหวะที่เลื่อนถึงท้าย — จึงมักหลุดขึ้น production ไปก่อน</p><p><strong>สิ่งที่ควรทำเพิ่มเพื่อลดโอกาสเกิด</strong></p><table><thead><tr><th>วิธี</th><th>ช่วยอะไร</th></tr></thead><tbody>
+<tr><td>debounce ช่องค้นหา (4.10)</td><td>ลดจำนวนคำขอ แต่ไม่ได้แก้ปัญหานี้</td></tr>
+<tr><td>บล็อก <code>loadMore</code> ระหว่างที่ <code>_loading</code> เป็นจริง</td><td>กันไม่ให้เริ่มโหลดเพิ่มระหว่างค้นหาใหม่</td></tr>
+<tr><td><strong>ตรวจรุ่น</strong></td><td>แก้ปัญหาจริง — กันผลที่ค้างอยู่แล้ว</td></tr>
+</tbody></table><p>สองข้อแรกลดโอกาส ข้อสุดท้ายกันได้จริง — เป็นข้อสรุปเดียวกับ 4.10 ว่า debounce เป็นเรื่องประสิทธิภาพ ส่วนตัวนับรุ่นเป็นเรื่องความถูกต้อง</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>items.length</code> ตอบว่าหน้านี้มีกี่รายการ ส่วน <code>totalCount</code> ตอบว่าทั้งหมดมีกี่รายการ</li><li>สองค่านี้เท่ากันเฉพาะตอนมีหน้าเดียว ซึ่งเป็นกรณีที่เจอตอนทดสอบพอดี</li><li>ให้ซองตรวจตัวเองว่าตัวเลขไม่ขัดแย้งกัน</li><li>อย่าเดาว่าโหลดครบจากจำนวนที่ได้ ให้เทียบกับ <code>totalCount</code></li><li>กรองด้วย id ก่อนต่อท้าย เพราะข้อมูลเปลี่ยนได้ระหว่างโหลด</li><li><code>totalCount</code> ผูกกับเงื่อนไขที่ถามไป จึงต้องส่งเงื่อนไขเดิมตอนโหลดหน้าถัดไป</li><li>ใช้ตัวนับรุ่นกันผลของคำขอเก่า และ <code>loadMore</code> ต้องเกาะรุ่นเดิม ไม่ใช่เพิ่มรุ่นใหม่</li><li>“ไม่มีงาน” กับ “ไม่พบผลลัพธ์” ต้องแสดงต่างกัน</li><li>แปลงซองของทุก endpoint ให้เป็นรูปแบบเดียวที่ขอบ</li></ul></div><p><strong>บทถัดไป:</strong> 6.11 จะกลับมาที่ตัว model เอง — ทำไมต้องแก้ไม่ได้ และกับดักของ <code>copyWith</code> ที่ตั้งค่าเป็น <code>null</code> ไม่ได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

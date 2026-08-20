@@ -1,10 +1,198 @@
-<div class="note"><strong>Lab:</strong> ออกแบบ InboundOrder/Detail และ Task page contract ตั้งแต่ .NET DTO → JSON fixture → Dart DTO → domain model พร้อม failure tests</div>
-<section><h2>1. Acceptance</h2><ul><li>typed request/responseแยกกัน</li><li>required/nullableชัด</li><li>number/date/status convertersกลาง</li><li>grid envelopeถูกต้อง</li><li>unknown statusปลอดภัย</li><li>fixturesทั้งดีและเสีย</li></ul></section>
-<section><h2>2. Wire shape</h2><pre class="code-vs"><code>{"items":[{"id":"T-1","qty":5.0,"status":"PENDING",
-"createdAt":"2026-08-15T03:00:00Z"}],"totalCount":1}</code></pre></section><section><h2>3. Dart DTO</h2><pre class="code-vs"><code>class TaskDto {
-  TaskDto({required this.id, required this.qty, required this.status});
-  factory TaskDto.fromJson(Map&lt;String,dynamic&gt; j) =&gt; TaskDto(
-    id: requireString(j,'id'), qty: requireDouble(j,'qty'),
-    status: requireString(j,'status'));
-  final String id; final double qty; final String status;
-}</code></pre></section><section><h2>4. Domain map</h2><p>Validate id/qty, parse enum/time UTCและคืน immutable Task ไม่ส่ง raw statusเข้า UI</p></section><section><h2>5. Inbound nesting</h2><p>Orderมี details list; error pathต้องระบุ <code>items[0].details[2].productCode</code></p></section><section><h2>6. .NET side</h2><p>ใช้ nullable reference types, DateTimeOffset, decimal/doubleตามหน่วย, camelCase JSONและ DTO validation</p></section><section><h2>7. Tests</h2><p>ทดสอบ happy, empty, Pascal fallback, qty int/string, null optional, missing id, invalid date, unknown status, request toJsonและ totalCount</p></section><section><h2>8. Exit Test</h2><div class="success"><ul><li>แยก DTO/domain/UIได้</li><li>parse dynamicอย่างปลอดภัยได้</li><li>ออกแบบ null/time/casing/status/pagingได้</li><li>จับ contract driftด้วย fixturesได้</li></ul></div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ประกอบสัญญาทั้งชุดตั้งแต่ JSON จนถึง model</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.1–6.13 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบและตรวจสอบสัญญาของ endpoint หนึ่งได้ครบ ตั้งแต่ไฟล์ตัวอย่างจนถึง model ที่พร้อมใช้</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>lib/json_basics/</code> ทั้งหมด พร้อมรู้ว่าทุกส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>สร้างสัญญาของ endpoint ใบเบิก ตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 7</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>json_read.dart</code></td><td>ตัวอ่านกลาง + <code>ContractException</code></td><td>6.2–6.4, 6.6–6.8</td></tr>
+<tr><td><code>task_dto.dart</code></td><td>DTO ขาลง ขาขึ้น และซองที่ห่อรายการ</td><td>6.1, 6.2, 6.10</td></tr>
+<tr><td><code>inbound_dto.dart</code></td><td>JSON ที่ซ้อนกันสองชั้น</td><td>6.5</td></tr>
+<tr><td><code>task_domain.dart</code></td><td>enum สถานะ, model ธุรกิจ, ตัวแปลง</td><td>6.1, 6.9, 6.11, 6.12</td></tr>
+<tr><td><code>test/fixtures/*.json</code></td><td>ไฟล์ตัวอย่างสามไฟล์</td><td>6.13</td></tr>
+<tr><td><code>test/json_basics_test.dart</code></td><td>เทสต์ 27 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/json_basics_test.dart</code></pre></section>
+
+<section><h2>3. เส้นทางของข้อมูลหนึ่งก้อน</h2><pre class="code-vs"><code>ข้อความ JSON จากเซิร์ฟเวอร์
+    │
+    ▼  jsonDecode  →  dynamic                        ← 6.8
+    │
+    ▼  requireMap(decoded, '')                       ← 6.5
+    │
+    ▼  TaskPageDto.fromJson                          ← 6.10
+    │    ├─ requireList(json, 'items')               ← 6.5
+    │    ├─ TaskDto.fromJson(..., path: 'items[0]')  ← 6.2
+    │    │    ├─ requireString  ← ตัวพิมพ์ + ว่าง     ← 6.4, 6.7
+    │    │    ├─ requireInt     ← 12 / 12.0 / "12"   ← 6.3
+    │    │    ├─ requireUtcTime ← ต้องมีเขตเวลา       ← 6.6
+    │    │    └─ readString     ← null ได้            ← 6.4
+    │    └─ ตรวจ totalCount ไม่ขัดแย้ง                ← 6.10
+    │
+    ▼  toTask(dto)                                   ← 6.1, 6.12
+    │    ├─ ตรวจ quantity &gt; 0                        ← 6.12
+    │    └─ parseTaskStatus → enum                   ← 6.9
+    │
+    ▼  Task — แก้ไม่ได้ เทียบค่าได้ พร้อมใช้           ← 6.11</code></pre><p>ถ้าอ่านแล้วยังมีขั้นไหนที่ตอบไม่ได้ว่าทำไมต้องมี ให้กลับไปอ่านบทที่กำกับไว้ก่อนทำต่อ</p></section>
+
+<section><h2>4. โจทย์</h2><p>สร้างสัญญาของใบเบิกสินค้าในโฟลเดอร์ใหม่ <code>lib/json_lab/</code></p><p>ทีมหลังบ้านส่งตัวอย่างมาให้</p><pre class="code-vs"><code>{
+  "requestNo": "RQ-2026-0451",
+  "requesterName": "สมชาย ใจดี",
+  "statusCode": 30,
+  "requestedAt": "2026-08-15T03:00:00Z",
+  "approvedAt": "2026-08-15T04:30:00+07:00",
+  "warehouseCode": "WH-01",
+  "remark": "",
+  "lines": [
+    {
+      "lineNo": 1,
+      "productCode": "SKU-1001",
+      "requestedQuantity": 24,
+      "pickedQuantity": 24,
+      "unitOfMeasure": "PCS",
+      "lotNumber": "L2608"
+    },
+    {
+      "lineNo": 2,
+      "productCode": "SKU-1002",
+      "requestedQuantity": 12.5,
+      "pickedQuantity": null,
+      "unitOfMeasure": "KG",
+      "lotNumber": null
+    }
+  ],
+  "totalCount": 2
+}</code></pre><p>พร้อมข้อมูลเพิ่มเติม</p><table><thead><tr><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>statusCode</code></td><td>10 ร่าง, 20 รออนุมัติ, 30 อนุมัติแล้ว, 40 กำลังหยิบ, 90 ยกเลิก</td></tr>
+<tr><td><code>approvedAt</code></td><td>เป็น <code>null</code> เมื่อยังไม่อนุมัติ</td></tr>
+<tr><td><code>pickedQuantity</code></td><td>เป็น <code>null</code> เมื่อยังไม่เริ่มหยิบบรรทัดนั้น</td></tr>
+<tr><td><code>unitOfMeasure</code></td><td>PCS, BOX, PALLET นับเป็นชิ้น ส่วน KG, M, L มีเศษได้</td></tr>
+<tr><td>endpoint เก่า</td><td>ยังมีสองสาขาใช้อยู่ และส่ง PascalCase</td></tr>
+</tbody></table></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>แยก DTO กับ domain model ชัดเจน</td><td>6.1</td></tr>
+<tr><td>2</td><td>อ่านทุกค่าผ่านตัวช่วยกลาง ไม่มี <code>as</code> ตรง ๆ</td><td>6.2, 6.8</td></tr>
+<tr><td>3</td><td><code>requestedQuantity</code> ที่มีเศษ ผ่านได้เฉพาะหน่วยที่ยอมให้มีเศษ</td><td>6.3</td></tr>
+<tr><td>4</td><td><code>remark</code> ที่เป็นข้อความว่าง ให้ผลเหมือนไม่มีคีย์</td><td>6.4</td></tr>
+<tr><td>5</td><td>บรรทัดที่พังต้องบอก path ถึงระดับ <code>lines[1].requestedQuantity</code></td><td>6.5</td></tr>
+<tr><td>6</td><td>เวลาที่ไม่มีเขตเวลาต้องถูกปฏิเสธ และ offset ต้องแปลงเป็น UTC</td><td>6.6</td></tr>
+<tr><td>7</td><td>รับ PascalCase จาก endpoint เก่าได้</td><td>6.7</td></tr>
+<tr><td>8</td><td><code>statusCode</code> ที่ไม่รู้จักเป็น <code>unknown</code> และทำงานต่อไม่ได้</td><td>6.9</td></tr>
+<tr><td>9</td><td><code>totalCount</code> ที่ขัดแย้งกับจำนวนบรรทัด ต้องถูกปฏิเสธ</td><td>6.10</td></tr>
+<tr><td>10</td><td>model แก้ไม่ได้ มี <code>==</code> คู่ <code>hashCode</code> และล้างค่า nullable ได้</td><td>6.11</td></tr>
+<tr><td>11</td><td>กฎธุรกิจอยู่ที่ตัวแปลง ไม่อยู่ในตัวอ่าน JSON</td><td>6.12</td></tr>
+<tr><td>12</td><td>มีไฟล์ตัวอย่างอย่างน้อยสองไฟล์ และเทสต์อย่างน้อย 15 ข้อ</td><td>6.13</td></tr>
+<tr><td>13</td><td>มี DTO ขาขึ้นสำหรับคำสั่งยืนยันการหยิบ พร้อมรหัสคำสั่ง</td><td>6.2, 4.14</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 3 ยากที่สุด เพราะกฎขึ้นกับ field อื่นในก้อนเดียวกัน ซึ่งเป็นข้อสรุปของ 6.3 แบบฝึกหัดข้อ 3</p></section>
+
+<section><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 3 — จำนวนที่มีเศษ</strong></p><p>ตัวอ่าน JSON ไม่รู้เรื่องหน่วย จึงตรวจข้อนี้ไม่ได้ ต้องอ่านมาเป็น <code>double</code> ก่อน แล้วตรวจตอนแปลงเป็น domain</p><pre class="code-vs"><code>// DTO — อ่านมาเฉย ๆ
+final double requestedQuantity;
+final String unitOfMeasure;
+
+// domain — ตรงนี้รู้จักหน่วยแล้ว จึงตรวจได้
+if (unit.mustBeWhole &amp;&amp; dto.requestedQuantity != dto.requestedQuantity.roundToDouble()) {
+  throw ContractException('$path.requestedQuantity', '...');
+}</code></pre><p><strong>เกณฑ์ 8 — สถานะที่ไม่รู้จัก</strong></p><p>อย่าลืมว่าต้องมีทั้งสองอย่าง — ไม่พัง และทำงานต่อไม่ได้ (6.9 หัวข้อ 6)</p><p><strong>เกณฑ์ 10 — ล้างค่า nullable</strong></p><p>ใบเบิกมี <code>remark</code> ที่ล้างได้ และบรรทัดมี <code>lotNumber</code> ที่ล้างได้ — ต้องมีเมธอดแยกทั้งคู่ (6.11 หัวข้อ 5)</p><p><strong>เกณฑ์ 13 — คำสั่งขาขึ้น</strong></p><pre class="code-vs"><code>class ConfirmPickRequest {
+  const ConfirmPickRequest({
+    required this.requestNo,
+    required this.lines,
+    required this.commandId,
+  });
+
+  Map&lt;String, Object?&gt; toJson() =&gt; {
+    'requestNo': requestNo,
+    'commandId': commandId,
+    'lines': [for (final line in lines) line.toJson()],
+  };
+}</code></pre><p>สังเกตว่าไม่ส่ง <code>statusCode</code> ขึ้นไป — การยืนยันการหยิบคือการขอเปลี่ยนสถานะอยู่แล้ว การส่งสถานะไปด้วยจะเกิดคำถามว่าถ้าไม่ตรงกับที่เซิร์ฟเวอร์มีจะเชื่อฝั่งไหน (6.2 หัวข้อ 7)</p></section>
+
+<section><h2>7. ไฟล์ตัวอย่างที่ควรมี</h2><table><thead><tr><th>ไฟล์</th><th>ครอบอะไร</th></tr></thead><tbody>
+<tr><td><code>pick_request.json</code></td><td>ก้อนจากโจทย์ — มีทั้งหน่วยชิ้นและหน่วยมีเศษ, <code>null</code> สองแบบ, offset</td></tr>
+<tr><td><code>pick_request_pascal.json</code></td><td>ก้อนเดียวกันแต่เป็น PascalCase ทั้งหมด</td></tr>
+<tr><td><code>pick_request_draft.json</code></td><td>ใบร่างที่ยังไม่อนุมัติ — <code>approvedAt</code> เป็น <code>null</code></td></tr>
+</tbody></table><p>ส่วนกรณีที่ผิดทั้งหมด ให้สร้าง JSON ในเทสต์แล้วแก้ทีละจุด ตามที่ทำใน 6.13 หัวข้อ 6</p><pre class="code-vs"><code>Map&lt;String, dynamic&gt; lineJson([Map&lt;String, Object?&gt; overrides = const {}]) =&gt; {
+  'lineNo': 1,
+  'productCode': 'SKU-1001',
+  'requestedQuantity': 24,
+  'pickedQuantity': null,
+  'unitOfMeasure': 'PCS',
+  ...overrides,
+};</code></pre></section>
+
+<section><h2>8. เทสต์ที่ต้องเขียน</h2><p>อย่างน้อย 15 ข้อ ตัวอย่างสามข้อที่คิดยากที่สุด</p><pre class="code-vs"><code>test('หน่วยชิ้นมีเศษไม่ได้ แต่หน่วยกิโลกรัมมีได้', () {
+  final pcs = PickLineDto.fromJson(
+    lineJson({'requestedQuantity': 24.5, 'unitOfMeasure': 'PCS'}),
+  );
+  expect(
+    () =&gt; toPickLine(pcs, path: 'lines[0]'),
+    throwsA(isA&lt;ContractException&gt;()
+        .having((e) =&gt; e.path, 'path', 'lines[0].requestedQuantity')),
+  );
+
+  final kg = PickLineDto.fromJson(
+    lineJson({'requestedQuantity': 24.5, 'unitOfMeasure': 'KG'}),
+  );
+  expect(toPickLine(kg, path: 'lines[0]').requestedQuantity, 24.5);
+});</code></pre><pre class="code-vs"><code>test('หน่วยที่ไม่รู้จัก ต้องไม่เดาว่ามีเศษได้หรือไม่', () {
+  final line = PickLineDto.fromJson(
+    lineJson({'requestedQuantity': 24.5, 'unitOfMeasure': 'ตัน'}),
+  );
+
+  // เลือกทางที่ปลอดภัย — ไม่รู้จักหน่วย แปลว่าตัดสินไม่ได้
+  expect(() =&gt; toPickLine(line, path: 'lines[0]'),
+      throwsA(isA&lt;ContractException&gt;()));
+});</code></pre><pre class="code-vs"><code>test('ใบที่อนุมัติแล้วต้องมีเวลาอนุมัติ', () {
+  final json = fixture('pick_request.json')..['approvedAt'] = null;
+
+  // statusCode 30 แปลว่าอนุมัติแล้ว แต่ไม่มีเวลาอนุมัติ — ขัดแย้งกันเอง
+  expect(() =&gt; PickRequestDto.fromJson(json).toDomain(),
+      throwsA(isA&lt;ContractException&gt;()));
+});</code></pre><p>ข้อสุดท้ายเป็นกฎที่ไม่มีในโจทย์ตรง ๆ แต่ได้มาจากการอ่านความหมายของ <code>statusCode</code> — ซึ่งเป็นสิ่งที่ต้องยืนยันกับทีมหลังบ้านก่อนใส่ลงไป</p></section>
+
+<section><h2>9. เทียบกับของจริงในโปรเจกต์</h2><p>เปิด <code>lib/features/tasks/wms_task.dart</code> ซึ่งเป็น model ที่ใช้จริงและจะเรียนเต็ม ๆ ใน Part 30</p><pre class="code-vs"><code>@freezed
+abstract class WmsTask with _$WmsTask {
+  const factory WmsTask({
+    required String id,
+    required String from,
+    required String to,
+    required TaskStatus status,
+  }) = _WmsTask;
+
+  factory WmsTask.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      _$WmsTaskFromJson(_normalizeTaskJson(json));
+}</code></pre><table><thead><tr><th>เรื่อง</th><th><code>Task</code> (บทเรียน)</th><th><code>WmsTask</code> (ของจริง)</th></tr></thead><tbody>
+<tr><td><code>fromJson</code></td><td>เขียนเอง</td><td>ให้เครื่องมือสร้าง</td></tr>
+<tr><td><code>copyWith</code>, <code>==</code>, <code>hashCode</code></td><td>เขียนเอง</td><td>ให้เครื่องมือสร้าง</td></tr>
+<tr><td>การตรวจสอบ</td><td>อยู่ในตัวอ่านกลาง</td><td>อยู่ใน <code>_normalizeTaskJson</code></td></tr>
+<tr><td>สถานะที่ไม่รู้จัก</td><td><code>unknown</code></td><td><strong>โยนข้อผิดพลาด</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายต่างกันจริง และเป็นความต่างที่ควรตั้งคำถาม</p><pre class="code-vs"><code>final rawStatus = requiredText('status').toLowerCase();
+if (!TaskStatus.values.any((value) =&gt; value.name == rawStatus)) {
+  throw FormatException('ไม่รู้จัก task.status: $rawStatus');
+}</code></pre><table><thead><tr><th>ทางเลือก</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>โยนข้อผิดพลาด</td><td>ชุดสถานะปิด ไม่มีการเพิ่มบ่อย และอยากรู้ทันทีถ้าสัญญาเปลี่ยน</td></tr>
+<tr><td>ใช้ <code>unknown</code></td><td>ชุดสถานะเปิด และแอปบน PDA อัปเดตช้ากว่าเซิร์ฟเวอร์</td></tr>
+</tbody></table><p>สำหรับงานบน PDA ที่อัปเดตแอปยาก ทางที่สองปลอดภัยกว่า — แต่ทางแรกก็มีเหตุผลถ้าชุดสถานะนิ่งแล้วจริง ๆ</p><div class="note">อย่าสรุปว่าของจริงต้องดีกว่าเสมอ ให้ดูว่ามันแลกอะไร แล้วถามว่าเหตุผลนั้นยังใช้ได้กับงานตรงหน้าไหม — เป็นวิธีอ่านโค้ดแบบเดียวกับที่ใช้ใน 4.16</div></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>อ่านไฟล์ตัวอย่างไม่เจอ</td><td>เส้นทางผิด</td><td>ใช้ <code>File('test/fixtures/...')</code> — เทสต์รันจากรากของโปรเจกต์</td></tr>
+<tr><td>แก้ไฟล์ตัวอย่างในเทสต์แล้วเทสต์อื่นพัง</td><td><code>jsonDecode</code> คืน map ที่แก้ได้ และแชร์กัน</td><td>อ่านไฟล์ใหม่ทุกครั้งในแต่ละเทสต์</td></tr>
+<tr><td>path ไม่ตรงกับที่คาด</td><td>ลืมส่ง <code>path</code> ต่อลงไป</td><td>ส่งทุกชั้น (6.5)</td></tr>
+<tr><td>ตรวจหน่วยในตัวอ่าน JSON แล้วโค้ดพันกัน</td><td>วางกฎผิดชั้น</td><td>ย้ายไปตัวแปลง (6.12)</td></tr>
+<tr><td><code>const</code> constructor ใช้ไม่ได้</td><td>มี <code>List.unmodifiable</code> ใน initializer</td><td>ยอมไม่ใช้ <code>const</code> (6.11)</td></tr>
+<tr><td>เทสต์เทียบ <code>DateTime</code> แล้วไม่เท่ากัน</td><td>ตัวหนึ่งเป็น UTC อีกตัวเป็นเวลาท้องถิ่น</td><td>เทียบกับ <code>DateTime.utc(...)</code></td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบทดสอบตัวเองก่อนจบ Part 6</h2><ol><li>DTO กับ domain model ต่างกันอย่างไร และทำไมห้ามส่ง DTO เข้าหน้าจอ (6.1)</li><li>ทำไมไม่ควรใช้ <code>as</code> อ่านค่าจาก JSON (6.2, 6.8)</li><li>“ไม่มีคีย์” กับ “มีคีย์แต่เป็น null” ต่างกันอย่างไร และทำไมต้องแยก (6.2)</li><li>JSON ส่ง <code>12</code>, <code>12.0</code>, <code>"12"</code> มา ควรรับอันไหนบ้าง เพราะอะไร (6.3)</li><li>ทำไมปฏิเสธ <code>1.9</code> แต่รับ <code>12.0</code> (6.3)</li><li>เมื่อไหร่ค่าตั้งต้นใช้ได้ และเมื่อไหร่มันคือการเดา (6.4)</li><li>ทำไมข้อความผิดพลาดต้องมี path (6.5)</li><li>เวลาที่ไม่มีเขตเวลาแปลว่าอะไร และควรทำอย่างไร (6.6)</li><li>ทำไมใช้ <code>containsKey</code> ไม่ใช่ <code>??</code> ตอนรองรับสองชื่อคีย์ (6.7)</li><li><code>as</code> กับ <code>is</code> ต่างกันอย่างไร (6.8)</li><li>ทำไม enum สถานะต้องมี <code>unknown</code> (6.9)</li><li>ทำไม <code>canWorkOn</code> ต้องเขียนเป็นรายชื่อที่อนุญาต (6.9)</li><li><code>items.length</code> กับ <code>totalCount</code> ตอบคำถามคนละข้ออย่างไร (6.10)</li><li>ทำไม <code>copyWith(note: null)</code> ไม่มีผล (6.11)</li><li>การตรวจฝั่งแอปเป็นความปลอดภัยหรือไม่ (6.12)</li><li>จะรู้ได้อย่างไรว่าเทสต์ครอบพอแล้ว (6.13)</li></ol></section>
+
+<section><h2>12. สรุปท้าย Part 6</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>แยกภาษาของสายออกจากภาษาของธุรกิจ</li><li>อ่านค่าจาก JSON ผ่านตัวช่วยกลางที่บอกได้ว่าพังตรงไหน</li><li>รับตัวเลขที่เขียนคนละแบบ แต่ไม่ยอมให้ความหมายเปลี่ยน</li><li>แยก “ไม่มีค่า” “ไม่รู้ค่า” และ “ค่าเป็นศูนย์” ออกจากกัน</li><li>อ่าน JSON ที่ซ้อนกันพร้อมบอกตำแหน่งถึงระดับบรรทัด</li><li>จัดการเวลาให้ทุกเครื่องเห็นตรงกัน</li><li>รองรับชื่อคีย์สองแบบโดยเก็บความยุ่งไว้ที่เดียว</li><li>กัก <code>dynamic</code> ไว้ที่ขอบ</li><li>แปลงสถานะเป็น enum ที่รับมือกับค่าที่ไม่รู้จักได้</li><li>อ่านซองที่ห่อรายการและแบ่งหน้าโดยไม่ซ้ำไม่ขาด</li><li>เขียน model ที่แก้ไม่ได้และเทียบค่าได้</li><li>วางการตรวจสอบให้ถูกชั้น</li><li>ตรึงสัญญาด้วยเทสต์ที่รันได้ในไม่ถึงวินาที</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>ยิงคำขอจริงและจัดการรหัสตอบกลับ</td><td>Part 7–8</td></tr>
+<tr><td>token และการเข้าสู่ระบบ</td><td>Part 8</td></tr>
+<tr><td>ลองใหม่ หมดเวลารอ และการยกเลิกคำขอ</td><td>Part 8</td></tr>
+<tr><td>เก็บข้อมูลลงเครื่องและทำงานตอนไม่มีเน็ต</td><td>Part 12</td></tr>
+<tr><td>ให้เครื่องมือสร้าง <code>fromJson</code> และ <code>copyWith</code> ให้</td><td>Part 30</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 7 จะเชื่อมทุกอย่างเข้ากับของจริง — ตอนนี้แอปแปลง JSON เป็น model ได้แล้ว แต่ JSON นั้นยังมาจากไฟล์ตัวอย่าง ถึงเวลาไปเอามาจากเซิร์ฟเวอร์ .NET จริง ๆ</p></section>

@@ -4,11 +4,186 @@
 <title>Enum / Status Mapping</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">06-09 · Flutter + .NET</span><h1>Enum / Status Mapping</h1><p>Part 6: Models &amp; JSON</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Map</a></li><li><a href="#section-2">Unknown</a></li><li><a href="#section-3">Alias</a></li><li><a href="#section-4">Serialize</a></li><li><a href="#section-5">UI</a></li><li><a href="#section-6">FSM</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Status stringจาก serverต้อง mapเป็น enum/domain stateและมี unknown policy เพื่อไม่กระจาย magic stringsทั่ว UI</div>
-<section id="section-1"><h2>1. Map</h2><pre class="code-vs"><code>TaskStatus parseStatus(String raw) =&gt; switch (raw.trim().toUpperCase()) {
-  'PENDING' =&gt; TaskStatus.pending, 'DONE' =&gt; TaskStatus.done,
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: แปลครั้งเดียวที่ขอบ</a></li><li><a href="#section-4">enum ที่พกค่าบนสายมาด้วย</a></li><li><a href="#section-5">ตัวแปลงที่รับชื่อเล่นได้</a></li><li><a href="#section-6">unknown คือสถานะที่ต้องมี</a></li><li><a href="#section-7">อ่านสถานะที่ไม่รู้จัก ให้ผู้ใช้เข้าใจ</a></li><li><a href="#section-8">ส่งกลับต้องใช้ wireValue</a></li><li><a href="#section-9">สถานะจากเซิร์ฟเวอร์ ไม่ใช่สถานะของหน้าจอ</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แปลงสถานะเป็น enum และรับมือกับค่าที่ไม่รู้จัก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.1 (การแยกชั้น) และ D1.9 (enhanced enum)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แปลงสถานะจากเซิร์ฟเวอร์เป็นชนิดที่ compiler ตรวจได้ และออกแบบให้แอปรุ่นเก่าไม่พังเมื่อเซิร์ฟเวอร์เพิ่มสถานะใหม่</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p><code>status</code> ที่ยังเป็นข้อความ จะกระจายไปทั่วแอป</p><pre class="code-vs"><code>if (task.status == 'PENDING') { ... }
+if (task.status == 'pending') { ... }      // อีกที่หนึ่งเขียนตัวเล็ก
+if (task.status != 'DONE') { ... }
+Color get color =&gt; status == 'WORKING' ? Colors.blue : Colors.grey;</code></pre><table><thead><tr><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>พิมพ์ผิดแล้วไม่มีอะไรเตือน</td><td><code>'PENDNG'</code> จะไม่เท่ากับอะไรเลยตลอดกาล</td></tr>
+<tr><td>ตัวพิมพ์ไม่ตรงกัน</td><td>เงื่อนไขเดียวกันให้ผลต่างกันคนละที่</td></tr>
+<tr><td>เพิ่มสถานะใหม่แล้วไม่รู้ว่าต้องแก้ตรงไหน</td><td>ต้องค้นทั้งโปรเจกต์แล้วหวังว่าครบ</td></tr>
+<tr><td>ไม่รู้ว่ามีสถานะอะไรบ้าง</td><td>ต้องอ่านโค้ดทั้งหมดถึงจะรู้</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>enum</td><td>ชนิดที่มีค่าได้จำกัดตามที่ประกาศไว้</td></tr>
+<tr><td>wire value</td><td>ค่าที่ใช้คุยกับเซิร์ฟเวอร์</td></tr>
+<tr><td>magic string</td><td>ข้อความที่มีความหมายพิเศษแต่กระจายอยู่ในโค้ด</td></tr>
+<tr><td>alias</td><td>ชื่อเล่นที่หมายถึงค่าเดียวกัน</td></tr>
+<tr><td>exhaustive</td><td>ครอบทุกกรณี ไม่มีทางตกหล่น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: แปลครั้งเดียวที่ขอบ</h2><pre class="code-vs"><code>"PENDING"  ─┐
+"pending"   ├─ แปลที่เดียว ─→  TaskStatus.pending  ─→ ใช้ทั้งแอป
+"Pending"  ─┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ข้อความสถานะควรมีอยู่แค่ในไฟล์เดียวคือไฟล์ที่แปลมัน — ถ้าเจอ <code>'PENDING'</code> ที่ไฟล์อื่น แปลว่ามีอะไรรั่ว</div></section>
+
+<section id="section-4"><h2>4. enum ที่พกค่าบนสายมาด้วย</h2><p>เปิด <code>lib/json_basics/task_domain.dart</code></p><pre class="code-vs"><code>enum TaskStatus {
+  pending('PENDING'),
+  working('WORKING'),
+  done('DONE'),
+  unknown('');
+
+  const TaskStatus(this.wireValue);
+
+  /// ค่าที่ใช้คุยกับเซิร์ฟเวอร์ — แยกจากชื่อใน Dart โดยตั้งใจ
+  /// ถ้าใช้ `name` ตรง ๆ วันที่มีคนเปลี่ยนชื่อ enum จะพังทั้งสัญญา
+  final String wireValue;
+}</code></pre><p>ทำไมไม่ใช้ <code>name</code> ที่ Dart ให้มาฟรี</p><pre class="code-vs"><code>TaskStatus.pending.name    // ได้ 'pending'</code></pre><table><thead><tr><th>ถ้าใช้ <code>name</code></th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>เปลี่ยนชื่อ <code>pending</code> เป็น <code>waiting</code> ให้ตรงกับภาษาธุรกิจ</td><td>สัญญากับเซิร์ฟเวอร์เปลี่ยนตามทันที โดยไม่มีอะไรเตือน</td></tr>
+<tr><td>เซิร์ฟเวอร์ใช้ตัวใหญ่ แต่ Dart ต้องใช้ตัวเล็ก</td><td>ต้องแปลงตัวพิมพ์ทุกครั้งอยู่ดี</td></tr>
+</tbody></table><p>การแยก <code>wireValue</code> ออกมาทำให้ <strong>ชื่อในโค้ดเปลี่ยนได้อย่างอิสระ โดยไม่กระทบสัญญา</strong></p></section>
+
+<section id="section-5"><h2>5. ตัวแปลงที่รับชื่อเล่นได้</h2><pre class="code-vs"><code>TaskStatus parseTaskStatus(String raw) =&gt; switch (raw.trim().toUpperCase()) {
+  'PENDING' =&gt; TaskStatus.pending,
+  'WORKING' =&gt; TaskStatus.working,
+  // ระบบเก่าส่ง COMPLETED แทน DONE — รวมชื่อเล่นไว้ที่เดียว
+  'DONE' || 'COMPLETED' =&gt; TaskStatus.done,
   _ =&gt; TaskStatus.unknown,
-};</code></pre></section><section id="section-2"><h2>2. Unknown</h2><p>Read-only UIอาจแสดง unknown; mutation-criticalควร disableและ refresh/update app</p></section><section id="section-3"><h2>3. Alias</h2><p>Legacy code 11/HANDLE mapกลางพร้อม deprecation telemetry</p></section><section id="section-4"><h2>4. Serialize</h2><p>Request mapperส่ง wire valueชัด ไม่ใช้ enum.nameโดยบังเอิญ</p></section><section id="section-5"><h2>5. UI</h2><p>สี/icon/label mapจาก domain statusที่เดียว</p></section><section id="section-6"><h2>6. FSM</h2><p>Status backendไม่เท่ากับ UI workflow stateเสมอ แยกกัน</p></section><section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Serverเพิ่ม PAUSED?</p><details><summary>เฉลย</summary><p>รุ่นเก่าเข้า unknownอย่างปลอดภัยและ telemetry; อัปเดต mapper/domain/UIตาม contract</p></details></section><section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า default unknownเป็น DONEหรือ PENDINGเพราะเปลี่ยนการตัดสินงาน</div></section>
+};</code></pre><table><thead><tr><th>สิ่งที่ทำ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>trim()</code></td><td>บางระบบมีช่องว่างติดมาจากฐานข้อมูล</td></tr>
+<tr><td><code>toUpperCase()</code></td><td>รับได้ทั้ง <code>PENDING</code> และ <code>pending</code></td></tr>
+<tr><td><code>'DONE' || 'COMPLETED'</code></td><td>ระบบเก่าและใหม่ใช้คนละคำ แต่หมายถึงเรื่องเดียวกัน</td></tr>
+<tr><td><code>_ =&gt; unknown</code></td><td>ค่าที่ไม่รู้จักต้องไม่ทำให้พัง — ดูหัวข้อ 6</td></tr>
+</tbody></table><pre class="code-vs"><code>test('แปลงค่าที่รู้จัก และรับชื่อเล่นของระบบเก่า', () {
+  expect(parseTaskStatus('PENDING'), TaskStatus.pending);
+  expect(parseTaskStatus('working'), TaskStatus.working);
+  expect(parseTaskStatus('DONE'), TaskStatus.done);
+  expect(parseTaskStatus('COMPLETED'), TaskStatus.done);
+});</code></pre></section>
+
+<section id="section-6"><h2>6. unknown คือสถานะที่ต้องมี</h2><p>คำถามที่ต้องตอบ — เมื่อเซิร์ฟเวอร์ส่ง <code>"PAUSED"</code> ที่แอปรุ่นนี้ไม่รู้จัก ควรทำอย่างไร</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>โยนข้อผิดพลาด</td><td>รายการทั้งหน้าโหลดไม่ได้ ทั้งที่มีงานเดียวที่สถานะใหม่</td></tr>
+<tr><td>เดาเป็น <code>pending</code></td><td>คนหน้างานไปทำงานที่ถูกพักไว้</td></tr>
+<tr><td>ใช้ <code>unknown</code></td><td>เห็นงานนั้น แต่ทำอะไรกับมันไม่ได้</td></tr>
+</tbody></table><p>ทางที่สามถูกต้อง และเหตุผลอยู่ที่ธรรมชาติของ PDA — <strong>เครื่องในคลังอัปเดตแอปช้ากว่าเซิร์ฟเวอร์เสมอ</strong></p><pre class="code-vs"><code>เซิร์ฟเวอร์อัปเดตวันจันทร์ → เพิ่มสถานะ PAUSED
+PDA 40 เครื่องอัปเดตวันศุกร์ → สี่วันที่เจอค่าที่ไม่รู้จัก</code></pre><p>ถ้าเลือกทางแรก คลังจะใช้งานไม่ได้สี่วัน</p><p>แต่ <code>unknown</code> ต้องมาพร้อมการจำกัดสิ่งที่ทำได้</p><pre class="code-vs"><code>/// สถานะที่ไม่รู้จัก ห้ามให้ทำงานต่อ เพราะไม่รู้ว่ามันแปลว่าอะไร
+bool get canWorkOn =&gt; this == TaskStatus.pending || this == TaskStatus.working;</code></pre><pre class="code-vs"><code>test('ค่าที่ไม่รู้จักต้องไม่ทำให้พัง แต่ต้องทำงานต่อไม่ได้', () {
+  final status = parseTaskStatus('PAUSED');
+
+  expect(status, TaskStatus.unknown);
+  expect(status.canWorkOn, isFalse);
+});</code></pre><p>สังเกตว่า <code>canWorkOn</code> เขียนเป็น <strong>รายชื่อที่อนุญาต</strong> ไม่ใช่รายชื่อที่ห้าม</p><pre class="code-vs"><code>// อันตราย — สถานะใหม่ที่เพิ่มมาจะ "อนุญาต" โดยอัตโนมัติ
+bool get canWorkOn =&gt; this != TaskStatus.done &amp;&amp; this != TaskStatus.unknown;</code></pre></section>
+
+<section id="section-7"><h2>7. อ่านสถานะที่ไม่รู้จัก ให้ผู้ใช้เข้าใจ</h2><table><thead><tr><th>สิ่งที่ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>แสดงว่า “สถานะไม่รู้จัก” ตรง ๆ</td><td>อย่าแสดงเป็นช่องว่าง — ผู้ใช้จะคิดว่าแอปโหลดไม่ครบ</td></tr>
+<tr><td>ปิดปุ่มที่ทำงานกับงานนั้น</td><td>ไม่รู้ว่าทำได้หรือไม่</td></tr>
+<tr><td>บอกให้อัปเดตแอป</td><td>เป็นทางแก้จริงของปัญหานี้</td></tr>
+<tr><td>บันทึกว่าเจอค่าอะไร</td><td>ทีมจะได้รู้ว่าต้องเพิ่มสถานะไหน</td></tr>
+</tbody></table><pre class="code-vs"><code>ListTile(
+  title: Text(task.palletCode),
+  subtitle: task.status == TaskStatus.unknown
+      ? const Text('สถานะใหม่ที่แอปรุ่นนี้ยังไม่รองรับ — กรุณาอัปเดตแอป')
+      : Text(statusLabel(task.status)),
+  enabled: task.status.canWorkOn,
+)</code></pre><p>ข้อความนี้ทำสองอย่าง — บอกว่าไม่ใช่ความผิดของผู้ใช้ และบอกว่าต้องทำอะไรต่อ ตามหลักใน 5.10</p></section>
+
+<section id="section-8"><h2>8. ส่งกลับต้องใช้ wireValue</h2><pre class="code-vs"><code>// ผิด — ส่งชื่อใน Dart ขึ้นไป
+'status': task.status.name,        // ได้ 'pending' ซึ่งเซิร์ฟเวอร์อาจไม่รู้จัก
+
+// ถูก
+'status': task.status.wireValue,   // ได้ 'PENDING'</code></pre><p>และต้องกันไม่ให้ส่ง <code>unknown</code> ขึ้นไป</p><pre class="code-vs"><code>if (task.status == TaskStatus.unknown) {
+  throw StateError('ส่งสถานะที่ไม่รู้จักกลับขึ้นเซิร์ฟเวอร์ไม่ได้');
+}</code></pre><p>เพราะ <code>unknown</code> มี <code>wireValue</code> เป็นข้อความว่าง ซึ่งจะทำให้เซิร์ฟเวอร์ตีความผิดหรือปฏิเสธ — และที่แย่กว่าคือถ้าเซิร์ฟเวอร์รับข้อความว่างไปแล้วเซ็ตสถานะเป็นค่าตั้งต้น งานที่ถูกพักไว้จะกลับมาเป็นรอทำโดยไม่มีใครสั่ง</p></section>
+
+<section id="section-9"><h2>9. สถานะจากเซิร์ฟเวอร์ ไม่ใช่สถานะของหน้าจอ</h2><p>สองอย่างนี้มักถูกยุบรวมกัน</p><table><thead><tr><th></th><th><code>TaskStatus</code></th><th>สถานะของ workflow (4.15)</th></tr></thead><tbody>
+<tr><td>มาจากไหน</td><td>เซิร์ฟเวอร์</td><td>เกิดในแอปขณะทำงาน</td></tr>
+<tr><td>ตัวอย่าง</td><td><code>pending</code>, <code>working</code>, <code>done</code></td><td><code>ScanPallet</code>, <code>ScanLocation</code>, <code>Submitting</code></td></tr>
+<tr><td>อยู่ได้นานแค่ไหน</td><td>ข้ามการเปิดปิดแอป</td><td>หายเมื่อออกจากหน้าจอ</td></tr>
+<tr><td>ใครเปลี่ยน</td><td>เซิร์ฟเวอร์เท่านั้น</td><td>การกระทำของผู้ใช้</td></tr>
+</tbody></table><pre class="code-vs"><code>งาน T-001 มี status = working  (เซิร์ฟเวอร์รู้ว่ามีคนกำลังทำ)
+  └─ หน้าจอกำลังอยู่ขั้น ScanLocation  (แอปรู้ว่าทำถึงไหนแล้ว)</code></pre><p>การยุบสองอย่างนี้เข้าด้วยกันทำให้เกิดคำถามที่ตอบไม่ได้ เช่น “ถ้าผู้ใช้ปิดแอปตอนอยู่ขั้นสแกนช่องเก็บ เซิร์ฟเวอร์ควรรู้ไหม” — คำตอบคือไม่ เพราะขั้นตอนในแอปไม่ใช่เรื่องของเซิร์ฟเวอร์</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เงื่อนไขเดียวกันให้ผลต่างกันคนละที่</td><td>เทียบข้อความ ตัวพิมพ์ไม่ตรง</td><td>แปลงเป็น enum ที่ขอบ</td></tr>
+<tr><td>พิมพ์ชื่อสถานะผิดแล้วไม่มีอะไรเตือน</td><td>ใช้ข้อความในเงื่อนไข</td><td>ใช้ enum</td></tr>
+<tr><td>เพิ่มสถานะแล้วลืมแก้บางหน้าจอ</td><td>ไม่ได้ใช้ <code>switch</code> ที่ครบทุกทาง</td><td>ตัด <code>default:</code> ออก</td></tr>
+<tr><td>แอปรุ่นเก่าพังทั้งคลังเมื่อเซิร์ฟเวอร์เพิ่มสถานะ</td><td>โยนข้อผิดพลาดเมื่อไม่รู้จัก</td><td>ใช้ <code>unknown</code></td></tr>
+<tr><td>คนหน้างานทำงานที่ถูกพักไว้</td><td>เดาสถานะที่ไม่รู้จักเป็นค่าอื่น</td><td>ห้ามเดา</td></tr>
+<tr><td>สถานะใหม่ได้สิทธิ์ทำงานโดยอัตโนมัติ</td><td>เขียน <code>canWorkOn</code> เป็นรายชื่อที่ห้าม</td><td>เขียนเป็นรายชื่อที่อนุญาต</td></tr>
+<tr><td>เปลี่ยนชื่อ enum แล้วสัญญาพัง</td><td>ใช้ <code>name</code> เป็นค่าบนสาย</td><td>แยก <code>wireValue</code></td></tr>
+<tr><td>งานที่พักไว้กลับมาเป็นรอทำเอง</td><td>ส่ง <code>unknown</code> กลับขึ้นไป</td><td>กันไว้ก่อนส่ง</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์ส่งสถานะของใบเบิกมาเป็นตัวเลข</p><table><thead><tr><th>รหัส</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>10</td><td>ร่าง</td></tr>
+<tr><td>20</td><td>รออนุมัติ</td></tr>
+<tr><td>30</td><td>อนุมัติแล้ว</td></tr>
+<tr><td>40</td><td>กำลังหยิบ</td></tr>
+<tr><td>90</td><td>ยกเลิก</td></tr>
+</tbody></table><p>และมีข้อกำหนดว่า ผู้ใช้กดเริ่มหยิบได้เฉพาะใบที่อนุมัติแล้ว และกดยกเลิกได้เฉพาะใบที่ยังไม่เริ่มหยิบ</p><ol><li>ออกแบบ enum และตัวแปลง</li><li>เขียนกฎว่ากดอะไรได้บ้าง</li><li>ตอบว่าถ้าเซิร์ฟเวอร์เพิ่มรหัส 50 ที่แปลว่า “หยิบครบแล้ว รอตรวจสอบ” แอปรุ่นเก่าจะเป็นอย่างไร และควรเป็นอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — enum และตัวแปลง</strong></p><pre class="code-vs"><code>enum PickRequestStatus {
+  draft(10),
+  pendingApproval(20),
+  approved(30),
+  picking(40),
+  cancelled(90),
+  unknown(-1);
+
+  const PickRequestStatus(this.wireValue);
+
+  /// รหัสที่ใช้คุยกับเซิร์ฟเวอร์
+  final int wireValue;
+}
+
+PickRequestStatus parsePickRequestStatus(int code) =&gt; switch (code) {
+  10 =&gt; PickRequestStatus.draft,
+  20 =&gt; PickRequestStatus.pendingApproval,
+  30 =&gt; PickRequestStatus.approved,
+  40 =&gt; PickRequestStatus.picking,
+  90 =&gt; PickRequestStatus.cancelled,
+  _ =&gt; PickRequestStatus.unknown,
+};</code></pre><p>ใช้ <code>-1</code> เป็น <code>wireValue</code> ของ <code>unknown</code> เพราะเป็นค่าที่เซิร์ฟเวอร์ไม่มีทางใช้ ทำให้ถ้าเผลอส่งขึ้นไปจะถูกปฏิเสธทันที แทนที่จะถูกตีความเป็นอย่างอื่น</p><p><strong>ข้อ 2 — กฎว่ากดอะไรได้</strong></p><pre class="code-vs"><code>extension PickRequestStatusRules on PickRequestStatus {
+  /// เริ่มหยิบได้เฉพาะใบที่อนุมัติแล้ว
+  bool get canStartPicking =&gt; this == PickRequestStatus.approved;
+
+  /// ยกเลิกได้เฉพาะใบที่ยังไม่เริ่มหยิบ
+  bool get canCancel =&gt; switch (this) {
+    PickRequestStatus.draft ||
+    PickRequestStatus.pendingApproval ||
+    PickRequestStatus.approved =&gt; true,
+    PickRequestStatus.picking ||
+    PickRequestStatus.cancelled ||
+    PickRequestStatus.unknown =&gt; false,
+  };
+}</code></pre><p>สังเกตว่า <code>canCancel</code> เขียนด้วย <code>switch</code> ที่ระบุครบทุกค่า แทนที่จะเขียนสั้น ๆ แบบนี้</p><pre class="code-vs"><code>// สั้นกว่า แต่อันตราย
+bool get canCancel =&gt; this != PickRequestStatus.picking
+    &amp;&amp; this != PickRequestStatus.cancelled
+    &amp;&amp; this != PickRequestStatus.unknown;</code></pre><p>ความต่างจะเห็นชัดในข้อ 3</p><p><strong>ข้อ 3 — เมื่อเซิร์ฟเวอร์เพิ่มรหัส 50</strong></p><p><em>แอปรุ่นเก่าจะเป็นอย่างไร</em></p><pre class="code-vs"><code>parsePickRequestStatus(50)  →  PickRequestStatus.unknown</code></pre><table><thead><tr><th>สิ่งที่เกิด</th><th>ถูกต้องไหม</th></tr></thead><tbody>
+<tr><td>ไม่พัง โหลดรายการได้ปกติ</td><td>ถูก</td></tr>
+<tr><td>ใบนั้นแสดงว่าสถานะไม่รู้จัก</td><td>ถูก</td></tr>
+<tr><td><code>canStartPicking</code> เป็น <code>false</code></td><td>ถูก</td></tr>
+<tr><td><code>canCancel</code> เป็น <code>false</code></td><td><strong>ถูก แต่เพราะเขียนแบบ switch เท่านั้น</strong></td></tr>
+</tbody></table><p>ถ้าเขียนแบบ <code>!=</code> ผลจะต่างออกไป — <code>unknown</code> ถูกกันไว้แล้วก็จริง แต่ประเด็นอยู่ที่ตอนที่ทีมเพิ่มสถานะใหม่ในแอป</p><pre class="code-vs"><code>// วันที่ทีมเพิ่ม pendingInspection(50) เข้าไปใน enum
+enum PickRequestStatus {
+  ...
+  picking(40),
+  pendingInspection(50),    // ← เพิ่มใหม่
+  cancelled(90),
+  unknown(-1);
+}</code></pre><table><thead><tr><th>เขียนแบบ</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td><code>switch</code> ครบทุกค่า</td><td><strong><code>flutter analyze</code> แดงทันที</strong> — บังคับให้ตัดสินใจว่าสถานะใหม่ยกเลิกได้ไหม</td></tr>
+<tr><td><code>!=</code></td><td>คอมไพล์ผ่าน และ <code>canCancel</code> กลายเป็น <code>true</code> เงียบ ๆ</td></tr>
+</tbody></table><p>แถวล่างคือบั๊กจริง — ใบที่หยิบครบแล้วรอตรวจสอบ จะถูกยกเลิกได้ ทั้งที่ของถูกหยิบออกจากชั้นไปแล้ว</p><p><em>ควรเป็นอย่างไร</em></p><table><thead><tr><th>ต้องทำ</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>รุ่นเก่าต้องไม่พัง</td><td>ทำได้แล้วด้วย <code>unknown</code></td></tr>
+<tr><td>รุ่นเก่าต้องไม่เดา</td><td>ทำได้แล้ว — ปิดทุกปุ่ม</td></tr>
+<tr><td>รุ่นเก่าต้องบอกผู้ใช้</td><td>“สถานะใหม่ กรุณาอัปเดตแอป”</td></tr>
+<tr><td>ทีมต้องรู้ว่ามีคนเจอ</td><td>บันทึกรหัสที่ไม่รู้จักส่งกลับมา</td></tr>
+<tr><td>ตอนเพิ่มในแอป compiler ต้องช่วย</td><td>ใช้ <code>switch</code> ครบทุกค่า</td></tr>
+</tbody></table><p>ข้อสุดท้ายเป็นข้อที่คนมองข้ามบ่อยที่สุด และเป็นข้อที่ป้องกันบั๊กที่แพงที่สุด</p><p><strong>บทเรียนที่ควรจำ:</strong> <code>unknown</code> ป้องกันปัญหาที่เกิด <em>ตอนนี้</em> จากเซิร์ฟเวอร์ที่ล้ำหน้ากว่า ส่วน <code>switch</code> ที่ครบทุกค่าป้องกันปัญหาที่จะเกิด <em>ตอนที่เราตามทัน</em> — ต้องมีทั้งคู่ เพราะกันคนละเวลา</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>แปลงข้อความสถานะเป็น enum ที่ขอบ ที่เดียว</li><li>แยก <code>wireValue</code> ออกจากชื่อใน Dart เพื่อให้เปลี่ยนชื่อได้อิสระ</li><li>รวมชื่อเล่นของระบบเก่าไว้ในตัวแปลงเดียว</li><li><code>unknown</code> จำเป็น เพราะ PDA อัปเดตช้ากว่าเซิร์ฟเวอร์เสมอ</li><li>ห้ามเดาสถานะที่ไม่รู้จักเป็นค่าอื่น</li><li>เขียนกฎเป็นรายชื่อที่อนุญาต ไม่ใช่รายชื่อที่ห้าม</li><li>ใช้ <code>switch</code> ที่ครบทุกค่า เพื่อให้ compiler เตือนตอนเพิ่มสถานะใหม่</li><li>ส่งกลับด้วย <code>wireValue</code> และห้ามส่ง <code>unknown</code> ขึ้นไป</li><li>สถานะจากเซิร์ฟเวอร์กับสถานะของหน้าจอเป็นคนละเรื่อง</li></ul></div><p><strong>บทถัดไป:</strong> 6.10 จะดูซองที่ห่อรายการมา — ทำไมจำนวนที่ได้รับกับจำนวนทั้งหมดไม่เท่ากัน และการใช้ผิดตัวทำให้แบ่งหน้าพัง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
