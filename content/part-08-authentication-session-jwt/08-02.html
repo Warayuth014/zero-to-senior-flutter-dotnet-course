@@ -1,21 +1,214 @@
-<div class="note"><strong>AuthRepository เป็น boundary:</strong> LoginScreen จัด form/feedback; repository รู้ endpoint, DTO, session persistence และการผูก token กับ ApiClient</div>
-<section><h2>1. ปัญหาของ fat LoginScreen</h2><p>ถ้า widget ต่อ URL, encode password, parse token, เขียน storage และ navigate เอง จะทดสอบยากและ logic auth ซ้ำทุกหน้าที่ต้อง re-login</p></section>
-<section><h2>2. Interface</h2><pre class="code-vs"><code>abstract interface class AuthRepository {
-  AuthSession? get session;
-  Future&lt;AuthSession&gt; login(LoginRequest request);
-  Future&lt;void&gt; restore();
-  Future&lt;void&gt; logout();
-}</code></pre></section>
-<section><h2>3. Screen เหลือ orchestration</h2><pre class="code-vs"><code>try {
-  await auth.login(LoginRequest(
-    username: user.text.trim(), password: pass.text));
-  if (!context.mounted) return;
-  Navigator.pushReplacement(context, shellRoute());
-} on InvalidCredentialsException {
-  setState(() =&gt; error = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
-}</code></pre></section>
-<section><h2>4. Dependency graph</h2><p>composition root สร้าง TokenStore → ApiClient → AuthRepository แล้วส่ง instance เดียวให้ LoginScreen และ shell เพื่อให้ bearer token/session เป็น single source of truth</p></section>
-<section><h2>5. Repository ไม่ควรรู้ BuildContext</h2><p>คืน typed result/exception ให้ controller หรือ screen ตัดสิน navigation/dialog เพราะ repository ต้องใช้ได้ใน bootstrap, background flow และ unit test</p></section>
-<section><h2>6. ของจริงและจุดต่อยอด</h2><p><code>wms_absolute_mobile</code> แยก repository แล้ว แต่ session ยังอยู่ memory และ repository ตั้ง <code>_api.authToken</code> โดยตรง ขั้นต่อไปคือ inject session/token store และ notifier เพื่อ restore/logout แบบทดสอบได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน fake repository ที่ login EMP001 สำเร็จและ user อื่น throw InvalidCredentials เพื่อทดสอบ LoginScreen โดยไม่เปิด server</p><details><summary>เฉลย</summary><p>fake ต้องบันทึก request เพื่อ assert trim/ไม่ submit ซ้ำ และ expose session หลังสำเร็จ</p></details></section>
-<section><h2>8. Review rule</h2><div class="warn">หากพบ <code>SharedPreferences.getInstance()</code>, <code>jsonDecode</code> หรือ Authorization header ใน LoginScreen ให้ย้ายออกไป boundary ที่รับผิดชอบ</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จัดโครงชั้นที่ดูแลการเข้าสู่ระบบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.1 (เส้นทางการเข้าสู่ระบบ) และ 7.1 (การแยกชั้น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตอบได้ว่าใครเป็นเจ้าของ token และวางโครงให้ทดสอบได้โดยไม่ต้องมีเซิร์ฟเวอร์</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>คำถามที่ต้องตอบก่อนเขียนโค้ด — <strong>ใครถือ token</strong></p><table><thead><tr><th>ทางเลือก</th><th>ปัญหาที่ตามมา</th></tr></thead><tbody>
+<tr><td>ตัวแปรระดับแอปที่ใครก็แก้ได้</td><td>ไม่รู้ว่าใครแก้ และทดสอบไม่ได้</td></tr>
+<tr><td>หน้าเข้าสู่ระบบถือไว้</td><td>หน้านั้นถูกทำลายไปแล้วตอนใช้งานจริง</td></tr>
+<tr><td><code>ApiClient</code> ถือไว้อย่างเดียว</td><td>ไม่มีใครรู้ว่าตอนนี้เข้าสู่ระบบอยู่หรือไม่</td></tr>
+<tr><td>แต่ละ store ถือของตัวเอง</td><td>ออกจากระบบแล้วบางส่วนยังใช้ token เก่า</td></tr>
+</tbody></table><p>แถวสุดท้ายคืออาการที่ 7.5 แบบฝึกหัดข้อ 2 พูดถึง — และเป็นเหตุผลที่ต้องมีเจ้าของชัดเจนเพียงหนึ่งเดียว</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>repository</td><td>ชั้นที่รู้ว่าคุยกับเซิร์ฟเวอร์อย่างไร</td></tr>
+<tr><td>store</td><td>ชั้นที่ถือสถานะและตัดสินใจ</td></tr>
+<tr><td>source of truth</td><td>ที่เดียวที่ถือความจริง</td></tr>
+<tr><td>callback</td><td>ฟังก์ชันที่ส่งเข้าไปให้เรียกกลับเมื่อมีอะไรเปลี่ยน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สองชั้นที่ทำคนละเรื่อง</h2><pre class="code-vs"><code>AuthRepository   รู้ว่าเข้าสู่ระบบอย่างไร    →  ไม่จำอะไรเลย
+SessionStore     รู้ว่าตอนนี้เป็นใครอยู่      →  จำ และบอกคนอื่น</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> repository ตอบคำถาม “รหัสผ่านนี้ถูกไหม” ครั้งเดียวแล้วจบ ส่วน store ตอบคำถาม “ตอนนี้ใครใช้อยู่” ได้ตลอดเวลา</div></section>
+
+<section><h2>4. ชั้นที่คุยกับเซิร์ฟเวอร์</h2><p>เปิด <code>lib/auth/auth_repository.dart</code></p><pre class="code-vs"><code>abstract interface class AuthRepository {
+  Future&lt;LoginOutcome&gt; login({
+    required String username,
+    required String password,
+    required String serverId,
+  });
+}</code></pre><table><thead><tr><th>สิ่งที่เห็น</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>เป็นสัญญา ไม่ใช่คลาสจริง</td><td>ทดสอบ store ได้โดยไม่ต้องมีเซิร์ฟเวอร์ (4.5)</td></tr>
+<tr><td>มีเมธอดเดียว</td><td>ไม่มี <code>logout</code> เพราะออกจากระบบไม่ต้องถามเซิร์ฟเวอร์</td></tr>
+<tr><td>รับ <code>serverId</code> เข้ามา</td><td>token ต้องรู้ว่าเป็นของเซิร์ฟเวอร์ไหน (8.11)</td></tr>
+</tbody></table><p>แถวกลางน่าสนใจ — <strong>การออกจากระบบเป็นเรื่องของฝั่งแอปทั้งหมด</strong> คือล้าง token ทิ้ง ส่วนเซิร์ฟเวอร์ไม่จำเป็นต้องรู้ เพราะ token จะหมดอายุเองอยู่แล้ว</p><p>ถ้าระบบต้องการยกเลิก token ทันที เช่นเมื่อเครื่องหาย นั่นเป็นความสามารถเพิ่มที่ต้องมี endpoint แยก และต้องตกลงว่าจะทำอย่างไรเมื่อเรียกไม่สำเร็จ</p></section>
+
+<section><h2>5. การแบ่งงานที่เห็นได้จากโครงสร้าง try</h2><pre class="code-vs"><code>final Map&lt;String, dynamic&gt; json;
+try {
+  json = await api.postJson('/api/Authenticate/login', {
+    'username': username,
+    'password': password,
+  });
+} on ApiException catch (error) {
+  return switch (error.kind) {
+    ApiFailureKind.unauthorized =&gt; const InvalidCredentials(),
+    ApiFailureKind.forbidden =&gt; AccountNotAllowed(error.userMessage),
+    _ =&gt; LoginFailed(error.kind, error.userMessage),
+  };
+}
+
+// อ่านคำตอบอยู่นอก try โดยตั้งใจ — คำตอบที่ผิดสัญญาต้องโยนออกไป
+// ไม่ใช่กลายเป็น LoginFailed เพราะผู้ใช้ทำอะไรกับมันไม่ได้ ทีมต้องแก้ (7.10)
+return LoginSucceeded(
+  _readSession(json, serverId: serverId, fallbackUsername: username),
+);</code></pre><p>ตำแหน่งของวงเล็บปีกกาปิดเป็นการตัดสินใจ ไม่ใช่เรื่องรูปแบบ</p><table><thead><tr><th>ถ้าอ่านคำตอบอยู่ใน <code>try</code></th><th>ถ้าอยู่นอก</th></tr></thead><tbody>
+<tr><td>คำตอบผิดสัญญากลายเป็น <code>LoginFailed</code></td><td>โยนออกไปให้เห็น</td></tr>
+<tr><td>ผู้ใช้เห็น “เข้าสู่ระบบไม่สำเร็จ” แล้วลองใหม่เรื่อย ๆ</td><td>ทีมรู้ว่าสัญญาไม่ตรง</td></tr>
+<tr><td>ไม่มีใครรู้ว่าฝั่งหลังบ้านเปลี่ยนอะไร</td><td>รู้ทันที</td></tr>
+</tbody></table><p>เทสต์ตรึงพฤติกรรมนี้ไว้</p><pre class="code-vs"><code>test('คำตอบที่ไม่มี token ถือว่าผิดสัญญา', () async {
+  api.loginResponse = const {'expiration': '2026-08-15T10:00:00Z'};
+
+  await expectLater(
+    repository.login(username: 'a', password: 'b', serverId: 'wh-01'),
+    throwsA(isA&lt;ApiException&gt;()
+        .having((e) =&gt; e.kind, 'kind', ApiFailureKind.contract)),
+  );
+});</code></pre><p>เทสต์นี้เขียนไว้ก่อนที่โค้ดจะถูกต้อง และมันจับได้ว่าโค้ดรุ่นแรกวาง <code>try</code> ครอบกว้างเกินไป — ซึ่งเป็นความผิดพลาดชนิดเดียวกับที่ 7.10 หัวข้อ 7 เตือนไว้</p></section>
+
+<section><h2>6. store เป็นเจ้าของ token</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>/// เจ้าของสถานะการเข้าสู่ระบบของทั้งแอป
+///
+/// ตัวเดียวในแอป เพราะ token ต้องมีชุดเดียว — ถ้ามีสองที่ จะเกิดกรณีที่
+/// ส่วนหนึ่งของแอปยังใช้ token เก่าอยู่หลังออกจากระบบแล้ว (7.5)
+class SessionStore extends ChangeNotifier {</code></pre><pre class="code-vs"><code>AuthStatus _status = AuthStatus.unknown;
+AuthSession? _session;
+String? _errorMessage;
+SignOutReason? _lastSignOutReason;</code></pre><p>สถานะเป็น enum ตามหลักใน 4.7 — และมีค่าที่คนมักลืม</p><pre class="code-vs"><code>enum AuthStatus {
+  /// ยังไม่รู้ — กำลังอ่านข้อมูลที่เก็บไว้ตอนเปิดแอป
+  unknown,
+
+  signedOut,
+
+  /// กำลังส่งชื่อผู้ใช้และรหัสผ่าน
+  signingIn,
+
+  signedIn,
+}</code></pre><p><code>unknown</code> จำเป็นเพราะตอนเปิดแอปมีช่วงหนึ่งที่ยังไม่รู้ว่าผู้ใช้เข้าสู่ระบบอยู่หรือไม่ — ถ้าไม่มีค่านี้ แอปจะเด้งไปหน้าเข้าสู่ระบบแวบหนึ่งทุกครั้งที่เปิด แล้วเด้งกลับเข้าหน้าหลัก ซึ่งจะลงรายละเอียดใน 8.6</p></section>
+
+<section><h2>7. บอก ApiClient ผ่าน callback</h2><pre class="code-vs"><code>/// เรียกทุกครั้งที่ token เปลี่ยน เพื่อให้ ApiClient ใช้ค่าล่าสุด
+///
+/// ใช้ callback แทนการถือ ApiClient ไว้ตรง ๆ เพื่อให้ทดสอบได้
+/// โดยไม่ต้องสร้างตัวส่ง HTTP
+final void Function(String? token) onTokenChanged;</code></pre><pre class="code-vs"><code>// ตอนประกอบแอป
+final sessionStore = SessionStore(
+  repository: RemoteAuthRepository(apiClient),
+  storage: secureSessionStorage,
+  onTokenChanged: (token) =&gt; apiClient.authToken = token,
+);</code></pre><table><thead><tr><th></th><th>ถือ <code>ApiClient</code> ไว้</th><th>ใช้ callback</th></tr></thead><tbody>
+<tr><td>ทดสอบต้องมีอะไร</td><td>ตัวส่ง HTTP</td><td>ฟังก์ชันเปล่า ๆ</td></tr>
+<tr><td>ตรวจว่า token ถูกตั้งไหม</td><td>ต้องอ่านจาก <code>ApiClient</code></td><td>เก็บใส่ list แล้วดู</td></tr>
+<tr><td>ผูกกับอะไร</td><td>คลาสจริง</td><td>ไม่ผูกกับอะไรเลย</td></tr>
+</tbody></table><pre class="code-vs"><code>// ในเทสต์
+tokens = &lt;String?&gt;[];
+store = SessionStore(
+  repository: RemoteAuthRepository(api),
+  storage: storage,
+  onTokenChanged: tokens.add,     // เก็บทุกครั้งที่เปลี่ยน
+  clock: () =&gt; now,
+);</code></pre><p>ทำให้เขียนเทสต์ที่ตรวจ <em>ลำดับ</em> ของการเปลี่ยน token ได้ ซึ่งเป็นสิ่งที่ตรวจจาก <code>ApiClient</code> ไม่ได้</p><pre class="code-vs"><code>expect(tokens, ['token-abc', null]);   // ตั้งแล้วล้าง ตามลำดับ</code></pre></section>
+
+<section><h2>8. กันการกดซ้ำ</h2><pre class="code-vs"><code>// กันการกดซ้ำระหว่างที่ยังส่งอยู่ (4.14)
+if (_status == AuthStatus.signingIn) return const LoginAlreadyInProgress();</code></pre><p>สังเกตว่าไม่ได้คืน <code>null</code> และไม่ได้โยน แต่คืนค่าที่อยู่ในชนิดเดียวกับผลลัพธ์อื่น</p><pre class="code-vs"><code>/// กดเข้าสู่ระบบซ้ำระหว่างที่ครั้งก่อนยังไม่จบ
+///
+/// เป็นผลลัพธ์หนึ่งของการเรียก ไม่ใช่ความล้มเหลว — จึงอยู่ในชนิดเดียวกัน
+/// แทนที่จะโยนหรือคืน null (4.14)
+class LoginAlreadyInProgress extends LoginOutcome {
+  const LoginAlreadyInProgress();
+}</code></pre><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>คืน <code>null</code></td><td>ผู้เรียกต้องเดาว่าแปลว่าอะไร (7.10)</td></tr>
+<tr><td>โยน</td><td>ทำให้เรื่องปกติกลายเป็นข้อยกเว้น</td></tr>
+<tr><td>เพิ่มเข้าไปในชนิดเดิม</td><td>compiler บังคับให้จัดการ</td></tr>
+</tbody></table><p>และเพราะเป็น <code>sealed class</code> การเพิ่มค่าใหม่ทำให้ทุกที่ที่ <code>switch</code> ต้องกลับมาตัดสินใจ ตามหลักใน 6.9</p><pre class="code-vs"><code>case LoginAlreadyInProgress():
+  // เกิดไม่ได้ — ถูกกันไว้ที่ต้นเมธอดแล้ว แต่ต้องเขียนให้ครบ
+  // เพื่อให้ compiler เตือนถ้ามีการเพิ่มผลลัพธ์ใหม่ (6.9)
+  break;</code></pre></section>
+
+<section><h2>9. ทดสอบได้ทั้งชั้น</h2><table><thead><tr><th>ทดสอบอะไร</th><th>ใช้ของปลอมอะไร</th></tr></thead><tbody>
+<tr><td><code>RemoteAuthRepository</code></td><td><code>JsonApi</code> ปลอม</td></tr>
+<tr><td><code>SessionStore</code></td><td><code>AuthRepository</code> จริง + <code>JsonApi</code> ปลอม</td></tr>
+<tr><td>เวลา</td><td><code>clock</code> ที่คืนค่าคงที่</td></tr>
+<tr><td>ที่เก็บ</td><td><code>InMemorySessionStorage</code></td></tr>
+</tbody></table><pre class="code-vs"><code>SessionStore({
+  required this.repository,
+  required this.storage,
+  required this.onTokenChanged,
+  DateTime Function()? clock,
+}) : _clock = clock ?? DateTime.now;</code></pre><p>การรับ <code>clock</code> เข้ามาทำให้ทดสอบเรื่องหมดอายุได้โดยไม่ต้องรอเวลาจริง ตามหลักใน 6.6 หัวข้อ 8</p><pre class="code-vs"><code>final store = storeWithClock(expiry.add(const Duration(minutes: 1)));
+
+await store.restore(currentServerId: 'wh-01');
+
+expect(store.status, AuthStatus.signedOut);</code></pre></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ออกจากระบบแล้วบางส่วนยังใช้ token เก่า</td><td>token อยู่หลายที่</td><td>ให้ store เดียวเป็นเจ้าของ</td></tr>
+<tr><td>คำตอบผิดสัญญากลายเป็น “รหัสผ่านผิด”</td><td><code>try</code> ครอบกว้างเกิน</td><td>ครอบเฉพาะการยิงคำขอ</td></tr>
+<tr><td>ทดสอบ store ต้องเปิดเซิร์ฟเวอร์</td><td>ผูกกับคลาสจริง</td><td>รับสัญญาเข้ามา</td></tr>
+<tr><td>ทดสอบเรื่องหมดอายุต้องรอเวลาจริง</td><td>เรียก <code>DateTime.now()</code> ข้างใน</td><td>รับ <code>clock</code> เข้ามา</td></tr>
+<tr><td>เด้งไปหน้าเข้าสู่ระบบแวบหนึ่งทุกครั้งที่เปิดแอป</td><td>ไม่มีสถานะ <code>unknown</code></td><td>เพิ่มเข้าไป (8.6)</td></tr>
+<tr><td>กดเข้าสู่ระบบรัว ๆ ได้หลายคำขอ</td><td>ไม่กันการกดซ้ำ</td><td>ตรวจสถานะที่ต้นเมธอด</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมต้องเพิ่มความสามารถให้ผู้ใช้เปลี่ยนรหัสผ่านจากในแอปได้</p><table><thead><tr><th>สัญญาที่ได้มา</th></tr></thead><tbody>
+<tr><td><code>POST /api/Authenticate/change-password</code> ต้องมี token</td></tr>
+<tr><td>ส่ง <code>{"currentPassword": "...", "newPassword": "..."}</code></td></tr>
+<tr><td>สำเร็จได้ 204 และ <strong>token เดิมถูกยกเลิกทันที</strong></td></tr>
+<tr><td>รหัสผ่านปัจจุบันผิดได้ 401</td></tr>
+</tbody></table><ol><li>ตัดสินว่าเมธอดนี้ควรอยู่ที่ <code>AuthRepository</code> หรือที่อื่น</li><li>ออกแบบผลลัพธ์</li><li>ข้อกำหนดที่ว่า token เดิมถูกยกเลิก สร้างปัญหาอะไร และแก้อย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — อยู่ที่ไหน</strong></p><p><strong>อยู่ที่ <code>AuthRepository</code></strong> เพราะเป็นเรื่องของการยืนยันตัวตน ไม่ใช่เรื่องของงานคลัง</p><pre class="code-vs"><code>abstract interface class AuthRepository {
+  Future&lt;LoginOutcome&gt; login({...});
+  Future&lt;ChangePasswordOutcome&gt; changePassword({
+    required String currentPassword,
+    required String newPassword,
+  });
+}</code></pre><p>สังเกตว่าไม่ต้องส่ง <code>username</code> หรือ <code>serverId</code> — เพราะ token ที่แนบไปกับคำขอบอกอยู่แล้วว่าเป็นใครและคุยกับเซิร์ฟเวอร์ไหน</p><p><strong>ข้อ 2 — ผลลัพธ์</strong></p><pre class="code-vs"><code>sealed class ChangePasswordOutcome {
+  const ChangePasswordOutcome();
+}
+
+/// สำเร็จ — และ token เดิมใช้ไม่ได้แล้ว
+class PasswordChanged extends ChangePasswordOutcome {
+  const PasswordChanged();
+}
+
+/// รหัสผ่านปัจจุบันผิด — token ยังใช้ได้อยู่
+class CurrentPasswordWrong extends ChangePasswordOutcome {
+  const CurrentPasswordWrong();
+}
+
+/// รหัสผ่านใหม่ไม่ผ่านกฎของระบบ
+class NewPasswordRejected extends ChangePasswordOutcome {
+  const NewPasswordRejected(this.reasons);
+  final List&lt;String&gt; reasons;      // จาก errors ใน ProblemDetails (7.11)
+}
+
+class ChangePasswordFailed extends ChangePasswordOutcome {
+  const ChangePasswordFailed(this.kind, this.message);
+  final ApiFailureKind kind;
+  final String message;
+}</code></pre><p><strong>ปัญหาที่ซ่อนอยู่ในข้อนี้</strong> — รหัส 401 มีสองความหมายที่ต้องแยก</p><table><thead><tr><th>401 มาจาก</th><th>แปลว่า</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>รหัสผ่านปัจจุบันผิด</td><td>ผู้ใช้พิมพ์ผิด</td><td>ให้พิมพ์ใหม่ — <strong>ห้ามออกจากระบบ</strong></td></tr>
+<tr><td>token หมดอายุ</td><td>session จบแล้ว</td><td>ออกจากระบบ (8.7)</td></tr>
+</tbody></table><p>ถ้าแยกไม่ออก ผู้ใช้ที่พิมพ์รหัสผ่านเดิมผิดจะถูกเด้งออกจากระบบทันที ซึ่งเป็นอาการเดียวกับที่ 7.5 เตือนไว้เรื่อง 401 กับ 403</p><p>ทางแก้คือขอ <code>errorCode</code> จากฝั่งหลังบ้าน ตามหลักใน 7.9</p><pre class="code-vs"><code>return switch (error.problem?.errorCode) {
+  'CURRENT_PASSWORD_INVALID' =&gt; const CurrentPasswordWrong(),
+  'TOKEN_EXPIRED' =&gt; ChangePasswordFailed(error.kind, error.userMessage),
+  _ =&gt; ChangePasswordFailed(error.kind, error.userMessage),
+};</code></pre><p><strong>ข้อ 3 — token เดิมถูกยกเลิก</strong></p><p>นี่คือประเด็นหลักของแบบฝึกหัด — <strong>คำขอที่สำเร็จ ทำให้ token ที่แอปถืออยู่ใช้ไม่ได้ทันที</strong></p><pre class="code-vs"><code>ผู้ใช้เปลี่ยนรหัสผ่านสำเร็จ
+  → server ยกเลิก token เดิม
+  → แอปยังถือ token เดิมอยู่ และคิดว่ายังเข้าสู่ระบบอยู่
+  → คำขอถัดไปทุกคำขอได้ 401
+  → ถ้ามี polling อยู่ (4.11) จะได้ 401 รัว ๆ ทันที</code></pre><p>สิ่งที่ผู้ใช้เห็นคือ “เปลี่ยนรหัสผ่านสำเร็จ” แล้วทุกอย่างพังพร้อมกัน</p><p><strong>ทางแก้ที่ผิด</strong></p><table><thead><tr><th>ทำอะไร</th><th>ทำไมไม่ดี</th></tr></thead><tbody>
+<tr><td>ปล่อยให้ได้ 401 แล้วค่อยออกจากระบบ</td><td>ผู้ใช้เห็นข้อความ “session หมดอายุ” ทั้งที่เพิ่งเปลี่ยนรหัสผ่านสำเร็จ — สับสน</td></tr>
+<tr><td>เก็บรหัสผ่านใหม่ไว้แล้วเข้าสู่ระบบเงียบ ๆ</td><td>ต้องเก็บรหัสผ่าน ซึ่งขัดกับ 8.1</td></tr>
+</tbody></table><p><strong>ทางแก้ที่ถูก</strong> — ให้ store จัดการทันทีที่รู้ผล</p><pre class="code-vs"><code>Future&lt;ChangePasswordOutcome&gt; changePassword({...}) async {
+  final outcome = await repository.changePassword(...);
+
+  if (outcome is PasswordChanged) {
+    // token เดิมใช้ไม่ได้แล้ว ต้องออกจากระบบก่อนที่คำขออื่นจะได้ 401
+    await signOut(reason: SignOutReason.passwordChanged);
+  }
+
+  return outcome;
+}</code></pre><p>แล้วเพิ่มเหตุผลใหม่เข้าไป เพื่อให้หน้าจอบอกได้ตรง</p><pre class="code-vs"><code>enum SignOutReason {
+  userRequested,
+  sessionExpired,
+  serverChanged,
+  /// เปลี่ยนรหัสผ่านแล้ว ต้องเข้าสู่ระบบใหม่ด้วยรหัสใหม่
+  passwordChanged,
+}</code></pre><pre class="code-vs"><code>// ข้อความที่ผู้ใช้ควรเห็น
+'เปลี่ยนรหัสผ่านเรียบร้อย กรุณาเข้าสู่ระบบใหม่ด้วยรหัสผ่านใหม่'</code></pre><p>ต่างจาก “session หมดอายุ” อย่างสิ้นเชิง ทั้งที่กลไกข้างล่างเหมือนกันทุกอย่าง</p><p><strong>บทเรียนที่ควรจำ:</strong> คำขอที่ทำให้ token ของตัวเองใช้ไม่ได้ ต้องจัดการผลข้างเคียงนั้นทันทีที่รู้ผล ไม่ใช่รอให้คำขออื่นไปเจอเอง — และเหตุผลของการออกจากระบบต้องเก็บไว้ เพราะมันเปลี่ยนข้อความที่ผู้ใช้เห็นทั้งหมด</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>repository ตอบครั้งเดียวแล้วจบ ส่วน store จำและบอกคนอื่น</li><li>token ต้องมีเจ้าของเดียวในแอป</li><li><code>try</code> ครอบเฉพาะการยิงคำขอ ไม่ครอบการอ่านคำตอบ</li><li>ไม่มี <code>logout</code> ที่ repository เพราะออกจากระบบเป็นเรื่องฝั่งแอป</li><li>ใช้ callback บอก <code>ApiClient</code> แทนการถือมันไว้</li><li>สถานะต้องมี <code>unknown</code> สำหรับช่วงที่ยังอ่านข้อมูลไม่เสร็จ</li><li>กันการกดซ้ำด้วยการคืนค่าที่อยู่ในชนิดเดียวกัน</li><li>รับ <code>clock</code> เข้ามาเพื่อทดสอบเรื่องเวลาได้</li></ul></div><p><strong>บทถัดไป:</strong> 8.3 จะเปิดดูข้างใน token ว่ามีอะไร และตอบว่าทำไมฝั่งแอปอ่านได้แต่เชื่อไม่ได้</p></section>

@@ -1,18 +1,187 @@
-<div class="note"><strong>Login end-to-end:</strong> รับ credential → validate ฝั่ง UI → HTTPS POST → .NET ตรวจ Identity → ออก token/expiration → Flutter สร้าง AuthSession → แนบ Bearer กับ request ถัดไป → เข้า authenticated shell</div>
-<section><h2>1. Authentication vs authorization</h2><p>Authentication ตอบว่า “คุณคือใคร” ส่วน authorization ตอบว่า “คุณทำอะไรได้” การ login สำเร็จไม่ได้แปลว่าทุก endpoint อนุญาต และการซ่อนปุ่มไม่แทนการตรวจสิทธิ์ฝั่ง server</p></section>
-<section><h2>2. Request contract</h2><pre class="code-vs"><code>POST /api/Authenticate/login
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ไล่เส้นทางตั้งแต่กรอกรหัสผ่านจนยิงคำขอแรกได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.5 (header และ token) และ 7.10 (โยนหรือคืนค่า)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นภาพรวมว่าการเข้าสู่ระบบเชื่อมกับทุกอย่างใน Part 7 อย่างไร และแยกความล้มเหลวได้ครบ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตลอด Part 7 มีบรรทัดหนึ่งที่ใช้มาตลอดแต่ไม่เคยถูกกำหนดค่า</p><pre class="code-vs"><code>String? authToken;
+
+Map&lt;String, String&gt; _headers() =&gt; {
+  'Content-Type': 'application/json',
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+};</code></pre><p>ค่านี้มาจากไหน ใครเป็นคนตั้ง และตั้งเมื่อไหร่ — นั่นคือสิ่งที่ Part 8 ทั้ง Part ตอบ</p><table><thead><tr><th>คำถาม</th><th>อยู่ในบท</th></tr></thead><tbody>
+<tr><td>ได้ token มาอย่างไร</td><td>8.1, 8.2</td></tr>
+<tr><td>ข้างใน token มีอะไร</td><td>8.3</td></tr>
+<tr><td>ส่งไปกับคำขออย่างไร</td><td>8.4</td></tr>
+<tr><td>เปิดแอปใหม่แล้วยังใช้ได้ไหม</td><td>8.5, 8.6</td></tr>
+<tr><td>หมดอายุแล้วทำอย่างไร</td><td>8.7</td></tr>
+<tr><td>ออกจากระบบต้องล้างอะไรบ้าง</td><td>8.8</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>authentication</td><td>ยืนยันว่าคุณเป็นใคร</td></tr>
+<tr><td>authorization</td><td>ตัดสินว่าคุณทำอะไรได้</td></tr>
+<tr><td>credential</td><td>สิ่งที่ใช้พิสูจน์ตัวตน เช่นรหัสผ่าน</td></tr>
+<tr><td>token</td><td>บัตรผ่านที่ได้มาหลังพิสูจน์ตัวตนแล้ว</td></tr>
+<tr><td>session</td><td>ช่วงเวลาที่ผู้ใช้เข้าสู่ระบบอยู่</td></tr>
+</tbody></table><p>สองคำแรกมักถูกใช้สลับกัน แต่ตอบคนละคำถาม และ 7.5 แสดงให้เห็นแล้วว่าการสับสนสองอย่างนี้ทำให้ผู้ใช้ถูกเด้งออกจากระบบทุกครั้งที่กดปุ่มที่ไม่มีสิทธิ์</p></section>
+
+<section><h2>3. Mental model: แลกรหัสผ่านเป็นบัตรผ่าน</h2><pre class="code-vs"><code>รหัสผ่าน  →  ใช้ครั้งเดียวตอนเข้าสู่ระบบ  →  ไม่เก็บไว้ที่ไหนเลย
+token     →  ใช้ทุกคำขอหลังจากนั้น        →  เก็บไว้ แต่มีวันหมดอายุ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> รหัสผ่านผ่านแอปแค่ครั้งเดียวแล้วหายไป — ถ้าเจอรหัสผ่านถูกเก็บไว้ที่ไหน แปลว่ามีอะไรผิด</div></section>
+
+<section><h2>4. เส้นทางทั้งหมด</h2><pre class="code-vs"><code>ผู้ใช้กรอกชื่อผู้ใช้และรหัสผ่าน
+    │
+    ▼  ตรวจว่ากรอกครบไหม                        ← ในเครื่อง ไม่ยิงคำขอ
+    │
+    ▼  POST /api/Authenticate/login             ← 7.4
+    │      {"username": "...", "password": "..."}
+    │
+    ▼  .NET ตรวจกับฐานข้อมูลผู้ใช้
+    │
+    ▼  ได้ token กลับมาพร้อมเวลาหมดอายุ
+    │
+    ▼  เก็บลงเครื่อง                             ← 8.5
+    │
+    ▼  ตั้ง authToken ใน ApiClient               ← 8.4
+    │
+    ▼  เข้าหน้าหลัก                              ← 5.4
+    │
+    ▼  ทุกคำขอหลังจากนี้มี Authorization ติดไป    ← 7.5</code></pre><p>สังเกตลำดับสองขั้นก่อนสุดท้าย — <strong>เก็บลงเครื่องก่อน แล้วค่อยประกาศว่าเข้าสู่ระบบแล้ว</strong> ซึ่งเป็นการตัดสินใจที่จะอธิบายใน 8.5</p></section>
+
+<section><h2>5. สัญญาของการเข้าสู่ระบบ</h2><pre class="code-vs"><code>// สิ่งที่ส่งไป
+POST /api/Authenticate/login
 Content-Type: application/json
 
-{"username":"EMP001","password":"••••••••"}</code></pre><p>ส่งผ่าน HTTPS เท่านั้นและไม่ log credential</p></section>
-<section><h2>3. Response contract</h2><pre class="code-vs"><code>{
-  "token": "eyJ...",
+{"username": "somchai", "password": "รหัสผ่าน"}</code></pre><pre class="code-vs"><code>// สิ่งที่ได้กลับมา
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "expiration": "2026-08-15T10:00:00Z"
-}</code></pre><p>ตรวจ field/ชนิด/เวลาเหมือน API contract อื่น ไม่ cast dynamic ใน widget</p></section>
-<section><h2>4. State transitions</h2><pre class="code-vs"><code>signedOut → submitting → authenticated
-                    ↘ invalidCredentials
-                    ↘ networkFailure
-authenticated → expired/revoked → signedOut</code></pre><p>disable submit ระหว่างส่งและอย่าเปลี่ยน route ก่อนเก็บ session สำเร็จ</p></section>
-<section><h2>5. ไฟล์จริง</h2><p><code>wms_absolute_mobile/features/auth/auth_repository.dart</code> เรียก <code>/api/Authenticate/login</code> แล้วตั้ง token ใน shared ApiClient ส่วน <code>wmsapp/screens/login_screen.dart</code> เป็น mock password และ preferences ซึ่งเหมาะ demo แต่ยังไม่ใช่ security boundary</p></section>
-<section><h2>6. Failure ที่ต้องแยก</h2><ul><li>validation local: field ว่าง</li><li>401: username/password ไม่ถูก</li><li>403: account ไม่มีสิทธิ์หรือ disabled ตาม contract</li><li>timeout/offline: ยังไม่รู้ว่า credential ถูกหรือไม่</li><li>invalid JSON: contract/deployment ผิด</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>วาด flow ตั้งแต่กด Login จน GET tasks สำเร็จ พร้อมจุดที่ password และ token ปรากฏ</p><details><summary>แนวคำตอบ</summary><p>Password อยู่เฉพาะ form/request ชั่วคราว ไม่ persist; token อยู่ AuthSession/secure storage และ Authorization header แต่ต้องถูก redact จาก log</p></details></section>
-<section><h2>8. Security checklist</h2><div class="success">HTTPS, no credential log, typed response, loading guard, generic invalid-login message, server rate limit/lockout และ token ถูกแนบหลัง session พร้อมแล้ว</div></section>
+}</code></pre><p>เปิด <code>lib/auth/auth_repository.dart</code> จะเห็นว่ามันถูกอ่านแบบเดียวกับข้อมูลอื่นทุกประการ</p><pre class="code-vs"><code>final token = json['token'];
+if (token is! String || token.trim().isEmpty) {
+  throw const ApiException(
+    'คำตอบจากเซิร์ฟเวอร์ไม่มี token',
+    kind: ApiFailureKind.contract,
+  );
+}</code></pre><p>ไม่มีข้อยกเว้นให้กับ endpoint นี้ — <strong>คำตอบของการเข้าสู่ระบบก็คือ JSON ที่ต้องตรวจตามกฎใน Part 6 เหมือนกัน</strong></p><pre class="code-vs"><code>test('คำตอบที่ไม่มี token ถือว่าผิดสัญญา', () async {
+  api.loginResponse = const {'expiration': '2026-08-15T10:00:00Z'};
+
+  await expectLater(
+    repository.login(username: 'a', password: 'b', serverId: 'wh-01'),
+    throwsA(isA&lt;ApiException&gt;()
+        .having((e) =&gt; e.kind, 'kind', ApiFailureKind.contract)),
+  );
+});</code></pre></section>
+
+<section><h2>6. ห้าอย่างที่ล้มเหลวได้ และต้องแยกกัน</h2><table><thead><tr><th>สิ่งที่เกิด</th><th>ผู้ใช้ควรทำ</th><th>ชนิดใน lab</th></tr></thead><tbody>
+<tr><td>ยังไม่ได้กรอกชื่อผู้ใช้</td><td>กรอกให้ครบ</td><td>ไม่ยิงคำขอเลย</td></tr>
+<tr><td>รหัสผ่านผิด</td><td>ลองใหม่</td><td><code>InvalidCredentials</code></td></tr>
+<tr><td>บัญชีถูกระงับ</td><td>ติดต่อหัวหน้า</td><td><code>AccountNotAllowed</code></td></tr>
+<tr><td>เน็ตหลุด</td><td>ตรวจสัญญาณแล้วลองใหม่</td><td><code>LoginFailed</code> ที่ลองใหม่ได้</td></tr>
+<tr><td>คำตอบผิดรูปแบบ</td><td>แจ้งทีม</td><td>โยน <code>ApiException</code></td></tr>
+</tbody></table><p>เปิด <code>lib/auth/auth_repository.dart</code></p><pre class="code-vs"><code>} on ApiException catch (error) {
+  return switch (error.kind) {
+    ApiFailureKind.unauthorized =&gt; const InvalidCredentials(),
+    ApiFailureKind.forbidden =&gt; AccountNotAllowed(error.userMessage),
+    _ =&gt; LoginFailed(error.kind, error.userMessage),
+  };
+}</code></pre><p>สังเกตว่าใช้ <code>kind</code> ที่ 7.9 ทำไว้ — ไม่ได้อ่านข้อความหรือดูรหัสตัวเลขเอง</p><p>และสังเกตว่า <strong>ความล้มเหลวที่ผิดสัญญายังโยนออกไป</strong> ไม่ได้แปลงเป็นค่า เพราะเป็นเรื่องที่ทีมต้องแก้ ไม่ใช่เรื่องที่ผู้ใช้ทำอะไรได้ ตามหลักใน 7.10</p></section>
+
+<section><h2>7. ทำไมคืนค่าแทนการโยน</h2><pre class="code-vs"><code>/// ผลของการพยายามเข้าสู่ระบบ
+///
+/// คืนค่าแทนการโยน เพราะ "รหัสผ่านผิด" เป็นเรื่องปกติที่เกิดทุกวัน
+/// ไม่ใช่ข้อยกเว้น (7.10)
+sealed class LoginOutcome {
+  const LoginOutcome();
+}</code></pre><table><thead><tr><th>ถ้าโยน</th><th>ถ้าคืนค่า</th></tr></thead><tbody>
+<tr><td>ต้องจำว่าโยนอะไรได้บ้าง</td><td>เห็นจากชนิดว่ามีผลลัพธ์อะไรบ้าง</td></tr>
+<tr><td>ลืมดักแล้วแอปพัง</td><td><code>switch</code> ต้องครบ</td></tr>
+<tr><td>“รหัสผ่านผิด” กลายเป็นความผิดพลาด</td><td>เป็นผลลัพธ์ปกติ</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญที่สุด — <strong>คนหน้างานพิมพ์รหัสผ่านผิดทุกวัน</strong> การทำให้มันเป็น exception ทำให้หน้าจอแสดงเป็นสีแดงพร้อมคำว่า “เกิดข้อผิดพลาด” ทั้งที่ระบบทำงานถูกต้องทุกอย่าง</p></section>
+
+<section><h2>8. อย่าบอกว่าผิดตรงไหน</h2><pre class="code-vs"><code>/// ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง
+///
+/// ไม่แยกว่าอันไหนผิด เพราะการบอกว่า "ไม่มีผู้ใช้นี้" ทำให้เดาชื่อผู้ใช้ได้
+class InvalidCredentials extends LoginOutcome {
+  const InvalidCredentials();
+}</code></pre><table><thead><tr><th>ถ้าบอกว่า</th><th>คนที่ไม่ควรรู้ได้อะไร</th></tr></thead><tbody>
+<tr><td>“ไม่พบผู้ใช้นี้”</td><td>รู้ว่าชื่อผู้ใช้ไหนมีอยู่จริง</td></tr>
+<tr><td>“รหัสผ่านไม่ถูกต้อง”</td><td>รู้ว่าเดาชื่อผู้ใช้ถูกแล้ว เหลือแค่รหัสผ่าน</td></tr>
+</tbody></table><p>ข้อความเดียวกันสำหรับทั้งสองกรณี ทำให้ไม่มีข้อมูลรั่วออกไป — และไม่ได้ทำให้ผู้ใช้จริงลำบาก เพราะเขารู้ชื่อผู้ใช้ของตัวเองอยู่แล้ว</p><p>เรื่องนี้ต้องตกลงกับฝั่งหลังบ้านด้วย เพราะถ้าเซิร์ฟเวอร์ส่งข้อความที่แยกสองกรณีมา แอปก็ไม่ควรเอามาแสดง</p></section>
+
+<section><h2>9. รหัสผ่านต้องไม่ไปโผล่ที่ไหน</h2><table><thead><tr><th>ที่ที่รหัสผ่านห้ามไปอยู่</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ไฟล์บันทึก</td><td>ถูกส่งต่อได้ (7.17)</td></tr>
+<tr><td>ที่เก็บข้อมูลในเครื่อง</td><td>ไม่มีเหตุผลต้องเก็บ — token ทำหน้าที่แทนแล้ว</td></tr>
+<tr><td>ข้อความผิดพลาด</td><td>ไปโผล่บนจอและใน log</td></tr>
+<tr><td>query ใน URL</td><td>ไปโผล่ใน log ของทุกตัวกลาง</td></tr>
+</tbody></table><p>ใน lab รหัสผ่านปรากฏแค่สองที่</p><pre class="code-vs"><code>// 1. พารามิเตอร์ของเมธอด
+Future&lt;LoginOutcome&gt; login({
+  required String username,
+  required String password,
+  required String serverId,
+});
+
+// 2. body ของคำขอเดียว
+final json = await api.postJson('/api/Authenticate/login', {
+  'username': username,
+  'password': password,
+});</code></pre><p>หลังจากนั้นไม่มีที่ไหนเก็บไว้อีกเลย — และเพราะ 7.17 ไม่บันทึก body มันจึงไม่ไปโผล่ในไฟล์บันทึกด้วย</p><div class="warn">ระวังการเก็บ <code>TextEditingController</code> ของช่องรหัสผ่านไว้นานเกินจำเป็น — ควร <code>dispose</code> เมื่อออกจากหน้าเข้าสู่ระบบตาม 3.12 ไม่ใช่เก็บไว้ที่ระดับแอป</div></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>รหัสผ่านผิดแสดงเป็นหน้าจอผิดพลาดสีแดง</td><td>โยนแทนคืนค่า</td><td>ทำเป็นผลลัพธ์ปกติ</td></tr>
+<tr><td>ข้อความบอกว่าไม่พบผู้ใช้</td><td>แยกสองกรณี</td><td>ใช้ข้อความเดียวกัน</td></tr>
+<tr><td>เน็ตหลุดแล้วบอกว่ารหัสผ่านผิด</td><td>เหมารวมทุกความล้มเหลว</td><td>แยกด้วย <code>kind</code></td></tr>
+<tr><td>รหัสผ่านอยู่ในไฟล์บันทึก</td><td>บันทึก body</td><td>ไม่บันทึก body (7.17)</td></tr>
+<tr><td>กดเข้าสู่ระบบรัว ๆ ได้หลายคำขอ</td><td>ไม่กันการกดซ้ำ</td><td>ธงกันซ้ำ (8.2)</td></tr>
+<tr><td>คำตอบผิดรูปแบบแล้วแอปพังแบบอธิบายไม่ได้</td><td>ไม่ตรวจสัญญา</td><td>ตรวจเหมือน endpoint อื่น</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมได้สัญญาของ endpoint เข้าสู่ระบบมาจากฝั่งหลังบ้าน</p><pre class="code-vs"><code>POST /api/Authenticate/login
+{"username": "somchai", "password": "..."}
+
+// สำเร็จ
+200 {"token": "eyJ...", "expiration": "2026-08-15T10:00:00Z"}
+
+// รหัสผ่านผิด
+401 {"title": "Unauthorized", "status": 401,
+     "detail": "ไม่พบผู้ใช้ somchai ในระบบ"}
+
+// บัญชีถูกระงับ
+403 {"title": "Forbidden", "status": 403,
+     "detail": "บัญชีนี้ถูกระงับ กรุณาติดต่อผู้ดูแล"}</code></pre><ol><li>ระบุปัญหาของสัญญานี้</li><li>เขียนสิ่งที่จะขอให้ฝั่งหลังบ้านแก้ พร้อมเหตุผล</li><li>ตอบว่าระหว่างที่ยังไม่แก้ ฝั่งแอปควรทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ปัญหา</strong></p><table><thead><tr><th>#</th><th>ปัญหา</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>1</td><td><code>detail</code> ของ 401 บอกว่าไม่พบผู้ใช้ชื่อนั้น</td><td>เดาชื่อผู้ใช้ที่มีอยู่จริงได้</td></tr>
+<tr><td>2</td><td>ไม่มี <code>errorCode</code> ที่ไม่เปลี่ยน</td><td>ต้องอ่านข้อความเพื่อแยกกรณี (7.9)</td></tr>
+<tr><td>3</td><td>ไม่มีชื่อผู้ใช้และ role ในคำตอบ</td><td>ต้องแกะจาก token ซึ่งผูกกับชื่อ claim (8.3)</td></tr>
+</tbody></table><p>ปัญหาข้อ 1 ร้ายที่สุด และเป็นสิ่งที่คนเขียนฝั่งหลังบ้านมักทำด้วยความหวังดี — อยากให้ผู้ใช้รู้ว่าผิดตรงไหน</p><p>วิธีที่คนไม่หวังดีใช้ประโยชน์</p><pre class="code-vs"><code>ลองชื่อผู้ใช้ทีละชื่อ ด้วยรหัสผ่านมั่ว ๆ
+  "ไม่พบผู้ใช้ somchai"     → ไม่มีคนนี้
+  "ไม่พบผู้ใช้ somsri"      → ไม่มีคนนี้
+  "รหัสผ่านไม่ถูกต้อง"       → มีคนนี้อยู่จริง ← ได้ข้อมูลแล้ว</code></pre><p>พอรู้ว่ามีชื่อไหนอยู่จริง ก็เหลือแค่เดารหัสผ่านของชื่อนั้น ซึ่งง่ายกว่าเดาทั้งสองอย่างพร้อมกันมาก</p><p><strong>ข้อ 2 — สิ่งที่จะขอ</strong></p><pre class="code-vs"><code>// 401 — ข้อความเดียวสำหรับทุกกรณี
+401 {
+  "title": "Unauthorized",
+  "status": 401,
+  "detail": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+  "errorCode": "INVALID_CREDENTIALS"
+}
+
+// 403 — บอกได้ เพราะยืนยันตัวตนผ่านแล้ว
+403 {
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "บัญชีนี้ถูกระงับ กรุณาติดต่อผู้ดูแล",
+  "errorCode": "ACCOUNT_DISABLED"
+}
+
+// 200 — ส่งข้อมูลผู้ใช้มาด้วย
+200 {
+  "token": "eyJ...",
+  "expiration": "2026-08-15T10:00:00Z",
+  "username": "somchai",
+  "roles": ["PICKER"]
+}</code></pre><p><strong>เหตุผลที่จะอธิบาย</strong></p><table><thead><tr><th>ขอ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>401 ใช้ข้อความเดียว</td><td>ไม่ให้เดาชื่อผู้ใช้ที่มีอยู่จริงได้</td></tr>
+<tr><td>403 บอกรายละเอียดได้</td><td>ผ่านการยืนยันตัวตนแล้ว จึงไม่ใช่การรั่วข้อมูล</td></tr>
+<tr><td>มี <code>errorCode</code></td><td>ให้แอปตัดสินใจโดยไม่ต้องอ่านข้อความ (7.9)</td></tr>
+<tr><td>ส่ง <code>username</code> และ <code>roles</code></td><td>ไม่ต้องผูกกับชื่อ claim ใน token</td></tr>
+</tbody></table><p>ความต่างระหว่าง 401 กับ 403 ในข้อนี้น่าสนใจ — <strong>403 บอกรายละเอียดได้เพราะผู้ใช้พิสูจน์ตัวตนสำเร็จแล้ว</strong> การบอกว่าบัญชีถูกระงับจึงไม่ได้ให้ข้อมูลกับใครที่ไม่ควรรู้</p><p><strong>ข้อ 3 — ระหว่างที่ยังไม่แก้</strong></p><p>ฝั่งแอปทำได้สองอย่าง</p><p><em>อย่างที่หนึ่ง — ไม่เอาข้อความของ 401 มาแสดง</em></p><pre class="code-vs"><code>ApiFailureKind.unauthorized =&gt; const InvalidCredentials(),</code></pre><p>สังเกตว่า lab ทิ้ง <code>error.userMessage</code> ไปเลยในกรณีนี้ ต่างจาก 403 ที่เอามาใช้</p><pre class="code-vs"><code>ApiFailureKind.forbidden =&gt; AccountNotAllowed(error.userMessage),</code></pre><p>แล้วให้หน้าจอแสดงข้อความของเราเอง</p><pre class="code-vs"><code>case InvalidCredentials():
+  _errorMessage = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';</code></pre><p><em>อย่างที่สอง — อ่านข้อมูลผู้ใช้จาก token ไปก่อน</em></p><pre class="code-vs"><code>username: _readText(json['username']) ?? payload?.username ?? username_,
+roles: _readRoles(json['roles']) ?? payload?.roles ?? const {},</code></pre><p>อ่านจากคำตอบก่อน ถ้าไม่มีค่อยแกะจาก token — พอฝั่งหลังบ้านเพิ่ม field มาให้ โค้ดนี้จะใช้ค่าใหม่เองโดยไม่ต้องแก้</p><p><strong>สิ่งที่ฝั่งแอปทำแทนไม่ได้</strong></p><table><thead><tr><th>เรื่อง</th><th>ทำไมแทนไม่ได้</th></tr></thead><tbody>
+<tr><td>การรั่วข้อมูลชื่อผู้ใช้</td><td><strong>เกิดที่เซิร์ฟเวอร์แล้ว</strong> — คนที่ยิงคำขอตรงก็เห็นข้อความนั้นอยู่ดี</td></tr>
+</tbody></table><p>การที่แอปไม่แสดงข้อความนั้น ช่วยเฉพาะกับคนที่ใช้แอปเท่านั้น — <strong>ใครที่ยิงคำขอด้วยเครื่องมืออื่นยังได้ข้อมูลไปเหมือนเดิม</strong></p><p>นี่คือเหตุผลที่ต้องแก้ที่ต้นทาง และเป็นหลักเดียวกับ 6.12 — <em>การตรวจฝั่งแอปคือประสบการณ์ผู้ใช้ ไม่ใช่ความปลอดภัย</em></p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>รหัสผ่านผ่านแอปครั้งเดียวแล้วหายไป ส่วน token อยู่ต่อจนหมดอายุ</li><li>คำตอบของการเข้าสู่ระบบต้องตรวจเหมือน JSON อื่นทุกประการ</li><li>คืนค่าแทนการโยน เพราะรหัสผ่านผิดเป็นเรื่องปกติ</li><li>แต่ความล้มเหลวที่ผิดสัญญายังต้องโยน</li><li>ใช้ <code>kind</code> จาก 7.9 แยกกรณี ไม่ใช่อ่านข้อความ</li><li>401 ใช้ข้อความเดียว ส่วน 403 บอกรายละเอียดได้</li><li>รหัสผ่านต้องไม่ไปอยู่ในบันทึก ในที่เก็บ หรือใน URL</li><li>สิ่งที่รั่วที่เซิร์ฟเวอร์ ฝั่งแอปปิดให้ไม่ได้</li></ul></div><p><strong>บทถัดไป:</strong> 8.2 จะจัดโครงของชั้นที่ทำเรื่องนี้ และตอบว่าใครควรเป็นเจ้าของ token</p></section>

@@ -1,15 +1,142 @@
-<div class="note"><strong>Bearer attachment จุดเดียว:</strong> ทุก authenticated request อ่าน access token ล่าสุดจาก SessionStore ตอนส่ง ไม่ copy token ไป feature APIs หลายแห่ง</div>
-<section><h2>1. Token provider</h2><pre class="code-vs"><code>typedef AccessTokenProvider = String? Function();
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: แนบ token ไปกับทุกคำขอโดยไม่มีทางลืม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.2 (เจ้าของ token) และ 7.5 (header)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ต่อ token จาก store เข้ากับตัวส่ง HTTP โดยที่ไม่มีจุดไหนใช้ค่าเก่า</div>
 
-Map&lt;String, String&gt; buildHeaders() =&gt; {
-  'Accept': 'application/json',
-  if (tokenProvider() case final token?)
-    'Authorization': 'Bearer $token',
-};</code></pre></section>
-<section><h2>2. Anonymous request</h2><p>login และ health probe ต้องไม่แนบ token เก่าหรือ expired โดยบังเอิญ API client จึงควรรองรับ explicit auth policy เช่น required/optional/none แทน boolean ที่ความหมายกำกวม</p></section>
-<section><h2>3. Shared client</h2><p>ของจริงตั้ง <code>ApiClient.authToken</code> หลัง login และ feature APIs ใช้ client เดียวกัน การสร้าง ApiClient ใหม่ในแต่ละหน้าอาจทำ token หายและ config ไม่ตรงกัน</p></section>
-<section><h2>4. Header correctness</h2><p>รูปแบบคือ <code>Authorization: Bearer &lt;token&gt;</code> มีช่องว่างหนึ่งครั้ง ไม่เติม quote และไม่ส่ง token ใน query string เพราะ URL มักถูก log/cache/history</p></section>
-<section><h2>5. Concurrent logout</h2><p>request ที่เริ่มก่อน logout อาจกลับมาทีหลัง ต้องมี session generation/identity guard ไม่ให้ response เก่าฟื้น state ของผู้ใช้ที่ออกจากระบบแล้ว</p></section>
-<section><h2>6. Redaction</h2><p>HTTP logger ต้องลบ Authorization แบบ case-insensitive ทั้ง success/error/retry และ tests ต้อง assert ว่า token marker ไม่ปรากฏใน log</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หลัง refresh token สำเร็จ feature API ควรเปลี่ยนอะไร?</p><details><summary>เฉลย</summary><p>อัปเดต SessionStore atomically; request ใหม่อ่าน token ล่าสุดเอง ไม่ต้องวนแก้ repository ทุกตัว ส่วน request เดิมต้องจบตาม generation policy</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">token source เดียว, anonymous route ชัด, client lifecycle เดียว, ไม่มี token ใน URL/log และ session generation ป้องกัน stale response</div></section>
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>8.2 ทำให้ <code>SessionStore</code> รู้ว่า token คืออะไร ส่วน 7.5 ทำให้ <code>ApiClient</code> แนบ token ไปกับคำขอ — บทนี้ต่อสองอย่างเข้าด้วยกัน</p><p>ปัญหาคือมันเป็นคนละชั้นกัน และการต่อผิดวิธีทำให้เกิดอาการที่ไล่หาสาเหตุยาก</p><table><thead><tr><th>วิธีต่อ</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ส่ง token เข้า <code>ApiClient</code> ตอนสร้าง</td><td>ต่ออายุแล้วยังใช้ค่าเก่า (7.5)</td></tr>
+<tr><td>ให้ repository อ่าน token จาก store เอง</td><td>ทุก repository ต้องรู้จัก store</td></tr>
+<tr><td>ให้ store ถือ <code>ApiClient</code> ไว้</td><td>ทดสอบ store ต้องมีตัวส่ง HTTP</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>bearer token</td><td>บัตรผ่านแบบที่ใครถือก็ใช้ได้</td></tr>
+<tr><td>composition root</td><td>จุดที่ประกอบทุกอย่างเข้าด้วยกันตอนแอปเริ่ม</td></tr>
+<tr><td>callback</td><td>ฟังก์ชันที่ส่งไปให้เรียกกลับ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: บอกทางเดียว ไม่ถามกลับ</h2><pre class="code-vs"><code>SessionStore  ──บอก──→  ApiClient
+    │                       │
+    รู้ว่า token คืออะไร      แค่ใช้ค่าล่าสุดที่ได้รับ ไม่ต้องรู้ว่ามาจากไหน</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ให้ฝ่ายที่รู้เป็นคนบอก ไม่ใช่ให้ฝ่ายที่ต้องใช้ไปถาม — เพราะฝ่ายที่ต้องใช้จะไม่รู้ว่าควรถามเมื่อไหร่</div></section>
+
+<section><h2>4. ต่อกันที่จุดประกอบแอป</h2><pre class="code-vs"><code>final apiClient = ApiClient(baseUrl: profile.baseUrl);
+
+final sessionStore = SessionStore(
+  repository: RemoteAuthRepository(apiClient),
+  storage: sessionStorage,
+  onTokenChanged: (token) =&gt; apiClient.authToken = token,
+);</code></pre><p>สังเกตว่า <code>RemoteAuthRepository</code> ใช้ <code>apiClient</code> ตัวเดียวกัน — ซึ่งดูเหมือนวนกลับมาหาตัวเอง แต่ไม่มีปัญหา</p><table><thead><tr><th>ตอนไหน</th><th><code>authToken</code> เป็นอะไร</th></tr></thead><tbody>
+<tr><td>ยิงคำขอเข้าสู่ระบบ</td><td><code>null</code> — endpoint นี้ไม่ต้องใช้ token</td></tr>
+<tr><td>หลังเข้าสู่ระบบสำเร็จ</td><td>ค่าที่เพิ่งได้มา</td></tr>
+<tr><td>หลังออกจากระบบ</td><td><code>null</code> อีกครั้ง</td></tr>
+</tbody></table><p>และเพราะ <code>_headers()</code> ใส่ <code>Authorization</code> เฉพาะเมื่อมีค่า ตามที่ทำใน 7.5 คำขอเข้าสู่ระบบจึงไม่มี header นั้นติดไปโดยอัตโนมัติ</p></section>
+
+<section><h2>5. ทำไมใช้ callback แทนการถือไว้ตรง ๆ</h2><pre class="code-vs"><code>/// เรียกทุกครั้งที่ token เปลี่ยน เพื่อให้ ApiClient ใช้ค่าล่าสุด
+///
+/// ใช้ callback แทนการถือ ApiClient ไว้ตรง ๆ เพื่อให้ทดสอบได้
+/// โดยไม่ต้องสร้างตัวส่ง HTTP
+final void Function(String? token) onTokenChanged;</code></pre><p>ประโยชน์ที่เห็นได้ชัดที่สุดคือในเทสต์</p><pre class="code-vs"><code>tokens = &lt;String?&gt;[];
+store = SessionStore(
+  repository: RemoteAuthRepository(api),
+  storage: storage,
+  onTokenChanged: tokens.add,     // เก็บทุกครั้งที่เปลี่ยน
+  clock: () =&gt; now,
+);</code></pre><p>ทำให้ตรวจ <strong>ลำดับ</strong> ของการเปลี่ยนแปลงได้ ซึ่งเป็นสิ่งที่อ่านจาก <code>ApiClient</code> ไม่ได้</p><pre class="code-vs"><code>test('ออกจากระบบต้องล้าง token ก่อนล้างที่เก็บ', () async {
+  await store.signIn(username: 'somchai', password: 'x', serverId: 'wh-01');
+
+  await store.signOut();
+
+  expect(tokens, ['token-abc', null]);
+});</code></pre><p>ถ้าตรวจจาก <code>ApiClient.authToken</code> จะเห็นแค่ค่าสุดท้ายคือ <code>null</code> — ไม่รู้ว่าเคยถูกตั้งแล้วล้าง หรือไม่เคยถูกตั้งเลย</p></section>
+
+<section><h2>6. ล้าง token ก่อนเสมอ</h2><pre class="code-vs"><code>Future&lt;void&gt; _clearTo(AuthStatus status, {SignOutReason? reason}) async {
+  // ล้าง token ก่อนเสมอ ไม่ให้มีคำขอไหนยิงด้วย token เก่าได้อีก
+  onTokenChanged(null);
+  _session = null;
+  _status = status;
+  ...
+}</code></pre><p>ลำดับสำคัญ เพราะระหว่างที่ล้างที่เก็บ (ซึ่งเป็นงาน async) อาจมีคำขออื่นยิงออกไป</p><pre class="code-vs"><code>// ถ้าล้างที่เก็บก่อน
+await storage.clear();          // ใช้เวลา 20 ms
+  ← ระหว่างนี้ polling ยิงคำขอด้วย token เก่าได้
+onTokenChanged(null);</code></pre><p>เป็นหลักเดียวกับ 5.4 หัวข้อ 8 — ล้างสิ่งที่ทำให้เข้าถึงได้ก่อน แล้วค่อยจัดการที่เหลือ</p><p>และการเรียก <code>onTokenChanged(null)</code> ทำทุกครั้งแม้ตอนที่ยังไม่เคยมี token</p><pre class="code-vs"><code>test('ไม่มีข้อมูลเก็บไว้ ต้องไปหน้าเข้าสู่ระบบ', () async {
+  await store.restore(currentServerId: 'wh-01');
+
+  expect(store.status, AuthStatus.signedOut);
+  // ล้าง token เสมอแม้ไม่เคยมี เพื่อรับประกันว่า ApiClient ไม่มีของค้าง
+  expect(tokens, [null]);
+});</code></pre></section>
+
+<section><h2>7. ต้องมี ApiClient ตัวเดียว</h2><pre class="code-vs"><code>// อันตราย — สอง repository สร้าง ApiClient คนละตัว
+final taskRepository = RemoteTaskRepository(ApiClient(baseUrl: url));
+final inboundRepository = RemoteInboundRepository(ApiClient(baseUrl: url));</code></pre><p>ผลคือ <code>onTokenChanged</code> ตั้งค่าให้ตัวเดียว ส่วนอีกตัวไม่เคยได้ token เลย</p><table><thead><tr><th>อาการที่เห็น</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>บางหน้าใช้ได้ บางหน้าได้ 401</td><td>คนละตัวส่ง</td></tr>
+<tr><td>ออกจากระบบแล้วบางส่วนยังใช้ได้</td><td>ล้างให้ตัวเดียว</td></tr>
+</tbody></table><pre class="code-vs"><code>// ถูก — ตัวเดียว ส่งต่อให้ทุก repository
+final apiClient = ApiClient(baseUrl: profile.baseUrl);
+final taskRepository = RemoteTaskRepository(apiClient);
+final inboundRepository = RemoteInboundRepository(apiClient);</code></pre><p>เป็นเหตุผลเดียวกับ 7.6 หัวข้อ 8 เรื่องความเป็นเจ้าของ — และเป็นเหตุผลที่ <code>ApiClient</code> ควรถูกสร้างที่จุดประกอบแอปที่เดียว</p></section>
+
+<section><h2>8. คำขอที่กำลังวิ่งอยู่ตอนที่ token เปลี่ยน</h2><p>การล้าง token ไม่ได้ยกเลิกคำขอที่ยิงไปแล้ว</p><pre class="code-vs"><code>0.0s  ยิงคำขอโหลดรายการ พร้อม token เก่า
+0.2s  ผู้ใช้กดออกจากระบบ → token ถูกล้าง
+0.8s  คำขอกลับมาพร้อมข้อมูล
+      → store ของรายการงานเขียนข้อมูลลง state ทั้งที่ออกจากระบบแล้ว</code></pre><table><thead><tr><th>สิ่งที่กันได้</th><th>สิ่งที่กันไม่ได้</th></tr></thead><tbody>
+<tr><td>คำขอ <em>ใหม่</em> จะไม่มี token</td><td>คำขอที่ยิงไปแล้วยังเดินทางต่อ</td></tr>
+</tbody></table><p>ทางแก้คือให้ store ที่ถือข้อมูลถูกทำลายพร้อมกับการออกจากระบบ ซึ่งเป็นเรื่องของ 8.8</p><p>หรือใช้ตัวนับรุ่นตาม 4.10 ถ้า store นั้นอยู่ต่อ</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ได้ 401 ทั้งที่เพิ่งเข้าสู่ระบบ</td><td>ส่ง token ตอนสร้าง <code>ApiClient</code></td><td>ตั้งค่าเมื่อเปลี่ยน</td></tr>
+<tr><td>บางหน้าใช้ได้ บางหน้าไม่ได้</td><td>มี <code>ApiClient</code> หลายตัว</td><td>สร้างตัวเดียวที่จุดประกอบ</td></tr>
+<tr><td>ออกจากระบบแล้วยังมีคำขอด้วย token เก่า</td><td>ล้างที่เก็บก่อนล้าง token</td><td>ล้าง token ก่อน</td></tr>
+<tr><td>ทดสอบ store ต้องมีตัวส่ง HTTP</td><td>store ถือ <code>ApiClient</code></td><td>ใช้ callback</td></tr>
+<tr><td>ข้อมูลของผู้ใช้เก่าโผล่มาหลังออกจากระบบ</td><td>คำขอที่ค้างอยู่กลับมา</td><td>ทำลาย store พร้อมกัน (8.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทีมพบว่าแอปมีอาการนี้ที่สาขาหนึ่ง</p><pre class="code-vs"><code>ผู้ใช้เข้าสู่ระบบสำเร็จ → หน้ารายการงานโหลดได้ปกติ
+  → กดเข้าหน้ารับเข้า → ได้ 401 ทุกครั้ง
+  → กลับมาหน้ารายการงาน → ยังใช้ได้ปกติ</code></pre><ol><li>ระบุสาเหตุที่น่าจะเป็นที่สุด</li><li>เขียนโค้ดจุดประกอบแอปที่ถูกต้อง</li><li>เขียนเทสต์ที่จะจับปัญหานี้ได้</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><p><strong>มี <code>ApiClient</code> มากกว่าหนึ่งตัว</strong> และ <code>onTokenChanged</code> ตั้งค่าให้ตัวที่หน้ารายการงานใช้เท่านั้น</p><p>หลักฐานที่ชี้ชัดสามอย่าง</p><table><thead><tr><th>สิ่งที่สังเกตได้</th><th>ตัดอะไรออกไป</th></tr></thead><tbody>
+<tr><td>หน้าหนึ่งใช้ได้ อีกหน้าไม่ได้</td><td>ไม่ใช่ token หมดอายุ — ถ้าหมดอายุจะพังทั้งคู่</td></tr>
+<tr><td>กลับมาหน้าเดิมยังใช้ได้</td><td>ไม่ใช่ token ถูกล้าง</td></tr>
+<tr><td>เกิดทุกครั้ง ไม่ใช่บางครั้ง</td><td>ไม่ใช่ปัญหาเครือข่ายหรือจังหวะ</td></tr>
+</tbody></table><p>“ทุกครั้ง” กับ “เฉพาะบางหน้า” รวมกันแล้วเหลือความเป็นไปได้เดียว — <strong>โค้ดของสองหน้าใช้ตัวส่งคนละตัว</strong></p><p>ส่วนที่ว่า “เกิดที่สาขาหนึ่ง” น่าจะเป็นเรื่องบังเอิญ — สาขาอื่นอาจยังไม่มีใครใช้หน้ารับเข้า</p><p><strong>ข้อ 2 — จุดประกอบที่ถูกต้อง</strong></p><pre class="code-vs"><code>Future&lt;AppDependencies&gt; buildDependencies(ConnectionProfile profile) async {
+  // ตัวส่ง HTTP ตัวเดียวสำหรับทั้งแอป
+  final apiClient = ApiClient(baseUrl: profile.baseUrl);
+
+  final sessionStore = SessionStore(
+    repository: RemoteAuthRepository(apiClient),
+    storage: SecureSessionStorage(),
+    onTokenChanged: (token) =&gt; apiClient.authToken = token,
+  );
+
+  return AppDependencies(
+    apiClient: apiClient,
+    sessionStore: sessionStore,
+    // ทุก repository ใช้ตัวส่งตัวเดียวกัน
+    taskRepository: RemoteTaskRepository(apiClient),
+    inboundRepository: RemoteInboundRepository(apiClient),
+  );
+}</code></pre><p>สิ่งที่ทำให้ผิดยากขึ้น — <strong>ไม่มีที่ไหนอื่นในโปรเจกต์ที่เรียก <code>ApiClient(...)</code> ได้</strong></p><pre class="code-vs"><code>// ค้นทั้งโปรเจกต์ ควรเจอที่เดียว
+grep -rn "ApiClient(" lib/</code></pre><p>ถ้าเจอมากกว่าหนึ่งที่ (ไม่นับเทสต์) แปลว่ามีปัญหานี้อยู่</p><p><strong>ข้อ 3 — เทสต์ที่จับได้</strong></p><p>ปัญหานี้อยู่ที่ <em>การประกอบ</em> ไม่ใช่ที่คลาสใดคลาสหนึ่ง — เทสต์ของ <code>SessionStore</code> หรือของ repository แต่ละตัวจะผ่านหมด</p><pre class="code-vs"><code>test('ทุก repository ต้องใช้ตัวส่งตัวเดียวกัน', () async {
+  final deps = await buildDependencies(testProfile);
+
+  // ยืนยันว่าเป็นวัตถุตัวเดียวกันจริง ไม่ใช่แค่ค่าเท่ากัน
+  expect(
+    identical(deps.taskRepository.api, deps.inboundRepository.api),
+    isTrue,
+  );
+});</code></pre><pre class="code-vs"><code>test('เข้าสู่ระบบแล้ว token ต้องถึงทุก repository', () async {
+  final deps = await buildDependencies(testProfile);
+  await deps.sessionStore.signIn(
+    username: 'somchai',
+    password: 'x',
+    serverId: testProfile.id,
+  );
+
+  expect(deps.apiClient.authToken, isNotNull);
+  // ตัวส่งที่ repository ถืออยู่ ต้องเป็นตัวเดียวกับที่ถูกตั้งค่า
+  expect(identical(deps.taskRepository.api, deps.apiClient), isTrue);
+  expect(identical(deps.inboundRepository.api, deps.apiClient), isTrue);
+});</code></pre><p>สังเกตว่าใช้ <code>identical</code> ไม่ใช่ <code>equals</code> — เพราะสิ่งที่ต้องพิสูจน์คือ <strong>เป็นวัตถุตัวเดียวกันในหน่วยความจำ</strong> ไม่ใช่แค่มีค่าเหมือนกัน</p><p><strong>ทางที่ทำให้ผิดไม่ได้เลย</strong></p><p>เทสต์จับได้หลังเขียนผิดไปแล้ว — แต่ทำให้เขียนผิดไม่ได้ตั้งแต่แรกดีกว่า</p><pre class="code-vs"><code>// ให้ repository รับสัญญา ไม่ใช่รับคลาสจริง
+class RemoteTaskRepository implements TaskRepository {
+  const RemoteTaskRepository(this.api);
+  final JsonApi api;      // ไม่ใช่ ApiClient
+}</code></pre><p>เมื่อ repository รับ <code>JsonApi</code> มันจะสร้าง <code>ApiClient</code> เองไม่ได้ เพราะไม่รู้จักคลาสนั้น — คนที่ประกอบต้องส่งเข้ามาเสมอ</p><p><strong>บทเรียนที่ควรจำ:</strong> อาการ “บางหน้าใช้ได้ บางหน้าไม่ได้” เกือบทุกครั้งแปลว่ามีของที่ควรมีตัวเดียวแต่มีหลายตัว — และบั๊กแบบนี้อยู่ที่จุดประกอบ ซึ่งเป็นที่ที่มักไม่มีเทสต์ครอบ</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>ให้ฝ่ายที่รู้เป็นคนบอก ไม่ใช่ให้ฝ่ายที่ใช้ไปถาม</li><li>ต่อกันที่จุดประกอบแอปที่เดียว</li><li>ใช้ callback แทนการให้ store ถือตัวส่ง HTTP</li><li>ล้าง token ก่อนล้างที่เก็บเสมอ</li><li>ล้างทุกครั้งแม้ยังไม่เคยมี เพื่อรับประกันว่าไม่มีของค้าง</li><li>ต้องมี <code>ApiClient</code> ตัวเดียวในแอป</li><li>ให้ repository รับสัญญา ไม่ใช่คลาสจริง จะได้สร้างเองไม่ได้</li><li>การล้าง token ไม่ได้ยกเลิกคำขอที่ยิงไปแล้ว</li></ul></div><p><strong>บทถัดไป:</strong> 8.5 จะทำให้ผู้ใช้ไม่ต้องเข้าสู่ระบบใหม่ทุกครั้งที่เปิดแอป และตอบว่าอะไรเก็บได้ อะไรเก็บไม่ได้</p></section>

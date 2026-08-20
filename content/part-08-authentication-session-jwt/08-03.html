@@ -1,17 +1,192 @@
-<div class="note"><strong>JWT คือ signed access credential:</strong> header.payload.signature อ่าน payload ได้แต่แก้ไม่ได้โดยไม่ทำลาย signature; ไม่ใช่ encryption และ client ไม่ใช่ผู้ตัดสินความถูกต้องสุดท้าย</div>
-<section><h2>1. AuthSession</h2><pre class="code-vs"><code>class AuthSession {
-  const AuthSession({required this.accessToken, required this.expiresAt,
-    required this.username, required this.roles});
-  final String accessToken;
-  final DateTime expiresAt;
-  final String username;
-  final Set&lt;String&gt; roles;
-  bool isExpiredAt(DateTime now) =&gt; !now.isBefore(expiresAt);
-}</code></pre></section>
-<section><h2>2. Claims ที่พบบ่อย</h2><p><code>sub</code> คือ subject, <code>exp</code> expiration เป็น Unix seconds, <code>iss</code> issuer, <code>aud</code> audience และ role/name อาจใช้ URI claim type ตาม .NET configuration</p></section>
-<section><h2>3. Server validation</h2><p>.NET ต้องตรวจ signature, issuer, audience, expiration และ signing key ทุก request ส่วน Flutter อ่าน claimsเพื่อ UX ได้ แต่ server เป็น security authority</p></section>
-<section><h2>4. Response vs decode token</h2><p>ถ้า login response ส่ง username/roles/expiration แบบ typed จะลดการผูก client กับ claim naming แต่ต้องกำหนด source of truth; ถ้า decode JWT ให้รองรับ claim shape ที่ตกลงและ validate types</p></section>
-<section><h2>5. Clock skew</h2><p>ถือ token ใกล้หมดอายุเป็น expired ก่อนจริง เช่น 30–60 วินาที เพื่อลด request ที่หมดอายุระหว่างเดินทาง และเวลาใน device อาจคลาดเคลื่อน จึงควรใช้ server expiration/refresh policy อย่างระวัง</p></section>
-<section><h2>6. ห้ามเก็บ secret ใน JWT</h2><p>Payload decode ได้โดยผู้ถือ token ห้ามใส่ password, connection string หรือข้อมูลลับ; claim มากเกินทำ token ใหญ่และถูกส่งทุก request</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>UI decode role ADMIN จาก token แล้วเปิดปุ่มลบได้หรือไม่?</p><details><summary>เฉลย</summary><p>ใช้เพื่อปรับ UI ได้ แต่ DELETE endpoint ยังต้องตรวจ policy/role ฝั่ง .NET และ client ต้อง handle 403 เพราะ role อาจถูกถอนหรือ token ถูก revoke</p></details></section>
-<section><h2>8. Contract tests</h2><div class="success">ทดสอบ token/expiration missing, invalid date, exp seconds, roles string/list, expired/near-expiry และ claim names จาก .NET fixture จริง</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านข้างใน token และรู้ว่าเชื่ออะไรได้แค่ไหน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.2 (โครงของชั้น auth) และ 6.6 (เวลาและเขตเวลา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แกะข้อมูลจาก token ได้ และรู้ว่าทำไมข้อมูลนั้นใช้ตัดสินสิทธิ์ไม่ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>token ที่ได้จากการเข้าสู่ระบบหน้าตาแบบนี้</p><pre class="code-vs"><code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzb21jaGFpIiwicm9sZ
+SI6IlBJQ0tFUiIsImV4cCI6MTc5MTk3MjgwMH0.dBjftJeZ4CVP-mB92K27uhbUJU1p</code></pre><p>มันดูเหมือนข้อความสุ่ม แต่จริง ๆ แล้วมีข้อมูลที่อ่านได้อยู่ข้างใน</p><table><thead><tr><th>คำถาม</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td>หมดอายุเมื่อไหร่</td><td>รู้ล่วงหน้าดีกว่ารอให้ได้ 401</td></tr>
+<tr><td>ผู้ใช้ชื่ออะไร</td><td>แสดงบนหน้าจอ</td></tr>
+<tr><td>มีสิทธิ์อะไรบ้าง</td><td>ซ่อนปุ่มที่กดไม่ได้</td></tr>
+</tbody></table><p>แต่มีกับดักอยู่ — <strong>อ่านได้ ไม่ได้แปลว่าเชื่อได้</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>JWT</td><td>รูปแบบ token ที่นิยมใช้</td></tr>
+<tr><td>claim</td><td>ข้อมูลหนึ่งชิ้นที่อยู่ใน token</td></tr>
+<tr><td>signature</td><td>ลายเซ็นที่พิสูจน์ว่าไม่ถูกแก้</td></tr>
+<tr><td>base64url</td><td>วิธีเข้ารหัสข้อความให้ใส่ใน URL ได้</td></tr>
+<tr><td>clock skew</td><td>ความคลาดเคลื่อนของนาฬิกาสองเครื่อง</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ซองที่ปิดผนึกแต่โปร่งใส</h2><pre class="code-vs"><code>header . payload . signature
+  │        │          │
+  │        │          └─ พิสูจน์ว่าไม่ถูกแก้ — ต้องมีกุญแจถึงจะตรวจได้
+  │        └─ ข้อมูล — ใครก็อ่านได้
+  └─ บอกว่าเซ็นด้วยวิธีไหน</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> JWT ไม่ได้เข้ารหัส — มันแค่เซ็นชื่อกำกับ ใครถือ token ก็อ่านข้างในได้หมด สิ่งที่ทำไม่ได้คือแก้แล้วให้ยังผ่านการตรวจ</div><p>ผลตามมาที่สำคัญที่สุด — <strong>ห้ามใส่อะไรที่เป็นความลับลงใน token</strong></p></section>
+
+<section><h2>4. แกะเนื้อหาออกมา</h2><p>เปิด <code>lib/auth/jwt.dart</code></p><pre class="code-vs"><code>/// อ่านเนื้อหาใน JWT
+///
+/// อ่านได้อย่างเดียว — ตรวจสอบว่า token ถูกต้องจริงไม่ได้ เพราะการตรวจ
+/// ต้องใช้กุญแจที่มีแต่ server รู้ ฝั่งแอปจึงใช้ข้อมูลนี้เพื่อปรับหน้าจอเท่านั้น
+/// ห้ามใช้ตัดสินสิทธิ์ (8.9)
+library;</code></pre><pre class="code-vs"><code>JwtPayload? tryDecodeJwt(String token) {
+  final parts = token.split('.');
+  if (parts.length != 3) return null;
+
+  try {
+    // base64url ใน JWT ตัด = ท้ายออก จึงต้องเติมกลับก่อนถอด
+    final normalized = base64Url.normalize(parts[1]);
+    final decoded = utf8.decode(base64Url.decode(normalized));
+    final claims = jsonDecode(decoded);
+    if (claims is! Map&lt;String, dynamic&gt;) return null;
+    return JwtPayload(claims);
+  } on FormatException {
+    return null;
+  }
+}</code></pre><p>บรรทัด <code>base64Url.normalize</code> จำเป็นเพราะ JWT ตัดเครื่องหมาย <code>=</code> ท้ายทิ้ง เพื่อให้ใส่ใน URL ได้ — ถ้าไม่เติมกลับ จะถอดไม่ได้</p><p>และคืน <code>null</code> แทนการโยน ตามเหตุผลเดียวกับ 6.9</p><pre class="code-vs"><code>test('token ที่รูปแบบผิดต้องคืน null ไม่ใช่โยน', () {
+  expect(tryDecodeJwt('ไม่ใช่ token'), isNull);
+  expect(tryDecodeJwt('a.b'), isNull);
+  expect(tryDecodeJwt('a.ข้อความที่ไม่ใช่ base64.c'), isNull);
+});</code></pre></section>
+
+<section><h2>5. เวลาหมดอายุเป็นตัวเลข ไม่ใช่ข้อความ</h2><pre class="code-vs"><code>/// เวลาหมดอายุ — `exp` เป็นจำนวนวินาทีนับจากปี 1970 ไม่ใช่ ISO-8601
+DateTime? get expiresAt {
+  final exp = claims['exp'];
+  if (exp is! num) return null;
+  return DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000, isUtc: true);
+}</code></pre><table><thead><tr><th>ที่ไหน</th><th>รูปแบบเวลา</th></tr></thead><tbody>
+<tr><td>ใน JWT (<code>exp</code>)</td><td><code>1791972800</code> — วินาทีนับจากปี 1970</td></tr>
+<tr><td>ในคำตอบของ login</td><td><code>"2026-08-15T10:00:00Z"</code> — ISO-8601 (6.6)</td></tr>
+</tbody></table><p>สองรูปแบบในคำตอบเดียวกัน ซึ่งเป็นเรื่องปกติของ JWT — และการคูณด้วย 1000 จำเป็นเพราะ Dart นับเป็นมิลลิวินาที ไม่ใช่วินาที</p><pre class="code-vs"><code>test('อ่าน exp ที่เป็นวินาทีนับจากปี 1970 ได้', () {
+  final payload = tryDecodeJwt(
+    fakeJwt({'exp': expiry.millisecondsSinceEpoch ~/ 1000}),
+  );
+
+  expect(payload!.expiresAt, expiry);
+});</code></pre><p>ลืมคูณ 1000 แล้วจะได้เวลาที่อยู่ในปี 1970 ซึ่งแปลว่าหมดอายุไปแล้วเสมอ — และแอปจะเด้งออกทันทีที่เข้าสู่ระบบสำเร็จ</p></section>
+
+<section><h2>6. ชื่อ claim ของ .NET ยาวผิดปกติ</h2><pre class="code-vs"><code>/// ชื่อ claim ที่ .NET ใช้เก็บ role โดยค่าตั้งต้น
+///
+/// ยาวแบบนี้เพราะเป็นมาตรฐานเก่าของ Microsoft — ถ้าฝั่งหลังบ้านตั้งค่าให้ใช้
+/// ชื่อสั้นกว่านี้ได้ ควรขอให้เปลี่ยน แต่ต้องรองรับของเดิมไว้ด้วย
+const String dotNetRoleClaim =
+    'http://schemas.microsoft.com/ws/2008/06/identity/claims/role';</code></pre><p>ครั้งแรกที่เห็นจะคิดว่าเป็นที่อยู่เว็บ แต่จริง ๆ เป็นแค่ชื่อ — และไม่มีอะไรอยู่ที่ที่อยู่นั้น</p><pre class="code-vs"><code>Set&lt;String&gt; get roles {
+  final raw = claims['role'] ?? claims[dotNetRoleClaim] ?? claims['roles'];
+  ...
+}</code></pre><p>ลองสามชื่อตามลำดับ เพราะแต่ละระบบตั้งค่าไม่เหมือนกัน — เป็นรูปแบบเดียวกับการรองรับ camelCase และ PascalCase ใน 6.7</p></section>
+
+<section><h2>7. role อาจเป็นข้อความเดียวหรือหลายค่า</h2><pre class="code-vs"><code>/// role อาจมาเป็นข้อความเดี่ยวหรือรายการ ขึ้นกับว่าผู้ใช้มีกี่ role
+///
+/// .NET ส่งข้อความเดี่ยวเมื่อมี role เดียว และส่ง array เมื่อมีหลาย role
+/// การรับได้ทั้งสองแบบจึงจำเป็น ไม่ใช่ความใจดี
+Set&lt;String&gt; get roles {
+  final raw = claims['role'] ?? claims[dotNetRoleClaim] ?? claims['roles'];
+  return switch (raw) {
+    String value when value.trim().isNotEmpty =&gt; {value.trim()},
+    List&lt;Object?&gt; values =&gt; {for (final value in values) ?_readString(value)},
+    _ =&gt; const &lt;String&gt;{},
+  };
+}</code></pre><p>นี่คือพฤติกรรมที่ทำให้เกิดบั๊กที่หายากมาก</p><pre class="code-vs"><code>ผู้ใช้ที่มี role เดียว   → "role": "PICKER"              → ทดสอบผ่าน
+ผู้ใช้ที่มีสอง role      → "role": ["PICKER", "ADMIN"]   → พัง</code></pre><p>ถ้าทดสอบด้วยบัญชีที่มี role เดียวอย่างเดียว จะไม่มีทางเจอ — จนกว่าหัวหน้าที่มีหลาย role จะเข้าสู่ระบบ</p><pre class="code-vs"><code>test('รับ role ทั้งแบบข้อความเดี่ยวและแบบรายการ', () {
+  expect(tryDecodeJwt(fakeJwt({'role': 'PICKER'}))!.roles, {'PICKER'});
+  expect(
+    tryDecodeJwt(fakeJwt({'role': ['PICKER', 'SUPERVISOR']}))!.roles,
+    {'PICKER', 'SUPERVISOR'},
+  );
+});</code></pre></section>
+
+<section><h2>8. เชื่อคำตอบก่อน แล้วค่อยดู token</h2><p>เปิด <code>lib/auth/auth_repository.dart</code></p><pre class="code-vs"><code>// เชื่อ expiration ที่ server ส่งมาก่อน แล้วค่อยดูใน token
+// เพราะ server อาจตั้งอายุสั้นกว่าที่เขียนไว้ใน token ได้
+final expiresAt = _readTime(json['expiration']) ?? payload?.expiresAt;</code></pre><pre class="code-vs"><code>// อ่านจากคำตอบก่อน ถ้าไม่มีค่อยแกะจาก token และสุดท้ายใช้ชื่อที่กรอกมา
+username: _readText(json['username']) ?? payload?.username ?? fallbackUsername,
+roles: _readRoles(json['roles']) ?? payload?.roles ?? const {},</code></pre><table><thead><tr><th>ลำดับ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>คำตอบของ login</td><td>เป็นสัญญาที่ตกลงกันไว้ชัด และไม่ผูกกับชื่อ claim</td></tr>
+<tr><td>ข้างใน token</td><td>ทางสำรองเมื่อ endpoint ยังไม่ได้ส่งมาให้</td></tr>
+<tr><td>ค่าที่ผู้ใช้กรอก</td><td>ทางสำรองสุดท้ายสำหรับชื่อผู้ใช้</td></tr>
+</tbody></table><p>ประโยชน์คือ <strong>เมื่อฝั่งหลังบ้านเพิ่ม field มาให้ โค้ดนี้จะใช้ค่าใหม่เองโดยไม่ต้องแก้</strong></p><pre class="code-vs"><code>test('อ่าน role จาก token เมื่อ server ไม่ได้ส่งมาแยก', () async {
+  api.loginResponse = loginJson(
+    token: fakeJwt({'name': 'somchai', 'role': 'SUPERVISOR'}),
+  );
+
+  final outcome = await repository.login(...);
+
+  expect((outcome as LoginSucceeded).session.roles, {'SUPERVISOR'});
+});</code></pre></section>
+
+<section><h2>9. เผื่อเวลาไว้ก่อนหมดอายุ</h2><p>เปิด <code>lib/auth/auth_session.dart</code></p><pre class="code-vs"><code>/// หมดอายุแล้วหรือยัง โดยเผื่อเวลาไว้ล่วงหน้า
+///
+/// เผื่อ [skew] เพราะนาฬิกาของ PDA กับของ server ไม่ตรงกันเป๊ะ และเพราะ
+/// คำขอที่ยิงตอนเหลืออีก 2 วินาที จะหมดอายุระหว่างเดินทาง
+bool isExpiredAt(
+  DateTime now, {
+  Duration skew = const Duration(seconds: 60),
+}) =&gt; !now.toUtc().isBefore(expiresAt.subtract(skew));</code></pre><table><thead><tr><th>ถ้าไม่เผื่อ</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>นาฬิกา PDA เร็วกว่า server 30 วินาที</td><td>แอปคิดว่าหมดอายุแล้ว ทั้งที่ยังใช้ได้</td></tr>
+<tr><td>นาฬิกา PDA ช้ากว่า server 30 วินาที</td><td>แอปส่งคำขอด้วย token ที่หมดอายุแล้ว</td></tr>
+<tr><td>ยิงคำขอตอนเหลือ 2 วินาที</td><td>หมดอายุระหว่างเดินทาง ได้ 401</td></tr>
+</tbody></table><pre class="code-vs"><code>test('ถือว่าหมดอายุก่อนเวลาจริง เพราะเผื่อเวลาเดินทาง', () {
+  // เหลืออีก 30 วินาที แต่เผื่อไว้ 60 จึงถือว่าหมดแล้ว
+  final almost = expiry.subtract(const Duration(seconds: 30));
+
+  expect(sessionExpiringAt(expiry).isExpiredAt(almost), isTrue);
+});</code></pre><p>การเผื่อเวลาไม่ได้แก้ปัญหานาฬิกาไม่ตรงทั้งหมด — มันแค่ลดโอกาส และ <strong>เซิร์ฟเวอร์ยังต้องตรวจอายุเองอยู่ดี</strong> ตามหลักใน 6.12</p></section>
+
+<section><h2>10. token ไม่ควรไปโผล่ในบันทึก</h2><pre class="code-vs"><code>/// ไม่พิมพ์ token ออกมา เพราะ toString ไปโผล่ใน log ได้ง่าย (7.17)
+@override
+String toString() =&gt;
+    'AuthSession($username @ $serverId, หมดอายุ $expiresAt)';</code></pre><p>เขียน <code>toString</code> เองเพราะค่าตั้งต้นของ Dart จะพิมพ์แค่ชื่อคลาส — แต่พอมีคนเพิ่มการพิมพ์ field ทั้งหมดเพื่อช่วยไล่หาสาเหตุ token จะหลุดไปทันที</p><pre class="code-vs"><code>test('ไม่พิมพ์ token ออกมาใน toString', () {
+  final text = sessionExpiringAt(expiry).toString();
+
+  expect(text, contains('somchai'));
+  expect(text, isNot(contains('token')));
+});</code></pre><p>เทสต์นี้ไม่ได้กันบั๊กที่มีอยู่ — มันกันการเปลี่ยนแปลงในอนาคตที่ดูเหมือนไม่มีพิษภัย ซึ่งเป็นหน้าที่ของเทสต์ตาม 6.13</p></section>
+
+<section><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เข้าสู่ระบบสำเร็จแล้วเด้งออกทันที</td><td>ลืมคูณ 1000 ตอนอ่าน <code>exp</code></td><td>คูณให้ถูกหน่วย</td></tr>
+<tr><td>หัวหน้าที่มีหลาย role เข้าใช้ไม่ได้</td><td>รับ role แบบข้อความอย่างเดียว</td><td>รับทั้งข้อความและรายการ</td></tr>
+<tr><td>อ่าน role ไม่เจอเลย</td><td>ชื่อ claim ของ .NET ยาวไม่ตรงที่คิด</td><td>ลองหลายชื่อ</td></tr>
+<tr><td>ถอด token ไม่ได้</td><td>ไม่ได้เติม <code>=</code> กลับ</td><td>ใช้ <code>base64Url.normalize</code></td></tr>
+<tr><td>ได้ 401 เป็นครั้งคราวโดยไม่มีเหตุผล</td><td>ไม่เผื่อเวลา</td><td>เผื่อไว้ประมาณหนึ่งนาที</td></tr>
+<tr><td>token อยู่ในไฟล์บันทึก</td><td><code>toString</code> พิมพ์ทุก field</td><td>เขียนเอง แล้วมีเทสต์กัน</td></tr>
+<tr><td>ซ่อนปุ่มตาม role แล้วคิดว่าปลอดภัย</td><td>ใช้ token ตัดสินสิทธิ์</td><td>เซิร์ฟเวอร์ต้องตรวจ (8.9)</td></tr>
+</tbody></table></section>
+
+<section><h2>12. แบบฝึกหัด</h2><p>ทีมได้ token ตัวอย่างจากฝั่งหลังบ้านมาตรวจ</p><pre class="code-vs"><code>{
+  "sub": "EMP001",
+  "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "สมชาย ใจดี",
+  "http://schemas.microsoft.com/ws/2008/06/identity/claims/role": [
+    "PICKER", "SUPERVISOR"
+  ],
+  "warehouseCode": "WH-01",
+  "employeePin": "1234",
+  "exp": 1791972800,
+  "iss": "wms-api",
+  "aud": "wms-mobile"
+}</code></pre><ol><li>ระบุว่าอ่าน claim ไหนได้บ้างด้วยโค้ดใน lab</li><li>มี claim หนึ่งที่ไม่ควรอยู่ในนี้ — บอกว่าอันไหนและทำไม</li><li>ตอบว่า <code>warehouseCode</code> ควรใช้ทำอะไรได้และทำอะไรไม่ได้</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — อ่านได้อะไรบ้าง</strong></p><table><thead><tr><th>claim</th><th>อ่านได้ด้วย</th><th>ได้ค่า</th></tr></thead><tbody>
+<tr><td><code>sub</code></td><td><code>payload.subject</code></td><td><code>EMP001</code></td></tr>
+<tr><td>claim ชื่อยาวของ name</td><td><code>payload.username</code></td><td><code>สมชาย ใจดี</code></td></tr>
+<tr><td>claim ชื่อยาวของ role</td><td><code>payload.roles</code></td><td><code>{PICKER, SUPERVISOR}</code></td></tr>
+<tr><td><code>exp</code></td><td><code>payload.expiresAt</code></td><td>เวลาที่แปลงเป็น UTC แล้ว</td></tr>
+<tr><td><code>warehouseCode</code>, <code>iss</code>, <code>aud</code></td><td><code>payload.claims['...']</code></td><td>ต้องอ่านเอง</td></tr>
+</tbody></table><p>สังเกตว่า <code>username</code> ลองสามทางตามลำดับ และในกรณีนี้เจอที่ทางที่สอง</p><pre class="code-vs"><code>String? get username =&gt;
+    _readString(claims['name']) ??
+    _readString(claims[dotNetNameClaim]) ??
+    subject;</code></pre><p>ถ้าไม่มี claim ชื่อยาว ก็จะได้ <code>EMP001</code> จาก <code>sub</code> แทน ซึ่งยังใช้งานได้ แค่ไม่สวย</p><p><strong>ข้อ 2 — claim ที่ไม่ควรอยู่</strong></p><p><code>"employeePin": "1234"</code></p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ใครถือ token ก็อ่านได้</td><td>JWT ไม่ได้เข้ารหัส — แค่ถอด base64 ก็เห็น</td></tr>
+<tr><td>เป็นความลับที่ใช้ยืนยันตัวตนได้</td><td>ถ้า PIN ใช้เข้าระบบอื่นได้ ก็เท่ากับรหัสผ่านรั่ว</td></tr>
+<tr><td>ไม่จำเป็นต้องอยู่ในนั้น</td><td>แอปไม่ต้องรู้ PIN ของผู้ใช้เลย</td></tr>
+</tbody></table><p><strong>วิธีพิสูจน์ให้ทีมเห็น</strong> — เอา token ไปวางในเว็บที่ถอด JWT ได้ แล้วให้ดูว่าเห็น PIN ทันทีโดยไม่ต้องมีกุญแจอะไรเลย</p><pre class="code-vs"><code>ถอด base64 ส่วนกลาง → เห็น {"employeePin": "1234", ...}
+ไม่ต้องมีรหัสผ่าน ไม่ต้องมีสิทธิ์ ไม่ต้องเจาะอะไร</code></pre><p>และเพราะ token ถูกส่งไปกับ <em>ทุกคำขอ</em> มันจึงผ่านตัวกลางในเครือข่ายทุกตัว และอาจไปอยู่ในบันทึกของระบบอื่นที่เราไม่ได้ดูแล</p><p>นอกจากนี้ token ที่มี claim เยอะจะใหญ่ขึ้น และถูกส่งไปทุกคำขอ — เป็นค่าใช้จ่ายที่จ่ายซ้ำตลอด</p><p><strong>ข้อ 3 — <code>warehouseCode</code> ใช้ทำอะไรได้</strong></p><table><thead><tr><th>ใช้ได้</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>แสดงบนหน้าจอ</td><td>“คลัง WH-01” บนแถบบน</td></tr>
+<tr><td>ตั้งค่าตั้งต้นของตัวกรอง</td><td>เปิดหน้ารายการแล้วกรองคลังนี้ให้เลย</td></tr>
+<tr><td>ตัดสินใจเรื่องหน้าตา</td><td>ซ่อนเมนูของคลังอื่น</td></tr>
+</tbody></table><table><thead><tr><th>ใช้ไม่ได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ตัดสินว่าดูข้อมูลคลังไหนได้</td><td>เซิร์ฟเวอร์ต้องเป็นคนตัดสิน</td></tr>
+<tr><td>ส่งไปเป็นเงื่อนไขแล้วเชื่อผล</td><td>คนที่แก้คำขอเองส่งค่าอื่นได้</td></tr>
+</tbody></table><p><strong>ความต่างที่ต้องเข้าใจ</strong></p><pre class="code-vs"><code>// ใช้ได้ — แค่ตั้งค่าตั้งต้นให้สะดวก
+_selectedWarehouse = session.warehouseCode;
+
+// ใช้ไม่ได้ — เชื่อว่า server จะจำกัดให้ตามที่เราส่งไป
+final tasks = await repository.fetchOpen(
+  warehouseCode: session.warehouseCode,   // server ต้องตรวจซ้ำเอง
+);</code></pre><p>บรรทัดล่างเขียนได้ แต่ <strong>เซิร์ฟเวอร์ต้องไม่เชื่อค่านี้</strong> — มันต้องดูจาก token ที่แนบมาว่าผู้ใช้คนนี้เข้าถึงคลังไหนได้ แล้วจำกัดเอง</p><p>ถ้าเซิร์ฟเวอร์เชื่อค่าที่แอปส่งมา ใครก็ตามที่ยิงคำขอเองจะดูข้อมูลของทุกคลังได้ โดยแค่เปลี่ยนค่าในคำขอ</p><p><strong>บทเรียนที่ควรจำ:</strong> ข้อมูลใน token ใช้ทำให้หน้าจอสะดวกขึ้นได้ทั้งหมด — แต่ทุกครั้งที่มันถูกใช้ตัดสินว่า <em>เข้าถึงอะไรได้</em> นั่นคือการย้ายการตัดสินใจเรื่องความปลอดภัยมาไว้ฝั่งที่ควบคุมไม่ได้</p></details></section>
+
+<section><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>JWT ไม่ได้เข้ารหัส — ใครถือก็อ่านได้ ห้ามใส่ความลับ</li><li>ลายเซ็นตรวจได้เฉพาะฝั่งที่มีกุญแจ ซึ่งไม่ใช่ฝั่งแอป</li><li><code>exp</code> เป็นวินาที ต้องคูณ 1000 ก่อนแปลง</li><li>ชื่อ claim ของ .NET ยาวผิดปกติ ต้องลองหลายชื่อ</li><li>role อาจเป็นข้อความเดี่ยวหรือรายการ ต้องรับได้ทั้งคู่</li><li>เชื่อคำตอบของ login ก่อน แล้วค่อยดูใน token</li><li>เผื่อเวลาก่อนหมดอายุ เพราะนาฬิกาไม่ตรงและคำขอใช้เวลาเดินทาง</li><li>เขียน <code>toString</code> เองไม่ให้ token หลุด และมีเทสต์กันไว้</li><li>ข้อมูลใน token ใช้ปรับหน้าจอได้ แต่ตัดสินสิทธิ์ไม่ได้</li></ul></div><p><strong>บทถัดไป:</strong> 8.4 จะเอา token ที่ได้มาแนบไปกับทุกคำขอ และตอบว่าทำไมต้องมีที่เดียวที่รู้ค่าล่าสุด</p></section>
