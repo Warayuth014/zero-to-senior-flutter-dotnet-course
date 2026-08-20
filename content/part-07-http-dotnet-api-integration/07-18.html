@@ -1,31 +1,179 @@
-<div class="note"><strong>Lab ปิด Part 7:</strong> สร้าง Flutter client ที่เรียก Minimal .NET endpoint จริง พร้อม typed DTO, grid query, ProblemDetails, timeout, health probe, tests และ log redaction</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>GET tasks รองรับ search/page/pageSize และคืน items/totalCount</li><li>POST complete รับ typed request + idempotency key</li><li>400/404/409 คืน ProblemDetails + stable code</li><li>Flutter แยก network/API/contract error</li><li>health ตรวจ service marker</li><li>unit/integration tests ครบ happy + failure</li></ul></section>
-<section><h2>2. .NET contracts</h2><pre class="code-vs"><code>record TaskDto(string TaskId, string Status, decimal Quantity);
-record CompleteTaskRequest(decimal Quantity);
-record GridPage&lt;T&gt;(IReadOnlyList&lt;T&gt; Items, int TotalCount);
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: ประกอบชั้นที่คุยกับ .NET ให้ครบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.1–7.17 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ต่อ endpoint ใหม่เข้ากับแอปได้ครบทุกด้าน ตั้งแต่ที่อยู่จนถึงการบันทึก</div>
 
-app.MapGet("/api/WMS/tasks", (string? search, int page = 1,
-  int pageSize = 20) =&gt; Results.Ok(/* GridPage */));</code></pre></section>
-<section><h2>3. Command endpoint</h2><pre class="code-vs"><code>app.MapPost("/api/WMS/tasks/{id}/complete",
-  (string id, CompleteTaskRequest body, HttpRequest http) =&gt; {
-    var key = http.Headers["Idempotency-Key"].ToString();
-    if (string.IsNullOrWhiteSpace(key))
-      return Results.Problem(statusCode: 400,
-        title: "Missing idempotency key");
-    return Results.Ok(new { taskId = id, status = "COMPLETED" });
-  });</code></pre></section>
-<section><h2>4. Flutter API</h2><pre class="code-vs"><code>class TasksApi {
-  TasksApi(this.client);
-  final ApiClient client;
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>lib/core/</code> และ <code>lib/features/tasks/</code> พร้อมรู้ว่าทุกส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ต่อ endpoint รับเข้าเข้ากับแอป ตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 8</td></tr>
+</tbody></table></section>
 
-  Future&lt;GridPage&lt;TaskDto&gt;&gt; fetch({String search = ''}) async {
-    final json = await client.getJson('/tasks', query: {'search': search});
-    return parseTaskPage(json);
-  }
-}</code></pre></section>
-<section><h2>5. Test table</h2><ul><li>query อักขระพิเศษและ pagination</li><li>200 grid, 204 และ malformed JSON</li><li>400 validation, 409 duplicate และ 500</li><li>timeout/SocketException</li><li>retry GET เท่านั้น</li><li>idempotency key เดิมคืนผลเดิม</li><li>token ไม่อยู่ใน log</li></ul></section>
-<section><h2>6. Run และ inspect</h2><pre class="code-vs"><code>dotnet run --project labs/dotnet/WmsMobileApi
-flutter test --no-pub
-flutter analyze --no-pub</code></pre><p>เปิด health URL จาก device/emulator ก่อนทดสอบ UI และใช้ trace ID ตาม request ข้ามสองฝั่ง</p></section>
-<section><h2>7. Code review questions</h2><ol><li>URL/prefix มี source of truth จุดเดียวหรือไม่</li><li>dynamic หยุดที่ boundary หรือยัง</li><li>timeout หลัง commit ทำซ้ำได้หรือไม่</li><li>error fallback และ UX ครบหรือไม่</li><li>test พิสูจน์ request ที่ส่งจริงหรือยัง</li></ol></section>
-<section><h2>8. Exit test</h2><div class="success">เมื่อจบ lab ต้องตาม flow Flutter → HTTP → .NET → JSON → state ได้, วินิจฉัย emulator/PDA connection ได้ และออกแบบ retry/idempotency/error/logging โดยไม่เสี่ยงทำงานซ้ำหรือรั่ว token</div></section>
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>core/api_client.dart</code></td><td>HTTP, header, เวลารอ, แปลงรหัสตอบกลับ</td><td>7.4–7.9</td></tr>
+<tr><td><code>core/api_failure.dart</code></td><td>ชนิดความล้มเหลว + ProblemDetails</td><td>7.9, 7.11, 7.14</td></tr>
+<tr><td><code>core/api_retry.dart</code></td><td>นโยบายการลองใหม่</td><td>7.14</td></tr>
+<tr><td><code>core/api_log.dart</code></td><td>ปิดค่าอ่อนไหวและสรุปคำขอ</td><td>7.17</td></tr>
+<tr><td><code>features/tasks/task_repository.dart</code></td><td>เส้นทางและการแปลง</td><td>7.1, 7.12, 7.15</td></tr>
+<tr><td><code>test/api_client_test.dart</code></td><td>เทสต์ผ่านของปลอม 12 ข้อ</td><td>7.6</td></tr>
+<tr><td><code>test/api_failure_test.dart</code></td><td>เทสต์ชนิด การลองใหม่ และการปิดค่า 21 ข้อ</td><td>7.9, 7.14, 7.17</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/api_client_test.dart test/api_failure_test.dart</code></pre></section>
+
+<section><h2>3. เส้นทางของคำขอหนึ่งครั้ง</h2><pre class="code-vs"><code>store เรียก repository.complete(id, commandId)          ← 7.1
+    │
+    ▼  RetryPolicy.run(..., isIdempotent: true)          ← 7.14
+    │      รหัสคำสั่งถูกสร้างไว้ข้างนอกแล้ว                ← 7.15
+    │
+    ▼  ApiClient.postJson(path, body, headers)           ← 7.4
+    │      ประกอบ URL                                    ← 7.2
+    │      ใส่ header และ token ล่าสุด                    ← 7.5
+    │      ตั้งเวลารอ                                     ← 7.7
+    │
+    ▼  ยิงจริง
+    │      สำเร็จ → ตรวจ body และแปลง                     ← 7.8
+    │      ล้มเหลว → แปลงรหัสเป็นชนิด + อ่าน ProblemDetails ← 7.9, 7.11
+    │      เน็ตหลุด → ติดธง outcomeUnknown                ← 7.4, 7.7
+    │
+    ▼  บันทึกผลโดยปิดค่าอ่อนไหว                            ← 7.17
+    │
+    ▼  repository แปลงเป็นชนิดของธุรกิจ                    ← 6.1
+    │
+    ▼  store ตัดสินใจว่าสถานะควรเป็นอะไร                    ← 4.13</code></pre><p>ถ้ามีขั้นไหนที่ตอบไม่ได้ว่าทำไมต้องมี ให้กลับไปอ่านบทที่กำกับไว้ก่อนทำต่อ</p></section>
+
+<section><h2>4. โจทย์</h2><p>ต่อ endpoint รับเข้าเข้ากับแอป ในโฟลเดอร์ใหม่ <code>lib/features/inbound/</code></p><p>ฝั่งหลังบ้านให้สัญญามาแล้ว</p><table><thead><tr><th>งาน</th><th>method และเส้นทาง</th></tr></thead><tbody>
+<tr><td>รายการใบรับเข้าที่ค้าง</td><td><code>GET /api/WMS/inbound?status=open&amp;skip=0&amp;take=20</code></td></tr>
+<tr><td>รายละเอียดใบหนึ่ง</td><td><code>GET /api/WMS/inbound/{orderNo}</code></td></tr>
+<tr><td>ยืนยันรับเข้าทั้งใบ</td><td><code>POST /api/WMS/inbound/{orderNo}/confirm</code></td></tr>
+</tbody></table><pre class="code-vs"><code>// คำตอบของการยืนยัน
+{
+  "orderNo": "IN-2026-0812",
+  "receiptNo": "RC-2481",
+  "alreadyConfirmed": false,
+  "confirmedAt": "2026-08-16T03:12:00Z"
+}</code></pre><p>และเมื่อล้มเหลว จะได้ ProblemDetails พร้อม <code>errorCode</code></p><table><thead><tr><th>รหัส</th><th><code>errorCode</code></th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>409</td><td><code>INBOUND_ALREADY_CONFIRMED</code></td><td>ยืนยันไปแล้ว</td></tr>
+<tr><td>409</td><td><code>INBOUND_LOCKED</code></td><td>คนอื่นกำลังทำอยู่</td></tr>
+<tr><td>400</td><td><code>INBOUND_QUANTITY_MISMATCH</code></td><td>จำนวนไม่ตรงกับที่สั่ง</td></tr>
+</tbody></table></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>store ไม่รู้จัก URL, header หรือรหัสตอบกลับ</td><td>7.1</td></tr>
+<tr><td>2</td><td>ประกอบ URL ด้วย <code>Uri</code> และ <code>orderNo</code> ถูก encode</td><td>7.2</td></tr>
+<tr><td>3</td><td>การอ่านใช้ GET ส่วนการยืนยันใช้ POST</td><td>7.4</td></tr>
+<tr><td>4</td><td>รหัสคำสั่งส่งทาง header และสร้างนอกส่วนที่ถูกลองใหม่</td><td>7.5, 7.15</td></tr>
+<tr><td>5</td><td>เทสต์ตรวจคำขอที่ส่งไป ไม่ใช่แค่ผลลัพธ์</td><td>7.6</td></tr>
+<tr><td>6</td><td>เน็ตหลุดตอน GET กับตอน POST ตั้ง <code>outcomeUnknown</code> ต่างกัน</td><td>7.4, 7.7</td></tr>
+<tr><td>7</td><td>204 และ body ว่างไม่ทำให้พัง</td><td>7.8</td></tr>
+<tr><td>8</td><td>แปลง <code>errorCode</code> เป็นผลลัพธ์ที่แอปทำต่างกันได้</td><td>7.9</td></tr>
+<tr><td>9</td><td>การยืนยันคืนค่า ไม่ใช่โยน เพราะมีหลายผลลัพธ์</td><td>7.10</td></tr>
+<tr><td>10</td><td>ข้อผิดพลาดรายช่องไปแสดงที่ช่องที่ถูกต้อง</td><td>7.11</td></tr>
+<tr><td>11</td><td>รายการใช้ <code>skip</code>/<code>take</code> และกรองซ้ำก่อนต่อท้าย</td><td>7.12, 7.13</td></tr>
+<tr><td>12</td><td>GET ลองใหม่เองได้ POST ลองใหม่ได้เพราะมีรหัสคำสั่ง</td><td>7.14</td></tr>
+<tr><td>13</td><td>มีปุ่มทดสอบการเชื่อมต่อที่แยกสาเหตุได้</td><td>7.16</td></tr>
+<tr><td>14</td><td>บันทึกคำขอโดยไม่มี token และไม่มี body</td><td>7.17</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 8 กับ 9 เป็นสองข้อที่ยากที่สุด และทั้งคู่เป็นเรื่องเดียวกัน — <strong>ทำให้ผลลัพธ์ที่ต่างกันถูกแยกตั้งแต่ชนิด ไม่ใช่ให้ชั้นบนไปอ่านข้อความเอง</strong></p></section>
+
+<section><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 8 และ 9 — ผลลัพธ์ของการยืนยัน</strong></p><pre class="code-vs"><code>sealed class ConfirmOutcome {
+  const ConfirmOutcome();
+}
+
+class ConfirmSucceeded extends ConfirmOutcome {
+  const ConfirmSucceeded(this.receiptNo, {required this.wasAlreadyConfirmed});
+  final String receiptNo;
+  /// true เมื่อ server ตอบผลเดิมเพราะรหัสคำสั่งซ้ำ (7.15)
+  final bool wasAlreadyConfirmed;
+}
+
+class ConfirmLocked extends ConfirmOutcome {
+  const ConfirmLocked(this.message);
+  final String message;
+}
+
+class ConfirmQuantityMismatch extends ConfirmOutcome {
+  const ConfirmQuantityMismatch(this.fieldErrors);
+  final Map&lt;String, String&gt; fieldErrors;    // ไปแสดงที่ช่อง (7.11)
+}
+
+class ConfirmFailed extends ConfirmOutcome {
+  const ConfirmFailed(this.kind, this.message, {this.traceId});
+  final ApiFailureKind kind;
+  final String message;
+  final String? traceId;
+}</code></pre><p>สังเกตว่า <code>INBOUND_ALREADY_CONFIRMED</code> กลายเป็น <code>ConfirmSucceeded</code> ไม่ใช่ความล้มเหลว — เพราะผลลัพธ์ที่ผู้ใช้ต้องการเกิดขึ้นแล้ว ตามข้อสรุปของ 7.9</p><p><strong>เกณฑ์ 12 — การลองใหม่ของ POST</strong></p><pre class="code-vs"><code>// รหัสสร้างที่นี่ ครั้งเดียว
+final commandId = _pendingCommandIds.putIfAbsent(orderNo, _createCommandId);
+
+return _retry.run(
+  () async =&gt; api.postJson(
+    '/api/WMS/inbound/${Uri.encodeComponent(orderNo)}/confirm',
+    request.toJson(),
+    headers: {'Idempotency-Key': commandId},
+  ),
+  isIdempotent: true,     // ปลอดภัยเพราะมีรหัสคำสั่ง
+);</code></pre><p><strong>เกณฑ์ 14 — การบันทึก</strong></p><p>อย่าลืมบันทึกในทุกทางออก รวมถึงตอนที่ไม่ได้คำตอบ ซึ่งเป็นกรณีที่ฝั่งเซิร์ฟเวอร์อาจไม่มีอะไรเลย</p></section>
+
+<section><h2>7. เทสต์ที่ต้องเขียน</h2><p>อย่างน้อย 15 ข้อ ตัวอย่างสามข้อที่คิดยากที่สุด</p><pre class="code-vs"><code>test('รหัสใบที่มีอักขระพิเศษต้องถูก encode ใน path', () async {
+  http.Request? sent;
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse(const &lt;String, Object&gt;{}, 200),
+    onRequest: (request) =&gt; sent = request,
+  );
+
+  await InboundRepository(api).confirm('IN/2026/0812', commandId: 'cmd-1');
+
+  // ขีดทับต้องไม่กลายเป็นตัวแบ่งเส้นทาง (7.2)
+  expect(sent!.url.path, contains('IN%2F2026%2F0812'));
+});</code></pre><pre class="code-vs"><code>test('ยืนยันซ้ำด้วยรหัสเดิม ต้องได้ผลสำเร็จที่บอกว่าทำไปแล้ว', () async {
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse({
+      'orderNo': 'IN-2026-0812',
+      'receiptNo': 'RC-2481',
+      'alreadyConfirmed': true,
+      'confirmedAt': '2026-08-16T03:12:00Z',
+    }, 200),
+  );
+
+  final outcome = await InboundRepository(api)
+      .confirm('IN-2026-0812', commandId: 'cmd-1');
+
+  // เป็นความสำเร็จ ไม่ใช่ความล้มเหลว (7.9, 7.15)
+  expect(outcome, isA&lt;ConfirmSucceeded&gt;());
+  expect((outcome as ConfirmSucceeded).wasAlreadyConfirmed, isTrue);
+  expect(outcome.receiptNo, 'RC-2481');
+});</code></pre><pre class="code-vs"><code>test('ลองใหม่ต้องส่งรหัสคำสั่งเดิมทุกครั้ง', () async {
+  final commandIds = &lt;String?&gt;[];
+  var attempts = 0;
+  final api = clientThatReturns(
+    (_) {
+      attempts++;
+      if (attempts &lt; 3) return http.Response('', 503);
+      return jsonResponse({...}, 200);
+    },
+    onRequest: (request) =&gt; commandIds.add(request.headers['Idempotency-Key']),
+  );
+
+  await InboundRepository(api, retry: fastRetry)
+      .confirm('IN-2026-0812', commandId: 'cmd-1');
+
+  // สามครั้ง รหัสเดียวกันทั้งหมด (7.15)
+  expect(commandIds, ['cmd-1', 'cmd-1', 'cmd-1']);
+});</code></pre><p>เทสต์ข้อสุดท้ายจับบั๊กที่ 7.14 หัวข้อ 11 เตือนไว้ — <strong>ถ้าสร้างรหัสข้างใน closure จะได้ <code>['cmd-1', 'cmd-2', 'cmd-3']</code> และระบบกันซ้ำจะไม่ทำงานเลย</strong></p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ผ่านแต่รหัสคำสั่งไม่ถูกส่ง</td><td>ตรวจแค่ผลลัพธ์</td><td>ตรวจ header ที่ส่งไป (7.6)</td></tr>
+<tr><td>404 เมื่อรหัสใบมีขีดทับ</td><td>ไม่ได้ encode</td><td><code>Uri.encodeComponent</code> (7.2)</td></tr>
+<tr><td>ลองใหม่แล้วได้ใบรับซ้ำ</td><td>สร้างรหัสข้างใน closure</td><td>ย้ายออกมาข้างนอก (7.15)</td></tr>
+<tr><td>“ยืนยันไปแล้ว” แสดงเป็นข้อผิดพลาด</td><td>แปลง 409 เป็นความล้มเหลวทั้งหมด</td><td>แยกตาม <code>errorCode</code> (7.9)</td></tr>
+<tr><td>อ่านข้อมูลแล้วแอปบอกว่าไม่รู้ผล</td><td>ใช้ POST อ่านโดยไม่ระบุ</td><td>ระบุว่าไม่ได้เปลี่ยนข้อมูล (7.12)</td></tr>
+<tr><td>ข้อผิดพลาดรายช่องไม่ขึ้นที่ช่อง</td><td>ชื่อ field จาก server เป็นตัวใหญ่</td><td>เทียบส่วนท้ายแบบไม่สนตัวพิมพ์ (7.11)</td></tr>
+<tr><td>token อยู่ในไฟล์บันทึก</td><td>บันทึก header ทั้งชุด</td><td>ปิดค่าที่ตัวกลาง (7.17)</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบทดสอบตัวเองก่อนจบ Part 7</h2><ol><li>มีกี่ชั้น และแต่ละชั้นรู้เรื่องอะไรบ้าง (7.1)</li><li>ทำไมไม่ควรต่อ URL ด้วยการต่อข้อความ (7.2)</li><li><code>resolve</code> ทำอะไรที่ทำให้พลาดง่าย (7.2)</li><li><code>localhost</code> บน emulator หมายถึงเครื่องไหน (7.3)</li><li>ทำไมเซิร์ฟเวอร์ที่ bind ที่ <code>localhost</code> ถึงเข้าจากเครื่องอื่นไม่ได้ (7.3)</li><li>เลือก GET หรือ POST ตัดสินจากอะไร (7.4)</li><li>ทำไม GET กับ POST ตั้ง <code>outcomeUnknown</code> ต่างกัน (7.4)</li><li>ทำไมต้องอ่าน token ตอนส่ง ไม่ใช่จำไว้ตอนสร้าง (7.5)</li><li>401 กับ 403 ต้องทำต่างกันอย่างไร (7.5, 7.9)</li><li>ทำไมต้องตรวจคำขอที่ส่งไป ไม่ใช่แค่ผลลัพธ์ (7.6)</li><li>หมดเวลารอแปลว่าเซิร์ฟเวอร์ไม่ทำหรือไม่ (7.7)</li><li>ทำไมคำสั่งที่เปลี่ยนข้อมูลควรตั้งเวลารอนานกว่า (7.7)</li><li>รหัส 200 รับประกันอะไรและไม่รับประกันอะไร (7.8)</li><li>ทำไมห้ามใช้ข้อความจากเซิร์ฟเวอร์เป็นเงื่อนไข (7.9)</li><li>เลือกโยนหรือคืนค่า ตัดสินจากอะไร (7.10)</li><li><code>title</code> กับ <code>detail</code> ต่างกันอย่างไร (7.11)</li><li>คีย์ว่างใน <code>errors</code> แปลว่าอะไร (7.11)</li><li>ทำไมไม่ควรให้รูปแบบของ endpoint ลามเข้ามาถึง store (7.12)</li><li><code>search</code> กับ <code>loadMore</code> ทำอะไรกับเลขรุ่นต่างกัน (7.13)</li><li>สองคำถามที่ต้องตอบก่อนลองใหม่คืออะไร (7.14)</li><li>รหัสคำสั่งควรถูกสร้างตอนไหน (7.15)</li><li>ได้ 401 จากปุ่มทดสอบ แปลว่าอะไร (7.16)</li><li>ทำไมตัวเลขเวลาถึงเป็นข้อมูลที่คุ้มที่สุดในการบันทึก (7.17)</li></ol></section>
+
+<section><h2>10. สรุปท้าย Part 7</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>วางชั้นให้การเปลี่ยนแปลงหยุดอยู่ที่ชั้นเดียว</li><li>ประกอบที่อยู่ให้ถูกทุกกรณี รวมถึงค่าที่มีอักขระพิเศษ</li><li>ทำให้เครื่องจริงคุยกับเซิร์ฟเวอร์ได้ และไล่หาสาเหตุเมื่อไม่ได้</li><li>เลือกวิธีส่งคำขอตามผลที่เกิดกับเซิร์ฟเวอร์</li><li>ส่งข้อมูลกำกับคำขอให้ครบและไม่รั่ว</li><li>ทดสอบทุกกรณีโดยไม่ต้องมีเซิร์ฟเวอร์</li><li>แยกความล้มเหลวเป็นชนิดที่ผู้ใช้ทำต่อได้</li><li>แยกความสำเร็จของการส่ง ออกจากความถูกต้องของข้อมูล</li><li>อ่านรายละเอียดข้อผิดพลาดมาตรฐานและแสดงให้ตรงจุด</li><li>ลองใหม่โดยไม่ทำให้ข้อมูลซ้ำหรือซ้ำเติมเซิร์ฟเวอร์</li><li>ทำให้คำสั่งส่งซ้ำได้อย่างปลอดภัย</li><li>บันทึกให้พอไล่หาสาเหตุ โดยไม่ให้ข้อมูลรั่ว</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>เข้าสู่ระบบและได้ token มาจริง</td><td>Part 8</td></tr>
+<tr><td>token หมดอายุแล้วต่ออายุอัตโนมัติ</td><td>Part 8</td></tr>
+<tr><td>เก็บ token ไว้อย่างปลอดภัย</td><td>Part 8</td></tr>
+<tr><td>เก็บข้อมูลลงเครื่องและทำงานตอนไม่มีเน็ต</td><td>Part 12</td></tr>
+<tr><td>ทดสอบกับเซิร์ฟเวอร์จริง</td><td>Part 14</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 8 จะเติมสิ่งที่ขาดไปตลอด Part นี้ — <code>authToken</code> ที่ใช้มาตั้งแต่ 7.5 ยังไม่เคยถูกกำหนดค่าจากที่ไหนเลย ถึงเวลาทำให้ผู้ใช้เข้าสู่ระบบได้จริง และจัดการอายุของ session บนเครื่องที่เปลี่ยนมือทุกกะ</p></section>

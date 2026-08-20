@@ -1,13 +1,151 @@
-<div class="note"><strong>Idempotency:</strong> ส่ง command เดิมหลายครั้งด้วย key เดิมแล้วเกิดผลทางธุรกิจเพียงครั้งเดียว และ client ได้ผลลัพธ์เดิมกลับมา</div>
-<section><h2>1. ทำไม Mobile WMS ต้องมี</h2><p>Wi-Fi หลุดหลัง server commit, ผู้ใช้กดซ้ำ, scanner ยิงซ้ำ หรือ app resume สามารถสร้างรับ/จ่าย/ยืนยันงานซ้ำได้ หาก client ตัดสินจาก timeout อย่างเดียว</p></section>
-<section><h2>2. Key ต่อ logical command</h2><pre class="code-vs"><code>final commandId = const Uuid().v4();
-await api.completeTask(
-  request,
-  idempotencyKey: commandId,
-); // retry ต้องใช้ commandId เดิม</code></pre></section>
-<section><h2>3. Header หรือ body</h2><p>ใช้ <code>Idempotency-Key</code> header หรือ commandId ใน request DTO ตามมาตรฐานทีม Key ต้องผูกผู้ใช้/endpoint/payload และมีอายุจัดเก็บ</p></section>
-<section><h2>4. .NET algorithm</h2><ol><li>เริ่ม transaction และตรวจ key</li><li>ถ้ามีผลเดิม คืนผลเดิม</li><li>ถ้า key เดิมแต่ payload fingerprint ต่าง คืน conflict</li><li>ทำ business mutation</li><li>บันทึก key + response atomically แล้ว commit</li></ol></section>
-<section><h2>5. Unique constraint</h2><p>ใช้ unique index ปิด race ระหว่าง request พร้อมกัน ไม่พึ่ง check-then-insert ใน memory และกำหนด behavior เมื่อคำสั่งแรกยัง processing</p></section>
-<section><h2>6. UI duplicate guard</h2><p>disable ปุ่มและ debounce scanner ยังมีประโยชน์ต่อ UX แต่ไม่ใช่ correctness guarantee เพราะ app crash/restart และหลายอุปกรณ์ยังเกิดได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้แก้ quantity แล้วกดใหม่ ควรใช้ key เดิมหรือใหม่?</p><details><summary>เฉลย</summary><p>ใหม่ เพราะเป็น logical command/payload ใหม่; หากส่ง payload ต่างด้วย key เดิม server ควร 409 ไม่ reuse ผลอย่างเงียบ ๆ</p></details></section>
-<section><h2>8. Exit criteria</h2><div class="success">ทดสอบ request ซ้ำพร้อมกัน, timeout แล้ว retry, app restart, key เดิม payload ต่าง และ retention หมดอายุ</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ส่งคำสั่งซ้ำได้โดยไม่บันทึกซ้ำ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 4.14 (กฎรหัสคำสั่ง) และ 7.14 (การลองใหม่)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ต่อกฎรหัสคำสั่งที่ออกแบบไว้ใน Part 4 เข้ากับ HTTP จริง และตกลงข้อตกลงกับฝั่งหลังบ้านให้ครบ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>4.14 ออกแบบกฎรหัสคำสั่งไว้แล้ว และ 7.14 บอกว่าการลองใหม่ต้องมีมันก่อน — แต่ยังไม่ได้บอกว่า <strong>รหัสนั้นเดินทางไปกับ HTTP อย่างไร และเซิร์ฟเวอร์ทำอะไรกับมัน</strong></p><p>บทนี้ต่อสองส่วนนั้นเข้าด้วยกัน</p><table><thead><tr><th>ส่วนที่มีแล้ว</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>กฎว่าเมื่อไหร่ใช้รหัสเดิม เมื่อไหร่ใช้รหัสใหม่</td><td>4.14</td></tr>
+<tr><td>ธงบอกว่าไม่รู้ผล</td><td>7.4</td></tr>
+<tr><td>การลองใหม่ที่ต้องการรหัส</td><td>7.14</td></tr>
+</tbody></table><table><thead><tr><th>ส่วนที่ยังขาด</th></tr></thead><tbody>
+<tr><td>รหัสส่งไปทาง header หรือ body</td></tr>
+<tr><td>เซิร์ฟเวอร์ตอบอะไรเมื่อเจอรหัสซ้ำ</td></tr>
+<tr><td>แอปรู้ได้อย่างไรว่าครั้งนี้เป็นการทำซ้ำ</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Idempotency-Key</code></td><td>ชื่อ header ที่นิยมใช้ส่งรหัสคำสั่ง</td></tr>
+<tr><td>correlation id</td><td>รหัสที่เซิร์ฟเวอร์สร้างให้กับผลลัพธ์</td></tr>
+<tr><td>replay</td><td>การที่เซิร์ฟเวอร์ตอบผลเดิมแทนการทำใหม่</td></tr>
+<tr><td>unique constraint</td><td>กติกาในฐานข้อมูลที่ห้ามข้อมูลซ้ำ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: รหัสคือชื่อของเจตนา</h2><pre class="code-vs"><code>เจตนา "ปิดงาน T-001"  →  cmd-8821
+    ├─ ส่งครั้งที่ 1 → cmd-8821 → server บันทึก
+    ├─ ลองใหม่      → cmd-8821 → server จำได้ ตอบผลเดิม
+    └─ ผู้ใช้กดซ้ำ   → cmd-8821 → server จำได้ ตอบผลเดิม</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> รหัสถูกสร้างตอนที่ผู้ใช้ตัดสินใจ ไม่ใช่ตอนที่ยิงคำขอ — ถ้าสร้างตอนยิง ทุกครั้งที่ยิงจะได้รหัสใหม่ ซึ่งทำให้ทั้งระบบไร้ความหมาย</div></section>
+
+<section><h2>4. ส่งไปทาง header</h2><p>เปิด <code>lib/features/tasks/task_repository.dart</code></p><pre class="code-vs"><code>final json = await api.postJson(
+  '/api/WMS/mobile_tasks/$id/complete',
+  const {},
+  headers: {'Idempotency-Key': commandId},
+);</code></pre><table><thead><tr><th></th><th>ส่งทาง header</th><th>ส่งใน body</th></tr></thead><tbody>
+<tr><td>เป็นเรื่องของ</td><td>การส่ง</td><td>ธุรกิจ</td></tr>
+<tr><td>ตัวกลางในเครือข่ายเห็นไหม</td><td>เห็น — บางตัวใช้กันซ้ำได้</td><td>ไม่เห็น</td></tr>
+<tr><td>ต้องแก้สัญญาของ endpoint ไหม</td><td>ไม่</td><td>ต้อง</td></tr>
+</tbody></table><p>ตามหลักใน 7.5 — สิ่งที่เหมือนกันทุก endpoint ควรอยู่ใน header</p><p>เทสต์ใน lab ตรึงไว้ว่ารหัสถูกส่งจริง</p><pre class="code-vs"><code>expect(sent!.headers['Idempotency-Key'], 'cmd-8821');</code></pre><p>เทสต์นี้สำคัญกว่าที่เห็น — <strong>ถ้ารหัสไม่ถูกส่ง ระบบกันซ้ำทั้งหมดจะไม่ทำงาน โดยที่ไม่มีอะไรพัง</strong> ทุกอย่างจะดูปกติจนกว่าจะเกิดการส่งซ้ำจริง</p></section>
+
+<section><h2>5. รู้ได้อย่างไรว่าเป็นการทำซ้ำ</h2><p>เซิร์ฟเวอร์ควรบอกกลับมาด้วยว่าครั้งนี้ทำจริงหรือตอบผลเดิม</p><pre class="code-vs"><code>class TaskCompletion {
+  const TaskCompletion({
+    required this.id,
+    required this.alreadyCompleted,
+    required this.correlationId,
+  });
+
+  final String id;
+  final bool alreadyCompleted;
+  final String correlationId;
+}</code></pre><table><thead><tr><th><code>alreadyCompleted</code></th><th>แปลว่า</th><th>ผู้ใช้ควรเห็น</th></tr></thead><tbody>
+<tr><td><code>false</code></td><td>ปิดงานสำเร็จในครั้งนี้</td><td>“ปิด T-001 สำเร็จ”</td></tr>
+<tr><td><code>true</code></td><td>ปิดไปแล้วก่อนหน้านี้</td><td>“T-001 ถูกปิดไปแล้ว (ตรวจซ้ำสำเร็จ)”</td></tr>
+</tbody></table><p>ดูของจริงใน <code>task_store.dart</code></p><pre class="code-vs"><code>_actionMessage = result.alreadyCompleted
+    ? '${task.id} ถูกปิดไปแล้ว (ตรวจซ้ำสำเร็จ)'
+    : 'ปิด ${task.id} สำเร็จ · ${result.correlationId}';</code></pre><p>ทั้งสองกรณีเป็นความสำเร็จ — ต่างกันแค่ว่าครั้งนี้ทำอะไรจริงหรือไม่</p><p>การแยกให้ผู้ใช้เห็นสำคัญ เพราะถ้าบอกว่า “ปิดสำเร็จ” ทั้งสองกรณี ผู้ใช้จะไม่รู้ว่าเมื่อกี้ที่กดไปแล้วมันติดหรือไม่</p></section>
+
+<section><h2>6. รหัสต้องอยู่รอดข้ามการลองใหม่</h2><p>7.14 หัวข้อ 11 เตือนเรื่องนี้ไว้แล้ว และนี่คือรายละเอียด</p><pre class="code-vs"><code>// ผิด — รหัสใหม่ทุกครั้งที่ลองใหม่
+_retry.run(
+  () async {
+    final commandId = createCommandId();      // อยู่ผิดที่
+    return api.postJson(..., headers: {'Idempotency-Key': commandId});
+  },
+  isIdempotent: true,
+);</code></pre><pre class="code-vs"><code>// ถูก — สร้างครั้งเดียว นอกส่วนที่ถูกลองใหม่
+final commandId = createCommandId();
+_retry.run(
+  () async =&gt; api.postJson(..., headers: {'Idempotency-Key': commandId}),
+  isIdempotent: true,
+);</code></pre><p>และต้องอยู่รอดข้ามการกดของผู้ใช้ด้วย ซึ่งเป็นสิ่งที่ <code>PickStore</code> ทำไว้ใน 4.14</p><pre class="code-vs"><code>final commandId = _pendingCommandIds.putIfAbsent(lineId, _createCommandId);</code></pre><p>กฎที่ตรึงไว้ด้วยเทสต์สองข้อ</p><table><thead><tr><th>ผลของครั้งก่อน</th><th>รหัสครั้งใหม่</th></tr></thead><tbody>
+<tr><td>ไม่รู้ผล</td><td>เดิม</td></tr>
+<tr><td>รู้ว่าถูกปฏิเสธ</td><td>ใหม่</td></tr>
+<tr><td>สำเร็จ</td><td>ล้างทิ้ง</td></tr>
+</tbody></table></section>
+
+<section><h2>7. ฝั่งเซิร์ฟเวอร์ต้องทำอะไร</h2><p>ต้องพูดให้ชัด — <strong>ทุกอย่างในบทนี้ไม่มีความหมายเลยถ้าเซิร์ฟเวอร์ไม่ตรวจรหัส</strong></p><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+var existing = await _db.Commands.FindAsync(commandId);
+if (existing is not null)
+{
+    return Ok(new { id = existing.TaskId,
+                    alreadyCompleted = true,
+                    correlationId = existing.CorrelationId });
+}
+// ยังไม่เคยทำ — ทำแล้วบันทึกรหัสไว้
+</code></pre><p>และควรมี unique constraint ในฐานข้อมูลเป็นด่านสุดท้าย เพราะสองคำขอที่มาถึงพร้อมกันอาจอ่านเจอว่า “ยังไม่มี” พร้อมกันทั้งคู่</p><table><thead><tr><th>ต้องตกลงกับฝั่งหลังบ้าน</th></tr></thead><tbody>
+<tr><td>ชื่อ header ที่ใช้</td></tr>
+<tr><td>เก็บรหัสไว้นานแค่ไหน</td></tr>
+<tr><td>ตอบอะไรเมื่อเจอรหัสซ้ำ</td></tr>
+<tr><td>ตอบอะไรเมื่อรหัสเดิมแต่เนื้อหาต่างกัน</td></tr>
+</tbody></table><p>แถวที่สองสำคัญและมักลืม — ถ้าเก็บแค่ห้านาที แล้วผู้ใช้ปิดแอปไปครึ่งชั่วโมงแล้วกลับมาส่งซ้ำ รหัสจะหมดอายุและงานถูกบันทึกซ้ำ</p><p>แถวสุดท้ายเป็นกรณีที่บอกว่ามีบั๊กฝั่งแอป — รหัสเดิมควรมาพร้อมเนื้อหาเดิมเสมอ</p><p>รายละเอียดฝั่งเซิร์ฟเวอร์อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a></p></section>
+
+<section><h2>8. ตรวจว่าผลที่ได้เป็นของคำขอนี้จริง</h2><pre class="code-vs"><code>final responseId = json['id']?.toString();
+if (responseId == null ||
+    responseId != id ||
+    alreadyCompleted is! bool ||
+    correlationId == null ||
+    correlationId.isEmpty) {
+  throw const ApiException('รูปแบบผล complete task ไม่ถูกต้อง');
+}</code></pre><p>บรรทัด <code>responseId != id</code> ตรวจสิ่งที่ดูเหมือนไม่น่าเกิด — แต่เกิดได้จริงเมื่อ</p><table><thead><tr><th>สถานการณ์</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>รหัสคำสั่งชนกันโดยบังเอิญ</td><td>ได้ผลของงานอื่นกลับมา</td></tr>
+<tr><td>เซิร์ฟเวอร์มีบั๊กในการจับคู่รหัส</td><td>เหมือนกัน</td></tr>
+<tr><td>ตัวกลางในเครือข่ายส่งคำตอบผิดคน</td><td>เหมือนกัน</td></tr>
+</tbody></table><p>ถ้าไม่ตรวจ แอปจะทำเครื่องหมายว่างานผิดตัวเสร็จแล้ว โดยที่ไม่มีอะไรบอก</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ข้อมูลซ้ำแม้มีรหัสคำสั่ง</td><td>สร้างรหัสใหม่ทุกครั้งที่ยิง</td><td>สร้างตอนที่ผู้ใช้ตัดสินใจ</td></tr>
+<tr><td>ลองใหม่แล้วได้ข้อมูลซ้ำ</td><td>สร้างรหัสข้างใน closure ที่ถูกลองใหม่</td><td>ย้ายออกมาข้างนอก</td></tr>
+<tr><td>ทุกอย่างดูปกติแต่ไม่มีการกันซ้ำ</td><td>รหัสไม่ถูกส่งไปจริง</td><td>เทสต์ตรวจ header ที่ส่ง</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่ากดครั้งก่อนติดหรือไม่</td><td>บอกว่าสำเร็จเหมือนกันทั้งสองกรณี</td><td>แยกข้อความตาม <code>alreadyCompleted</code></td></tr>
+<tr><td>ส่งซ้ำหลังผ่านไปนานแล้วได้ข้อมูลซ้ำ</td><td>เซิร์ฟเวอร์เก็บรหัสไว้สั้นเกินไป</td><td>ตกลงระยะเวลาเก็บ</td></tr>
+<tr><td>งานผิดตัวถูกทำเครื่องหมายว่าเสร็จ</td><td>ไม่ตรวจว่าผลเป็นของคำขอนี้</td><td>เทียบ id ที่ได้กลับมา</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทีมกำลังจะทำ endpoint ยืนยันรับเข้าทั้งใบ ซึ่งมี 40 บรรทัดในคำขอเดียว</p><ol><li>ระบุว่ารหัสคำสั่งควรผูกกับอะไร — ทั้งใบ หรือแต่ละบรรทัด</li><li>เขียนข้อตกลงที่ต้องคุยกับฝั่งหลังบ้านให้ครบ</li><li>ตอบว่าถ้าผู้ใช้แก้จำนวนบรรทัดหนึ่งแล้วส่งใหม่ ควรใช้รหัสเดิมหรือใหม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ผูกกับอะไร</strong></p><p><strong>ผูกกับทั้งใบ</strong> เพราะขอบเขตของรหัสควรตรงกับขอบเขตของคำสั่ง</p><table><thead><tr><th></th><th>รหัสต่อใบ</th><th>รหัสต่อบรรทัด</th></tr></thead><tbody>
+<tr><td>ตรงกับคำขอไหม</td><td>ตรง — หนึ่งคำขอหนึ่งรหัส</td><td>ไม่ตรง — 40 รหัสในคำขอเดียว</td></tr>
+<tr><td>เซิร์ฟเวอร์ตรวจอย่างไร</td><td>ตรวจครั้งเดียว</td><td>ต้องตรวจ 40 ครั้ง แล้วตัดสินว่าถ้าบางบรรทัดซ้ำจะทำอย่างไร</td></tr>
+<tr><td>ส่งซ้ำแล้วเกิดอะไร</td><td>ตอบผลเดิมทั้งใบ</td><td>อาจได้ผลปนกันระหว่างบรรทัดที่ทำแล้วกับยังไม่ทำ</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเหตุผลหลัก — <strong>ถ้าหนึ่งคำขอทำได้บางส่วน จะไม่มีทางตอบได้ว่า “ทำไปแล้วหรือยัง”</strong> ซึ่งทำลายทั้งแนวคิด</p><p>หลักคือ <em>หนึ่งคำขอ หนึ่งรหัส และคำขอนั้นต้องสำเร็จทั้งหมดหรือไม่สำเร็จเลย</em></p><p><strong>ข้อ 2 — ข้อตกลงที่ต้องคุย</strong></p><pre class="code-vs"><code>ข้อตกลงรหัสคำสั่ง — endpoint ยืนยันรับเข้า
+
+1. ส่งอย่างไร
+   header ชื่อ Idempotency-Key
+   ค่าเป็นข้อความไม่เกิน 64 ตัวอักษร
+
+2. ขอบเขต
+   หนึ่งรหัสต่อหนึ่งใบ ครอบทุกบรรทัดในคำขอนั้น
+   คำขอต้องสำเร็จทั้งหมดหรือไม่สำเร็จเลย
+
+3. เก็บไว้นานแค่ไหน
+   อย่างน้อย 24 ชั่วโมง
+   (ครอบกรณีที่ผู้ใช้ปิดแอปข้ามกะแล้วกลับมาส่งซ้ำ)
+
+4. เจอรหัสซ้ำ ตอบอะไร
+   200 พร้อมผลเดิม และ alreadyProcessed เป็น true
+   ไม่ใช่ 409 เพราะไม่ใช่ความขัดแย้ง
+
+5. รหัสเดิมแต่เนื้อหาต่าง ตอบอะไร
+   409 พร้อม errorCode ว่า IDEMPOTENCY_KEY_REUSED
+   (เป็นบั๊กฝั่งแอป ต้องดังให้เห็น)
+
+6. ไม่ส่งรหัสมาเลย ตอบอะไร
+   400 — เพื่อไม่ให้มีทางที่คำสั่งจะถูกส่งโดยไม่มีการกันซ้ำ</code></pre><p>ข้อ 4 สำคัญและมักตกลงผิด — <strong>การเจอรหัสซ้ำไม่ใช่ความผิดพลาด</strong> มันคือการทำงานตามที่ออกแบบไว้ ถ้าตอบ 409 แอปจะแสดงเป็นข้อผิดพลาดทั้งที่ทุกอย่างถูกต้อง</p><p>ข้อ 6 เป็นการป้องกันที่ดี — ถ้าเซิร์ฟเวอร์ยอมรับคำขอที่ไม่มีรหัส วันหนึ่งจะมีคนเขียนโค้ดที่ลืมส่ง แล้วไม่มีใครรู้จนกว่าจะเกิดข้อมูลซ้ำ</p><p><strong>ข้อ 3 — แก้จำนวนแล้วส่งใหม่</strong></p><p><strong>รหัสใหม่</strong> — และเหตุผลอยู่ในกฎที่ตั้งไว้ตั้งแต่ 4.14</p><table><thead><tr><th>สถานการณ์</th><th>รหัส</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ส่งไปแล้วไม่รู้ผล แล้วส่งซ้ำ</td><td>เดิม</td><td>เป็นเจตนาเดิม แค่ไม่แน่ใจว่าถึงไหม</td></tr>
+<tr><td>ถูกปฏิเสธ แล้วส่งใหม่โดยไม่แก้อะไร</td><td>ใหม่</td><td>ครั้งก่อนไม่มีอะไรถูกบันทึก และเงื่อนไขอาจเปลี่ยนแล้ว</td></tr>
+<tr><td><strong>แก้ข้อมูลแล้วส่งใหม่</strong></td><td><strong>ใหม่</strong></td><td>เป็นคนละเจตนา — เนื้อหาไม่เหมือนเดิมแล้ว</td></tr>
+</tbody></table><p>และข้อตกลงข้อ 5 ในข้อ 2 กันกรณีที่เขียนผิดไว้พอดี — <strong>ถ้าเผลอส่งรหัสเดิมพร้อมเนื้อหาใหม่ เซิร์ฟเวอร์จะปฏิเสธและบอกว่าเป็นบั๊ก</strong></p><p>ถ้าไม่มีข้อตกลงนั้น เซิร์ฟเวอร์จะตอบผลเดิมกลับมา แล้วผู้ใช้จะเห็นว่า “บันทึกสำเร็จ” ทั้งที่จำนวนที่แก้ไปไม่ได้ถูกบันทึกเลย</p><pre class="code-vs"><code>ผู้ใช้แก้ 12 เป็น 15 แล้วกดส่ง
+  → ส่งรหัสเดิม (ผิด)
+  → server ตอบผลเดิมที่บันทึกไว้ตอน 12
+  → แอปแสดงว่าสำเร็จ
+  → ในระบบยังเป็น 12 อยู่ และไม่มีใครรู้</code></pre><p>อาการนี้ร้ายเพราะไม่มีอะไรพัง และผู้ใช้เชื่อว่าแก้สำเร็จแล้ว</p><p><strong>วิธีทำให้ถูกในโค้ด</strong></p><pre class="code-vs"><code>/// ล้างรหัสเมื่อร่างถูกแก้ — การแก้คือเจตนาใหม่
+void updateLineQuantity(int index, int quantity) {
+  _draft = _draft.updateLine(index, quantity);
+  _pendingCommandId = null;      // รหัสเดิมใช้กับเนื้อหานี้ไม่ได้แล้ว
+  notifyListeners();
+}</code></pre><p><strong>บทเรียนที่ควรจำ:</strong> รหัสคำสั่งผูกกับ <em>เนื้อหา</em> ของเจตนา ไม่ใช่แค่กับการกดปุ่ม — ทุกครั้งที่เนื้อหาเปลี่ยน รหัสต้องเปลี่ยนตาม และควรมีด่านที่เซิร์ฟเวอร์คอยจับถ้าเราทำผิด</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>รหัสถูกสร้างตอนที่ผู้ใช้ตัดสินใจ ไม่ใช่ตอนยิงคำขอ</li><li>ส่งทาง header เพราะเป็นเรื่องของการส่ง ไม่ใช่ของธุรกิจ</li><li>สร้างรหัสนอกส่วนที่ถูกลองใหม่</li><li>เซิร์ฟเวอร์ควรบอกกลับมาว่าครั้งนี้ทำจริงหรือตอบผลเดิม</li><li>การเจอรหัสซ้ำไม่ใช่ความผิดพลาด</li><li>หนึ่งคำขอ หนึ่งรหัส และต้องสำเร็จทั้งหมดหรือไม่เลย</li><li>ตกลงระยะเวลาเก็บรหัสให้ครอบกรณีข้ามกะ</li><li>เนื้อหาเปลี่ยน รหัสต้องเปลี่ยน — และเซิร์ฟเวอร์ควรจับได้ถ้าเราลืม</li><li>ตรวจว่าผลที่ได้เป็นของคำขอนี้จริง</li></ul></div><p><strong>บทถัดไป:</strong> 7.16 จะทำหน้าที่ตรวจว่าเซิร์ฟเวอร์ยังคุยได้ไหม ซึ่งเป็นเครื่องมือที่ทำให้ปัญหาการติดตั้งถูกพบตั้งแต่วันแรก</p></section>

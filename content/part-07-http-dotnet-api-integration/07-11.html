@@ -1,26 +1,232 @@
-<div class="note"><strong>ProblemDetails:</strong> รูปแบบมาตรฐานของ .NET สำหรับ error มี status, title, detail, type, instance และ extensions เช่น traceId/errors/code</div>
-<section><h2>1. ตัวอย่าง payload</h2><pre class="code-vs"><code>{
-  "type": "https://example/errors/validation",
-  "title": "Validation failed",
-  "status": 400,
-  "detail": "Quantity must be greater than zero",
-  "code": "INVALID_QUANTITY",
-  "traceId": "00-abcd..."
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านรายละเอียดข้อผิดพลาดมาตรฐานจาก .NET</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.9 (รหัสตอบกลับ) และ 6.2 (การอ่าน JSON อย่างปลอดภัย)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านรูปแบบข้อผิดพลาดมาตรฐานของ ASP.NET และเอาไปแสดงให้ผู้ใช้ได้ตรงจุด</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>7.9 บอกว่า “ให้อ่านเนื้อหาที่มากับความล้มเหลว” แต่ยังไม่ได้บอกว่าเนื้อหานั้นหน้าตาอย่างไร</p><p>ปัญหาคือถ้าแต่ละ endpoint กำหนดรูปแบบเอง แอปจะต้องรู้จักทุกแบบ</p><pre class="code-vs"><code>{"message": "..."}                    endpoint A
+{"error": {"text": "..."}}            endpoint B
+{"errors": ["...", "..."]}            endpoint C
+{"Message": "...", "Code": 42}        endpoint D ที่เขียนไว้นานแล้ว</code></pre><p>ASP.NET แก้เรื่องนี้ด้วยรูปแบบกลางที่มีมาให้อยู่แล้ว</p><pre class="code-vs"><code>{
+  "type": "https://httpstatuses.io/409",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว เมื่อ 14:32",
+  "traceId": "00-4bf92f-a3ce929d-01"
+}</code></pre><p>ประโยชน์ที่ได้ทันทีคือ <strong>เขียนตัวอ่านครั้งเดียว ใช้ได้กับทุก endpoint ที่ทำตามรูปแบบนี้</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>field</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>type</code></td><td>ที่อยู่ที่อธิบายข้อผิดพลาดประเภทนี้</td></tr>
+<tr><td><code>title</code></td><td>ชื่อประเภทข้อผิดพลาด — กว้าง</td></tr>
+<tr><td><code>status</code></td><td>รหัสตอบกลับ ซ้ำกับที่อยู่ใน HTTP</td></tr>
+<tr><td><code>detail</code></td><td>รายละเอียดของคำขอครั้งนี้โดยเฉพาะ</td></tr>
+<tr><td><code>errors</code></td><td>ข้อผิดพลาดรายช่อง — มีเฉพาะกรณีตรวจข้อมูลไม่ผ่าน</td></tr>
+<tr><td><code>traceId</code></td><td>รหัสตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: title กว้าง detail เจาะจง</h2><pre class="code-vs"><code>title:  "Conflict"                        ← ทุกคำขอที่ 409 ได้ข้อความนี้เหมือนกัน
+detail: "งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว"      ← เฉพาะคำขอนี้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>detail</code> คือสิ่งเดียวที่บอกเรื่องของคำขอครั้งนี้ — ส่วน <code>title</code> เป็นแค่ชื่อกลุ่ม ซึ่งรหัสตอบกลับบอกอยู่แล้ว</div></section>
+
+<section><h2>4. ตัวอ่านใน lab</h2><p>เปิด <code>lib/core/api_failure.dart</code></p><pre class="code-vs"><code>/// อ่านจาก JSON ถ้าหน้าตาตรงกับ ProblemDetails
+///
+/// คืน null เมื่อไม่ใช่ — ไม่โยน เพราะบาง endpoint ตอบรูปแบบอื่น
+/// และนั่นไม่ใช่ความผิดพลาดที่ต้องหยุดทุกอย่าง
+static ProblemDetails? tryParse(Map&lt;String, dynamic&gt;? json) {
+  if (json == null) return null;
+  final hasAnyField =
+      json.containsKey('title') ||
+      json.containsKey('detail') ||
+      json.containsKey('errors');
+  if (!hasAnyField) return null;
+  ...
+}</code></pre><p>สังเกตว่ามันไม่ได้บังคับให้ครบทุก field — แค่มีอย่างใดอย่างหนึ่งก็ถือว่าใช่</p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>บาง endpoint ส่งมาไม่ครบ</td><td>มีแต่ <code>title</code> ก็ยังใช้ได้</td></tr>
+<tr><td>ข้อมูลบางส่วนดีกว่าไม่มีเลย</td><td>ได้ข้อความบอกผู้ใช้ก็ยังดี</td></tr>
+<tr><td>ไม่ทำให้ล้มเหลวซ้อนล้มเหลว</td><td>ตอนที่กำลังจัดการความล้มเหลวอยู่แล้ว</td></tr>
+</tbody></table><pre class="code-vs"><code>test('JSON ที่ไม่ใช่ ProblemDetails ต้องคืน null ไม่ใช่โยน', () {
+  expect(ProblemDetails.tryParse(const {'items': []}), isNull);
+  expect(ProblemDetails.tryParse(null), isNull);
+});</code></pre></section>
+
+<section><h2>5. เลือกข้อความให้ผู้ใช้</h2><pre class="code-vs"><code>/// ข้อความที่เอาไปแสดงให้ผู้ใช้ได้เลย
+///
+/// เรียงจากเจาะจงที่สุดไปกว้างที่สุด — detail บอกเรื่องของคำขอนี้
+/// ส่วน title มักเป็นชื่อประเภทข้อผิดพลาดกว้าง ๆ
+String? get userMessage {
+  if (hasFieldErrors) {
+    return errors.values.expand((messages) =&gt; messages).join('\n');
+  }
+  return detail ?? title;
+}</code></pre><p>ลำดับความสำคัญ</p><table><thead><tr><th>ลำดับ</th><th>ใช้อะไร</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>1</td><td>ข้อผิดพลาดรายช่อง</td><td>บอกได้ว่าช่องไหนผิดและผิดอย่างไร</td></tr>
+<tr><td>2</td><td><code>detail</code></td><td>บอกเรื่องของคำขอนี้</td></tr>
+<tr><td>3</td><td><code>title</code></td><td>ดีกว่าไม่มีอะไรเลย</td></tr>
+</tbody></table><pre class="code-vs"><code>test('ข้อผิดพลาดรายช่องต้องถูกรวมมาแสดงได้', () {
+  final problem = ProblemDetails.tryParse(const {
+    'title': 'One or more validation errors occurred.',
+    'status': 400,
+    'errors': {
+      'quantity': ['จำนวนต้องมากกว่าศูนย์'],
+      'palletCode': ['รูปแบบรหัสพาเลทไม่ถูกต้อง'],
+    },
+  });
+
+  // ข้อผิดพลาดรายช่องสำคัญกว่า title กว้าง ๆ
+  expect(problem!.userMessage, contains('จำนวนต้องมากกว่าศูนย์'));
+});</code></pre><p>เหตุผลที่รายช่องต้องมาก่อน — <code>title</code> ในกรณีนี้คือ “One or more validation errors occurred.” ซึ่งไม่ได้บอกอะไรที่ผู้ใช้เอาไปแก้ได้เลย</p></section>
+
+<section><h2>6. ข้อผิดพลาดรายช่องควรไปอยู่ที่ช่อง</h2><p>การรวมข้อความทุกช่องมาแสดงรวมกันเป็นทางที่ง่ายที่สุด แต่ยังไม่ดีที่สุด</p><pre class="code-vs"><code>จำนวนต้องมากกว่าศูนย์
+รูปแบบรหัสพาเลทไม่ถูกต้อง</code></pre><p>ผู้ใช้ต้องเดาเองว่าข้อความไหนของช่องไหน — ทั้งที่เซิร์ฟเวอร์บอกมาแล้ว</p><pre class="code-vs"><code>final problem = error.problem;
+if (problem != null &amp;&amp; problem.hasFieldErrors) {
+  setState(() {
+    _quantityError = problem.errors['quantity']?.first;
+    _palletCodeError = problem.errors['palletCode']?.first;
+  });
+  return;
+}</code></pre><pre class="code-vs"><code>TextFormField(
+  decoration: InputDecoration(
+    labelText: 'จำนวน',
+    errorText: _quantityError,     // ขึ้นใต้ช่องที่ผิดจริง
+  ),
+)</code></pre><p>แต่มีเรื่องที่ต้องระวัง — <strong>ชื่อช่องที่เซิร์ฟเวอร์ใช้อาจไม่ตรงกับชื่อในแอป</strong></p><table><thead><tr><th>เซิร์ฟเวอร์ส่งมา</th><th>เกิดจาก</th></tr></thead><tbody>
+<tr><td><code>quantity</code></td><td>ตั้งค่าให้เป็น camelCase</td></tr>
+<tr><td><code>Quantity</code></td><td>ค่าตั้งต้นของ .NET รุ่นเก่า</td></tr>
+<tr><td><code>$.quantity</code></td><td>ข้อผิดพลาดตอนแปลง JSON</td></tr>
+<tr><td><code>request.Detail[0].Quantity</code></td><td>ช่องที่อยู่ลึกในโครง</td></tr>
+</tbody></table><p>จึงต้องแปลงชื่อก่อนจับคู่ ไม่ใช่เทียบตรง ๆ</p><pre class="code-vs"><code>/// จับคู่ชื่อช่องจาก server กับชื่อในแอป
+///
+/// server อาจส่ง Quantity, quantity หรือ request.Detail[0].Quantity
+/// จึงเทียบเฉพาะส่วนท้ายแบบไม่สนตัวพิมพ์
+String? errorFor(ProblemDetails problem, String field) {
+  final target = field.toLowerCase();
+  for (final entry in problem.errors.entries) {
+    final last = entry.key.split('.').last.toLowerCase();
+    if (last == target) return entry.value.firstOrNull;
+  }
+  return null;
 }</code></pre></section>
-<section><h2>2. Dart model แบบทนทาน</h2><p>รับ field มาตรฐานเป็น nullable, parse extensions ที่ทีมใช้ และเก็บ validation errors เป็น map ของ field → messages โดยไม่ assume ว่าทุก error มี detail</p></section>
-<section><h2>3. Message fallback chain</h2><pre class="code-vs"><code>final message = problem.detail?.trim().isNotEmpty == true
-    ? problem.detail!
-    : problem.title?.trim().isNotEmpty == true
-        ? problem.title!
-        : fallbackForStatus(response.statusCode);</code></pre></section>
-<section><h2>4. .NET endpoint</h2><pre class="code-vs"><code>return Results.Problem(
-  statusCode: StatusCodes.Status409Conflict,
-  title: "Task conflict",
-  detail: "Task was completed by another device",
-  extensions: new Dictionary&lt;string, object?&gt; {
-    ["code"] = "TASK_ALREADY_COMPLETED"
-  });</code></pre></section>
-<section><h2>5. ValidationProblem</h2><p>กรณีหลาย field ให้ .NET คืน dictionary ของ errors; Flutter map field key ไป form control หรือสรุปด้านบน โดยมี global message เมื่อ key ไม่ตรง UI</p></section>
-<section><h2>6. Security</h2><p>production ProblemDetails ไม่ควรคืน stack trace, SQL, internal host หรือ exception message ดิบ ให้ log รายละเอียดฝั่ง serverและคืน trace ID สำหรับอ้างอิง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Error body ว่างและ status 503 ผู้ใช้ควรเห็นอะไร?</p><details><summary>เฉลย</summary><p>fallback ที่กำหนดจาก 503 เช่น “ระบบยังไม่พร้อม กรุณาลองใหม่” พร้อม trace/correlation ID ถ้ามี ไม่แสดงข้อความว่าง</p></details></section>
-<section><h2>8. Contract</h2><div class="success">ตกลง stable error code และ field errors ระหว่าง Flutter/.NET; title/detail เปลี่ยนภาษาได้แต่ code ต้องไม่เปลี่ยนโดยไม่ version</div></section>
+
+<section><h2>7. traceId คือสะพานไปหา log ฝั่งเซิร์ฟเวอร์</h2><pre class="code-vs"><code>/// รหัสที่ใช้ตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์
+final String? traceId;</code></pre><p>ค่านี้มีประโยชน์ที่สุดตอนที่ปัญหาเกิดที่หน้างานและทีมไม่ได้อยู่ตรงนั้น</p><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ บันทึกไม่สำเร็จ                          │
+│ เซิร์ฟเวอร์มีปัญหาภายใน                   │
+│                                        │
+│ รหัสอ้างอิง: 00-4bf92f-a3ce929d-01      │
+│                          [ ลองใหม่ ]     │
+└────────────────────────────────────────┘</code></pre><table><thead><tr><th>ไม่มี traceId</th><th>มี traceId</th></tr></thead><tbody>
+<tr><td>“เกิดตอนบ่ายสองสามโมงมั้ง”</td><td>ค้นด้วยรหัสแล้วเจอทันที</td></tr>
+<tr><td>ต้องไล่ log ทั้งวัน</td><td>เจอคำขอที่ตรงกันเป๊ะ</td></tr>
+<tr><td>ไม่แน่ใจว่าเป็นเครื่องไหน</td><td>เห็นทุกอย่างที่เซิร์ฟเวอร์บันทึกไว้</td></tr>
+</tbody></table><p>แต่ควรแสดงเฉพาะเมื่อเป็นความล้มเหลวที่ต้องแจ้งทีม — ไม่ใช่ทุกกรณี</p><table><thead><tr><th>ชนิด</th><th>แสดง traceId ไหม</th></tr></thead><tbody>
+<tr><td><code>server</code>, <code>contract</code></td><td>แสดง — เป็นเรื่องที่ทีมต้องแก้</td></tr>
+<tr><td><code>validation</code>, <code>conflict</code></td><td>ไม่แสดง — ผู้ใช้แก้เองได้</td></tr>
+<tr><td><code>network</code>, <code>timeout</code></td><td>ไม่มีอยู่แล้ว เพราะไปไม่ถึงเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section><h2>8. อย่าแสดง type ให้ผู้ใช้</h2><pre class="code-vs"><code>"type": "https://httpstatuses.io/409"</code></pre><p>field นี้เป็นที่อยู่ของเอกสารที่อธิบายข้อผิดพลาด ซึ่งมีไว้ให้คนพัฒนาอ่าน ไม่ใช่คนหน้างาน</p><p>lab จึงไม่ได้อ่าน <code>type</code> เลย</p><table><thead><tr><th>field</th><th>lab อ่านไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>title</code>, <code>detail</code></td><td>อ่าน</td><td>เอาไปแสดงให้ผู้ใช้ได้</td></tr>
+<tr><td><code>status</code></td><td>อ่าน</td><td>ใช้ตรวจว่าตรงกับรหัส HTTP ไหม</td></tr>
+<tr><td><code>errors</code></td><td>อ่าน</td><td>ชี้ช่องที่ผิดได้</td></tr>
+<tr><td><code>traceId</code></td><td>อ่าน</td><td>ตามหาใน log ได้</td></tr>
+<tr><td><code>type</code></td><td><strong>ไม่อ่าน</strong></td><td>ไม่มีใครในแอปใช้ประโยชน์ได้</td></tr>
+</tbody></table><p>การไม่อ่าน field ที่ไม่ได้ใช้ เป็นเรื่องดี — ตามหลักใน 6.2 ว่าให้ผ่อนกับสิ่งที่เราไม่ได้ใช้</p></section>
+
+<section><h2>9. ฝั่ง .NET ต้องเปิดให้ส่งมาด้วย</h2><p>ProblemDetails ไม่ได้มาเองอัตโนมัติในทุกกรณี</p><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+builder.Services.AddProblemDetails();
+
+app.UseExceptionHandler();
+app.UseStatusCodePages();</code></pre><p>สิ่งที่ควรตกลงกับฝั่งหลังบ้าน</p><table><thead><tr><th>ตกลงเรื่อง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ทุก endpoint ตอบ ProblemDetails เมื่อล้มเหลว</td><td>แอปจะได้เขียนตัวอ่านครั้งเดียว</td></tr>
+<tr><td><code>detail</code> เป็นภาษาที่ผู้ใช้อ่านได้</td><td>เอาไปแสดงได้เลยโดยไม่ต้องแปล</td></tr>
+<tr><td>มี <code>traceId</code> เสมอ</td><td>ตามหาได้</td></tr>
+<tr><td>มีรหัสข้อผิดพลาดที่ไม่เปลี่ยน</td><td>ให้แอปตัดสินใจได้โดยไม่ต้องอ่านข้อความ (7.9)</td></tr>
+</tbody></table><div class="warn">ข้อสองมักถูกมองข้าม — ถ้า <code>detail</code> เป็นข้อความทางเทคนิคอย่าง <code>"Sequence contains no elements"</code> แอปจะเอาไปแสดงไม่ได้ และต้องกลับไปใช้ข้อความกลางที่ไม่บอกอะไร</div><p>รายละเอียดการตั้งค่าฝั่งเซิร์ฟเวอร์อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a></p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แสดง “Conflict” ให้ผู้ใช้เห็น</td><td>ใช้ <code>title</code> ทั้งที่มี <code>detail</code></td><td>เรียงลำดับให้ <code>detail</code> มาก่อน</td></tr>
+<tr><td>แสดง “One or more validation errors occurred.”</td><td>ไม่ได้อ่าน <code>errors</code></td><td>ให้รายช่องมาก่อน <code>title</code></td></tr>
+<tr><td>ข้อผิดพลาดขึ้นรวมกันหมด ไม่รู้ว่าช่องไหน</td><td>ไม่ได้จับคู่กับช่อง</td><td>จับคู่ด้วยชื่อ field</td></tr>
+<tr><td>จับคู่ช่องไม่ได้เพราะชื่อไม่ตรง</td><td>เทียบชื่อตรง ๆ</td><td>เทียบส่วนท้ายแบบไม่สนตัวพิมพ์</td></tr>
+<tr><td>เนื้อหาผิดรูปแบบแล้วพังซ้อน</td><td>บังคับให้ต้องเป็น ProblemDetails</td><td>คืน <code>null</code> แล้วใช้ทางสำรอง</td></tr>
+<tr><td>ตามหาใน log ไม่เจอ</td><td>ไม่ได้แสดง <code>traceId</code></td><td>แสดงเมื่อเป็นเรื่องที่ทีมต้องแก้</td></tr>
+<tr><td>แสดงที่อยู่เอกสารให้ผู้ใช้</td><td>เอา <code>type</code> ไปแสดง</td><td>ไม่ต้องอ่าน field นี้</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ผู้ใช้กรอกฟอร์มยืนยันรับเข้า แล้วได้คำตอบนี้</p><pre class="code-vs"><code>HTTP 400
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "One or more validation errors occurred.",
+  "status": 400,
+  "errors": {
+    "Quantity": ["จำนวนต้องมากกว่าศูนย์"],
+    "request.Details[1].LotNumber": ["ระบุเลขล็อตไม่ถูกรูปแบบ"],
+    "": ["ใบรับเข้านี้ถูกปิดไปแล้ว"]
+  },
+  "traceId": "00-9f3a12-77b0e4-01"
+}</code></pre><ol><li>ระบุว่าแต่ละรายการใน <code>errors</code> ควรไปแสดงที่ไหน</li><li>เขียนโค้ดจับคู่</li><li>รายการที่สามมีคีย์เป็นข้อความว่าง — อธิบายว่ามันคืออะไรและควรทำอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แต่ละรายการไปไหน</strong></p><table><thead><tr><th>คีย์</th><th>ไปแสดงที่</th><th>หมายเหตุ</th></tr></thead><tbody>
+<tr><td><code>Quantity</code></td><td>ใต้ช่องจำนวน</td><td>ตัวใหญ่ ต้องแปลงก่อนจับคู่</td></tr>
+<tr><td><code>request.Details[1].LotNumber</code></td><td>ใต้ช่องเลขล็อตของ <strong>บรรทัดที่สอง</strong></td><td>ต้องอ่านหมายเลขบรรทัดออกมาด้วย</td></tr>
+<tr><td><code>""</code></td><td>ด้านบนของฟอร์ม</td><td>ดูข้อ 3</td></tr>
+</tbody></table><p>รายการที่สองเป็นจุดที่ยาก — <strong>มันไม่ได้ชี้ไปที่ช่องเดียว แต่ชี้ไปที่ช่องหนึ่งในแถวหนึ่ง</strong> การจับคู่ด้วยชื่อ field อย่างเดียวจะไปแสดงผิดแถว</p><p><strong>ข้อ 2 — โค้ดจับคู่</strong></p><pre class="code-vs"><code>/// ผลของการแยกคีย์ที่ server ส่งมา
+typedef FieldPath = ({String field, int? index});
+
+/// แยก "request.Details[1].LotNumber" เป็น (field: lotnumber, index: 1)
+FieldPath parseErrorKey(String key) {
+  if (key.isEmpty) return (field: '', index: null);
+
+  final parts = key.split('.');
+  final field = parts.last.toLowerCase();
+
+  // หาหมายเลขแถวจากส่วนที่มีวงเล็บเหลี่ยม
+  for (final part in parts) {
+    final match = RegExp(r'\[(\d+)\]').firstMatch(part);
+    if (match != null) {
+      return (field: field, index: int.parse(match.group(1)!));
+    }
+  }
+  return (field: field, index: null);
+}</code></pre><pre class="code-vs"><code>void applyServerErrors(ProblemDetails problem) {
+  final formErrors = &lt;String&gt;[];
+  final fieldErrors = &lt;String, String&gt;{};
+  final lineErrors = &lt;int, Map&lt;String, String&gt;&gt;{};
+
+  for (final entry in problem.errors.entries) {
+    final path = parseErrorKey(entry.key);
+    final message = entry.value.first;
+
+    if (path.field.isEmpty) {
+      formErrors.add(message);                       // ของทั้งฟอร์ม
+    } else if (path.index case final index?) {
+      (lineErrors[index] ??= {})[path.field] = message;   // ของแถวนั้น
+    } else {
+      fieldErrors[path.field] = message;             // ของช่องเดี่ยว
+    }
+  }
+
+  setState(() {
+    _formErrors = formErrors;
+    _quantityError = fieldErrors['quantity'];
+    _lineErrors = lineErrors;
+  });
+}</code></pre><pre class="code-vs"><code>// ในแถวที่ index
+TextFormField(
+  decoration: InputDecoration(
+    labelText: 'เลขล็อต',
+    errorText: _lineErrors[index]?['lotnumber'],
+  ),
+)</code></pre><p><strong>ข้อ 3 — คีย์ที่เป็นข้อความว่าง</strong></p><p>คีย์ว่างเป็นข้อตกลงของ .NET ที่แปลว่า <strong>ข้อผิดพลาดของทั้งคำขอ ไม่ใช่ของช่องใดช่องหนึ่ง</strong></p><table><thead><tr><th>ตัวอย่างข้อผิดพลาดระดับคำขอ</th></tr></thead><tbody>
+<tr><td>“ใบรับเข้านี้ถูกปิดไปแล้ว”</td></tr>
+<tr><td>“วันที่รับต้องไม่อยู่ก่อนวันที่สั่งซื้อ” — เกี่ยวกับสองช่องพร้อมกัน</td></tr>
+<tr><td>“ต้องมีอย่างน้อยหนึ่งบรรทัด”</td></tr>
+</tbody></table><p>สามอย่างนี้ชี้ไปที่ช่องเดียวไม่ได้ — และถ้าเอาไปแสดงใต้ช่องใดช่องหนึ่งจะทำให้ผู้ใช้สับสน</p><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ ⚠ ใบรับเข้านี้ถูกปิดไปแล้ว                │  ← ระดับฟอร์ม อยู่ด้านบน
+│                                        │
+│ จำนวน  [ 0            ]                 │
+│        จำนวนต้องมากกว่าศูนย์              │  ← ระดับช่อง
+│                                        │
+│ บรรทัดที่ 2                              │
+│ เลขล็อต [ L26/08      ]                 │
+│        ระบุเลขล็อตไม่ถูกรูปแบบ            │  ← ระดับแถว
+└────────────────────────────────────────┘</code></pre><p><strong>แต่ในกรณีนี้มีเรื่องที่ต้องคิดเพิ่ม</strong></p><p>ข้อความ “ใบรับเข้านี้ถูกปิดไปแล้ว” ไม่ใช่ข้อผิดพลาดของการกรอกข้อมูล — มันคือ <strong>ข้อมูลว่าสถานะเปลี่ยนไปแล้ว</strong> ซึ่งตามหลักใน 7.9 ควรมาเป็น 409 ไม่ใช่ 400</p><table><thead><tr><th></th><th>400 validation</th><th>409 conflict</th></tr></thead><tbody>
+<tr><td>ผู้ใช้แก้แล้วส่งใหม่ได้ไหม</td><td>ได้</td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td>ควรให้แก้ฟอร์มต่อไหม</td><td>ควร</td><td>ไม่ควร — ควรพากลับไปดูรายการ</td></tr>
+</tbody></table><p>การที่เซิร์ฟเวอร์ยัดเรื่องนี้มาใน 400 ทำให้แอปแสดงผลเหมือนเป็นเรื่องที่แก้ได้ ทั้งที่แก้ไม่ได้ — ผู้ใช้จะแก้จำนวนแล้วกดส่งใหม่ แล้วก็ได้ข้อความเดิม</p><p>สิ่งที่ควรทำคือแจ้งฝั่งหลังบ้านให้แยกออกมา และระหว่างนั้นฝั่งแอปรับมือด้วยการแสดงข้อความระดับฟอร์มให้เด่นพอที่ผู้ใช้จะเห็นก่อนแก้ช่องอื่น</p><p><strong>บทเรียนที่ควรจำ:</strong> โครงของ <code>errors</code> บอกได้มากกว่าที่เห็น — คีย์ว่างคือระดับคำขอ คีย์ที่มีวงเล็บเหลี่ยมคือระดับแถว และเมื่อพบว่าข้อผิดพลาดระดับคำขอไม่ใช่เรื่องการกรอกข้อมูล นั่นเป็นสัญญาณว่ารหัสตอบกลับเลือกผิด</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ProblemDetails เป็นรูปแบบกลาง เขียนตัวอ่านครั้งเดียวใช้ได้ทุก endpoint</li><li><code>detail</code> เจาะจง ส่วน <code>title</code> กว้าง — เรียงลำดับให้ถูก</li><li>ข้อผิดพลาดรายช่องสำคัญกว่าทั้งคู่</li><li>คืน <code>null</code> เมื่อรูปแบบไม่ตรง ไม่ใช่โยน</li><li>จับคู่ชื่อช่องด้วยส่วนท้ายแบบไม่สนตัวพิมพ์</li><li>คีย์ที่มีวงเล็บเหลี่ยมบอกหมายเลขแถว</li><li>คีย์ว่างคือข้อผิดพลาดระดับคำขอ</li><li>แสดง <code>traceId</code> เฉพาะเมื่อเป็นเรื่องที่ทีมต้องแก้</li><li>ตกลงกับหลังบ้านว่า <code>detail</code> ต้องเป็นภาษาที่ผู้ใช้อ่านได้</li></ul></div><p><strong>บทถัดไป:</strong> 7.12 จะดูสถานการณ์ที่พบบ่อยในระบบ WMS — เมื่อ endpoint ถูกออกแบบมาให้เว็บใช้ก่อน แล้วแอปมือถือต้องมาใช้ตาม</p></section>

@@ -1,13 +1,176 @@
-<div class="note"><strong>Headers คือ metadata ของ request:</strong> กำหนดชนิด payload, รูปแบบ response, authentication, tracing และ idempotency โดยไม่ปนกับ business body</div>
-<section><h2>1. ชุดพื้นฐาน</h2><pre class="code-vs"><code>Map&lt;String, String&gt; headers(String? token) =&gt; {
-  'Accept': 'application/json',
-  'Content-Type': 'application/json; charset=utf-8',
-  if (token != null) 'Authorization': 'Bearer $token',
-};</code></pre></section>
-<section><h2>2. Content-Type vs Accept</h2><p><code>Content-Type</code> บอกชนิด body ที่ส่ง ส่วน <code>Accept</code> บอกชนิด response ที่รับ GET ที่ไม่มี body ไม่จำเป็นต้องใส่ Content-Type แต่ใส่ Accept ได้</p></section>
-<section><h2>3. Bearer token</h2><p>ApiClient ควรอ่าน token จาก session provider ตอนส่ง request เพื่อไม่ cache token เก่าหลัง refresh/logout และต้องไม่เติมคำว่า Bearer ซ้ำสองครั้ง</p></section>
-<section><h2>4. 401 กับ 403</h2><p>401 หมายถึงยัง authenticate ไม่สำเร็จหรือ token ใช้ไม่ได้ ส่วน 403 คือรู้ว่าเป็นใครแต่ไม่มีสิทธิ์ UI อาจพา login ใหม่เมื่อ 401 แต่ 403 ควรอธิบายสิทธิ์ ไม่ logout แบบเหมารวม</p></section>
-<section><h2>5. Correlation</h2><p>ส่ง/รับ correlation หรือ trace ID เพื่อให้ support ตาม request จาก PDA ไป log ฝั่ง .NET ได้ โดยแสดง ID นี้ในหน้ารายละเอียด error แต่ไม่ใช้แทน idempotency key</p></section>
-<section><h2>6. Multipart ต่างจาก JSON</h2><p>เมื่อใช้ <code>MultipartRequest</code> ให้ library สร้าง boundary ใน Content-Type อย่ากำหนด <code>multipart/form-data</code> เองแบบไม่มี boundary</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Request ได้ 415 Unsupported Media Type ทั้งที่ body เป็น JSON ควรตรวจอะไร?</p><details><summary>เฉลย</summary><p>ตรวจ Content-Type, encoding, body จาก <code>jsonEncode</code>, endpoint <code>Consumes</code> และอย่าส่ง Dart map เป็น string ด้วย <code>toString()</code></p></details></section>
-<section><h2>8. ห้ามรั่ว</h2><div class="warn">ห้าม log Authorization, refresh token, password หรือ cookie แม้ debug; redact ที่ transport logger จุดเดียวและมี test</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ส่งข้อมูลกำกับคำขอให้ครบและไม่รั่ว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.4 (GET และ POST)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใส่ข้อมูลกำกับคำขอให้ถูก และรู้ว่าอะไรห้ามหลุดออกไปในบันทึก</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>คำขอหนึ่งครั้งมีข้อมูลสองชุดที่เดินทางไปด้วยกัน</p><pre class="code-vs"><code>POST /api/WMS/mobile_tasks/T-001/complete
+Content-Type: application/json          ┐
+Authorization: Bearer eyJhbGci...       ├─ ข้อมูลกำกับ (header)
+Idempotency-Key: cmd-8821               ┘
+
+{"quantity": 12}                         ← เนื้อหา (body)</code></pre><p>ความต่างคือ <strong>body เป็นเรื่องของธุรกิจ ส่วน header เป็นเรื่องของการส่ง</strong></p><table><thead><tr><th>ถ้าเอาไปปนกัน</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ใส่ token ลงใน body</td><td>ทุก endpoint ต้องรับ field นี้ และมันจะไปโผล่ใน log ของธุรกิจ</td></tr>
+<tr><td>ใส่จำนวนสินค้าไว้ใน header</td><td>เซิร์ฟเวอร์ต้องอ่านสองที่ และตรวจสอบยากขึ้น</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>header</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>Content-Type</code></td><td>body ที่ส่งไปเป็นรูปแบบอะไร</td></tr>
+<tr><td><code>Accept</code></td><td>อยากได้คำตอบเป็นรูปแบบอะไร</td></tr>
+<tr><td><code>Authorization</code></td><td>บัตรผ่านที่บอกว่าเราเป็นใคร</td></tr>
+<tr><td><code>Idempotency-Key</code></td><td>รหัสที่บอกว่าคำขอนี้คือเจตนาเดิม (4.14)</td></tr>
+<tr><td>bearer token</td><td>บัตรผ่านแบบที่ใครถือก็ใช้ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ซองจดหมายกับจดหมาย</h2><pre class="code-vs"><code>ซอง (header)     บอกว่าส่งถึงใคร ส่งจากใคร และเป็นจดหมายประเภทไหน
+จดหมาย (body)    เนื้อหาที่อยากบอก</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าข้อมูลนั้นเปลี่ยนไปตามธุรกิจ ให้อยู่ใน body — ถ้ามันเหมือนกันทุก endpoint ให้อยู่ใน header</div></section>
+
+<section><h2>4. ชุดพื้นฐานใน lab</h2><pre class="code-vs"><code>Map&lt;String, String&gt; _headers() =&gt; {
+  'Content-Type': 'application/json',
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+};</code></pre><p>สองบรรทัดนี้ทำให้ทุกที่ที่เรียก <code>ApiClient</code> ไม่ต้องรู้เรื่อง header เลย</p><table><thead><tr><th>สิ่งที่ได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ลืมใส่ token ไม่ได้</td><td>ใส่ให้อัตโนมัติทุกคำขอ</td></tr>
+<tr><td>เปลี่ยนรูปแบบ token ที่เดียว</td><td>ไม่ต้องไล่แก้ทุก repository</td></tr>
+<tr><td>ปิดค่าตอนบันทึกได้ที่เดียว</td><td>ดูหัวข้อ 8</td></tr>
+</tbody></table><p>สังเกตว่า <code>if</code> อยู่ในตัว map เลย — ถ้ายังไม่ได้เข้าสู่ระบบ ก็ไม่มี header นี้ ไม่ใช่ส่งค่าว่างไป</p><pre class="code-vs"><code>// เลี่ยง — ส่ง "Bearer null" ไปให้ server งง
+'Authorization': 'Bearer ${authToken ?? ""}',</code></pre></section>
+
+<section><h2>5. Content-Type กับ Accept ไม่เหมือนกัน</h2><table><thead><tr><th></th><th><code>Content-Type</code></th><th><code>Accept</code></th></tr></thead><tbody>
+<tr><td>พูดถึง</td><td>สิ่งที่เราส่งไป</td><td>สิ่งที่เราอยากได้กลับ</td></tr>
+<tr><td>GET ต้องมีไหม</td><td>ไม่ต้อง เพราะไม่มี body</td><td>ใส่ได้</td></tr>
+<tr><td>ถ้าผิด</td><td>ได้รหัส 415</td><td>ได้รหัส 406 หรือได้รูปแบบที่ไม่ต้องการ</td></tr>
+</tbody></table><p>ในทางปฏิบัติ API ส่วนใหญ่ตอบเป็น JSON อยู่แล้ว การใส่ <code>Accept</code> จึงไม่ค่อยเปลี่ยนอะไร — แต่มีประโยชน์ในกรณีเดียวที่สำคัญ</p><pre class="code-vs"><code>Accept: application/json</code></pre><p>เมื่อมีตัวกลางในเครือข่ายที่คืนหน้า HTML แทน (เช่นหน้าเข้าสู่ระบบขององค์กร) การประกาศไว้ชัดช่วยให้บางระบบตอบเป็น JSON แทน — และถ้ายังได้ HTML มาก็ยังจับได้จากการตรวจรูปแบบตาม 7.8</p></section>
+
+<section><h2>6. อ่าน token ตอนส่ง ไม่ใช่ตอนสร้าง</h2><p>จุดที่ผิดง่ายและอาการดูเหมือนเรื่องอื่น</p><pre class="code-vs"><code>// เสี่ยง — จำ token ไว้ตั้งแต่ตอนสร้าง
+class ApiClient {
+  ApiClient({required this.token});
+  final String token;              // ถ้า token เปลี่ยน ตัวนี้ยังใช้ของเก่า
+}</code></pre><pre class="code-vs"><code>// ที่ lab ทำ — อ่านค่าล่าสุดทุกครั้งที่ส่ง
+String? authToken;
+
+Map&lt;String, String&gt; _headers() =&gt; {
+  ...
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+};</code></pre><table><thead><tr><th>ถ้าจำ token ไว้ตั้งแต่ต้น</th><th>อาการที่เห็น</th></tr></thead><tbody>
+<tr><td>ต่ออายุ token แล้ว</td><td>ยังใช้ตัวเก่า ได้ 401 ทั้งที่เพิ่งต่ออายุ</td></tr>
+<tr><td>ออกจากระบบแล้ว</td><td>ยังยิงคำขอด้วย token เก่าได้</td></tr>
+<tr><td>เข้าสู่ระบบด้วยคนใหม่</td><td>ยังใช้สิทธิ์ของคนเก่า</td></tr>
+</tbody></table><p>แถวสุดท้ายอันตรายที่สุดบน PDA ที่เปลี่ยนมือทุกกะ — และเป็นเหตุผลที่ 5.4 ย้ำว่าการล้างหน้าจอไม่เท่ากับการออกจากระบบ</p></section>
+
+<section><h2>7. 401 กับ 403 ต้องทำคนละอย่าง</h2><table><thead><tr><th></th><th>401</th><th>403</th></tr></thead><tbody>
+<tr><td>แปลว่า</td><td>ไม่รู้ว่าคุณเป็นใคร</td><td>รู้ว่าเป็นใคร แต่ทำสิ่งนี้ไม่ได้</td></tr>
+<tr><td>สาเหตุ</td><td>ยังไม่ล็อกอิน หรือ token หมดอายุ</td><td>สิทธิ์ไม่พอ</td></tr>
+<tr><td>ควรทำ</td><td>พาไปเข้าสู่ระบบใหม่</td><td>บอกว่าไม่มีสิทธิ์ และให้ติดต่อหัวหน้า</td></tr>
+</tbody></table><p>การเหมารวมทั้งสองเป็น “ให้ล็อกอินใหม่” ทำให้เกิดอาการที่อธิบายยาก — คนหน้างานที่ไม่มีสิทธิ์ปรับยอด จะถูกเด้งออกจากระบบทุกครั้งที่กดปุ่มนั้น แล้วล็อกอินกลับเข้ามาก็เจอเหมือนเดิม</p><p>ใน lab แยกไว้แล้วตั้งแต่ชั้น <code>ApiClient</code></p><pre class="code-vs"><code>ApiFailureKind failureKindForStatus(int statusCode) =&gt; switch (statusCode) {
+  401 =&gt; ApiFailureKind.unauthorized,
+  403 =&gt; ApiFailureKind.forbidden,
+  ...
+};</code></pre><p>ส่วนการตัดสินใจว่าจะพาไปหน้าไหน เป็นเรื่องของชั้นบน ไม่ใช่ของ <code>ApiClient</code> ตามหลักใน 5.4</p></section>
+
+<section><h2>8. ห้ามให้ header หลุดออกไปในบันทึก</h2><p>นี่คือเรื่องที่ผิดแล้วแก้ยากที่สุดในบทนี้ เพราะเมื่อ token หลุดไปอยู่ในไฟล์บันทึกแล้ว มันจะถูกคัดลอกต่อไปเรื่อย ๆ</p><pre class="code-vs"><code>// อันตราย — ทุก token ที่เคยใช้จะอยู่ในไฟล์นี้
+logger.debug('request headers: $headers');</code></pre><p>เปิด <code>lib/core/api_log.dart</code></p><pre class="code-vs"><code>const Set&lt;String&gt; _sensitiveHeaders = {
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+};
+
+Map&lt;String, String&gt; redactHeaders(Map&lt;String, String&gt; headers) =&gt; {
+  for (final entry in headers.entries)
+    entry.key: _sensitiveHeaders.contains(entry.key.toLowerCase())
+        ? _masked
+        : entry.value,
+};</code></pre><pre class="code-vs"><code>test('ปิดค่า header ที่อ่อนไหว ไม่สนตัวพิมพ์', () {
+  final headers = redactHeaders({
+    'Authorization': 'Bearer eyJhbGciOi...',
+    'Content-Type': 'application/json',
+  });
+
+  expect(headers['Authorization'], 'REDACTED');
+  expect(headers['Content-Type'], 'application/json');
+});</code></pre><p>สังเกตว่าเทียบด้วย <code>toLowerCase()</code> เพราะชื่อ header ไม่สนตัวพิมพ์ — <code>Authorization</code> กับ <code>authorization</code> คืออันเดียวกัน และการเทียบตรง ๆ จะพลาดตัวใดตัวหนึ่ง</p><p>และการปิดค่าอยู่ที่เดียวตรงนี้ ไม่ใช่ที่ทุกจุดที่บันทึก — จะได้ไม่มีทางลืม</p></section>
+
+<section><h2>9. header ที่ช่วยตอนมีปัญหา</h2><table><thead><tr><th>header</th><th>ประโยชน์</th></tr></thead><tbody>
+<tr><td><code>Idempotency-Key</code></td><td>บอกว่าคำขอนี้คือเจตนาเดิม (7.15)</td></tr>
+<tr><td><code>traceId</code> ที่ได้กลับมา</td><td>ใช้ตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์</td></tr>
+<tr><td>รุ่นของแอป</td><td>รู้ว่าเครื่องที่มีปัญหาใช้แอปรุ่นไหน</td></tr>
+</tbody></table><p>ใน lab เห็น <code>Idempotency-Key</code> ได้ที่ <code>task_repository.dart</code></p><pre class="code-vs"><code>final json = await api.postJson(
+  '/api/WMS/mobile_tasks/$id/complete',
+  const {},
+  headers: {'Idempotency-Key': commandId},
+);</code></pre><p>สังเกตว่ามันอยู่ใน header ไม่ใช่ใน body — เพราะเป็นเรื่องของการส่ง ไม่ใช่เรื่องของธุรกิจ ตามหลักในหัวข้อ 3</p><p>ส่วน <code>traceId</code> เดินทางกลับมาใน ProblemDetails ซึ่งอ่านไว้แล้วใน <code>api_failure.dart</code></p><pre class="code-vs"><code>/// รหัสที่ใช้ตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์
+final String? traceId;</code></pre><p>การแสดงรหัสนี้บนหน้าจอเมื่อเกิดข้อผิดพลาด ทำให้คนหน้างานอ่านให้ทีมฟังได้ แล้วทีมตามหาใน log ได้ทันที แทนที่จะต้องเดาว่าเกิดตอนไหน</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>รหัส 415</td><td>ไม่มี <code>Content-Type</code> หรือค่าผิด</td><td>ใส่ให้ครบที่ตัวกลาง</td></tr>
+<tr><td>ได้ 401 ทั้งที่เพิ่งต่ออายุ token</td><td>จำ token ไว้ตั้งแต่ตอนสร้าง</td><td>อ่านค่าล่าสุดตอนส่ง</td></tr>
+<tr><td>ล็อกอินคนใหม่แล้วยังใช้สิทธิ์คนเก่า</td><td>เหมือนข้างบน</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ถูกเด้งออกทุกครั้งที่กดปุ่มหนึ่ง</td><td>เหมารวม 403 เป็น 401</td><td>แยกสองรหัส</td></tr>
+<tr><td><code>Bearer null</code> ถูกส่งไป</td><td>ใส่ header เสมอแม้ไม่มี token</td><td>ใส่เฉพาะเมื่อมี</td></tr>
+<tr><td>token อยู่ในไฟล์บันทึก</td><td>บันทึก header ทั้งชุด</td><td>ปิดค่าที่ตัวกลางที่เดียว</td></tr>
+<tr><td>ปิดค่าแล้วยังหลุด</td><td>เทียบชื่อ header แบบสนตัวพิมพ์</td><td>เทียบด้วยตัวเล็กทั้งหมด</td></tr>
+<tr><td>เกิดปัญหาแล้วตามหาใน log ไม่เจอ</td><td>ไม่ได้เก็บรหัสตามรอย</td><td>แสดง <code>traceId</code> ให้ผู้ใช้เห็น</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมรายงานปัญหาสองอย่างที่เกิดในสัปดาห์เดียวกัน</p><table><thead><tr><th>#</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>คนหน้างานคนหนึ่งถูกเด้งออกจากระบบทุกครั้งที่กดปุ่ม “ปรับยอด” แต่ปุ่มอื่นใช้ได้ปกติ</td></tr>
+<tr><td>2</td><td>PDA เครื่องหนึ่งใช้งานได้ตอนเช้า พอเปลี่ยนกะแล้วคนใหม่ล็อกอิน กลับเห็นงานของคนกะเช้า</td></tr>
+</tbody></table><ol><li>ระบุสาเหตุที่น่าจะเป็นของแต่ละข้อ</li><li>เขียนวิธีแก้</li><li>ตอบว่าจะเขียนเทสต์อย่างไรให้จับปัญหาข้อ 2 ได้ก่อนขึ้นใช้จริง</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><table><thead><tr><th>#</th><th>สาเหตุ</th><th>หลักฐานที่ชี้</th></tr></thead><tbody>
+<tr><td>1</td><td>เหมารวม 403 เป็น 401</td><td>ปุ่มอื่นใช้ได้ = token ยังดี แปลว่าไม่ใช่ 401 จริง</td></tr>
+<tr><td>2</td><td>token เก่ายังถูกใช้อยู่ หรือ store เก่าไม่ถูกล้าง</td><td>เห็นข้อมูลของคนก่อนหน้า</td></tr>
+</tbody></table><p>ข้อ 1 มีหลักฐานชัดมาก — <strong>ถ้า token ใช้ไม่ได้จริง ปุ่มอื่นก็ต้องใช้ไม่ได้ด้วย</strong> การที่มีปุ่มเดียวที่มีปัญหา ชี้ว่าเป็นเรื่องสิทธิ์เฉพาะการกระทำนั้น</p><p><strong>ข้อ 2 — วิธีแก้</strong></p><p><em>ข้อ 1</em></p><pre class="code-vs"><code>// ที่ชั้นบนซึ่งตัดสินใจเรื่องเส้นทาง (5.4)
+switch (error.kind) {
+  case ApiFailureKind.unauthorized:
+    await session.signOut();          // token ใช้ไม่ได้จริง
+    goToLogin();
+  case ApiFailureKind.forbidden:
+    // ไม่แตะ session เลย
+    showResultBanner(
+      messenger,
+      error.userMessage,              // ให้ server บอกว่าขาดสิทธิ์อะไร
+      isError: true,
+    );
+  ...
+}</code></pre><p>จุดสำคัญคือกรณี <code>forbidden</code> <strong>ต้องไม่แตะ session</strong> — เพราะการล็อกอินใหม่ไม่ได้ทำให้ได้สิทธิ์เพิ่ม</p><p><em>ข้อ 2</em></p><p>ต้องแก้สามที่ เพราะการออกจากระบบมีหลายชั้นตาม 5.4</p><pre class="code-vs"><code>Future&lt;void&gt; signOut() async {
+  apiClient.authToken = null;        // 1. ล้าง token ในตัวส่ง
+  await secureStorage.clearToken();  // 2. ล้างที่เก็บในเครื่อง
+  taskStore.dispose();               // 3. ทิ้ง store ที่ถือข้อมูลของคนเก่า
+}</code></pre><table><thead><tr><th>ถ้าลืมข้อไหน</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>ยิงคำขอด้วยสิทธิ์คนเก่าได้</td></tr>
+<tr><td>2</td><td>เปิดแอปใหม่แล้วเข้าได้เลยโดยไม่ต้องล็อกอิน</td></tr>
+<tr><td>3</td><td><strong>เห็นงานของคนเก่าบนจอ</strong> — ตรงกับอาการที่รายงาน</td></tr>
+</tbody></table><p>อาการที่รายงานชี้ไปที่ข้อ 3 มากที่สุด แต่ต้องตรวจทั้งสามเพราะมักผิดพร้อมกัน</p><p><strong>ข้อ 3 — เทสต์ที่จับได้ก่อนขึ้นใช้จริง</strong></p><p>ปัญหาข้อ 2 ทดสอบด้วยการกดใช้งานปกติแทบไม่มีทางเจอ เพราะต้องล็อกอินสองคนติดกันในเครื่องเดียว ซึ่งไม่มีใครทำตอนทดสอบ</p><p><em>เทสต์ที่หนึ่ง — token ต้องถูกล้าง</em></p><pre class="code-vs"><code>test('ออกจากระบบแล้วต้องไม่มี token ติดไปกับคำขอถัดไป', () async {
+  final requests = &lt;http.Request&gt;[];
+  final client = MockClient((request) async {
+    requests.add(request);
+    return http.Response('{}', 200);
+  });
+  final api = ApiClient(baseUrl: 'http://test', client: client)
+    ..authToken = 'token-ของคนแรก';
+
+  await api.getJson('/api/WMS/mobile_tasks');
+  expect(requests.last.headers['Authorization'], 'Bearer token-ของคนแรก');
+
+  api.authToken = null;                       // จำลองการออกจากระบบ
+  await api.getJson('/api/WMS/mobile_tasks');
+
+  expect(requests.last.headers.containsKey('Authorization'), isFalse);
+});</code></pre><p><em>เทสต์ที่สอง — ข้อมูลของคนเก่าต้องหาย</em></p><pre class="code-vs"><code>test('ออกจากระบบแล้ว store ต้องไม่เหลือข้อมูลของคนเก่า', () async {
+  final store = TaskStore(repository);
+  await store.load();
+  expect(store.tasks, isNotEmpty);
+
+  await session.signOut();
+
+  // store ตัวเดิมต้องถูกทิ้ง ไม่ใช่แค่ล้างค่า
+  expect(() => store.load(), throwsA(isA&lt;FlutterError&gt;()));
+});</code></pre><p><em>เทสต์ที่สาม — ตัวที่จับได้ตรงที่สุด</em></p><pre class="code-vs"><code>test('ล็อกอินคนใหม่ต้องไม่เห็นข้อมูลของคนก่อนหน้า', () async {
+  await app.signIn('somchai');
+  await app.loadTasks();
+  expect(app.visibleTasks, hasLength(3));
+
+  await app.signOut();
+  await app.signIn('somsri');
+
+  // ยังไม่ได้โหลด จึงต้องว่าง ไม่ใช่ค้างของคนเก่า
+  expect(app.visibleTasks, isEmpty);
+});</code></pre><p>เทสต์ตัวนี้อ่านแล้วเข้าใจได้ทันทีว่ากันอะไร และชื่อของมันคือคำอธิบายของบั๊กที่รายงานมาพอดี — ตามหลักใน 6.13 ว่าเทสต์คือที่เก็บเหตุผล</p><p><strong>บทเรียนที่ควรจำ:</strong> บั๊กที่เกิดเฉพาะตอน “คนที่สองใช้ต่อจากคนแรก” ไม่มีทางเจอจากการทดสอบด้วยมือ เพราะไม่มีใครล็อกอินสองคนติดกัน — ต้องมีเทสต์ที่จำลองการเปลี่ยนมือโดยเฉพาะ</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>header เป็นเรื่องของการส่ง ส่วน body เป็นเรื่องของธุรกิจ</li><li>รวม header พื้นฐานไว้ที่ตัวกลาง จะได้ไม่มีทางลืม</li><li>ใส่ <code>Authorization</code> เฉพาะเมื่อมี token จริง</li><li>อ่าน token ตอนส่ง ไม่ใช่จำไว้ตอนสร้าง</li><li>401 พาไปล็อกอินใหม่ ส่วน 403 ห้ามแตะ session</li><li>ปิดค่า header ที่อ่อนไหวที่เดียว และเทียบชื่อแบบไม่สนตัวพิมพ์</li><li>รหัสคำสั่งอยู่ใน header ไม่ใช่ใน body</li><li>แสดงรหัสตามรอยให้ผู้ใช้เห็น เพื่อให้ตามหาใน log ได้</li></ul></div><p><strong>บทถัดไป:</strong> 7.6 จะทำให้ทุกอย่างในสามบทที่ผ่านมาทดสอบได้ โดยไม่ต้องเปิดเซิร์ฟเวอร์จริง</p></section>

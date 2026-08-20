@@ -1,17 +1,142 @@
-<div class="note"><strong>Decode สองชั้น:</strong> HTTP success เป็นเพียง transport success; body ยังต้องผ่าน JSON syntax, shape และ domain validation ก่อนเป็นข้อมูลที่ UI เชื่อถือได้</div>
-<section><h2>1. Success range</h2><p>โดยทั่วไป status 200–299 สำเร็จ แต่แต่ละ endpoint ต้องกำหนด expected status เช่น POST create อาจคืน 201 และ command ที่ไม่มี body อาจคืน 204</p></section>
-<section><h2>2. Decode UTF-8</h2><pre class="code-vs"><code>Object? decodeJson(http.Response response) {
-  if (response.bodyBytes.isEmpty) return null;
-  final text = utf8.decode(response.bodyBytes);
-  return jsonDecode(text);
-}</code></pre><p>ใช้ body bytes ช่วยรักษาภาษาไทยเมื่อ header encoding จาก server/proxy ไม่สมบูรณ์</p></section>
-<section><h2>3. Shape guard</h2><pre class="code-vs"><code>final raw = decodeJson(response);
-if (raw is! Map&lt;String, dynamic&gt;) {
-  throw ContractException('Expected JSON object');
-}
-return TaskDto.fromJson(raw);</code></pre></section>
-<section><h2>4. Empty response</h2><p>204 ต้องไม่เรียก <code>jsonDecode('')</code> สำหรับ 200 empty body ให้ถือเป็น contract error เว้นแต่ endpoint ระบุชัดว่าอนุญาต</p></section>
-<section><h2>5. Parse ที่ API boundary</h2><p>ApiClient อาจคืน typed decoded object หรือ raw map ให้ feature API parse ต่อ แต่ห้ามส่ง raw dynamic ถึง widget เพราะ cast error จะเกิดไกลจากต้นเหตุ</p></section>
-<section><h2>6. Content-Type guard</h2><p>ถ้า proxy คืน HTML พร้อม status 200 การเช็ก Content-Type และ shape จะจับได้เร็วกว่า error <code>type 'String' is not a subtype...</code> ที่ไม่บอกสาเหตุ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>response 200 body เป็น <code>[]</code> แต่ endpoint สัญญาว่าคืน grid object ควรทำอะไร?</p><details><summary>เฉลย</summary><p>throw ContractException พร้อม endpoint/correlation ID; อย่าแปลงเป็น empty page เพราะซ่อน contract drift</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">ทดสอบ valid object/list, Thai UTF-8, empty 204, empty 200, malformed JSON, wrong top-level shape และ required field ผิดชนิด</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: แปลงคำตอบที่สำเร็จให้เป็นข้อมูลที่เชื่อถือได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.7 (ชนิดความล้มเหลว) และ 6.8 (การกัก dynamic ไว้ที่ขอบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกความสำเร็จของการส่ง ออกจากความถูกต้องของข้อมูล</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>รหัส 200 แปลว่าอะไร</p><pre class="code-vs"><code>200 OK</code></pre><p>มันแปลว่า <strong>คำขอเดินทางไปถึงและเซิร์ฟเวอร์ตอบกลับมาแล้ว</strong> — เท่านั้น</p><table><thead><tr><th>สิ่งที่ 200 ไม่ได้รับประกัน</th><th>ตัวอย่างที่เกิดจริง</th></tr></thead><tbody>
+<tr><td>ว่า body เป็น JSON</td><td>ตัวกลางในเครือข่ายคืนหน้า HTML พร้อมรหัส 200</td></tr>
+<tr><td>ว่าโครงตรงกับที่ตกลง</td><td>ได้ array แทน object</td></tr>
+<tr><td>ว่า field ที่ต้องใช้มีครบ</td><td>เซิร์ฟเวอร์เปลี่ยนชื่อ field</td></tr>
+<tr><td>ว่าค่าสมเหตุสมผล</td><td>จำนวนติดลบ</td></tr>
+</tbody></table><p>ทั้งสี่กรณีเป็นเรื่องที่ Part 6 แก้ไว้แล้ว — บทนี้ต่อจากตรงนั้นด้วยการบอกว่า <strong>เส้นแบ่งอยู่ตรงไหน และใครรับผิดชอบส่วนไหน</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>transport success</td><td>ส่งสำเร็จ — ข้อความไปถึงและกลับมา</td></tr>
+<tr><td>payload</td><td>เนื้อหาที่อยู่ใน body</td></tr>
+<tr><td>UTF-8</td><td>วิธีเข้ารหัสตัวอักษรที่รองรับภาษาไทย</td></tr>
+<tr><td><code>bodyBytes</code></td><td>เนื้อหาดิบก่อนถูกแปลงเป็นข้อความ</td></tr>
+<tr><td>shape</td><td>โครงของข้อมูล เช่นเป็น object หรือ array</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สามด่านที่ต้องผ่าน</h2><pre class="code-vs"><code>รหัส 200        →  ส่งสำเร็จ
+    ↓
+เป็น JSON ไหม   →  แปลงเป็นวัตถุได้
+    ↓
+โครงถูกไหม      →  เป็น object และมี field ที่ต้องใช้
+    ↓
+ค่าใช้ได้ไหม    →  ผ่านกฎธุรกิจ
+    ↓
+ข้อมูลที่เชื่อถือได้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> รหัส 200 ผ่านแค่ด่านแรก — และการเขียนโค้ดเหมือนว่ามันผ่านครบทุกด่าน คือที่มาของข้อผิดพลาดที่อ่านไม่รู้เรื่องตอนรัน</div></section>
+
+<section><h2>4. ใครทำอะไรใน lab</h2><table><thead><tr><th>ด่าน</th><th>ทำที่</th><th>โยนอะไรเมื่อไม่ผ่าน</th></tr></thead><tbody>
+<tr><td>รหัสตอบกลับ</td><td><code>ApiClient._decode</code></td><td><code>ApiException</code> พร้อม <code>kind</code></td></tr>
+<tr><td>เป็น JSON ไหม</td><td><code>ApiClient._decode</code></td><td>ดูหัวข้อ 5</td></tr>
+<tr><td>โครงถูกไหม</td><td>repository และ DTO</td><td><code>ContractException</code> (6.2)</td></tr>
+<tr><td>ค่าใช้ได้ไหม</td><td>ตัวแปลงเป็น domain</td><td><code>ContractException</code> (6.12)</td></tr>
+</tbody></table><p>เส้นแบ่งคือ <strong><code>ApiClient</code> ตอบว่า “คุยกันสำเร็จไหม” ส่วนชั้นบนตอบว่า “ข้อมูลใช้ได้ไหม”</strong></p><p>เหตุผลที่แบ่งแบบนี้ — <code>ApiClient</code> ไม่รู้ว่ากำลังคุยเรื่องอะไร มันเรียกได้ทั้ง endpoint งานและ endpoint พาเลท จึงตัดสินไม่ได้ว่า field ไหนต้องมี</p></section>
+
+<section><h2>5. body ที่ไม่ใช่ JSON</h2><p>เปิด <code>lib/core/api_client.dart</code></p><pre class="code-vs"><code>Map&lt;String, dynamic&gt;? json;
+try {
+  if (response.body.isNotEmpty) {
+    json = jsonDecode(response.body) as Map&lt;String, dynamic&gt;;
+  }
+} on FormatException {
+  json = null;
+}</code></pre><p>โค้ดนี้กลืน <code>FormatException</code> ไว้ ซึ่งดูขัดกับ 4.8 ที่บอกว่าห้ามกลืน — แต่ตรงนี้มีเหตุผล</p><table><thead><tr><th>สถานการณ์</th><th>สิ่งที่เกิด</th></tr></thead><tbody>
+<tr><td>รหัส 500 พร้อมหน้า HTML</td><td>แปลงไม่ได้ แต่รหัสบอกอยู่แล้วว่าล้มเหลว</td></tr>
+<tr><td>รหัส 200 พร้อมหน้า HTML</td><td>แปลงไม่ได้ และคืน map ว่าง</td></tr>
+</tbody></table><p>แถวแรกคือกรณีที่การกลืนถูกต้อง — ถ้าโยน <code>FormatException</code> ออกไป ข้อความจะเป็น “แปลง JSON ไม่ได้” ทั้งที่เรื่องจริงคือเซิร์ฟเวอร์ล่ม ซึ่งชี้ผิดทาง</p><p>เทสต์ใน lab ตรึงพฤติกรรมนี้ไว้</p><pre class="code-vs"><code>test('ได้ HTML แทน JSON ต้องไม่พังแบบอธิบายไม่ได้', () async {
+  // เกิดจริงเมื่อตัวกลางในเครือข่ายคืนหน้าเข้าสู่ระบบขององค์กร
+  final api = clientThatReturns(
+    (_) =&gt; http.Response('&lt;html&gt;&lt;body&gt;Login&lt;/body&gt;&lt;/html&gt;', 500),
+  );
+
+  await expectLater(
+    api.getJson('/api/WMS/mobile_tasks'),
+    throwsA(isA&lt;ApiException&gt;()
+        .having((e) =&gt; e.kind, 'kind', ApiFailureKind.server)),
+  );
+});</code></pre><div class="warn">แต่แถวที่สองยังเป็นช่องโหว่ — รหัส 200 พร้อม HTML จะได้ map ว่าง แล้วชั้นบนจะบอกว่า “ไม่มีคีย์ items” ซึ่งชี้ไปที่สัญญาทั้งที่จริง ๆ เป็นปัญหาเครือข่าย เรื่องนี้แก้ได้ด้วยการตรวจ <code>Content-Type</code> ตามหัวข้อ 7</div></section>
+
+<section><h2>6. ภาษาไทยกับการเข้ารหัส</h2><pre class="code-vs"><code>// ปลอดภัยกว่า — อ่านจากไบต์ดิบแล้วแปลงเอง
+final text = utf8.decode(response.bodyBytes);
+final json = jsonDecode(text);</code></pre><table><thead><tr><th></th><th><code>response.body</code></th><th><code>utf8.decode(bodyBytes)</code></th></tr></thead><tbody>
+<tr><td>ใช้อะไรตัดสินการเข้ารหัส</td><td>ดูจาก header ที่เซิร์ฟเวอร์ส่งมา</td><td>บังคับเป็น UTF-8 เสมอ</td></tr>
+<tr><td>ถ้า header ไม่ระบุ</td><td>เดาเป็นแบบเก่าที่ไม่รองรับภาษาไทย</td><td>ยังอ่านถูก</td></tr>
+</tbody></table><p>อาการที่เกิดคือชื่อผู้จำหน่ายภาษาไทยกลายเป็นตัวอักษรแปลก ๆ ทั้งที่ข้อมูลในฐานข้อมูลถูกต้อง</p><p>ในทางปฏิบัติ ASP.NET ส่ง header มาถูกอยู่แล้ว จึงมักไม่มีปัญหา — แต่เมื่อมีตัวกลางในเครือข่ายมาแทรก header อาจหายไป</p><p>เทสต์ใน lab ครอบเรื่องนี้ไว้</p><pre class="code-vs"><code>test('อ่าน JSON ที่เป็นภาษาไทยได้ถูกต้อง', () async {
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse({'supplierName': 'บริษัท ซัพพลาย จำกัด'}, 200),
+  );
+
+  final json = await api.getJson('/api/WMS/inbound');
+
+  expect(json['supplierName'], 'บริษัท ซัพพลาย จำกัด');
+});</code></pre></section>
+
+<section><h2>7. ตรวจว่าเป็น JSON จริงก่อน</h2><p>วิธีปิดช่องโหว่ในหัวข้อ 5</p><pre class="code-vs"><code>final contentType = response.headers['content-type'] ?? '';
+if (response.statusCode &gt;= 200 &amp;&amp;
+    response.statusCode &lt; 300 &amp;&amp;
+    response.body.isNotEmpty &amp;&amp;
+    !contentType.contains('application/json')) {
+  throw ApiException(
+    'เซิร์ฟเวอร์ตอบกลับมาในรูปแบบที่ไม่รองรับ ($contentType)',
+    statusCode: response.statusCode,
+    kind: ApiFailureKind.contract,
+  );
+}</code></pre><table><thead><tr><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>รู้ทันทีว่าไม่ใช่ JSON แทนที่จะไปรู้ตอนหา field ไม่เจอ</td></tr>
+<tr><td>ข้อความบอกรูปแบบที่ได้จริง ทำให้เดาได้ว่ามีตัวกลางมาแทรก</td></tr>
+<tr><td>ชี้ไปที่ปัญหาเครือข่าย ไม่ใช่ปัญหาสัญญา</td></tr>
+</tbody></table><p>แต่ต้องระวังว่าบางเซิร์ฟเวอร์ส่ง <code>content-type</code> ที่มีข้อความต่อท้าย เช่น <code>application/json; charset=utf-8</code> จึงต้องใช้ <code>contains</code> ไม่ใช่เทียบเท่ากันตรง ๆ</p></section>
+
+<section><h2>8. คำตอบที่ไม่มีเนื้อหา</h2><pre class="code-vs"><code>if (response.statusCode &gt;= 200 &amp;&amp; response.statusCode &lt; 300) {
+  // 204 และ 200 ที่ body ว่าง ถือว่าสำเร็จ ไม่ต้องมี JSON
+  return json ?? &lt;String, dynamic&gt;{};
+}</code></pre><p>การคืน map ว่างแทนที่จะโยน ทำให้ผู้เรียกไม่ต้องเขียนเงื่อนไขพิเศษ</p><pre class="code-vs"><code>test('204 ที่ไม่มีเนื้อหา ถือว่าสำเร็จ ไม่ใช่พัง', () async {
+  final api = clientThatReturns((_) =&gt; http.Response('', 204));
+
+  final json = await api.postJson('/api/WMS/ping', const {});
+
+  expect(json, isEmpty);
+});</code></pre><p>แต่มีข้อแลกที่ต้องรู้ตัว — <strong>ถ้า endpoint ที่ควรคืนข้อมูลกลับคืน body ว่างมา จะได้ map ว่างแทนที่จะได้ข้อผิดพลาด</strong></p><p>ชั้นบนจะจับได้อยู่ดีตอนที่หา field ไม่เจอ ตาม 6.2 — แต่ข้อความจะเป็น “ไม่มีคีย์ items” ซึ่งชี้ไปที่สัญญา ทั้งที่จริง ๆ เซิร์ฟเวอร์ไม่ได้ส่งอะไรมาเลย</p><p>ถ้าอยากให้ชี้ตรงกว่านั้น ต้องให้ผู้เรียกบอกว่าคาดหวังเนื้อหาหรือไม่</p><pre class="code-vs"><code>Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(
+  String path, {
+  bool expectBody = true,     // GET มักคาดหวังเนื้อหา
+}) async { ... }</code></pre></section>
+
+<section><h2>9. อย่าส่งข้อมูลดิบขึ้นไป</h2><pre class="code-vs"><code>// ที่ lab ทำ — คืน Map แล้วให้ repository แปลงต่อ
+Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(String path);</code></pre><p>คำถามที่สมเหตุสมผล — ทำไมไม่ให้ <code>ApiClient</code> แปลงเป็น model ไปเลย</p><table><thead><tr><th>ถ้า <code>ApiClient</code> แปลงเอง</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ต้องรู้จัก model ทุกตัวในแอป</td><td>ชั้นล่างสุดผูกกับทุกฟีเจอร์</td></tr>
+<tr><td>เพิ่มฟีเจอร์ต้องแก้ <code>ApiClient</code></td><td>ขัดกับหลักใน 7.1</td></tr>
+</tbody></table><p>แต่การคืน <code>Map</code> ก็มีข้อแลก — <strong>ค่าใน map เป็น <code>dynamic</code></strong> ซึ่งเป็นสิ่งที่ 6.8 บอกให้ระวัง</p><p>สิ่งที่ทำให้ยอมรับได้คือ <strong>ขอบเขตที่ <code>dynamic</code> อยู่ได้ต้องแคบมาก</strong></p><pre class="code-vs"><code>ApiClient        คืน Map&lt;String, dynamic&gt;   ← dynamic เริ่มที่นี่
+repository       แปลงเป็น DTO ทันที          ← dynamic จบที่นี่
+store, หน้าจอ    ไม่มี dynamic แล้ว</code></pre><p>ถ้าเห็น <code>Map&lt;String, dynamic&gt;</code> ไปโผล่ที่ store หรือหน้าจอ แปลว่ามีอะไรรั่วออกมาจากขอบเขตนี้</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ภาษาไทยเพี้ยน</td><td>เซิร์ฟเวอร์ไม่ระบุการเข้ารหัส</td><td>อ่านจาก <code>bodyBytes</code> แล้วแปลงเป็น UTF-8 เอง</td></tr>
+<tr><td><code>FormatException: Unexpected character</code></td><td>ได้ HTML แทน JSON</td><td>ตรวจ <code>content-type</code> ก่อน</td></tr>
+<tr><td>“ไม่มีคีย์ items” ทั้งที่ปัญหาคือเครือข่าย</td><td>ไม่ตรวจรูปแบบก่อน</td><td>เหมือนข้างบน</td></tr>
+<tr><td><code>FormatException</code> ทั้งที่คำขอสำเร็จ</td><td>พยายามแปลง body ว่าง</td><td>ตรวจว่ามีเนื้อหาก่อน</td></tr>
+<tr><td>ข้อผิดพลาดชี้ไปที่หน้าจอ ทั้งที่ปัญหาอยู่ที่สัญญา</td><td><code>dynamic</code> รั่วขึ้นไป</td><td>แปลงเป็น DTO ที่ repository</td></tr>
+<tr><td>เพิ่มฟีเจอร์แล้วต้องแก้ <code>ApiClient</code></td><td>ให้ชั้นล่างรู้จัก model</td><td>ให้คืนข้อมูลกลาง แล้วแปลงที่ชั้นบน</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมได้รายงานสามอย่างในสัปดาห์เดียวกัน</p><table><thead><tr><th>#</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>ชื่อผู้จำหน่ายภาษาไทยกลายเป็นตัวอักษรแปลก เฉพาะที่สาขาหนึ่ง</td></tr>
+<tr><td>2</td><td>บางครั้งขึ้นว่า “ไม่มีคีย์ items” ทั้งที่ endpoint นั้นใช้งานได้ปกติมาตลอด</td></tr>
+<tr><td>3</td><td>กดปุ่มหนึ่งแล้วขึ้น <code>FormatException</code> ทั้งที่ข้อมูลถูกบันทึกเรียบร้อย</td></tr>
+</tbody></table><ol><li>ระบุด่านที่มีปัญหาของแต่ละข้อ ตามหัวข้อ 3</li><li>เสนอวิธีแก้</li><li>อาการที่ 2 บอกใบ้อะไรที่สำคัญ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 และ 2 — ด่านที่มีปัญหาและวิธีแก้</strong></p><table><thead><tr><th>#</th><th>ด่าน</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>1</td><td>แปลงเป็นข้อความ</td><td>header การเข้ารหัสหายไป</td><td>อ่านจาก <code>bodyBytes</code></td></tr>
+<tr><td>2</td><td>เป็น JSON ไหม</td><td>ได้ HTML พร้อมรหัส 200</td><td>ตรวจ <code>content-type</code></td></tr>
+<tr><td>3</td><td>เป็น JSON ไหม</td><td>ได้ 204 แต่พยายามแปลง</td><td>ตรวจว่ามีเนื้อหาก่อน</td></tr>
+</tbody></table><p>ข้อ 1 ที่เกิด <em>เฉพาะสาขาหนึ่ง</em> ชี้ชัดว่ามีอะไรต่างที่สาขานั้น — น่าจะมีตัวกลางในเครือข่ายที่สาขานั้นเท่านั้น</p><p>ข้อ 3 น่าสนใจเพราะ <strong>ข้อมูลถูกบันทึกแล้ว</strong> แปลว่าคำขอสำเร็จทุกอย่าง ปัญหาอยู่ที่ฝั่งเราตีความคำตอบผิด</p><pre class="code-vs"><code>// สาเหตุ
+if (response.body.isNotEmpty) {          // 204 มี body ว่าง จึงข้ามไป
+  json = jsonDecode(response.body) ...   // ถ้าลืมเช็ก จะพังตรงนี้
+}</code></pre><p>ใน lab เช็กไว้แล้ว แต่ถ้า endpoint นั้นตอบ 200 พร้อม body ว่าง แทนที่จะเป็น 204 ก็จะเข้าเงื่อนไขเดียวกัน</p><p><strong>ข้อ 3 — อาการที่ 2 บอกใบ้อะไร</strong></p><p>คำว่า <strong>“บางครั้ง”</strong> และ <strong>“ใช้งานได้ปกติมาตลอด”</strong> เป็นข้อมูลสำคัญสองอย่าง</p><table><thead><tr><th>ถ้าเป็นปัญหาสัญญา</th><th>ถ้าเป็นปัญหาเครือข่าย</th></tr></thead><tbody>
+<tr><td>ต้องพังทุกครั้ง</td><td>พังเป็นครั้งคราว</td></tr>
+<tr><td>พังตั้งแต่ที่เซิร์ฟเวอร์เปลี่ยน</td><td>พังโดยไม่มีใครแก้อะไร</td></tr>
+<tr><td>พังทุกเครื่อง</td><td>อาจพังบางเครื่องหรือบางช่วงเวลา</td></tr>
+</tbody></table><p>อาการที่รายงานตรงกับคอลัมน์ขวาทั้งหมด ดังนั้น <strong>ข้อความ “ไม่มีคีย์ items” กำลังชี้ผิดทาง</strong></p><p>สิ่งที่น่าจะเกิดจริง</p><pre class="code-vs"><code>token หมดอายุ หรือ session ที่ตัวกลางหมดอายุ
+  → ตัวกลางคืนหน้าเข้าสู่ระบบ พร้อมรหัส 200
+  → ApiClient แปลง HTML ไม่ได้ → คืน map ว่าง
+  → repository หา items ไม่เจอ → "ไม่มีคีย์ items"</code></pre><p>ข้อความสุดท้ายทำให้ทีมไปไล่ดูสัญญากับฝั่งหลังบ้าน ซึ่งไม่มีอะไรผิด และเสียเวลาไปโดยเปล่าประโยชน์</p><p><strong>สิ่งที่การตรวจ <code>content-type</code> ให้</strong></p><pre class="code-vs"><code>// ข้อความที่ได้หลังแก้
+เซิร์ฟเวอร์ตอบกลับมาในรูปแบบที่ไม่รองรับ (text/html)</code></pre><p>ข้อความนี้ชี้ไปที่ตัวกลางในเครือข่ายทันที และคำว่า <code>text/html</code> ทำให้เดาได้เลยว่าเป็นหน้าเข้าสู่ระบบขององค์กร</p><p><strong>บทเรียนที่ควรจำ:</strong> เมื่ออาการเป็น “บางครั้ง” และ “ไม่มีใครแก้อะไร” ให้สงสัยชั้นล่างก่อนเสมอ — และข้อความผิดพลาดที่ชี้ผิดชั้น ทำให้เสียเวลามากกว่าการไม่มีข้อความเลย เพราะมันพาไปหาคำตอบผิดที่</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>รหัส 200 แปลว่าส่งสำเร็จ ไม่ได้แปลว่าข้อมูลใช้ได้</li><li>มีสี่ด่านที่ต้องผ่าน และแต่ละด่านอยู่คนละชั้น</li><li><code>ApiClient</code> ตอบว่าคุยกันสำเร็จไหม ชั้นบนตอบว่าข้อมูลใช้ได้ไหม</li><li>อ่านจาก <code>bodyBytes</code> เพื่อให้ภาษาไทยไม่เพี้ยน</li><li>ตรวจ <code>content-type</code> เพื่อจับกรณีที่ได้ HTML แทน JSON</li><li>body ว่างถือว่าสำเร็จ แต่ต้องตรวจก่อนแปลง</li><li>คืนข้อมูลกลางแล้วให้ชั้นบนแปลง เพื่อไม่ให้ชั้นล่างรู้จักทุกฟีเจอร์</li><li>ข้อความผิดพลาดที่ชี้ผิดชั้น เสียเวลากว่าไม่มีข้อความ</li></ul></div><p><strong>บทถัดไป:</strong> 7.9 จะดูฝั่งที่เซิร์ฟเวอร์ตอบว่าไม่สำเร็จ — รหัสแต่ละกลุ่มแปลว่าอะไร และทำไมห้ามใช้ข้อความเป็นตัวตัดสินใจ</p></section>

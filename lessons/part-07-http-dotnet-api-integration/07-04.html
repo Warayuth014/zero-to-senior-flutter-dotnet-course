@@ -4,25 +4,153 @@
 <title>GET / POST &amp; Body</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-04 · Flutter + .NET</span><h1>GET / POST &amp; Body</h1><p>Part 7: Flutter + .NET API</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">GET</a></li><li><a href="#section-2">POST JSON</a></li><li><a href="#section-3">DTO ไม่ใช่ widget state</a></li><li><a href="#section-4">Other methods</a></li><li><a href="#section-5">.NET counterpart</a></li><li><a href="#section-6">Body edge cases</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Checklist</a></li></ol></nav>
-<div class="note"><strong>Method สื่อเจตนา:</strong> GET อ่านข้อมูล, POST ส่ง command/สร้าง resource; payload และ side effect ต้องตรงกับ contract ของ endpoint</div>
-<section id="section-1"><h2>1. GET</h2><pre class="code-vs"><code>final uri = buildUri('/tasks', {'status': 'open'});
-final response = await client.get(uri, headers: headers);</code></pre><p>GET ควร safe และไม่มีการเปลี่ยนข้อมูล เพื่อให้ retry/cache มีความหมาย</p></section>
-<section id="section-2"><h2>2. POST JSON</h2><pre class="code-vs"><code>final response = await client.post(
-  buildUri('/tasks/complete'),
-  headers: {...headers, 'Content-Type': 'application/json'},
-  body: jsonEncode(request.toJson()),
-);</code></pre></section>
-<section id="section-3"><h2>3. DTO ไม่ใช่ widget state</h2><p>สร้าง request DTO ที่มีเฉพาะ field ตาม API เช่น taskId, quantity และ idempotencyKey อย่าส่งทั้ง domain object หรือ map จาก controller เพราะจะรั่ว field และเปลี่ยน contract โดยไม่ตั้งใจ</p></section>
-<section id="section-4"><h2>4. Other methods</h2><p>PUT มักแทน resource เต็ม, PATCH แก้บาง field, DELETE ลบ แต่ความหมายจริงต้องอ่าน API contract ไม่เดาจากชื่อ method อย่างเดียว</p></section>
-<section id="section-5"><h2>5. .NET counterpart</h2><pre class="code-vs"><code>app.MapPost("/api/WMS/tasks/complete",
-  async (CompleteTaskRequest request, ITaskService service,
-         CancellationToken ct) =&gt; {
-    var result = await service.CompleteAsync(request, ct);
-    return Results.Ok(result);
-  });</code></pre></section>
-<section id="section-6"><h2>6. Body edge cases</h2><p>แยก empty body, JSON <code>null</code>, object และ list ให้ชัด ถ้า success endpoint คืน 204 ต้องไม่บังคับ decode map; ถ้า 200 ต้องกำหนด response shape</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>การสแกนยืนยันหยิบสินค้าเป็น GET หรือ POST?</p><details><summary>เฉลย</summary><p>POST เพราะเปลี่ยน state และอาจมี side effect; ต้องออกแบบ duplicate/idempotency ด้วย ไม่ซ่อน command ใน query ของ GET</p></details></section>
-<section id="section-8"><h2>8. Checklist</h2><div class="success">method ตรง intent, URI encode แล้ว, request DTO typed, content-type ถูก, .NET bind ได้ และกำหนด success body/empty body ชัดเจน</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ถามหรือสั่ง</a></li><li><a href="#section-4">อ่านข้อมูลด้วย GET</a></li><li><a href="#section-5">สั่งงานด้วย POST</a></li><li><a href="#section-6">body ต้องเป็นข้อความ JSON ไม่ใช่ Map</a></li><li><a href="#section-7">ส่งอะไรไปใน body</a></li><li><a href="#section-8">method อื่นที่จะเจอ</a></li><li><a href="#section-9">คำตอบที่ไม่มีเนื้อหา</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งคำขออ่านข้อมูลและคำขอสั่งงานให้ถูกวิธี</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.2 (การประกอบ URL) และ 6.2 (DTO ขาขึ้น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกวิธีส่งคำขอให้ตรงกับเจตนา และรู้ว่าการเลือกผิดทำให้เกิดปัญหาอะไรตามมา</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>HTTP มีวิธีส่งคำขอหลายแบบ และสองแบบที่ใช้บ่อยที่สุดคือ GET กับ POST</p><p>คำถามที่ดูเหมือนเป็นเรื่องของรูปแบบ แต่จริง ๆ แล้วเป็นเรื่องของความหมาย</p><pre class="code-vs"><code>GET  /api/WMS/mobile_tasks              "ขอดูรายการงาน"
+POST /api/WMS/mobile_tasks/T-001/complete   "สั่งให้ปิดงาน T-001"</code></pre><p>ถ้าเลือกผิด สิ่งที่ตามมาไม่ใช่แค่ผิดหลักการ</p><table><thead><tr><th>ถ้าใช้ GET สั่งให้ปิดงาน</th><th>ผลที่เกิดจริง</th></tr></thead><tbody>
+<tr><td>เบราว์เซอร์และตัวกลางเก็บผลไว้ใช้ซ้ำ</td><td>กดปิดงานครั้งที่สองไม่ถึงเซิร์ฟเวอร์</td></tr>
+<tr><td>ตัวกลางในเครือข่ายลองใหม่เองเมื่อล้มเหลว</td><td>งานถูกปิดสองครั้ง</td></tr>
+<tr><td>รหัสงานไปโผล่ใน log ของทุกตัวกลางที่ผ่าน</td><td>ข้อมูลรั่วโดยไม่ตั้งใจ</td></tr>
+</tbody></table><p>แถวที่สองสำคัญที่สุด — <strong>ระบบเครือข่ายถือว่า GET ปลอดภัยที่จะทำซ้ำ</strong> และจะทำซ้ำให้เองโดยไม่ถามใคร</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>method</td><td>ชนิดของคำขอ เช่น GET, POST</td></tr>
+<tr><td>body</td><td>ข้อมูลที่ส่งไปกับคำขอ</td></tr>
+<tr><td>query</td><td>ข้อมูลที่ต่อท้าย URL</td></tr>
+<tr><td>safe</td><td>ไม่เปลี่ยนแปลงอะไรที่เซิร์ฟเวอร์</td></tr>
+<tr><td>idempotent</td><td>ทำซ้ำแล้วผลเท่ากับทำครั้งเดียว</td></tr>
+<tr><td><code>Content-Type</code></td><td>บอกว่า body ที่ส่งเป็นรูปแบบอะไร</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ถามหรือสั่ง</h2><pre class="code-vs"><code>"ขอดูหน่อย"     → GET   ทำกี่ครั้งก็ได้ ไม่มีอะไรเปลี่ยน
+"ทำสิ่งนี้ให้ที"  → POST  ทำซ้ำอาจได้ผลซ้ำ ต้องระวัง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถามว่า “ถ้าคำขอนี้ถูกส่งซ้ำสามครั้งโดยไม่มีใครตั้งใจ จะเป็นไรไหม” — ถ้าไม่เป็นไรคือ GET ถ้าเป็นไรคือ POST</div></section>
+
+<section id="section-4"><h2>4. อ่านข้อมูลด้วย GET</h2><p>เปิด <code>lib/core/api_client.dart</code></p><pre class="code-vs"><code>Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(String path) async {
+  try {
+    final response = await _client
+        .get(Uri.parse('$baseUrl$path'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    return _decode(response);
+  } on SocketException {
+    // GET ไม่เปลี่ยนข้อมูล จึงรู้แน่ว่าไม่มีอะไรเกิดขึ้น
+    throw const ApiException('เชื่อมต่อ server ไม่ได้', kind: ApiFailureKind.network);
+  }
+  ...
+}</code></pre><p>คอมเมนต์บรรทัดนั้นสำคัญกว่าที่เห็น — <strong>เพราะ GET ไม่เปลี่ยนอะไร เราจึงรู้แน่ว่าเน็ตหลุดแปลว่าไม่มีอะไรเกิดขึ้น</strong> ซึ่งทำให้ลองใหม่ได้อย่างปลอดภัย</p><p>เงื่อนไขที่ต้องรักษาไว้เพื่อให้ข้อสรุปนี้จริง</p><table><thead><tr><th>ต้องไม่ทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ให้ GET เปลี่ยนข้อมูล</td><td>ข้อสรุปเรื่องลองใหม่จะไม่จริงอีกต่อไป</td></tr>
+<tr><td>ให้ GET มี body</td><td>ตัวกลางบางตัวตัด body ของ GET ทิ้ง</td></tr>
+<tr><td>ใส่ข้อมูลอ่อนไหวใน query</td><td>ไปโผล่ใน log ของทุกตัวกลาง (7.17)</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. สั่งงานด้วย POST</h2><pre class="code-vs"><code>Future&lt;Map&lt;String, dynamic&gt;&gt; postJson(
+  String path,
+  Map&lt;String, dynamic&gt; body, {
+  Map&lt;String, String&gt; headers = const {},
+}) async {
+  try {
+    final response = await _client
+        .post(
+          Uri.parse('$baseUrl$path'),
+          headers: {..._headers(), ...headers},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
+    return _decode(response);
+  } on SocketException {
+    // POST เปลี่ยนข้อมูลได้ จึงไม่รู้ว่า server ทำไปแล้วหรือยัง
+    throw const ApiException(
+      'การเชื่อมต่อขาดระหว่างส่งคำสั่ง',
+      outcomeUnknown: true,
+      kind: ApiFailureKind.network,
+    );
+  }
+  ...
+}</code></pre><p>เทียบสองเมธอดนี้จะเห็นความต่างที่สำคัญที่สุดของบทนี้</p><table><thead><tr><th></th><th><code>getJson</code></th><th><code>postJson</code></th></tr></thead><tbody>
+<tr><td>เน็ตหลุดแล้วรู้ผลไหม</td><td>รู้ — ไม่มีอะไรเกิดขึ้น</td><td><strong>ไม่รู้</strong></td></tr>
+<tr><td><code>outcomeUnknown</code></td><td>ไม่ตั้ง (เป็น false)</td><td><code>true</code></td></tr>
+<tr><td>ลองใหม่เองอัตโนมัติได้ไหม</td><td>ได้</td><td>ไม่ได้ ถ้าไม่มีรหัสคำสั่ง</td></tr>
+</tbody></table><p>ธง <code>outcomeUnknown</code> นี้คือตัวเดียวกับที่ใช้ตัดสินใน 4.13 ว่าจะย้อนกลับหรือไปตรวจสอบ — <strong>และมันถูกกำหนดตั้งแต่ชั้นนี้ เพราะชั้นนี้เป็นชั้นเดียวที่รู้ว่าใช้ method อะไร</strong></p></section>
+
+<section id="section-6"><h2>6. body ต้องเป็นข้อความ JSON ไม่ใช่ Map</h2><pre class="code-vs"><code>// ผิด — Dart จะแปลง Map เป็นข้อความแบบของ Dart ไม่ใช่ JSON
+body: {'taskId': 'T-001', 'quantity': 12}
+
+// ได้ {taskId: T-001, quantity: 12}  ← ไม่มีเครื่องหมายคำพูด ไม่ใช่ JSON
+// server ตอบ 400 หรือ 415</code></pre><pre class="code-vs"><code>// ถูก
+body: jsonEncode({'taskId': 'T-001', 'quantity': 12}),
+headers: {'Content-Type': 'application/json'},</code></pre><p>สองอย่างต้องมาคู่กันเสมอ — <code>jsonEncode</code> ทำให้เนื้อหาเป็น JSON และ <code>Content-Type</code> บอกเซิร์ฟเวอร์ว่าให้อ่านแบบ JSON</p><p>ถ้าขาดอย่างใดอย่างหนึ่งจะได้รหัส 415 ซึ่งแปลว่า “ส่งมาในรูปแบบที่ฉันไม่รับ”</p><div class="note">ใน lab <code>_headers()</code> ใส่ <code>Content-Type</code> ให้ทุกคำขออยู่แล้ว จึงไม่ต้องใส่ซ้ำในแต่ละที่ที่เรียก — เป็นรูปแบบเดียวกับการรวมกฎไว้ที่เดียวใน 6.2</div></section>
+
+<section id="section-7"><h2>7. ส่งอะไรไปใน body</h2><p>คำถามที่ตอบง่ายผิด — ส่ง model ที่มีอยู่แล้วไปเลยได้ไหม</p><pre class="code-vs"><code>// เลี่ยง
+body: jsonEncode(task.toJson())</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ส่ง field ที่เซิร์ฟเวอร์ไม่ต้องการ</td><td>เช่น <code>createdAt</code> ที่เซิร์ฟเวอร์เป็นคนกำหนดเอง</td></tr>
+<tr><td>เพิ่ม field ใน model แล้วสัญญาเปลี่ยนเงียบ ๆ</td><td>ไม่มีอะไรบอกว่าคำขอเปลี่ยนไป</td></tr>
+<tr><td>ไม่รู้ว่าคำขอนี้ต้องมีอะไรบ้าง</td><td>ต้องไปอ่าน model ทั้งตัว</td></tr>
+</tbody></table><p>ทางที่ถูกคือมีชนิดของคำขอแยกต่างหาก ตามที่ทำไว้ใน 6.2</p><pre class="code-vs"><code>class CompleteTaskRequest {
+  const CompleteTaskRequest({
+    required this.taskId,
+    required this.quantity,
+    required this.commandId,
+    this.note,
+  });
+
+  Map&lt;String, Object?&gt; toJson() =&gt; {
+    'taskId': taskId,
+    'quantity': quantity,
+    'commandId': commandId,
+    'note': note,
+  };
+}</code></pre><p>อ่านคลาสนี้แล้วรู้ทันทีว่าคำขอนี้ต้องมีอะไร และ compiler บังคับให้ครบตั้งแต่ตอนเขียน</p></section>
+
+<section id="section-8"><h2>8. method อื่นที่จะเจอ</h2><table><thead><tr><th>method</th><th>ความหมายทั่วไป</th><th>ทำซ้ำแล้วผลเท่าเดิมไหม</th></tr></thead><tbody>
+<tr><td>GET</td><td>อ่าน</td><td>ใช่</td></tr>
+<tr><td>POST</td><td>สร้างหรือสั่งงาน</td><td><strong>ไม่</strong></td></tr>
+<tr><td>PUT</td><td>แทนที่ทั้งชิ้น</td><td>ใช่</td></tr>
+<tr><td>PATCH</td><td>แก้บางส่วน</td><td>แล้วแต่ว่าแก้อะไร</td></tr>
+<tr><td>DELETE</td><td>ลบ</td><td>ใช่ — ลบซ้ำก็ยังไม่มีอยู่</td></tr>
+</tbody></table><p>คอลัมน์ขวาคือสิ่งที่สำคัญกว่าชื่อ — มันบอกว่าตัวกลางในเครือข่ายจะกล้าลองใหม่ให้หรือไม่</p><div class="warn">แต่ความหมายจริงต้องอ่านจากสัญญาของ endpoint นั้น ไม่ใช่เดาจากชื่อ method — บาง API ใช้ POST กับทุกอย่างรวมถึงการอ่านข้อมูล ซึ่งถ้าเป็นแบบนั้นต้องรู้ตัวว่าเสียคุณสมบัติเรื่องการลองใหม่ไปด้วย</div></section>
+
+<section id="section-9"><h2>9. คำตอบที่ไม่มีเนื้อหา</h2><p>ไม่ใช่ทุกคำขอที่ได้ข้อมูลกลับมา</p><table><thead><tr><th>รหัส</th><th>ความหมาย</th><th>ต้องทำอะไร</th></tr></thead><tbody>
+<tr><td>200</td><td>สำเร็จ พร้อมข้อมูล</td><td>อ่าน body</td></tr>
+<tr><td>201</td><td>สร้างสำเร็จ</td><td>อ่าน body หรือดูที่อยู่ของสิ่งที่สร้าง</td></tr>
+<tr><td>204</td><td>สำเร็จ ไม่มีเนื้อหา</td><td><strong>ห้ามพยายามอ่าน body</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>// ใน _decode ของ lab
+if (response.statusCode &gt;= 200 &amp;&amp; response.statusCode &lt; 300) {
+  // 204 และ 200 ที่ body ว่าง ถือว่าสำเร็จ ไม่ต้องมี JSON
+  return json ?? &lt;String, dynamic&gt;{};
+}</code></pre><p>ถ้าเรียก <code>jsonDecode('')</code> จะได้ <code>FormatException</code> ที่หน้าตาเหมือนปัญหาสัญญา ทั้งที่จริง ๆ แล้วคำขอสำเร็จเรียบร้อย — เป็นข้อผิดพลาดที่ทำให้ไล่หาสาเหตุผิดทางได้ง่าย</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดปิดงานครั้งที่สองไม่มีอะไรเกิดขึ้น</td><td>ใช้ GET สั่งงาน แล้วผลถูกเก็บไว้ใช้ซ้ำ</td><td>เปลี่ยนเป็น POST</td></tr>
+<tr><td>งานถูกบันทึกซ้ำโดยไม่มีใครกดซ้ำ</td><td>ตัวกลางลองใหม่ให้เอง เพราะคิดว่าปลอดภัย</td><td>ใช้ POST และรหัสคำสั่ง (7.15)</td></tr>
+<tr><td>รหัส 415</td><td>ไม่ได้ <code>jsonEncode</code> หรือไม่มี <code>Content-Type</code></td><td>ใส่ทั้งคู่</td></tr>
+<tr><td>รหัส 400 ทั้งที่ข้อมูลดูถูก</td><td>ส่ง Map เข้าไปตรง ๆ</td><td><code>jsonEncode</code> ก่อน</td></tr>
+<tr><td><code>FormatException</code> ทั้งที่คำขอสำเร็จ</td><td>พยายามอ่าน body ของ 204</td><td>ตรวจก่อนว่ามีเนื้อหาไหม</td></tr>
+<tr><td>เซิร์ฟเวอร์บ่นว่ามี field แปลก ๆ</td><td>ส่ง model ทั้งตัวไป</td><td>ทำชนิดของคำขอแยก</td></tr>
+<tr><td>ค้นหาแล้วเจอผลเก่า</td><td>ผลของ GET ถูกเก็บไว้</td><td>เป็นพฤติกรรมปกติ — ถ้าไม่ต้องการต้องบอกเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ทีมกำลังออกแบบ endpoint สำหรับงานสี่อย่าง</p><table><thead><tr><th>#</th><th>งาน</th></tr></thead><tbody>
+<tr><td>1</td><td>ดูรายการงานที่ยังไม่เสร็จ</td></tr>
+<tr><td>2</td><td>ค้นหางานด้วยรหัสพาเลท</td></tr>
+<tr><td>3</td><td>ยืนยันการหยิบสินค้าหนึ่งบรรทัด</td></tr>
+<tr><td>4</td><td>บันทึกว่าผู้ใช้เปิดดูงานนี้แล้ว เพื่อเก็บสถิติ</td></tr>
+</tbody></table><ol><li>เลือก method และเขียน endpoint ของแต่ละงาน</li><li>ระบุว่างานไหนต้องมีรหัสคำสั่ง</li><li>งานที่ 4 มีจุดที่ต้องคิดเป็นพิเศษ — อธิบายว่าคืออะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 และ 2</strong></p><table><thead><tr><th>#</th><th>method และเส้นทาง</th><th>ต้องมีรหัสคำสั่งไหม</th></tr></thead><tbody>
+<tr><td>1</td><td><code>GET /api/WMS/mobile_tasks?status=open</code></td><td>ไม่</td></tr>
+<tr><td>2</td><td><code>GET /api/WMS/mobile_tasks?search=PAL-0101</code></td><td>ไม่</td></tr>
+<tr><td>3</td><td><code>POST /api/WMS/mobile_tasks/T-001/complete</code></td><td><strong>ต้องมี</strong></td></tr>
+<tr><td>4</td><td><code>POST /api/WMS/mobile_tasks/T-001/viewed</code></td><td>ดูข้อ 3</td></tr>
+</tbody></table><p>ข้อ 2 ใช้ GET ทั้งที่ผู้ใช้ “ทำอะไรบางอย่าง” — เพราะการค้นหาไม่ได้เปลี่ยนแปลงอะไรที่เซิร์ฟเวอร์ การค้นซ้ำสิบครั้งก็ได้ผลเหมือนเดิม</p><p>ข้อ 3 ต้องมีรหัสคำสั่งเพราะเป็นคำสั่งที่ทำซ้ำแล้วเสียหาย และเน็ตอาจหลุดตอนที่ไม่รู้ผล ตามที่วางไว้ใน 4.14</p><p><strong>ข้อ 3 — จุดที่ต้องคิดเป็นพิเศษของงานที่ 4</strong></p><p>งานนี้ดูเหมือนงานเล็กที่สุด แต่มีคำถามซ้อนอยู่หลายชั้น</p><p><em>ชั้นที่หนึ่ง — มันเปลี่ยนข้อมูลหรือเปล่า</em></p><p>เปลี่ยน — มันเขียนสถิติลงฐานข้อมูล จึงเป็น POST ไม่ใช่ GET</p><p>คนมักเผลอทำเป็น GET เพราะรู้สึกว่า “แค่ดู” แต่สิ่งที่ตัดสินคือ <strong>ผลที่เซิร์ฟเวอร์ ไม่ใช่เจตนาของผู้ใช้</strong></p><p><em>ชั้นที่สอง — ต้องรอผลไหม</em></p><table><thead><tr><th></th><th>ยืนยันการหยิบ (ข้อ 3)</th><th>บันทึกสถิติ (ข้อ 4)</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ต้องรู้ผลไหม</td><td>ต้อง</td><td>ไม่ต้อง</td></tr>
+<tr><td>ล้มเหลวแล้วต้องบอกไหม</td><td>ต้อง</td><td>ไม่ควรบอก</td></tr>
+<tr><td>ต้องกันกดซ้ำไหม</td><td>ต้อง</td><td>ไม่ต้อง</td></tr>
+</tbody></table><pre class="code-vs"><code>// ข้อ 4 — สั่งแล้วไม่รอ และต้องจัดการ error ในตัวเอง (4.8)
+unawaited(analytics.recordTaskViewed(taskId));</code></pre><p>ถ้าเผลอ <code>await</code> การเปิดดูงานจะช้าลงเพราะรอบันทึกสถิติ และถ้าบันทึกล้มเหลว ผู้ใช้จะเห็นข้อความผิดพลาดทั้งที่ไม่ได้ทำอะไรผิดเลย</p><p><em>ชั้นที่สาม — รหัสคำสั่งจำเป็นไหม</em></p><p>คำตอบคือ <strong>ไม่จำเป็น แต่ด้วยเหตุผลที่ต้องคิดให้ครบ</strong></p><table><thead><tr><th>คำถาม</th><th>คำตอบ</th></tr></thead><tbody>
+<tr><td>บันทึกซ้ำแล้วเสียหายไหม</td><td>สถิติเพี้ยนเล็กน้อย ไม่กระทบการทำงาน</td></tr>
+<tr><td>คุ้มที่จะทำระบบกันซ้ำไหม</td><td>ไม่ — ต้นทุนสูงกว่าความเสียหาย</td></tr>
+<tr><td>ถ้าสถิตินี้เอาไปคิดค่าตอบแทนล่ะ</td><td><strong>คำตอบเปลี่ยนทันที — ต้องกันซ้ำ</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือประเด็นจริงของข้อนี้ — <strong>“ข้อมูลนี้เอาไปใช้ทำอะไร” เป็นคำถามที่ต้องถามก่อนตัดสินใจ ไม่ใช่คำถามที่ถามทีหลัง</strong></p><p>สถิติที่เอาไปดูเฉย ๆ กับสถิติที่เอาไปคิดเงิน มีข้อกำหนดคนละระดับ ทั้งที่ endpoint หน้าตาเหมือนกันทุกอย่าง</p><p><em>ชั้นที่สี่ — ข้อมูลส่วนบุคคล</em></p><p>การบันทึกว่า “ใครเปิดดูอะไรเมื่อไหร่” เป็นข้อมูลที่ติดตามพฤติกรรมพนักงานได้ ซึ่งต้องมีเหตุผลรองรับและควรแจ้งให้ทราบ — ไม่ใช่เรื่องเทคนิค แต่เป็นเรื่องที่ต้องถามก่อนเขียนโค้ด</p><p><strong>บทเรียนที่ควรจำ:</strong> การเลือก method ตัดสินจาก <em>ผลที่เกิดกับเซิร์ฟเวอร์</em> ไม่ใช่จากความรู้สึกของผู้ใช้ — และคำถามว่า “ต้องกันซ้ำไหม” ตอบไม่ได้จนกว่าจะรู้ว่าข้อมูลนั้นถูกเอาไปใช้ทำอะไร</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>เลือก method จากคำถามว่า “ถูกส่งซ้ำโดยไม่ตั้งใจแล้วเป็นไรไหม”</li><li>ตัวกลางในเครือข่ายลองใหม่ให้เองกับคำขอที่ถือว่าปลอดภัย</li><li>GET ไม่เปลี่ยนอะไร จึงรู้แน่ว่าเน็ตหลุดแปลว่าไม่มีอะไรเกิดขึ้น</li><li>POST เปลี่ยนข้อมูลได้ จึงต้องตั้ง <code>outcomeUnknown</code> เมื่อเน็ตหลุด</li><li>body ต้องผ่าน <code>jsonEncode</code> และต้องมี <code>Content-Type</code> คู่กัน</li><li>ส่งชนิดของคำขอที่แยกไว้ ไม่ส่ง model ทั้งตัว</li><li>204 ไม่มีเนื้อหา ห้ามพยายามอ่าน body</li><li>ผลที่เกิดกับเซิร์ฟเวอร์เป็นตัวตัดสิน ไม่ใช่ความรู้สึกของผู้ใช้</li></ul></div><p><strong>บทถัดไป:</strong> 7.5 จะดูข้อมูลที่เดินทางไปกับคำขอแต่ไม่ได้อยู่ใน body — ตั้งแต่การบอกชนิดข้อมูล ไปจนถึงบัตรผ่านที่ยืนยันว่าเราเป็นใคร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

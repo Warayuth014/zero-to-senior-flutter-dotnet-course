@@ -1,20 +1,227 @@
-<div class="note"><strong>สองแนวทาง:</strong> คืน <code>ApiResult&lt;T&gt;</code> ทำ failure ชัดใน type; throw <code>ApiException</code> ทำ happy path อ่านง่าย ทั้งคู่ใช้ได้ถ้ากำหนด policy สม่ำเสมอ</div>
-<section><h2>1. Result type</h2><pre class="code-vs"><code>sealed class ApiResult&lt;T&gt; const ApiResult();
-final class ApiSuccess&lt;T&gt; extends ApiResult&lt;T&gt; {
-  const ApiSuccess(this.value); final T value;
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เลือกวิธีส่งความล้มเหลวขึ้นไปให้ชั้นบน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.9 (ชนิดความล้มเหลว) และ 4.15 (<code>sealed class</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกได้ว่าจะโยนหรือคืนค่า และรู้ว่าทำไมการผสมสองแบบแย่กว่าเลือกแบบใดแบบหนึ่ง</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>มีสองวิธีที่ใช้กันทั่วไปในการบอกชั้นบนว่าล้มเหลว</p><pre class="code-vs"><code>// แบบโยน — ที่ lab ใช้
+Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();      // สำเร็จได้ List, ล้มเหลวโยน
+
+// แบบคืนค่า
+Future&lt;ApiResult&lt;List&lt;WmsTask&gt;&gt;&gt; fetchOpen();   // คืนค่าเสมอ ไม่โยน</code></pre><p>ทั้งสองแบบใช้ได้ และทีมที่เก่งใช้ทั้งสองแบบ — ปัญหาไม่ได้อยู่ที่เลือกผิด แต่อยู่ที่</p><table><thead><tr><th>ปัญหาจริง</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>ผสมสองแบบในโปรเจกต์เดียว</td><td>ผู้เรียกต้องรับมือทั้ง <code>try</code> และ <code>switch</code></td></tr>
+<tr><td>ไม่มีข้อตกลงว่าอะไรโยนอะไรคืน</td><td>ต้องเปิดโค้ดดูทุกครั้งว่าเมธอดนี้แบบไหน</td></tr>
+<tr><td>ใช้ <code>null</code> แทนความล้มเหลว</td><td>แยกไม่ออกว่า “ไม่พบ” “เน็ตหลุด” หรือ “แปลงไม่ได้”</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>throw</td><td>โยนความล้มเหลวออกไปให้คนอื่นดัก</td></tr>
+<tr><td>Result</td><td>ชนิดที่พกได้ทั้งความสำเร็จและความล้มเหลว</td></tr>
+<tr><td>happy path</td><td>เส้นทางที่ทุกอย่างสำเร็จ</td></tr>
+<tr><td>exhaustive</td><td>ครอบทุกกรณี ไม่มีทางตกหล่น</td></tr>
+<tr><td><code>rethrow</code></td><td>โยนตัวเดิมต่อ โดยรักษาร่องรอยไว้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ใครควรถูกบังคับให้จัดการ</h2><pre class="code-vs"><code>โยน       →  ผู้เรียกจะลืมจัดการก็ได้ compiler ไม่บ่น
+คืนค่า    →  ผู้เรียกต้องแกะค่าออกมา จึงเห็นว่ามีทางล้มเหลวอยู่</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าความล้มเหลวเป็นสิ่งที่ <em>คาดไว้แล้วและต้องจัดการทุกครั้ง</em> ให้คืนค่า — ถ้าเป็นสิ่งที่ <em>เกิดได้แต่จัดการรวมที่เดียวก็พอ</em> ให้โยน</div></section>
+
+<section><h2>4. แบบโยน</h2><p>lab ใช้แบบนี้ทั้งหมด</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  final generation = ++_requestGeneration;
+  _loading = true;
+  notifyListeners();
+  try {
+    final result = await repository.fetchOpen();
+    if (generation != _requestGeneration) return;
+    _tasks = result;
+  } catch (exception) {
+    if (generation != _requestGeneration) return;
+    _error = exception.toString();
+  } finally {
+    ...
+  }
+}</code></pre><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>เส้นทางที่สำเร็จอ่านง่าย ไม่มีการแกะค่า</td><td>ลืมดักแล้ว compiler ไม่เตือน</td></tr>
+<tr><td>ผ่านหลายชั้นได้โดยไม่ต้องแกะทุกชั้น</td><td>ต้องอ่านเอกสารว่าโยนอะไรได้บ้าง</td></tr>
+<tr><td>ดักรวมที่เดียวได้</td><td>ดักกว้างเกินไปแล้วกลืนบั๊ก (4.8)</td></tr>
+</tbody></table><p>ข้อเสียข้อแรกเป็นเรื่องจริงและแก้ไม่ได้ด้วยตัวภาษา — Dart ไม่มีวิธีบังคับให้ผู้เรียกดัก</p><p>สิ่งที่ทดแทนได้คือ <strong>ดักที่ชั้นเดียวซึ่งทุกอย่างต้องผ่าน</strong> แล้วทำให้ที่นั่นครอบคลุมจริง ๆ</p></section>
+
+<section><h2>5. แบบคืนค่า</h2><pre class="code-vs"><code>sealed class ApiResult&lt;T&gt; {
+  const ApiResult();
 }
-final class ApiFailure&lt;T&gt; extends ApiResult&lt;T&gt; {
-  const ApiFailure(this.error); final ApiError error;
-}</code></pre></section>
-<section><h2>2. Exception style</h2><pre class="code-vs"><code>try {
-  final page = await api.fetchTasks();
-  state = Ready(page);
-} on ApiException catch (e) {
-  state = Failed(e.userMessage);
-}</code></pre></section>
-<section><h2>3. เลือก Result เมื่อ</h2><p>failure เป็นผลที่คาดหมายและ caller ต้อง pattern-match ทุกครั้ง เช่น validation/conflict ใน workflow หรือทีมต้องการให้ compiler บังคับ handle</p></section>
-<section><h2>4. เลือก throw เมื่อ</h2><p>service method มีค่าปกติหนึ่งแบบและใช้ shared boundary แปลง exception เป็น UI state ทำให้ chain หลายชั้นไม่ต้อง unwrap ซ้ำ</p></section>
-<section><h2>5. อย่าซ้อนสองระบบ</h2><p><code>ApiResult</code> ที่บาง branch ยัง throw network exception ทำให้ caller ต้อง handle สองทาง ถ้าใช้ Result ควรกำหนดว่าอะไรถูก capture และอะไรเป็น programmer error</p></section>
-<section><h2>6. Generic และ stack trace</h2><p>ถ้า rethrow ใช้ <code>rethrow</code> เพื่อรักษา stack trace ไม่ใช้ <code>throw e</code>; Result ควรเก็บ cause สำหรับ diagnostics โดยไม่ expose ให้ UI</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แอปมี 30 API methods และทุก Store ใช้ Loading/Error/Success เดียวกัน ควรเริ่มจากอะไร?</p><details><summary>แนวคำตอบ</summary><p>เลือก convention เดียว เช่น typed ApiException + central mapper หรือ Result + exhaustive switch แล้วเขียนตัวอย่างมาตรฐานและ tests ก่อน migrate</p></details></section>
-<section><h2>8. Decision rule</h2><div class="success">ความสม่ำเสมอและ typed error สำคัญกว่าชื่อ pattern; ห้ามคืน null เพื่อแทนทั้ง not-found, offline และ parse error</div></section>
+
+class ApiSuccess&lt;T&gt; extends ApiResult&lt;T&gt; {
+  const ApiSuccess(this.value);
+  final T value;
+}
+
+class ApiFailure&lt;T&gt; extends ApiResult&lt;T&gt; {
+  const ApiFailure(this.kind, this.message, {this.problem});
+  final ApiFailureKind kind;
+  final String message;
+  final ProblemDetails? problem;
+}</code></pre><pre class="code-vs"><code>final result = await repository.fetchOpen();
+
+switch (result) {
+  case ApiSuccess(:final value):
+    _tasks = value;
+    _state = LoadState.ready;
+  case ApiFailure(:final kind, :final message):
+    _state = LoadState.failed;
+    _errorMessage = message;
+    _canRetry = kind.isRetryable;      // ใช้ชนิดตัดสินได้เลย
+}</code></pre><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ลืมจัดการไม่ได้ — <code>switch</code> ต้องครบ</td><td>ต้องแกะค่าทุกชั้นที่ผ่าน</td></tr>
+<tr><td>เห็นจากลายเซ็นว่าล้มเหลวได้</td><td>เส้นทางที่สำเร็จอ่านยากขึ้น</td></tr>
+<tr><td>เพิ่มชนิดความล้มเหลวแล้ว compiler ไล่ให้</td><td>ต้องเขียนโครงเพิ่ม</td></tr>
+</tbody></table><p>ข้อดีข้อแรกคือเหตุผลหลักที่คนเลือกแบบนี้ — และมันสำคัญมากในงานที่ความล้มเหลวเป็นเรื่องปกติ</p></section>
+
+<section><h2>6. เกณฑ์เลือก</h2><table><thead><tr><th>สถานการณ์</th><th>เลือก</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลมาแสดง</td><td>โยน</td><td>ล้มเหลวแล้วแสดงหน้าผิดพลาด — จัดการรวมที่เดียวได้</td></tr>
+<tr><td>ยืนยันคำสั่งที่มีหลายผลลัพธ์</td><td><strong>คืนค่า</strong></td><td>สำเร็จ ขัดแย้ง ข้อมูลผิด ต้องทำคนละอย่าง</td></tr>
+<tr><td>ตรวจว่าเซิร์ฟเวอร์ยังอยู่ไหม</td><td>คืนค่า</td><td>ล้มเหลวคือคำตอบที่ต้องการ ไม่ใช่ข้อยกเว้น</td></tr>
+<tr><td>เรียกต่อกันหลายชั้น</td><td>โยน</td><td>ไม่ต้องแกะทุกชั้น</td></tr>
+</tbody></table><p>แถวที่สามน่าสนใจ — <strong>เมื่อความล้มเหลวคือผลลัพธ์ที่ต้องการ การโยนจะผิดความหมาย</strong></p><pre class="code-vs"><code>// แปลก — ใช้ exception บอกผลปกติ
+try {
+  await api.checkHealth();
+  return true;
+} catch (_) {
+  return false;      // ล้มเหลวคือคำตอบ ไม่ใช่ข้อยกเว้น
+}</code></pre><p>เรื่องนี้จะกลับมาใน 7.16</p></section>
+
+<section><h2>7. อย่าผสมสองแบบในเมธอดเดียว</h2><pre class="code-vs"><code>// แย่ที่สุด — ผู้เรียกต้องรับมือสองทาง
+Future&lt;ApiResult&lt;List&lt;WmsTask&gt;&gt;&gt; fetchOpen() async {
+  final json = await api.getJson('/api/WMS/mobile_tasks');   // ยังโยนอยู่
+  ...
+  return ApiSuccess(tasks);
+}</code></pre><pre class="code-vs"><code>// ผู้เรียกต้องเขียนแบบนี้ ซึ่งแย่กว่าทั้งสองแบบเดี่ยว ๆ
+try {
+  final result = await repository.fetchOpen();
+  switch (result) { ... }
+} on ApiException catch (error) {
+  ...
+}</code></pre><p>ถ้าเลือกแบบคืนค่า ต้องจับให้ครบ</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;List&lt;WmsTask&gt;&gt;&gt; fetchOpen() async {
+  try {
+    final json = await api.getJson('/api/WMS/mobile_tasks');
+    return ApiSuccess(_parseTasks(json));
+  } on ApiException catch (error) {
+    return ApiFailure(error.kind, error.userMessage, problem: error.problem);
+  } on ContractException catch (error) {
+    return ApiFailure(ApiFailureKind.contract, 'ข้อมูลไม่ตรงสัญญา: ${error.path}');
+  }
+  // ชนิดอื่นยังโยนต่อ — เพราะเป็นบั๊ก ไม่ใช่ผลลัพธ์
+}</code></pre><p>บรรทัดสุดท้ายสำคัญ — <strong>แม้เลือกแบบคืนค่า ก็ยังไม่จับทุกอย่าง</strong> บั๊กของเราเองต้องโยนต่อให้เห็น ตาม 4.8</p><div class="note">เส้นแบ่งคือ — <em>สิ่งที่คาดไว้แล้วคืนเป็นค่า สิ่งที่ไม่ควรเกิดปล่อยให้โยน</em></div></section>
+
+<section><h2>8. อย่าใช้ null แทนความล้มเหลว</h2><pre class="code-vs"><code>// แย่กว่าทั้งสองแบบ
+Future&lt;List&lt;WmsTask&gt;?&gt; fetchOpen();</code></pre><table><thead><tr><th><code>null</code> แปลว่าอะไร</th><th>ผู้เรียกทำอะไรได้</th></tr></thead><tbody>
+<tr><td>เน็ตหลุด</td><td>ควรลองใหม่</td></tr>
+<tr><td>ไม่มีสิทธิ์</td><td>ควรบอกให้ติดต่อหัวหน้า</td></tr>
+<tr><td>ข้อมูลผิดสัญญา</td><td>ควรแจ้งทีม</td></tr>
+<tr><td>ไม่มีงานจริง ๆ</td><td>ควรแสดงว่าไม่มีงาน</td></tr>
+</tbody></table><p>สี่ความหมายยัดอยู่ในค่าเดียว และแยกไม่ออกเลย — ซึ่งเป็นปัญหาเดียวกับที่ 4.7 และ 6.4 เจอ</p><p>แถวสุดท้ายอันตรายที่สุด เพราะมันเป็นความสำเร็จ แต่ถูกยัดรวมกับความล้มเหลว</p></section>
+
+<section><h2>9. รักษาร่องรอยไว้</h2><pre class="code-vs"><code>// ผิด — ร่องรอยว่าเกิดที่ไหนหายไป
+try {
+  ...
+} on ApiException catch (error) {
+  throw error;        // ร่องรอยเริ่มใหม่ที่บรรทัดนี้
+}</code></pre><pre class="code-vs"><code>// ถูก
+} on ApiException {
+  rethrow;            // ร่องรอยเดิมยังอยู่
+}</code></pre><p>และถ้าเลือกแบบคืนค่า ควรเก็บสาเหตุไว้ด้วย</p><pre class="code-vs"><code>class ApiFailure&lt;T&gt; extends ApiResult&lt;T&gt; {
+  const ApiFailure(this.kind, this.message, {this.problem, this.cause});
+
+  /// เก็บไว้สำหรับ log ไม่ใช่สำหรับแสดงให้ผู้ใช้
+  final Object? cause;
+}</code></pre><p>เพราะเมื่อแปลงความล้มเหลวเป็นค่า ร่องรอยเดิมจะหายไปทันที — และถ้าไม่เก็บไว้ จะไล่หาสาเหตุไม่ได้เลย</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ผู้เรียกต้องเขียนทั้ง <code>try</code> และ <code>switch</code></td><td>ผสมสองแบบ</td><td>เลือกแบบเดียวต่อเมธอด</td></tr>
+<tr><td>ต้องเปิดโค้ดดูว่าเมธอดนี้โยนหรือคืน</td><td>ไม่มีข้อตกลงในทีม</td><td>ตกลงแล้วเขียนไว้</td></tr>
+<tr><td>ลืมดักแล้วแอปพัง</td><td>เลือกแบบโยนแต่ไม่มีจุดดักรวม</td><td>ดักที่ชั้นเดียวที่ทุกอย่างผ่าน</td></tr>
+<tr><td>“ไม่มีงาน” กับ “โหลดไม่ได้” แยกไม่ออก</td><td>ใช้ <code>null</code> แทนความล้มเหลว</td><td>ใช้ชนิดที่แยกได้</td></tr>
+<tr><td>รู้ว่าพังแต่ไม่รู้ว่าที่ไหน</td><td>ใช้ <code>throw error</code></td><td>ใช้ <code>rethrow</code></td></tr>
+<tr><td>บั๊กของเราถูกแปลงเป็นผลลัพธ์ปกติ</td><td>จับทุกอย่างแล้วคืนค่า</td><td>จับเฉพาะที่คาดไว้</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>แอปมี repository สี่เมธอด</p><table><thead><tr><th>#</th><th>เมธอด</th><th>ผลลัพธ์ที่เป็นไปได้</th></tr></thead><tbody>
+<tr><td>1</td><td><code>fetchOpen()</code></td><td>ได้รายการ หรือล้มเหลว</td></tr>
+<tr><td>2</td><td><code>complete(id, commandId)</code></td><td>สำเร็จ / ปิดไปแล้ว / ถูกล็อก / ของไม่พอ / ล้มเหลว</td></tr>
+<tr><td>3</td><td><code>checkHealth()</code></td><td>ต่อได้ หรือต่อไม่ได้</td></tr>
+<tr><td>4</td><td><code>findByBarcode(code)</code></td><td>เจอ / ไม่เจอ / ล้มเหลว</td></tr>
+</tbody></table><ol><li>เลือกแบบโยนหรือคืนค่าของแต่ละเมธอด พร้อมเหตุผล</li><li>เขียนลายเซ็นของเมธอดที่ 2 และ 4</li><li>ตอบว่าการมีทั้งสองแบบในไฟล์เดียวกัน ยอมรับได้หรือไม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — เลือกแบบไหน</strong></p><table><thead><tr><th>#</th><th>เลือก</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td>โยน</td><td>ล้มเหลวมีทางเดียวคือแสดงหน้าผิดพลาด จัดการรวมได้</td></tr>
+<tr><td>2</td><td><strong>คืนค่า</strong></td><td>ห้าผลลัพธ์ที่ต้องทำคนละอย่าง และลืมจัดการไม่ได้</td></tr>
+<tr><td>3</td><td>คืนค่า</td><td>“ต่อไม่ได้” คือคำตอบ ไม่ใช่ข้อยกเว้น</td></tr>
+<tr><td>4</td><td><strong>คืนค่า</strong></td><td>“ไม่เจอ” เป็นผลปกติ ไม่ใช่ความล้มเหลว</td></tr>
+</tbody></table><p>ข้อ 4 เป็นข้อที่คนตอบผิดบ่อยที่สุด — การสแกนแล้วไม่เจอรหัสนั้นเป็นเรื่องปกติที่เกิดทุกวัน ไม่ใช่ข้อยกเว้น</p><pre class="code-vs"><code>// ผิด — ทำให้เรื่องปกติกลายเป็นความผิดพลาด
+try {
+  final product = await repository.findByBarcode(code);
+  ...
+} on NotFoundException {
+  showError('ไม่พบสินค้า');      // ไม่ใช่ error
+}</code></pre><p><strong>ข้อ 2 — ลายเซ็น</strong></p><pre class="code-vs"><code>sealed class CompleteOutcome {
+  const CompleteOutcome();
+}
+
+class CompleteSucceeded extends CompleteOutcome {
+  const CompleteSucceeded(this.correlationId);
+  final String correlationId;
+}
+
+/// ปิดไปแล้ว — ไม่ใช่ความผิดพลาด ผลลัพธ์ที่ต้องการเกิดขึ้นแล้ว
+class AlreadyCompleted extends CompleteOutcome {
+  const AlreadyCompleted({this.completedBy, this.completedAt});
+  final String? completedBy;
+  final DateTime? completedAt;
+}
+
+/// ถูกล็อก — รอแล้วลองใหม่ได้
+class LockedByOther extends CompleteOutcome {
+  const LockedByOther(this.lockedBy);
+  final String lockedBy;
+}
+
+/// ของไม่พอ — ต้องแก้จำนวนก่อน
+class InsufficientStock extends CompleteOutcome {
+  const InsufficientStock(this.available);
+  final int available;
+}
+
+/// ล้มเหลวจริง ๆ
+class CompleteFailed extends CompleteOutcome {
+  const CompleteFailed(this.kind, this.message);
+  final ApiFailureKind kind;
+  final String message;
+}
+
+Future&lt;CompleteOutcome&gt; complete(String id, {required String commandId});</code></pre><p>สังเกตว่าแต่ละกรณีพกข้อมูลที่ต่างกัน ตามหลักใน 4.15 — <code>InsufficientStock</code> พาจำนวนที่เหลือจริงกลับมา ทำให้หน้าจออัปเดตได้ทันทีตาม 6.12</p><pre class="code-vs"><code>sealed class ProductLookup {
+  const ProductLookup();
+}
+
+class ProductFound extends ProductLookup {
+  const ProductFound(this.product);
+  final Product product;
+}
+
+/// ไม่เจอ — เป็นผลปกติของการสแกน
+class ProductNotFound extends ProductLookup {
+  const ProductNotFound(this.scannedCode);
+  final String scannedCode;
+}
+
+class LookupFailed extends ProductLookup {
+  const LookupFailed(this.kind, this.message);
+  final ApiFailureKind kind;
+  final String message;
+}
+
+Future&lt;ProductLookup&gt; findByBarcode(String code);</code></pre><p><code>ProductNotFound</code> พารหัสที่สแกนกลับมาด้วย เพื่อให้แสดงได้ว่า “ไม่พบสินค้ารหัส SKU-9931” แทนที่จะบอกลอย ๆ ตาม 5.10</p><p><strong>ข้อ 3 — มีทั้งสองแบบในไฟล์เดียวยอมรับได้ไหม</strong></p><p><strong>ยอมรับได้ ถ้าเส้นแบ่งอธิบายได้</strong> — และในกรณีนี้อธิบายได้ชัด</p><table><thead><tr><th>เมธอด</th><th>ความล้มเหลวเป็นอะไร</th><th>แบบ</th></tr></thead><tbody>
+<tr><td><code>fetchOpen</code></td><td>ข้อยกเว้น — ปกติต้องได้ข้อมูล</td><td>โยน</td></tr>
+<tr><td><code>complete</code></td><td>ผลลัพธ์ที่คาดไว้ — มีหลายแบบ</td><td>คืนค่า</td></tr>
+<tr><td><code>checkHealth</code></td><td>คำตอบ — ไม่ใช่ข้อยกเว้น</td><td>คืนค่า</td></tr>
+<tr><td><code>findByBarcode</code></td><td>ผลลัพธ์ที่เกิดทุกวัน</td><td>คืนค่า</td></tr>
+</tbody></table><p><strong>เกณฑ์ที่ทำให้อธิบายได้</strong></p><pre class="code-vs"><code>ถามว่า "ผลลัพธ์นี้เกิดขึ้นในการใช้งานปกติหรือไม่"
+  เกิด    → คืนค่า
+  ไม่เกิด  → โยน</code></pre><p>แต่มีเงื่อนไขสองข้อที่ต้องมี ไม่งั้นจะกลายเป็นความสับสน</p><table><thead><tr><th>ต้องมี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>เขียนเกณฑ์ไว้ในเอกสารของทีม</td><td>คนใหม่จะได้ตัดสินแบบเดียวกัน</td></tr>
+<tr><td>ดูจากลายเซ็นแล้วรู้ทันที</td><td><code>Future&lt;CompleteOutcome&gt;</code> บอกอยู่แล้วว่าคืนค่า</td></tr>
+</tbody></table><p>ข้อสองสำคัญ — <strong>ลายเซ็นที่คืน <code>sealed class</code> บอกตัวเองอยู่แล้วว่าเป็นแบบคืนค่า</strong> ผู้เรียกไม่ต้องเดา ต่างจากการที่ทั้งสองแบบมีลายเซ็นหน้าตาเหมือนกัน</p><p>สิ่งที่ยอมรับไม่ได้คือเมธอดที่ <em>คืนค่าแต่ก็ยังโยนด้วย</em> ตามหัวข้อ 7 — เพราะลายเซ็นบอกว่าปลอดภัยแล้ว แต่จริง ๆ ไม่</p><p><strong>บทเรียนที่ควรจำ:</strong> คำถามที่ตัดสินไม่ใช่ “แบบไหนดีกว่า” แต่คือ <em>“ผลลัพธ์นี้เป็นเรื่องปกติของงานหรือเปล่า”</em> — และการที่สแกนแล้วไม่เจอเป็นเรื่องปกติที่สุดในคลัง จึงไม่ควรเป็น exception</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>โยนกับคืนค่าใช้ได้ทั้งคู่ ปัญหาอยู่ที่การผสมโดยไม่มีเกณฑ์</li><li>โยนเมื่อล้มเหลวแล้วจัดการรวมที่เดียวได้</li><li>คืนค่าเมื่อมีหลายผลลัพธ์ที่ต้องทำคนละอย่าง</li><li>เกณฑ์คือถามว่าผลลัพธ์นี้เกิดในการใช้งานปกติหรือไม่</li><li>ห้ามให้เมธอดเดียวทั้งคืนค่าและโยนสิ่งที่คาดไว้แล้ว</li><li>บั๊กของเราต้องโยนต่อเสมอ แม้จะเลือกแบบคืนค่า</li><li>ห้ามใช้ <code>null</code> แทนความล้มเหลว</li><li>ใช้ <code>rethrow</code> ไม่ใช่ <code>throw error</code></li><li>ลายเซ็นที่คืน <code>sealed class</code> บอกตัวเองว่าเป็นแบบไหน</li></ul></div><p><strong>บทถัดไป:</strong> 7.11 จะเจาะรูปแบบข้อผิดพลาดมาตรฐานที่ ASP.NET ส่งมา และวิธีอ่านให้ได้ประโยชน์สูงสุด</p></section>

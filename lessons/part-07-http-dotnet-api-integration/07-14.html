@@ -4,19 +4,220 @@
 <title>Safe Retry</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-14 · Flutter + .NET</span><h1>Safe Retry</h1><p>Part 7: Flutter + .NET API</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Safe candidates</a></li><li><a href="#section-2">Retryable failure</a></li><li><a href="#section-3">Exponential backoff + jitter</a></li><li><a href="#section-4">Budget</a></li><li><a href="#section-5">UX</a></li><li><a href="#section-6">Server load</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">กฎตัดสินใจ</a></li></ol></nav>
-<div class="note"><strong>Retry ไม่ใช่ “ลองทุกอย่างอีกครั้ง”:</strong> retry เมื่อ failure ชั่วคราวและ operation ปลอดภัยต่อการทำซ้ำ หรือมี idempotency guarantee เท่านั้น</div>
-<section id="section-1"><h2>1. Safe candidates</h2><p>GET health/list/detail มัก retry ได้ ส่วน POST complete/receive/issue stock อาจทำซ้ำ side effect จึงห้าม auto-retry ถ้ายังไม่มี idempotency key</p></section>
-<section id="section-2"><h2>2. Retryable failure</h2><p>พิจารณา timeout ก่อน connect, SocketException, 408, 429 และบาง 5xx ตาม API policy ไม่ retry 400/401/403/404 แบบอัตโนมัติ</p></section>
-<section id="section-3"><h2>3. Exponential backoff + jitter</h2><pre class="code-vs"><code>final delay = Duration(
-  milliseconds: (300 * math.pow(2, attempt)).round()
-      + random.nextInt(200),
-);
-await Future.delayed(delay);</code></pre><p>jitter ลดการยิงพร้อมกันเมื่อ server กลับมา</p></section>
-<section id="section-4"><h2>4. Budget</h2><p>กำหนด max attempts และเวลารวม เช่น 2 retry ภายใน 10 วินาที เคารพ <code>Retry-After</code> และหยุดเมื่อผู้ใช้ออกจากหน้า/logout</p></section>
-<section id="section-5"><h2>5. UX</h2><p>background refresh retry เงียบได้ช่วงสั้น แต่ command ที่ผลไม่แน่นอนต้องบอกผู้ใช้ว่า “กำลังตรวจสอบผล” ไม่แสดงล้มเหลวเด็ดขาดก่อน reconcile</p></section>
-<section id="section-6"><h2>6. Server load</h2><p>retry storm ทำ outage แย่ลง จึงควรมี backoff, jitter, circuit breaker ระดับระบบเมื่อจำเป็น และ telemetry แยก original request จาก retry attempt</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>POST complete timeout หลัง 8 วินาที จะ retry อัตโนมัติไหม?</p><details><summary>เฉลย</summary><p>ไม่ เว้นแต่ส่ง idempotency key เดิมและ serverรับประกัน dedupe; ทางเลือกคือ query command status ก่อน</p></details></section>
-<section id="section-8"><h2>8. กฎตัดสินใจ</h2><div class="warn">ถามสองข้อก่อน retry: “รู้ไหมว่า server ยังไม่ทำ?” และ “ทำซ้ำแล้วผลเท่าเดิมแน่ไหม?” ถ้าตอบไม่ได้ให้หยุดและ reconcile</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: สองคำถามก่อนลองใหม่</a></li><li><a href="#section-4">คำถามที่หนึ่ง: มีโอกาสได้ผลต่างไหม</a></li><li><a href="#section-5">คำถามที่สอง: ยิงซ้ำปลอดภัยไหม</a></li><li><a href="#section-6">ยืดระยะและสุ่ม</a></li><li><a href="#section-7">ต้องมีจุดจบเสมอ</a></li><li><a href="#section-8">บอกผู้ใช้ว่ากำลังลองใหม่</a></li><li><a href="#section-9">การลองใหม่ที่ดีที่สุดคือไม่ต้องลอง</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ลองใหม่เองโดยไม่ทำให้สถานการณ์แย่ลง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.9 (ชนิดความล้มเหลว) และ 4.11 (การยืดระยะและ jitter)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่าคำขอไหนลองใหม่เองได้ และตั้งจังหวะไม่ให้ซ้ำเติมเซิร์ฟเวอร์</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>เครือข่ายในคลังไม่เสถียร — คำขอที่ล้มเหลวเพราะสัญญาณแวบเดียว มักสำเร็จถ้าลองใหม่ในอีกวินาทีเดียว</p><p>แต่การลองใหม่แบบไม่คิด สร้างปัญหาที่ใหญ่กว่าเดิม</p><table><thead><tr><th>ลองใหม่แบบผิด</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ลองใหม่กับทุกความล้มเหลว</td><td>ยิงคำขอที่รู้อยู่แล้วว่าจะถูกปฏิเสธ</td></tr>
+<tr><td>ลองใหม่กับคำสั่งที่เปลี่ยนข้อมูล</td><td>งานถูกบันทึกหลายครั้ง</td></tr>
+<tr><td>ลองใหม่ทันทีไม่มีการรอ</td><td>ยิงสามครั้งในเสี้ยววินาที ได้ผลเดิมทั้งสามครั้ง</td></tr>
+<tr><td>ทุกเครื่องลองใหม่พร้อมกัน</td><td>เซิร์ฟเวอร์ที่เพิ่งฟื้นล้มซ้ำทันที</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเรื่องที่มองไม่เห็นจากเครื่องเดียว — PDA 40 เครื่องในคลังหลุดพร้อมกัน แล้วกลับมายิงพร้อมกัน</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>retry</td><td>ยิงคำขอเดิมซ้ำ</td></tr>
+<tr><td>backoff</td><td>ยืดระยะรอออกไปทุกครั้งที่ล้มเหลว</td></tr>
+<tr><td>jitter</td><td>สุ่มเวลาเล็กน้อย ไม่ให้ทุกเครื่องยิงพร้อมกัน</td></tr>
+<tr><td>idempotent</td><td>ทำซ้ำแล้วผลเท่ากับทำครั้งเดียว</td></tr>
+<tr><td>attempt</td><td>ครั้งที่ยิง รวมครั้งแรก</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: สองคำถามก่อนลองใหม่</h2><pre class="code-vs"><code>1. ลองใหม่แล้วมีโอกาสได้ผลต่างไหม
+     ไม่มี → อย่าลอง เสียเวลาเปล่า
+
+2. ยิงซ้ำแล้วปลอดภัยไหม
+     ไม่ปลอดภัย → อย่าลองเอง ให้ผู้ใช้ตัดสินใจ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ต้องตอบว่า “ได้” ทั้งสองข้อจึงจะลองใหม่เองได้ — ข้อเดียวไม่พอ</div></section>
+
+<section id="section-4"><h2>4. คำถามที่หนึ่ง: มีโอกาสได้ผลต่างไหม</h2><p>เปิด <code>lib/core/api_failure.dart</code></p><pre class="code-vs"><code>/// ลองใหม่ด้วยคำขอเดิมแล้วมีโอกาสได้ผลต่างไหม
+///
+/// เขียนเป็นรายชื่อที่อนุญาต ไม่ใช่รายชื่อที่ห้าม — ชนิดใหม่ที่เพิ่มมา
+/// จะได้ไม่กลายเป็น "ลองใหม่ได้" โดยอัตโนมัติ
+bool get isRetryable =&gt; switch (this) {
+  ApiFailureKind.network || ApiFailureKind.timeout || ApiFailureKind.server =&gt;
+    true,
+  ApiFailureKind.unauthorized ||
+  ApiFailureKind.forbidden ||
+  ApiFailureKind.notFound ||
+  ApiFailureKind.conflict ||
+  ApiFailureKind.validation ||
+  ApiFailureKind.contract =&gt; false,
+};</code></pre><table><thead><tr><th>ลองใหม่ได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>network</code></td><td>สัญญาณอาจกลับมาแล้ว</td></tr>
+<tr><td><code>timeout</code></td><td>เซิร์ฟเวอร์อาจว่างลงแล้ว</td></tr>
+<tr><td><code>server</code></td><td>ปัญหาภายในอาจเป็นชั่วคราว</td></tr>
+</tbody></table><table><thead><tr><th>ลองใหม่ไม่ได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>unauthorized</code></td><td>token เดิมยังใช้ไม่ได้อยู่ดี</td></tr>
+<tr><td><code>forbidden</code></td><td>สิทธิ์ไม่เปลี่ยนในสามวินาที</td></tr>
+<tr><td><code>validation</code></td><td>ข้อมูลเดิมยังผิดอยู่</td></tr>
+<tr><td><code>conflict</code></td><td>คนอื่นทำไปแล้ว ยิงอีกกี่ครั้งก็ 409</td></tr>
+<tr><td><code>contract</code></td><td>สัญญายังไม่ตรงอยู่ดี</td></tr>
+</tbody></table><p>การเขียนเป็นรายชื่อที่อนุญาตสำคัญกว่าที่เห็น — ถ้าเขียนแบบ <code>kind != unauthorized &amp;&amp; kind != forbidden</code> วันที่เพิ่มชนิดใหม่ มันจะกลายเป็น “ลองใหม่ได้” เงียบ ๆ</p></section>
+
+<section id="section-5"><h2>5. คำถามที่สอง: ยิงซ้ำปลอดภัยไหม</h2><p>เปิด <code>lib/core/api_retry.dart</code></p><pre class="code-vs"><code>/// [isIdempotent] ต้องเป็น true เท่านั้นจึงจะลองใหม่ — คำสั่งที่ยังไม่รู้ผล
+/// ห้ามยิงซ้ำโดยอัตโนมัติ ถ้าไม่มีรหัสคำสั่งกำกับ (4.14)
+Future&lt;T&gt; run&lt;T&gt;(
+  Future&lt;T&gt; Function() action, {
+  required bool isIdempotent,
+}) async {
+  var attempt = 1;
+  while (true) {
+    try {
+      return await action();
+    } on ApiException catch (error) {
+      final canRetry =
+          isIdempotent &amp;&amp; error.kind.isRetryable &amp;&amp; attempt &lt; maxAttempts;
+      if (!canRetry) rethrow;
+      await _sleep(delayForAttempt(attempt));
+      attempt++;
+    }
+  }
+}</code></pre><p>สังเกตว่า <code>isIdempotent</code> เป็น <strong><code>required</code></strong> — ไม่มีค่าตั้งต้น</p><table><thead><tr><th>ถ้ามีค่าตั้งต้นเป็น <code>true</code></th><th>ถ้ามีค่าตั้งต้นเป็น <code>false</code></th></tr></thead><tbody>
+<tr><td>ลืมระบุแล้วคำสั่งถูกยิงซ้ำ — อันตราย</td><td>ลืมระบุแล้วไม่ลองใหม่ — ปลอดภัยแต่ไม่มีใครรู้ว่าลืม</td></tr>
+</tbody></table><p>การบังคับให้ระบุทำให้ <strong>ทุกจุดที่ใช้ต้องคิดเรื่องนี้</strong> ซึ่งเป็นสิ่งที่ต้องการ</p><pre class="code-vs"><code>test('คำสั่งที่ไม่ปลอดภัยต่อการยิงซ้ำ ห้ามลองใหม่เอง', () async {
+  ...
+  await expectLater(
+    policy.run(
+      () async {
+        attempts++;
+        throw const ApiException('server ไม่ตอบหลังส่งคำสั่ง',
+            kind: ApiFailureKind.timeout, outcomeUnknown: true);
+      },
+      isIdempotent: false,
+    ),
+    throwsA(isA&lt;ApiException&gt;()),
+  );
+
+  expect(attempts, 1);
+});</code></pre><p>สังเกตว่าชนิดคือ <code>timeout</code> ซึ่ง <code>isRetryable</code> เป็น <code>true</code> — แต่ยังยิงครั้งเดียว เพราะคำถามที่สองตอบว่าไม่ปลอดภัย</p></section>
+
+<section id="section-6"><h2>6. ยืดระยะและสุ่ม</h2><pre class="code-vs"><code>/// ยืดเป็นทวีคูณ มีเพดาน และสุ่มเล็กน้อย
+///
+/// jitter จำเป็นเพราะ PDA ทั้งคลังมักหลุดพร้อมกัน ถ้าไม่สุ่มก็จะ
+/// กลับมายิงพร้อมกันจนเซิร์ฟเวอร์ล้มซ้ำ
+Duration delayForAttempt(int attempt) {
+  final growth = baseDelay.inMilliseconds * (1 &lt;&lt; (attempt - 1));
+  final capped = min(growth, maxDelay.inMilliseconds);
+  final jitter = _random.nextInt(capped ~/ 4 + 1);
+  return Duration(milliseconds: capped + jitter);
+}</code></pre><table><thead><tr><th>ส่วนประกอบ</th><th>ทำอะไร</th><th>ถ้าไม่มี</th></tr></thead><tbody>
+<tr><td><code>1 &lt;&lt; (attempt - 1)</code></td><td>คูณสองทุกครั้ง</td><td>ยิงถี่เท่าเดิม ซ้ำเติมเซิร์ฟเวอร์</td></tr>
+<tr><td><code>min(..., maxDelay)</code></td><td>ไม่ให้เกินเพดาน</td><td>ครั้งที่สิบต้องรอเป็นนาที</td></tr>
+<tr><td><code>nextInt</code></td><td>สุ่มเพิ่มเล็กน้อย</td><td>ทุกเครื่องยิงพร้อมกัน</td></tr>
+</tbody></table><pre class="code-vs"><code>test('ยืดระยะขึ้นทุกครั้งที่ล้มเหลว', () async {
+  ...
+  expect(delays.map((d) =&gt; d.inMilliseconds), [100, 200, 400]);
+});
+
+test('ยืดได้ไม่เกินเพดาน', () {
+  final policy = RetryPolicy(
+    baseDelay: const Duration(seconds: 1),
+    maxDelay: const Duration(seconds: 3),
+    random: _FixedRandom(),
+  );
+
+  expect(policy.delayForAttempt(10).inMilliseconds, 3000);
+});</code></pre><p>เทสต์ใช้ตัวสุ่มที่ไม่สุ่ม เพื่อให้ได้ผลเหมือนเดิมทุกครั้ง</p><pre class="code-vs"><code>/// สุ่มที่ไม่สุ่ม เพื่อให้เทสต์ได้ผลเหมือนเดิมทุกครั้ง
+class _FixedRandom implements Random {
+  @override
+  int nextInt(int max) =&gt; 0;
+  ...
+}</code></pre></section>
+
+<section id="section-7"><h2>7. ต้องมีจุดจบเสมอ</h2><pre class="code-vs"><code>/// รวมครั้งแรกด้วย — 3 แปลว่ายิงจริงได้มากที่สุด 3 ครั้ง
+final int maxAttempts;</code></pre><p>คอมเมนต์บรรทัดนี้จำเป็น เพราะคำว่า “ลองใหม่ 3 ครั้ง” ตีความได้สองแบบ</p><table><thead><tr><th>ตีความว่า</th><th>ยิงจริงกี่ครั้ง</th></tr></thead><tbody>
+<tr><td>ครั้งแรก + ลองใหม่ 3</td><td>4</td></tr>
+<tr><td>รวมทั้งหมด 3</td><td>3</td></tr>
+</tbody></table><p>ความต่างนี้สำคัญเมื่อคำนวณเวลารอรวม — ถ้าตั้งเวลารอ 30 วินาทีต่อครั้ง การยิง 4 ครั้งแปลว่าผู้ใช้อาจรอถึงสองนาที</p><pre class="code-vs"><code>เวลารอรวมที่แย่ที่สุด = (timeout × maxAttempts) + ผลรวมของเวลาที่ยืด
+                     = (30 × 3) + (0.4 + 0.8)
+                     ≈ 91 วินาที</code></pre><p>ตัวเลขนี้ต้องคำนวณและยอมรับได้ — ไม่ใช่ปล่อยให้เกิดขึ้นแล้วค่อยรู้</p><div class="warn">อย่าลองใหม่ไม่จำกัดครั้ง แม้จะยืดระยะแล้ว — เพราะถ้าเซิร์ฟเวอร์ล่มยาว แอปจะยิงต่อไปเรื่อย ๆ กินแบตของ PDA ทั้งคลัง</div></section>
+
+<section id="section-8"><h2>8. บอกผู้ใช้ว่ากำลังลองใหม่</h2><p>การลองใหม่เงียบ ๆ ทำให้ผู้ใช้เห็นแค่ว่า “ค้างนาน”</p><table><thead><tr><th>ควรบอก</th><th>เมื่อ</th></tr></thead><tbody>
+<tr><td>ไม่ต้องบอก</td><td>ลองใหม่ครั้งแรกที่เร็วมาก</td></tr>
+<tr><td>“กำลังลองใหม่...”</td><td>เริ่มลองครั้งที่สองขึ้นไป</td></tr>
+<tr><td>“ลองแล้ว 3 ครั้ง ยังไม่สำเร็จ”</td><td>หมดโควตาแล้ว</td></tr>
+</tbody></table><pre class="code-vs"><code>final policy = RetryPolicy(
+  sleep: (duration) async {
+    onRetrying?.call();          // แจ้งชั้นบนว่ากำลังจะลองใหม่
+    await Future&lt;void&gt;.delayed(duration);
+  },
+);</code></pre><p>และเมื่อหมดโควตา ข้อความควรบอกด้วยว่าลองไปแล้วกี่ครั้ง — เพราะ “ลองแล้ว 3 ครั้ง” บอกผู้ใช้ว่าไม่ต้องกดลองใหม่เองอีก ปัญหาอยู่ที่อื่น</p></section>
+
+<section id="section-9"><h2>9. การลองใหม่ที่ดีที่สุดคือไม่ต้องลอง</h2><table><thead><tr><th>แทนที่จะลองใหม่</th><th>ทำอะไรได้</th></tr></thead><tbody>
+<tr><td>เก็บคำสั่งไว้ส่งทีหลัง</td><td>ผู้ใช้ทำงานต่อได้เลย ไม่ต้องรอ (Part 12)</td></tr>
+<tr><td>ให้ผู้ใช้กดลองใหม่เอง</td><td>เขารู้ดีกว่าว่าตอนนี้สัญญาณดีหรือยัง</td></tr>
+<tr><td>โหลดข้อมูลใหม่แทนการส่งซ้ำ</td><td>สำหรับกรณีที่ไม่รู้ผล (4.13)</td></tr>
+</tbody></table><p>แถวกลางสำคัญบน PDA — คนหน้างานรู้ว่าตัวเองอยู่มุมอับสัญญาณ และเดินออกมาสองก้าวแล้วกดใหม่ได้ผลกว่าให้แอปลองเองสามครั้งอยู่ที่เดิม</p><p>ดังนั้นการลองใหม่อัตโนมัติควรจำกัดอยู่แค่ <strong>สองสามครั้งแรกที่เร็วมาก</strong> แล้วปล่อยให้ผู้ใช้ตัดสินใจ ไม่ใช่พยายามลองให้ครบทุกทางเอง</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ข้อมูลถูกบันทึกหลายครั้ง</td><td>ลองใหม่กับคำสั่งที่เปลี่ยนข้อมูล</td><td>ต้องมีรหัสคำสั่งก่อน (7.15)</td></tr>
+<tr><td>ยิงคำขอที่รู้ว่าจะถูกปฏิเสธ</td><td>ลองใหม่กับทุกชนิด</td><td>ตรวจ <code>isRetryable</code></td></tr>
+<tr><td>เซิร์ฟเวอร์ล้มซ้ำทันทีที่ฟื้น</td><td>ทุกเครื่องยิงพร้อมกัน</td><td>ใส่ jitter</td></tr>
+<tr><td>รอนานมากในครั้งที่หลัง ๆ</td><td>ไม่มีเพดาน</td><td>ใส่ <code>maxDelay</code></td></tr>
+<tr><td>แบตหมดเร็วตอนเน็ตมีปัญหา</td><td>ลองใหม่ไม่จำกัดครั้ง</td><td>จำกัดจำนวนครั้ง</td></tr>
+<tr><td>ผู้ใช้เห็นแค่ว่าค้างนาน</td><td>ลองใหม่เงียบ ๆ</td><td>แจ้งเมื่อลองครั้งที่สองขึ้นไป</td></tr>
+<tr><td>ชนิดใหม่กลายเป็นลองใหม่ได้เอง</td><td>เขียนเป็นรายชื่อที่ห้าม</td><td>เขียนเป็นรายชื่อที่อนุญาต</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ทีมจะเพิ่มการลองใหม่อัตโนมัติให้สี่คำขอ</p><table><thead><tr><th>#</th><th>คำขอ</th><th>method</th></tr></thead><tbody>
+<tr><td>1</td><td>โหลดรายการงาน</td><td>GET</td></tr>
+<tr><td>2</td><td>ปิดงาน พร้อมรหัสคำสั่ง</td><td>POST</td></tr>
+<tr><td>3</td><td>ปิดงาน ไม่มีรหัสคำสั่ง</td><td>POST</td></tr>
+<tr><td>4</td><td>ค้นหางาน ผ่าน endpoint ของตาราง</td><td>POST</td></tr>
+</tbody></table><ol><li>ตัดสินว่าอันไหนลองใหม่เองได้</li><li>เขียนโค้ดเรียกของอันที่ 1 และ 2</li><li>อันที่ 4 มีจุดที่ต้องระวังเป็นพิเศษ — อธิบาย</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — อันไหนลองใหม่ได้</strong></p><table><thead><tr><th>#</th><th>ลองใหม่เองได้ไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td><strong>ได้</strong></td><td>GET ไม่เปลี่ยนอะไร ยิงกี่ครั้งก็ปลอดภัย</td></tr>
+<tr><td>2</td><td><strong>ได้</strong></td><td>มีรหัสคำสั่ง เซิร์ฟเวอร์กันซ้ำให้</td></tr>
+<tr><td>3</td><td><strong>ไม่ได้</strong></td><td>ไม่มีอะไรกันการบันทึกซ้ำ</td></tr>
+<tr><td>4</td><td>ได้ แต่ต้องระวัง</td><td>ดูข้อ 3</td></tr>
+</tbody></table><p>ข้อ 2 กับ 3 เป็นคำขอเดียวกันทุกอย่าง ต่างกันแค่มีรหัสคำสั่งหรือไม่ — <strong>ซึ่งเปลี่ยนคำตอบจากได้เป็นไม่ได้</strong></p><p>นี่แสดงว่าความปลอดภัยของการลองใหม่ ไม่ได้ขึ้นกับ method อย่างเดียว</p><p><strong>ข้อ 2 — โค้ด</strong></p><pre class="code-vs"><code>// 1. โหลดรายการ — GET ปลอดภัยเสมอ
+@override
+Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen() =&gt; _retry.run(
+  () async {
+    final json = await api.getJson('/api/WMS/mobile_tasks');
+    return _parseTasks(json);
+  },
+  isIdempotent: true,
+);</code></pre><pre class="code-vs"><code>// 2. ปิดงาน — ปลอดภัยเพราะรหัสคำสั่งเดียวกันถูกส่งทุกครั้ง
+@override
+Future&lt;TaskCompletion&gt; complete(String id, {required String commandId}) =&gt;
+    _retry.run(
+      () async {
+        final json = await api.postJson(
+          '/api/WMS/mobile_tasks/$id/complete',
+          const {},
+          headers: {'Idempotency-Key': commandId},
+        );
+        return _parseCompletion(json, id);
+      },
+      // ปลอดภัยเพราะ commandId ถูกสร้างนอก closure นี้
+      // ทุกครั้งที่ลองใหม่จึงส่งรหัสเดิม
+      isIdempotent: true,
+    );</code></pre><p>คอมเมนต์สองบรรทัดนั้นสำคัญ — <strong>ถ้า <code>commandId</code> ถูกสร้างข้างใน closure จะได้รหัสใหม่ทุกครั้งที่ลองใหม่ ซึ่งทำให้ระบบกันซ้ำใช้ไม่ได้เลย</strong></p><pre class="code-vs"><code>// อันตราย — รหัสใหม่ทุกครั้งที่ลองใหม่
+isIdempotent: true,
+() async {
+  final commandId = createCommandId();     // อยู่ผิดที่
+  ...
+}</code></pre><p>บั๊กนี้มองไม่เห็นจากการอ่านเผิน ๆ และจะเจอเฉพาะตอนที่เน็ตไม่ดีจนเกิดการลองใหม่จริง</p><p><strong>ข้อ 3 — จุดที่ต้องระวังของอันที่ 4</strong></p><p>การค้นหาผ่าน POST มีสองเรื่องซ้อนกัน</p><p><em>เรื่องที่หนึ่ง — ธง <code>outcomeUnknown</code> ตั้งผิด</em></p><p>ตามที่ 7.12 หัวข้อ 7 บอกไว้ <code>postJson</code> ตั้งว่าไม่รู้ผลเสมอ ทั้งที่การค้นหาไม่ได้เปลี่ยนอะไร</p><pre class="code-vs"><code>final json = await api.postJson(
+  '/api/WMS/mobile_tasks/query',
+  { ... },
+  mutates: false,          // บอกว่าไม่ได้เปลี่ยนข้อมูล
+);</code></pre><p><em>เรื่องที่สอง — การลองใหม่ทับกับตัวนับรุ่น</em></p><p>นี่คือจุดที่ระวังยากกว่า</p><pre class="code-vs"><code>0.0s  ผู้ใช้พิมพ์ "PAL" → search() เริ่ม generation 5
+0.2s  ล้มเหลว → เริ่มรอ 400ms เพื่อลองใหม่
+0.3s  ผู้ใช้พิมพ์ "PALL" → search() เริ่ม generation 6
+0.6s  การลองใหม่ของ generation 5 ยิงออกไป      ← ยังยิงอยู่ทั้งที่ล้าสมัยแล้ว
+1.1s  ผลของ generation 5 กลับมา → ถูกทิ้งเพราะรุ่นไม่ตรง ✓</code></pre><table><thead><tr><th></th><th>ผลที่ได้</th></tr></thead><tbody>
+<tr><td>ความถูกต้อง</td><td>ปลอดภัย — ตัวนับรุ่นทิ้งผลให้</td></tr>
+<tr><td>ความสิ้นเปลือง</td><td><strong>เสีย</strong> — ยิงคำขอที่ไม่มีใครต้องการแล้ว</td></tr>
+</tbody></table><p>ทางแก้คือให้การลองใหม่รู้ว่าควรหยุด</p><pre class="code-vs"><code>await _retry.run(
+  () async { ... },
+  isIdempotent: true,
+  // หยุดลองใหม่ถ้าไม่มีใครรอผลนี้แล้ว
+  shouldContinue: () =&gt; generation == _generation,
+);</code></pre><pre class="code-vs"><code>final canRetry = isIdempotent &amp;&amp;
+    error.kind.isRetryable &amp;&amp;
+    attempt &lt; maxAttempts &amp;&amp;
+    (shouldContinue?.call() ?? true);</code></pre><p><strong>บทเรียนที่ควรจำ:</strong> การลองใหม่กับตัวนับรุ่นแก้คนละปัญหา — ตัวนับรุ่นกันผลเก่าเขียนทับ ส่วนการหยุดลองใหม่กันการยิงเปล่า และเมื่อใช้ทั้งสองอย่างพร้อมกัน ต้องให้ตัวหนึ่งรู้จักอีกตัว ไม่งั้นจะปลอดภัยแต่สิ้นเปลือง</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ต้องตอบได้ทั้งสองข้อ — มีโอกาสได้ผลต่างไหม และยิงซ้ำปลอดภัยไหม</li><li>เขียนรายชื่อที่ลองใหม่ได้แบบอนุญาต ไม่ใช่แบบห้าม</li><li>บังคับให้ระบุว่าปลอดภัยต่อการยิงซ้ำหรือไม่ ไม่มีค่าตั้งต้น</li><li>สร้างรหัสคำสั่งนอกส่วนที่ถูกลองใหม่ ไม่ใช่ข้างใน</li><li>ยืดระยะเป็นทวีคูณ มีเพดาน และใส่ jitter</li><li>จำกัดจำนวนครั้ง และคำนวณเวลารอรวมที่แย่ที่สุดไว้</li><li>บอกผู้ใช้เมื่อลองครั้งที่สองขึ้นไป</li><li>การลองใหม่ที่ดีที่สุดคือให้ผู้ใช้ตัดสินใจ หรือเก็บไว้ส่งทีหลัง</li></ul></div><p><strong>บทถัดไป:</strong> 7.15 จะทำให้คำสั่งที่เปลี่ยนข้อมูลส่งซ้ำได้อย่างปลอดภัย ซึ่งเป็นเงื่อนไขที่ขาดไปในบทนี้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

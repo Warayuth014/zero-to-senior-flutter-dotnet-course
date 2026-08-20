@@ -1,20 +1,172 @@
-<div class="note"><strong>Dependency injection:</strong> รับ <code>http.Client</code> จากภายนอก ทำให้ production ใช้ client จริง แต่ test ควบคุม status/body/exception ได้โดยไม่เปิด server</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ApiClient {
-  ApiClient({http.Client? client})
-      : _client = client ?? http.Client(),
-        _ownsClient = client == null;
-  final http.Client _client;
-  final bool _ownsClient;
-}</code></pre></section>
-<section><h2>2. Ownership</h2><p>ผู้สร้าง dependency เป็นผู้ dispose: ถ้า ApiClient สร้าง client เองจึง close เอง แต่ถ้ารับ shared client จาก composition root ต้องไม่ปิดแทนเจ้าของ</p></section>
-<section><h2>3. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
-  expect(request.url.path, '/api/WMS/tasks');
-  expect(request.headers['Authorization'], 'Bearer test-token');
-  return http.Response('{"items":[],"totalCount":0}', 200);
-});
-final api = TasksApi(ApiClient(client: client));</code></pre></section>
-<section><h2>4. ทดสอบ request ด้วย</h2><p>อย่าตรวจแค่ model ที่คืนมา ให้ assert method, URL, encoded query, header และ JSON body ด้วย เพราะ bug integration จำนวนมากอยู่ฝั่ง request</p></section>
-<section><h2>5. ทดสอบ failure table</h2><ul><li>200 valid/invalid JSON</li><li>204 empty</li><li>400 ProblemDetails</li><li>401/403</li><li>500 HTML proxy page</li><li>timeout และ ClientException</li></ul></section>
-<section><h2>6. ไฟล์จริง</h2><p><code>wms_absolute_mobile/lib/core/api_client.dart</code> และ connection probe ของทั้งสองแอปรับ optional client อยู่แล้ว จึงเป็น seam สำหรับ test โดยไม่เปลี่ยน production behavior</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เขียน test ที่พิสูจน์ว่า barcode <code>A&amp;B 01</code> ถูก encode ใน query และ server decode กลับค่าเดิม</p><details><summary>แนวคำตอบ</summary><p>ตรวจ <code>request.url.queryParameters['search']</code> ไม่ตรวจ raw URL string ซึ่งอ่าน percent encoding ยาก</p></details></section>
-<section><h2>8. หลักจำ</h2><div class="success">Inject ที่ I/O boundary, assert request + response mapping และไม่มี network จริงใน unit test</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ทดสอบการคุยกับเซิร์ฟเวอร์โดยไม่ต้องมีเซิร์ฟเวอร์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.5 (header) และ 4.5 (การฉีดสิ่งที่ต้องใช้เข้ามา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนเทสต์ที่ควบคุมคำตอบของเซิร์ฟเวอร์ได้ทุกกรณี รวมถึงกรณีที่ทำให้เกิดจริงไม่ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่คุยกับเซิร์ฟเวอร์เป็นส่วนที่มีกรณีขอบเยอะที่สุด แต่ทดสอบยากที่สุด</p><table><thead><tr><th>กรณีที่ต้องทดสอบ</th><th>ทำให้เกิดจริงได้ไหม</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ตอบ 409</td><td>ยาก — ต้องหาสถานการณ์ที่ชนกันพอดี</td></tr>
+<tr><td>เน็ตหลุดกลางคัน</td><td>ต้องถอดสาย หรือปิด Wi-Fi ตอนที่กำลังยิงพอดี</td></tr>
+<tr><td>เซิร์ฟเวอร์ตอบ HTML แทน JSON</td><td>เกือบเป็นไปไม่ได้ — ต้องรอให้ระบบเครือข่ายมีปัญหา</td></tr>
+<tr><td>ตอบช้าจนหมดเวลารอ</td><td>ต้องทำให้เซิร์ฟเวอร์ช้าจริง</td></tr>
+</tbody></table><p>ผลคือคนส่วนใหญ่ทดสอบแค่กรณีที่สำเร็จ แล้วกรณีที่เหลือไปเจอครั้งแรกที่หน้างาน</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>http.Client</code></td><td>ตัวที่ทำหน้าที่ส่ง HTTP จริง</td></tr>
+<tr><td><code>MockClient</code></td><td>ตัวปลอมที่เราเขียนคำตอบเองได้</td></tr>
+<tr><td>injection</td><td>การส่งสิ่งที่ต้องใช้เข้ามาแทนที่จะสร้างเอง</td></tr>
+<tr><td>seam</td><td>จุดที่แทนของจริงด้วยของปลอมได้</td></tr>
+<tr><td>ownership</td><td>ใครเป็นเจ้าของ ก็คือคนที่ต้องปิด</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เปิดช่องไว้ที่จุดที่ติดต่อโลกภายนอก</h2><pre class="code-vs"><code>โค้ดของเรา ──→ [ช่อง] ──→ เครือข่ายจริง
+                  │
+                  └──────→ ของปลอมที่เราคุมได้ (ตอนเทสต์)</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เปิดช่องไว้ที่จุดที่ต่ำที่สุดที่ยังเป็นโค้ดของเรา — ยิ่งต่ำ ยิ่งทดสอบของจริงได้มาก</div><p>ใน lab ช่องนั้นคือพารามิเตอร์เดียวใน constructor</p><pre class="code-vs"><code>ApiClient({required this.baseUrl, http.Client? client})
+  : _client = client ?? http.Client();</code></pre><p>ตอนใช้งานจริงไม่ต้องส่งอะไร มันสร้างของจริงให้เอง ส่วนตอนเทสต์ส่งของปลอมเข้าไป</p></section>
+
+<section><h2>4. เขียนเทสต์แรก</h2><p>เปิด <code>test/api_client_test.dart</code></p><pre class="code-vs"><code>/// สร้าง ApiClient ที่ตอบตามที่เรากำหนด โดยไม่ต้องมี server จริง
+///
+/// [onRequest] เก็บคำขอที่ถูกส่งไว้ให้ตรวจได้ — เพราะบั๊กจำนวนมาก
+/// อยู่ที่ "ส่งอะไรไป" ไม่ใช่ "แปลผลอย่างไร"
+ApiClient clientThatReturns(
+  http.Response Function(http.Request request) respond, {
+  void Function(http.Request request)? onRequest,
+  String baseUrl = 'http://wms.local:5000',
+}) =&gt; ApiClient(
+  baseUrl: baseUrl,
+  client: MockClient((request) async {
+    onRequest?.call(request);
+    return respond(request);
+  }),
+);</code></pre><p>ตัวช่วยตัวเดียวนี้ทำให้เทสต์ที่เหลือสั้นและอ่านง่าย</p><pre class="code-vs"><code>test('อ่าน JSON ที่เป็นภาษาไทยได้ถูกต้อง', () async {
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse({'supplierName': 'บริษัท ซัพพลาย จำกัด'}, 200),
+  );
+
+  final json = await api.getJson('/api/WMS/inbound');
+
+  expect(json['supplierName'], 'บริษัท ซัพพลาย จำกัด');
+});</code></pre><p>ไม่มีเซิร์ฟเวอร์ ไม่มีเครือข่าย และรันจบในไม่กี่มิลลิวินาที</p></section>
+
+<section><h2>5. ตรวจสิ่งที่ส่งไป ไม่ใช่แค่สิ่งที่ได้กลับ</h2><p>นี่คือส่วนที่คนมักข้าม และเป็นที่ที่บั๊กซ่อนอยู่เยอะที่สุด</p><pre class="code-vs"><code>test('POST ส่ง body เป็น JSON และแนบ header เพิ่มที่ส่งเข้ามา', () async {
+  http.Request? sent;
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse(const &lt;String, Object&gt;{}, 200),
+    onRequest: (request) =&gt; sent = request,
+  );
+
+  await api.postJson(
+    '/api/WMS/mobile_tasks/T-001/complete',
+    const {'quantity': 12},
+    headers: {'Idempotency-Key': 'cmd-8821'},
+  );
+
+  expect(sent!.method, 'POST');
+  expect(jsonDecode(sent!.body), {'quantity': 12});
+  expect(sent!.headers['Idempotency-Key'], 'cmd-8821');
+});</code></pre><table><thead><tr><th>สิ่งที่เทสต์นี้จับได้</th></tr></thead><tbody>
+<tr><td>เผลอใช้ GET แทน POST</td></tr>
+<tr><td>ลืม <code>jsonEncode</code> แล้วส่ง Map ตรง ๆ (7.4)</td></tr>
+<tr><td>รหัสคำสั่งไม่ถูกส่งไป — ซึ่งทำให้ระบบกันซ้ำใช้ไม่ได้เลย (7.15)</td></tr>
+</tbody></table><p>สามข้อนี้ถ้าไม่ตรวจ จะไม่มีทางรู้จนกว่าจะเจอที่หน้างาน — เพราะเทสต์ที่ตรวจแค่ผลลัพธ์จะผ่านหมด ในเมื่อของปลอมตอบสำเร็จอยู่แล้วไม่ว่าจะส่งอะไรไป</p><p>และเทสต์ตัวหนึ่งใน lab ตรึงบั๊กที่ 7.5 พูดถึงไว้โดยเฉพาะ</p><pre class="code-vs"><code>test('เข้าสู่ระบบแล้วต้องแนบ token และอ่านค่าล่าสุดทุกครั้ง', () async {
+  ...
+  await api.getJson('/api/WMS/mobile_tasks');
+
+  // จำลองการออกจากระบบ — คำขอถัดไปต้องไม่มี token เก่าติดไป
+  api.authToken = null;
+  await api.getJson('/api/WMS/mobile_tasks');
+
+  expect(tokens, ['Bearer token-คนแรก', null]);
+});</code></pre></section>
+
+<section><h2>6. ทดสอบกรณีที่ทำให้เกิดจริงไม่ได้</h2><pre class="code-vs"><code>test('ได้ HTML แทน JSON ต้องไม่พังแบบอธิบายไม่ได้', () async {
+  // เกิดจริงเมื่อตัวกลางในเครือข่ายคืนหน้าเข้าสู่ระบบขององค์กร
+  final api = clientThatReturns(
+    (_) =&gt; http.Response('&lt;html&gt;&lt;body&gt;Login&lt;/body&gt;&lt;/html&gt;', 500),
+  );
+
+  await expectLater(
+    api.getJson('/api/WMS/mobile_tasks'),
+    throwsA(isA&lt;ApiException&gt;()
+        .having((e) =&gt; e.kind, 'kind', ApiFailureKind.server)),
+  );
+});</code></pre><pre class="code-vs"><code>test('POST ที่เน็ตหลุด ไม่รู้ว่า server ทำไปแล้วหรือยัง', () async {
+  final api = ApiClient(
+    baseUrl: 'http://wms.local',
+    client: MockClient((_) async =&gt; throw const SocketException('ไม่มีเส้นทาง')),
+  );
+
+  await expectLater(
+    api.postJson('/api/WMS/mobile_tasks/T-001/complete', const {}),
+    throwsA(isA&lt;ApiException&gt;()
+        .having((e) =&gt; e.outcomeUnknown, 'outcomeUnknown', isTrue)),
+  );
+});</code></pre><p>สังเกตว่าของปลอม <strong>โยน exception ได้</strong> ไม่ใช่แค่ตอบกลับ ซึ่งทำให้จำลองเน็ตหลุดได้โดยไม่ต้องถอดสาย</p><p>และเทสต์คู่นี้ตรึงข้อสรุปสำคัญของ 7.4 ไว้ — GET กับ POST ตั้ง <code>outcomeUnknown</code> ต่างกัน ซึ่งเป็นสิ่งที่ 4.13 เอาไปใช้ตัดสินว่าจะย้อนกลับหรือไปตรวจสอบ</p></section>
+
+<section><h2>7. รายการกรณีที่ควรครอบ</h2><table><thead><tr><th>กลุ่ม</th><th>กรณี</th></tr></thead><tbody>
+<tr><td>คำขอ</td><td>method, path, header, body ที่ส่งไป</td></tr>
+<tr><td>สำเร็จ</td><td>200 พร้อมข้อมูล, 200 ภาษาไทย, 204 ไม่มีเนื้อหา</td></tr>
+<tr><td>ล้มเหลวที่เซิร์ฟเวอร์บอก</td><td>400 พร้อมข้อผิดพลาดรายช่อง, 401, 403, 409, 500</td></tr>
+<tr><td>ล้มเหลวที่รูปแบบ</td><td>HTML แทน JSON, JSON ที่โครงผิด</td></tr>
+<tr><td>ล้มเหลวที่การเชื่อมต่อ</td><td>เน็ตหลุดตอน GET, เน็ตหลุดตอน POST, หมดเวลารอ</td></tr>
+</tbody></table><p>สังเกตว่าสามกลุ่มล่างเป็นกลุ่มที่ทำให้เกิดจริงยาก — และเป็นกลุ่มที่ทำให้แอปพังที่หน้างานมากที่สุด</p></section>
+
+<section><h2>8. ใครเป็นคนปิด client</h2><p>คำถามเรื่องความเป็นเจ้าของกลับมาอีกครั้ง เหมือนใน 4.12</p><pre class="code-vs"><code>ApiClient({required this.baseUrl, http.Client? client})
+  : _client = client ?? http.Client();
+...
+void close() =&gt; _client.close();</code></pre><table><thead><tr><th>สถานการณ์</th><th>ใครควรปิด</th></tr></thead><tbody>
+<tr><td><code>ApiClient</code> สร้าง client เอง</td><td><code>ApiClient</code> ปิดเอง — ถูกต้อง</td></tr>
+<tr><td>รับ client จากข้างนอกมา</td><td><strong>เจ้าของเดิม</strong> ไม่ใช่ <code>ApiClient</code></td></tr>
+</tbody></table><p>โค้ดข้างบนปิดทุกกรณี ซึ่งเป็นปัญหาถ้ามีการใช้ client ตัวเดียวร่วมกันหลายที่ — ปิดจากที่หนึ่งแล้วอีกที่จะใช้ไม่ได้</p><pre class="code-vs"><code>// เข้มขึ้น — จำไว้ว่าใครสร้าง
+ApiClient({required this.baseUrl, http.Client? client})
+  : _client = client ?? http.Client(),
+    _ownsClient = client == null;
+
+void close() {
+  if (_ownsClient) _client.close();   // ปิดเฉพาะตัวที่สร้างเอง
+}</code></pre><p>ในเทสต์เรื่องนี้ไม่กระทบ เพราะ <code>MockClient</code> ไม่ได้ถือทรัพยากรจริง — แต่ในแอปที่ใช้ client ร่วมกันเพื่อใช้การเชื่อมต่อซ้ำ การปิดผิดตัวทำให้คำขอถัดไปล้มเหลวโดยไม่มีเหตุผลที่ชัดเจน</p></section>
+
+<section><h2>9. อย่าเปิดช่องสูงเกินไป</h2><p>ทางเลือกที่ดูง่ายกว่าคือปลอมที่ระดับ <code>ApiClient</code> เลย</p><pre class="code-vs"><code>class FakeApiClient implements JsonApi {
+  @override
+  Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(String path) async =&gt; {'items': []};
+}</code></pre><table><thead><tr><th></th><th>ปลอมที่ <code>http.Client</code></th><th>ปลอมที่ <code>JsonApi</code></th></tr></thead><tbody>
+<tr><td>ทดสอบอะไรได้บ้าง</td><td>รหัสตอบกลับ, header, การแปลง JSON, timeout</td><td>เฉพาะตรรกะของชั้นบน</td></tr>
+<tr><td>เหมาะกับทดสอบ</td><td><code>ApiClient</code> เอง</td><td>repository และ store</td></tr>
+</tbody></table><p>ทั้งสองแบบมีที่ใช้ และควรมีทั้งคู่</p><pre class="code-vs"><code>ApiClient       ← ทดสอบด้วย MockClient      (api_client_test.dart)
+repository      ← ทดสอบด้วย JsonApi ปลอม    (task_repository_test.dart)
+store           ← ทดสอบด้วย repository ปลอม (task_store_test.dart)</code></pre><p>แต่ละชั้นทดสอบด้วยของปลอมของชั้นที่อยู่ต่ำกว่าตัวเองหนึ่งชั้น ซึ่งตรงกับโครงใน 7.1 พอดี</p><div class="warn">ถ้าปลอมที่ระดับสูงอย่างเดียว จะไม่มีอะไรทดสอบว่ารหัส 409 ถูกแปลงเป็นชนิดที่ถูกต้อง — เพราะชั้นนั้นถูกข้ามไปทั้งชั้น</div></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทดสอบได้แต่กรณีที่สำเร็จ</td><td>ไม่มีช่องให้แทนของจริง</td><td>รับ client ผ่าน constructor</td></tr>
+<tr><td>เทสต์ช้าและแดงเป็นครั้งคราว</td><td>ยิงเข้าเซิร์ฟเวอร์จริง</td><td>ใช้ของปลอม</td></tr>
+<tr><td>ส่งคำขอผิดแต่เทสต์เขียว</td><td>ตรวจแค่ผลลัพธ์</td><td>ตรวจคำขอที่ส่งไปด้วย</td></tr>
+<tr><td>รหัสคำสั่งหายไปโดยไม่มีใครรู้</td><td>ไม่ได้ตรวจ header ที่ส่ง</td><td>ตรวจ</td></tr>
+<tr><td>คำขอถัดไปล้มเหลวหลังปิด client</td><td>ปิด client ที่คนอื่นเป็นเจ้าของ</td><td>ปิดเฉพาะตัวที่สร้างเอง</td></tr>
+<tr><td>ไม่มีอะไรทดสอบการแปลงรหัสตอบกลับ</td><td>ปลอมที่ระดับสูงเกินไป</td><td>ปลอมที่ <code>http.Client</code> ด้วย</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมพบว่าคำขอค้นหาที่มีรหัส <code>A&amp;B 01</code> ได้ผลไม่ตรง แต่ไม่รู้ว่าปัญหาอยู่ฝั่งแอปหรือฝั่งเซิร์ฟเวอร์</p><ol><li>เขียนเทสต์ที่พิสูจน์ว่าฝั่งแอปส่งไปถูก</li><li>อธิบายว่าทำไมไม่ควรตรวจด้วยการเทียบ URL ทั้งข้อความ</li><li>ถ้าเทสต์ผ่าน แต่ของจริงยังผิด สรุปได้ว่าอย่างไร และควรทำอะไรต่อ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — เทสต์</strong></p><pre class="code-vs"><code>test('รหัสที่มีอักขระพิเศษต้องถูก encode และถอดกลับได้ค่าเดิม', () async {
+  http.Request? sent;
+  final api = clientThatReturns(
+    (_) =&gt; jsonResponse({'items': &lt;Object&gt;[]}, 200),
+    onRequest: (request) =&gt; sent = request,
+  );
+
+  await api.getJson('/api/WMS/mobile_tasks?search=${Uri.encodeQueryComponent('A&amp;B 01')}');
+
+  // ตรวจค่าที่ถอดกลับแล้ว ไม่ใช่ข้อความดิบ
+  expect(sent!.url.queryParameters['search'], 'A&amp;B 01');
+  expect(sent!.url.queryParameters.keys, ['search']);
+});</code></pre><p>บรรทัดสุดท้ายสำคัญ — <strong>ตรวจว่ามี query แค่ตัวเดียว</strong> เพราะถ้า <code>&amp;</code> ไม่ถูก encode มันจะกลายเป็นสองพารามิเตอร์ ซึ่งเป็นอาการที่โจทย์บอกพอดี</p><pre class="code-vs"><code>?search=A&amp;B 01
+  → queryParameters = {'search': 'A', 'B 01': ''}    ← สองตัว
+?search=A%26B+01
+  → queryParameters = {'search': 'A&amp;B 01'}          ← ตัวเดียว ถูกต้อง</code></pre><p><strong>ข้อ 2 — ทำไมไม่เทียบ URL ทั้งข้อความ</strong></p><pre class="code-vs"><code>// เปราะ
+expect(sent!.url.toString(),
+    'http://wms.local:5000/api/WMS/mobile_tasks?search=A%26B+01');</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>encode ได้หลายแบบที่ถูกต้องเท่ากัน</td><td>ช่องว่างเป็น <code>+</code> หรือ <code>%20</code> ก็ถูกทั้งคู่</td></tr>
+<tr><td>ลำดับ query ไม่รับประกัน</td><td>เพิ่มพารามิเตอร์ที่สองแล้วเทสต์แดงทั้งที่ถูก</td></tr>
+<tr><td>อ่านไม่ออกว่าตรวจอะไร</td><td><code>%26</code> ต้องแปลในหัวก่อนถึงจะรู้ว่าคือ <code>&amp;</code></td></tr>
+</tbody></table><p>การตรวจที่ <code>queryParameters</code> ตรวจ <em>ความหมาย</em> ส่วนการตรวจข้อความตรวจ <em>วิธีเขียน</em> — และวิธีเขียนที่ต่างกันอาจถูกต้องเท่ากัน</p><p>เป็นหลักเดียวกับ 6.3 — ผ่อนได้กับรูปแบบการเขียน แต่ห้ามผ่อนกับความหมาย</p><p><strong>ข้อ 3 — เทสต์ผ่านแต่ของจริงยังผิด</strong></p><p>สรุปได้ทันทีว่า <strong>ฝั่งแอปส่งไปถูกแล้ว ปัญหาอยู่ฝั่งเซิร์ฟเวอร์หรือระหว่างทาง</strong></p><p>ซึ่งเป็นข้อมูลที่มีค่ามาก เพราะมันเปลี่ยนคำถามจาก “ใครผิด” เป็น “ผิดตรงไหนหลังจากที่เราส่งไปแล้ว”</p><p>สิ่งที่ควรทำต่อ เรียงจากถูกที่สุด</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ยิง URL เดียวกันด้วยเครื่องมือทดสอบ API</td><td>ถ้าผิดเหมือนกัน แปลว่าเซิร์ฟเวอร์ ไม่ใช่แอป</td></tr>
+<tr><td>2</td><td>ดู log ฝั่งเซิร์ฟเวอร์ว่ารับค่าอะไรไป</td><td>แยก "ระหว่างทางเพี้ยน" ออกจาก "เซิร์ฟเวอร์อ่านผิด"</td></tr>
+<tr><td>3</td><td>ถ้าค่าที่เซิร์ฟเวอร์รับถูก แต่ผลผิด</td><td>ปัญหาอยู่ที่การค้นในฐานข้อมูล</td></tr>
+</tbody></table><p>ขั้นที่ 1 สำคัญเพราะมันตัดตัวแปรทั้งหมดที่เป็นของแอปออกไป — และถ้าเครื่องมือทดสอบให้ผลถูกต้อง แต่แอปไม่ถูก แปลว่าเทสต์เรายังตรวจไม่ครบ ต้องกลับมาดูว่าของจริงส่งอะไรต่างจากที่เทสต์คิด</p><p><strong>บทเรียนที่ควรจำ:</strong> เทสต์ที่ตรวจคำขอมีคุณค่ามากกว่าการจับบั๊ก — มันทำให้ <em>ตัดฝั่งหนึ่งออกจากการสงสัยได้</em> ซึ่งในระบบที่มีสองทีมดูแลคนละฝั่ง เป็นสิ่งที่ประหยัดเวลาได้มากที่สุด</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>เปิดช่องรับ client ผ่าน constructor เพื่อให้แทนของจริงได้ตอนเทสต์</li><li>ของปลอมตอบกลับได้และโยน exception ได้ จึงจำลองเน็ตหลุดได้</li><li>ตรวจคำขอที่ส่งไปด้วย ไม่ใช่แค่ผลลัพธ์ที่ได้</li><li>กรณีที่ทำให้เกิดจริงยาก คือกรณีที่ทำให้แอปพังที่หน้างานมากที่สุด</li><li>ตรวจ <code>queryParameters</code> ไม่ใช่เทียบ URL ทั้งข้อความ</li><li>ปิดเฉพาะ client ที่สร้างเอง</li><li>แต่ละชั้นทดสอบด้วยของปลอมของชั้นที่ต่ำกว่าหนึ่งชั้น</li><li>เทสต์ที่ตรวจคำขอ ช่วยตัดฝั่งหนึ่งออกจากการสงสัยได้</li></ul></div><p><strong>บทถัดไป:</strong> 7.7 จะแยกความล้มเหลวของการเชื่อมต่อออกเป็นชนิด ๆ เพราะ “เชื่อมต่อไม่ได้” อย่างเดียวไม่พอให้ผู้ใช้ทำอะไรต่อได้</p></section>

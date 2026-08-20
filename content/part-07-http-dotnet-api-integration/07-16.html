@@ -1,14 +1,168 @@
-<div class="note"><strong>Health probe ต้องพิสูจน์ identity:</strong> การได้ HTTP 200 ไม่พอ เพราะ proxy, captive portal หรือ service คนละตัวอาจตอบพอร์ตเดียวกัน</div>
-<section><h2>1. Endpoint contract</h2><pre class="code-vs"><code>{
-  "service": "wms-mobile-api",
-  "status": "healthy",
-  "version": "1.4.2",
-  "serverTime": "2026-08-15T03:00:00Z"
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ตรวจว่าเซิร์ฟเวอร์ยังคุยได้ไหม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.3 (ที่อยู่ตามอุปกรณ์) และ 7.10 (โยนหรือคืนค่า)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำปุ่มทดสอบการเชื่อมต่อที่บอกสาเหตุได้จริง และรู้ว่าไม่ควรใช้มันทำอะไร</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>7.3 จบด้วยรายการตรวจก่อนติดตั้ง ซึ่งทั้งหมดต้องทำด้วยมือ — บทนี้ทำให้แอปตรวจเองได้</p><p>ปัญหาที่แก้คือ <strong>ช่องว่างระหว่างตอนติดตั้งกับตอนใช้งานจริง</strong></p><pre class="code-vs"><code>ทีมติดตั้งตั้งค่าที่อยู่เซิร์ฟเวอร์ → กดบันทึก → กลับบ้าน
+วันรุ่งขึ้น คนหน้างานเปิดแอป → กดปุ่มโหลดงาน → "เชื่อมต่อไม่ได้"
+  → ไม่รู้ว่าที่อยู่ผิด เน็ตมีปัญหา หรือแอปพัง
+  → ต้องรอทีมมาดู ซึ่งอาจเป็นวันถัดไป</code></pre><p>ปุ่มทดสอบการเชื่อมต่อย้ายการค้นพบปัญหามาไว้ตอนติดตั้ง ซึ่งเป็นตอนที่คนที่แก้ได้ยังอยู่ตรงนั้น</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>health check</td><td>endpoint ที่ตอบว่าเซิร์ฟเวอร์ยังทำงานอยู่</td></tr>
+<tr><td>probe</td><td>การยิงไปตรวจ</td></tr>
+<tr><td>liveness</td><td>เซิร์ฟเวอร์ยังไม่ตายไหม</td></tr>
+<tr><td>readiness</td><td>เซิร์ฟเวอร์พร้อมรับงานไหม</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ล้มเหลวคือคำตอบ ไม่ใช่ข้อยกเว้น</h2><pre class="code-vs"><code>โหลดรายการงาน  →  ล้มเหลว = ผิดปกติ = โยน
+ทดสอบการเชื่อมต่อ →  ล้มเหลว = คำตอบที่ต้องการ = คืนค่า</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ปุ่มทดสอบมีไว้เพื่อ <em>รู้ว่าต่อไม่ได้</em> — การโยนความล้มเหลวออกไปจึงผิดความหมาย ตามที่ 7.10 บอกไว้</div></section>
+
+<section><h2>4. ผลลัพธ์ที่บอกสาเหตุได้</h2><pre class="code-vs"><code>sealed class HealthResult {
+  const HealthResult();
+}
+
+class HealthOk extends HealthResult {
+  const HealthOk(this.elapsed);
+  final Duration elapsed;      // ช้าหรือเร็ว ก็เป็นข้อมูล
+}
+
+class HealthUnreachable extends HealthResult {
+  const HealthUnreachable(this.message);
+  final String message;
+}
+
+class HealthUnauthorized extends HealthResult {
+  const HealthUnauthorized();
+}
+
+class HealthWrongServer extends HealthResult {
+  const HealthWrongServer(this.detail);
+  final String detail;
+}</code></pre><p>สี่กรณีนี้ทำให้คนติดตั้งรู้ว่าต้องไปแก้ที่ไหน</p><table><thead><tr><th>ผลลัพธ์</th><th>บอกอะไร</th><th>ไปแก้ที่</th></tr></thead><tbody>
+<tr><td><code>HealthOk</code></td><td>ทุกอย่างพร้อม</td><td>—</td></tr>
+<tr><td><code>HealthUnreachable</code></td><td>ต่อไม่ถึงเลย</td><td>ที่อยู่ เครือข่าย firewall</td></tr>
+<tr><td><code>HealthUnauthorized</code></td><td>ต่อถึงแล้ว แต่ยังไม่ได้เข้าสู่ระบบ</td><td>ไม่ใช่ปัญหา — ที่อยู่ถูกแล้ว</td></tr>
+<tr><td><code>HealthWrongServer</code></td><td>ต่อถึงแต่ไม่ใช่เซิร์ฟเวอร์ที่ต้องการ</td><td>ที่อยู่ชี้ผิดระบบ</td></tr>
+</tbody></table><p>แถวที่สามน่าสนใจ — <strong>การได้ 401 จากปุ่มทดสอบเป็นข่าวดี</strong> เพราะแปลว่าคุยกับเซิร์ฟเวอร์ที่ถูกต้องได้แล้ว เหลือแค่เข้าสู่ระบบ</p></section>
+
+<section><h2>5. เขียนตัวตรวจ</h2><pre class="code-vs"><code>Future&lt;HealthResult&gt; checkHealth(Uri baseUrl) async {
+  final stopwatch = Stopwatch()..start();
+  try {
+    final response = await client
+        .get(baseUrl.replace(path: '${baseUrl.path}/health'))
+        .timeout(const Duration(seconds: 5));   // สั้นกว่าปกติ (7.7)
+    stopwatch.stop();
+
+    if (response.statusCode == 401) return const HealthUnauthorized();
+    if (response.statusCode &gt;= 500) {
+      return HealthUnreachable('เซิร์ฟเวอร์ตอบว่ามีปัญหาภายใน '
+          '(${response.statusCode})');
+    }
+    if (response.statusCode != 200) {
+      return HealthWrongServer('ได้รหัส ${response.statusCode} '
+          'จากที่อยู่นี้ อาจไม่ใช่เซิร์ฟเวอร์ WMS');
+    }
+
+    // ตรวจว่าเป็นเซิร์ฟเวอร์ที่ถูกต้องจริง ไม่ใช่แค่มีอะไรตอบมา
+    final contentType = response.headers['content-type'] ?? '';
+    if (!contentType.contains('application/json')) {
+      return HealthWrongServer('ที่อยู่นี้ตอบเป็น $contentType '
+          'ซึ่งไม่ใช่รูปแบบของ API');
+    }
+
+    return HealthOk(stopwatch.elapsed);
+  } on SocketException catch (error) {
+    return HealthUnreachable('ติดต่อเซิร์ฟเวอร์ไม่ได้: ${error.message}');
+  } on TimeoutException {
+    return const HealthUnreachable('เซิร์ฟเวอร์ไม่ตอบภายใน 5 วินาที');
+  }
+}</code></pre><p>สังเกตว่าไม่ได้ใช้ <code>ApiClient</code> แต่ยิงเอง</p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ต้องการเวลารอที่สั้นกว่า</td><td>5 วินาที ไม่ใช่ 15 (7.7)</td></tr>
+<tr><td>ต้องการดูรหัสตอบกลับดิบ</td><td><code>ApiClient</code> แปลงเป็น exception ไปแล้ว</td></tr>
+<tr><td>ต้องการตรวจ <code>content-type</code></td><td>เพื่อจับกรณีที่ต่อไปโดนเว็บอื่น</td></tr>
+</tbody></table><p>การตรวจ <code>content-type</code> จับกรณีที่พบบ่อยแต่ไม่มีใครคิดถึง — <strong>ผู้ใช้พิมพ์ที่อยู่ของเว็บ WMS แทนที่จะเป็นที่อยู่ของ API</strong> ซึ่งจะได้ 200 พร้อมหน้า HTML</p></section>
+
+<section><h2>6. แสดงผลให้คนติดตั้งใช้ได้</h2><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ ที่อยู่เซิร์ฟเวอร์                        │
+│ [ http://192.168.1.50:5000        ]    │
+│                     [ ทดสอบการเชื่อมต่อ ] │
+│                                        │
+│ ✓ เชื่อมต่อได้ (142 ms)                 │
+└────────────────────────────────────────┘</code></pre><table><thead><tr><th>ผลลัพธ์</th><th>ข้อความที่แสดง</th></tr></thead><tbody>
+<tr><td><code>HealthOk</code> เร็ว</td><td>“เชื่อมต่อได้ (142 ms)”</td></tr>
+<tr><td><code>HealthOk</code> ช้า</td><td>“เชื่อมต่อได้ แต่ตอบช้า (3.2 วินาที) — ตรวจสอบสัญญาณ”</td></tr>
+<tr><td><code>HealthUnauthorized</code></td><td>“เชื่อมต่อได้ กรุณาเข้าสู่ระบบ”</td></tr>
+<tr><td><code>HealthUnreachable</code></td><td>“ติดต่อไม่ได้ — ตรวจที่อยู่ Wi-Fi และ firewall”</td></tr>
+<tr><td><code>HealthWrongServer</code></td><td>“ที่อยู่นี้ตอบเป็น text/html ซึ่งไม่ใช่ API”</td></tr>
+</tbody></table><p>แถวที่สองมีค่ามาก — <strong>“ต่อได้แต่ช้า” เป็นสัญญาณที่จะกลายเป็นปัญหาในอีกสองสัปดาห์</strong> และการรู้ตั้งแต่วันติดตั้งทำให้แก้ทันก่อนที่จะมีคนใช้งานจริง</p></section>
+
+<section><h2>7. อย่าใช้เป็นด่านกั้นการทำงาน</h2><pre class="code-vs"><code>// ผิด — บล็อกผู้ใช้ด้วยผลของการตรวจ
+if (await checkHealth(baseUrl) is! HealthOk) {
+  showOfflineScreen();
+  return;                    // ไม่ให้ทำอะไรเลย
+}</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>เพิ่มคำขอหนึ่งครั้งก่อนทุกการทำงาน</td><td>ช้าลงโดยไม่ได้อะไร</td></tr>
+<tr><td>ตรวจผ่านแล้วอาจล้มเหลวในวินาทีถัดมา</td><td>สัญญาณในคลังเปลี่ยนตลอด</td></tr>
+<tr><td>ตรวจไม่ผ่านแต่คำขอจริงอาจสำเร็จ</td><td>เช่น <code>/health</code> ถูกปิดไว้แต่ API ทำงานปกติ</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเหตุผลที่หนักที่สุด — การบล็อกผู้ใช้เพราะ endpoint ที่ไม่เกี่ยวกับงานของเขา คือการหยุดงานทั้งคลังด้วยเหตุผลที่ผิด</p><div class="note">หลักที่ใช้ได้ — <em>ให้ผลของคำขอจริงเป็นตัวบอกสถานะ ไม่ใช่ผลของการตรวจแยก</em> ซึ่งเป็นข้อสรุปเดียวกับ 7.7 หัวข้อ 8</div></section>
+
+<section><h2>8. ใช้ตรงไหนถึงจะคุ้ม</h2><table><thead><tr><th>ใช้ที่</th><th>คุ้มไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ปุ่มในหน้าตั้งค่า</td><td><strong>คุ้มที่สุด</strong></td><td>คนติดตั้งกดเองตอนที่ยังแก้ได้</td></tr>
+<tr><td>หน้าจอที่บอกว่าเชื่อมต่อไม่ได้</td><td>คุ้ม</td><td>ให้ผู้ใช้กดตรวจเองว่าตอนนี้กลับมาหรือยัง</td></tr>
+<tr><td>ตอนเปิดแอป</td><td>พอได้</td><td>แต่อย่าบล็อก — ให้เป็นข้อมูลเฉย ๆ</td></tr>
+<tr><td>ทุก 10 วินาที</td><td><strong>ไม่คุ้ม</strong></td><td>ยิงเปล่า 2,880 ครั้งต่อกะ (4.11)</td></tr>
+<tr><td>ก่อนทุกคำขอ</td><td>ไม่คุ้ม</td><td>ดูหัวข้อ 7</td></tr>
+</tbody></table><p>สำหรับจุดสีเขียวที่บอกสถานะการเชื่อมต่อบนหน้าจอ ให้ใช้ผลของคำขอจริงที่ยิงอยู่แล้วแทน</p><pre class="code-vs"><code>// ได้สถานะฟรีจากคำขอที่ยิงอยู่แล้ว
+void _recordOutcome(bool succeeded) {
+  _lastSuccessAt = succeeded ? DateTime.now() : _lastSuccessAt;
+  _isReachable = succeeded;
+  notifyListeners();
 }</code></pre></section>
-<section><h2>2. Probe flow</h2><p>parse base URL → GET anonymous health route → timeout สั้น → ตรวจ expected status → decode JSON → ตรวจ service marker/status → คืน typed ConnectionProbeResult</p></section>
-<section><h2>3. ของจริงสองแอป</h2><p><code>wmsapp/lib/services/connection_probe.dart</code> ยิง <code>/api/health</code>; อีกแอปใช้ <code>/api/WMS/mobile_health</code> และตรวจ payload เพื่อไม่ให้ HTML 200 หลอกว่าเชื่อมสำเร็จ</p></section>
-<section><h2>4. Liveness vs readiness</h2><p>Liveness บอก process ยังอยู่ ส่วน readiness บอก dependency สำคัญพร้อมรับงาน เช่น DB/queue การตั้งค่าหน้า app ควรรู้ว่าจะเช็กแบบใดและอย่าให้ query หนักเกินไป</p></section>
-<section><h2>5. ก่อน login</h2><p>route สำหรับตรวจ connection profile ควร anonymous และไม่คืนข้อมูลลับ หาก health ต้อง auth ผู้ใช้จะแยก URL ผิดจาก token ผิดไม่ได้</p></section>
-<section><h2>6. Result สำหรับ UI</h2><p>แยก invalid URL, timeout, unreachable, wrong service, unhealthy, HTTP error และ success พร้อม latency/version เพื่อช่วย support</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>GET health ได้ 200 body เป็นหน้า login HTML ควรแสดง connected ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้องตรวจ JSON service marker; รายงานว่า endpoint ไม่ใช่ WMS API หรือ proxy/config ผิด</p></details></section>
-<section><h2>8. Operational rule</h2><div class="warn">Health endpoint ไม่ควรเปิด stack trace, connection string หรือรายละเอียด infrastructure แก่ anonymous caller</div></section>
+
+<section><h2>9. ฝั่ง .NET ควรมีอะไร</h2><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+app.MapHealthChecks("/health");</code></pre><table><thead><tr><th>ควรตกลง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ต้องเข้าสู่ระบบก่อนไหม</td><td>ถ้าต้อง ปุ่มทดสอบจะได้ 401 เสมอตอนยังไม่ล็อกอิน</td></tr>
+<tr><td>ตอบเป็น JSON</td><td>เพื่อให้ตรวจ <code>content-type</code> ได้</td></tr>
+<tr><td>ตรวจลึกแค่ไหน</td><td>แค่ตอบว่ายังอยู่ หรือตรวจฐานข้อมูลด้วย</td></tr>
+</tbody></table><p>ข้อสุดท้ายมีข้อแลก — การตรวจฐานข้อมูลด้วยทำให้รู้มากกว่า แต่ก็ทำให้ endpoint นี้ช้าและอาจล้มเหลวทั้งที่ API ส่วนใหญ่ยังใช้ได้</p><p>สำหรับปุ่มทดสอบในแอป การตรวจแค่ว่าเซิร์ฟเวอร์ตอบได้ก็เพียงพอ — เพราะคำถามที่ต้องการคำตอบคือ “ที่อยู่นี้ถูกไหม” ไม่ใช่ “ระบบสมบูรณ์ไหม”</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปุ่มทดสอบบอกแค่ว่าได้หรือไม่ได้</td><td>คืน <code>bool</code></td><td>คืนชนิดที่แยกสาเหตุได้</td></tr>
+<tr><td>ผู้ใช้รอนานกว่าจะรู้ว่าที่อยู่ผิด</td><td>ใช้เวลารอเดียวกับคำขอปกติ</td><td>ตั้งให้สั้นกว่า</td></tr>
+<tr><td>ทดสอบผ่านแต่ใช้งานจริงไม่ได้</td><td>ต่อไปโดนเว็บอื่นที่ตอบ 200</td><td>ตรวจ <code>content-type</code></td></tr>
+<tr><td>คลังหยุดทำงานเพราะ <code>/health</code> ถูกปิด</td><td>ใช้เป็นด่านกั้น</td><td>ให้เป็นข้อมูล ไม่ใช่ด่าน</td></tr>
+<tr><td>แบตหมดเร็ว</td><td>ตรวจถี่เกินไป</td><td>ใช้ผลของคำขอจริงแทน</td></tr>
+<tr><td>ได้ 401 แล้วคิดว่าที่อยู่ผิด</td><td>ไม่แยก 401 ออกจากต่อไม่ได้</td><td>401 แปลว่าที่อยู่ถูกแล้ว</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมติดตั้งที่สาขาใหม่ กดปุ่มทดสอบแล้วได้ผลต่างกันสี่ครั้ง</p><table><thead><tr><th>ครั้ง</th><th>ที่อยู่ที่กรอก</th><th>ผลที่ได้</th></tr></thead><tbody>
+<tr><td>1</td><td><code>192.168.1.50:5000</code></td><td>ติดต่อไม่ได้</td></tr>
+<tr><td>2</td><td><code>http://192.168.1.50</code></td><td>ที่อยู่นี้ตอบเป็น text/html</td></tr>
+<tr><td>3</td><td><code>http://192.168.1.50:5000</code></td><td>เชื่อมต่อได้ กรุณาเข้าสู่ระบบ</td></tr>
+<tr><td>4</td><td><code>http://192.168.1.50:5000</code></td><td>เชื่อมต่อได้ แต่ตอบช้า (4.8 วินาที)</td></tr>
+</tbody></table><ol><li>อธิบายว่าแต่ละครั้งเกิดอะไร</li><li>ตอบว่าครั้งไหนถือว่าตั้งค่าสำเร็จแล้ว</li><li>ครั้งที่ 4 ควรทำอย่างไรต่อ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แต่ละครั้งเกิดอะไร</strong></p><table><thead><tr><th>ครั้ง</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่มี <code>http://</code> — ตัวแยกที่อยู่ตีความว่า <code>192.168.1.50</code> เป็น scheme (7.2)</td></tr>
+<tr><td>2</td><td>ไม่มี port จึงไปที่ port 80 ซึ่งเป็นเว็บ WMS ไม่ใช่ API</td></tr>
+<tr><td>3</td><td>ถูกต้องแล้ว — API ตอบและบอกว่าต้องเข้าสู่ระบบ</td></tr>
+<tr><td>4</td><td>ที่อยู่ถูก แต่เครือข่ายหรือเซิร์ฟเวอร์ช้า</td></tr>
+</tbody></table><p>ครั้งที่ 2 เป็นกรณีที่อันตรายที่สุดถ้าไม่มีการตรวจ <code>content-type</code> — เพราะเว็บ WMS ตอบ 200 กลับมา ถ้าตรวจแค่รหัสจะบอกว่า “เชื่อมต่อได้” ทั้งที่คุยผิดระบบ</p><p>แล้วปัญหาจะไปโผล่ตอนที่คนหน้างานกดโหลดงาน แล้วได้ HTML มาแทน JSON ซึ่งเป็นอาการที่ 7.8 อธิบายไว้ว่าไล่หาสาเหตุยาก</p><p><strong>ข้อ 2 — ครั้งไหนถือว่าสำเร็จ</strong></p><p><strong>ครั้งที่ 3</strong> — และเป็นจุดที่คนติดตั้งมักเข้าใจผิด</p><table><thead><tr><th>ความเข้าใจผิด</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>“ขึ้นว่าต้องเข้าสู่ระบบ แปลว่ายังไม่สำเร็จ”</td><td>สำเร็จแล้ว — 401 มาจาก API ที่ถูกต้อง</td></tr>
+</tbody></table><p>สิ่งที่ 401 พิสูจน์ให้เห็นแล้ว</p><pre class="code-vs"><code>ที่อยู่ถูกต้อง        ✓  ไม่งั้นคงต่อไม่ถึง
+เครือข่ายถึงกัน      ✓  ไม่งั้นคงเป็น "ติดต่อไม่ได้"
+firewall เปิดแล้ว    ✓  เหตุผลเดียวกัน
+เป็น API จริง        ✓  ไม่งั้นคงไม่ตอบ 401 แบบ JSON
+เซิร์ฟเวอร์ทำงานอยู่  ✓</code></pre><p>ข้อความบนหน้าจอจึงควรสื่อว่าเป็นความสำเร็จ ไม่ใช่ข้อผิดพลาด</p><pre class="code-vs"><code>✓ เชื่อมต่อได้ กรุณาเข้าสู่ระบบเพื่อเริ่มใช้งาน</code></pre><p>ถ้าใช้สีแดงหรือคำว่า “ไม่สำเร็จ” คนติดตั้งจะนั่งแก้ที่อยู่ต่อไปเรื่อย ๆ ทั้งที่ถูกแล้ว</p><p><strong>ข้อ 3 — ครั้งที่ 4 ควรทำอย่างไรต่อ</strong></p><p>4.8 วินาทีสำหรับ endpoint ที่แทบไม่ทำอะไรเลย เป็นสัญญาณที่ต้องหาสาเหตุ ไม่ใช่ปล่อยผ่าน</p><table><thead><tr><th>สาเหตุที่เป็นไปได้</th><th>ตรวจอย่างไร</th></tr></thead><tbody>
+<tr><td>สัญญาณ Wi-Fi อ่อนตรงจุดที่ยืนอยู่</td><td>เดินไปใกล้จุดกระจายสัญญาณแล้วลองใหม่</td></tr>
+<tr><td>เซิร์ฟเวอร์ทำงานหนัก</td><td>ลองจากคอมพิวเตอร์เครื่องอื่นเทียบ</td></tr>
+<tr><td>การแปลงชื่อเป็นที่อยู่ช้า</td><td>ไม่น่าใช่ เพราะกรอกเป็นตัวเลขอยู่แล้ว</td></tr>
+<tr><td>เครือข่ายมีอุปกรณ์คั่นกลางที่ช้า</td><td>ให้ทีมไอทีตรวจเส้นทาง</td></tr>
+</tbody></table><p><strong>ทำไมห้ามปล่อยผ่าน</strong></p><pre class="code-vs"><code>/health ใช้ 4.8 วินาที  →  endpoint ที่ทำงานจริงจะใช้นานกว่านั้น
+                          →  โหลดรายการงานอาจเกิน 15 วินาที
+                          →  หมดเวลารอบ่อย
+                          →  คำสั่งที่เปลี่ยนข้อมูลเกิดสถานะ "ไม่รู้ผล" (7.7)</code></pre><p>สิ่งที่ควรทำก่อนปิดงานติดตั้ง</p><table><thead><tr><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>ทดสอบซ้ำหลายจุดในคลัง เพื่อดูว่าช้าเฉพาะจุดหรือช้าทุกที่</td></tr>
+<tr><td>ถ้าช้าทุกที่ ให้แจ้งทีมไอทีก่อนเริ่มใช้งาน</td></tr>
+<tr><td>ถ้าช้าเฉพาะบางจุด ให้บันทึกไว้และแจ้งคนหน้างาน</td></tr>
+<tr><td>บันทึกค่าที่วัดได้ไว้ในเอกสารของสาขา</td></tr>
+</tbody></table><p>แถวสุดท้ายมีค่ามากในระยะยาว — เมื่อสาขานั้นรายงานว่า “ช้าลง” อีกหกเดือนข้างหน้า จะมีตัวเลขให้เทียบว่าช้าลงจริงหรือช้ามาตั้งแต่แรก</p><p><strong>บทเรียนที่ควรจำ:</strong> ปุ่มทดสอบที่ดีไม่ได้ตอบแค่ “ได้หรือไม่ได้” — มันย้ายการค้นพบปัญหามาไว้ตอนที่คนที่แก้ได้ยังอยู่ตรงนั้น และตัวเลขเวลาที่มันวัดได้ คือข้อมูลพื้นฐานที่ใช้เทียบในอนาคต</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ปุ่มทดสอบย้ายการค้นพบปัญหามาไว้ตอนติดตั้ง</li><li>ความล้มเหลวคือคำตอบ จึงคืนค่าไม่ใช่โยน</li><li>คืนชนิดที่แยกสาเหตุได้ ไม่ใช่ <code>bool</code></li><li>ตั้งเวลารอสั้นกว่าคำขอปกติ</li><li>ตรวจ <code>content-type</code> เพื่อจับกรณีที่ต่อไปโดนเว็บอื่น</li><li>ได้ 401 แปลว่าที่อยู่ถูกแล้ว ซึ่งเป็นความสำเร็จ</li><li>อย่าใช้เป็นด่านกั้นการทำงาน</li><li>สถานะการเชื่อมต่อควรมาจากผลของคำขอจริง</li><li>เวลาที่วัดได้เป็นข้อมูลพื้นฐานที่ใช้เทียบในอนาคต</li></ul></div><p><strong>บทถัดไป:</strong> 7.17 จะทำให้ทุกอย่างที่ทำมาไล่หาสาเหตุได้ โดยไม่ทำให้ข้อมูลของลูกค้ารั่วออกไป</p></section>

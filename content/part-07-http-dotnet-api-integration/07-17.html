@@ -1,17 +1,177 @@
-<div class="note"><strong>Log เพื่อ debug flow โดยไม่รั่วความลับ:</strong> เก็บ method, route template, status, elapsed, attempt และ correlation ID; redact token/PII/business payload</div>
-<section><h2>1. Structured event</h2><pre class="code-vs"><code>{
-  "event":"http.completed",
-  "method":"POST",
-  "route":"/api/WMS/tasks/{id}/complete",
-  "status":409,
-  "elapsedMs":184,
-  "traceId":"00-abcd",
-  "attempt":1
-}</code></pre></section>
-<section><h2>2. อย่า log raw URL เสมอ</h2><p>query อาจมี barcode, username หรือ search text ให้ log route template และ allowlist query ที่ปลอดภัย หรือ hash identifier เมื่อจำเป็นต้อง correlate</p></section>
-<section><h2>3. Redaction</h2><p>case-insensitive redact headers เช่น Authorization, Cookie, Set-Cookie, API-Key และ redact JSON fields เช่น password/token ก่อน serialize—ไม่ redact หลังเขียน log แล้ว</p></section>
-<section><h2>4. Request/response body</h2><p>ปิดเป็นค่าเริ่มต้นใน production; debug เฉพาะ endpoint allowlist, จำกัดขนาด และ scrub field หาก error body เป็น HTML ให้เก็บ content-type/length ไม่เก็บทั้งหน้า</p></section>
-<section><h2>5. Timing</h2><p>ใช้ stopwatch รอบทุก attempt และแยก logical operation ID จาก retry attempt เพื่อวิเคราะห์ latency/timeout โดยไม่สับสนว่าเป็นหลายคำสั่ง</p></section>
-<section><h2>6. Flutter กับ .NET</h2><p>ส่ง trace/correlation header แล้วให้ .NET scope log ต่อ ID เดียวกัน ทำให้ตามจาก device → endpoint → service ได้ โดย server เป็นแหล่ง log หลักของ exception ภายใน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือก field จาก request complete-task ว่าอะไร log ได้ตรง ๆ, hash, หรือห้าม log</p><details><summary>แนวคำตอบ</summary><p>method/status/elapsed log ได้; task ID อาจ hash; token/password ห้าม; quantity/barcode พิจารณา classification และ operational need</p></details></section>
-<section><h2>8. Test</h2><div class="success">เขียน test ส่ง token/secret marker ผ่าน headers/body/error แล้ว assert ว่า marker ไม่ปรากฏใน log sink แม้ request ล้มเหลว</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: บันทึกให้พอไล่หาสาเหตุ โดยไม่ให้ข้อมูลรั่ว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.5 (header ที่อ่อนไหว) และ 6.8 (สิ่งที่ไม่ควรบันทึก)<br><strong>จบบทนี้แล้วจะทำได้:</strong> บันทึกคำขอ HTTP ให้ตามหาสาเหตุได้ โดยที่ไฟล์บันทึกส่งให้ใครดูก็ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เมื่อมีปัญหาที่หน้างาน สิ่งแรกที่ทีมขอคือไฟล์บันทึก</p><p>แต่ไฟล์บันทึกที่มีทุกอย่างกลายเป็นปัญหาเสียเอง</p><pre class="code-vs"><code>[14:32:01] POST http://wms.local/api/tasks/T-001/complete
+           headers: {Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6...}
+           body: {"customerName":"บริษัท เอบีซี","address":"123 ถ.สุขุมวิท",
+                  "amount":48200,"phone":"081-234-5678"}</code></pre><table><thead><tr><th>ปัญหา</th><th>ความเสียหาย</th></tr></thead><tbody>
+<tr><td>token อยู่ในไฟล์</td><td>ใครได้ไฟล์ไปก็ใช้สิทธิ์นั้นได้</td></tr>
+<tr><td>ชื่อและที่อยู่ลูกค้า</td><td>ข้อมูลส่วนบุคคลหลุด</td></tr>
+<tr><td>ยอดเงิน</td><td>ข้อมูลธุรกิจหลุด</td></tr>
+<tr><td>ไฟล์ถูกส่งต่อทางแชต</td><td>ไม่มีใครรู้ว่ามันไปอยู่ที่ไหนบ้างแล้ว</td></tr>
+</tbody></table><p>และปัญหาตรงข้ามก็มีอยู่ — บันทึกน้อยเกินไปจนไล่หาอะไรไม่ได้</p><pre class="code-vs"><code>[14:32:01] request failed</code></pre></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>redact</td><td>ปิดค่าที่อ่อนไหวแต่เก็บโครงไว้</td></tr>
+<tr><td>PII</td><td>ข้อมูลที่ระบุตัวบุคคลได้</td></tr>
+<tr><td>trace id</td><td>รหัสตามหาคำขอฝั่งเซิร์ฟเวอร์</td></tr>
+<tr><td>log level</td><td>ระดับความสำคัญของสิ่งที่บันทึก</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: บันทึกโครง ไม่บันทึกเนื้อ</h2><pre class="code-vs"><code>เนื้อ (ห้ามบันทึก)        โครง (บันทึกได้)
+─────────────────        ────────────────
+ค่าของ token             มี Authorization ส่งไปด้วยไหม
+ชื่อลูกค้า                มี field ชื่อนี้อยู่ไหม
+ยอดเงิน                  คำขอไปที่ endpoint ไหน
+                        ได้รหัสอะไรกลับมา
+                        ใช้เวลาเท่าไหร่</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> คำถามที่ต้องตอบตอนไล่หาสาเหตุคือ “คำขอไหน ไปที่ไหน ได้อะไรกลับมา” — ซึ่งตอบได้โดยไม่ต้องรู้เนื้อหาเลย</div></section>
+
+<section><h2>4. ปิดค่าใน URL</h2><p>เปิด <code>lib/core/api_log.dart</code></p><pre class="code-vs"><code>/// แทนค่าที่อ่อนไหวใน URL ด้วยเครื่องหมาย แต่เก็บโครงไว้ให้ครบ
+///
+/// เก็บชื่อคีย์ไว้เสมอ เพราะการรู้ว่า "มี token ส่งไปด้วย" มีประโยชน์
+/// ตอนไล่หาสาเหตุ ส่วนตัวค่าไม่มีประโยชน์เลย
+String redactUri(Uri uri) {
+  if (uri.queryParameters.isEmpty) return uri.toString();
+  final safe = &lt;String, String&gt;{
+    for (final entry in uri.queryParameters.entries)
+      entry.key: _sensitiveQueryKeys.contains(entry.key.toLowerCase())
+          ? _masked
+          : entry.value,
+  };
+  return uri.replace(queryParameters: safe).toString();
+}</code></pre><pre class="code-vs"><code>test('ปิดค่า token ใน URL แต่เก็บชื่อคีย์ไว้', () {
+  final uri = Uri.parse(
+    'http://wms.local/api/tasks?search=PAL-01&amp;token=secret123',
+  );
+
+  final redacted = redactUri(uri);
+
+  expect(redacted, contains('search=PAL-01'));
+  // ใช้ตัวอักษรล้วนเป็นเครื่องหมายปิด เพราะ Uri encode สัญลักษณ์
+  expect(redacted, contains('token=REDACTED'));
+  expect(redacted, isNot(contains('secret123')));
+});</code></pre><p>บรรทัดคอมเมนต์ในเทสต์บันทึกเรื่องที่เจอตอนเขียนจริง</p><pre class="code-vs"><code>/// ใช้ตัวอักษรล้วน ไม่ใช้เครื่องหมาย เพราะ Uri.replace จะ encode เครื่องหมาย
+/// ให้เป็น %2A ทำให้ log อ่านยากและค้นหาไม่เจอ
+const String _masked = 'REDACTED';</code></pre><p>ถ้าใช้ <code>***</code> ตามที่คนมักใช้ ไฟล์บันทึกจะเต็มไปด้วย <code>%2A%2A%2A</code> ซึ่งค้นหาไม่เจอเมื่อต้องการหาว่ามีค่าไหนถูกปิดบ้าง</p><p>สังเกตว่า <code>search=PAL-01</code> ยังอยู่ครบ — <strong>คำค้นไม่ใช่ข้อมูลอ่อนไหว และมันจำเป็นตอนไล่หาสาเหตุ</strong></p></section>
+
+<section><h2>5. ปิดค่าใน header</h2><pre class="code-vs"><code>const Set&lt;String&gt; _sensitiveHeaders = {
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+};
+
+Map&lt;String, String&gt; redactHeaders(Map&lt;String, String&gt; headers) =&gt; {
+  for (final entry in headers.entries)
+    entry.key: _sensitiveHeaders.contains(entry.key.toLowerCase())
+        ? _masked
+        : entry.value,
+};</code></pre><p>สองอย่างที่ทำให้ถูกต้อง</p><table><thead><tr><th>สิ่งที่ทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>เทียบด้วยตัวเล็กทั้งหมด</td><td>ชื่อ header ไม่สนตัวพิมพ์ — <code>Authorization</code> กับ <code>authorization</code> คืออันเดียวกัน</td></tr>
+<tr><td>เก็บชื่อ header ไว้</td><td>รู้ว่ามี token ส่งไปหรือไม่ ซึ่งเป็นข้อมูลที่ใช้ได้</td></tr>
+</tbody></table><p>ข้อแรกเป็นกับดักที่พลาดง่าย — ถ้าเทียบตรง ๆ แล้วโค้ดส่ง <code>authorization</code> ตัวเล็ก ค่าจะหลุดออกไปทั้งที่มีตัวปิดอยู่แล้ว</p></section>
+
+<section><h2>6. ไม่บันทึก body เลย</h2><pre class="code-vs"><code>/// สรุปคำขอหนึ่งครั้งให้พอไล่หาสาเหตุได้ โดยไม่มีเนื้อหาของ body
+///
+/// ไม่บันทึก body เลย เพราะ body ของงานคลังมีทั้งชื่อลูกค้า ที่อยู่ และราคา
+/// สิ่งที่ต้องรู้จริง ๆ คือยิงไปที่ไหน ได้อะไรกลับมา และใช้เวลาเท่าไหร่
+String describeExchange({
+  required String method,
+  required Uri uri,
+  required int? statusCode,
+  required Duration elapsed,
+  String? traceId,
+}) { ... }</code></pre><pre class="code-vs"><code>POST http://wms.local/api/tasks/T-001/complete → 409 (812 ms) trace=00-abc-123</code></pre><p>บรรทัดเดียวนี้ตอบคำถามได้เกือบหมด</p><table><thead><tr><th>คำถาม</th><th>ตอบได้จาก</th></tr></thead><tbody>
+<tr><td>ทำอะไรอยู่</td><td>method และ endpoint</td></tr>
+<tr><td>งานไหน</td><td>รหัสใน path</td></tr>
+<tr><td>ผลเป็นอย่างไร</td><td>รหัสตอบกลับ</td></tr>
+<tr><td>ช้าหรือเร็ว</td><td>เวลาที่ใช้</td></tr>
+<tr><td>ดูรายละเอียดต่อได้ที่ไหน</td><td><code>traceId</code></td></tr>
+</tbody></table><p>สิ่งเดียวที่ตอบไม่ได้คือ “ส่งจำนวนเท่าไหร่ไป” — ซึ่งถ้าจำเป็นจริง ให้ดูจาก log ฝั่งเซิร์ฟเวอร์ผ่าน <code>traceId</code> แทน</p><p><strong>เหตุผลที่ให้ฝั่งเซิร์ฟเวอร์เก็บดีกว่า</strong></p><table><thead><tr><th>ฝั่งแอป</th><th>ฝั่งเซิร์ฟเวอร์</th></tr></thead><tbody>
+<tr><td>ไฟล์อยู่บนเครื่องที่เปลี่ยนมือทุกกะ</td><td>อยู่ในระบบที่ควบคุมสิทธิ์ได้</td></tr>
+<tr><td>ถูกส่งต่อทางแชตได้ง่าย</td><td>เข้าถึงได้เฉพาะคนที่มีสิทธิ์</td></tr>
+<tr><td>ไม่มีนโยบายลบเมื่อครบกำหนด</td><td>มี</td></tr>
+</tbody></table></section>
+
+<section><h2>7. บันทึกไม่ได้แปลว่าไม่มีค่าใช้จ่าย</h2><table><thead><tr><th>ระดับ</th><th>บันทึกอะไร</th><th>เปิดเมื่อ</th></tr></thead><tbody>
+<tr><td>ปกติ</td><td>เฉพาะคำขอที่ล้มเหลว</td><td>ตลอดเวลา</td></tr>
+<tr><td>ละเอียด</td><td>ทุกคำขอ</td><td>เมื่อกำลังไล่หาสาเหตุ</td></tr>
+</tbody></table><p>เหตุผลที่ไม่บันทึกทุกคำขอตลอดเวลา</p><pre class="code-vs"><code>คนหน้างานสแกน 400 ครั้งต่อกะ × 3 คำขอต่อครั้ง = 1,200 บรรทัด
+× 40 เครื่อง = 48,000 บรรทัดต่อวัน</code></pre><p>ซึ่งกินพื้นที่บนเครื่องและทำให้หาบรรทัดที่สำคัญยากขึ้น</p><p>แต่ต้องเปิดได้ง่ายเมื่อต้องการ — ไม่ใช่ต้อง build ใหม่</p><pre class="code-vs"><code>// เปิดจากหน้าตั้งค่า เมื่อทีมขอให้เปิดตอนไล่หาสาเหตุ
+bool verboseLogging = false;</code></pre></section>
+
+<section><h2>8. บันทึกที่ไม่มีเวลาก็ไร้ประโยชน์</h2><pre class="code-vs"><code>final stopwatch = Stopwatch()..start();
+try {
+  final response = await _client.get(uri, headers: headers).timeout(timeout);
+  stopwatch.stop();
+  _log(describeExchange(
+    method: 'GET',
+    uri: uri,
+    statusCode: response.statusCode,
+    elapsed: stopwatch.elapsed,
+  ));
+  return _decode(response);
+} on TimeoutException {
+  stopwatch.stop();
+  _log(describeExchange(
+    method: 'GET',
+    uri: uri,
+    statusCode: null,            // ไม่ได้คำตอบ
+    elapsed: stopwatch.elapsed,
+  ));
+  rethrow;
+}</code></pre><pre class="code-vs"><code>test('ไม่ได้คำตอบก็ยังบันทึกได้', () {
+  final line = describeExchange(
+    method: 'GET',
+    uri: Uri.parse('http://wms.local/api/tasks'),
+    statusCode: null,
+    elapsed: const Duration(seconds: 15),
+  );
+
+  expect(line, contains('ไม่ได้คำตอบ'));
+});</code></pre><p>กรณีที่ไม่ได้คำตอบเป็นกรณีที่ <strong>สำคัญที่สุด</strong> ที่ต้องบันทึก — เพราะเป็นกรณีที่ฝั่งเซิร์ฟเวอร์อาจไม่มีอะไรเลย</p><table><thead><tr><th>สิ่งที่เวลาบอก</th><th>ตีความ</th></tr></thead><tbody>
+<tr><td>ล้มเหลวใน 50 ms</td><td>ไปไม่ถึงเซิร์ฟเวอร์ — ที่อยู่ผิดหรือไม่มีเส้นทาง</td></tr>
+<tr><td>ล้มเหลวใน 15,000 ms พอดี</td><td>ถึงเซิร์ฟเวอร์แล้วแต่ไม่ตอบ — หมดเวลารอ</td></tr>
+<tr><td>สำเร็จใน 4,000 ms</td><td>ทำงานได้แต่ช้า — เป็นสัญญาณเตือน</td></tr>
+</tbody></table><p>สองแถวแรกให้ผลลัพธ์เหมือนกันในสายตาผู้ใช้ แต่ต้องแก้คนละที่ — และแยกได้จากตัวเลขเวลาอย่างเดียว</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>token อยู่ในไฟล์บันทึก</td><td>บันทึก header ทั้งชุด</td><td>ปิดค่าที่ตัวกลางที่เดียว</td></tr>
+<tr><td>ปิดแล้วยังหลุด</td><td>เทียบชื่อ header แบบสนตัวพิมพ์</td><td>เทียบด้วยตัวเล็ก</td></tr>
+<tr><td>ข้อมูลลูกค้าอยู่ในไฟล์</td><td>บันทึก body</td><td>ไม่บันทึก body เลย</td></tr>
+<tr><td>ค้นหาค่าที่ถูกปิดไม่เจอ</td><td>ใช้สัญลักษณ์ที่ถูก encode</td><td>ใช้ตัวอักษรล้วน</td></tr>
+<tr><td>ไฟล์ใหญ่จนหาอะไรไม่เจอ</td><td>บันทึกทุกคำขอตลอดเวลา</td><td>บันทึกเฉพาะที่ล้มเหลว</td></tr>
+<tr><td>บันทึกแล้วแต่ยังหาสาเหตุไม่ได้</td><td>ไม่มีเวลาที่ใช้</td><td>บันทึกเวลาเสมอ</td></tr>
+<tr><td>กรณีที่ไม่ได้คำตอบไม่มีในไฟล์</td><td>บันทึกเฉพาะตอนได้คำตอบ</td><td>บันทึกในทุกทางออก</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทีมขอไฟล์บันทึกจากเครื่องที่มีปัญหา แล้วได้บรรทัดเหล่านี้</p><pre class="code-vs"><code>[08:15:02] GET  .../api/WMS/mobile_tasks → 200 (180 ms)
+[08:15:44] POST .../api/WMS/mobile_tasks/T-014/complete → 409 (95 ms) trace=00-a1
+[09:02:11] GET  .../api/WMS/mobile_tasks → ไม่ได้คำตอบ (15000 ms)
+[09:02:27] GET  .../api/WMS/mobile_tasks → ไม่ได้คำตอบ (15000 ms)
+[09:02:58] GET  .../api/WMS/mobile_tasks → ไม่ได้คำตอบ (48 ms)
+[09:03:30] GET  .../api/WMS/mobile_tasks → 200 (4820 ms)
+[09:05:12] GET  .../api/WMS/mobile_tasks → 200 (210 ms)</code></pre><ol><li>อธิบายว่าเกิดอะไรขึ้นระหว่าง 09:02 ถึง 09:05</li><li>บรรทัดที่ 09:02:58 ต่างจากสองบรรทัดก่อนหน้าอย่างไร และบอกอะไร</li><li>ระบุว่ายังขาดข้อมูลอะไรที่ควรบันทึกเพิ่ม</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — เกิดอะไรขึ้น</strong></p><pre class="code-vs"><code>09:02:11  หมดเวลารอเต็ม 15 วินาที → ต่อถึงเซิร์ฟเวอร์แต่ไม่ตอบ
+09:02:27  หมดเวลารออีกครั้ง
+09:02:58  ล้มเหลวใน 48 ms → ต่อไม่ถึงเลย ← เปลี่ยนอาการ
+09:03:30  สำเร็จแต่ใช้ 4.8 วินาที → เริ่มกลับมาแต่ยังช้า
+09:05:12  สำเร็จใน 210 ms → กลับสู่ปกติ</code></pre><p>ภาพรวมคือเซิร์ฟเวอร์หรือเครือข่ายมีปัญหาประมาณสามนาที แล้วค่อย ๆ ฟื้น</p><p>สังเกตว่าเวลาที่ใช้เล่าเรื่องได้ทั้งหมด โดยที่ไม่มีเนื้อหาของ body เลยสักบรรทัด</p><p><strong>ข้อ 2 — บรรทัด 09:02:58</strong></p><table><thead><tr><th></th><th>15,000 ms</th><th>48 ms</th></tr></thead><tbody>
+<tr><td>แปลว่า</td><td>ถึงเซิร์ฟเวอร์แล้ว แต่ไม่ตอบ</td><td><strong>ไปไม่ถึงเลย</strong></td></tr>
+<tr><td>ชนิด</td><td><code>timeout</code></td><td><code>network</code></td></tr>
+<tr><td>สาเหตุที่น่าจะเป็น</td><td>เซิร์ฟเวอร์ทำงานหนักจนไม่ทัน</td><td>เซิร์ฟเวอร์ปิดไปเลย หรือเครือข่ายขาด</td></tr>
+</tbody></table><p><strong>การเปลี่ยนจากหมดเวลารอเป็นต่อไม่ถึง เป็นข้อมูลสำคัญ</strong></p><pre class="code-vs"><code>เซิร์ฟเวอร์ช้าลงเรื่อย ๆ (หมดเวลารอสองครั้ง)
+  → แล้วหยุดตอบเลย (ต่อไม่ถึง)
+  → แล้วกลับมาแต่ช้า (4.8 วินาที)
+  → แล้วปกติ
+
+รูปแบบนี้ตรงกับ "เซิร์ฟเวอร์ถูกรีสตาร์ต"</code></pre><p>ถ้าไม่มีตัวเลขเวลา ทั้งสามบรรทัดจะเป็น “ไม่ได้คำตอบ” เหมือนกัน และเล่าเรื่องนี้ไม่ได้เลย</p><p><strong>ข้อ 3 — ข้อมูลที่ควรบันทึกเพิ่ม</strong></p><table><thead><tr><th>ข้อมูล</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td>ชนิดความล้มเหลว</td><td>ไม่ต้องเดาจากตัวเลขเวลา</td></tr>
+<tr><td>รุ่นของแอป</td><td>รู้ว่าเครื่องนี้ใช้รุ่นไหน</td></tr>
+<tr><td>รหัสเครื่อง</td><td>เทียบกับเครื่องอื่นในช่วงเวลาเดียวกัน</td></tr>
+<tr><td>ที่อยู่เซิร์ฟเวอร์ที่ใช้อยู่</td><td>รู้ว่าชี้ไปที่ไหน</td></tr>
+<tr><td>ครั้งที่เท่าไหร่ของการลองใหม่</td><td>แยก "ผู้ใช้กดเอง" ออกจาก "แอปลองเอง"</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญกับบรรทัด 09:02:11 และ 09:02:27 — <strong>สองบรรทัดนี้ห่างกัน 16 วินาที ซึ่งใกล้เคียงกับเวลารอพอดี</strong> จึงเดาไม่ได้ว่าผู้ใช้กดใหม่เอง หรือแอปลองเองตาม 7.14</p><pre class="code-vs"><code>// เพิ่มข้อมูลโดยไม่เพิ่มความเสี่ยง
+GET .../api/WMS/mobile_tasks → ไม่ได้คำตอบ (15000 ms)
+    kind=timeout attempt=2/3 app=1.4.2 device=PDA-07</code></pre><p>ทุกอย่างที่เพิ่มเป็นข้อมูลของ <em>ระบบ</em> ไม่ใช่ของ <em>ธุรกิจ</em> จึงบันทึกได้อย่างปลอดภัย</p><p><strong>บทเรียนที่ควรจำ:</strong> บันทึกที่ดีเล่าเรื่องได้โดยไม่ต้องมีเนื้อหา — และตัวเลขเวลาเป็นข้อมูลที่ให้ประโยชน์สูงสุดต่อความเสี่ยงที่ต่ำที่สุด เพราะมันแยกสาเหตุที่ต่างกันสิ้นเชิงออกจากกันได้ โดยไม่บอกอะไรเกี่ยวกับข้อมูลเลย</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>บันทึกโครง ไม่บันทึกเนื้อ</li><li>ปิดค่าที่อ่อนไหวที่ตัวกลางที่เดียว</li><li>เทียบชื่อ header ด้วยตัวเล็กทั้งหมด</li><li>ใช้ตัวอักษรล้วนเป็นเครื่องหมายปิด เพื่อให้ค้นหาได้</li><li>เก็บชื่อคีย์ไว้ เพราะการรู้ว่ามีอะไรส่งไปก็มีประโยชน์</li><li>ไม่บันทึก body — ให้ฝั่งเซิร์ฟเวอร์เก็บผ่าน <code>traceId</code></li><li>บันทึกเฉพาะที่ล้มเหลว และเปิดโหมดละเอียดได้เมื่อต้องการ</li><li>บันทึกเวลาที่ใช้เสมอ รวมถึงตอนที่ไม่ได้คำตอบ</li><li>ตัวเลขเวลาแยกสาเหตุที่ต่างกันได้ โดยไม่บอกอะไรเกี่ยวกับข้อมูล</li></ul></div><p><strong>บทถัดไป:</strong> 7.18 เป็นบทปฏิบัติปิดท้าย Part 7 — ประกอบทุกอย่างตั้งแต่ที่อยู่จนถึงการบันทึก ให้เป็นชั้นที่คุยกับ .NET ได้จริง</p></section>

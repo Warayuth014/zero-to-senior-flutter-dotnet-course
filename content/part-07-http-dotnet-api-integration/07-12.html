@@ -1,18 +1,193 @@
-<div class="note"><strong>BootstrapBlazor grid:</strong> endpoint รายการมักคืน envelope <code>{items, totalCount}</code> และรับ query สำหรับ page/search/sort/filter ไม่ใช่ JSON list เปล่า</div>
-<section><h2>1. Response contract</h2><pre class="code-vs"><code>{
-  "items": [{"taskId":"T-1","status":"OPEN"}],
-  "totalCount": 137
-}</code></pre><p><code>items.length</code> คือจำนวนหน้าปัจจุบัน ส่วน totalCount คือผลทั้งหมดหลัง filter</p></section>
-<section><h2>2. Grid DTO</h2><pre class="code-vs"><code>typedef GridPage&lt;T&gt; = ({List&lt;T&gt; items, int totalCount});
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ใช้ endpoint ที่ออกแบบมาให้เว็บ โดยไม่ให้รูปแบบนั้นลามเข้าแอป</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.10 (ซองที่ห่อรายการ) และ 7.1 (การแยกชั้น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ต่อกับ endpoint ที่ถูกออกแบบมาเพื่ออย่างอื่น โดยที่แอปยังสะอาด</div>
 
-GridPage&lt;TaskDto&gt; parseTaskPage(Map&lt;String, dynamic&gt; json) {
-  final rows = requireList(json, 'items');
-  return (items: rows.map(TaskDto.fromObject).toList(),
-          totalCount: requireInt(json, 'totalCount'));
-}</code></pre></section>
-<section><h2>3. Casing compatibility</h2><p>ของจริงใน <code>api/tasks_api.dart</code> รองรับทั้ง <code>totalCount</code> และ <code>TotalCount</code> ระหว่าง migration แต่ควร normalize จุดเดียวและมีแผนถอด fallback</p></section>
-<section><h2>4. Request shape</h2><p>ตรวจว่า endpoint รับ page/pageSize, offset/limit หรือ Bootstrap query model เพราะเลข page อาจเริ่มที่ 1 หรือ 0 และ sort expression อาจมีรูปแบบเฉพาะ</p></section>
-<section><h2>5. Load all อย่างระวัง</h2><p>หาก workflow ต้องโหลดทุกหน้า ให้ loop พร้อม maximum pages, cancellation, stable sort และ dedupe ด้วย ID เพื่อป้องกันข้อมูลเปลี่ยนระหว่าง paging หรือ server totalCount ผิด</p></section>
-<section><h2>6. Empty vs failure</h2><p><code>items=[] totalCount=0</code> คือ success empty; wrong shape, missing items หรือ 500 ไม่ใช่ empty และต้องแสดง error state</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้าแรกมี 20 รายการ total 45 ต้อง request กี่หน้าที่ pageSize 20?</p><details><summary>เฉลย</summary><p>3 หน้า โดยหยุดเมื่อ loaded ≥ totalCount หรือหน้าสั้นกว่า pageSize ตาม contract; ป้องกัน duplicate ID ระหว่างหน้า</p></details></section>
-<section><h2>8. Test</h2><div class="success">fixture ต้องครอบคลุม camel/Pascal casing, empty, totalCount มากกว่า items, field ผิดชนิด และหน้าซ้ำ</div></section>
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในระบบ WMS จริง เว็บมักถูกสร้างก่อนแอปมือถือ และ endpoint ก็ถูกออกแบบให้ตารางบนเว็บใช้</p><pre class="code-vs"><code>// สิ่งที่ตารางบนเว็บส่งไป
+{
+  "pageIndex": 1,
+  "pageItems": 20,
+  "sortName": "createdAt",
+  "sortOrder": "Desc",
+  "filters": [
+    {"fieldKey": "status", "fieldValue": "PENDING", "filterAction": "Equal"}
+  ]
+}</code></pre><pre class="code-vs"><code>// สิ่งที่ได้กลับมา
+{
+  "items": [ ... ],
+  "totalCount": 137
+}</code></pre><p>แอปมือถือแค่อยากได้ “งานที่ยังไม่เสร็จ 20 รายการแรก” แต่ต้องประกอบโครงทั้งหมดนี้ขึ้นมา</p><table><thead><tr><th>ถ้าปล่อยให้รูปแบบนี้ลามเข้าแอป</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>store ต้องรู้จักคำว่า <code>filterAction</code></td><td>ชั้นบนผูกกับรายละเอียดของเว็บ</td></tr>
+<tr><td>หน้าจอต้องส่ง <code>pageIndex</code></td><td>เปลี่ยนวิธีแบ่งหน้าแล้วกระทบทุกที่</td></tr>
+<tr><td>เพิ่มเงื่อนไขค้นหาต้องแก้หลายชั้น</td><td>ขัดกับหลักใน 7.1</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>grid</td><td>ตารางข้อมูลบนเว็บที่มีการแบ่งหน้าและกรอง</td></tr>
+<tr><td>query options</td><td>ก้อนที่บอกว่าอยากได้ข้อมูลแบบไหน</td></tr>
+<tr><td>filter</td><td>เงื่อนไขกรองข้อมูล</td></tr>
+<tr><td>adapter</td><td>ตัวแปลงระหว่างสองรูปแบบที่ไม่ตรงกัน</td></tr>
+<tr><td>leaky abstraction</td><td>รายละเอียดของชั้นล่างที่รั่วขึ้นมาชั้นบน</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: แปลที่ชั้นเดียว</h2><pre class="code-vs"><code>หน้าจอ / store        พูดภาษาของงาน
+       │              "งานที่ยังไม่เสร็จ หน้าแรก 20 รายการ"
+       ▼
+repository            ← แปลตรงนี้ที่เดียว
+       │
+       ▼
+endpoint ของเว็บ      พูดภาษาของตาราง
+                      pageIndex, filters, filterAction</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> endpoint ที่ออกแบบมาเพื่ออย่างอื่น ไม่ใช่ปัญหา — ปัญหาคือปล่อยให้รูปแบบของมันเดินทางเข้ามาถึงชั้นที่ไม่ควรรู้จัก</div></section>
+
+<section><h2>4. ทำให้ชั้นบนพูดภาษาของงาน</h2><pre class="code-vs"><code>// สิ่งที่ store เห็น — ไม่มีคำว่า pageIndex หรือ filters เลย
+abstract interface class TaskRepository {
+  Future&lt;TaskPage&gt; fetchOpen({
+    String? search,
+    int skip = 0,
+    int take = 20,
+  });
+}</code></pre><pre class="code-vs"><code>class TaskPage {
+  const TaskPage({required this.items, required this.totalCount});
+  final List&lt;WmsTask&gt; items;
+  final int totalCount;
+  bool get hasMore =&gt; items.length &lt; totalCount;
+}</code></pre><p>สังเกตว่าใช้ <code>skip</code> และ <code>take</code> ไม่ใช่ <code>pageIndex</code></p><table><thead><tr><th></th><th><code>pageIndex</code></th><th><code>skip</code> / <code>take</code></th></tr></thead><tbody>
+<tr><td>เหมาะกับ</td><td>ตารางที่มีปุ่มเลขหน้า</td><td>รายการที่โหลดเพิ่มเมื่อเลื่อนถึงท้าย</td></tr>
+<tr><td>คำนวณจากอะไร</td><td>หมายเลขหน้า</td><td>จำนวนที่โหลดมาแล้ว</td></tr>
+</tbody></table><p>บนมือถือแทบไม่มีปุ่มเลขหน้า มีแต่การเลื่อนลงแล้วโหลดเพิ่ม — <code>skip</code> จึงตรงกับสิ่งที่หน้าจอต้องการมากกว่า</p></section>
+
+<section><h2>5. แปลงที่ repository</h2><pre class="code-vs"><code>@override
+Future&lt;TaskPage&gt; fetchOpen({
+  String? search,
+  int skip = 0,
+  int take = 20,
+}) async {
+  // แปลงจากภาษาของงาน เป็นภาษาของตารางบนเว็บ
+  final json = await api.postJson('/api/WMS/mobile_tasks/query', {
+    'pageIndex': (skip ~/ take) + 1,       // ตารางนับหน้าจาก 1
+    'pageItems': take,
+    'sortName': 'createdAt',
+    'sortOrder': 'Desc',
+    'filters': [
+      {'fieldKey': 'status', 'fieldValue': 'PENDING', 'filterAction': 'Equal'},
+      if (search != null &amp;&amp; search.isNotEmpty)
+        {
+          'fieldKey': 'palletCode',
+          'fieldValue': search,
+          'filterAction': 'Contains',
+        },
+    ],
+  });
+
+  final page = TaskPageDto.fromJson(json);
+  return TaskPage(
+    items: [for (final dto in page.items) toTask(dto)],
+    totalCount: page.totalCount,
+  );
+}</code></pre><p>ความยุ่งทั้งหมดอยู่ในเมธอดเดียว และไม่มีอะไรรั่วออกไป</p><div class="warn">บรรทัด <code>(skip ~/ take) + 1</code> มีข้อจำกัดที่ต้องรู้ตัว — มันใช้ได้เฉพาะเมื่อ <code>skip</code> หารด้วย <code>take</code> ลงตัวเสมอ ถ้าหน้าจอส่ง <code>skip: 15, take: 20</code> มา จะได้หน้าที่ 1 ซึ่งเป็นข้อมูลซ้ำกับที่โหลดไปแล้ว</div><p>ทางแก้คือให้ repository บังคับเงื่อนไขนั้นไว้</p><pre class="code-vs"><code>assert(skip % take == 0, 'endpoint นี้แบ่งเป็นหน้า จึงข้ามได้ทีละหน้าเท่านั้น');</code></pre><p>หรือถ้าคุมไม่ได้ ต้องขอให้ฝั่งหลังบ้านเพิ่ม endpoint ที่รับ <code>skip</code> ตรง ๆ</p></section>
+
+<section><h2>6. เมื่อ endpoint ให้ข้อมูลเกินที่ต้องการ</h2><p>ตารางบนเว็บมักต้องการ field เยอะกว่ามือถือมาก</p><pre class="code-vs"><code>{
+  "id": "T-001",
+  "palletCode": "PAL-0101",
+  "quantity": 12,
+  "status": "PENDING",
+  "createdAt": "...",
+  "createdByName": "สมชาย ใจดี",
+  "createdByDepartment": "คลังสินค้า",
+  "lastModifiedAt": "...",
+  "lastModifiedByName": "...",
+  "remarks": "...",
+  "attachmentCount": 0,
+  "approvalHistory": [ ... ]
+}</code></pre><table><thead><tr><th>สิ่งที่ควรทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>อ่านเฉพาะ field ที่ใช้</td><td>ตามหลักใน 6.2 — ผ่อนกับสิ่งที่ไม่ได้ใช้</td></tr>
+<tr><td>ไม่ต้องทำ DTO ให้ครบทุก field</td><td>field ที่ไม่ได้อ่านจะถูกข้ามไปเอง</td></tr>
+<tr><td>บอกฝั่งหลังบ้านถ้าข้อมูลใหญ่เกินไป</td><td>PDA บนเครือข่ายในคลังรับข้อมูลใหญ่ช้า</td></tr>
+</tbody></table><p>ข้อสุดท้ายเป็นเรื่องจริงที่วัดได้ — รายการ 20 รายการที่มี <code>approvalHistory</code> ติดมาด้วย อาจใหญ่กว่าที่จำเป็นสิบเท่า</p><p>ถ้าแก้ที่ต้นทางไม่ได้ ให้วัดก่อนว่าช้าจริงไหมตามหลักใน 2.10 — อย่าเพิ่งขอ endpoint ใหม่โดยที่ยังไม่รู้ว่าเป็นปัญหา</p></section>
+
+<section><h2>7. เมื่อ endpoint ใช้ POST สำหรับการอ่าน</h2><p>สังเกตว่าตัวอย่างข้างบนใช้ <code>postJson</code> ทั้งที่เป็นการอ่านข้อมูล</p><pre class="code-vs"><code>final json = await api.postJson('/api/WMS/mobile_tasks/query', { ... });</code></pre><p>เป็นเรื่องปกติสำหรับ endpoint แบบตาราง เพราะเงื่อนไขกรองยาวเกินกว่าจะใส่ใน URL ได้ — แต่ต้องรู้ตัวว่าเสียอะไรไป</p><table><thead><tr><th>สิ่งที่เสียไป</th><th>ผลกระทบ</th></tr></thead><tbody>
+<tr><td>ตัวกลางลองใหม่ให้เองไม่ได้</td><td>ไม่กระทบ — เราจัดการเองอยู่แล้ว (7.14)</td></tr>
+<tr><td>ผลไม่ถูกเก็บไว้ใช้ซ้ำ</td><td>ไม่กระทบมาก</td></tr>
+<tr><td><strong>ธง <code>outcomeUnknown</code> จะเป็น true</strong></td><td><strong>กระทบ</strong> — ดูข้างล่าง</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นปัญหาจริง เพราะ <code>postJson</code> ใน lab ตั้งธงว่าไม่รู้ผลเสมอตาม 7.4</p><pre class="code-vs"><code>} on SocketException {
+  // POST เปลี่ยนข้อมูลได้ จึงไม่รู้ว่า server ทำไปแล้วหรือยัง
+  throw const ApiException(..., outcomeUnknown: true, ...);
+}</code></pre><p>แต่การอ่านข้อมูลไม่ได้เปลี่ยนอะไร — การบอกว่า “ไม่รู้ผล” จึงผิด และจะทำให้ชั้นบนไปเรียกการตรวจสอบที่ไม่จำเป็นตาม 4.13</p><p>ทางแก้คือให้ผู้เรียกบอกได้ว่าคำขอนี้เปลี่ยนข้อมูลหรือไม่</p><pre class="code-vs"><code>Future&lt;Map&lt;String, dynamic&gt;&gt; postJson(
+  String path,
+  Map&lt;String, dynamic&gt; body, {
+  Map&lt;String, String&gt; headers = const {},
+  bool mutates = true,        // ค่าตั้งต้นปลอดภัยไว้ก่อน
+}) async {
+  ...
+  } on SocketException {
+    throw ApiException(
+      mutates ? 'การเชื่อมต่อขาดระหว่างส่งคำสั่ง' : 'เชื่อมต่อ server ไม่ได้',
+      outcomeUnknown: mutates,
+      kind: ApiFailureKind.network,
+    );
+  }
+}</code></pre><pre class="code-vs"><code>// การอ่านผ่าน POST — บอกว่าไม่ได้เปลี่ยนอะไร
+final json = await api.postJson(
+  '/api/WMS/mobile_tasks/query',
+  { ... },
+  mutates: false,
+);</code></pre><p>ค่าตั้งต้นเป็น <code>true</code> เพราะถ้าลืมระบุ จะได้ผลที่ปลอดภัยกว่า — คือถือว่าไม่รู้ผลไว้ก่อน</p></section>
+
+<section><h2>8. อย่าเพิ่งขอ endpoint ใหม่ทันที</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ใช้ endpoint ที่มีอยู่ แล้วแปลงที่ repository</td></tr>
+<tr><td>2</td><td>วัดว่าช้าจริงไหม หรือข้อมูลใหญ่เกินไปจริงไหม</td></tr>
+<tr><td>3</td><td>ถ้าเป็นปัญหาจริง จึงขอ endpoint ที่เหมาะกับมือถือ</td></tr>
+</tbody></table><p>เหตุผลที่ไม่ควรข้ามไปขั้น 3 เลย</p><table><thead><tr><th>ต้นทุนของ endpoint ใหม่</th></tr></thead><tbody>
+<tr><td>ฝั่งหลังบ้านต้องดูแลสองทางที่ทำเรื่องเดียวกัน</td></tr>
+<tr><td>กฎธุรกิจอาจไม่ตรงกันเมื่อแก้ที่เดียว</td></tr>
+<tr><td>ต้องทดสอบสองชุด</td></tr>
+</tbody></table><p>แต่เมื่อถึงขั้น 3 จริง ๆ สิ่งที่ควรขอคือ endpoint ที่ <strong>คืนเฉพาะสิ่งที่มือถือใช้</strong> ไม่ใช่แค่เปลี่ยนรูปแบบพารามิเตอร์</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>store ต้องรู้จัก <code>filterAction</code></td><td>ปล่อยรูปแบบของเว็บลามขึ้นมา</td><td>แปลที่ repository</td></tr>
+<tr><td>โหลดหน้าถัดไปแล้วได้ข้อมูลซ้ำ</td><td>คำนวณหมายเลขหน้าจาก <code>skip</code> ที่หารไม่ลงตัว</td><td>บังคับเงื่อนไข หรือขอ endpoint ที่รับ <code>skip</code></td></tr>
+<tr><td>รายการโหลดช้ามากบน PDA</td><td>ข้อมูลติดมาเกินที่ใช้</td><td>วัดก่อน แล้วค่อยขอลดข้อมูล</td></tr>
+<tr><td>อ่านข้อมูลแล้วแอปบอกว่า “ไม่รู้ผล”</td><td>ใช้ POST อ่านข้อมูลแต่ธงตั้งผิด</td><td>ให้ระบุได้ว่าเปลี่ยนข้อมูลหรือไม่</td></tr>
+<tr><td>มี endpoint สองทางที่ทำเรื่องเดียวกันแต่ผลไม่ตรง</td><td>ขอ endpoint ใหม่เร็วเกินไป</td><td>ใช้ของเดิมก่อน วัดก่อน</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทีมต้องทำหน้าค้นหางานบนมือถือ โดยใช้ endpoint ของตารางบนเว็บที่มีอยู่แล้ว</p><table><thead><tr><th>สิ่งที่หน้าจอต้องการ</th></tr></thead><tbody>
+<tr><td>ค้นด้วยรหัสพาเลท แบบพิมพ์ไปค้นไป</td></tr>
+<tr><td>แสดงเฉพาะงานที่ยังไม่เสร็จ</td></tr>
+<tr><td>เรียงจากใหม่ไปเก่า</td></tr>
+<tr><td>โหลดเพิ่มเมื่อเลื่อนถึงท้าย ครั้งละ 20</td></tr>
+</tbody></table><ol><li>ออกแบบลายเซ็นของ repository ที่ store จะเรียก</li><li>ระบุว่าอะไรที่ store ไม่ควรรู้เลย</li><li>ตอบว่าถ้าฝั่งหลังบ้านเปลี่ยนจาก <code>filters</code> เป็นรูปแบบใหม่ จะกระทบกี่ไฟล์ และทำไม</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ลายเซ็น</strong></p><pre class="code-vs"><code>abstract interface class TaskRepository {
+  /// ค้นงานที่ยังไม่เสร็จ
+  ///
+  /// [skip] คือจำนวนที่โหลดมาแล้ว ไม่ใช่หมายเลขหน้า
+  Future&lt;TaskPage&gt; searchOpen({
+    String? palletCode,
+    int skip = 0,
+    int take = 20,
+  });
+}</code></pre><p>สังเกตสามอย่าง</p><table><thead><tr><th>สิ่งที่ทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ชื่อ <code>palletCode</code> ไม่ใช่ <code>search</code></td><td>บอกว่าค้นด้วยอะไร ไม่ใช่ค้นลอย ๆ</td></tr>
+<tr><td>ไม่มีพารามิเตอร์เรียงลำดับ</td><td>หน้าจอนี้เรียงแบบเดียวเสมอ — ไม่ต้องเปิดให้เลือก</td></tr>
+<tr><td>ไม่มีพารามิเตอร์สถานะ</td><td>ชื่อเมธอดบอกแล้วว่าเอาเฉพาะที่ยังไม่เสร็จ</td></tr>
+</tbody></table><p>สองข้อล่างเป็นการตัดสินใจที่สำคัญ — <strong>อย่าเปิดพารามิเตอร์ที่ยังไม่มีใครใช้</strong> เพราะทุกพารามิเตอร์คือสิ่งที่ต้องทดสอบและดูแลต่อไป</p><p>ถ้าวันหนึ่งต้องให้เลือกเรียงลำดับได้ ค่อยเพิ่มตอนนั้น ตามหลักที่ไม่เขียนโค้ดเผื่ออนาคต</p><p><strong>ข้อ 2 — สิ่งที่ store ไม่ควรรู้</strong></p><table><thead><tr><th>store ไม่ควรรู้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>pageIndex</code>, <code>pageItems</code></td><td>เป็นวิธีนับของตารางบนเว็บ</td></tr>
+<tr><td><code>filters</code>, <code>fieldKey</code>, <code>filterAction</code></td><td>เป็นโครงของตัวกรองบนเว็บ</td></tr>
+<tr><td><code>sortName</code>, <code>sortOrder</code></td><td>เหมือนกัน</td></tr>
+<tr><td>ค่า <code>'PENDING'</code></td><td>เป็นค่าบนสาย — store ควรรู้จัก <code>TaskStatus</code> เท่านั้น (6.9)</td></tr>
+<tr><td>ว่าเป็น GET หรือ POST</td><td>เป็นเรื่องของการส่ง</td></tr>
+<tr><td>เส้นทาง <code>/api/WMS/...</code></td><td>เป็นเรื่องของ repository (7.1)</td></tr>
+</tbody></table><p>แถวที่สี่มักถูกมองข้าม — ถ้า store เขียน <code>'PENDING'</code> ตรง ๆ แปลว่าค่าบนสายรั่วขึ้นมาแล้ว ซึ่งเป็นปัญหาเดียวกับที่ 6.9 แก้ไว้</p><p><strong>ข้อ 3 — ถ้ารูปแบบตัวกรองเปลี่ยน</strong></p><p><strong>ไฟล์เดียว</strong> คือไฟล์ที่มี <code>RemoteTaskRepository</code></p><pre class="code-vs"><code>// เดิม
+'filters': [
+  {'fieldKey': 'status', 'fieldValue': 'PENDING', 'filterAction': 'Equal'},
+],
+
+// ใหม่ — สมมติว่าเปลี่ยนเป็นรูปแบบอื่น
+'where': {'status': {'eq': 'PENDING'}},</code></pre><table><thead><tr><th>ไฟล์</th><th>ต้องแก้ไหม</th></tr></thead><tbody>
+<tr><td>หน้าจอค้นหา</td><td>ไม่</td></tr>
+<tr><td><code>task_store.dart</code></td><td>ไม่</td></tr>
+<tr><td><code>task_repository.dart</code></td><td><strong>ใช่</strong></td></tr>
+<tr><td><code>api_client.dart</code></td><td>ไม่</td></tr>
+<tr><td>เทสต์ของ repository</td><td>ใช่</td></tr>
+</tbody></table><p><strong>ทำไมถึงเป็นแค่ไฟล์เดียว</strong></p><p>เพราะลายเซ็น <code>searchOpen({String? palletCode, int skip, int take})</code> ไม่มีอะไรที่สะท้อนรูปแบบของเซิร์ฟเวอร์เลย — มันพูดแต่เรื่องที่หน้าจอสนใจ</p><pre class="code-vs"><code>store พูดว่า      "ค้น PAL-01 ข้ามไป 20 เอามา 20"
+repository แปลเป็น  รูปแบบอะไรก็ได้ที่ endpoint ต้องการ ณ ตอนนั้น</code></pre><p>ถ้าลายเซ็นเป็นแบบนี้แทน ผลจะต่างออกไปทันที</p><pre class="code-vs"><code>// ลายเซ็นที่รั่ว
+Future&lt;TaskPage&gt; query(Map&lt;String, dynamic&gt; queryOptions);</code></pre><p>แบบนี้ store ต้องประกอบ <code>queryOptions</code> เอง ซึ่งแปลว่ารูปแบบของเซิร์ฟเวอร์อยู่ใน store แล้ว และการเปลี่ยนจะกระทบทุกที่ที่เรียก</p><p><strong>บทเรียนที่ควรจำ:</strong> ลายเซ็นของ repository คือด่านกันการเปลี่ยนแปลง — ถ้ามันพูดภาษาของงาน การเปลี่ยนฝั่งเซิร์ฟเวอร์จะหยุดอยู่ที่ชั้นเดียว แต่ถ้ามันพูดภาษาของเซิร์ฟเวอร์ ก็ไม่ได้กันอะไรเลย</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>endpoint ที่ออกแบบมาเพื่ออย่างอื่นใช้ได้ ถ้าไม่ปล่อยให้รูปแบบลามเข้ามา</li><li>แปลจากภาษาของงานเป็นภาษาของ endpoint ที่ repository ที่เดียว</li><li>ใช้ <code>skip</code> และ <code>take</code> เพราะตรงกับการเลื่อนโหลดเพิ่มบนมือถือ</li><li>อ่านเฉพาะ field ที่ใช้ ไม่ต้องทำ DTO ให้ครบ</li><li>การอ่านผ่าน POST ต้องบอกได้ว่าไม่ได้เปลี่ยนข้อมูล</li><li>อย่าเปิดพารามิเตอร์ที่ยังไม่มีใครใช้</li><li>ใช้ของเดิมและวัดก่อน ค่อยขอ endpoint ใหม่</li><li>ลายเซ็นของ repository คือด่านกันการเปลี่ยนแปลง</li></ul></div><p><strong>บทถัดไป:</strong> 7.13 จะทำเรื่องการแบ่งหน้าและค้นหาให้ครบ ซึ่งเป็นสองอย่างที่มักถูกทำแยกกันแล้วชนกันเอง</p></section>

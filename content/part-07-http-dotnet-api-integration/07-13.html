@@ -1,15 +1,161 @@
-<div class="note"><strong>Query string คือ contract:</strong> pagination, search, filter และ sort ต้อง encode ด้วย <code>Uri</code> และผูกกับ response generation เพื่อกันข้อมูลเก่าทับใหม่</div>
-<section><h2>1. สร้าง query</h2><pre class="code-vs"><code>final uri = base.replace(queryParameters: {
-  'page': '$page',
-  'pageSize': '$pageSize',
-  if (search.trim().isNotEmpty) 'search': search.trim(),
-  if (status != null) 'status': status.wireValue,
-  'sort': 'createdAt:desc',
-});</code></pre></section>
-<section><h2>2. Page vs offset</h2><p>Page-based ใช้ง่ายแต่รายการอาจเลื่อนเมื่อข้อมูลใหม่เข้า; offset-based มีปัญหาคล้ายกัน ส่วน cursor-based เสถียรกว่าสำหรับ feed ใหญ่ แต่ server/client ต้องออกแบบร่วมกัน</p></section>
-<section><h2>3. Search debounce</h2><p>ข้อความค้นหาควร debounce และเพิ่ม request generation token เมื่อ query เปลี่ยน เพื่อไม่ให้ response คำเก่าที่ช้ากว่ามาทับผลคำล่าสุด</p></section>
-<section><h2>4. Reset pagination</h2><p>เมื่อ search/filter/sort เปลี่ยน ต้องกลับหน้าแรก ล้าง accumulator และยกเลิกหรือ ignore request เดิม การคง page 5 ไว้อาจทำให้ดูเหมือนไม่มีข้อมูล</p></section>
-<section><h2>5. Repeat keys</h2><p>ถ้า filter หลายค่าใช้ repeated query keys หรือ comma-separated ตาม contract อย่า rely กับ <code>Map&lt;String,String&gt;</code> หากต้องส่ง key ซ้ำ; ใช้ builder ที่รองรับรายการ</p></section>
-<section><h2>6. Server validation</h2><p>.NET ต้อง clamp/max pageSize, whitelist sort fields และ parameterize search; client validationช่วย UX แต่ไม่แทน server security</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้พิมพ์ “entity A&amp;B” ต่อเนื่องสามครั้ง response แรกกลับมาทีหลังสุด ควรแสดงผลใด?</p><details><summary>เฉลย</summary><p>เฉพาะ generation ล่าสุด; Uri ต้อง decode search กลับข้อความเดิม และหน้าเริ่มที่ contract กำหนด</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">encode query, ระบุ page origin, จำกัด pageSize, reset เมื่อ filter เปลี่ยน, stable sort, stale-response guard และ test อักขระพิเศษ</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ค้นหาและโหลดเพิ่มโดยไม่ให้ชนกัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.10 (ซองที่ห่อรายการ) และ 4.10 (ตัวนับรุ่น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำหน้าค้นหาที่โหลดเพิ่มได้ โดยไม่ได้ข้อมูลซ้ำ ไม่ขาด และไม่ปนกัน</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>การค้นหาและการโหลดเพิ่ม แต่ละอย่างไม่ยาก แต่เมื่ออยู่ด้วยกันจะเกิดสถานการณ์ที่คิดไม่ถึง</p><pre class="code-vs"><code>0.0s  ผู้ใช้เลื่อนถึงท้าย → โหลดเพิ่มเริ่ม (คำค้นว่าง, ข้าม 20)
+0.2s  ผู้ใช้พิมพ์ "PAL" → ค้นหาใหม่เริ่ม
+0.7s  ค้นหาใหม่กลับมา → แสดงผล 12 รายการ
+1.4s  โหลดเพิ่มกลับมา → ต่อท้ายอีก 20 รายการที่ไม่ตรงคำค้น</code></pre><p>ผลคือผู้ใช้ค้นหา “PAL” แต่เห็นงานที่ไม่มี PAL อยู่ในรายการ และตัวเลขข้างบนบอกจำนวนที่ไม่ตรงกับสิ่งที่เห็น</p><p>อาการนี้ทำซ้ำได้ยากมาก เพราะต้องพิมพ์พอดีจังหวะที่เลื่อนถึงท้าย</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>pagination</td><td>การแบ่งข้อมูลเป็นชุด ๆ</td></tr>
+<tr><td>debounce</td><td>รอให้หยุดพิมพ์ก่อนค่อยยิง</td></tr>
+<tr><td>generation</td><td>เลขรุ่นที่บอกว่าคำขอนี้เป็นของชุดไหน</td></tr>
+<tr><td>cursor</td><td>ตัวชี้ว่าอ่านมาถึงไหนแล้ว</td></tr>
+<tr><td>dedupe</td><td>การกรองรายการซ้ำออก</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: สองคำสั่งที่แตะข้อมูลก้อนเดียวกัน</h2><pre class="code-vs"><code>ค้นหา      →  แทนที่ข้อมูลทั้งชุด  →  เริ่มชุดใหม่
+โหลดเพิ่ม  →  ต่อท้ายข้อมูลเดิม    →  ต่อชุดเดิม</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การโหลดเพิ่มต้องรู้ว่ากำลังต่อ <em>ชุดไหน</em> — ถ้าชุดนั้นถูกแทนที่ไปแล้ว ผลที่กลับมาต้องถูกทิ้ง</div></section>
+
+<section><h2>4. ค้นหาเริ่มรุ่นใหม่ โหลดเพิ่มเกาะรุ่นเดิม</h2><pre class="code-vs"><code>Future&lt;void&gt; search(String query) async {
+  final generation = ++_generation;      // เริ่มชุดใหม่
+  ...
+  if (generation != _generation) return;
+  _tasks = page.items;                   // แทนที่ทั้งชุด
+  _query = query;
+}
+
+Future&lt;void&gt; loadMore() async {
+  if (_loadingMore || _loading || !hasMore) return;
+  final generation = _generation;        // เกาะชุดปัจจุบัน ไม่เพิ่ม
+  ...
+  if (generation != _generation) return; // มีการค้นหาใหม่ระหว่างรอ
+  _tasks = [..._tasks, ...newItems];     // ต่อท้าย
+}</code></pre><table><thead><tr><th></th><th><code>search</code></th><th><code>loadMore</code></th></tr></thead><tbody>
+<tr><td>ทำอะไรกับเลขรุ่น</td><td><strong>เพิ่ม</strong> — <code>++_generation</code></td><td><strong>จำไว้</strong> — <code>_generation</code></td></tr>
+<tr><td>ทำอะไรกับข้อมูล</td><td>แทนที่</td><td>ต่อท้าย</td></tr>
+<tr><td>ถ้ารุ่นเปลี่ยนระหว่างรอ</td><td>ทิ้งผล</td><td>ทิ้งผล</td></tr>
+</tbody></table><p>ถ้า <code>loadMore</code> เพิ่มเลขรุ่นด้วย จะเกิดผลข้างเคียงที่ไม่ตั้งใจ — การค้นหาที่กำลังวิ่งอยู่จะถูกยกเลิก ทั้งที่ผู้ใช้กำลังรอผลนั้นอยู่</p></section>
+
+<section><h2>5. ส่งเงื่อนไขเดิมไปทุกครั้ง</h2><pre class="code-vs"><code>// ผิด — ทิ้งเงื่อนไขเดิม
+final page = await repository.fetchOpen(search: '', skip: _tasks.length);
+
+// ถูก — ส่งเงื่อนไขที่ใช้อยู่จริง
+final page = await repository.fetchOpen(search: _query, skip: _tasks.length);</code></pre><p>ซึ่งแปลว่าต้องเก็บ <code>_query</code> ไว้ และต้องเก็บ <strong>ตอนที่ผลกลับมาสำเร็จ</strong> ไม่ใช่ตอนที่เริ่มยิง</p><pre class="code-vs"><code>final page = await repository.fetchOpen(query: query, skip: 0);
+if (generation != _generation) return;
+_tasks = page.items;
+_totalCount = page.totalCount;
+_query = query;                  // จำเงื่อนไขที่ใช้จริง หลังจากรู้ว่าผลนี้ใช้ได้</code></pre><p>ถ้าเก็บตอนเริ่มยิง จะเกิดกรณีที่ <code>_query</code> เป็นของคำขอที่ถูกทิ้งไปแล้ว แล้วการโหลดเพิ่มจะใช้เงื่อนไขผิด</p></section>
+
+<section><h2>6. กรองซ้ำก่อนต่อท้าย</h2><pre class="code-vs"><code>final seenIds = {for (final task in _tasks) task.id};
+_tasks = [
+  ..._tasks,
+  for (final task in page.items)
+    if (seenIds.add(task.id)) task,
+];</code></pre><p>จำเป็นเพราะการแบ่งหน้าด้วยตำแหน่งมีจุดอ่อนตามธรรมชาติ ตามที่เห็นใน 6.10</p><pre class="code-vs"><code>โหลดหน้า 1 → ได้รายการที่ 1–20
+มีคนเพิ่มงานใหม่ ซึ่งเรียงมาเป็นอันดับที่ 1
+โหลดหน้า 2 (ข้าม 20) → ได้รายการที่ 20–39
+                        └─ รายการที่ 20 ซ้ำกับที่โหลดไปแล้ว</code></pre><p><code>seenIds.add()</code> คืน <code>false</code> เมื่อมีอยู่แล้ว จึงใช้เป็นเงื่อนไขกรองได้ในบรรทัดเดียว</p><div class="warn">การกรองซ้ำแก้เรื่องข้อมูลซ้ำ แต่ไม่ได้แก้เรื่องข้อมูล <strong>ขาด</strong> — ถ้ามีคนลบงานออกระหว่างโหลด รายการที่ 21 จะถูกข้ามไปโดยไม่มีใครรู้ ซึ่งแก้ได้ทางเดียวคือให้ฝั่งหลังบ้านใช้ตัวชี้ที่ผูกกับรายการสุดท้ายแทนตำแหน่ง</div></section>
+
+<section><h2>7. debounce ลดคำขอ แต่ไม่ได้แก้ปัญหา</h2><pre class="code-vs"><code>Timer? _debounce;
+
+void onQueryChanged(String query) {
+  _debounce?.cancel();
+  _debounce = Timer(const Duration(milliseconds: 300), () =&gt; search(query));
+}</code></pre><table><thead><tr><th></th><th>debounce</th><th>ตัวนับรุ่น</th></tr></thead><tbody>
+<tr><td>แก้อะไร</td><td>ลดจำนวนคำขอ</td><td>กันผลเก่าทับผลใหม่</td></tr>
+<tr><td>ถ้าผู้ใช้พิมพ์ช้ากว่า 300ms</td><td>ยิงทุกครั้งอยู่ดี</td><td>ยังกันได้</td></tr>
+<tr><td>ถ้าคำขอแรกช้ากว่าคำขอสอง</td><td>ช่วยไม่ได้เลย</td><td>กันได้</td></tr>
+</tbody></table><p>เป็นข้อสรุปเดียวกับ 4.10 — debounce เป็นเรื่องประสิทธิภาพ ตัวนับรุ่นเป็นเรื่องความถูกต้อง และถ้าเลือกได้แค่อย่างเดียวต้องเลือกอย่างหลัง</p><p>อย่าลืมยกเลิกตัวจับเวลาตอนทิ้ง store ตาม 4.11</p><pre class="code-vs"><code>@override
+void dispose() {
+  _debounce?.cancel();
+  _generation++;
+  super.dispose();
+}</code></pre></section>
+
+<section><h2>8. ค้นด้วยตัวอักษรเดียวไม่มีประโยชน์</h2><pre class="code-vs"><code>if (query.trim().length &lt; 2) {
+  _tasks = const [];
+  _totalCount = 0;
+  notifyListeners();
+  return;
+}</code></pre><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ผลเยอะเกินกว่าจะมีประโยชน์</td><td>ค้น “P” ได้พันรายการ ซึ่งไม่ช่วยอะไร</td></tr>
+<tr><td>เปลืองทั้งสองฝั่ง</td><td>เซิร์ฟเวอร์ต้องค้นทั้งตาราง</td></tr>
+<tr><td>ผู้ใช้ยังพิมพ์ไม่เสร็จ</td><td>รหัสพาเลทมีอย่างน้อยเจ็ดตัวอักษร</td></tr>
+</tbody></table><p>แต่ต้องบอกผู้ใช้ด้วยว่าทำไมยังไม่มีผล ไม่ใช่แสดงจอว่างเปล่า</p><pre class="code-vs"><code>_emptyReason = query.trim().isEmpty
+    ? EmptyReason.notSearchedYet
+    : EmptyReason.queryTooShort;</code></pre><p>เพราะ “ยังไม่ได้ค้น” “พิมพ์สั้นเกินไป” และ “ค้นแล้วไม่เจอ” เป็นสามสถานะที่ต้องแสดงต่างกัน ตามที่ 6.10 บอกไว้</p></section>
+
+<section><h2>9. ตัวเลขที่แสดงต้องตรงกับสิ่งที่เห็น</h2><table><thead><tr><th>สิ่งที่แสดง</th><th>ใช้ค่าไหน</th></tr></thead><tbody>
+<tr><td>“พบ 137 รายการ”</td><td><code>totalCount</code></td></tr>
+<tr><td>“แสดง 20 จาก 137”</td><td><code>items.length</code> และ <code>totalCount</code></td></tr>
+<tr><td>ตัวหมุนท้ายรายการ</td><td><code>hasMore</code></td></tr>
+</tbody></table><pre class="code-vs"><code>bool get hasMore =&gt; items.length &lt; totalCount;</code></pre><p>อย่าเดาว่าหมดแล้วจากจำนวนที่ได้ในหน้าสุดท้าย</p><pre class="code-vs"><code>// พังเมื่อหน้าสุดท้ายมีพอดี 20 รายการ
+if (page.items.length &lt; 20) hasMore = false;</code></pre><p>และเมื่อโหลดเพิ่มสำเร็จ ต้องอัปเดต <code>totalCount</code> ด้วย เพราะจำนวนอาจเปลี่ยนไปแล้วระหว่างนั้น</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ค้นแล้วเห็นผลที่ไม่ตรงคำค้น</td><td>โหลดเพิ่มไม่ตรวจเลขรุ่น</td><td>เกาะรุ่นเดิมแล้วเทียบก่อนเขียน</td></tr>
+<tr><td>โหลดเพิ่มแล้วได้ข้อมูลของคำค้นเก่า</td><td>ไม่ได้ส่งเงื่อนไขเดิมไป</td><td>เก็บ <code>_query</code> แล้วส่งทุกครั้ง</td></tr>
+<tr><td>รายการซ้ำเมื่อเลื่อนลง</td><td>ต่อท้ายโดยไม่กรอง</td><td>กรองด้วย id</td></tr>
+<tr><td>ค้นหาถูกยกเลิกเองระหว่างรอ</td><td><code>loadMore</code> เพิ่มเลขรุ่น</td><td>ให้จำรุ่นแทนการเพิ่ม</td></tr>
+<tr><td>ยิงคำขอทุกตัวอักษรที่พิมพ์</td><td>ไม่มี debounce</td><td>เพิ่ม debounce</td></tr>
+<tr><td>ยิงคำขอเกินหนึ่งครั้งเสมอ</td><td>เดาว่าหมดจากจำนวนที่ได้</td><td>เทียบกับ <code>totalCount</code></td></tr>
+<tr><td>จอว่างเปล่าโดยไม่บอกอะไร</td><td>ไม่แยกเหตุผลที่ว่าง</td><td>แยกสามสถานะ</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>หน้าค้นหางานมีข้อกำหนดเพิ่มมาข้อหนึ่ง — <strong>ผู้ใช้ลากลงเพื่อรีเฟรชได้</strong> โดยที่คำค้นปัจจุบันยังอยู่</p><ol><li>อธิบายว่าการรีเฟรชควรเพิ่มเลขรุ่นหรือเกาะรุ่นเดิม</li><li>เขียนเมธอด <code>refresh()</code></li><li>ตอบว่าถ้าผู้ใช้ลากรีเฟรชขณะที่กำลังโหลดเพิ่มอยู่ ควรเกิดอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — เพิ่มหรือเกาะ</strong></p><p><strong>เพิ่ม</strong> — เพราะการรีเฟรชคือการเริ่มชุดข้อมูลใหม่ ไม่ใช่การต่อชุดเดิม</p><table><thead><tr><th>คำสั่ง</th><th>ทำอะไรกับข้อมูล</th><th>เลขรุ่น</th></tr></thead><tbody>
+<tr><td><code>search</code></td><td>แทนที่ทั้งชุด</td><td>เพิ่ม</td></tr>
+<tr><td><code>refresh</code></td><td><strong>แทนที่ทั้งชุด</strong></td><td><strong>เพิ่ม</strong></td></tr>
+<tr><td><code>loadMore</code></td><td>ต่อท้าย</td><td>เกาะเดิม</td></tr>
+</tbody></table><p>เกณฑ์คือ <strong>ดูว่าทำอะไรกับข้อมูล ไม่ใช่ดูว่าเงื่อนไขเปลี่ยนหรือไม่</strong></p><p>คนมักตอบว่า “เกาะเดิม เพราะคำค้นไม่เปลี่ยน” ซึ่งเป็นการดูผิดจุด — สิ่งที่สำคัญคือผลที่กลับมาจะไปแทนที่ข้อมูลทั้งหมด ดังนั้นการโหลดเพิ่มที่ค้างอยู่ต้องถูกทิ้ง</p><p><strong>ข้อ 2 — โค้ด</strong></p><pre class="code-vs"><code>Future&lt;void&gt; refresh() async {
+  final generation = ++_generation;    // เริ่มชุดใหม่
+  final query = _query;                // ใช้คำค้นเดิม
+  _refreshing = true;
+  _errorMessage = null;
+  // ไม่ตั้ง _loading เพราะยังมีข้อมูลให้แสดงอยู่ (4.7)
+  notifyListeners();
+
+  try {
+    final page = await repository.searchOpen(
+      palletCode: query.isEmpty ? null : query,
+      skip: 0,
+      take: _pageSize,
+    );
+    if (generation != _generation) return;
+    _tasks = page.items;               // แทนที่ทั้งชุด
+    _totalCount = page.totalCount;
+  } on ApiException catch (error) {
+    if (generation != _generation) return;
+    // ล้มเหลวตอนรีเฟรช — เก็บข้อมูลเดิมไว้ให้ทำงานต่อได้ (4.7)
+    _errorMessage = error.userMessage;
+  } finally {
+    if (generation == _generation) {
+      _refreshing = false;
+      notifyListeners();
+    }
+  }
+}</code></pre><p>สองจุดที่ต่างจาก <code>search</code></p><table><thead><tr><th>จุด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ไม่ตั้ง <code>_loading</code></td><td>มีข้อมูลอยู่แล้ว ไม่ควรเอาออกจากจอ (4.7 หัวข้อ 8)</td></tr>
+<tr><td>ล้มเหลวแล้วไม่ล้างข้อมูล</td><td>ข้อมูลเมื่อครู่ยังใช้ทำงานได้</td></tr>
+</tbody></table><p><strong>ข้อ 3 — รีเฟรชขณะกำลังโหลดเพิ่ม</strong></p><p>ไล่ตามลำดับเวลา</p><pre class="code-vs"><code>0.0s  ผู้ใช้เลื่อนถึงท้าย → loadMore() เริ่ม
+      จำ generation = 5, ขอ skip: 20
+0.3s  ผู้ใช้ลากลงรีเฟรช → refresh() เริ่ม
+      _generation กลายเป็น 6
+0.9s  refresh กลับมา → 6 == 6 → แทนที่ข้อมูลทั้งชุด
+      _tasks = 20 รายการแรกที่สดใหม่
+1.6s  loadMore กลับมา → 5 != 6 → ทิ้งผล ✓</code></pre><p><strong>ถ้าไม่ทิ้ง</strong> จะเกิดสิ่งนี้แทน</p><pre class="code-vs"><code>1.6s  ต่อท้าย 20 รายการที่ 21–40 ของ "ข้อมูลเมื่อ 1.6 วินาทีก่อน"
+      เข้ากับ 20 รายการแรกที่ "สดใหม่"
+      → รายการที่ 21–40 อาจซ้ำหรือขาด เพราะมาจากคนละช่วงเวลา</code></pre><p>ผลคือรายการที่ผู้ใช้เห็นเป็นการปนกันของข้อมูลสองช่วงเวลา ซึ่งอาจมีงานที่ถูกปิดไปแล้วปนอยู่</p><p><strong>สิ่งที่ควรทำเพิ่ม</strong></p><table><thead><tr><th>ทำอะไร</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>กันไม่ให้ <code>loadMore</code> เริ่มระหว่างรีเฟรช</td><td>ลดโอกาสเกิด</td></tr>
+<tr><td>ปลดธง <code>_loadingMore</code> ให้ถูก</td><td>ไม่งั้นตัวหมุนท้ายรายการจะค้าง</td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; loadMore() async {
+  if (_loadingMore || _loading || _refreshing || !hasMore) return;
+  ...
+  } finally {
+    // ปลดธงเสมอ แม้รุ่นจะเปลี่ยนไปแล้ว ไม่งั้นตัวหมุนค้าง
+    _loadingMore = false;
+    if (generation == _generation) notifyListeners();
+  }
+}</code></pre><p>บรรทัดใน <code>finally</code> เป็นจุดที่ละเอียด — <strong>ธงต้องปลดเสมอ แต่การแจ้งให้วาดใหม่ควรทำเฉพาะเมื่อยังเป็นรุ่นปัจจุบัน</strong></p><p>ถ้าเอา <code>_loadingMore = false</code> ไปไว้ใต้เงื่อนไขตรวจรุ่น ตัวหมุนจะค้างถาวรเมื่อผลของรุ่นเก่ากลับมา ซึ่งเป็นบั๊กเดียวกับที่ 4.10 หัวข้อ 5 เตือนไว้</p><p><strong>บทเรียนที่ควรจำ:</strong> เมื่อมีคำสั่งหลายตัวที่แตะข้อมูลก้อนเดียวกัน ให้จัดกลุ่มตาม <em>สิ่งที่ทำกับข้อมูล</em> ไม่ใช่ตามชื่อคำสั่ง — คำสั่งที่แทนที่ทั้งชุดเริ่มรุ่นใหม่ คำสั่งที่ต่อท้ายเกาะรุ่นเดิม</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ค้นหาและรีเฟรชแทนที่ทั้งชุด จึงเริ่มรุ่นใหม่</li><li>โหลดเพิ่มต่อท้าย จึงเกาะรุ่นเดิม</li><li>เก็บเงื่อนไขที่ใช้จริงไว้ แล้วส่งไปทุกครั้งที่โหลดเพิ่ม</li><li>เก็บเงื่อนไขตอนที่ผลกลับมาสำเร็จ ไม่ใช่ตอนเริ่มยิง</li><li>กรองซ้ำด้วย id ก่อนต่อท้าย</li><li>debounce ลดคำขอ ตัวนับรุ่นกันความผิด — ต้องมีทั้งคู่</li><li>ค้นด้วยตัวอักษรน้อยเกินไปไม่มีประโยชน์ แต่ต้องบอกผู้ใช้ว่าทำไม</li><li>ธงต้องปลดเสมอ แต่แจ้งให้วาดใหม่เฉพาะรุ่นปัจจุบัน</li></ul></div><p><strong>บทถัดไป:</strong> 7.14 จะทำให้แอปลองใหม่เองได้เมื่อล้มเหลว โดยไม่ทำให้ข้อมูลซ้ำหรือทำให้เซิร์ฟเวอร์ล้มหนักกว่าเดิม</p></section>

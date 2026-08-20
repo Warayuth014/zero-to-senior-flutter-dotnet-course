@@ -1,16 +1,132 @@
-<div class="note"><strong>Error ต้องแยกประเภท:</strong> timeout, ไม่มี route/network, TLS, HTTP error และ JSON contract error มีสาเหตุและวิธีแก้ต่างกัน อย่ารวมเป็น “เชื่อมต่อไม่ได้” ทั้งหมด</div>
-<section><h2>1. Exception map</h2><ul><li><code>TimeoutException</code>: เกินเวลาที่ client ยอมรอ</li><li><code>SocketException</code>: DNS/route/connection ล้มเหลว</li><li><code>ClientException</code>: transport/client error อื่น</li><li><code>FormatException</code>: URL หรือ response format ผิด</li><li><code>ApiException</code>: server ตอบ status ที่ไม่สำเร็จ</li></ul></section>
-<section><h2>2. Timeout รอบ operation</h2><pre class="code-vs"><code>try {
-  return await _client.get(uri, headers: headers)
-      .timeout(const Duration(seconds: 15));
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: แยกความล้มเหลวของการเชื่อมต่อให้ผู้ใช้ทำต่อได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.4 (GET กับ POST) และ 4.8 (จับเฉพาะที่จัดการได้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกสาเหตุที่ทำให้คำขอไม่สำเร็จ และรู้ว่าอันไหนรู้ผลแน่ อันไหนไม่รู้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>โค้ดที่ดูเหมือนรอบคอบแล้ว</p><pre class="code-vs"><code>try {
+  final json = await api.getJson('/api/WMS/mobile_tasks');
+  ...
+} catch (e) {
+  showError('เชื่อมต่อไม่ได้');
+}</code></pre><p>ข้อความเดียวนี้ถูกใช้กับสถานการณ์ที่ต่างกันสิ้นเชิง</p><table><thead><tr><th>สิ่งที่เกิดจริง</th><th>ผู้ใช้ควรทำ</th><th>แต่ได้ข้อความว่า</th></tr></thead><tbody>
+<tr><td>Wi-Fi หลุด</td><td>เดินไปที่ที่สัญญาณดี</td><td>เชื่อมต่อไม่ได้</td></tr>
+<tr><td>เซิร์ฟเวอร์ช้ามาก</td><td>รอแล้วลองใหม่</td><td>เชื่อมต่อไม่ได้</td></tr>
+<tr><td>ที่อยู่เซิร์ฟเวอร์ตั้งผิด</td><td>ไปแก้ในหน้าตั้งค่า</td><td>เชื่อมต่อไม่ได้</td></tr>
+<tr><td>บั๊กในโค้ดเรา</td><td>แจ้งทีม</td><td>เชื่อมต่อไม่ได้</td></tr>
+</tbody></table><p>แถวสุดท้ายอันตรายที่สุด — <strong><code>catch (e)</code> เปล่า ๆ กลืนบั๊กของเราเองแล้วแสดงว่าเป็นปัญหาเครือข่าย</strong> ทำให้ไม่มีใครไปแก้ที่ต้นเหตุ</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>ชนิด</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td><code>SocketException</code></td><td>ต่อไม่ถึงปลายทาง — หาที่อยู่ไม่เจอ หรือไม่มีเส้นทาง</td></tr>
+<tr><td><code>TimeoutException</code></td><td>รอเกินเวลาที่กำหนด</td></tr>
+<tr><td><code>ClientException</code></td><td>ปัญหาระดับการส่งอื่น ๆ เช่นการเชื่อมต่อขาดกลางคัน</td></tr>
+<tr><td><code>FormatException</code></td><td>สิ่งที่ได้กลับมาไม่ใช่ JSON</td></tr>
+<tr><td><code>ApiException</code></td><td>เซิร์ฟเวอร์ตอบมาแล้ว แต่ตอบว่าไม่สำเร็จ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: ไปไม่ถึง ไม่เท่ากับ ไปถึงแล้วไม่สำเร็จ</h2><pre class="code-vs"><code>แอป ──X──→ เซิร์ฟเวอร์        ไปไม่ถึง — รู้แน่ว่าไม่มีอะไรเกิดขึ้น
+แอป ─────→ เซิร์ฟเวอร์ ──X──→  ถึงแล้ว แต่คำตอบกลับไม่ถึง — ไม่รู้ผล
+แอป ─────→ เซิร์ฟเวอร์ ────→  ถึงแล้ว ตอบว่าไม่ให้ทำ — รู้ผลแน่</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> คำถามที่สำคัญที่สุดไม่ใช่ “ล้มเหลวเพราะอะไร” แต่คือ “<em>เซิร์ฟเวอร์ทำไปแล้วหรือยัง</em>” — เพราะคำตอบนั้นตัดสินว่าจะลองใหม่ได้ไหม</div></section>
+
+<section><h2>4. แปลงเป็นชนิดของเราที่ขอบ</h2><p>เปิด <code>lib/core/api_client.dart</code></p><pre class="code-vs"><code>} on SocketException {
+  // GET ไม่เปลี่ยนข้อมูล จึงรู้แน่ว่าไม่มีอะไรเกิดขึ้น
+  throw const ApiException(
+    'เชื่อมต่อ server ไม่ได้',
+    kind: ApiFailureKind.network,
+  );
+} on http.ClientException {
+  throw const ApiException(
+    'เชื่อมต่อ server ไม่ได้',
+    kind: ApiFailureKind.network,
+  );
 } on TimeoutException {
-  throw const NetworkException.timeout();
-} on SocketException catch (e) {
-  throw NetworkException.offline(cause: e);
-}</code></pre></section>
-<section><h2>3. Connect vs response timeout</h2><p><code>Future.timeout</code> ให้ budget รวมแบบง่าย แต่ไม่ได้แปลว่าจะยกเลิก socket ทุก implementation งาน download/upload ยาวควรมี policy แยกและ cancellation strategy</p></section>
-<section><h2>4. User message</h2><p>ข้อความควร actionable เช่น “ติดต่อ server ไม่ได้ ตรวจ Wi-Fi และ URL” หรือ “server ใช้เวลานาน ลองใหม่” พร้อม technical cause สำหรับ log แต่ไม่โยน stack trace ให้ผู้ใช้</p></section>
-<section><h2>5. Finally และ state</h2><p>ปิด loading ใน <code>finally</code> หรือเปลี่ยนเป็น terminal state ทุก branch เพื่อไม่ให้ปุ่มค้าง และตรวจ <code>mounted</code> ก่อนใช้ context หลัง await</p></section>
-<section><h2>6. Offline ไม่เท่ากับ internet</h2><p>Mobile WMS อาจไม่มี internet แต่ยังเข้าถึง intranet API ได้ จึงต้อง probe endpoint เป้าหมาย ไม่ใช้ connectivity package เป็นคำตัดสินสุดท้าย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>server บันทึก command สำเร็จแต่ response timeout ผู้ใช้กดซ้ำได้ไหม?</p><details><summary>เฉลย</summary><p>ยังไม่รู้ผลแน่ชัด จึงต้องใช้ idempotency key หรือ query status ก่อน retry; timeout ไม่ได้พิสูจน์ว่า server ไม่ทำงาน</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่า catch <code>Exception</code> แล้วคืน empty list เพราะเปลี่ยน outage เป็น “ไม่มีงาน” และทำให้ operator ตัดสินใจผิด</div></section>
+  throw const ApiException(
+    'server ไม่ตอบภายในเวลาที่กำหนด',
+    kind: ApiFailureKind.timeout,
+  );
+}</code></pre><p>สามอย่างที่เกิดขึ้นตรงนี้</p><table><thead><tr><th>สิ่งที่ทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ดักเฉพาะชนิดที่รู้จัก</td><td>บั๊กของเราจะไม่ถูกกลืน (4.8)</td></tr>
+<tr><td>แปลงเป็น <code>ApiException</code> ชนิดเดียว</td><td>ชั้นบนไม่ต้องรู้จัก exception ของ HTTP</td></tr>
+<tr><td>ติด <code>kind</code> ให้ทุกทาง</td><td>ชั้นบนตัดสินใจได้โดยไม่ต้องอ่านข้อความ</td></tr>
+</tbody></table><p>ข้อสองสำคัญกว่าที่เห็น — ถ้าปล่อยให้ <code>SocketException</code> ลอยขึ้นไปถึง store จะกลายเป็นว่า store ต้อง <code>import 'dart:io'</code> ซึ่งทำให้ทดสอบยากและผูกกับแพลตฟอร์ม</p></section>
+
+<section><h2>5. ตั้งเวลารอให้เหมาะกับงาน</h2><pre class="code-vs"><code>.timeout(const Duration(seconds: 15))</code></pre><p>ตัวเลขนี้ไม่ควรเป็นค่าเดียวกันทุกที่</p><table><thead><tr><th>งาน</th><th>เวลาที่เหมาะ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ตรวจว่าเซิร์ฟเวอร์ยังอยู่ไหม</td><td>3–5 วินาที</td><td>ต้องรู้เร็ว ผู้ใช้กำลังรอดูผล</td></tr>
+<tr><td>โหลดรายการงาน</td><td>10–15 วินาที</td><td>ยอมรอได้ แต่ไม่ควรค้างนาน</td></tr>
+<tr><td>ส่งคำสั่งที่เปลี่ยนข้อมูล</td><td>20–30 วินาที</td><td>ยิ่งหมดเวลาเร็ว ยิ่งเจอกรณี "ไม่รู้ผล" บ่อย</td></tr>
+<tr><td>อัปโหลดรูป</td><td>นานกว่านั้น</td><td>ขึ้นกับขนาดไฟล์และสัญญาณ</td></tr>
+</tbody></table><p>แถวที่สามสวนความรู้สึก — คนมักคิดว่าคำสั่งสำคัญควรหมดเวลาเร็ว ๆ เพื่อให้ผู้ใช้รู้ผลไว แต่จริง ๆ แล้วตรงกันข้าม</p><pre class="code-vs"><code>ตั้ง 5 วินาที  → เซิร์ฟเวอร์ใช้ 7 วินาที → แอปบอกว่าไม่รู้ผล
+                  ทั้งที่งานสำเร็จเรียบร้อย
+                  → ผู้ใช้ต้องไปตรวจสอบเอง หรือเสี่ยงกดซ้ำ</code></pre><p><strong>ทุกครั้งที่หมดเวลารอกับคำสั่งที่เปลี่ยนข้อมูล จะเกิดสถานะ “ไม่รู้ผล” ที่ต้องจัดการ</strong> — ซึ่งแพงกว่าการรออีกสิบวินาทีมาก</p></section>
+
+<section><h2>6. หมดเวลารอไม่ได้แปลว่าเซิร์ฟเวอร์ไม่ทำ</h2><p>นี่คือความเข้าใจผิดที่ทำให้เกิดข้อมูลซ้ำมากที่สุด</p><pre class="code-vs"><code>แอปเลิกรอที่วินาทีที่ 15
+เซิร์ฟเวอร์ยังทำงานอยู่ และทำเสร็จที่วินาทีที่ 18
+  → งานถูกบันทึกแล้ว แต่แอปไม่รู้</code></pre><p>การเลิกรอเป็นการตัดสินใจของฝั่งเรา ไม่ได้ส่งสัญญาณอะไรไปบอกเซิร์ฟเวอร์ให้หยุด</p><p>ใน lab จึงตั้งธงไว้ต่างกันตาม method ตามที่เห็นใน 7.4</p><pre class="code-vs"><code>// GET — ไม่เปลี่ยนอะไรอยู่แล้ว
+throw const ApiException('server ไม่ตอบภายในเวลาที่กำหนด',
+    kind: ApiFailureKind.timeout);
+
+// POST — เปลี่ยนข้อมูลได้
+throw const ApiException('server ไม่ตอบหลังส่งคำสั่ง',
+    outcomeUnknown: true, kind: ApiFailureKind.timeout);</code></pre><p>และกฎนี้ถูกตรึงไว้ใน <code>api_failure.dart</code></p><pre class="code-vs"><code>/// timeout กับ network ที่ขาดกลางทางคือกรณีที่ไม่รู้ผล ซึ่งห้ามเดา (4.13)
+bool get outcomeIsKnown =&gt; switch (this) {
+  ApiFailureKind.network || ApiFailureKind.timeout =&gt; false,
+  _ =&gt; true,
+};</code></pre></section>
+
+<section><h2>7. ข้อความที่บอกว่าต้องทำอะไรต่อ</h2><table><thead><tr><th>ชนิด</th><th>ข้อความที่ดี</th><th>ข้อความที่ไม่ช่วย</th></tr></thead><tbody>
+<tr><td>network</td><td>“ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบ Wi-Fi แล้วลองใหม่”</td><td>“SocketException”</td></tr>
+<tr><td>timeout</td><td>“เซิร์ฟเวอร์ตอบช้า ลองใหม่อีกครั้ง”</td><td>“หมดเวลา”</td></tr>
+<tr><td>timeout หลังส่งคำสั่ง</td><td>“ไม่ทราบผล กำลังตรวจสอบสถานะล่าสุด”</td><td>“บันทึกไม่สำเร็จ”</td></tr>
+<tr><td>contract</td><td>“ข้อมูลจากเซิร์ฟเวอร์ไม่ถูกต้อง กรุณาแจ้งทีม”</td><td>“เกิดข้อผิดพลาด”</td></tr>
+</tbody></table><p>แถวที่สามสำคัญที่สุด — <strong>“บันทึกไม่สำเร็จ” เป็นการโกหกเมื่อยังไม่รู้ผล</strong> และเป็นการโกหกที่ทำให้ผู้ใช้กดซ้ำ</p><p>ส่วนแถวสุดท้าย ข้อความควรบอกด้วยว่าไม่ใช่ความผิดของผู้ใช้ ไม่งั้นเขาจะพยายามแก้เองไปเรื่อย ๆ</p></section>
+
+<section><h2>8. ไม่มีอินเทอร์เน็ต ไม่เท่ากับ ไม่มีเซิร์ฟเวอร์</h2><p>ในคลังหลายแห่ง เครือข่ายภายในไม่ได้ต่อออกอินเทอร์เน็ตเลย</p><pre class="code-vs"><code>PDA ──→ Wi-Fi ของคลัง ──→ เซิร์ฟเวอร์ WMS   ✓ ทำงานได้
+                        ──X──→ อินเทอร์เน็ต   ไม่ได้ต่อ</code></pre><table><thead><tr><th>วิธีตรวจ</th><th>ตอบอะไรได้</th></tr></thead><tbody>
+<tr><td>ตรวจว่ามีอินเทอร์เน็ตไหม</td><td>ไม่ตรงคำถาม — คลังหลายที่ไม่มีอยู่แล้ว</td></tr>
+<tr><td>ตรวจว่ามีการเชื่อมต่อ Wi-Fi ไหม</td><td>ต่อ Wi-Fi ได้ไม่ได้แปลว่าถึงเซิร์ฟเวอร์</td></tr>
+<tr><td><strong>ยิงไปที่เซิร์ฟเวอร์จริง</strong></td><td>ตอบตรงคำถาม</td></tr>
+</tbody></table><p>การใช้สถานะการเชื่อมต่อของเครื่องเป็นตัวตัดสิน จะทำให้แอปบอกว่า “ออฟไลน์” ทั้งที่ใช้งานได้ปกติ — ซึ่งเป็นการปิดกั้นผู้ใช้โดยไม่มีเหตุผล</p><p>วิธีที่ถูกคือถือว่าใช้งานได้ไว้ก่อน แล้วให้ผลของคำขอจริงเป็นตัวบอก ซึ่งจะทำเต็มรูปแบบใน 7.16</p></section>
+
+<section><h2>9. อย่าเปลี่ยนความล้มเหลวเป็นรายการว่าง</h2><pre class="code-vs"><code>// อันตรายมาก
+try {
+  return await api.fetchTasks();
+} catch (e) {
+  return [];      // เน็ตหลุดกลายเป็น "วันนี้ไม่มีงาน"
+}</code></pre><table><thead><tr><th>สิ่งที่ผู้ใช้เห็น</th><th>สิ่งที่เกิดจริง</th></tr></thead><tbody>
+<tr><td>“วันนี้ยังไม่มีงาน”</td><td>มีงาน 40 ชิ้น แต่โหลดไม่ได้</td></tr>
+</tbody></table><p>ผลคือคนหน้างานยืนรอ หรือเดินไปถามหัวหน้าว่าทำไมไม่มีงาน ทั้งที่งานอยู่ในระบบครบ</p><p>เป็นหลักเดียวกับ 4.7 — <strong>“ไม่มีข้อมูล” กับ “เอาข้อมูลมาไม่ได้” เป็นคนละสถานะ และต้องแสดงต่างกัน</strong></p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทุกปัญหาขึ้นข้อความเดียวกัน</td><td><code>catch (e)</code> เปล่า ๆ</td><td>ดักเฉพาะชนิดที่รู้จัก</td></tr>
+<tr><td>บั๊กในโค้ดถูกรายงานว่าเน็ตมีปัญหา</td><td>เหมือนข้างบน</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ข้อมูลซ้ำหลังจากที่หมดเวลารอ</td><td>ถือว่าหมดเวลารอ = ไม่สำเร็จ</td><td>ตั้ง <code>outcomeUnknown</code> แล้วไปตรวจสอบ</td></tr>
+<tr><td>เจอกรณี “ไม่รู้ผล” บ่อยผิดปกติ</td><td>ตั้งเวลารอสั้นเกินไปสำหรับคำสั่ง</td><td>ยืดเวลาสำหรับคำสั่งที่เปลี่ยนข้อมูล</td></tr>
+<tr><td>แอปบอกออฟไลน์ทั้งที่ใช้ได้</td><td>ใช้สถานะอินเทอร์เน็ตเป็นตัวตัดสิน</td><td>ยิงไปที่เซิร์ฟเวอร์จริง</td></tr>
+<tr><td>เน็ตหลุดแล้วขึ้นว่าไม่มีงาน</td><td>คืนรายการว่างเมื่อล้มเหลว</td><td>แยกสถานะให้ชัด</td></tr>
+<tr><td>store ต้อง import dart:io</td><td>ปล่อย exception ของ HTTP ขึ้นไป</td><td>แปลงเป็นชนิดของเราที่ขอบ</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมตั้งเวลารอไว้ 10 วินาทีทุก endpoint แล้วพบสองอาการ</p><table><thead><tr><th>#</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>ตอนช่วงเช้าที่คนใช้เยอะ มีรายงานว่า “กดปิดงานแล้วขึ้นว่าไม่สำเร็จ แต่พอกลับมาดูงานปิดไปแล้ว” สัปดาห์ละหลายครั้ง</td></tr>
+<tr><td>2</td><td>หน้าตั้งค่ามีปุ่มทดสอบการเชื่อมต่อ ผู้ใช้บ่นว่ากดแล้วต้องรอนานกว่าจะรู้ว่าที่อยู่ผิด</td></tr>
+</tbody></table><ol><li>อธิบายว่าทั้งสองอาการมาจากสาเหตุเดียวกันอย่างไร</li><li>เสนอค่าที่ควรตั้งของแต่ละงาน พร้อมเหตุผล</li><li>ตอบว่าการแก้เวลารออย่างเดียวพอไหมสำหรับอาการที่ 1</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุเดียวกัน</strong></p><p>ทั้งสองมาจาก <strong>การใช้ค่าเดียวกับงานที่มีความต้องการตรงข้ามกัน</strong></p><table><thead><tr><th></th><th>ปิดงาน</th><th>ทดสอบการเชื่อมต่อ</th></tr></thead><tbody>
+<tr><td>ผู้ใช้กำลังทำอะไร</td><td>ทำงานจริง รอผลได้</td><td>กำลังตั้งค่า อยากรู้เร็ว</td></tr>
+<tr><td>หมดเวลาเร็วไปแล้วเสียหายอย่างไร</td><td><strong>เกิดสถานะไม่รู้ผล</strong></td><td>ไม่เสียหาย</td></tr>
+<tr><td>หมดเวลาช้าไปแล้วเสียหายอย่างไร</td><td>ไม่เสียหายมาก</td><td><strong>ผู้ใช้ยืนรอโดยไม่จำเป็น</strong></td></tr>
+</tbody></table><p>10 วินาทีจึง <em>สั้นไป</em> สำหรับอย่างแรก และ <em>ยาวไป</em> สำหรับอย่างที่สอง</p><p>และอาการที่ 1 บอกใบ้ชัดว่าเป็นเรื่องเวลา — <strong>“ช่วงเช้าที่คนใช้เยอะ”</strong> คือช่วงที่เซิร์ฟเวอร์ช้าลง ทำให้บางคำขอเกิน 10 วินาที</p><p><strong>ข้อ 2 — ค่าที่ควรตั้ง</strong></p><table><thead><tr><th>งาน</th><th>ค่า</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ทดสอบการเชื่อมต่อ</td><td>5 วินาที</td><td>ต้องรู้เร็ว และไม่มีผลข้างเคียงถ้าตัดสินผิด</td></tr>
+<tr><td>โหลดรายการ</td><td>15 วินาที</td><td>ล้มเหลวแล้วกดใหม่ได้ ไม่มีอะไรเสียหาย</td></tr>
+<tr><td>ปิดงาน / คำสั่งที่เปลี่ยนข้อมูล</td><td>30 วินาที</td><td>ทุกครั้งที่หมดเวลา = เกิดสถานะไม่รู้ผล ซึ่งแพงกว่าการรอ</td></tr>
+</tbody></table><pre class="code-vs"><code>// ให้ตั้งได้ต่อคำขอ แทนที่จะเป็นค่าเดียวทั้งคลาส
+Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(
+  String path, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
+  ...
+  .timeout(timeout);
+}</code></pre><p><strong>ข้อ 3 — แก้เวลารออย่างเดียวพอไหม</strong></p><p><strong>ไม่พอ</strong> และนี่คือประเด็นหลักของแบบฝึกหัดนี้</p><p>การยืดเป็น 30 วินาทีลดความถี่ของอาการ แต่ไม่ได้กำจัดมัน — <strong>ตราบใดที่มีเวลารอ ก็ยังมีโอกาสที่เซิร์ฟเวอร์จะใช้เวลานานกว่านั้น</strong></p><table><thead><tr><th>สิ่งที่ต้องมีเพิ่ม</th><th>บท</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>ตั้ง <code>outcomeUnknown</code> ให้ถูก</td><td>7.4</td><td>แยก "ไม่รู้ผล" ออกจาก "ล้มเหลวแน่"</td></tr>
+<tr><td>ห้ามย้อนกลับเมื่อไม่รู้ผล</td><td>4.13</td><td>ไปโหลดใหม่แทนการเดา</td></tr>
+<tr><td>รหัสคำสั่ง</td><td>4.14, 7.15</td><td>ส่งซ้ำได้โดยไม่บันทึกซ้ำ</td></tr>
+<tr><td>ข้อความที่บอกว่ากำลังตรวจสอบ</td><td>7.7 หัวข้อ 7</td><td>ไม่บอกว่าล้มเหลวทั้งที่ยังไม่รู้</td></tr>
+</tbody></table><p>สังเกตว่าอาการที่รายงานมาคือ <em>“ขึ้นว่าไม่สำเร็จ แต่งานปิดไปแล้ว”</em> ซึ่งชี้ว่าปัญหาจริงไม่ใช่เวลารอ แต่คือ <strong>แอปบอกว่าล้มเหลวทั้งที่ยังไม่รู้ผล</strong></p><pre class="code-vs"><code>สิ่งที่เกิด:  หมดเวลารอ → แอปบอก "ไม่สำเร็จ" → ผู้ใช้เชื่อ → งานจริงปิดไปแล้ว
+สิ่งที่ควรเป็น: หมดเวลารอ → แอปบอก "กำลังตรวจสอบ" → โหลดใหม่ → บอกผลจริง</code></pre><p>ถ้าทำข้อนี้แล้ว ต่อให้เวลารอเป็น 10 วินาทีเหมือนเดิม อาการที่ผู้ใช้รายงานก็จะหายไป เพราะแอปจะไปหาความจริงมาบอกแทนที่จะเดา</p><p><strong>บทเรียนที่ควรจำ:</strong> การปรับตัวเลขเวลารอเป็นการลดความถี่ ส่วนการจัดการสถานะ “ไม่รู้ผล” ให้ถูกคือการแก้ปัญหา — และเมื่อเจออาการแบบนี้ ให้แก้อย่างหลังก่อนเสมอ เพราะอย่างแรกไม่มีวันพอ</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ดักเฉพาะชนิดที่รู้จัก อย่าใช้ <code>catch (e)</code> เปล่า ๆ</li><li>แปลง exception ของ HTTP เป็นชนิดของเราที่ขอบ</li><li>คำถามสำคัญคือ “เซิร์ฟเวอร์ทำไปแล้วหรือยัง” ไม่ใช่ “ล้มเหลวเพราะอะไร”</li><li>หมดเวลารอไม่ได้แปลว่าเซิร์ฟเวอร์หยุดทำงาน</li><li>คำสั่งที่เปลี่ยนข้อมูลควรตั้งเวลารอนานกว่า ไม่ใช่สั้นกว่า</li><li>ข้อความต้องบอกว่าต้องทำอะไรต่อ และห้ามบอกว่าล้มเหลวเมื่อยังไม่รู้ผล</li><li>ไม่มีอินเทอร์เน็ตไม่เท่ากับเข้าเซิร์ฟเวอร์ไม่ได้</li><li>ห้ามเปลี่ยนความล้มเหลวเป็นรายการว่าง</li></ul></div><p><strong>บทถัดไป:</strong> 7.8 จะดูฝั่งที่คำขอสำเร็จแล้ว — และทำไมรหัส 200 ยังไม่ได้แปลว่าข้อมูลใช้ได้</p></section>

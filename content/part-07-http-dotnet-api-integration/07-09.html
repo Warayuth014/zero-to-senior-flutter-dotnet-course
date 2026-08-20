@@ -1,14 +1,172 @@
-<div class="note"><strong>Status code ตอบว่า request จบแบบไหน:</strong> error payload ตอบรายละเอียด ห้ามพึ่งอย่างใดอย่างหนึ่งเพียงอย่างเดียว</div>
-<section><h2>1. กลุ่มสำคัญ</h2><ul><li>400 validation/request ผิด</li><li>401 token ไม่มีหรือใช้ไม่ได้</li><li>403 ไม่มีสิทธิ์</li><li>404 resource/route ไม่พบ</li><li>409 conflict/สถานะเปลี่ยนแล้ว</li><li>422 semantic validation</li><li>429 rate limit</li><li>500–599 server/proxy failure</li></ul></section>
-<section><h2>2. Typed ApiException</h2><pre class="code-vs"><code>throw ApiException(
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: อ่านคำปฏิเสธจากเซิร์ฟเวอร์ให้ผู้ใช้ทำต่อได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.8 (คำตอบที่สำเร็จ) และ 6.9 (การแปลงค่าที่ไม่รู้จัก)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกรหัสตอบกลับเป็นกลุ่มที่ต้องทำต่างกัน และรู้ว่าอะไรใช้ตัดสินใจได้ อะไรใช้แค่แสดงผล</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>เซิร์ฟเวอร์ตอบมาว่าไม่สำเร็จ แล้วแอปควรทำอะไร</p><pre class="code-vs"><code>// คำตอบที่ทุกคนเขียนครั้งแรก
+showError('ไม่สำเร็จ');
+</code></pre><p>แต่ “ไม่สำเร็จ” มีหลายแบบที่ผู้ใช้ต้องทำต่างกันสิ้นเชิง</p><table><thead><tr><th>เซิร์ฟเวอร์บอกว่า</th><th>ผู้ใช้ต้องทำ</th><th>ลองใหม่ช่วยไหม</th></tr></thead><tbody>
+<tr><td>ยังไม่ได้เข้าสู่ระบบ</td><td>เข้าสู่ระบบใหม่</td><td>ไม่</td></tr>
+<tr><td>ไม่มีสิทธิ์ทำสิ่งนี้</td><td>ติดต่อหัวหน้า</td><td>ไม่</td></tr>
+<tr><td>คนอื่นทำไปก่อนแล้ว</td><td>โหลดใหม่แล้วดูอีกที</td><td>ไม่</td></tr>
+<tr><td>จำนวนที่กรอกไม่ถูกต้อง</td><td>แก้จำนวนแล้วส่งใหม่</td><td>ไม่ ถ้าไม่แก้</td></tr>
+<tr><td>เซิร์ฟเวอร์มีปัญหาภายใน</td><td>รอสักครู่แล้วลองใหม่</td><td><strong>ช่วย</strong></td></tr>
+</tbody></table><p>ห้าแถว มีแค่แถวเดียวที่ปุ่ม “ลองใหม่” มีความหมาย — แต่ถ้าแสดงเหมือนกันหมด ผู้ใช้จะกดลองใหม่กับทุกแถว</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>รหัส</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td>400</td><td>คำขอไม่ถูกต้อง</td></tr>
+<tr><td>401</td><td>ไม่รู้ว่าคุณเป็นใคร</td></tr>
+<tr><td>403</td><td>รู้ว่าเป็นใคร แต่ทำไม่ได้</td></tr>
+<tr><td>404</td><td>ไม่พบสิ่งที่ขอ</td></tr>
+<tr><td>409</td><td>ขัดแย้งกับสถานะปัจจุบัน</td></tr>
+<tr><td>422</td><td>รูปแบบถูก แต่ความหมายใช้ไม่ได้</td></tr>
+<tr><td>429</td><td>ยิงถี่เกินไป</td></tr>
+<tr><td>500–599</td><td>เซิร์ฟเวอร์มีปัญหา</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: รหัสบอกกลุ่ม เนื้อหาบอกรายละเอียด</h2><pre class="code-vs"><code>รหัส 409     →  "ขัดแย้ง" — บอกได้แค่กลุ่ม
+detail       →  "งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว" — บอกว่าขัดแย้งเรื่องอะไร</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> รหัสใช้ตัดสินว่า <em>แอปควรทำอะไร</em> ส่วนเนื้อหาใช้บอกผู้ใช้ว่า <em>เกิดอะไรขึ้น</em> — และห้ามสลับหน้าที่กัน</div></section>
+
+<section><h2>4. แปลงรหัสเป็นชนิดที่เดียว</h2><p>เปิด <code>lib/core/api_failure.dart</code></p><pre class="code-vs"><code>/// แปลงรหัสตอบกลับเป็นชนิดความล้มเหลว
+///
+/// รวมไว้ที่เดียวเพราะกฎนี้ต้องเหมือนกันทุก endpoint
+ApiFailureKind failureKindForStatus(int statusCode) =&gt; switch (statusCode) {
+  401 =&gt; ApiFailureKind.unauthorized,
+  403 =&gt; ApiFailureKind.forbidden,
+  404 =&gt; ApiFailureKind.notFound,
+  409 =&gt; ApiFailureKind.conflict,
+  400 || 422 =&gt; ApiFailureKind.validation,
+  &gt;= 500 =&gt; ApiFailureKind.server,
+  _ =&gt; ApiFailureKind.contract,
+};</code></pre><p>สามอย่างที่ควรสังเกต</p><table><thead><tr><th>สิ่งที่เห็น</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>400 || 422</code> รวมเป็นชนิดเดียว</td><td>ทั้งคู่แปลว่า “ข้อมูลที่ส่งไปใช้ไม่ได้” และแอปทำเหมือนกัน</td></tr>
+<tr><td><code>&gt;= 500</code> ครอบทุกรหัส 5xx</td><td>500, 502, 503 ล้วนแปลว่าเซิร์ฟเวอร์มีปัญหา และลองใหม่ได้เหมือนกัน</td></tr>
+<tr><td>รหัสที่เหลือเป็น <code>contract</code></td><td>รหัสที่ไม่ควรมาถึงตรงนี้ แปลว่าสัญญาไม่ตรงกัน</td></tr>
+</tbody></table><pre class="code-vs"><code>test('รหัสที่ไม่ควรมาถึงตรงนี้ ถือว่าผิดสัญญา', () {
+  expect(failureKindForStatus(418), ApiFailureKind.contract);
+});</code></pre><p>สังเกตว่าไม่ได้แยก 401 กับ 403 ตามที่คนมักคิดว่า “คล้ายกัน” — เพราะ 7.5 แสดงแล้วว่าสองรหัสนี้ต้องทำคนละอย่างสิ้นเชิง</p></section>
+
+<section><h2>5. อ่านเนื้อหาแบบไม่คาดหวังมากเกินไป</h2><p>เนื้อหาที่มากับความล้มเหลวมีได้หลายรูปแบบ</p><table><thead><tr><th>รูปแบบ</th><th>เจอเมื่อ</th></tr></thead><tbody>
+<tr><td>ProblemDetails</td><td>ASP.NET รุ่นใหม่ที่ตั้งค่าไว้</td></tr>
+<tr><td><code>{"message": "..."}</code></td><td>ระบบเก่าที่กำหนดรูปแบบเอง</td></tr>
+<tr><td>ข้อความล้วน</td><td>ตัวกลางในเครือข่าย</td></tr>
+<tr><td>HTML</td><td>หน้าเข้าสู่ระบบขององค์กร</td></tr>
+<tr><td>ว่างเปล่า</td><td>บาง endpoint ที่ไม่ได้ใส่รายละเอียด</td></tr>
+</tbody></table><p>lab จึงลองอ่านแบบดีที่สุดเท่าที่ทำได้ แล้วมีทางสำรองเสมอ</p><pre class="code-vs"><code>final problem = ProblemDetails.tryParse(json);
+throw ApiException(
+  // ข้อความสำรองเมื่อ server ไม่ได้บอกอะไรที่อ่านรู้เรื่อง
+  problem?.userMessage ??
+      json?['message']?.toString() ??
+      'HTTP ${response.statusCode}',
   statusCode: response.statusCode,
-  code: problem.code,
-  userMessage: problem.detail ?? fallbackFor(status),
-  correlationId: problem.traceId,
-);</code></pre></section>
-<section><h2>3. อ่าน body อย่างปลอดภัย</h2><p>Error body อาจเป็น ProblemDetails, legacy map, plain text, HTML หรือว่าง จึง parse แบบ best effort และต้องมี fallback จาก status เสมอ</p></section>
-<section><h2>4. UI policy</h2><p>409 อาจให้ refresh งาน, 401 ส่งไป login, 403 แสดงไม่มีสิทธิ์, 400 ชี้ field ที่ผิด, 500 ให้ลองใหม่พร้อม trace ID แต่ policy navigation ควรอยู่เหนือ transport layer</p></section>
-<section><h2>5. ห้ามใช้ message เป็น logic</h2><p>อย่าเขียน <code>if (message.contains('already'))</code> ให้ server ส่ง stable machine code เช่น <code>TASK_ALREADY_COMPLETED</code> และ Flutter map เป็น enum/action</p></section>
-<section><h2>6. Preserve evidence</h2><p>เก็บ status, safe error code, endpoint, elapsed time และ trace ID สำหรับ log โดย truncate/redact body ที่อาจมีข้อมูลสำคัญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>404 จาก <code>/tasks/T-1</code> กับ 404 จาก route พิมพ์ผิดต่างกันอย่างไร?</p><details><summary>เฉลย</summary><p>status เท่ากันแต่ error code/ProblemDetails และ contract ช่วยแยก resource missing จาก deployment/config path ผิด</p></details></section>
-<section><h2>8. หลักจำ</h2><div class="success">Status ขับ policy ระดับกว้าง, stable error code ขับ behavior เฉพาะ และข้อความมีไว้แสดง—not control flow</div></section>
+  kind: failureKindForStatus(response.statusCode),
+  problem: problem,
+);</code></pre><p>สังเกตว่า <code>tryParse</code> คืน <code>null</code> แทนที่จะโยน ตามที่เขียนไว้ใน 6.9</p><pre class="code-vs"><code>/// คืน null เมื่อไม่ใช่ — ไม่โยน เพราะบาง endpoint ตอบรูปแบบอื่น
+/// และนั่นไม่ใช่ความผิดพลาดที่ต้องหยุดทุกอย่าง</code></pre><p>เพราะการที่เนื้อหาไม่ตรงรูปแบบที่หวัง ไม่ควรทำให้ข้อมูลที่มีอยู่แล้ว (คือรหัสตอบกลับ) ใช้ไม่ได้ไปด้วย</p></section>
+
+<section><h2>6. ห้ามใช้ข้อความเป็นเงื่อนไข</h2><p>นี่คือข้อผิดพลาดที่ดูไม่มีพิษภัยแต่สร้างปัญหายาว</p><pre class="code-vs"><code>// อันตราย
+if (error.message.contains('already completed')) {
+  showAsSuccess();
+}</code></pre><table><thead><tr><th>ปัญหา</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td>ข้อความเปลี่ยน</td><td>ทีมหลังบ้านแก้คำให้อ่านง่ายขึ้น</td></tr>
+<tr><td>ข้อความถูกแปล</td><td>เซิร์ฟเวอร์รองรับหลายภาษา</td></tr>
+<tr><td>ข้อความคล้ายกันแต่คนละเรื่อง</td><td>“already completed” กับ “already cancelled”</td></tr>
+</tbody></table><p>สิ่งที่ควรขอจากฝั่งหลังบ้านคือ <strong>รหัสที่ไม่เปลี่ยน</strong></p><pre class="code-vs"><code>{
+  "title": "Conflict",
+  "status": 409,
+  "detail": "งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว",
+  "errorCode": "TASK_ALREADY_COMPLETED"
+}</code></pre><pre class="code-vs"><code>// ตัดสินใจจากรหัส แสดงผลจากข้อความ
+switch (error.problem?.errorCode) {
+  case 'TASK_ALREADY_COMPLETED':
+    await store.reload();              // ไม่ใช่ความผิดพลาด — แค่ช้าไป
+  case 'TASK_LOCKED_BY_OTHER':
+    showResultBanner(messenger, error.userMessage);
+  case _:
+    showResultBanner(messenger, error.userMessage, isError: true);
+}</code></pre><div class="note">กฎง่าย ๆ — <em>ถ้าโค้ดอ่านข้อความเพื่อตัดสินใจ แปลว่ากำลังพึ่งสิ่งที่ไม่มีใครรับประกันว่าจะไม่เปลี่ยน</em></div></section>
+
+<section><h2>7. รหัสเดียวกันอาจมาจากคนละสาเหตุ</h2><p>404 เป็นตัวอย่างที่ชัดที่สุด</p><table><thead><tr><th>สาเหตุ</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>งาน T-001 ถูกลบไปแล้ว</td><td>บอกผู้ใช้ว่างานหายไป แล้วโหลดรายการใหม่</td></tr>
+<tr><td>เส้นทางพิมพ์ผิด</td><td>เป็นบั๊กของเรา ต้องแจ้งทีม</td></tr>
+<tr><td>เซิร์ฟเวอร์ยังไม่ได้ติดตั้งรุ่นที่มี endpoint นี้</td><td>บอกให้อัปเดตเซิร์ฟเวอร์</td></tr>
+</tbody></table><p>สามอย่างนี้ให้รหัสเดียวกันแต่ต้องทำคนละอย่าง และแยกไม่ได้จากรหัสอย่างเดียว</p><p>สิ่งที่ช่วยแยกได้</p><table><thead><tr><th>สัญญาณ</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>มี ProblemDetails มาด้วย</td><td>เซิร์ฟเวอร์รู้จัก endpoint นี้ — น่าจะเป็นสาเหตุแรก</td></tr>
+<tr><td>ได้ HTML หรือเนื้อหาว่าง</td><td>อาจไปไม่ถึง endpoint เลย — น่าจะเป็นสาเหตุที่สองหรือสาม</td></tr>
+<tr><td>เกิดกับทุก endpoint</td><td>ที่อยู่พื้นฐานผิด (7.2)</td></tr>
+<tr><td>เกิดกับ endpoint เดียว</td><td>เส้นทางนั้นผิด หรือเซิร์ฟเวอร์รุ่นเก่า</td></tr>
+</tbody></table><p>สองแถวล่างเป็นข้อมูลที่ได้จากการดูภาพรวม ไม่ใช่จากคำขอครั้งเดียว — ซึ่งเป็นเหตุผลที่ต้องบันทึกไว้ตาม 7.17</p></section>
+
+<section><h2>8. ให้ชั้นบนเป็นคนตัดสินว่าจะทำอะไร</h2><p><code>ApiClient</code> รู้แค่ว่าเกิดความล้มเหลวชนิดไหน แต่ไม่ควรตัดสินว่าจะพาผู้ใช้ไปไหน</p><pre class="code-vs"><code>// ผิด — ชั้นล่างสุดตัดสินใจเรื่องเส้นทาง
+if (response.statusCode == 401) {
+  Navigator.of(context).pushAndRemoveUntil(...);   // ApiClient ไม่ควรรู้จัก Navigator
+}</code></pre><table><thead><tr><th>ชั้น</th><th>รับผิดชอบ</th></tr></thead><tbody>
+<tr><td><code>ApiClient</code></td><td>แปลงรหัสเป็นชนิด</td></tr>
+<tr><td>repository</td><td>แปลงเป็นความล้มเหลวที่มีความหมายทางธุรกิจ ถ้าจำเป็น</td></tr>
+<tr><td>store</td><td>ตัดสินว่าสถานะควรเป็นอะไร</td></tr>
+<tr><td>หน้าจอ</td><td>ตัดสินว่าจะแสดงอะไรและพาไปไหน</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 5.4 — ชั้นที่รู้เรื่องเส้นทางน้อยที่สุด ควรตัดสินใจเรื่องเส้นทางน้อยที่สุด</p><p>และการที่ <code>ApiClient</code> ไม่รู้จัก <code>BuildContext</code> ทำให้ทดสอบได้โดยไม่ต้องมีหน้าจอ ตาม 7.6</p></section>
+
+<section><h2>9. เก็บหลักฐานไว้ตามหา</h2><pre class="code-vs"><code>/// รหัสที่ใช้ตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์
+final String? traceId;</code></pre><p>เมื่อเกิดข้อผิดพลาด สิ่งที่ควรเก็บ</p><table><thead><tr><th>เก็บ</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td>รหัสตอบกลับ</td><td>รู้ว่าเป็นความล้มเหลวกลุ่มไหน</td></tr>
+<tr><td><code>traceId</code></td><td>ตามหาคำขอนี้ใน log ฝั่งเซิร์ฟเวอร์</td></tr>
+<tr><td>endpoint</td><td>รู้ว่าเกิดที่ไหน</td></tr>
+<tr><td>เวลาที่ใช้</td><td>แยก “ปฏิเสธทันที” ออกจาก “ทำนานแล้วล้มเหลว”</td></tr>
+</tbody></table><p>และสิ่งที่ห้ามเก็บคือเนื้อหาทั้งก้อน ตามที่ 6.8 และ 7.17 บอกไว้ — เพราะ body ของงานคลังมีทั้งชื่อลูกค้าและราคา</p><p>การแสดง <code>traceId</code> บนหน้าจอเมื่อเกิดข้อผิดพลาด ทำให้คนหน้างานอ่านให้ทีมฟังได้ทันที แทนที่ทีมจะต้องเดาว่าเกิดตอนไหน</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ผู้ใช้กดลองใหม่กับทุกอย่าง</td><td>แสดงข้อความเดียวกันหมด</td><td>แยกชนิดแล้วแสดงต่างกัน</td></tr>
+<tr><td>ถูกเด้งออกจากระบบเมื่อไม่มีสิทธิ์</td><td>เหมารวม 403 เป็น 401</td><td>แยกสองรหัส</td></tr>
+<tr><td>โค้ดพังหลังหลังบ้านแก้คำในข้อความ</td><td>ใช้ข้อความเป็นเงื่อนไข</td><td>ขอรหัสที่ไม่เปลี่ยน</td></tr>
+<tr><td>เนื้อหาผิดรูปแบบแล้วไม่ได้อะไรเลย</td><td>บังคับให้เนื้อหาต้องตรงรูปแบบ</td><td>มีทางสำรองจากรหัสเสมอ</td></tr>
+<tr><td>404 แล้วไม่รู้ว่าเป็นบั๊กหรือข้อมูลหาย</td><td>ดูรหัสอย่างเดียว</td><td>ดูสัญญาณประกอบ</td></tr>
+<tr><td><code>ApiClient</code> ต้องรู้จักหน้าจอ</td><td>ตัดสินใจเรื่องเส้นทางที่ชั้นล่าง</td><td>ย้ายไปชั้นบน</td></tr>
+<tr><td>ตามหาใน log ฝั่งเซิร์ฟเวอร์ไม่เจอ</td><td>ไม่ได้เก็บ <code>traceId</code></td><td>เก็บและแสดงให้ผู้ใช้เห็น</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ผู้ใช้กดปิดงาน แล้วได้คำตอบนี้</p><pre class="code-vs"><code>HTTP 409
+{
+  "type": "https://httpstatuses.io/409",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว เมื่อ 14:32",
+  "traceId": "00-4bf92f-a3ce929d-01"
+}</code></pre><ol><li>ระบุว่าแอปควรทำอะไรกับคำตอบนี้ และห้ามทำอะไร</li><li>เขียนสิ่งที่ผู้ใช้ควรเห็นบนหน้าจอ</li><li>ตอบว่าถ้าเซิร์ฟเวอร์ตอบ 409 เหมือนกันแต่ <code>detail</code> ว่า “งานนี้ถูกล็อกโดยผู้ใช้อื่นอยู่” จะต่างกันอย่างไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ควรทำอะไร</strong></p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ย้อนการเปลี่ยนแปลงบนจอกลับ</td><td>เราติ๊กว่าเสร็จไว้ล่วงหน้าตาม 4.13 — แต่คนอื่นเป็นคนปิด</td></tr>
+<tr><td><strong>โหลดรายการใหม่</strong></td><td>ข้อมูลบนจอเก่าไปแล้ว อาจมีงานอื่นเปลี่ยนด้วย</td></tr>
+<tr><td>แสดง <code>detail</code> ที่เซิร์ฟเวอร์ส่งมา</td><td>มันบอกเรื่องที่เราไม่รู้ — ว่าใครทำและเมื่อไหร่</td></tr>
+<tr><td>เก็บ <code>traceId</code> ไว้</td><td>เผื่อต้องตามหาทีหลัง</td></tr>
+</tbody></table><table><thead><tr><th>ห้ามทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ลองใหม่อัตโนมัติ</td><td><code>conflict.isRetryable</code> เป็น <code>false</code> — ยิงไปกี่ครั้งก็ได้ 409 เหมือนเดิม</td></tr>
+<tr><td>แสดงปุ่ม “ลองใหม่”</td><td>เหตุผลเดียวกัน — เป็นการหลอกให้ผู้ใช้เสียเวลา</td></tr>
+<tr><td>พาไปหน้าเข้าสู่ระบบ</td><td>ไม่เกี่ยวกับสิทธิ์เลย</td></tr>
+<tr><td>แสดงว่า “เกิดข้อผิดพลาด”</td><td><strong>ไม่มีอะไรผิดพลาด</strong> — งานถูกปิดเรียบร้อยแล้ว แค่ไม่ใช่เราที่ปิด</td></tr>
+</tbody></table><p>แถวสุดท้ายคือประเด็นสำคัญ — 409 นี้เป็น <em>ข้อมูลใหม่</em> ไม่ใช่ความล้มเหลว ซึ่งเป็นข้อสรุปเดียวกับ 6.12 แบบฝึกหัดข้อ 3</p><p><strong>ข้อ 2 — สิ่งที่ผู้ใช้ควรเห็น</strong></p><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ ✓ T-001  PAL-0101                      │
+│   งานนี้ถูกปิดโดยผู้ใช้อื่นแล้ว เมื่อ 14:32  │
+│                                        │
+│ (รายการอัปเดตแล้ว)                       │
+└────────────────────────────────────────┘</code></pre><table><thead><tr><th>สิ่งที่ควรมี</th><th>สิ่งที่ไม่ควรมี</th></tr></thead><tbody>
+<tr><td>ข้อความจากเซิร์ฟเวอร์ตรง ๆ</td><td>คำว่า “ผิดพลาด” หรือสีแดง</td></tr>
+<tr><td>รายการที่อัปเดตแล้ว</td><td>ปุ่มลองใหม่</td></tr>
+<tr><td>เครื่องหมายว่างานนั้นเสร็จแล้ว</td><td>การย้อนกลับเงียบ ๆ โดยไม่บอกเหตุผล</td></tr>
+</tbody></table><p>เพราะผลลัพธ์สุดท้ายคือ “งานเสร็จแล้ว” ซึ่งเป็นสิ่งที่ผู้ใช้ต้องการอยู่แล้ว — แค่ไม่ได้เกิดจากการกดของเขา</p><p>ส่วน <code>traceId</code> ไม่ต้องแสดงในกรณีนี้ เพราะไม่มีอะไรผิดปกติให้ตามหา — เก็บไว้ใน log ก็พอ</p><p><strong>ข้อ 3 — ถ้า detail เปลี่ยนเป็น “ถูกล็อกอยู่”</strong></p><p>รหัสเหมือนกัน แต่ <strong>ความหมายทางธุรกิจต่างกันสิ้นเชิง</strong></p><table><thead><tr><th></th><th>“ถูกปิดแล้ว”</th><th>“ถูกล็อกอยู่”</th></tr></thead><tbody>
+<tr><td>งานจบหรือยัง</td><td>จบแล้ว</td><td><strong>ยังไม่จบ</strong></td></tr>
+<tr><td>ผู้ใช้ทำอะไรได้</td><td>ไปทำงานถัดไป</td><td>รอ แล้วลองใหม่ทีหลัง</td></tr>
+<tr><td>ปุ่มลองใหม่มีความหมายไหม</td><td>ไม่</td><td><strong>มี</strong> — เมื่ออีกคนปล่อยล็อกแล้ว</td></tr>
+<tr><td>ควรแสดงเป็นอะไร</td><td>ข้อมูล</td><td>สิ่งที่ต้องรอ</td></tr>
+</tbody></table><p><strong>และนี่คือเหตุผลว่าทำไมรหัสอย่างเดียวไม่พอ</strong></p><p>ถ้าตัดสินจากรหัส 409 อย่างเดียว ทั้งสองกรณีจะได้การปฏิบัติเหมือนกัน ซึ่งผิดในกรณีหลัง — ผู้ใช้จะคิดว่างานเสร็จแล้วและเดินจากไป ทั้งที่ยังไม่มีใครทำ</p><p><strong>แต่ก็ห้ามอ่าน <code>detail</code> เพื่อตัดสินใจ</strong> ตามหัวข้อ 6</p><pre class="code-vs"><code>// ห้าม — ข้อความเปลี่ยนได้
+if (detail.contains('ถูกปิด')) { ... }</code></pre><p>ทางที่ถูกคือขอให้ฝั่งหลังบ้านส่งรหัสที่ไม่เปลี่ยนมาด้วย</p><pre class="code-vs"><code>{
+  "status": 409,
+  "detail": "งานนี้ถูกล็อกโดยผู้ใช้อื่นอยู่",
+  "errorCode": "TASK_LOCKED_BY_OTHER"
+}</code></pre><pre class="code-vs"><code>switch (error.problem?.errorCode) {
+  case 'TASK_ALREADY_COMPLETED':
+    await store.reload();
+    showResultBanner(messenger, error.userMessage);      // ไม่ใช่ error
+  case 'TASK_LOCKED_BY_OTHER':
+    showRetryableBanner(messenger, error.userMessage);   // มีปุ่มลองใหม่
+  case _:
+    showResultBanner(messenger, error.userMessage, isError: true);
+}</code></pre><p><strong>บทเรียนที่ควรจำ:</strong> รหัสตอบกลับบอกได้แค่ว่าเป็นความล้มเหลว <em>กลุ่ม</em> ไหน — เมื่อกลุ่มเดียวกันต้องทำต่างกัน ต้องขอรหัสที่ละเอียดกว่าจากฝั่งหลังบ้าน ไม่ใช่ไปอ่านข้อความเอา</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>รหัสใช้ตัดสินว่าแอปทำอะไร เนื้อหาใช้บอกผู้ใช้ว่าเกิดอะไร</li><li>แปลงรหัสเป็นชนิดที่เดียว เพื่อให้กฎเหมือนกันทุก endpoint</li><li>รวมรหัสที่แอปทำเหมือนกันไว้เป็นชนิดเดียว</li><li>อ่านเนื้อหาแบบดีที่สุดเท่าที่ทำได้ และมีทางสำรองจากรหัสเสมอ</li><li>ห้ามใช้ข้อความเป็นเงื่อนไข — ขอรหัสที่ไม่เปลี่ยนแทน</li><li>รหัสเดียวกันอาจมาจากคนละสาเหตุ ต้องดูสัญญาณประกอบ</li><li>ชั้นบนเป็นคนตัดสินว่าจะพาผู้ใช้ไปไหน</li><li>ความล้มเหลวบางอย่างไม่ใช่ความผิดพลาด แต่เป็นข้อมูลใหม่</li></ul></div><p><strong>บทถัดไป:</strong> 7.10 จะตอบคำถามที่ค้างมาตั้งแต่ต้น Part — ควรโยนความล้มเหลวออกไป หรือคืนมันเป็นค่ากลับมา</p></section>
