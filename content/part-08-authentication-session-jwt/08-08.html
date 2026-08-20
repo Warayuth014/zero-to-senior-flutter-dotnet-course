@@ -1,12 +1,166 @@
-<div class="note"><strong>Logout คือ security transition ทั้งระบบ:</strong> หยุดงาน, ล้าง credential และ user-scoped state, invalidate navigation แล้วค่อยกลับ login—not merely pop route</div>
-<section><h2>1. ลำดับที่ปลอดภัย</h2><ol><li>เปลี่ยน auth state เป็น signingOut และเพิ่ม generation</li><li>หยุด polling/timer/subscription</li><li>cancel หรือ ignore in-flight response</li><li>ล้าง feature/user caches</li><li>ลบ secure credential และ token ใน memory</li><li>แทน route stack ด้วย login</li></ol></section>
-<section><h2>2. API revoke</h2><p>ถ้ามี refresh token/server session ให้เรียก revoke แบบ best effort ตาม product policy แต่ local logout ต้องสำเร็จแม้ offline; server token อายุสั้นช่วยลดช่วงเสี่ยง</p></section>
-<section><h2>3. Clear เฉพาะ scope</h2><p>ลบ auth keys, selected task และ user data แต่อาจเก็บ theme/language; connection profile จะเก็บหรือไม่ขึ้นกับ threat model อย่าใช้ <code>SharedPreferences.clear()</code> โดยไม่รู้ ownership</p></section>
-<section><h2>4. Navigation reset</h2><pre class="code-vs"><code>Navigator.of(context).pushAndRemoveUntil(
-  MaterialPageRoute(builder: (_) =&gt; LoginScreen(auth: auth)),
-  (_) =&gt; false,
-);</code></pre><p>กด Back แล้วต้องไม่กลับ authenticated screen</p></section>
-<section><h2>5. Stale response guard</h2><p>ทุก async store action จับ session generation/user ID ตอนเริ่มและตรวจอีกครั้งก่อน apply state ป้องกันข้อมูลผู้ใช้ A โผล่หลังผู้ใช้ B login</p></section>
-<section><h2>6. ของจริง</h2><p><code>AuthRepository.logout()</code> ในแอปจริงล้าง token/session memory ส่วน WarehouseShell reset route; production extension ต้องรวม persistence, timers และ feature storesด้วย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>secure storage ลบ token ไม่สำเร็จควรอยู่ shell ต่อไหม?</p><details><summary>เฉลย</summary><p>ไม่ ให้ล้าง memory/route ทันทีและ retry secure deletion หรือ block restore ด้วย tombstone/version เพื่อไม่ฟื้น token เก่าโดยเงียบ</p></details></section>
-<section><h2>8. Exit checklist</h2><div class="success">Back กลับไม่ได้, request เก่าเปลี่ยน state ไม่ได้, token/log/cache ไม่มีข้อมูลผู้ใช้เดิม และเปิดแอปใหม่ไม่ restore session ที่ logout แล้ว</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ล้างทุกอย่างที่ผูกกับผู้ใช้คนเดิม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.7 (การหลุดออกจากระบบ) และ 5.4 (การล้างเส้นทาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกจากระบบให้ครบทุกชั้น และรู้ว่าอะไรที่ลืมแล้วจะกลายเป็นปัญหาบน PDA ที่เปลี่ยนมือ</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>5.4 บอกไว้แล้วว่าล้างหน้าจอไม่เท่ากับออกจากระบบ — บทนี้ลงรายละเอียดว่าต้องล้างอะไรบ้าง</p><p>และเหตุผลที่เรื่องนี้สำคัญกว่าในแอปทั่วไป</p><pre class="code-vs"><code>โทรศัพท์ส่วนตัว  →  คนเดียวใช้  →  ล้างไม่ครบก็ไม่มีใครเห็น
+PDA ในคลัง       →  เปลี่ยนมือทุกกะ  →  ล้างไม่ครบ = คนถัดไปเห็นของคนก่อน</code></pre><table><thead><tr><th>สิ่งที่ลืมล้าง</th><th>คนถัดไปเห็นอะไร</th></tr></thead><tbody>
+<tr><td>token</td><td>ทำงานด้วยสิทธิ์ของคนก่อน</td></tr>
+<tr><td>ข้อมูลใน store</td><td>รายการงานของคนก่อน</td></tr>
+<tr><td>ตัวจับเวลา</td><td>คำขอยิงต่อด้วย token เก่า</td></tr>
+<tr><td>ร่างงานที่ทำค้าง</td><td>งานของคนก่อน และอาจกดส่งในชื่อตัวเอง</td></tr>
+</tbody></table></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>cleanup</td><td>งานเก็บกวาดเมื่อจบการใช้งาน</td></tr>
+<tr><td>ownership</td><td>ใครสร้าง คนนั้นทำลาย</td></tr>
+<tr><td>lifetime</td><td>ช่วงเวลาที่สิ่งหนึ่งมีชีวิตอยู่</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: อะไรที่มีอายุเท่ากับ session</h2><pre class="code-vs"><code>อายุเท่าแอป        ApiClient, ที่อยู่เซิร์ฟเวอร์, การตั้งค่า
+อายุเท่า session   token, ข้อมูลงาน, ร่างงาน, ตัวจับเวลา
+อายุเท่าหน้าจอ     controller, ตำแหน่งที่เลื่อน</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกอย่างในชั้นกลางต้องหายไปพร้อมกันเมื่อออกจากระบบ — และวิธีที่ทำให้ลืมไม่ได้คือให้มันถูกสร้างพร้อมกันตั้งแต่แรก</div></section>
+
+<section><h2>4. ลำดับการล้าง</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>Future&lt;void&gt; _clearTo(AuthStatus status, {SignOutReason? reason}) async {
+  // ล้าง token ก่อนเสมอ ไม่ให้มีคำขอไหนยิงด้วย token เก่าได้อีก
+  onTokenChanged(null);
+  _session = null;
+  _status = status;
+  _lastSignOutReason = reason;
+  try {
+    await storage.clear();
+  } on SessionStorageException {
+    // ล้างไม่ได้ก็ยังต้องออกจากระบบในรอบนี้ให้ได้
+  }
+  notifyListeners();
+}</code></pre><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>ทำไมต้องอยู่ตำแหน่งนี้</th></tr></thead><tbody>
+<tr><td>1</td><td>ล้าง token</td><td>ตัดความสามารถในการยิงคำขอทันที</td></tr>
+<tr><td>2</td><td>ล้างสถานะในหน่วยความจำ</td><td>เร็ว ไม่มีทางล้มเหลว</td></tr>
+<tr><td>3</td><td>ล้างที่เก็บ</td><td>ช้าและล้มเหลวได้ จึงอยู่ท้าย</td></tr>
+<tr><td>4</td><td>แจ้งผู้ฟัง</td><td>หลังจากทุกอย่างเรียบร้อยแล้ว</td></tr>
+</tbody></table><p>ข้อ 3 ที่ล้มเหลวได้ ต้องไม่ทำให้ข้อ 1 และ 2 เสียไป — <strong>ออกจากระบบในรอบนี้ต้องสำเร็จเสมอ</strong> แม้ครั้งหน้าจะยังเจอข้อมูลเก่าอยู่</p></section>
+
+<section><h2>5. store อื่นต้องหายไปด้วย</h2><p><code>SessionStore</code> ล้างของตัวเองได้ แต่ไม่รู้จัก store อื่น</p><pre class="code-vs"><code>// ที่จุดประกอบแอป — สร้าง store ที่มีอายุเท่า session พร้อมกัน
+class SignedInScope {
+  SignedInScope({required this.apiClient, required this.session}) {
+    taskStore = TaskStore(RemoteTaskRepository(apiClient));
+    inboundStore = InboundStore(RemoteInboundRepository(apiClient));
+  }
+
+  late final TaskStore taskStore;
+  late final InboundStore inboundStore;
+
+  /// ทำลายทุกอย่างที่ผูกกับผู้ใช้คนนี้
+  void dispose() {
+    taskStore.dispose();      // หยุด polling และเพิ่มเลขรุ่น (4.11)
+    inboundStore.dispose();
+  }
+}</code></pre><pre class="code-vs"><code>// หน้าจอที่ฟัง session
+void _onSessionChanged() {
+  if (sessionStore.isSignedIn &amp;&amp; _scope == null) {
+    _scope = SignedInScope(apiClient: apiClient, session: sessionStore.session!);
+  } else if (!sessionStore.isSignedIn &amp;&amp; _scope != null) {
+    _scope!.dispose();
+    _scope = null;
+  }
+}</code></pre><p>ประโยชน์คือ <strong>เพิ่ม store ใหม่แล้วลืมล้างไม่ได้</strong> เพราะมันถูกสร้างในที่เดียวกับที่ถูกทำลาย</p><p>เป็นหลักเดียวกับ 4.12 — ใครสร้าง คนนั้นทำลาย</p></section>
+
+<section><h2>6. ตัวจับเวลาต้องหยุด</h2><p>สิ่งที่ลืมบ่อยที่สุดและมองไม่เห็น</p><pre class="code-vs"><code>@override
+void dispose() {
+  stopPolling();      // หยุดที่จะเกิดในอนาคต
+  _generation++;      // ทิ้งผลของที่เกิดไปแล้ว (4.10, 4.11)
+  super.dispose();
+}</code></pre><p>ถ้าลืม จะเกิดสิ่งนี้</p><pre class="code-vs"><code>ออกจากระบบ → token ถูกล้าง
+  → 10 วินาทีต่อมา polling ยิงคำขอ
+  → ไม่มี token → ได้ 401
+  → เรียก handleUnauthorized ทั้งที่ออกจากระบบไปแล้ว
+  → (ถ้าไม่กันซ้ำตาม 8.7 จะพาไปหน้าเข้าสู่ระบบอีกครั้ง)</code></pre><p>อาการที่ผู้ใช้เห็นคือหน้าเข้าสู่ระบบเด้งซ้ำทุก 10 วินาที ทั้งที่ไม่ได้ทำอะไร</p><p>และแม้จะกันซ้ำไว้แล้ว มันก็ยังเปลืองคำขอและกินแบตโดยไม่ได้อะไร</p></section>
+
+<section><h2>7. ร่างงานเก็บได้ แต่ต้องผูกกับเจ้าของ</h2><table><thead><tr><th>ล้างทิ้ง</th><th>เก็บไว้แต่ผูกกับผู้ใช้</th></tr></thead><tbody>
+<tr><td>token</td><td>ร่างงานที่ยังไม่ได้ส่ง</td></tr>
+<tr><td>ข้อมูลที่โหลดมาจากเซิร์ฟเวอร์</td><td>รหัสคำสั่งที่ยังค้าง (4.14)</td></tr>
+<tr><td>ชื่อและข้อมูลส่วนตัว</td><td>การตั้งค่าที่ไม่อ่อนไหว</td></tr>
+</tbody></table><p>เหตุผลที่คอลัมน์ขวาเก็บได้ — <strong>มันเป็นงานของผู้ใช้ ไม่ใช่ความลับ</strong> และการทิ้งไปคือการทำลายงานที่เขาทำมา</p><pre class="code-vs"><code>await draftStorage.save(userId: session.username, draft: draft);</code></pre><p>แต่ต้องผูกกับเจ้าของเสมอ ไม่งั้นคนกะถัดไปจะเห็น ซึ่งเป็นข้อสรุปของ 5.4 แบบฝึกหัดข้อ 3</p><pre class="code-vs"><code>// ตอนเปิดกลับมา — ดึงเฉพาะของคนที่ล็อกอินอยู่
+final draft = await draftStorage.load(userId: session.username);</code></pre></section>
+
+<section><h2>8. เซิร์ฟเวอร์ควรรู้ไหม</h2><p>8.2 บอกว่า <code>AuthRepository</code> ไม่มีเมธอด <code>logout</code> — เพราะการออกจากระบบเป็นเรื่องของฝั่งแอป</p><table><thead><tr><th>ถ้าไม่แจ้งเซิร์ฟเวอร์</th><th>ถ้าแจ้ง</th></tr></thead><tbody>
+<tr><td>token ยังใช้ได้จนหมดอายุ</td><td>token ถูกยกเลิกทันที</td></tr>
+<tr><td>ออกจากระบบสำเร็จเสมอ</td><td>ต้องตัดสินว่าถ้าแจ้งไม่ได้จะทำอย่างไร</td></tr>
+<tr><td>ทำงานได้แม้ไม่มีเน็ต</td><td>ต้องมีเน็ต</td></tr>
+</tbody></table><p>สำหรับ token ที่อายุสั้น การไม่แจ้งก็เพียงพอ — แต่ถ้าตัดสินใจแจ้ง ต้อง <strong>ไม่ให้การแจ้งล้มเหลวขวางการออกจากระบบ</strong></p><pre class="code-vs"><code>Future&lt;void&gt; signOut({SignOutReason reason = SignOutReason.userRequested}) async {
+  // แจ้ง server แบบไม่รอผล และไม่ให้ล้มเหลวขวางการออก (4.8)
+  unawaited(_notifyServerBestEffort());
+
+  await _clearTo(AuthStatus.signedOut, reason: reason);
+}</code></pre><p>เพราะถ้าเน็ตหลุด แล้วออกจากระบบไม่ได้ ผู้ใช้จะติดอยู่ในบัญชีของตัวเองบนเครื่องที่ต้องส่งต่อให้กะถัดไป</p></section>
+
+<section><h2>9. รายการตรวจ</h2><table><thead><tr><th>ล้างอะไร</th><th>ถ้าลืม</th></tr></thead><tbody>
+<tr><td>token ในตัวส่ง HTTP</td><td>ยิงคำขอด้วยสิทธิ์คนเก่าได้</td></tr>
+<tr><td>token ในที่เก็บ</td><td>เปิดแอปใหม่แล้วเข้าได้เลย</td></tr>
+<tr><td>store ที่ถือข้อมูลของผู้ใช้</td><td>เห็นรายการงานของคนเก่า</td></tr>
+<tr><td>ตัวจับเวลาและ polling</td><td>ยิงคำขอต่อและได้ 401 วนไป</td></tr>
+<tr><td>คำขอที่ยังค้างอยู่</td><td>ผลกลับมาเขียนลง store ที่ควรตายแล้ว (4.10)</td></tr>
+<tr><td>เส้นทางบนหน้าจอ</td><td>กดย้อนกลับแล้วเข้าหน้าเดิมได้ (5.4)</td></tr>
+<tr><td>ไฟล์ชั่วคราว เช่นรูปที่รอส่ง</td><td>คนถัดไปเห็นรูปของคนก่อน</td></tr>
+</tbody></table><p>แถวสุดท้ายมักถูกลืมที่สุด — และเป็นข้อมูลที่มองเห็นได้ชัดที่สุดถ้าหลุด</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>คนกะถัดไปเห็นงานของคนก่อน</td><td>ไม่ทำลาย store</td><td>สร้างและทำลายพร้อมกัน</td></tr>
+<tr><td>หน้าเข้าสู่ระบบเด้งซ้ำทุก 10 วินาที</td><td>ไม่หยุด polling</td><td>หยุดใน <code>dispose</code></td></tr>
+<tr><td>เปิดแอปใหม่แล้วเข้าได้เลย</td><td>ไม่ล้างที่เก็บ</td><td>ล้าง</td></tr>
+<tr><td>ออกจากระบบไม่ได้เมื่อไม่มีเน็ต</td><td>รอผลการแจ้งเซิร์ฟเวอร์</td><td>แจ้งแบบไม่รอผล</td></tr>
+<tr><td>ร่างงานของทุกคนปนกัน</td><td>ไม่ผูกกับผู้ใช้</td><td>เก็บพร้อมรหัสผู้ใช้</td></tr>
+<tr><td>ล้างแล้วการตั้งค่าเซิร์ฟเวอร์หายด้วย</td><td>ล้างที่เก็บทั้งหมด</td><td>ล้างเฉพาะของ session (8.5)</td></tr>
+<tr><td>เพิ่ม store ใหม่แล้วลืมล้าง</td><td>สร้างกระจายหลายที่</td><td>รวมไว้ที่เดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมได้รายงานจากหัวหน้ากะว่า</p><blockquote><p>“คนกะบ่ายบอกว่าเปิดแอปมาแล้วเห็นชื่อคนกะเช้าค้างอยู่บนหัวจอ กดออกจากระบบแล้วเข้าใหม่ก็ยังเห็น ต้องปิดแอปแล้วเปิดใหม่ถึงจะหาย”</p></blockquote><ol><li>ระบุสาเหตุที่น่าจะเป็น</li><li>อธิบายว่าทำไมปิดแอปแล้วเปิดใหม่ถึงหาย</li><li>เขียนวิธีแก้และเทสต์ที่จะจับได้</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><p><strong>มี store หรือ widget ที่ถือชื่อผู้ใช้ไว้ และไม่ถูกทำลายตอนออกจากระบบ</strong></p><table><thead><tr><th>สิ่งที่ตัดออกได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>token ไม่ถูกล้าง</td><td>ถ้าไม่ล้าง คนกะบ่ายจะทำงานด้วยสิทธิ์คนเก่า ซึ่งไม่มีรายงาน</td></tr>
+<tr><td>ที่เก็บไม่ถูกล้าง</td><td>ถ้าไม่ล้าง ปิดแอปเปิดใหม่ก็ยังเห็น — แต่รายงานบอกว่าหาย</td></tr>
+</tbody></table><p>ข้อมูลที่ชี้ชัดที่สุดคือ <strong>“ปิดแอปแล้วเปิดใหม่ถึงจะหาย”</strong> — แปลว่าข้อมูลอยู่ในหน่วยความจำอย่างเดียว ไม่ได้อยู่ในที่เก็บ</p><p>สิ่งที่น่าจะเป็นคือ store ที่ถูกสร้างครั้งเดียวตอนแอปเริ่ม แล้วอยู่ยาวข้าม session</p><pre class="code-vs"><code>// ผิด — สร้างครั้งเดียวตอนแอปเริ่ม
+final profileStore = ProfileStore();   // อายุเท่าแอป
+
+// แต่ข้อมูลข้างในมีอายุเท่า session
+class ProfileStore extends ChangeNotifier {
+  String? displayName;    // ค้างข้าม session
+}</code></pre><p><strong>ข้อ 2 — ทำไมปิดแอปแล้วหาย</strong></p><pre class="code-vs"><code>ปิดแอป → หน่วยความจำถูกคืนทั้งหมด → store ถูกสร้างใหม่ตอนเปิด
+      → displayName เป็น null → ไม่มีอะไรค้าง</code></pre><p>ซึ่งอธิบายว่าทำไมการกดออกจากระบบไม่ช่วย — เพราะการออกจากระบบล้างแค่ <code>SessionStore</code> ส่วน <code>ProfileStore</code> ไม่มีใครแตะ</p><table><thead><tr><th>สิ่งที่เกิด</th><th>ข้อมูลไปไหน</th></tr></thead><tbody>
+<tr><td>กดออกจากระบบ</td><td><code>SessionStore</code> ถูกล้าง แต่ <code>ProfileStore</code> ไม่</td></tr>
+<tr><td>เข้าสู่ระบบใหม่</td><td><code>ProfileStore</code> ยังมีค่าเก่า จนกว่าจะโหลดทับ</td></tr>
+<tr><td>ปิดแอปแล้วเปิด</td><td>ทุก store ถูกสร้างใหม่</td></tr>
+</tbody></table><p><strong>ข้อ 3 — วิธีแก้และเทสต์</strong></p><p><em>วิธีแก้</em> — ทำให้ store ที่ถือข้อมูลของผู้ใช้มีอายุเท่า session</p><pre class="code-vs"><code>class SignedInScope {
+  SignedInScope({required this.apiClient, required AuthSession session}) {
+    profileStore = ProfileStore(session: session);
+    taskStore = TaskStore(RemoteTaskRepository(apiClient));
+  }
+
+  late final ProfileStore profileStore;
+  late final TaskStore taskStore;
+
+  void dispose() {
+    profileStore.dispose();
+    taskStore.dispose();
+  }
+}</code></pre><p>สิ่งที่ทำให้ผิดยากขึ้น — <strong><code>ProfileStore</code> รับ <code>AuthSession</code> เข้ามาทาง constructor</strong></p><pre class="code-vs"><code>class ProfileStore extends ChangeNotifier {
+  ProfileStore({required this.session});
+  final AuthSession session;      // final — ไม่มีทางค้างจาก session เก่า
+
+  String get displayName =&gt; session.username;
+}</code></pre><p>เมื่อชื่อผู้ใช้มาจาก <code>session</code> ที่เป็น <code>final</code> มันจึงไม่มีทางค้าง — เพราะ store ตัวใหม่ต้องได้ session ตัวใหม่เสมอ</p><p>เป็นการแก้ปัญหาด้วยชนิดข้อมูล แทนที่จะแก้ด้วยวินัย ซึ่งเป็นหลักเดียวกับ 4.7</p><p><em>เทสต์</em></p><pre class="code-vs"><code>test('ล็อกอินคนใหม่ต้องไม่เห็นชื่อคนก่อนหน้า', () async {
+  await app.signIn('somchai');
+  expect(app.scope!.profileStore.displayName, 'somchai');
+
+  await app.signOut();
+  expect(app.scope, isNull);          // ทำลายแล้วจริง
+
+  await app.signIn('somsri');
+  expect(app.scope!.profileStore.displayName, 'somsri');
+});</code></pre><pre class="code-vs"><code>test('ออกจากระบบต้องทำลาย store ที่ผูกกับผู้ใช้ทั้งหมด', () async {
+  await app.signIn('somchai');
+  final taskStore = app.scope!.taskStore;
+
+  await app.signOut();
+
+  // store เก่าต้องใช้ต่อไม่ได้ ไม่ใช่แค่ถูกลืม
+  expect(() =&gt; taskStore.load(), throwsA(isA&lt;FlutterError&gt;()));
+});</code></pre><p>เทสต์ตัวที่สองแรงกว่า — มันพิสูจน์ว่า store ถูก <em>ทำลาย</em> ไม่ใช่แค่ไม่มีใครอ้างถึงแล้ว</p><p>เพราะ <code>ChangeNotifier</code> ที่ถูก <code>dispose</code> แล้วจะโยนเมื่อมีคนเรียก <code>notifyListeners</code> ซึ่งเป็นการยืนยันว่าถูกทำลายจริง</p><p><strong>บทเรียนที่ควรจำ:</strong> อาการ “ปิดแอปแล้วหาย” เป็นหลักฐานว่าข้อมูลอยู่ในหน่วยความจำอย่างเดียว — และเมื่อรวมกับ “กดออกจากระบบแล้วไม่หาย” ก็เหลือความเป็นไปได้เดียวคือมีของที่อายุยาวกว่าที่ควร</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>PDA เปลี่ยนมือทุกกะ การล้างไม่ครบจึงเห็นได้ทันที</li><li>ล้าง token ก่อน แล้วค่อยล้างที่เก็บที่ล้มเหลวได้</li><li>ออกจากระบบในรอบนี้ต้องสำเร็จเสมอ</li><li>สร้าง store ที่มีอายุเท่า session พร้อมกัน เพื่อให้ทำลายพร้อมกัน</li><li>หยุดตัวจับเวลา ไม่งั้นจะยิงคำขอต่อและได้ 401 วนไป</li><li>ร่างงานเก็บได้ แต่ต้องผูกกับเจ้าของ</li><li>ถ้าแจ้งเซิร์ฟเวอร์ อย่าให้การแจ้งล้มเหลวขวางการออก</li><li>ให้ข้อมูลของผู้ใช้มาจาก session ที่เป็น <code>final</code> จะได้ไม่มีทางค้าง</li></ul></div><p><strong>บทถัดไป:</strong> 8.9 จะดูเรื่องสิทธิ์ ซึ่งเป็นคนละเรื่องกับการยืนยันตัวตน และเป็นที่ที่การเข้าใจผิดทำให้เกิดช่องโหว่</p></section>

@@ -1,14 +1,171 @@
-<div class="note"><strong>Remember session คือ restore credential ไม่ใช่จำหน้า UI:</strong> เก็บเฉพาะข้อมูลที่ต้องใช้ยืนยันตัวตน แล้ว rebuild user/session state จาก storage อย่างปลอดภัยตอนเปิดแอป</div>
-<section><h2>1. Persistence choices</h2><p>access/refresh token เป็น secret ควรอยู่ secure storage ของ platform; username, locale หรือ active server profileที่ไม่ลับอาจอยู่ SharedPreferences ตาม data classification</p></section>
-<section><h2>2. Stored envelope</h2><pre class="code-vs"><code>{
-  "schemaVersion": 1,
-  "serverId": "warehouse-prod",
-  "username": "EMP001",
-  "expiresAt": "2026-08-15T10:00:00Z"
-}</code></pre><p>เก็บ token ด้วย secure key แยกหรือตาม abstraction และ bind session กับ server</p></section>
-<section><h2>3. Atomic save</h2><p>อย่าให้ memory session authenticated ก่อน token persist สำเร็จหาก product ต้อง remember login กำหนด policy เมื่อ secure storage เขียนไม่ได้: session ชั่วคราวหรือ fail login พร้อมข้อความที่ชัด</p></section>
-<section><h2>4. Restore validation</h2><ol><li>อ่าน storage และ schema</li><li>ตรวจ server binding</li><li>ตรวจ expiration/required fields</li><li>ตั้ง token ใน client</li><li>อาจเรียก profile/me เพื่อยืนยันกับ server</li><li>ค่อยประกาศ authenticated</li></ol></section>
-<section><h2>5. Corrupt/migrated data</h2><p>parse failure ไม่ควร crash splash screen ให้ลบเฉพาะ auth keys ที่เสียและกลับ login พร้อม telemetry ไม่ใช้ <code>prefs.clear()</code> เพราะอาจลบ theme/server settings ที่ไม่เกี่ยวข้อง</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp/AuthSessionService</code> โหลด userId/fullName/role จาก preferences แต่ไม่มี bearer token นี่คือ remembered demo identity ไม่ใช่ server-authenticated session</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>แอปเปิดแล้วพบ token expired แต่ยังมี username ควรเข้า shell ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ให้ล้าง credential/auth state และไป login โดยอาจ prefill username ที่จัดเป็น non-secret ได้</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">ไม่มีข้อมูล, valid, expired, corrupt JSON, schema เก่า, secure storage error, server mismatch และ logout หลัง restore</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: จำการเข้าสู่ระบบข้ามการปิดแอป</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.4 (การต่อ token) และ 5.7 (ชั้นของข้อมูลตามอายุ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บ session ลงเครื่องอย่างปลอดภัย และรู้ว่าอะไรเก็บได้ อะไรเก็บไม่ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ทุกอย่างที่ทำมาอยู่ในหน่วยความจำ — ปิดแอปแล้วหายหมด</p><pre class="code-vs"><code>คนหน้างานเปิดแอป → เข้าสู่ระบบ → ทำงาน
+  → วางเครื่องไว้ ระบบปิดแอปเอง (5.7)
+  → หยิบขึ้นมาใหม่ → ต้องเข้าสู่ระบบอีกรอบ</code></pre><p>บน PDA ที่ใส่ถุงมือและใช้ทั้งกะ การพิมพ์รหัสผ่านใหม่ทุกครั้งเป็นเรื่องใหญ่กว่าที่คิด</p><p>แต่การจำไว้ก็เปิดคำถามใหม่ — <strong>เก็บอะไรได้บ้าง และเก็บไว้ที่ไหน</strong></p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>persist</td><td>เก็บให้อยู่รอดข้ามการปิดแอป</td></tr>
+<tr><td>secure storage</td><td>ที่เก็บที่ระบบปฏิบัติการช่วยปกป้อง</td></tr>
+<tr><td>schema version</td><td>เลขรุ่นของโครงข้อมูลที่เก็บ</td></tr>
+<tr><td>atomic</td><td>สำเร็จทั้งหมดหรือไม่สำเร็จเลย</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: เก็บบัตรผ่าน ไม่เก็บกุญแจ</h2><pre class="code-vs"><code>รหัสผ่าน  →  ห้ามเก็บ  →  ใช้เข้าระบบอื่นได้ และเปลี่ยนไม่ได้ถ้ารั่ว
+token     →  เก็บได้   →  หมดอายุเอง และยกเลิกได้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เก็บสิ่งที่หมดอายุเองได้ ไม่เก็บสิ่งที่ใช้ได้ตลอดไป — และถ้าจำเป็นต้องเก็บรหัสผ่านเพื่อให้ฟีเจอร์ทำงาน แปลว่าออกแบบผิด</div></section>
+
+<section><h2>4. เก็บอะไรบ้าง</h2><p>เปิด <code>lib/auth/session_storage.dart</code></p><pre class="code-vs"><code>String encode(AuthSession session) =&gt; jsonEncode({
+  'schemaVersion': sessionSchemaVersion,
+  'serverId': session.serverId,
+  'username': session.username,
+  'accessToken': session.accessToken,
+  'expiresAt': session.expiresAt.toIso8601String(),
+  'roles': session.roles.toList(),
+});</code></pre><table><thead><tr><th>field</th><th>ทำไมต้องเก็บ</th></tr></thead><tbody>
+<tr><td><code>accessToken</code></td><td>สิ่งที่ทำให้ไม่ต้องเข้าสู่ระบบใหม่</td></tr>
+<tr><td><code>expiresAt</code></td><td>รู้ได้ว่ายังใช้ได้ไหมโดยไม่ต้องยิงคำขอ</td></tr>
+<tr><td><code>serverId</code></td><td>รู้ว่า token นี้เป็นของเซิร์ฟเวอร์ไหน (8.11)</td></tr>
+<tr><td><code>username</code></td><td>แสดงบนหน้าจอทันทีที่เปิดแอป</td></tr>
+<tr><td><code>roles</code></td><td>ปรับหน้าจอได้ก่อนที่จะยิงคำขอแรก</td></tr>
+<tr><td><code>schemaVersion</code></td><td>ดูหัวข้อ 6</td></tr>
+</tbody></table><p>สังเกตว่า <strong>ไม่มีรหัสผ่าน</strong> — และไม่มีอะไรที่จำเป็นต้องมีรหัสผ่านถึงจะทำงานได้</p></section>
+
+<section><h2>5. เก็บลงเครื่องก่อน แล้วค่อยประกาศว่าเข้าสู่ระบบแล้ว</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>case LoginSucceeded(:final session):
+  // เก็บลงเครื่องก่อน แล้วค่อยประกาศว่าเข้าสู่ระบบแล้ว
+  // ถ้าเก็บไม่ได้ ยังใช้งานได้ในรอบนี้ แต่เปิดแอปใหม่ต้องล็อกอินอีก
+  try {
+    await storage.write(session);
+  } on SessionStorageException {
+    _errorMessage = 'เข้าสู่ระบบได้ แต่จำไว้ให้ไม่ได้ '
+        'ครั้งหน้าต้องเข้าสู่ระบบใหม่';
+  }
+  _applySession(session);</code></pre><p>การตัดสินใจที่ซ่อนอยู่ตรงนี้คือ — <strong>เก็บไม่ได้ ไม่ทำให้เข้าสู่ระบบล้มเหลว</strong></p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>เก็บไม่ได้ = เข้าสู่ระบบไม่สำเร็จ</td><td>ผู้ใช้ทำงานไม่ได้เลย ทั้งที่รหัสผ่านถูก</td></tr>
+<tr><td>เก็บไม่ได้ = ใช้งานรอบนี้ได้ แต่บอกให้รู้</td><td>ทำงานต่อได้ และรู้ว่าครั้งหน้าต้องพิมพ์ใหม่</td></tr>
+</tbody></table><p>ทางที่สองถูกสำหรับงานคลัง เพราะ <strong>การจำไว้เป็นความสะดวก ไม่ใช่ความจำเป็น</strong></p><pre class="code-vs"><code>test('เก็บลงเครื่องไม่ได้ ยังใช้งานรอบนี้ได้ แต่ต้องบอกผู้ใช้', () async {
+  storage.failOnWrite = true;
+
+  await store.signIn(username: 'somchai', password: 'x', serverId: 'wh-01');
+
+  expect(store.status, AuthStatus.signedIn);
+  expect(store.errorMessage, contains('ครั้งหน้าต้องเข้าสู่ระบบใหม่'));
+});</code></pre><p>แต่ถ้าเป็นแอปธนาคาร คำตอบอาจกลับกัน — ซึ่งเป็นการตัดสินใจของธุรกิจ ไม่ใช่ของเทคนิค</p></section>
+
+<section><h2>6. เลขรุ่นของโครงข้อมูล</h2><pre class="code-vs"><code>/// รุ่นของโครงข้อมูลที่เก็บ
+///
+/// ต้องมีตั้งแต่วันแรก เพราะวันที่โครงเปลี่ยน ต้องแยกให้ออกระหว่าง
+/// "ข้อมูลเสีย" กับ "ข้อมูลของรุ่นเก่า" ซึ่งต้องจัดการคนละแบบ
+const int sessionSchemaVersion = 1;</code></pre><pre class="code-vs"><code>// รุ่นที่ไม่รู้จักถือว่าอ่านไม่ได้ ไม่ใช่พยายามเดา
+if (json['schemaVersion'] != sessionSchemaVersion) return null;</code></pre><p>ทำไมต้องมีตั้งแต่วันแรก ทั้งที่ยังมีรุ่นเดียว</p><pre class="code-vs"><code>วันที่เพิ่ม field ใหม่ที่จำเป็น
+  ถ้าไม่มีเลขรุ่น → อ่านข้อมูลเก่าแล้วไม่เจอ field → ไม่รู้ว่าเสียหรือเก่า
+  ถ้ามีเลขรุ่น    → รู้ทันทีว่าเป็นของรุ่นก่อน → ให้ล็อกอินใหม่อย่างมีเหตุผล</code></pre><p>และการเพิ่มทีหลังทำไม่ได้ — เพราะข้อมูลที่เก็บไว้แล้วไม่มีเลขรุ่นอยู่ในนั้น</p><pre class="code-vs"><code>test('ข้อมูลของรุ่นเก่าต้องไม่ถูกเดา', () {
+  final old = jsonEncode({
+    'schemaVersion': 0,
+    ...
+  });
+
+  expect(codec.decode(old), isNull);
+});</code></pre></section>
+
+<section><h2>7. ข้อมูลที่เสียต้องไม่ทำให้เปิดแอปไม่ได้</h2><pre class="code-vs"><code>/// คืน null เมื่ออ่านไม่ได้ — ข้อมูลที่เสียไม่ควรทำให้เปิดแอปไม่ได้ (8.6)
+AuthSession? decode(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+
+  final Object? json;
+  try {
+    json = jsonDecode(raw);
+  } on FormatException {
+    return null;
+  }
+  ...
+}</code></pre><table><thead><tr><th>สาเหตุที่ข้อมูลเสียได้</th></tr></thead><tbody>
+<tr><td>แอปถูกปิดกลางการเขียน</td></tr>
+<tr><td>พื้นที่เก็บเต็ม</td></tr>
+<tr><td>โครงข้อมูลเปลี่ยนโดยไม่ได้เพิ่มเลขรุ่น</td></tr>
+<tr><td>แบตหมดตอนกำลังบันทึก</td></tr>
+</tbody></table><p>ทั้งสี่กรณีให้ผลเดียวกันที่ควรเป็น — <strong>ไปหน้าเข้าสู่ระบบ ไม่ใช่จอขาว</strong></p><pre class="code-vs"><code>test('ข้อมูลที่เสียต้องคืน null ไม่ใช่ทำให้เปิดแอปไม่ได้', () {
+  expect(codec.decode('ไม่ใช่ JSON'), isNull);
+  expect(codec.decode('{}'), isNull);
+  expect(codec.decode(null), isNull);
+});</code></pre></section>
+
+<section><h2>8. ล้างเฉพาะของตัวเอง</h2><pre class="code-vs"><code>// อันตราย — ล้างทุกอย่างที่แอปเก็บไว้
+await preferences.clear();</code></pre><table><thead><tr><th>สิ่งที่หายไปด้วยโดยไม่ตั้งใจ</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ที่อยู่เซิร์ฟเวอร์ที่ตั้งไว้</td><td>ต้องตั้งค่าใหม่ทั้งหมด (7.3)</td></tr>
+<tr><td>การตั้งค่าเสียงและขนาดตัวอักษร</td><td>ผู้ใช้ต้องตั้งใหม่</td></tr>
+<tr><td>ร่างงานที่ยังไม่ได้ส่ง</td><td><strong>งานของผู้ใช้หาย</strong> (5.7)</td></tr>
+</tbody></table><p>แถวสุดท้ายร้ายที่สุด — และมันเกิดจากโค้ดบรรทัดเดียวที่ดูเหมือนทำความสะอาด</p><pre class="code-vs"><code>// ถูก — ล้างเฉพาะสิ่งที่เกี่ยวกับการเข้าสู่ระบบ
+@override
+Future&lt;void&gt; clear() async {
+  raw = null;
+}</code></pre><p>ที่เก็บของ session ควรเป็นคนละก้อนกับที่เก็บอย่างอื่น เพื่อให้ล้างผิดไม่ได้ตั้งแต่แรก</p></section>
+
+<section><h2>9. ที่เก็บเป็นสัญญา ไม่ใช่คลาสจริง</h2><pre class="code-vs"><code>/// ที่เก็บ session ข้ามการปิดแอป
+///
+/// เป็นสัญญา ไม่ใช่คลาสจริง เพราะที่เก็บจริงต่างกันตามแพลตฟอร์ม
+/// และเทสต์ต้องใช้ของปลอมที่ควบคุมได้ (8.10)
+abstract interface class SessionStorage {
+  Future&lt;AuthSession?&gt; read();
+  Future&lt;void&gt; write(AuthSession session);
+  Future&lt;void&gt; clear();
+}</code></pre><p>และของปลอมที่ทำให้ทดสอบกรณีล้มเหลวได้</p><pre class="code-vs"><code>/// จำลองความล้มเหลวได้ เพราะที่เก็บจริงเขียนไม่สำเร็จได้ และนั่นคือกรณี
+/// ที่ต้องออกแบบไว้ ไม่ใช่กรณีที่หวังว่าจะไม่เกิด
+class InMemorySessionStorage implements SessionStorage {
+  String? raw;
+  bool failOnWrite = false;
+  bool failOnRead = false;
+  ...
+}</code></pre><p>เป็นรูปแบบเดียวกับ <code>MockClient</code> ใน 7.6 — <strong>กรณีที่ทำให้เกิดจริงยาก คือกรณีที่ต้องทดสอบมากที่สุด</strong></p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>รหัสผ่านอยู่ในเครื่อง</td><td>เก็บไว้เพื่อเข้าสู่ระบบอัตโนมัติ</td><td>เก็บ token แทน</td></tr>
+<tr><td>เปิดแอปแล้วจอขาว</td><td>ข้อมูลเสียแล้วโยนออกมา</td><td>คืน <code>null</code> แล้วไปหน้าเข้าสู่ระบบ</td></tr>
+<tr><td>อัปเดตแอปแล้วผู้ใช้ตั้งค่าหายหมด</td><td>ล้างที่เก็บทั้งหมด</td><td>ล้างเฉพาะของ session</td></tr>
+<tr><td>ร่างงานหายตอนออกจากระบบ</td><td>เหมือนข้างบน</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ไม่รู้ว่าข้อมูลเสียหรือเป็นของรุ่นเก่า</td><td>ไม่มีเลขรุ่น</td><td>เพิ่มตั้งแต่วันแรก</td></tr>
+<tr><td>เข้าสู่ระบบไม่ได้เพราะที่เก็บมีปัญหา</td><td>ถือว่าเก็บไม่ได้คือล้มเหลว</td><td>ให้ใช้งานรอบนี้ได้ แล้วบอกผู้ใช้</td></tr>
+<tr><td>ทดสอบกรณีที่เก็บล้มเหลวไม่ได้</td><td>ผูกกับที่เก็บจริง</td><td>ใช้สัญญา + ของปลอม</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ทีมจะเพิ่มความสามารถ “จำฉันไว้” ที่หน้าเข้าสู่ระบบ โดยมีข้อกำหนดจากธุรกิจ</p><table><thead><tr><th>ข้อกำหนด</th></tr></thead><tbody>
+<tr><td>ถ้าติ๊ก ให้ไม่ต้องเข้าสู่ระบบใหม่นาน 7 วัน</td></tr>
+<tr><td>ถ้าไม่ติ๊ก ให้จำแค่จนกว่าจะปิดแอป</td></tr>
+<tr><td>แต่ token จากเซิร์ฟเวอร์มีอายุแค่ 8 ชั่วโมง</td></tr>
+</tbody></table><ol><li>ระบุว่าข้อกำหนดนี้ทำได้ด้วยสิ่งที่มีอยู่ไหม</li><li>ถ้าไม่ได้ ต้องขออะไรจากฝั่งหลังบ้าน</li><li>ออกแบบว่าจะเก็บอะไรต่างกันระหว่างติ๊กกับไม่ติ๊ก</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ทำได้ไหม</strong></p><p><strong>ทำไม่ได้</strong> ด้วยสิ่งที่มีอยู่ และเหตุผลตรงไปตรงมา</p><pre class="code-vs"><code>token อายุ 8 ชั่วโมง
+ธุรกิจต้องการ 7 วัน = 168 ชั่วโมง
+  → หลังชั่วโมงที่ 8 token ใช้ไม่ได้แล้ว
+  → ไม่ว่าเก็บไว้นานแค่ไหนก็ไม่ช่วย</code></pre><p>สิ่งที่ทำได้คือ <em>เก็บ token ไว้ 8 ชั่วโมง</em> ซึ่งไม่ตรงกับที่ธุรกิจขอ</p><p>ทางที่ผิดที่คนมักคิดถึง</p><table><thead><tr><th>ทางเลือกที่ผิด</th><th>ทำไมผิด</th></tr></thead><tbody>
+<tr><td>เก็บรหัสผ่านไว้แล้วเข้าสู่ระบบใหม่เงียบ ๆ</td><td>ขัดกับหลักในหัวข้อ 3 — รหัสผ่านใช้ได้ตลอดไปและเปลี่ยนยาก</td></tr>
+<tr><td>ขอให้เซิร์ฟเวอร์ออก token อายุ 7 วัน</td><td>token ที่อายุยาวคือความเสี่ยงที่ยาวตามไปด้วย</td></tr>
+</tbody></table><p>ทางที่สองน่าสนใจเพราะดูสมเหตุสมผล — แต่ถ้า PDA หาย token ที่อายุ 7 วันจะใช้ได้ต่ออีกเจ็ดวัน และยกเลิกไม่ได้ถ้าไม่มีระบบเพิ่ม</p><p><strong>ข้อ 2 — ต้องขออะไร</strong></p><p>ขอ <strong>refresh token</strong> — บัตรผ่านอีกใบที่อายุยาว แต่ทำได้อย่างเดียวคือขอ token ใหม่</p><pre class="code-vs"><code>{
+  "token": "eyJ...",              // อายุ 8 ชั่วโมง ใช้ยิงคำขอ
+  "expiration": "2026-08-15T18:00:00Z",
+  "refreshToken": "rt_9f3a...",   // อายุ 7 วัน ใช้ขอ token ใหม่เท่านั้น
+  "refreshExpiration": "2026-08-22T10:00:00Z"
+}</code></pre><table><thead><tr><th></th><th>access token</th><th>refresh token</th></tr></thead><tbody>
+<tr><td>ใช้ทำอะไร</td><td>ยิงคำขอทุกคำขอ</td><td>ขอ access token ใหม่เท่านั้น</td></tr>
+<tr><td>อายุ</td><td>สั้น</td><td>ยาว</td></tr>
+<tr><td>ถูกส่งบ่อยแค่ไหน</td><td>ทุกคำขอ</td><td>นาน ๆ ครั้ง</td></tr>
+<tr><td>ยกเลิกได้ไหม</td><td>รอหมดอายุ</td><td><strong>ยกเลิกได้ทันที</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่ทำให้ทางนี้ปลอดภัยกว่าการออก token อายุยาว — <strong>ถ้า PDA หาย ทีมสั่งยกเลิก refresh token ได้ทันที</strong></p><p>สิ่งที่ต้องตกลงเพิ่ม</p><table><thead><tr><th>ตกลงเรื่อง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>endpoint สำหรับขอ token ใหม่</td><td>ต้องรู้ว่ายิงไปที่ไหน</td></tr>
+<tr><td>ใช้ refresh token ซ้ำได้ไหม</td><td>บางระบบออกใบใหม่ทุกครั้ง</td></tr>
+<tr><td>ยกเลิกอย่างไรเมื่อเครื่องหาย</td><td>เป็นเหตุผลหลักที่ใช้วิธีนี้</td></tr>
+</tbody></table><p><strong>ข้อ 3 — เก็บอะไรต่างกัน</strong></p><table><thead><tr><th></th><th>ติ๊ก “จำฉันไว้”</th><th>ไม่ติ๊ก</th></tr></thead><tbody>
+<tr><td>access token</td><td>เก็บ</td><td>เก็บ</td></tr>
+<tr><td>refresh token</td><td><strong>เก็บ</strong></td><td><strong>ไม่เก็บ</strong></td></tr>
+<tr><td>ปิดแอปแล้วเปิดใหม่</td><td>ต่ออายุเองได้ 7 วัน</td><td>ใช้ต่อได้จนครบ 8 ชั่วโมง</td></tr>
+</tbody></table><pre class="code-vs"><code>String encode(AuthSession session, {required bool rememberMe}) =&gt; jsonEncode({
+  'schemaVersion': sessionSchemaVersion,
+  'serverId': session.serverId,
+  'username': session.username,
+  'accessToken': session.accessToken,
+  'expiresAt': session.expiresAt.toIso8601String(),
+  'roles': session.roles.toList(),
+  // เก็บเฉพาะเมื่อผู้ใช้ยอมให้จำ
+  'refreshToken': ?(rememberMe ? session.refreshToken : null),
+});</code></pre><p><strong>จุดที่ต้องคิดเพิ่ม — “ไม่ติ๊ก” ไม่ได้แปลว่าไม่เก็บอะไรเลย</strong></p><p>คนมักคิดว่าไม่ติ๊ก = ไม่เก็บ แต่ถ้าทำแบบนั้น ระบบปิดแอปเองระหว่างพักกลางวันจะทำให้ต้องเข้าสู่ระบบใหม่ ทั้งที่ยังอยู่ในกะเดียวกัน</p><pre class="code-vs"><code>ไม่ติ๊ก = "ไม่ต้องจำข้ามวัน"
+       ≠ "ลืมทันทีที่แอปปิด"</code></pre><p>การเก็บ access token ไว้ทั้งสองกรณีจึงถูกต้อง — เพราะมันหมดอายุใน 8 ชั่วโมงอยู่แล้ว ซึ่งประมาณหนึ่งกะพอดี</p><p>และเมื่อออกจากระบบ ต้องล้างทั้งสองอย่าง พร้อมแจ้งเซิร์ฟเวอร์ให้ยกเลิก refresh token ด้วยถ้าทำได้</p><p><strong>บทเรียนที่ควรจำ:</strong> เมื่อข้อกำหนดของธุรกิจขัดกับข้อจำกัดทางเทคนิค อย่าแก้ด้วยการเก็บสิ่งที่ไม่ควรเก็บ — ให้กลับไปคุยว่าต้องขออะไรเพิ่ม เพราะปัญหาส่วนใหญ่แบบนี้มีทางแก้ที่ถูกต้องอยู่แล้ว แค่ต้องทำสองฝั่ง</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>เก็บสิ่งที่หมดอายุเองได้ ไม่เก็บสิ่งที่ใช้ได้ตลอดไป</li><li>ไม่มีเหตุผลใดที่ต้องเก็บรหัสผ่าน</li><li>เก็บลงเครื่องก่อน แล้วค่อยประกาศว่าเข้าสู่ระบบแล้ว</li><li>เก็บไม่ได้ไม่ควรทำให้เข้าสู่ระบบล้มเหลว แต่ต้องบอกผู้ใช้</li><li>เลขรุ่นของโครงข้อมูลต้องมีตั้งแต่วันแรก เพราะเพิ่มทีหลังไม่ได้</li><li>ข้อมูลที่เสียต้องคืนค่าว่าง ไม่ใช่ทำให้เปิดแอปไม่ได้</li><li>ล้างเฉพาะของ session ไม่ล้างที่เก็บทั้งหมด</li><li>ที่เก็บเป็นสัญญา เพื่อให้ทดสอบกรณีล้มเหลวได้</li></ul></div><p><strong>บทถัดไป:</strong> 8.6 จะใช้สิ่งที่เก็บไว้ตอนเปิดแอป และแก้อาการเด้งไปหน้าเข้าสู่ระบบแวบหนึ่งที่คนเจอบ่อย</p></section>

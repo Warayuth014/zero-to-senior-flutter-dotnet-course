@@ -4,15 +4,146 @@
 <title>Secure Storage</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-10 · Auth Integration</span><h1>Secure Storage</h1><p>Part 8: Authentication &amp; JWT</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">SharedPreferences</a></li><li><a href="#section-2">Secure storage</a></li><li><a href="#section-3">Never persist password</a></li><li><a href="#section-4">Data classification table</a></li><li><a href="#section-5">Backup และ reinstall</a></li><li><a href="#section-6">Namespace และ selective delete</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Security tests</a></li></ol></nav>
-<div class="note"><strong>Storage เลือกตามความลับ:</strong> SharedPreferences เหมาะ setting ทั่วไป ไม่รับประกัน secrecy; token/password/private key ใช้ platform-backed secure storage และออกแบบ lifecycle เพิ่มเติม</div>
-<section id="section-1"><h2>1. SharedPreferences</h2><p>เหมาะ locale, theme, onboarding และ connection profileที่องค์กรยอมรับให้เก็บแบบ application preferences ข้อมูลอาจอยู่ไฟล์ readable บนอุปกรณ์ที่ compromise/backup</p></section>
-<section id="section-2"><h2>2. Secure storage</h2><p>plugin secure storage ใช้ Android Keystore/iOS Keychain เพื่อปกป้อง encryption key/secret ตาม platform แต่ไม่ทำให้อุปกรณ์ rooted หรือ app process ที่ถูกยึดปลอดภัยสมบูรณ์</p></section>
-<section id="section-3"><h2>3. Never persist password</h2><p>เก็บ access/refresh token ตาม policy ไม่เก็บ password เพื่อ auto-login; ถ้าต้อง re-auth ใช้ refresh flow, biometric-gated secret หรือ identity platform ที่ออกแบบมา</p></section>
-<section id="section-4"><h2>4. Data classification table</h2><ul><li>token/refresh token: secure storage</li><li>username: preferences ได้ถ้า policy อนุญาต</li><li>roles/profile cache: preferences ได้แต่ไม่เป็น security authority</li><li>password: ไม่ persist</li><li>server URL: preferences/managed config ตาม threat model</li></ul></section>
-<section id="section-5"><h2>5. Backup และ reinstall</h2><p>Android backup/key invalidation, device lock change และ reinstall อาจทำ decrypt ไม่ได้ Storage abstraction ต้องแปลงเป็น recoverable signed-out state ไม่ crash</p></section>
-<section id="section-6"><h2>6. Namespace และ selective delete</h2><p>ใช้ key prefix/version เช่น <code>auth.v1.accessToken</code> และ delete เฉพาะ auth keys ตอน logout/migration ป้องกันชนกับ setting และคอร์สอื่น</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>แอป mock เก็บ userId/role ใน preferences แล้วถือว่า authorize ได้หรือไม่?</p><details><summary>เฉลย</summary><p>ไม่ได้ ผู้ใช้/เครื่องมืออาจแก้ค่าได้ ใช้เพื่อ UI demo/cache เท่านั้น; production serverต้อง validate signed tokenและ policy</p></details></section>
-<section id="section-8"><h2>8. Security tests</h2><div class="warn">ตรวจ repo/log/crash report/preferences backup ว่าไม่มี password/token marker และทดสอบ storage read/write/delete failure โดยไม่คืน secret ใน error</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: จัดชั้นก่อนเลือกที่เก็บ</a></li><li><a href="#section-4">แยกที่เก็บตามชั้น</a></li><li><a href="#section-5">ที่เก็บเป็นสัญญา ไม่ใช่คลาสจริง</a></li><li><a href="#section-6">ที่เก็บที่ปกป้องก็ล้มเหลวได้</a></li><li><a href="#section-7">ที่เก็บที่ปกป้องไม่ได้แปลว่าปลอดภัยเสมอ</a></li><li><a href="#section-8">ไม่ควรเก็บอะไรเลยก็เป็นทางเลือก</a></li><li><a href="#section-9">อย่าเก็บสิ่งที่ไม่ควรเก็บลงในที่เก็บที่ปกป้อง</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: เก็บ token ไว้ในที่ที่เหมาะกับความอ่อนไหวของมัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.5 (การเก็บ session) และ 8.8 (การล้าง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกที่เก็บให้ตรงกับความอ่อนไหวของข้อมูล และรู้ว่าที่เก็บที่ปลอดภัยกว่าก็ยังมีข้อจำกัด</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>8.5 ตัดสินแล้วว่า <em>เก็บอะไร</em> — บทนี้ตอบว่า <em>เก็บที่ไหน</em></p><p>เพราะที่เก็บบนเครื่องมีหลายแบบ และไม่ได้ปลอดภัยเท่ากัน</p><table><thead><tr><th>ที่เก็บ</th><th>ใครอ่านได้บ้าง</th></tr></thead><tbody>
+<tr><td>ที่เก็บค่าตั้งค่าแบบธรรมดา</td><td>แอปนั้น และใครก็ตามที่เข้าถึงไฟล์ในเครื่องได้</td></tr>
+<tr><td>ที่เก็บที่ระบบปฏิบัติการปกป้อง</td><td>แอปนั้น และถูกเข้ารหัสด้วยกุญแจของเครื่อง</td></tr>
+</tbody></table><p>ความต่างสำคัญบน PDA เป็นพิเศษ — <strong>เครื่องอาจถูกตั้งค่าให้เข้าถึงไฟล์ได้ง่ายกว่าโทรศัพท์ทั่วไป</strong> เพราะทีมไอทีต้องดูแลหลายสิบเครื่อง</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>secure storage</td><td>ที่เก็บที่ระบบปฏิบัติการช่วยเข้ารหัสให้</td></tr>
+<tr><td>Keystore / Keychain</td><td>ระบบจัดการกุญแจของ Android และ iOS</td></tr>
+<tr><td>data classification</td><td>การจัดว่าข้อมูลชิ้นไหนอ่อนไหวแค่ไหน</td></tr>
+<tr><td>at rest</td><td>ตอนที่ข้อมูลอยู่นิ่งในเครื่อง</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: จัดชั้นก่อนเลือกที่เก็บ</h2><pre class="code-vs"><code>ความลับ        →  token, refresh token       →  ที่เก็บที่ปกป้อง
+ข้อมูลส่วนตัว  →  ชื่อผู้ใช้                  →  ที่เก็บธรรมดาได้
+ไม่ลับเลย      →  ที่อยู่เซิร์ฟเวอร์, ขนาดตัวอักษร →  ที่เก็บธรรมดา</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เกณฑ์คือถามว่า “ถ้าคนอื่นอ่านค่านี้ได้ เขาทำอะไรได้บ้าง” — ถ้าคำตอบคือ “สวมรอยเป็นผู้ใช้คนนี้” นั่นคือความลับ</div></section>
+
+<section id="section-4"><h2>4. แยกที่เก็บตามชั้น</h2><table><thead><tr><th>ข้อมูล</th><th>ถ้ารั่วแล้วเกิดอะไร</th><th>เก็บที่</th></tr></thead><tbody>
+<tr><td><code>accessToken</code></td><td>สวมรอยได้จนหมดอายุ</td><td><strong>ที่เก็บที่ปกป้อง</strong></td></tr>
+<tr><td><code>refreshToken</code></td><td>สวมรอยได้ยาวกว่ามาก (8.5)</td><td><strong>ที่เก็บที่ปกป้อง</strong></td></tr>
+<tr><td><code>username</code></td><td>รู้ว่าใครใช้เครื่องนี้</td><td>ธรรมดาได้</td></tr>
+<tr><td><code>expiresAt</code></td><td>ไม่มีอะไร</td><td>ธรรมดาได้</td></tr>
+<tr><td><code>serverId</code></td><td>ไม่มีอะไร</td><td>ธรรมดาได้</td></tr>
+<tr><td><code>roles</code></td><td>รู้ว่าคนนี้มีสิทธิ์อะไร</td><td>ธรรมดาได้ — เพราะเซิร์ฟเวอร์ตรวจอยู่แล้ว (8.9)</td></tr>
+</tbody></table><p>ใน lab เก็บทุกอย่างไว้ก้อนเดียวเพื่อความง่าย — และเพราะทั้งก้อนอยู่ในที่เก็บที่ปกป้อง จึงปลอดภัยกว่าที่จำเป็น</p><pre class="code-vs"><code>String encode(AuthSession session) =&gt; jsonEncode({
+  'schemaVersion': sessionSchemaVersion,
+  'serverId': session.serverId,
+  'username': session.username,
+  'accessToken': session.accessToken,
+  'expiresAt': session.expiresAt.toIso8601String(),
+  'roles': session.roles.toList(),
+});</code></pre><p>ข้อแลกคือช้ากว่าเล็กน้อย เพราะที่เก็บที่ปกป้องต้องเข้ารหัสทุกครั้ง — ซึ่งไม่สำคัญเมื่ออ่านเขียนแค่ตอนเข้าและออกจากระบบ</p></section>
+
+<section id="section-5"><h2>5. ที่เก็บเป็นสัญญา ไม่ใช่คลาสจริง</h2><p>เปิด <code>lib/auth/session_storage.dart</code></p><pre class="code-vs"><code>/// ที่เก็บ session ข้ามการปิดแอป
+///
+/// เป็นสัญญา ไม่ใช่คลาสจริง เพราะที่เก็บจริงต่างกันตามแพลตฟอร์ม
+/// และเทสต์ต้องใช้ของปลอมที่ควบคุมได้ (8.10)
+abstract interface class SessionStorage {
+  Future&lt;AuthSession?&gt; read();
+  Future&lt;void&gt; write(AuthSession session);
+  Future&lt;void&gt; clear();
+}</code></pre><p>ทำให้เปลี่ยนที่เก็บได้โดยไม่แตะ <code>SessionStore</code> เลย</p><pre class="code-vs"><code>// ตอนใช้งานจริง
+final storage = SecureSessionStorage();
+
+// ตอนเทสต์
+final storage = InMemorySessionStorage();
+
+// ตอนพัฒนาบนเครื่องที่ยังไม่มีที่เก็บที่ปกป้อง
+final storage = InMemorySessionStorage();   // ไม่จำข้ามการเปิดแอป</code></pre><p>และการแยกสัญญาออกมาทำให้ <strong>ทดสอบกรณีที่เก็บล้มเหลวได้</strong> ซึ่งเป็นกรณีที่เกิดจริงและทำให้เกิดจริงยาก</p><pre class="code-vs"><code>/// จำลองความล้มเหลวได้ เพราะที่เก็บจริงเขียนไม่สำเร็จได้ และนั่นคือกรณี
+/// ที่ต้องออกแบบไว้ ไม่ใช่กรณีที่หวังว่าจะไม่เกิด
+class InMemorySessionStorage implements SessionStorage {
+  String? raw;
+  bool failOnWrite = false;
+  bool failOnRead = false;
+  ...
+}</code></pre></section>
+
+<section id="section-6"><h2>6. ที่เก็บที่ปกป้องก็ล้มเหลวได้</h2><table><thead><tr><th>สาเหตุที่ล้มเหลว</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td>ระบบกุญแจของเครื่องมีปัญหา</td><td>บางรุ่นของ Android</td></tr>
+<tr><td>ผู้ใช้ยังไม่ได้ตั้งรหัสปลดล็อกเครื่อง</td><td>บางการตั้งค่าต้องมีก่อน</td></tr>
+<tr><td>กุญแจถูกล้างหลังเปลี่ยนรหัสปลดล็อก</td><td>อ่านของเดิมไม่ได้</td></tr>
+<tr><td>พื้นที่เต็ม</td><td>PDA ที่มีที่เก็บน้อย</td></tr>
+</tbody></table><p>แถวที่สามน่าสนใจ — <strong>เขียนได้ตอนแรก แต่อ่านไม่ได้ทีหลัง</strong> ซึ่งเป็นเหตุผลที่การอ่านต้องดักไว้ด้วย</p><pre class="code-vs"><code>try {
+  stored = await storage.read();
+} on SessionStorageException {
+  // อ่านไม่ได้ก็แค่ให้ล็อกอินใหม่ ไม่ควรทำให้เปิดแอปไม่ได้
+  stored = null;
+}</code></pre><p>และการเขียนที่ล้มเหลวไม่ควรทำให้เข้าสู่ระบบไม่ได้ ตามที่ตัดสินไว้ใน 8.5</p><pre class="code-vs"><code>try {
+  await storage.write(session);
+} on SessionStorageException {
+  _errorMessage = 'เข้าสู่ระบบได้ แต่จำไว้ให้ไม่ได้ '
+      'ครั้งหน้าต้องเข้าสู่ระบบใหม่';
+}</code></pre></section>
+
+<section id="section-7"><h2>7. ที่เก็บที่ปกป้องไม่ได้แปลว่าปลอดภัยเสมอ</h2><p>สิ่งที่ต้องเข้าใจให้ตรง</p><table><thead><tr><th>ป้องกันได้</th><th>ป้องกันไม่ได้</th></tr></thead><tbody>
+<tr><td>แอปอื่นอ่านค่า</td><td>เครื่องที่ถูกปลดล็อกระบบป้องกัน</td></tr>
+<tr><td>อ่านไฟล์ตรง ๆ จากที่เก็บ</td><td>คนที่ถือเครื่องที่ปลดล็อกอยู่</td></tr>
+<tr><td>สำรองข้อมูลแล้วเอาไปเปิดที่เครื่องอื่น</td><td>โปรแกรมที่ฝังในเครื่องที่ถูกแก้ไข</td></tr>
+</tbody></table><p>ผลตามมาที่สำคัญกับงานคลัง — <strong>PDA ที่วางทิ้งไว้โดยไม่ล็อกหน้าจอ คือ token ที่ใครก็หยิบไปใช้ได้</strong></p><p>ซึ่งแก้ด้วยที่เก็บไม่ได้ ต้องแก้ด้วยเรื่องอื่น</p><table><thead><tr><th>ทางลด</th><th>ช่วยอย่างไร</th></tr></thead><tbody>
+<tr><td>token อายุสั้น</td><td>จำกัดความเสียหายตามเวลา</td></tr>
+<tr><td>ล็อกหน้าจอเมื่อไม่ได้ใช้</td><td>เป็นการตั้งค่าของเครื่อง ไม่ใช่ของแอป</td></tr>
+<tr><td>ยกเลิก token ได้จากส่วนกลาง</td><td>เมื่อเครื่องหาย</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. ไม่ควรเก็บอะไรเลยก็เป็นทางเลือก</h2><table><thead><tr><th>สถานการณ์</th><th>ควรจำไหม</th></tr></thead><tbody>
+<tr><td>PDA ประจำตัวคนเดียว</td><td>จำได้ — สะดวกและความเสี่ยงต่ำ</td></tr>
+<tr><td>PDA ส่วนกลางที่เปลี่ยนมือทุกกะ</td><td><strong>ควรคิดให้ดี</strong></td></tr>
+<tr><td>เครื่องที่ใช้กับข้อมูลอ่อนไหวมาก</td><td>อาจไม่จำเลย</td></tr>
+</tbody></table><p>แถวกลางเป็นกรณีของงานคลังส่วนใหญ่ และคำตอบขึ้นกับว่า <strong>คนกะถัดไปควรต้องเข้าสู่ระบบใหม่หรือไม่</strong></p><pre class="code-vs"><code>ถ้าจำไว้     →  คนกะถัดไปเปิดแอปมาแล้วเป็นคนกะก่อน  ← อันตราย
+ถ้าไม่จำ     →  ทุกคนต้องเข้าสู่ระบบทุกครั้ง        ← ปลอดภัยแต่ช้า</code></pre><p>ทางสายกลางที่ใช้ได้จริง — <strong>จำไว้ในช่วงเวลาที่สั้นกว่าหนึ่งกะ</strong> เช่นสี่ชั่วโมง ทำให้คนที่วางเครื่องไปกินข้าวไม่ต้องล็อกอินใหม่ แต่คนกะถัดไปต้อง</p><p>ซึ่งทำได้โดยไม่ต้องเปลี่ยนที่เก็บเลย — แค่ตั้งอายุ token ให้เหมาะ</p></section>
+
+<section id="section-9"><h2>9. อย่าเก็บสิ่งที่ไม่ควรเก็บลงในที่เก็บที่ปกป้อง</h2><p>ความเข้าใจผิดที่ตรงข้ามกัน</p><pre class="code-vs"><code>// ผิด — ที่เก็บที่ปกป้องไม่ได้ทำให้การเก็บรหัสผ่านกลายเป็นเรื่องที่ยอมรับได้
+await secureStorage.write('password', password);</code></pre><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>รหัสผ่านใช้ได้ตลอดไป</td><td>ต่างจาก token ที่หมดอายุเอง (8.5)</td></tr>
+<tr><td>ใช้เข้าระบบอื่นได้</td><td>คนมักใช้รหัสผ่านซ้ำ</td></tr>
+<tr><td>ยกเลิกจากส่วนกลางไม่ได้</td><td>ต้องให้ผู้ใช้เปลี่ยนเอง</td></tr>
+</tbody></table><p>ที่เก็บที่ปกป้องลดความเสี่ยง แต่ไม่ได้เปลี่ยนว่าอะไรควรเก็บ — <strong>คำถามว่า “ควรเก็บไหม” ต้องตอบก่อนคำถามว่า “เก็บที่ไหน”</strong></p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>token อยู่ในไฟล์ที่อ่านได้ง่าย</td><td>เก็บในที่เก็บธรรมดา</td><td>ย้ายไปที่เก็บที่ปกป้อง</td></tr>
+<tr><td>เปิดแอปไม่ได้บนบางเครื่อง</td><td>ที่เก็บที่ปกป้องล้มเหลวแล้วไม่ดัก</td><td>ดักแล้วให้ล็อกอินใหม่</td></tr>
+<tr><td>เข้าสู่ระบบไม่ได้เพราะเขียนไม่ได้</td><td>ถือว่าเขียนไม่ได้คือล้มเหลว</td><td>ให้ใช้งานรอบนี้ได้ (8.5)</td></tr>
+<tr><td>เปลี่ยนรหัสปลดล็อกเครื่องแล้วอ่านของเดิมไม่ได้</td><td>กุญแจถูกล้าง</td><td>ดักที่การอ่านด้วย</td></tr>
+<tr><td>คิดว่าที่เก็บที่ปกป้องแก้ได้ทุกอย่าง</td><td>ไม่ได้แยกว่าป้องกันอะไรได้บ้าง</td><td>ลด token ให้อายุสั้นด้วย</td></tr>
+<tr><td>เก็บรหัสผ่านเพราะคิดว่าที่เก็บปลอดภัยแล้ว</td><td>ตอบคำถามผิดลำดับ</td><td>ถามก่อนว่าควรเก็บไหม</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ทีมกำลังจะเลือกที่เก็บสำหรับข้อมูลหกอย่าง</p><table><thead><tr><th>#</th><th>ข้อมูล</th></tr></thead><tbody>
+<tr><td>1</td><td><code>accessToken</code></td></tr>
+<tr><td>2</td><td>ที่อยู่เซิร์ฟเวอร์ที่ผู้ใช้ตั้งไว้</td></tr>
+<tr><td>3</td><td>ชื่อผู้ใช้ล่าสุดที่เข้าสู่ระบบ</td></tr>
+<tr><td>4</td><td>ร่างใบรับเข้าที่ยังไม่ได้ส่ง</td></tr>
+<tr><td>5</td><td>รหัสคำสั่งที่ยังค้างอยู่ (4.14)</td></tr>
+<tr><td>6</td><td>รูปถ่ายสินค้าเสียหายที่รอส่ง</td></tr>
+</tbody></table><ol><li>จัดแต่ละอย่างลงที่เก็บที่เหมาะสม</li><li>ระบุว่าอันไหนต้องล้างเมื่อออกจากระบบ</li><li>ข้อ 6 มีเรื่องที่ต้องคิดเป็นพิเศษ — อธิบาย</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 และ 2</strong></p><table><thead><tr><th>#</th><th>เก็บที่</th><th>ล้างเมื่อออกจากระบบ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td>ที่เก็บที่ปกป้อง</td><td><strong>ล้าง</strong></td><td>สวมรอยได้</td></tr>
+<tr><td>2</td><td>ธรรมดา</td><td>ไม่ล้าง</td><td>เป็นการตั้งค่าของเครื่อง ไม่ใช่ของผู้ใช้ (8.5)</td></tr>
+<tr><td>3</td><td>ธรรมดา</td><td>ไม่ล้าง</td><td>ใช้เติมให้ตอนเข้าสู่ระบบใหม่ (8.7)</td></tr>
+<tr><td>4</td><td>ธรรมดา แต่ผูกกับผู้ใช้</td><td>ไม่ล้าง</td><td>เป็นงานของผู้ใช้ (8.8)</td></tr>
+<tr><td>5</td><td>ธรรมดา แต่ผูกกับผู้ใช้</td><td>ไม่ล้าง</td><td>ต้องใช้ตอนส่งซ้ำ</td></tr>
+<tr><td>6</td><td>ดูข้อ 3</td><td>ดูข้อ 3</td><td></td></tr>
+</tbody></table><p>ข้อ 2 น่าสนใจ — <strong>ที่อยู่เซิร์ฟเวอร์ไม่ควรล้างตอนออกจากระบบ</strong> เพราะเป็นการตั้งค่าที่ทีมติดตั้งเป็นคนตั้ง ไม่ใช่ผู้ใช้</p><p>ถ้าล้างด้วย คนกะถัดไปจะเปิดแอปมาแล้วต้องตั้งค่าเซิร์ฟเวอร์ใหม่ ซึ่งเขาไม่รู้ว่าต้องใส่อะไร</p><p>ข้อ 3 กับ 4 อยู่ในที่เก็บธรรมดาได้ แต่ <strong>ต้องผูกกับผู้ใช้</strong> ตามที่ 5.4 และ 8.8 ย้ำไว้</p><pre class="code-vs"><code>await draftStorage.save(userId: session.username, draft: draft);</code></pre><p><strong>ข้อ 3 — รูปถ่ายที่รอส่ง</strong></p><p>เป็นข้อที่ยากที่สุดเพราะมีหลายมิติ</p><p><em>มิติที่หนึ่ง — เก็บที่ไหน</em></p><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ที่เก็บที่ปกป้อง</td><td>ไม่ได้ออกแบบมาเก็บไฟล์ใหญ่ — ช้าและมีข้อจำกัดขนาด</td></tr>
+<tr><td>ไฟล์ในพื้นที่ของแอป</td><td>เหมาะกับขนาด แต่ไม่ได้เข้ารหัส</td></tr>
+<tr><td>คลังรูปของเครื่อง</td><td><strong>อันตราย</strong> — แอปอื่นเห็นได้ และไปโผล่ในแกลเลอรี</td></tr>
+</tbody></table><p>คำตอบคือ <strong>ไฟล์ในพื้นที่ของแอป</strong> — เพราะรูปสินค้าเสียหายไม่ใช่ความลับระดับ token แต่ก็ไม่ควรไปโผล่ในแกลเลอรีให้ทุกคนเห็น</p><p><em>มิติที่สอง — ล้างเมื่อออกจากระบบไหม</em></p><p>นี่คือจุดที่ต้องคิดต่างจากข้ออื่น</p><table><thead><tr><th></th><th>ร่างใบรับเข้า (ข้อ 4)</th><th>รูปถ่าย (ข้อ 6)</th></tr></thead><tbody>
+<tr><td>เป็นงานของผู้ใช้ไหม</td><td>ใช่</td><td>ใช่</td></tr>
+<tr><td>คนอื่นเห็นแล้วเสียหายไหม</td><td>เห็นตัวเลขและรหัสสินค้า</td><td><strong>เห็นภาพจริงในคลัง</strong></td></tr>
+<tr><td>กินพื้นที่แค่ไหน</td><td>น้อยมาก</td><td><strong>มาก</strong></td></tr>
+</tbody></table><p>สองแถวล่างทำให้คำตอบต่างจากข้อ 4</p><pre class="code-vs"><code>เก็บไว้ แต่ต้อง
+  1. ผูกกับผู้ใช้ที่ถ่าย — คนถัดไปต้องไม่เห็น
+  2. มีวันหมดอายุ — ลบอัตโนมัติหลัง 7 วัน
+  3. ลบทันทีที่ส่งสำเร็จ — ไม่เก็บไว้ซ้ำ</code></pre><p>ข้อ 2 จำเป็นเพราะ <strong>รูปที่ส่งไม่สำเร็จแล้วไม่มีใครกลับมาส่ง จะกินพื้นที่ไปเรื่อย ๆ</strong> จนเครื่องเต็ม แล้วทำให้ที่เก็บอื่นล้มเหลวตามไปด้วย ซึ่งเป็นสาเหตุหนึ่งในหัวข้อ 6</p><p><em>มิติที่สาม — สิ่งที่มักถูกลืม</em></p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ปิดการสำรองข้อมูลขึ้นคลาวด์ของโฟลเดอร์นี้</td><td>ไม่งั้นรูปในคลังจะไปอยู่ในบัญชีส่วนตัวของพนักงาน</td></tr>
+<tr><td>ไม่ใส่ตำแหน่งที่ถ่ายลงในไฟล์</td><td>เป็นข้อมูลที่ไม่จำเป็นและอ่อนไหว</td></tr>
+</tbody></table><p>แถวแรกเป็นเรื่องที่คนไม่ค่อยคิดถึง — ระบบปฏิบัติการสำรองไฟล์ของแอปขึ้นคลาวด์ให้โดยอัตโนมัติในหลายกรณี และถ้าไม่ตั้งค่ายกเว้น รูปภายในคลังจะถูกคัดลอกออกไปโดยไม่มีใครตั้งใจ</p><p><strong>บทเรียนที่ควรจำ:</strong> การเลือกที่เก็บไม่ได้ดูแค่ว่าอ่อนไหวแค่ไหน — ต้องดูขนาด อายุ และเส้นทางที่ข้อมูลอาจไหลออกไปโดยไม่ตั้งใจด้วย และไฟล์ขนาดใหญ่ที่ไม่มีวันหมดอายุ จะกลายเป็นสาเหตุที่ทำให้ที่เก็บอื่นล้มเหลว</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>จัดชั้นความอ่อนไหวก่อน แล้วค่อยเลือกที่เก็บ</li><li>เกณฑ์คือถามว่าถ้าคนอื่นอ่านได้ เขาทำอะไรได้บ้าง</li><li>token ต้องอยู่ในที่เก็บที่ปกป้อง</li><li>ที่เก็บเป็นสัญญา เพื่อให้เปลี่ยนได้และทดสอบกรณีล้มเหลวได้</li><li>ที่เก็บที่ปกป้องก็ล้มเหลวได้ ทั้งตอนเขียนและตอนอ่าน</li><li>มันป้องกันแอปอื่น แต่ไม่ป้องกันคนที่ถือเครื่องที่ปลดล็อกอยู่</li><li>token อายุสั้นช่วยจำกัดความเสียหายที่ที่เก็บช่วยไม่ได้</li><li>คำถามว่า “ควรเก็บไหม” ต้องตอบก่อน “เก็บที่ไหน”</li></ul></div><p><strong>บทถัดไป:</strong> 8.11 จะจัดการกรณีที่แอปสลับไปคุยกับเซิร์ฟเวอร์อื่น ซึ่งทำให้ทุกอย่างที่เก็บไว้ใช้ไม่ได้ทันที</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

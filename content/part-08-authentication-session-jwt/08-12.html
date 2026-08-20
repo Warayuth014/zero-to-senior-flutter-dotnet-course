@@ -1,21 +1,142 @@
-<div class="note"><strong>Lab ปิด Part 8:</strong> ทำ login/logout กับ fake backend และ in-memory secure store เพื่อพิสูจน์ session lifecycle โดยไม่ใช้ network จริงหรือ secret จริง</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>LoginScreen ไม่มี HTTP/storage logic</li><li>repository parse token/expiration เป็น AuthSession</li><li>ApiClient แนบ Bearer เฉพาะ authenticated route</li><li>bootstrap restore ก่อน feature request</li><li>401 หลาย request logout ครั้งเดียว</li><li>logout ล้าง token/cache/routes</li><li>server switch ไม่รั่ว token</li></ul></section>
-<section><h2>2. Fake backend</h2><pre class="code-vs"><code>final http = MockClient((request) async {
-  if (request.url.path == '/api/Authenticate/login') {
-    return Response('{"token":"test-token",'
-      '"expiration":"2099-01-01T00:00:00Z"}', 200);
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ประกอบการเข้าและออกจากระบบให้ครบทุกเส้นทาง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.1–8.11 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำระบบเข้าสู่ระบบที่รับมือได้ทุกกรณี รวมถึงกรณีที่เกิดจริงยากแต่เสียหายมาก</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>lib/auth/</code> ทั้งหมด พร้อมรู้ว่าทุกส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ต่อระบบเข้าสู่ระบบเข้ากับแอปจริง ตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 9</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>jwt.dart</code></td><td>อ่านเนื้อหาใน token</td><td>8.3</td></tr>
+<tr><td><code>auth_session.dart</code></td><td>ข้อมูลผู้ใช้ + อายุ + ผูกกับเซิร์ฟเวอร์</td><td>8.3, 8.9, 8.11</td></tr>
+<tr><td><code>auth_repository.dart</code></td><td>คุยกับ endpoint เข้าสู่ระบบ</td><td>8.1, 8.2</td></tr>
+<tr><td><code>session_storage.dart</code></td><td>เก็บและอ่านข้ามการปิดแอป</td><td>8.5, 8.10</td></tr>
+<tr><td><code>session_store.dart</code></td><td>เจ้าของสถานะและ token</td><td>8.2, 8.4, 8.6–8.8</td></tr>
+<tr><td><code>test/auth_test.dart</code></td><td>เทสต์ 30 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/auth_test.dart</code></pre></section>
+
+<section><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>เปิดแอป
+  └─ restore(currentServerId)                        ← 8.6
+       ├─ ไม่มีข้อมูล        → หน้าเข้าสู่ระบบ
+       ├─ คนละเซิร์ฟเวอร์    → หน้าเข้าสู่ระบบ + เหตุผล   ← 8.11
+       ├─ หมดอายุ           → หน้าเข้าสู่ระบบ + เหตุผล   ← 8.3
+       └─ ใช้ได้            → หน้าหลัก
+
+เข้าสู่ระบบ
+  └─ signIn(username, password, serverId)            ← 8.1
+       ├─ สำเร็จ  → เก็บลงเครื่อง → ตั้ง token → หน้าหลัก  ← 8.4, 8.5
+       ├─ 401     → "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
+       ├─ 403     → บอกว่าบัญชีใช้ไม่ได้
+       └─ เน็ตหลุด → ให้ลองใหม่
+
+ระหว่างใช้งาน
+  └─ ได้ 401 → handleUnauthorized()                  ← 8.7
+       └─ เก็บร่าง → ล้าง token → ล้าง store → หน้าเข้าสู่ระบบ  ← 8.8
+
+ออกจากระบบ
+  └─ signOut(reason) → เหมือนข้างบน แต่คนละเหตุผล      ← 8.8</code></pre><p>ถ้ามีขั้นไหนที่ตอบไม่ได้ว่าทำไมต้องมี ให้กลับไปอ่านบทที่กำกับไว้ก่อนทำต่อ</p></section>
+
+<section><h2>4. โจทย์</h2><p>ต่อระบบเข้าสู่ระบบเข้ากับแอปจริง ในโฟลเดอร์ <code>lib/auth_lab/</code></p><table><thead><tr><th>สิ่งที่ต้องมี</th></tr></thead><tbody>
+<tr><td>หน้าเข้าสู่ระบบที่มีช่องชื่อผู้ใช้ รหัสผ่าน และปุ่ม</td></tr>
+<tr><td>หน้ารอระหว่างอ่านข้อมูลตอนเปิดแอป</td></tr>
+<tr><td>หน้าหลักที่แสดงชื่อผู้ใช้และปุ่มออกจากระบบ</td></tr>
+<tr><td>ปุ่มตั้งค่าเซิร์ฟเวอร์ที่เข้าได้จากหน้าเข้าสู่ระบบ</td></tr>
+</tbody></table></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>รหัสผ่านไม่ถูกเก็บที่ไหนเลย และไม่ไปโผล่ในบันทึก</td><td>8.1, 7.17</td></tr>
+<tr><td>2</td><td>401 กับ 403 ให้ผลต่างกัน และ 403 ไม่ทำให้ออกจากระบบ</td><td>8.1, 8.9</td></tr>
+<tr><td>3</td><td>คำตอบที่ผิดสัญญาต้องโยน ไม่ใช่กลายเป็น “รหัสผ่านผิด”</td><td>8.2</td></tr>
+<tr><td>4</td><td>กดเข้าสู่ระบบซ้ำระหว่างส่ง ต้องยิงครั้งเดียว</td><td>8.2</td></tr>
+<tr><td>5</td><td>มี <code>ApiClient</code> ตัวเดียว และทุก repository ใช้ตัวเดียวกัน</td><td>8.4</td></tr>
+<tr><td>6</td><td>เก็บลงเครื่องไม่ได้ ต้องยังใช้งานรอบนี้ได้</td><td>8.5</td></tr>
+<tr><td>7</td><td>เปิดแอปแล้วไม่เด้งหน้าจอ</td><td>8.6</td></tr>
+<tr><td>8</td><td>ข้อมูลที่เสียหรือเป็นของรุ่นเก่า ต้องไม่ทำให้เปิดแอปไม่ได้</td><td>8.5, 8.6</td></tr>
+<tr><td>9</td><td>ได้ 401 หลายครั้งพร้อมกัน ต้องออกจากระบบครั้งเดียว</td><td>8.7</td></tr>
+<tr><td>10</td><td>เหตุผลของการออกจากระบบเปลี่ยนข้อความที่ผู้ใช้เห็น</td><td>8.7, 8.8</td></tr>
+<tr><td>11</td><td>ออกจากระบบแล้ว store ที่ถือข้อมูลถูกทำลาย</td><td>8.8</td></tr>
+<tr><td>12</td><td>ตัวจับเวลาหยุดเมื่อออกจากระบบ</td><td>8.8, 4.11</td></tr>
+<tr><td>13</td><td>กฎสิทธิ์รวมไว้ที่เดียว และเขียนเป็นรายชื่อที่อนุญาต</td><td>8.9</td></tr>
+<tr><td>14</td><td>session ผูกกับเซิร์ฟเวอร์ และสลับแล้วออกจากระบบ</td><td>8.11</td></tr>
+<tr><td>15</td><td>เข้าหน้าตั้งค่าเซิร์ฟเวอร์ได้โดยไม่ต้องล็อกอิน</td><td>8.11</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 9, 11 และ 12 เป็นสามข้อที่ทดสอบด้วยมือไม่มีทางเจอ — และเป็นข้อที่เสียหายมากที่สุดบน PDA ที่เปลี่ยนมือ</p></section>
+
+<section><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 11 และ 12 — ทำลาย store พร้อม session</strong></p><pre class="code-vs"><code>class SignedInScope {
+  SignedInScope({required this.apiClient, required this.session}) {
+    taskStore = TaskStore(RemoteTaskRepository(apiClient))
+      ..startPolling(const Duration(seconds: 10));
   }
-  expect(request.headers['Authorization'], 'Bearer test-token');
-  return Response('{"items":[],"totalCount":0}', 200);
+
+  final ApiClient apiClient;
+  final AuthSession session;
+  late final TaskStore taskStore;
+
+  void dispose() {
+    taskStore.dispose();     // หยุด polling + เพิ่มเลขรุ่น (4.11)
+  }
+}</code></pre><p>สร้างและทำลายที่เดียวกัน ทำให้เพิ่ม store ใหม่แล้วลืมล้างไม่ได้</p><p><strong>เกณฑ์ 15 — เข้าหน้าตั้งค่าก่อนล็อกอิน</strong></p><p>ต้องทำ ไม่งั้นเครื่องที่ที่อยู่ผิดจะติดวนตามที่ 8.11 แบบฝึกหัดข้อ 3 อธิบาย</p><pre class="code-vs"><code>LoginScreen(
+  actions: [
+    TextButton(
+      key: const Key('server-settings-button'),
+      onPressed: _openServerSettings,
+      child: const Text('ตั้งค่าเซิร์ฟเวอร์'),
+    ),
+  ],
+)</code></pre><p><strong>เกณฑ์ 1 — รหัสผ่านไม่รั่ว</strong></p><pre class="code-vs"><code>@override
+void dispose() {
+  _passwordController.dispose();    // 3.12
+  super.dispose();
+}</code></pre><p>และเพราะ 7.17 ไม่บันทึก body รหัสผ่านจึงไม่ไปโผล่ในไฟล์บันทึกอยู่แล้ว</p></section>
+
+<section><h2>7. เทสต์ที่ต้องเขียน</h2><p>อย่างน้อย 15 ข้อ ตัวอย่างสามข้อที่เขียนยากที่สุด</p><pre class="code-vs"><code>testWidgets('เปิดแอปที่มี session เดิม ต้องไม่เห็นหน้าเข้าสู่ระบบเลย', (tester) async {
+  await storage.write(validSession);
+
+  await tester.pumpWidget(AuthLabApp(dependencies: deps));
+  // ยังไม่ settle — ดูเฟรมแรกก่อน
+  await tester.pump();
+
+  expect(find.byKey(const Key('splash')), findsOneWidget);
+  expect(find.byKey(const Key('login-screen')), findsNothing);
+
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('home-shell')), findsOneWidget);
+});</code></pre><p>เทสต์นี้จับอาการเด้งหน้าจอใน 8.6 ได้ตรง ๆ — <strong>ถ้าไม่มีสถานะ <code>unknown</code> เฟรมแรกจะเป็นหน้าเข้าสู่ระบบ</strong></p><pre class="code-vs"><code>test('ออกจากระบบต้องหยุด polling', () async {
+  await app.signIn('somchai');
+  final callsBefore = repository.fetchCount;
+
+  await app.signOut();
+  await Future&lt;void&gt;.delayed(const Duration(seconds: 30));   // ใช้ fakeAsync จริง ๆ
+
+  expect(repository.fetchCount, callsBefore);   // ไม่เพิ่มเลย
+});</code></pre><pre class="code-vs"><code>test('ล็อกอินคนใหม่ต้องไม่เห็นข้อมูลของคนก่อน', () async {
+  await app.signIn('somchai');
+  await app.scope!.taskStore.load();
+  expect(app.scope!.taskStore.tasks, isNotEmpty);
+
+  await app.signOut();
+  await app.signIn('somsri');
+
+  // scope ใหม่ ต้องเริ่มจากว่าง
+  expect(app.scope!.taskStore.tasks, isEmpty);
 });</code></pre></section>
-<section><h2>3. Fake token store</h2><pre class="code-vs"><code>class MemoryTokenStore implements TokenStore {
-  String? value;
-  Future&lt;String?&gt; read() async =&gt; value;
-  Future&lt;void&gt; write(String token) async =&gt; value = token;
-  Future&lt;void&gt; delete() async =&gt; value = null;
-}</code></pre></section>
-<section><h2>4. Core tests</h2><ol><li>valid login sets session/header</li><li>401 invalid credential ไม่ persist</li><li>malformed expiration เป็น contract error</li><li>restore valid/expired/corrupt</li><li>logout ระหว่าง in-flight request</li><li>403 ไม่ logout</li><li>token marker ไม่อยู่ log</li></ol></section>
-<section><h2>5. Widget tests</h2><p>กรอก form → submit ครั้งเดียว → loading disable → fake success เข้า shell; fake failure แสดงข้อความและ passwordไม่ถูก log/persist; logout reset routeจน Back เข้า shellไม่ได้</p></section>
-<section><h2>6. Integration seam</h2><p>เมื่อ unit testsผ่าน เปลี่ยน fake backendเป็น Minimal .NET login fixtureใน environmentทดสอบ โดยใช้ test signing key/credentialชั่วคราว ห้าม commit production secret</p></section>
-<section><h2>7. Review questions</h2><ul><li>ใครเป็น owner ของ session?</li><li>request แรกเกิดหลัง restoreจริงไหม?</li><li>401/403 ต่างกันไหม?</li><li>storage/server bindingครบไหม?</li><li>responseเก่าข้าม logoutได้ไหม?</li></ul></section>
-<section><h2>8. Exit test</h2><div class="success">อธิบายและทดสอบได้ครบ Login → Session → Bearer → Expire/401 → Logout/Restore/Server switch โดย passwordไม่ persist, tokenไม่รั่ว และ .NETยังเป็นผู้บังคับสิทธิ์จริง</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เห็นหน้าเข้าสู่ระบบแวบหนึ่ง</td><td>ค่าเริ่มต้นเป็น <code>signedOut</code></td><td>ใช้ <code>unknown</code> (8.6)</td></tr>
+<tr><td>เทสต์ widget ไม่เห็นหน้ารอ</td><td>ใช้ <code>pumpAndSettle</code> ตั้งแต่แรก</td><td>ใช้ <code>pump()</code> ดูเฟรมแรกก่อน</td></tr>
+<tr><td>ออกจากระบบแล้วยังมีคำขอ</td><td>ไม่หยุด polling</td><td>ทำลาย store (8.8)</td></tr>
+<tr><td>หน้าเข้าสู่ระบบซ้อนกัน</td><td>จัดการ 401 หลายครั้ง</td><td>ตรวจสถานะก่อน (8.7)</td></tr>
+<tr><td>403 ทำให้ออกจากระบบ</td><td>เหมารวมกับ 401</td><td>แยกด้วย <code>kind</code> (7.9)</td></tr>
+<tr><td>คำตอบผิดสัญญากลายเป็น “รหัสผ่านผิด”</td><td><code>try</code> ครอบกว้างเกิน</td><td>อ่านคำตอบนอก <code>try</code> (8.2)</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบทดสอบตัวเองก่อนจบ Part 8</h2><ol><li>รหัสผ่านกับ token ต่างกันอย่างไรในแง่การเก็บ (8.1)</li><li>ทำไม 401 ต้องใช้ข้อความเดียวสำหรับทุกกรณี (8.1)</li><li>ทำไมการอ่านคำตอบต้องอยู่นอก <code>try</code> (8.2)</li><li>ทำไม <code>AuthRepository</code> ไม่มีเมธอด <code>logout</code> (8.2)</li><li>JWT เข้ารหัสหรือไม่ และผลตามมาคืออะไร (8.3)</li><li><code>exp</code> ใน token ต่างจาก <code>expiration</code> ในคำตอบอย่างไร (8.3)</li><li>ทำไมต้องเผื่อเวลาก่อนถือว่าหมดอายุ (8.3)</li><li>ทำไมใช้ callback แทนการให้ store ถือ <code>ApiClient</code> (8.4)</li><li>ทำไมต้องล้าง token ก่อนล้างที่เก็บ (8.4, 8.8)</li><li>เก็บลงเครื่องไม่ได้ ควรทำให้เข้าสู่ระบบล้มเหลวไหม (8.5)</li><li>ทำไมต้องมีเลขรุ่นของโครงข้อมูลตั้งแต่วันแรก (8.5)</li><li>ทำไมค่าเริ่มต้นของสถานะต้องเป็น <code>unknown</code> (8.6)</li><li>ทำไมตรวจเซิร์ฟเวอร์ก่อนตรวจอายุ (8.6, 8.11)</li><li>401 สามตัวพร้อมกัน ควรออกจากระบบกี่ครั้ง (8.7)</li><li>ทำไมต้องเก็บเหตุผลของการออกจากระบบ (8.7)</li><li>อะไรบ้างที่ต้องล้างเมื่อออกจากระบบ (8.8)</li><li>การซ่อนปุ่มตาม role เป็นการป้องกันหรือไม่ (8.9)</li><li>ทำไมกฎสิทธิ์ต้องเขียนเป็นรายชื่อที่อนุญาต (8.9)</li><li>อะไรเก็บในที่เก็บธรรมดาได้บ้าง (8.10)</li><li>ทำไมไม่ควรใช้ที่อยู่เป็น <code>serverId</code> (8.11)</li></ol></section>
+
+<section><h2>10. สรุปท้าย Part 8</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>แลกรหัสผ่านเป็น token โดยที่รหัสผ่านไม่ค้างอยู่ที่ไหน</li><li>แยกความล้มเหลวของการเข้าสู่ระบบให้ผู้ใช้ทำต่อได้ถูก</li><li>อ่านข้อมูลใน token โดยรู้ว่าเชื่ออะไรได้แค่ไหน</li><li>ต่อ token เข้ากับทุกคำขอโดยมีเจ้าของเดียว</li><li>จำการเข้าสู่ระบบข้ามการปิดแอปอย่างปลอดภัย</li><li>เปิดแอปแล้วพาไปที่ถูกที่โดยไม่เด้งหน้าจอ</li><li>รับมือกับ token ที่ใช้ไม่ได้กลางทาง โดยไม่ทำงานซ้ำ</li><li>ล้างทุกอย่างที่ผูกกับผู้ใช้เมื่อออกจากระบบ</li><li>ใช้ role ปรับหน้าจอโดยไม่เข้าใจผิดว่าเป็นความปลอดภัย</li><li>เลือกที่เก็บให้ตรงกับความอ่อนไหวของข้อมูล</li><li>ผูก session กับเซิร์ฟเวอร์ที่ออกมัน</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>ต่ออายุ token อัตโนมัติด้วย refresh token</td><td>Part 15</td></tr>
+<tr><td>เก็บร่างงานลงเครื่องจริง</td><td>Part 12</td></tr>
+<tr><td>ที่เก็บที่ปกป้องของแต่ละแพลตฟอร์ม</td><td>Part 12</td></tr>
+<tr><td>ทดสอบกับเซิร์ฟเวอร์จริง</td><td>Part 14</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 9 จะกลับมาที่การจัดการสถานะ — ตอนนี้แอปมีทั้ง <code>SessionStore</code>, <code>TaskStore</code> และ store อื่นที่ต้องคุยกัน ซึ่งเปิดคำถามใหม่ว่าจะส่งของถึงกันอย่างไรโดยไม่ผูกกันแน่นเกินไป</p></section>

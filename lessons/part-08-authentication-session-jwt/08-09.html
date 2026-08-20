@@ -4,20 +4,162 @@
 <title>Roles &amp; Permissions</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-09 · Auth Integration</span><h1>Roles &amp; Permissions</h1><p>Part 8: Authentication &amp; JWT</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Role vs permission</a></li><li><a href="#section-2">Typed access</a></li><li><a href="#section-3">Claim normalization</a></li><li><a href="#section-4">Hide หรือ disable</a></li><li><a href="#section-5">Server remains authority</a></li><li><a href="#section-6">Avoid route-only protection</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>UI permission เป็น UX ไม่ใช่ security:</strong> ใช้ซ่อน/disable action ที่ผู้ใช้ทำไม่ได้ แต่ .NET endpoint ต้อง enforce policy ทุกครั้ง</div>
-<section id="section-1"><h2>1. Role vs permission</h2><p>Role เช่น OPERATOR/SUPERVISOR เป็นกลุ่มกว้าง ส่วน permission เช่น <code>inventory.adjust</code> สื่อ action ชัดและลด if-role กระจายเมื่อ role เปลี่ยน</p></section>
-<section id="section-2"><h2>2. Typed access</h2><pre class="code-vs"><code>enum Permission { receive, pick, adjustInventory }
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ซ่อนปุ่มคือความสุภาพ ไม่ใช่รั้ว</a></li><li><a href="#section-4">ใช้ role ปรับหน้าจอ</a></li><li><a href="#section-5">ทำไมถึงป้องกันไม่ได้</a></li><li><a href="#section-6">role ในแอปอาจไม่ใช่ความจริงล่าสุด</a></li><li><a href="#section-7">อย่ากระจายชื่อ role ไปทั่วแอป</a></li><li><a href="#section-8">ปิดปุ่มดีกว่าซ่อน ในบางกรณี</a></li><li><a href="#section-9">ฝั่ง .NET ต้องตรวจทุกครั้ง</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ใช้ role ปรับหน้าจอ โดยไม่เข้าใจผิดว่าเป็นความปลอดภัย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.3 (ข้อมูลใน token) และ 6.12 (ด่านตรวจสอบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ซ่อนปุ่มตามสิทธิ์ได้อย่างถูกต้อง และรู้ว่าทำไมนั่นไม่ใช่การป้องกัน</div>
 
-bool can(Permission p) =&gt; session.permissions.contains(p);
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>8.1 แยกคำสองคำไว้แล้ว และบทนี้คือที่ที่ความต่างนั้นสำคัญที่สุด</p><table><thead><tr><th></th><th>ยืนยันตัวตน</th><th>สิทธิ์</th></tr></thead><tbody>
+<tr><td>ตอบคำถาม</td><td>คุณเป็นใคร</td><td>คุณทำอะไรได้</td></tr>
+<tr><td>ตอบเมื่อไหร่</td><td>ตอนเข้าสู่ระบบ ครั้งเดียว</td><td>ทุกครั้งที่ทำอะไร</td></tr>
+<tr><td>ใครตอบ</td><td>เซิร์ฟเวอร์</td><td>เซิร์ฟเวอร์</td></tr>
+</tbody></table><p>แถวล่างสำคัญ — <strong>ทั้งสองอย่างเซิร์ฟเวอร์เป็นคนตอบ</strong> ส่วนแอปแค่ใช้ข้อมูลนั้นทำให้หน้าจอสะดวกขึ้น</p><p>ความเข้าใจผิดที่พบบ่อยคือคิดว่าการซ่อนปุ่มคือการป้องกัน</p></section>
 
-if (auth.can(Permission.adjustInventory))
-  FilledButton(onPressed: adjust, child: const Text('ปรับสต็อก'));</code></pre></section>
-<section id="section-3"><h2>3. Claim normalization</h2><p>.NET role claim อาจเป็น string เดียว/list/URI key ให้ Auth mapper normalize เป็น lower/upper convention และ immutable set จุดเดียว ไม่เทียบ raw dynamic ใน widgets</p></section>
-<section id="section-4"><h2>4. Hide หรือ disable</h2><p>ซ่อน action ที่ไม่เกี่ยวกับผู้ใช้เพื่อลด clutter; disable พร้อมเหตุผลเมื่อผู้ใช้ควรรู้ว่าฟีเจอร์มีแต่ต้องขอสิทธิ์ โดยคำนึง accessibility</p></section>
-<section id="section-5"><h2>5. Server remains authority</h2><p>permission อาจเปลี่ยนหลัง token ออก, device offline หรือ client ถูกดัดแปลง จึง handle 403 เสมอและ refresh profile/session ตาม policy</p></section>
-<section id="section-6"><h2>6. Avoid route-only protection</h2><p>เมนูไม่แสดงไม่ได้แปลว่า route เข้าไม่ได้ Route guard ตรวจ session/permission อีกชั้น แต่ endpoint ยังต้อง authorize เป็นชั้นสุดท้าย</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>SUPERVISOR เห็นปุ่ม adjust แต่ serverตอบ 403 ควรทำอย่างไร?</p><details><summary>เฉลย</summary><p>แสดงไม่มีสิทธิ์ ไม่ logout; invalidate/refresh permission stateถ้ารองรับ และ log trace ID—not retry วนหรือฝืน UI</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">ไม่มี claim, role เดี่ยว/หลาย role, case ต่าง, unknown permission, route deep link และ 403 หลัง UI เปิด action</div></section>
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>role</td><td>กลุ่มสิทธิ์ที่ตั้งชื่อไว้ เช่น <code>PICKER</code></td></tr>
+<tr><td>permission</td><td>สิทธิ์ทำสิ่งหนึ่ง เช่นปรับยอดสต๊อก</td></tr>
+<tr><td>least privilege</td><td>ให้สิทธิ์เท่าที่จำเป็นเท่านั้น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ซ่อนปุ่มคือความสุภาพ ไม่ใช่รั้ว</h2><pre class="code-vs"><code>ซ่อนปุ่ม   →  ผู้ใช้ไม่เห็นสิ่งที่กดไม่ได้  →  ประสบการณ์ดีขึ้น
+เซิร์ฟเวอร์ตรวจ  →  ทำไม่ได้จริง            →  ป้องกันได้จริง</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การซ่อนปุ่มช่วยคนที่ตั้งใจทำงาน — ไม่ได้ช่วยกับคนที่ตั้งใจข้าม เพราะคำขอส่งตรงถึงเซิร์ฟเวอร์ได้โดยไม่ผ่านหน้าจอ</div></section>
+
+<section id="section-4"><h2>4. ใช้ role ปรับหน้าจอ</h2><p>เปิด <code>lib/auth/auth_session.dart</code></p><pre class="code-vs"><code>/// ใช้ปรับหน้าจอเท่านั้น — ห้ามใช้แทนการตรวจสิทธิ์ที่ server (8.9)
+bool hasRole(String role) =&gt; roles.contains(role);</code></pre><pre class="code-vs"><code>// ในหน้าจอ
+if (session.hasRole('SUPERVISOR'))
+  FilledButton(
+    onPressed: () =&gt; store.adjustStock(...),
+    child: const Text('ปรับยอด'),
+  ),</code></pre><table><thead><tr><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>คนที่ไม่มีสิทธิ์ไม่เห็นปุ่มที่กดไปก็ถูกปฏิเสธ</td></tr>
+<tr><td>หน้าจอไม่รกด้วยสิ่งที่ใช้ไม่ได้</td></tr>
+<tr><td>ไม่เสียคำขอที่รู้อยู่แล้วว่าจะล้มเหลว</td></tr>
+</tbody></table><p>ทั้งสามข้อเป็นเรื่องประสบการณ์ทั้งหมด — ไม่มีข้อไหนเป็นเรื่องความปลอดภัย</p></section>
+
+<section id="section-5"><h2>5. ทำไมถึงป้องกันไม่ได้</h2><p>เหตุผลที่ตรงไปตรงมาที่สุด</p><pre class="code-vs"><code>คำขอที่แอปส่ง:
+POST /api/WMS/stock/adjust
+Authorization: Bearer eyJ...
+{"productCode": "SKU-1001", "delta": -50}</code></pre><p>ใครก็ตามที่มี token นี้ ส่งคำขอเดียวกันได้โดยไม่ต้องผ่านแอปเลย</p><table><thead><tr><th>วิธีที่ข้ามหน้าจอได้</th></tr></thead><tbody>
+<tr><td>ใช้เครื่องมือทดสอบ API ยิงตรง</td></tr>
+<tr><td>แก้แอปแล้วติดตั้งเอง</td></tr>
+<tr><td>ดักคำขอแล้วส่งซ้ำโดยแก้ค่า</td></tr>
+</tbody></table><p>ทั้งสามไม่ต้องใช้ความสามารถพิเศษอะไร — และ token ที่ได้มาก็เป็นของผู้ใช้เองอย่างถูกต้อง</p><p>เป็นหลักเดียวกับ 6.12 หัวข้อ 6 — <strong>การตรวจฝั่งแอปคือประสบการณ์ผู้ใช้ ไม่ใช่ความปลอดภัย</strong></p></section>
+
+<section id="section-6"><h2>6. role ในแอปอาจไม่ใช่ความจริงล่าสุด</h2><pre class="code-vs"><code>08:00  เข้าสู่ระบบ → token มี role SUPERVISOR
+10:30  หัวหน้าถอดสิทธิ์ SUPERVISOR ออก
+10:31  แอปยังแสดงปุ่มปรับยอด เพราะ token เดิมยังบอกว่ามีสิทธิ์
+10:32  กดปุ่ม → server ปฏิเสธ 403</code></pre><table><thead><tr><th>สิ่งที่ต้องรับมือ</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>ปุ่มยังแสดงอยู่ทั้งที่ไม่มีสิทธิ์แล้ว</td><td>ยอมรับ — เป็นข้อจำกัดตามธรรมชาติ</td></tr>
+<tr><td>กดแล้วได้ 403</td><td><strong>ต้องรับมือให้ดี</strong> เพราะเกิดได้จริง</td></tr>
+<tr><td>ผู้ใช้สับสนว่าทำไมปุ่มมีแต่กดไม่ได้</td><td>บอกให้ชัด และเสนอให้เข้าสู่ระบบใหม่</td></tr>
+</tbody></table><pre class="code-vs"><code>case ApiFailureKind.forbidden:
+  // ไม่ออกจากระบบ — สิทธิ์เปลี่ยน ไม่ใช่ตัวตนเปลี่ยน (7.5)
+  showResultBanner(
+    messenger,
+    '${error.userMessage}\nหากเพิ่งได้รับสิทธิ์ กรุณาเข้าสู่ระบบใหม่',
+    isError: true,
+  );</code></pre><p>ข้อความท่อนหลังสำคัญ — เพราะกรณีตรงข้ามก็เกิดเหมือนกัน คือ <strong>เพิ่งได้รับสิทธิ์แต่ token เก่ายังไม่มี</strong> ซึ่งแก้ได้ด้วยการเข้าสู่ระบบใหม่</p></section>
+
+<section id="section-7"><h2>7. อย่ากระจายชื่อ role ไปทั่วแอป</h2><pre class="code-vs"><code>// เลี่ยง — ชื่อ role กระจายทุกหน้าจอ
+if (session.hasRole('SUPERVISOR')) ...
+if (session.hasRole('supervisor')) ...        // ตัวพิมพ์ไม่ตรง
+if (session.hasRole('SUPERVISOR') || session.hasRole('ADMIN')) ...</code></pre><p>ปัญหาเดียวกับ magic string ใน 6.9 — พิมพ์ผิดแล้วไม่มีอะไรเตือน และเปลี่ยนกติกาต้องไล่แก้ทุกที่</p><pre class="code-vs"><code>// รวมกฎไว้ที่เดียว
+extension SessionPermissions on AuthSession {
+  bool get canAdjustStock =&gt; hasRole('SUPERVISOR') || hasRole('ADMIN');
+  bool get canCancelOrder =&gt; hasRole('SUPERVISOR');
+  bool get canPick =&gt; hasRole('PICKER') || hasRole('SUPERVISOR');
+}</code></pre><pre class="code-vs"><code>// ในหน้าจอ — อ่านแล้วรู้ว่ากฎคืออะไร
+if (session.canAdjustStock) ...</code></pre><table><thead><tr><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>เปลี่ยนกฎที่เดียว ทุกหน้าจอเปลี่ยนตาม</td></tr>
+<tr><td>ชื่อเมธอดบอกความหมาย ไม่ใช่บอกชื่อ role</td></tr>
+<tr><td>เขียนเทสต์ของกฎได้โดยไม่ต้องสร้างหน้าจอ</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 6.12 หัวข้อ 9 — รวมกฎไว้ที่ model ไม่ให้แต่ละหน้าจอตีความเอง</p></section>
+
+<section id="section-8"><h2>8. ปิดปุ่มดีกว่าซ่อน ในบางกรณี</h2><table><thead><tr><th>สถานการณ์</th><th>ควรทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>สิทธิ์ที่คนส่วนใหญ่ไม่มี</td><td>ซ่อน</td><td>ไม่รกจอ และไม่ทำให้สงสัย</td></tr>
+<tr><td>สิทธิ์ที่คนควรมีแต่ยังไม่มี</td><td><strong>ปิดแต่แสดง</strong></td><td>ให้รู้ว่ามีความสามารถนี้อยู่ และขอสิทธิ์ได้</td></tr>
+<tr><td>สิทธิ์ที่ขึ้นกับสถานะของงาน</td><td>ปิดพร้อมบอกเหตุผล</td><td>ผู้ใช้แก้เองได้</td></tr>
+</tbody></table><pre class="code-vs"><code>// แถวกลาง — เห็นแต่กดไม่ได้ พร้อมเหตุผล
+Tooltip(
+  message: 'ต้องมีสิทธิ์หัวหน้างาน',
+  child: FilledButton(
+    onPressed: session.canAdjustStock ? _adjust : null,
+    child: const Text('ปรับยอด'),
+  ),
+)</code></pre><p>การซ่อนทั้งหมดทำให้เกิดคำถามที่ตอบยาก — <strong>“ทำไมเครื่องของฉันไม่มีปุ่มนี้ แต่ของเพื่อนมี”</strong> ซึ่งคนหน้างานจะคิดว่าแอปพัง</p></section>
+
+<section id="section-9"><h2>9. ฝั่ง .NET ต้องตรวจทุกครั้ง</h2><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+app.MapPost("/api/WMS/stock/adjust", async (...) =&gt; { ... })
+   .RequireAuthorization("CanAdjustStock");</code></pre><table><thead><tr><th>ต้องตกลง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ทุก endpoint ที่เปลี่ยนข้อมูลต้องมีการตรวจ</td><td>ไม่มีข้อยกเว้น</td></tr>
+<tr><td>ตอบ 403 พร้อมบอกว่าขาดสิทธิ์อะไร</td><td>ผู้ใช้จะได้รู้ว่าต้องขออะไร</td></tr>
+<tr><td>ชื่อ role ที่ตรงกันทั้งสองฝั่ง</td><td>ไม่งั้นซ่อนปุ่มผิดคน</td></tr>
+</tbody></table><p>แถวที่สองมีประโยชน์มากกว่าที่คิด</p><pre class="code-vs"><code>403 {
+  "detail": "ต้องมีสิทธิ์ SUPERVISOR จึงจะปรับยอดได้",
+  "errorCode": "MISSING_PERMISSION"
+}</code></pre><p>ทำให้แอปแสดงข้อความที่บอกได้ว่าต้องไปขออะไร แทนที่จะบอกแค่ “ไม่มีสิทธิ์”</p><p>รายละเอียดฝั่งเซิร์ฟเวอร์อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a></p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>คิดว่าซ่อนปุ่มแล้วปลอดภัย</td><td>เข้าใจผิดว่าเป็นการป้องกัน</td><td>เซิร์ฟเวอร์ต้องตรวจทุกครั้ง</td></tr>
+<tr><td>ถูกเด้งออกเมื่อได้ 403</td><td>เหมารวมกับ 401</td><td>แยกสองรหัส (7.5)</td></tr>
+<tr><td>ชื่อ role พิมพ์ผิดแล้วไม่มีอะไรเตือน</td><td>กระจายชื่อไปทั่วแอป</td><td>รวมกฎไว้ที่เดียว</td></tr>
+<tr><td>เพิ่งได้สิทธิ์แต่ยังกดไม่ได้</td><td>token เก่ายังไม่มี role ใหม่</td><td>บอกให้เข้าสู่ระบบใหม่</td></tr>
+<tr><td>“ทำไมเครื่องฉันไม่มีปุ่มนี้”</td><td>ซ่อนโดยไม่บอกเหตุผล</td><td>ปิดพร้อมบอกว่าต้องมีสิทธิ์อะไร</td></tr>
+<tr><td>ปุ่มหายไปกลางกะ</td><td>สิทธิ์ถูกถอดแล้วโหลด session ใหม่</td><td>บอกผู้ใช้ ไม่ให้คิดว่าแอปพัง</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ระบบมีสาม role และสี่การกระทำ</p><table><thead><tr><th>role</th><th>ทำอะไรได้</th></tr></thead><tbody>
+<tr><td><code>PICKER</code></td><td>ดูงาน หยิบสินค้า</td></tr>
+<tr><td><code>SUPERVISOR</code></td><td>ทุกอย่างของ PICKER + ปรับยอด + ยกเลิกงาน</td></tr>
+<tr><td><code>VIEWER</code></td><td>ดูอย่างเดียว</td></tr>
+</tbody></table><ol><li>เขียนกฎสิทธิ์ที่รวมไว้ที่เดียว</li><li>ตัดสินว่าปุ่มไหนควรซ่อน ปุ่มไหนควรปิดแต่แสดง</li><li>ตอบว่าถ้าฝั่งหลังบ้านเพิ่ม role <code>AUDITOR</code> ที่ดูได้ทุกคลังแต่แก้ไม่ได้ ฝั่งแอปต้องแก้อะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — กฎสิทธิ์</strong></p><pre class="code-vs"><code>extension SessionPermissions on AuthSession {
+  /// ดูรายการงาน — ทุก role ทำได้
+  bool get canViewTasks =&gt;
+      hasRole('PICKER') || hasRole('SUPERVISOR') || hasRole('VIEWER');
+
+  bool get canPick =&gt; hasRole('PICKER') || hasRole('SUPERVISOR');
+
+  bool get canAdjustStock =&gt; hasRole('SUPERVISOR');
+
+  bool get canCancelTask =&gt; hasRole('SUPERVISOR');
+}</code></pre><p>สังเกตว่า <strong>เขียนเป็นรายชื่อที่อนุญาต ไม่ใช่รายชื่อที่ห้าม</strong></p><pre class="code-vs"><code>// อันตราย — role ใหม่ที่เพิ่มมาจะได้สิทธิ์โดยอัตโนมัติ
+bool get canPick =&gt; !hasRole('VIEWER');</code></pre><p>เป็นหลักเดียวกับ <code>isRetryable</code> ใน 7.14 และ <code>canWorkOn</code> ใน 6.9 — และข้อ 3 จะแสดงว่าทำไมสำคัญ</p><p><strong>ข้อ 2 — ซ่อนหรือปิด</strong></p><table><thead><tr><th>ปุ่ม</th><th>ทำอย่างไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ดูงาน</td><td>แสดงเสมอ</td><td>ทุก role ทำได้</td></tr>
+<tr><td>หยิบสินค้า</td><td><strong>ปิดแต่แสดง</strong> สำหรับ VIEWER</td><td>เป็นงานหลักของแอป — ซ่อนแล้วจะงงว่าใช้แอปทำอะไร</td></tr>
+<tr><td>ปรับยอด</td><td><strong>ซ่อน</strong> สำหรับ PICKER</td><td>คนหยิบของส่วนใหญ่ไม่เคยต้องใช้</td></tr>
+<tr><td>ยกเลิกงาน</td><td>ปิดแต่แสดง</td><td>มีกรณีที่คนหยิบอยากยกเลิกแล้วต้องขอหัวหน้า</td></tr>
+</tbody></table><p>เกณฑ์ที่ใช้ตัดสิน — <strong>ถ้าผู้ใช้มีเหตุผลที่จะอยากทำสิ่งนั้น ให้แสดงแล้วบอกว่าต้องมีสิทธิ์อะไร</strong></p><pre class="code-vs"><code>// VIEWER เห็นปุ่มหยิบ แต่กดไม่ได้ พร้อมเหตุผล
+Tooltip(
+  message: 'บัญชีของคุณดูข้อมูลได้อย่างเดียว',
+  child: FilledButton(
+    onPressed: session.canPick ? _pick : null,
+    child: const Text('หยิบสินค้า'),
+  ),
+)</code></pre><p>ถ้าซ่อนไปเลย VIEWER จะเปิดแอปมาแล้วเห็นแค่รายการที่กดอะไรไม่ได้เลย และจะคิดว่าแอปโหลดไม่ครบ</p><p><strong>ข้อ 3 — เพิ่ม role <code>AUDITOR</code></strong></p><p>ถ้าเขียนเป็นรายชื่อที่อนุญาตตามข้อ 1 คำตอบคือ <strong>เพิ่มชื่อเข้าไปในกฎที่เกี่ยวข้องเท่านั้น</strong></p><pre class="code-vs"><code>bool get canViewTasks =&gt;
+    hasRole('PICKER') ||
+    hasRole('SUPERVISOR') ||
+    hasRole('VIEWER') ||
+    hasRole('AUDITOR');       // เพิ่มบรรทัดเดียว
+
+// กฎอื่นไม่ต้องแตะเลย — AUDITOR แก้ไม่ได้อยู่แล้ว</code></pre><p><strong>แต่ถ้าเขียนเป็นรายชื่อที่ห้าม จะเกิดช่องโหว่ทันที</strong></p><pre class="code-vs"><code>bool get canPick =&gt; !hasRole('VIEWER');
+
+// AUDITOR ไม่ใช่ VIEWER → เงื่อนไขเป็นจริง → เห็นปุ่มหยิบสินค้า
+// ทั้งที่ไม่ควรมีสิทธิ์</code></pre><p>และเพราะเป็นแค่การซ่อนปุ่ม ช่องโหว่นี้ไม่ได้ทำให้ AUDITOR หยิบของได้จริง — เซิร์ฟเวอร์จะปฏิเสธอยู่ดี</p><p><strong>แต่มันสร้างปัญหาอื่น</strong></p><table><thead><tr><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>AUDITOR เห็นปุ่มที่กดแล้วได้ 403 ทุกครั้ง</td></tr>
+<tr><td>คิดว่าแอปพัง แล้วแจ้งทีม</td></tr>
+<tr><td>ทีมเสียเวลาไล่หาสาเหตุที่ไม่ใช่บั๊กจริง</td></tr>
+</tbody></table><p><strong>สิ่งที่ต้องทำเพิ่มนอกจากแก้กฎ</strong></p><table><thead><tr><th>ทำอะไร</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ตกลงชื่อ role กับฝั่งหลังบ้านก่อน</td><td>ถ้าสะกดต่างกัน จะซ่อนปุ่มผิดคน</td></tr>
+<tr><td>ตรวจว่ามีกฎไหนที่ควรรวม <code>AUDITOR</code> อีก</td><td>เช่นดูรายงาน</td></tr>
+<tr><td>เขียนเทสต์ของกฎแต่ละข้อกับ role ใหม่</td><td>ยืนยันว่าไม่ได้สิทธิ์เกิน</td></tr>
+</tbody></table><pre class="code-vs"><code>test('AUDITOR ดูได้อย่างเดียว', () {
+  final session = sessionWithRoles({'AUDITOR'});
+
+  expect(session.canViewTasks, isTrue);
+  expect(session.canPick, isFalse);
+  expect(session.canAdjustStock, isFalse);
+  expect(session.canCancelTask, isFalse);
+});</code></pre><p>เทสต์แบบนี้เขียนง่ายและเร็วมาก เพราะกฎถูกรวมไว้ที่เดียวและไม่ต้องสร้างหน้าจอ</p><p><strong>บทเรียนที่ควรจำ:</strong> การเขียนกฎสิทธิ์เป็นรายชื่อที่อนุญาต ทำให้ role ใหม่ <em>ไม่ได้อะไรเลยโดยอัตโนมัติ</em> ซึ่งเป็นค่าตั้งต้นที่ปลอดภัย — ส่วนรายชื่อที่ห้ามให้ค่าตั้งต้นตรงข้าม และผิดพลาดในทางที่อันตรายกว่า</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ยืนยันตัวตนกับสิทธิ์เป็นคนละคำถาม และเซิร์ฟเวอร์ตอบทั้งคู่</li><li>ซ่อนปุ่มคือประสบการณ์ ไม่ใช่การป้องกัน</li><li>คำขอส่งตรงถึงเซิร์ฟเวอร์ได้โดยไม่ผ่านหน้าจอ</li><li>role ใน token อาจไม่ใช่ความจริงล่าสุด ต้องรับมือกับ 403 เสมอ</li><li>403 ไม่ควรทำให้ออกจากระบบ</li><li>รวมกฎสิทธิ์ไว้ที่เดียว อย่ากระจายชื่อ role</li><li>เขียนกฎเป็นรายชื่อที่อนุญาต ไม่ใช่รายชื่อที่ห้าม</li><li>สิทธิ์ที่ผู้ใช้มีเหตุผลจะอยากใช้ ควรปิดแต่แสดงพร้อมเหตุผล</li></ul></div><p><strong>บทถัดไป:</strong> 8.10 จะดูว่า token ควรถูกเก็บไว้ที่ไหนบนเครื่องจริง และอะไรที่เก็บในที่ธรรมดาได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

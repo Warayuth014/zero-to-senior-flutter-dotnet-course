@@ -4,24 +4,164 @@
 <title>Startup Bootstrap</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">08-06 · Auth Integration</span><h1>Startup Bootstrap</h1><p>Part 8: Authentication &amp; JWT</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Startup states</a></li><li><a href="#section-2">Ordered initialization</a></li><li><a href="#section-3">Splash ไม่ใช่ delay</a></li><li><a href="#section-4">First request invariant</a></li><li><a href="#section-5">Parallel ที่ปลอดภัย</a></li><li><a href="#section-6">ของจริง</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Acceptance</a></li></ol></nav>
-<div class="note"><strong>Bootstrap gate:</strong> ก่อน request แรกต้องโหลด connection profile และ auth session ให้เสร็จ มิฉะนั้น request อาจไป server default โดยไม่มี token แล้วเกิด 401 ที่ดูเหมือน logout</div>
-<section id="section-1"><h2>1. Startup states</h2><pre class="code-vs"><code>sealed class BootstrapState {}
-class Booting extends BootstrapState {}
-class NeedsLogin extends BootstrapState {}
-class Ready extends BootstrapState { Ready(this.session); final AuthSession session; }
-class BootFailed extends BootstrapState { BootFailed(this.message); final String message; }</code></pre></section>
-<section id="section-2"><h2>2. Ordered initialization</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await connectionProfiles.load();
-  await auth.restore();
-  runApp(App(bootstrap: bootstrap));
-}</code></pre></section>
-<section id="section-3"><h2>3. Splash ไม่ใช่ delay</h2><p>Splash แสดงตาม Future/state จริง ไม่ใช้ fixed timer เพราะเครื่องเร็วเสียเวลา เครื่องช้ายัง race และ error ไม่มีทาง retry</p></section>
-<section id="section-4"><h2>4. First request invariant</h2><p>ApiClient ต้องมี base URL ที่ active และ token ที่ restore แล้วก่อน Store เริ่ม polling/load ใน <code>initState</code> ควรสร้าง authenticated shell หลัง gate ready เท่านั้น</p></section>
-<section id="section-5"><h2>5. Parallel ที่ปลอดภัย</h2><p>theme/language อาจโหลดคู่กันได้ แต่ auth restore ต้องรอ connection profile ถ้า session bind กับ server และ feature data ต้องรอ auth; วาด dependency graphก่อนใช้ <code>Future.wait</code></p></section>
-<section id="section-6"><h2>6. ของจริง</h2><p><code>wms_absolute_mobile/main.dart</code> เรียก <code>WidgetsFlutterBinding.ensureInitialized()</code> และรอ language/connection profile ก่อน <code>runApp</code>; Part นี้เพิ่ม session restore เข้า sequence เดียวกัน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ภาษาโหลดไม่ได้แต่ token/server ถูกต้อง ควร block app ทั้งหมดหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>ใช้ default locale และ log warning ได้ ส่วน connection/auth corruption ต้องเข้าสถานะ recoverable ที่ให้เลือก server/login ไม่ปล่อย feature request วิ่งผิด config</p></details></section>
-<section id="section-8"><h2>8. Acceptance</h2><div class="success">ไม่มี flash หน้า login ก่อน restore, ไม่มี request ก่อน ready, error retry ได้, logout ระหว่าง boot ปลอดภัย และ test ควบคุมลำดับด้วย fake dependencies</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ยังไม่รู้ ไม่เท่ากับ ยังไม่ได้เข้าสู่ระบบ</a></li><li><a href="#section-4">สถานะที่มีสี่ค่า</a></li><li><a href="#section-5">ขั้นตอนการอ่านข้อมูลเดิม</a></li><li><a href="#section-6">ลำดับการตรวจสำคัญ</a></li><li><a href="#section-7">ตรวจอายุเองก่อน ไม่ต้องรอ 401</a></li><li><a href="#section-8">อย่ายิงคำขอตรวจสอบตอนเปิดแอป</a></li><li><a href="#section-9">หน้ารอต้องไม่ค้าง</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: เปิดแอปแล้วพาผู้ใช้ไปที่ถูกที่ตั้งแต่ครั้งแรก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.5 (การเก็บ session) และ 5.4 (เส้นทางเข้าออกระบบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนขั้นตอนเปิดแอปที่ไม่เด้งหน้าจอ และรับมือกับทุกกรณีที่อ่านข้อมูลเก่าแล้วใช้ไม่ได้</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>อาการที่เห็นได้ในแอปจำนวนมาก</p><pre class="code-vs"><code>เปิดแอป → หน้าเข้าสู่ระบบแวบหนึ่ง → เด้งเข้าหน้าหลักเอง</code></pre><p>ผู้ใช้ไม่ได้ทำอะไรผิด และแอปก็ทำงานถูก — แต่ประสบการณ์แย่ และทำให้คนกดปุ่มผิดถ้ากดเร็ว</p><p>สาเหตุคือแอปตอบคำถาม “เข้าสู่ระบบอยู่ไหม” เร็วเกินไป ก่อนที่จะอ่านข้อมูลที่เก็บไว้เสร็จ</p><pre class="code-vs"><code>0 ms   แอปเริ่ม → session เป็น null → แสดงหน้าเข้าสู่ระบบ
+40 ms  อ่านข้อมูลจากเครื่องเสร็จ → มี session → เด้งเข้าหน้าหลัก</code></pre></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>bootstrap</td><td>ขั้นตอนเตรียมทุกอย่างก่อนแอปเริ่มทำงานจริง</td></tr>
+<tr><td>splash</td><td>หน้าจอที่แสดงระหว่างเตรียม</td></tr>
+<tr><td>restore</td><td>การกู้สถานะเดิมกลับมา</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ยังไม่รู้ ไม่เท่ากับ ยังไม่ได้เข้าสู่ระบบ</h2><pre class="code-vs"><code>unknown    ยังอ่านข้อมูลไม่เสร็จ  →  แสดงหน้ารอ
+signedOut  อ่านเสร็จแล้ว ไม่มี     →  แสดงหน้าเข้าสู่ระบบ
+signedIn   อ่านเสร็จแล้ว ใช้ได้     →  แสดงหน้าหลัก</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การไม่มีสถานะ <code>unknown</code> บังคับให้แอปต้องเดา และการเดาที่ผิดคือที่มาของการเด้งหน้าจอ</div></section>
+
+<section id="section-4"><h2>4. สถานะที่มีสี่ค่า</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>enum AuthStatus {
+  /// ยังไม่รู้ — กำลังอ่านข้อมูลที่เก็บไว้ตอนเปิดแอป
+  unknown,
+
+  signedOut,
+
+  /// กำลังส่งชื่อผู้ใช้และรหัสผ่าน
+  signingIn,
+
+  signedIn,
+}</code></pre><pre class="code-vs"><code>AuthStatus _status = AuthStatus.unknown;   // ค่าเริ่มต้น</code></pre><p>ค่าเริ่มต้นเป็น <code>unknown</code> ไม่ใช่ <code>signedOut</code> — ซึ่งเป็นรายละเอียดเล็ก ๆ ที่แก้ปัญหาทั้งหมดในหัวข้อ 1</p><pre class="code-vs"><code>Widget build(BuildContext context) =&gt; ListenableBuilder(
+  listenable: sessionStore,
+  builder: (context, child) =&gt; switch (sessionStore.status) {
+    AuthStatus.unknown =&gt; const SplashScreen(),
+    AuthStatus.signedOut || AuthStatus.signingIn =&gt; LoginScreen(...),
+    AuthStatus.signedIn =&gt; HomeShell(...),
+  },
+);</code></pre><p>สังเกตว่า <code>signingIn</code> ยังแสดงหน้าเข้าสู่ระบบ — เพราะผู้ใช้ต้องเห็นฟอร์มของตัวเองระหว่างที่รอ ตาม 4.7</p></section>
+
+<section id="section-5"><h2>5. ขั้นตอนการอ่านข้อมูลเดิม</h2><pre class="code-vs"><code>Future&lt;void&gt; restore({required String currentServerId}) async {
+  _status = AuthStatus.unknown;
+  notifyListeners();
+
+  AuthSession? stored;
+  try {
+    stored = await storage.read();
+  } on SessionStorageException {
+    // อ่านไม่ได้ก็แค่ให้ล็อกอินใหม่ ไม่ควรทำให้เปิดแอปไม่ได้
+    stored = null;
+  }
+
+  if (stored == null) {
+    await _clearTo(AuthStatus.signedOut);
+    return;
+  }
+  if (stored.serverId != currentServerId) {
+    await _clearTo(AuthStatus.signedOut, reason: SignOutReason.serverChanged);
+    return;
+  }
+  if (stored.isExpiredAt(_clock())) {
+    await _clearTo(AuthStatus.signedOut, reason: SignOutReason.sessionExpired);
+    return;
+  }
+
+  _applySession(stored);
+}</code></pre><p>สี่ทางออก และแต่ละทางมีเหตุผลที่ต่างกัน</p><table><thead><tr><th>กรณี</th><th>ผลลัพธ์</th><th>บอกผู้ใช้ว่า</th></tr></thead><tbody>
+<tr><td>ไม่มีข้อมูล</td><td>หน้าเข้าสู่ระบบ</td><td>ไม่ต้องบอกอะไร — เป็นเรื่องปกติ</td></tr>
+<tr><td>คนละเซิร์ฟเวอร์</td><td>หน้าเข้าสู่ระบบ</td><td>“เปลี่ยนเซิร์ฟเวอร์แล้ว กรุณาเข้าสู่ระบบใหม่”</td></tr>
+<tr><td>หมดอายุ</td><td>หน้าเข้าสู่ระบบ</td><td>“เซสชันหมดอายุ”</td></tr>
+<tr><td>ใช้ได้</td><td>หน้าหลัก</td><td>—</td></tr>
+</tbody></table><p>สามกรณีแรกพาไปที่เดียวกัน แต่ <strong>เหตุผลต่างกัน และผู้ใช้ควรได้ข้อความต่างกัน</strong> ซึ่งเป็นเหตุผลที่ต้องเก็บ <code>SignOutReason</code></p></section>
+
+<section id="section-6"><h2>6. ลำดับการตรวจสำคัญ</h2><pre class="code-vs"><code>1. มีข้อมูลไหม
+2. เซิร์ฟเวอร์ตรงกันไหม
+3. หมดอายุหรือยัง
+4. ใช้ได้</code></pre><p>ทำไมตรวจเซิร์ฟเวอร์ก่อนอายุ</p><pre class="code-vs"><code>ถ้าตรวจอายุก่อน
+  token ของสาขา A ที่ยังไม่หมดอายุ + ตอนนี้ตั้งค่าเป็นสาขา B
+  → ผ่านการตรวจอายุ → เข้าใช้งาน → ทุกคำขอได้ 401
+  → ผู้ใช้เห็น "เซสชันหมดอายุ" ทั้งที่ปัญหาคือเซิร์ฟเวอร์ผิด</code></pre><p>การตรวจเซิร์ฟเวอร์ก่อนทำให้ได้ข้อความที่ถูกต้อง และตัดปัญหาตั้งแต่ต้น</p><pre class="code-vs"><code>test('สลับเซิร์ฟเวอร์แล้ว token เก่าใช้ไม่ได้', () async {
+  await saveSession(serverId: 'wh-01');
+  final store = storeWithClock(now);
+
+  await store.restore(currentServerId: 'wh-02');
+
+  expect(store.status, AuthStatus.signedOut);
+  expect(store.lastSignOutReason, SignOutReason.serverChanged);
+  // token ของสาขาเก่าต้องไม่ถูกส่งต่อไปให้ ApiClient เลยแม้แต่ครั้งเดียว
+  expect(tokens, [null]);
+});</code></pre></section>
+
+<section id="section-7"><h2>7. ตรวจอายุเองก่อน ไม่ต้องรอ 401</h2><table><thead><tr><th></th><th>ตรวจเองตอนเปิดแอป</th><th>รอให้ได้ 401</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เห็นอะไร</td><td>หน้าเข้าสู่ระบบทันที</td><td>หน้าหลัก แล้วเด้งออกหลังกดอะไรสักอย่าง</td></tr>
+<tr><td>เสียคำขอไปกี่ครั้ง</td><td>ไม่เสีย</td><td>อย่างน้อยหนึ่ง</td></tr>
+<tr><td>รู้ได้ตอนไหน</td><td>ก่อนแสดงหน้าจอ</td><td>หลังผู้ใช้เริ่มทำงานแล้ว</td></tr>
+</tbody></table><p>แต่การตรวจเองไม่ได้แทนที่การรับมือกับ 401 — <strong>ต้องมีทั้งคู่</strong></p><pre class="code-vs"><code>ตรวจเองตอนเปิด  →  กันกรณีที่รู้อยู่แล้วว่าหมดอายุ
+รับมือกับ 401    →  กันกรณีที่ token ถูกยกเลิกก่อนหมดอายุ (8.7)</code></pre><p>เพราะ token อาจใช้ไม่ได้ทั้งที่ยังไม่หมดอายุ เช่นเมื่อผู้ดูแลระบบยกเลิกมัน หรือเมื่อผู้ใช้เปลี่ยนรหัสผ่านจากเครื่องอื่น</p></section>
+
+<section id="section-8"><h2>8. อย่ายิงคำขอตรวจสอบตอนเปิดแอป</h2><p>ทางเลือกที่ดูรอบคอบกว่า</p><pre class="code-vs"><code>// เพิ่มขั้นตอน — ยิงไปถาม server ว่า token ยังใช้ได้ไหม
+final me = await api.getJson('/api/Authenticate/me');</code></pre><table><thead><tr><th>ได้อะไร</th><th>เสียอะไร</th></tr></thead><tbody>
+<tr><td>รู้แน่ว่า token ยังใช้ได้</td><td>เปิดแอปช้าลงเท่ากับหนึ่งคำขอ</td></tr>
+<tr><td>ได้ข้อมูลผู้ใช้ล่าสุด</td><td>ถ้าเน็ตไม่มี จะเปิดแอปไม่ได้เลย</td></tr>
+</tbody></table><p>แถวขวาล่างเป็นปัญหาจริงในคลัง — <strong>ถ้าเน็ตมีปัญหาตอนเช้า ทุกคนเปิดแอปไม่ได้พร้อมกัน</strong> ทั้งที่ token ยังดีอยู่</p><p>lab จึงไม่ยิงคำขอตอนเปิด — เชื่อสิ่งที่เก็บไว้ แล้วให้คำขอจริงเป็นตัวบอกถ้ามีปัญหา ซึ่งเป็นหลักเดียวกับ 7.16 หัวข้อ 7</p><div class="note">ถ้าจำเป็นต้องยิงจริง ให้ทำแบบไม่บล็อก — เข้าหน้าหลักไปก่อน แล้วยิงเบื้องหลัง ถ้าได้ 401 ค่อยพาออก</div></section>
+
+<section id="section-9"><h2>9. หน้ารอต้องไม่ค้าง</h2><pre class="code-vs"><code>} on SessionStorageException {
+  // อ่านไม่ได้ก็แค่ให้ล็อกอินใหม่ ไม่ควรทำให้เปิดแอปไม่ได้
+  stored = null;
+}</code></pre><p>ถ้าไม่ดักไว้ แอปจะค้างอยู่ที่ <code>unknown</code> ตลอดกาล เพราะไม่มีอะไรเปลี่ยนสถานะ</p><pre class="code-vs"><code>test('อ่านที่เก็บไม่ได้ ต้องไม่ทำให้เปิดแอปไม่ได้', () async {
+  storage.failOnRead = true;
+  final store = storeWithClock(now);
+
+  await store.restore(currentServerId: 'wh-01');
+
+  expect(store.status, AuthStatus.signedOut);
+});</code></pre><p>เป็นหลักเดียวกับ 4.8 — <strong>ทุกเส้นทางต้องจบที่สถานะที่ชัดเจน</strong> ไม่มีทางไหนที่ปล่อยให้ค้าง</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เด้งหน้าเข้าสู่ระบบแวบหนึ่งทุกครั้งที่เปิด</td><td>ไม่มีสถานะ <code>unknown</code></td><td>เพิ่มเข้าไปเป็นค่าเริ่มต้น</td></tr>
+<tr><td>แอปค้างที่หน้ารอ</td><td>อ่านข้อมูลล้มเหลวแล้วไม่มีทางออก</td><td>ดักแล้วไปหน้าเข้าสู่ระบบ</td></tr>
+<tr><td>เปิดแอปไม่ได้เมื่อเน็ตมีปัญหา</td><td>ยิงคำขอตรวจสอบก่อนเข้า</td><td>เชื่อสิ่งที่เก็บไว้ก่อน</td></tr>
+<tr><td>บอกว่าหมดอายุทั้งที่เปลี่ยนเซิร์ฟเวอร์</td><td>ตรวจอายุก่อนตรวจเซิร์ฟเวอร์</td><td>สลับลำดับ</td></tr>
+<tr><td>เข้าหน้าหลักแล้วเด้งออกทันที</td><td>ไม่ตรวจอายุตอนเปิด</td><td>ตรวจก่อนแสดงหน้าจอ</td></tr>
+<tr><td>ทุกกรณีขึ้นข้อความเดียวกัน</td><td>ไม่เก็บเหตุผล</td><td>เก็บ <code>SignOutReason</code></td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ทีมพบว่าตอนเช้าที่ทุกคนเปิดแอปพร้อมกัน มีรายงานสองแบบ</p><table><thead><tr><th>#</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>บางเครื่องค้างที่หน้าโลโก้ ต้องปิดแล้วเปิดใหม่</td></tr>
+<tr><td>2</td><td>บางเครื่องเข้าได้ แต่พอกดปุ่มแรกก็เด้งออกทันที</td></tr>
+</tbody></table><ol><li>ระบุสาเหตุที่น่าจะเป็นของแต่ละข้อ</li><li>เขียนวิธีแก้</li><li>ตอบว่าทำไมทั้งสองอาการถึงเกิดพร้อมกันตอนเช้า</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><table><thead><tr><th>#</th><th>สาเหตุ</th><th>หลักฐาน</th></tr></thead><tbody>
+<tr><td>1</td><td>ขั้นตอนเปิดแอปมีทางที่ไม่จบ</td><td>ค้างที่หน้ารอ = สถานะไม่เคยเปลี่ยนจาก <code>unknown</code></td></tr>
+<tr><td>2</td><td>ไม่ได้ตรวจอายุตอนเปิด</td><td>เข้าได้แต่คำขอแรกล้มเหลว</td></tr>
+</tbody></table><p>อาการที่ 1 มีสองสาเหตุย่อยที่เป็นไปได้</p><pre class="code-vs"><code>ก. อ่านข้อมูลจากเครื่องล้มเหลว แล้วไม่มีทางออก
+ข. ยิงคำขอตรวจสอบตอนเปิด แล้วรอจนหมดเวลา (15 วินาที)</code></pre><p>ข้อ ข น่าจะเป็นสาเหตุจริงมากกว่า เพราะ “ต้องปิดแล้วเปิดใหม่” สื่อว่ารอนานจนผู้ใช้ยอมแพ้ ไม่ใช่ค้างถาวร</p><p><strong>ข้อ 2 — วิธีแก้</strong></p><p><em>อาการที่ 1</em></p><pre class="code-vs"><code>// เอาการยิงคำขอออกจากขั้นตอนเปิดแอป
+Future&lt;void&gt; restore({required String currentServerId}) async {
+  _status = AuthStatus.unknown;
+  notifyListeners();
+
+  AuthSession? stored;
+  try {
+    stored = await storage.read();
+  } on SessionStorageException {
+    stored = null;                    // ทางออกที่ชัดเจน
+  }
+  ...
+  // ไม่มีการยิงคำขอที่นี่เลย
+}</code></pre><p>ถ้ายังอยากตรวจกับเซิร์ฟเวอร์ ให้ทำหลังเข้าหน้าหลักแล้ว</p><pre class="code-vs"><code>// เข้าหน้าหลักไปก่อน แล้วตรวจเบื้องหลัง
+unawaited(_verifyInBackground());   // 4.8</code></pre><p><em>อาการที่ 2</em></p><pre class="code-vs"><code>if (stored.isExpiredAt(_clock())) {
+  await _clearTo(AuthStatus.signedOut, reason: SignOutReason.sessionExpired);
+  return;
+}</code></pre><p>และเพราะเผื่อเวลาไว้ 60 วินาทีตาม 8.3 token ที่เหลืออีกไม่ถึงนาทีก็จะถูกถือว่าหมดอายุ — กันกรณีที่หมดอายุระหว่างที่ผู้ใช้กำลังเปิดแอป</p><p><strong>ข้อ 3 — ทำไมเกิดพร้อมกันตอนเช้า</strong></p><p>นี่คือคำถามที่ทำให้เห็นภาพรวม — <strong>ทั้งสองอาการมาจากสาเหตุร่วมกันข้อเดียว</strong></p><pre class="code-vs"><code>token มีอายุ 8 ชั่วโมง
+กะเช้าเริ่ม 08:00 → เข้าสู่ระบบ → token หมดอายุ 16:00
+กะบ่ายเริ่ม 16:00 → เปิดแอปที่เครื่องเดิม → token หมดอายุพอดี</code></pre><table><thead><tr><th>สิ่งที่เกิด</th><th>อาการที่เห็น</th></tr></thead><tbody>
+<tr><td>token หมดอายุพร้อมกันทุกเครื่อง</td><td>ทุกคนต้องเข้าสู่ระบบใหม่พร้อมกัน</td></tr>
+<tr><td>ทุกเครื่องยิงคำขอเข้าสู่ระบบพร้อมกัน</td><td>เซิร์ฟเวอร์ช้าลง</td></tr>
+<tr><td>คำขอตรวจสอบตอนเปิดแอปช้าตามไปด้วย</td><td><strong>อาการที่ 1</strong></td></tr>
+<tr><td>เครื่องที่ token เพิ่งหมดพอดี</td><td><strong>อาการที่ 2</strong></td></tr>
+</tbody></table><p><strong>สิ่งที่ควรทำเพิ่มนอกจากแก้สองข้อข้างบน</strong></p><table><thead><tr><th>ทำอะไร</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td>ให้ token หมดอายุกระจายกัน ไม่ตรงกันเป๊ะ</td><td>ลดการกระจุกตัว — เป็นหลักเดียวกับ jitter ใน 7.14</td></tr>
+<tr><td>ใช้ refresh token ต่ออายุเบื้องหลัง (8.5)</td><td>ผู้ใช้ไม่ต้องเข้าสู่ระบบใหม่พร้อมกัน</td></tr>
+<tr><td>ตั้งอายุ token ให้ยาวกว่ากะ</td><td>ไม่หมดอายุกลางกะ</td></tr>
+</tbody></table><p>แถวสุดท้ายดูง่ายที่สุดแต่ต้องคิดให้ครบ — token ที่อายุยาวกว่ากะ แปลว่าถ้าเครื่องหาย มันใช้ได้ต่ออีกทั้งกะ</p><p><strong>บทเรียนที่ควรจำ:</strong> อาการที่เกิด “พร้อมกันตอนเวลาเดิมทุกวัน” เกือบทุกครั้งมาจากสิ่งที่หมดอายุพร้อมกัน — และการกระจายเวลาหมดอายุออกจากกัน เป็นทางแก้เดียวกับที่ใช้กับการลองใหม่ใน 7.14</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ค่าเริ่มต้นของสถานะต้องเป็น <code>unknown</code> ไม่ใช่ <code>signedOut</code></li><li>“ยังไม่รู้” กับ “ยังไม่ได้เข้าสู่ระบบ” เป็นคนละเรื่อง</li><li>ตรวจตามลำดับ — มีข้อมูลไหม เซิร์ฟเวอร์ตรงไหม หมดอายุหรือยัง</li><li>ตรวจเซิร์ฟเวอร์ก่อนอายุ เพื่อให้ได้ข้อความที่ถูกต้อง</li><li>ตรวจอายุเองตอนเปิด แต่ยังต้องรับมือกับ 401 อยู่ดี</li><li>อย่ายิงคำขอตรวจสอบก่อนเข้าแอป</li><li>ทุกเส้นทางต้องจบที่สถานะที่ชัดเจน</li><li>เก็บเหตุผลของการออกจากระบบ เพราะข้อความที่ผู้ใช้เห็นต่างกัน</li></ul></div><p><strong>บทถัดไป:</strong> 8.7 จะรับมือกับกรณีที่ token ใช้ไม่ได้ระหว่างที่กำลังทำงานอยู่ ซึ่งต่างจากการรู้ตั้งแต่เปิดแอป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

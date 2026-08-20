@@ -1,9 +1,149 @@
-<div class="note"><strong>Session ผูกกับ security realm:</strong> token จาก Server A ห้ามถูกส่งไป Server B แม้ host ทั้งคู่เป็น WMS เพราะ issuer, audience, tenant และข้อมูลผู้ใช้คนละชุด</div>
-<section><h2>1. Threat</h2><p>ผู้ใช้ login production แล้วเปลี่ยน base URL เป็น dev ถ้า ApiClient ยังถือ token จะส่ง credential production ไป host ใหม่และอาจเปิดเผย tokenใน log/server ที่ไม่ควรเห็น</p></section>
-<section><h2>2. Server identity</h2><p>connection profile ควรมี stable server ID/realm จาก trusted health/auth metadata ไม่ใช้แค่ label ที่ผู้ใช้พิมพ์ และ session envelope เก็บ server ID ที่ออก token</p></section>
-<section><h2>3. Switch algorithm</h2><ol><li>หยุด authenticated requests</li><li>เพิ่ม session generation</li><li>clear token/session/user caches</li><li>เปลี่ยน profile/base URL</li><li>probe service identity</li><li>กลับ login สำหรับ server ใหม่</li></ol></section>
-<section><h2>4. Same host config edit</h2><p>แม้เปลี่ยน protocol/port/pathเล็กน้อยให้ถือเป็น realm change เว้นแต่ serverพิสูจน์ identityตรงและ policy อนุญาต อย่าเดาจาก hostname string</p></section>
-<section><h2>5. UI confirmation</h2><p>ถ้ามี session active ให้แจ้งว่าเปลี่ยน serverแล้วต้องออกจากระบบและล้างงานที่ยังไม่ส่ง ป้องกันผู้ใช้คิดว่าข้อมูลหายหรือส่งผิดคลัง</p></section>
-<section><h2>6. ของจริง</h2><p>connection controller ใช้ ApiClient ตัวเดิมเพื่อรักษา tokenเมื่อปรับ setting แต่ productionต้องกำหนดชัดว่า setting ใดไม่เปลี่ยน realm และ setting ใดบังคับ logout</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนจาก <code>http://192.168.1.5:5000</code> เป็น HTTPS domain ที่ reverse proxy ไป serverเดิม ควรเก็บ sessionไหม?</p><details><summary>แนวคำตอบ</summary><p>ตัดสินจาก verified server/issuer identity และ migration policy ไม่ใช่ URL similarity; ค่าเริ่มต้นที่ปลอดภัยคือ clear แล้ว login ใหม่</p></details></section>
-<section><h2>8. Tests</h2><div class="success">switch A→B, switch ขณะ request, probe wrong service, switch offline, cancel switch และตรวจว่า Authorization ของ A ไม่เคยถึง B</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: รับมือกับการสลับเซิร์ฟเวอร์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.6 (การเปิดแอป) และ 7.3 (ที่อยู่เซิร์ฟเวอร์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ผูก session กับเซิร์ฟเวอร์ที่ออกมันมา และรู้ว่าทำไมการไม่ผูกทำให้เกิดอาการที่อธิบายไม่ได้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ในแอปคลังจริง ที่อยู่เซิร์ฟเวอร์เปลี่ยนได้ ตามที่ 7.3 และ 5.11 ออกแบบไว้</p><table><thead><tr><th>เมื่อไหร่ที่เปลี่ยน</th></tr></thead><tbody>
+<tr><td>ทีมติดตั้งย้ายเครื่องไปสาขาอื่น</td></tr>
+<tr><td>สลับระหว่างเซิร์ฟเวอร์ทดสอบกับของจริง</td></tr>
+<tr><td>สาขาย้ายไปเซิร์ฟเวอร์ใหม่</td></tr>
+</tbody></table><p>ปัญหาคือ <strong>token ที่เก็บไว้เป็นของเซิร์ฟเวอร์เก่า</strong> แต่ถ้าไม่ได้บันทึกไว้ว่าเป็นของใคร แอปจะไม่รู้</p><pre class="code-vs"><code>เข้าสู่ระบบที่สาขา ก → เก็บ token ไว้
+เปลี่ยนที่อยู่เป็นสาขา ข → เปิดแอป
+  → อ่าน token เดิม → คิดว่ายังเข้าสู่ระบบอยู่
+  → ยิงคำขอไปสาขา ข ด้วย token ของสาขา ก
+  → ได้ 401 ทุกคำขอ
+  → ผู้ใช้เห็น "เซสชันหมดอายุ" ทั้งที่เพิ่งเข้าสู่ระบบเมื่อเช้า</code></pre></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>server profile</td><td>ชุดการตั้งค่าของเซิร์ฟเวอร์หนึ่งตัว</td></tr>
+<tr><td>binding</td><td>การผูกของสองอย่างเข้าด้วยกัน</td></tr>
+<tr><td>issuer</td><td>ผู้ออก token</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: token เป็นของเซิร์ฟเวอร์ที่ออกมัน</h2><pre class="code-vs"><code>token ของสาขา ก  →  ใช้ได้กับสาขา ก เท่านั้น
+                  →  สาขา ข ไม่รู้จักและปฏิเสธ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> เก็บ token โดยไม่เก็บว่าเป็นของใคร ก็เหมือนเก็บกุญแจโดยไม่รู้ว่าเป็นกุญแจบ้านไหน</div></section>
+
+<section><h2>4. ผูกไว้ตั้งแต่ตอนสร้าง</h2><p>เปิด <code>lib/auth/auth_session.dart</code></p><pre class="code-vs"><code>/// ข้อมูลของผู้ใช้ที่เข้าสู่ระบบอยู่
+///
+/// ผูกกับ [serverId] ด้วย เพราะ PDA เครื่องเดียวอาจสลับไปคุยกับเซิร์ฟเวอร์
+/// ของอีกสาขาได้ และ token ของสาขาหนึ่งใช้กับอีกสาขาไม่ได้ (8.11)
+class AuthSession {
+  ...
+  /// ระบุว่า token นี้เป็นของเซิร์ฟเวอร์ไหน
+  final String serverId;
+}</code></pre><p>และเพราะเป็น <code>required</code> ใน constructor จึงลืมใส่ไม่ได้</p><pre class="code-vs"><code>Future&lt;LoginOutcome&gt; login({
+  required String username,
+  required String password,
+  required String serverId,      // ต้องบอกว่ากำลังเข้าสู่ระบบที่ไหน
+});</code></pre><p>เป็นการแก้ปัญหาด้วยชนิดข้อมูล แทนที่จะแก้ด้วยวินัย — คนเขียนโค้ดใหม่จะถูกบังคับให้คิดเรื่องนี้ตั้งแต่บรรทัดแรก</p></section>
+
+<section><h2>5. ตรวจตอนเปิดแอป</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>/// [currentServerId] คือเซิร์ฟเวอร์ที่ตั้งค่าไว้ตอนนี้ — ถ้าไม่ตรงกับที่
+/// เก็บไว้ แปลว่ามีคนสลับเซิร์ฟเวอร์ และ token เก่าใช้ไม่ได้ (8.11)
+Future&lt;void&gt; restore({required String currentServerId}) async {
+  ...
+  if (stored.serverId != currentServerId) {
+    await _clearTo(AuthStatus.signedOut, reason: SignOutReason.serverChanged);
+    return;
+  }
+  ...
+}</code></pre><p>8.6 อธิบายแล้วว่าทำไมตรวจข้อนี้ก่อนตรวจอายุ — เพื่อให้ได้ข้อความที่ถูกต้อง</p><pre class="code-vs"><code>test('สลับเซิร์ฟเวอร์แล้ว token เก่าใช้ไม่ได้', () async {
+  await saveSession(serverId: 'wh-01');
+  final store = storeWithClock(now);
+
+  await store.restore(currentServerId: 'wh-02');
+
+  expect(store.status, AuthStatus.signedOut);
+  expect(store.lastSignOutReason, SignOutReason.serverChanged);
+  // token ของสาขาเก่าต้องไม่ถูกส่งต่อไปให้ ApiClient เลยแม้แต่ครั้งเดียว
+  expect(tokens, [null]);
+});</code></pre><p>บรรทัดสุดท้ายสำคัญ — <strong>token ของเซิร์ฟเวอร์เก่าต้องไม่ถูกตั้งค่าแม้แต่ชั่วขณะ</strong> เพราะถ้าตั้งแล้วค่อยล้าง อาจมีคำขอยิงออกไปในช่วงนั้น</p></section>
+
+<section><h2>6. สลับระหว่างที่ใช้งานอยู่</h2><p>การตรวจตอนเปิดแอปยังไม่พอ — ผู้ใช้สลับเซิร์ฟเวอร์ได้จากหน้าตั้งค่าตาม 5.11</p><pre class="code-vs"><code>Future&lt;void&gt; changeServer(ConnectionProfile next) async {
+  // ออกจากระบบก่อน แล้วค่อยเปลี่ยนที่อยู่
+  await sessionStore.signOut(reason: SignOutReason.serverChanged);
+
+  apiClient.baseUrl = next.baseUrl;
+  await profileStorage.save(next);
+}</code></pre><table><thead><tr><th>ลำดับ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ออกจากระบบก่อน</td><td>ล้าง token และ store ทั้งหมด (8.8)</td></tr>
+<tr><td>แล้วค่อยเปลี่ยนที่อยู่</td><td>ไม่ให้มีช่วงที่ token เก่าคู่กับที่อยู่ใหม่</td></tr>
+</tbody></table><p>ถ้าสลับลำดับ จะเกิดช่วงสั้น ๆ ที่อันตราย</p><pre class="code-vs"><code>เปลี่ยนที่อยู่ก่อน → token เก่ายังอยู่
+  → polling ที่ยังไม่ถูกหยุด ยิงไปเซิร์ฟเวอร์ใหม่ด้วย token เก่า
+  → ได้ 401 → เรียก handleUnauthorized
+  → ผู้ใช้เห็น "เซสชันหมดอายุ" แทนที่จะเป็น "เปลี่ยนเซิร์ฟเวอร์แล้ว"</code></pre><p>ข้อความผิดทำให้ผู้ใช้ไม่รู้ว่าตัวเองเป็นคนทำให้เกิด</p></section>
+
+<section><h2>7. ควรถามก่อนสลับ</h2><p>การสลับเซิร์ฟเวอร์ทำให้ออกจากระบบเสมอ ซึ่งเป็นผลข้างเคียงที่ผู้ใช้อาจไม่รู้</p><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ เปลี่ยนเซิร์ฟเวอร์?                       │
+│                                        │
+│ จะออกจากระบบและต้องเข้าสู่ระบบใหม่        │
+│ งานที่ทำค้างไว้ 12 บรรทัดจะถูกเก็บไว้      │
+│                                        │
+│              [ ยกเลิก ]  [ เปลี่ยน ]     │
+└────────────────────────────────────────┘</code></pre><p>ตามหลักใน 5.8 — <strong>ถามเมื่อย้อนกลับไม่ได้ และบอกผลที่จะเกิดขึ้น</strong></p><p>บรรทัดที่สองสำคัญเพราะมันตอบคำถามที่ผู้ใช้กำลังกังวลอยู่พอดี</p></section>
+
+<section><h2>8. เลือก serverId ให้ดี</h2><table><thead><tr><th>ใช้อะไรเป็น <code>serverId</code></th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ที่อยู่เต็ม เช่น <code>http://192.168.1.50:5000</code></td><td>เปลี่ยน IP แล้วถือว่าเป็นคนละเซิร์ฟเวอร์</td></tr>
+<tr><td>ชื่อที่ผู้ใช้ตั้งเอง</td><td>ตั้งซ้ำกันได้</td></tr>
+<tr><td><strong>รหัสที่ฝั่งหลังบ้านกำหนด</strong></td><td>ดีที่สุด แต่ต้องขอ</td></tr>
+</tbody></table><p>แถวแรกเป็นสิ่งที่คนทำก่อนเพราะง่ายที่สุด — และมีปัญหาที่เจอจริง</p><pre class="code-vs"><code>เซิร์ฟเวอร์สาขาเดิม แต่ IP เปลี่ยนจาก DHCP (7.3)
+  → serverId ไม่ตรง → บังคับให้ล็อกอินใหม่
+  → ทั้งที่เป็นเซิร์ฟเวอร์เดียวกัน</code></pre><p>ทางแก้คือขอให้ฝั่งหลังบ้านส่งรหัสประจำเซิร์ฟเวอร์มาในคำตอบของการเข้าสู่ระบบ</p><pre class="code-vs"><code>{
+  "token": "eyJ...",
+  "expiration": "2026-08-15T10:00:00Z",
+  "serverId": "wh-bangna-prod"
+}</code></pre><p>หรืออ่านจาก claim <code>iss</code> ใน token ซึ่งบอกอยู่แล้วว่าใครเป็นคนออก</p></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ได้ 401 ทุกคำขอหลังย้ายสาขา</td><td>ไม่ผูก session กับเซิร์ฟเวอร์</td><td>เก็บ <code>serverId</code></td></tr>
+<tr><td>บอกว่าหมดอายุทั้งที่เปลี่ยนเซิร์ฟเวอร์</td><td>ตรวจอายุก่อนตรวจเซิร์ฟเวอร์</td><td>สลับลำดับ (8.6)</td></tr>
+<tr><td>สลับเซิร์ฟเวอร์แล้วยังยิงด้วย token เก่า</td><td>เปลี่ยนที่อยู่ก่อนออกจากระบบ</td><td>ออกก่อน แล้วค่อยเปลี่ยน</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่าสลับแล้วจะหลุด</td><td>ไม่ถามก่อน</td><td>ถามพร้อมบอกผล</td></tr>
+<tr><td>ถูกบังคับให้ล็อกอินใหม่ทั้งที่ไม่ได้เปลี่ยนอะไร</td><td>ใช้ IP เป็นตัวระบุ</td><td>ขอรหัสประจำเซิร์ฟเวอร์</td></tr>
+<tr><td>ข้อมูลของสาขาเก่าโผล่มา</td><td>ไม่ล้าง store ตอนสลับ</td><td>ออกจากระบบเต็มรูปแบบ (8.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><p>ทีมใช้ที่อยู่เต็มเป็น <code>serverId</code> แล้วได้รายงานสามอย่าง</p><table><thead><tr><th>#</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>1</td><td>สาขาหนึ่งบ่นว่าต้องล็อกอินใหม่ทุกเช้าวันจันทร์</td></tr>
+<tr><td>2</td><td>ทีมทดสอบสลับระหว่างเซิร์ฟเวอร์ทดสอบกับของจริง แล้วเห็นข้อมูลปนกัน</td></tr>
+<tr><td>3</td><td>เครื่องที่ย้ายจากสาขา ก ไป ข ใช้งานไม่ได้เลยจนกว่าจะติดตั้งแอปใหม่</td></tr>
+</tbody></table><ol><li>อธิบายสาเหตุของแต่ละข้อ</li><li>ระบุว่าข้อไหนแก้ได้ด้วยการเปลี่ยน <code>serverId</code> และข้อไหนไม่ใช่</li><li>เขียนวิธีแก้ทั้งหมด</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><table><thead><tr><th>#</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>1</td><td>เซิร์ฟเวอร์ได้ IP ใหม่จากเราเตอร์หลังปิดสุดสัปดาห์ → <code>serverId</code> ไม่ตรง</td></tr>
+<tr><td>2</td><td><strong>ไม่ใช่เรื่อง <code>serverId</code></strong> — ดูข้อ 2</td></tr>
+<tr><td>3</td><td>มีอะไรที่ไม่ถูกล้างตอนสลับ และไม่ได้ผูกกับเซิร์ฟเวอร์</td></tr>
+</tbody></table><p>ข้อ 1 ตรงกับที่ 7.3 เตือนไว้ — <strong>คอมพิวเตอร์ที่รับ IP จากเราเตอร์จะได้ IP ใหม่</strong> และวันจันทร์เช้าคือหลังจากปิดเครื่องมาสองวัน</p><p><strong>ข้อ 2 — ข้อไหนแก้ได้ด้วย <code>serverId</code></strong></p><table><thead><tr><th>#</th><th>แก้ด้วย <code>serverId</code> ได้ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>1</td><td><strong>ได้</strong></td><td>ใช้รหัสที่ไม่เปลี่ยนตาม IP</td></tr>
+<tr><td>2</td><td><strong>ไม่ได้</strong></td><td>เป็นเรื่องการล้าง store ไม่ใช่การระบุเซิร์ฟเวอร์</td></tr>
+<tr><td>3</td><td>ไม่ได้ทั้งหมด</td><td>ต้องดูว่าอะไรค้าง</td></tr>
+</tbody></table><p><em>ทำไมข้อ 2 ไม่ใช่</em></p><p>ถ้า <code>serverId</code> ทำงานถูกต้อง การสลับเซิร์ฟเวอร์จะทำให้ออกจากระบบและล้าง session — แต่ <strong>ข้อมูลที่โหลดมาแล้วอยู่ใน store ซึ่งเป็นคนละเรื่อง</strong></p><pre class="code-vs"><code>สลับเซิร์ฟเวอร์ → session ถูกล้าง (serverId ทำงานถูก)
+  → แต่ TaskStore ยังถือรายการงานของเซิร์ฟเวอร์เก่า
+  → ล็อกอินที่เซิร์ฟเวอร์ใหม่ → เห็นรายการเก่าจนกว่าจะโหลดทับ</code></pre><p>ซึ่งเป็นปัญหาเดียวกับ 8.8 แบบฝึกหัด — <strong>store ที่มีอายุยาวกว่า session</strong></p><p><strong>ข้อ 3 — วิธีแก้ทั้งหมด</strong></p><p><em>แก้ข้อ 1</em></p><pre class="code-vs"><code>// ขอรหัสประจำเซิร์ฟเวอร์จากฝั่งหลังบ้าน
+{
+  "token": "eyJ...",
+  "expiration": "...",
+  "serverId": "wh-bangna-prod"     // ไม่เปลี่ยนตาม IP
+}</code></pre><p>และถ้าฝั่งหลังบ้านยังไม่พร้อม ใช้ค่าที่ทีมติดตั้งกรอกเองไปก่อนได้</p><pre class="code-vs"><code>class ConnectionProfile {
+  final String id;          // ทีมติดตั้งตั้ง เช่น "bangna"
+  final String baseUrl;     // เปลี่ยนได้โดยไม่กระทบ id
+}</code></pre><p>แยก <em>ตัวระบุ</em> ออกจาก <em>ที่อยู่</em> ทำให้เปลี่ยน IP ได้โดยไม่ถือว่าเป็นคนละเซิร์ฟเวอร์ — และตรงกับที่ 7.3 แนะนำว่าควรตั้ง IP คงที่อยู่แล้ว</p><p><em>แก้ข้อ 2</em></p><pre class="code-vs"><code>Future&lt;void&gt; changeServer(ConnectionProfile next) async {
+  await sessionStore.signOut(reason: SignOutReason.serverChanged);
+  // signOut ทำลาย SignedInScope ทั้งหมด รวม TaskStore (8.8)
+
+  apiClient.baseUrl = next.baseUrl;
+  await profileStorage.save(next);
+}</code></pre><p>ต้องมั่นใจว่า <code>signOut</code> ทำลาย store ทุกตัวที่ถือข้อมูล ไม่ใช่แค่ล้าง token</p><p><em>แก้ข้อ 3</em></p><p>อาการ “ต้องติดตั้งแอปใหม่” แปลว่ามีอะไรที่ล้างด้วยวิธีปกติไม่ได้</p><table><thead><tr><th>สิ่งที่น่าจะค้าง</th><th>ทำไมล้างไม่ได้</th></tr></thead><tbody>
+<tr><td>ที่อยู่เซิร์ฟเวอร์เก่า</td><td>ไม่มีทางแก้ในแอปถ้าหน้าตั้งค่าเข้าไม่ถึง</td></tr>
+<tr><td>ร่างงานของสาขาเก่า</td><td>ผูกกับผู้ใช้ แต่ไม่ผูกกับเซิร์ฟเวอร์</td></tr>
+<tr><td>รูปที่รอส่ง (8.10)</td><td>เหมือนกัน</td></tr>
+</tbody></table><p>แถวแรกน่าจะเป็นสาเหตุหลัก — <strong>ถ้าแอปเข้าหน้าตั้งค่าได้เฉพาะหลังล็อกอิน และล็อกอินไม่ได้เพราะที่อยู่ผิด ก็ติดวน</strong></p><pre class="code-vs"><code>// ทางแก้ — ให้เข้าหน้าตั้งค่าได้จากหน้าเข้าสู่ระบบ
+LoginScreen(
+  actions: [
+    TextButton(
+      onPressed: _openServerSettings,     // เข้าได้โดยไม่ต้องล็อกอิน
+      child: const Text('ตั้งค่าเซิร์ฟเวอร์'),
+    ),
+  ],
+)</code></pre><p>และแถวที่สองกับสามแก้ด้วยการผูกกับเซิร์ฟเวอร์ด้วย ไม่ใช่แค่ผูกกับผู้ใช้</p><pre class="code-vs"><code>await draftStorage.save(
+  serverId: session.serverId,      // เพิ่มเข้าไป
+  userId: session.username,
+  draft: draft,
+);</code></pre><p><strong>บทเรียนที่ควรจำ:</strong> อาการที่ต้อง “ติดตั้งแอปใหม่” ถึงจะหาย เกือบทุกครั้งแปลว่ามีสถานะที่ผู้ใช้แก้เองไม่ได้ — และทางแก้มักไม่ใช่การเพิ่มปุ่มล้างข้อมูล แต่คือการทำให้เข้าถึงหน้าที่แก้ได้ตั้งแต่ก่อนล็อกอิน</p></details></section>
+
+<section><h2>11. สรุปท้ายบท</h2><div class="success"><ul><li>token เป็นของเซิร์ฟเวอร์ที่ออกมัน ต้องเก็บว่าเป็นของใคร</li><li>ทำให้ <code>serverId</code> เป็น <code>required</code> จะได้ลืมไม่ได้</li><li>ตรวจตอนเปิดแอป ก่อนตรวจอายุ</li><li>token ของเซิร์ฟเวอร์เก่าต้องไม่ถูกตั้งค่าแม้แต่ชั่วขณะ</li><li>สลับระหว่างใช้งาน ต้องออกจากระบบก่อนเปลี่ยนที่อยู่</li><li>ถามผู้ใช้ก่อน และบอกว่าจะเกิดอะไร</li><li>อย่าใช้ที่อยู่เป็นตัวระบุ เพราะ IP เปลี่ยนได้</li><li>แยกตัวระบุออกจากที่อยู่</li></ul></div><p><strong>บทถัดไป:</strong> 8.12 เป็นบทปฏิบัติปิดท้าย Part 8 — ประกอบการเข้าและออกจากระบบให้ครบทุกเส้นทาง</p></section>

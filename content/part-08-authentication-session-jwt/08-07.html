@@ -1,10 +1,174 @@
-<div class="note"><strong>Expiration กับ 401 เป็นคนละสัญญาณ:</strong> client รู้เวลา expiry ล่วงหน้าได้ แต่ server ยังอาจ 401 เพราะ revoke, signing key, issuer/audience หรือ clock policy</div>
-<section><h2>1. Proactive check</h2><pre class="code-vs"><code>bool shouldRefresh(DateTime now) =&gt;
-    !now.isBefore(session.expiresAt.subtract(const Duration(minutes: 1)));</code></pre><p>ถ้าไม่มี refresh-token contract ให้ proactive check พา login ใหม่ ไม่สร้าง refresh เอง</p></section>
-<section><h2>2. Reactive 401</h2><p>ApiClient แจ้ง AuthCoordinator เมื่อ authenticated request ได้ 401 แต่ไม่ควร logout จาก 401 ของ login endpoint หรือ anonymous probe และต้องป้องกันหลาย request trigger logout/dialog ซ้ำ</p></section>
-<section><h2>3. Single-flight refresh</h2><p>ถ้ามี refresh token ให้ request พร้อมกันรอ refresh Future เดียว เมื่อสำเร็จ retry request ที่ปลอดภัยตาม policy; เมื่อ refresh ล้มให้ clear session ครั้งเดียว</p></section>
-<section><h2>4. 401 vs 403</h2><p>401 ทำให้ credential invalid จึงอาจยุติ session ส่วน 403 session ยัง validแต่ไม่มี permission ห้าม logout อัตโนมัติและห้าม refresh วน</p></section>
-<section><h2>5. Command uncertainty</h2><p>401 มักเกิดก่อน endpoint ทำ business logic แต่ proxy/middleware custom อาจต่างกัน Command retry หลัง refresh ต้องพิจารณา idempotency เช่นเดียวกับ timeout</p></section>
-<section><h2>6. User experience</h2><p>เก็บ intended destination ได้เฉพาะข้อมูลไม่ลับแล้วพา login จากนั้นให้ผู้ใช้เริ่ม command ใหม่ อย่าเก็บ password หรือ replay mutation ที่ยังไม่แน่ชัดโดยอัตโนมัติ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>สาม API ได้ 401 พร้อมกันควรเกิดอะไร?</p><details><summary>เฉลย</summary><p>refresh/logout transition เดียว, clear session ครั้งเดียว, cancel/ignore responses ด้วย generation และแสดง login หนึ่งครั้ง ไม่เปิดสาม dialog</p></details></section>
-<section><h2>8. Test matrix</h2><div class="success">expired ก่อนยิง, 401 หนึ่ง/หลาย request, 403, refresh success/fail, logout ระหว่าง refresh และ command ที่ห้าม retry</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: รับมือกับ token ที่ใช้ไม่ได้ระหว่างทำงาน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 8.6 (การเปิดแอป) และ 7.9 (รหัส 401)<br><strong>จบบทนี้แล้วจะทำได้:</strong> พาผู้ใช้ออกจากระบบอย่างมีเหตุผลเมื่อ token ใช้ไม่ได้ โดยไม่ทำงานซ้ำและไม่ทิ้งงานของผู้ใช้</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>8.6 ตรวจอายุตอนเปิดแอปแล้ว แต่ token ยังใช้ไม่ได้กลางทางได้อยู่ดี</p><table><thead><tr><th>สาเหตุ</th><th>ตรวจล่วงหน้าได้ไหม</th></tr></thead><tbody>
+<tr><td>หมดอายุระหว่างที่ใช้งานอยู่</td><td>ได้ — รู้เวลาหมดอายุอยู่แล้ว</td></tr>
+<tr><td>ผู้ดูแลระบบยกเลิก token</td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td>ผู้ใช้เปลี่ยนรหัสผ่านจากเครื่องอื่น</td><td>ไม่ได้</td></tr>
+<tr><td>บัญชีถูกระงับกลางกะ</td><td>ไม่ได้</td></tr>
+</tbody></table><p>สามแถวล่างรู้ได้ทางเดียวคือ <strong>ยิงคำขอไปแล้วได้ 401 กลับมา</strong></p><p>และเมื่อเกิดขึ้น มันมักเกิดกับหลายคำขอพร้อมกัน</p><pre class="code-vs"><code>polling ทุก 10 วินาที + คำขอที่ผู้ใช้กด + คำขอโหลดรูป
+  → token ถูกยกเลิก
+  → ทั้งสามได้ 401 ภายในเสี้ยววินาทีเดียวกัน</code></pre></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>revoke</td><td>ยกเลิก token ก่อนหมดอายุ</td></tr>
+<tr><td>reason</td><td>เหตุผลที่หลุดออกจากระบบ</td></tr>
+<tr><td>idempotent</td><td>ทำซ้ำแล้วผลเท่ากับทำครั้งเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: หลายคนเห็นปัญหาเดียวกัน</h2><pre class="code-vs"><code>คำขอ A ──401──┐
+คำขอ B ──401──┼──→ ต้องออกจากระบบ "หนึ่งครั้ง" ไม่ใช่สามครั้ง
+คำขอ C ──401──┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> 401 หลายตัวคือหลักฐานของเหตุการณ์เดียว ไม่ใช่หลายเหตุการณ์ — การจัดการต้องเกิดครั้งเดียว</div></section>
+
+<section><h2>4. ให้จุดเดียวเป็นคนจัดการ</h2><p>เปิด <code>lib/auth/session_store.dart</code></p><pre class="code-vs"><code>/// เรียกเมื่อ server ตอบ 401 — token ใช้ไม่ได้แล้ว
+///
+/// ทำครั้งเดียวแม้จะได้ 401 มาหลายครั้งพร้อมกัน เพราะคำขอหลายตัว
+/// ที่วิ่งขนานกันจะได้ 401 พร้อมกันหมด (5.4)
+Future&lt;void&gt; handleUnauthorized() async {
+  if (_status != AuthStatus.signedIn) return;
+  await _clearTo(AuthStatus.signedOut, reason: SignOutReason.sessionExpired);
+}</code></pre><p>บรรทัดแรกคือทั้งหมดของการกันซ้ำ — <strong>ถ้าไม่ได้อยู่ในสถานะเข้าสู่ระบบแล้ว ก็ไม่ต้องทำอะไร</strong></p><pre class="code-vs"><code>test('ได้ 401 หลายครั้งพร้อมกัน ต้องล้าง token ครั้งเดียว', () async {
+  await store.signIn(username: 'somchai', password: 'x', serverId: 'wh-01');
+
+  await Future.wait([
+    store.handleUnauthorized(),
+    store.handleUnauthorized(),
+    store.handleUnauthorized(),
+  ]);
+
+  // ['token-abc', null] — ไม่ใช่ null ซ้ำสามครั้ง
+  expect(tokens, ['token-abc', null]);
+});</code></pre><p>เทสต์นี้จับอาการที่ทดสอบด้วยมือไม่มีทางเจอ — เพราะต้องมีคำขอสามตัววิ่งพร้อมกันแล้วล้มเหลวพร้อมกันพอดี</p></section>
+
+<section><h2>5. ทำไมการทำซ้ำถึงเป็นปัญหา</h2><table><thead><tr><th>ถ้าทำสามครั้ง</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>เขียนที่เก็บสามครั้ง</td><td>เปลืองและอาจชนกัน</td></tr>
+<tr><td>แจ้งผู้ฟังสามครั้ง</td><td>หน้าจอวาดใหม่โดยไม่จำเป็น</td></tr>
+<tr><td>พาไปหน้าเข้าสู่ระบบสามครั้ง</td><td><strong>หน้าเข้าสู่ระบบซ้อนกันสามชั้น</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคืออาการที่ 5.4 หัวข้อ 10 พูดถึง — กดปุ่มย้อนกลับแล้วเจอหน้าเข้าสู่ระบบอีกใบ</p><pre class="code-vs"><code>// ที่ชั้นบนซึ่งฟัง store อยู่
+void _onSessionChanged() {
+  if (sessionStore.status == AuthStatus.signedOut &amp;&amp; _wasSignedIn) {
+    _wasSignedIn = false;
+    navigator.pushAndRemoveUntil(loginRoute, (route) =&gt; false);   // 5.4
+  }
+}</code></pre><p>การเทียบกับสถานะก่อนหน้าตาม 4.6 หัวข้อ 8 ทำให้การเปลี่ยนเส้นทางเกิดครั้งเดียว แม้ store จะแจ้งหลายครั้ง</p></section>
+
+<section><h2>6. เหตุผลเปลี่ยนข้อความที่ผู้ใช้เห็น</h2><pre class="code-vs"><code>/// เหตุผลที่หลุดออกจากระบบ — ใช้บอกผู้ใช้ว่าเกิดอะไร (8.7)
+enum SignOutReason {
+  /// ผู้ใช้กดออกเอง
+  userRequested,
+
+  /// token หมดอายุ หรือ server ปฏิเสธ
+  sessionExpired,
+
+  /// สลับไปเซิร์ฟเวอร์อื่น
+  serverChanged,
+}</code></pre><table><thead><tr><th>เหตุผล</th><th>ข้อความ</th><th>ควรพาไปไหน</th></tr></thead><tbody>
+<tr><td><code>userRequested</code></td><td>ไม่ต้องมีข้อความ</td><td>หน้าเข้าสู่ระบบ</td></tr>
+<tr><td><code>sessionExpired</code></td><td>“เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่”</td><td>หน้าเข้าสู่ระบบ พร้อมชื่อผู้ใช้เดิม</td></tr>
+<tr><td><code>serverChanged</code></td><td>“เปลี่ยนเซิร์ฟเวอร์แล้ว กรุณาเข้าสู่ระบบใหม่”</td><td>หน้าเข้าสู่ระบบ</td></tr>
+</tbody></table><p>ถ้าไม่เก็บเหตุผล ทั้งสามกรณีจะได้ข้อความเดียวกัน — และผู้ใช้ที่ถูกเด้งออกกลางงานจะไม่รู้ว่าเกิดอะไร</p><p>แถวกลางมีรายละเอียดที่ช่วยได้มาก — <strong>เติมชื่อผู้ใช้เดิมให้</strong> เพราะเขาเพิ่งใช้งานอยู่ และชื่อผู้ใช้ไม่ใช่ความลับ</p><pre class="code-vs"><code>// ชื่อผู้ใช้เก็บแยกได้ เพราะไม่ใช่ข้อมูลลับ (8.10)
+_lastUsername = session.username;</code></pre></section>
+
+<section><h2>7. อย่าทิ้งงานของผู้ใช้เงียบ ๆ</h2><p>สถานการณ์ที่ต้องคิดให้ครบ</p><pre class="code-vs"><code>คนหน้างานสแกนของเข้าใบรับเข้าไป 18 บรรทัด
+  → token ถูกยกเลิก
+  → แอปเด้งไปหน้าเข้าสู่ระบบ
+  → 18 บรรทัดหายไปพร้อมกับ store ที่ถูกทำลาย</code></pre><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ทิ้งไปเลย</td><td>ผู้ใช้ต้องเดินสแกนใหม่ 18 บรรทัด</td></tr>
+<tr><td>เก็บร่างไว้ก่อนออกจากระบบ</td><td>ล็อกอินกลับมาแล้วทำต่อได้</td></tr>
+</tbody></table><p>ทางที่สองถูก แต่มีเงื่อนไขที่ 5.4 แบบฝึกหัดข้อ 3 บอกไว้ — <strong>ร่างต้องผูกกับผู้ใช้ที่สร้างมัน</strong></p><pre class="code-vs"><code>Future&lt;void&gt; handleUnauthorized() async {
+  if (_status != AuthStatus.signedIn) return;
+
+  // เก็บงานที่ทำค้างไว้ก่อน แล้วค่อยล้าง session
+  await draftStorage.save(userId: _session!.username, drafts: ...);
+
+  await _clearTo(AuthStatus.signedOut, reason: SignOutReason.sessionExpired);
+}</code></pre><p>ลำดับสำคัญ — เก็บก่อนล้าง เพราะหลังล้างแล้วจะไม่รู้ว่าร่างเป็นของใคร</p></section>
+
+<section><h2>8. ต่ออายุอัตโนมัติ ถ้ามี refresh token</h2><p>ถ้าฝั่งหลังบ้านให้ refresh token มาตาม 8.5 การได้ 401 ไม่จำเป็นต้องพาออกจากระบบทันที</p><pre class="code-vs"><code>Future&lt;bool&gt; tryRefresh() async {
+  final refreshToken = _session?.refreshToken;
+  if (refreshToken == null) return false;
+
+  final outcome = await repository.refresh(refreshToken);
+  return switch (outcome) {
+    RefreshSucceeded(:final session) =&gt; _applyAndSave(session),
+    RefreshRejected() =&gt; false,      // refresh token ก็ใช้ไม่ได้แล้ว
+    RefreshFailed() =&gt; false,        // เน็ตมีปัญหา
+  };
+}</code></pre><table><thead><tr><th>ต้องระวัง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ต่ออายุครั้งเดียวแม้หลายคำขอได้ 401</td><td>เหตุผลเดียวกับหัวข้อ 4</td></tr>
+<tr><td>คำขอที่ได้ 401 ต้องรอผลการต่ออายุ</td><td>ไม่งั้นจะล้มเหลวทั้งที่ต่ออายุสำเร็จ</td></tr>
+<tr><td>ต่ออายุล้มเหลวแล้วต้องออกจากระบบ</td><td>ไม่ใช่ลองไปเรื่อย ๆ</td></tr>
+<tr><td>อย่าให้การต่ออายุเองได้ 401 แล้วเรียกต่ออายุอีก</td><td>จะวนไม่รู้จบ</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นกับดักที่เจอบ่อย — คำขอต่ออายุต้องไม่ผ่านตัวดักที่เรียก <code>handleUnauthorized</code></p><div class="warn">การต่ออายุอัตโนมัติเพิ่มความซับซ้อนมาก — ถ้า token อายุยาวพอสำหรับหนึ่งกะ อาจไม่คุ้มที่จะทำ ให้เริ่มจากการพาออกจากระบบอย่างสุภาพก่อน</div></section>
+
+<section><h2>9. ใครเป็นคนเรียก handleUnauthorized</h2><pre class="code-vs"><code>// ที่ชั้นที่เรียก repository
+try {
+  await taskRepository.complete(id, commandId: commandId);
+} on ApiException catch (error) {
+  if (error.kind == ApiFailureKind.unauthorized) {
+    await sessionStore.handleUnauthorized();
+    return;
+  }
+  ...
+}</code></pre><p>เขียนแบบนี้ในทุก store จะซ้ำและลืมง่าย — ทางที่ดีกว่าคือดักที่ชั้นเดียว</p><pre class="code-vs"><code>// ที่ ApiClient — แจ้งขึ้นไปโดยไม่ตัดสินใจเอง
+ApiClient({
+  required this.baseUrl,
+  http.Client? client,
+  this.onUnauthorized,          // ไม่รู้จัก SessionStore
+});
+
+final void Function()? onUnauthorized;</code></pre><pre class="code-vs"><code>// ที่จุดประกอบแอป
+final apiClient = ApiClient(
+  baseUrl: profile.baseUrl,
+  onUnauthorized: () =&gt; sessionStore.handleUnauthorized(),
+);</code></pre><p>รูปแบบเดียวกับ <code>onTokenChanged</code> ใน 8.4 — <strong><code>ApiClient</code> บอกว่าเกิดอะไร แต่ไม่ตัดสินใจว่าต้องทำอะไร</strong> ตามหลักใน 7.9</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หน้าเข้าสู่ระบบซ้อนกันหลายชั้น</td><td>จัดการ 401 หลายครั้ง</td><td>กันด้วยการตรวจสถานะ</td></tr>
+<tr><td>ถูกเด้งออกโดยไม่มีข้อความ</td><td>ไม่เก็บเหตุผล</td><td>เก็บ <code>SignOutReason</code></td></tr>
+<tr><td>งานที่ทำค้างหายไป</td><td>ล้าง session ก่อนเก็บร่าง</td><td>เก็บก่อนล้าง</td></tr>
+<tr><td>ต้องเขียนดัก 401 ในทุก store</td><td>ดักที่ชั้นบนเกินไป</td><td>ดักที่ <code>ApiClient</code> แล้วแจ้งขึ้นไป</td></tr>
+<tr><td>ต่ออายุแล้ววนไม่รู้จบ</td><td>คำขอต่ออายุเองได้ 401</td><td>ยกเว้น endpoint นั้น</td></tr>
+<tr><td>ถูกเด้งออกเมื่อไม่มีสิทธิ์</td><td>เหมารวม 403 เป็น 401</td><td>แยกสองรหัส (7.5)</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>แอปมีสามอย่างที่ทำงานพร้อมกัน</p><table><thead><tr><th>อะไร</th><th>ความถี่</th></tr></thead><tbody>
+<tr><td>polling รายการงาน</td><td>ทุก 10 วินาที</td></tr>
+<tr><td>คำขอที่ผู้ใช้กด</td><td>เมื่อกด</td></tr>
+<tr><td>อัปโหลดรูปเบื้องหลัง</td><td>เมื่อมีรูปรอส่ง</td></tr>
+</tbody></table><p>ผู้ดูแลระบบยกเลิก token ตอน 14:32:10 ขณะที่ผู้ใช้กำลังกรอกใบรับเข้าอยู่ 18 บรรทัด</p><ol><li>ไล่ลำดับว่าเกิดอะไรบ้างในสามวินาทีถัดมา</li><li>ระบุว่าถ้าไม่กันซ้ำ จะเกิดอะไร</li><li>เขียนสิ่งที่ผู้ใช้ควรเห็น</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ลำดับเหตุการณ์</strong></p><pre class="code-vs"><code>14:32:10  ผู้ดูแลยกเลิก token
+14:32:12  อัปโหลดรูปที่กำลังวิ่งอยู่ → 401
+14:32:14  polling ยิงตามรอบ → 401
+14:32:15  ผู้ใช้กดปุ่มบันทึกบรรทัดที่ 19 → 401</code></pre><p>สามคำขอได้ 401 ภายในสามวินาที และแต่ละตัวเรียก <code>handleUnauthorized</code></p><table><thead><tr><th>ครั้งที่</th><th>สถานะตอนเรียก</th><th>ผล</th></tr></thead><tbody>
+<tr><td>1</td><td><code>signedIn</code></td><td>ทำงาน — ล้าง token, เก็บร่าง, เปลี่ยนสถานะ</td></tr>
+<tr><td>2</td><td><code>signedOut</code></td><td><strong>ออกทันทีที่บรรทัดแรก</strong></td></tr>
+<tr><td>3</td><td><code>signedOut</code></td><td>ออกทันทีเหมือนกัน</td></tr>
+</tbody></table><pre class="code-vs"><code>if (_status != AuthStatus.signedIn) return;</code></pre><p>บรรทัดเดียวนี้ทำให้ครั้งที่ 2 และ 3 ไม่ทำอะไรเลย</p><p><strong>ข้อ 2 — ถ้าไม่กันซ้ำ</strong></p><table><thead><tr><th>ผลที่เกิด</th><th>อาการที่ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td>เขียนที่เก็บสามครั้ง</td><td>ไม่เห็นอะไร แต่เปลืองและอาจชนกัน</td></tr>
+<tr><td>เก็บร่างสามครั้ง</td><td>อาจเขียนทับกันเองถ้าเขียนไม่พร้อมกัน</td></tr>
+<tr><td>แจ้งผู้ฟังสามครั้ง</td><td>หน้าจอกระพริบ</td></tr>
+<tr><td><strong>เปลี่ยนเส้นทางสามครั้ง</strong></td><td><strong>หน้าเข้าสู่ระบบสามชั้น</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายร้ายที่สุด เพราะผู้ใช้ล็อกอินสำเร็จแล้วยังเจอหน้าเข้าสู่ระบบอีกสองใบซ้อนอยู่</p><pre class="code-vs"><code>ล็อกอินสำเร็จ → เข้าหน้าหลัก
+  → กดปุ่มย้อนกลับ → เจอหน้าเข้าสู่ระบบอีกใบ
+  → งงว่าออกจากระบบตอนไหน</code></pre><p>และแถวที่สองอันตรายเงียบ ๆ — <strong>การเก็บร่างสามครั้งพร้อมกันอาจทำให้ได้ร่างที่ไม่ครบ</strong> ถ้าการเขียนไม่ใช่การกระทำที่จบในครั้งเดียว</p><p><strong>ข้อ 3 — สิ่งที่ผู้ใช้ควรเห็น</strong></p><pre class="code-vs"><code>┌────────────────────────────────────────┐
+│ เข้าสู่ระบบ                              │
+│                                        │
+│ ⚠ เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่      │
+│   งานที่ทำค้างไว้ 18 บรรทัดถูกเก็บไว้แล้ว   │
+│                                        │
+│ ชื่อผู้ใช้  [ somchai            ]       │
+│ รหัสผ่าน   [                    ]       │
+│                        [ เข้าสู่ระบบ ]    │
+└────────────────────────────────────────┘</code></pre><table><thead><tr><th>ส่วนประกอบ</th><th>ทำไมต้องมี</th></tr></thead><tbody>
+<tr><td>บอกว่าเซสชันหมดอายุ</td><td>ผู้ใช้ไม่ได้กดออกเอง ต้องรู้ว่าทำไม</td></tr>
+<tr><td><strong>บอกว่างานถูกเก็บไว้</strong></td><td>ลดความตกใจมากที่สุด — เขากำลังกลัวว่างานหาย</td></tr>
+<tr><td>เติมชื่อผู้ใช้ให้</td><td>เขาเพิ่งใช้งานอยู่ และไม่ใช่ความลับ</td></tr>
+<tr><td>ไม่เติมรหัสผ่าน</td><td>ไม่เคยเก็บไว้ตั้งแต่แรก (8.5)</td></tr>
+</tbody></table><p><strong>สิ่งที่ห้ามแสดง</strong></p><table><thead><tr><th>ห้าม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>“เกิดข้อผิดพลาด (401)”</td><td>ผู้ใช้ไม่รู้ว่า 401 คืออะไร</td></tr>
+<tr><td>“ไม่มีสิทธิ์เข้าถึง”</td><td>เป็นข้อความของ 403 ไม่ใช่ 401 (7.5)</td></tr>
+<tr><td>ข้อความเดียวกับตอนที่ผู้ใช้กดออกเอง</td><td>สองกรณีนี้ต่างกันสิ้นเชิง</td></tr>
+</tbody></table><p><strong>และหลังล็อกอินกลับมา</strong></p><pre class="code-vs"><code>เข้าหน้าหลัก → เจอข้อความ
+  "มีใบรับเข้าที่ทำค้างไว้ 18 บรรทัด เมื่อ 14:32  [ทำต่อ] [ยกเลิก]"</code></pre><p>ซึ่งเป็นรูปแบบเดียวกับที่ 5.7 แบบฝึกหัดข้อ 3 ออกแบบไว้ — <strong>กู้คืนแล้วต้องบอก ไม่ใช่กู้คืนเงียบ ๆ</strong></p><p><strong>บทเรียนที่ควรจำ:</strong> เมื่อมีหลายอย่างทำงานพร้อมกัน เหตุการณ์เดียวจะถูกรายงานหลายครั้ง — และการกันซ้ำที่ง่ายที่สุดคือตรวจว่าสถานะเปลี่ยนไปแล้วหรือยัง ซึ่งเป็นรูปแบบเดียวกับธงกันกดซ้ำใน 4.14</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>token ใช้ไม่ได้กลางทางได้ด้วยสาเหตุที่ตรวจล่วงหน้าไม่ได้</li><li>401 หลายตัวคือหลักฐานของเหตุการณ์เดียว</li><li>กันซ้ำด้วยการตรวจว่าสถานะยังเป็น <code>signedIn</code> อยู่ไหม</li><li>ไม่กันซ้ำแล้วจะได้หน้าเข้าสู่ระบบซ้อนกันหลายชั้น</li><li>เก็บเหตุผล เพราะข้อความที่ผู้ใช้เห็นต่างกัน</li><li>เก็บร่างงานก่อนล้าง session</li><li>ดัก 401 ที่ <code>ApiClient</code> แล้วแจ้งขึ้นไป ไม่ตัดสินใจเอง</li><li>ถ้าต่ออายุอัตโนมัติ ต้องยกเว้น endpoint ที่ใช้ต่ออายุเอง</li></ul></div><p><strong>บทถัดไป:</strong> 8.8 จะรวบทุกอย่างที่ต้องล้างเมื่อออกจากระบบ ซึ่งมากกว่าแค่ token</p></section>
