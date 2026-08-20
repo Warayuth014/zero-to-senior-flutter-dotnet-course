@@ -4,26 +4,116 @@
 <title>URL / URI / Base URL</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-02 · Flutter + .NET</span><h1>URL / URI / Base URL</h1><p>Part 7: Flutter + .NET API</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Anatomy</a></li><li><a href="#section-2">ใช้ Uri แทน string query</a></li><li><a href="#section-3">Normalize ที่ boundary</a></li><li><a href="#section-4">Prefix คนละระบบ</a></li><li><a href="#section-5">Encoding</a></li><li><a href="#section-6">Validate ก่อนใช้</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><strong>กติกา URL:</strong> แยก scheme, host, port, base path, API prefix และ endpoint path ให้ชัด แล้วประกอบด้วย <code>Uri</code> จุดเดียว</div>
-<section id="section-1"><h2>1. Anatomy</h2><pre class="code-vs"><code>http://192.168.1.50:5000/wms/api/WMS/tasks
-└─scheme └────authority────┘ └base┘└prefix┘└path┘</code></pre><p><code>baseUrl</code> ไม่ควรเปลี่ยนความหมายไปมาว่ารวม <code>/api</code> แล้วหรือยัง</p></section>
-<section id="section-2"><h2>2. ใช้ Uri แทน string query</h2><pre class="code-vs"><code>final base = Uri.parse(profile.baseUrl);
-final uri = base.replace(
-  path: '${base.path}/api/WMS/tasks'.replaceAll('//', '/'),
-  queryParameters: {'search': barcode, 'page': '$page'},
-);</code></pre></section>
-<section id="section-3"><h2>3. Normalize ที่ boundary</h2><p>ตอนบันทึก connection profile ให้ trim, ตรวจ scheme/host/port และตัด trailing slash ตามกติกากลาง อย่ากระจาย <code>endsWith('/')</code> ทุก API method</p></section>
-<section id="section-4"><h2>4. Prefix คนละระบบ</h2><p>API บางชุดอาจเป็น <code>/api/WMS</code> ขณะที่ health เป็น <code>/api/health</code> จึงควรให้ API class ระบุ route จาก base URL ไม่ hardcode prefix ซ้ำซ้อนใน UI</p></section>
-<section id="section-5"><h2>5. Encoding</h2><p><code>Uri</code> encode ช่องว่าง, ภาษาไทย, <code>#</code>, <code>&amp;</code> และ barcode ที่มีอักขระพิเศษได้ถูกต้อง การต่อ <code>?search=$value</code> เองเสี่ยง query แตก</p></section>
-<section id="section-6"><h2>6. Validate ก่อนใช้</h2><pre class="code-vs"><code>Uri parseBaseUrl(String raw) {
-  final uri = Uri.tryParse(raw.trim());
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: URL เป็นโครงสร้าง ไม่ใช่ข้อความ</a></li><li><a href="#section-4">ให้ Uri เป็นคนประกอบ</a></li><li><a href="#section-5">ระวัง resolve ที่ทิ้ง path เดิม</a></li><li><a href="#section-6">ตกลงให้ชัดว่า base URL รวมอะไร</a></li><li><a href="#section-7">ตรวจ URL ตอนที่ผู้ใช้กรอก</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ประกอบที่อยู่ของเซิร์ฟเวอร์ให้ถูกทุกครั้ง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 7.1 (ชั้นต่าง ๆ) และ D1.2 (ข้อความใน Dart)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ประกอบ URL ด้วย <code>Uri</code> โดยไม่ทำให้ path หายหรือ query แตก</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>การต่อข้อความสองอันเข้าด้วยกัน ดูเป็นเรื่องที่ผิดไม่ได้</p><pre class="code-vs"><code>final url = baseUrl + path;</code></pre><p>แต่ลองดูว่าเกิดอะไรเมื่อค่าจริงมาถึง</p><table><thead><tr><th><code>baseUrl</code></th><th><code>path</code></th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td><code>http://wms.local</code></td><td><code>/api/tasks</code></td><td><code>http://wms.local/api/tasks</code> ✓</td></tr>
+<tr><td><code>http://wms.local/</code></td><td><code>/api/tasks</code></td><td><code>http://wms.local//api/tasks</code> ✗</td></tr>
+<tr><td><code>http://wms.local</code></td><td><code>api/tasks</code></td><td><code>http://wms.localapi/tasks</code> ✗</td></tr>
+<tr><td><code>http://wms.local/wms</code></td><td><code>/api/tasks</code></td><td><code>http://wms.local/wms/api/tasks</code> ✓</td></tr>
+</tbody></table><p>สองแถวกลางเกิดจากสิ่งเดียวกัน — <strong>ไม่มีกติกาว่าใครเป็นคนใส่ขีดทับ</strong> และผู้ใช้ที่กรอกที่อยู่เองมักใส่ขีดทับปิดท้ายมาด้วย</p><p>ปัญหาที่สองคือ query ที่มีอักขระพิเศษ</p><pre class="code-vs"><code>final url = '$baseUrl/api/tasks?search=$barcode';
+// barcode = "A&B 01"
+// ได้ ...?search=A&B 01
+//            └─ & กลายเป็นตัวคั่นพารามิเตอร์ และช่องว่างทำให้ URL ผิดรูป
+// server เห็น search=A และพารามิเตอร์แปลก ๆ ชื่อ B 01</code></pre></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ตัวอย่างจาก <code>http://wms.local:5000/wms/api/tasks?page=2</code></th></tr></thead><tbody>
+<tr><td>scheme</td><td><code>http</code></td></tr>
+<tr><td>host</td><td><code>wms.local</code></td></tr>
+<tr><td>port</td><td><code>5000</code></td></tr>
+<tr><td>path</td><td><code>/wms/api/tasks</code></td></tr>
+<tr><td>query</td><td><code>page=2</code></td></tr>
+<tr><td>base URL</td><td>ส่วนที่คงที่ทุกคำขอ — <code>http://wms.local:5000/wms</code></td></tr>
+<tr><td>percent encoding</td><td>การแทนอักขระพิเศษด้วย <code>%</code> เช่นช่องว่างเป็น <code>%20</code></td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: URL เป็นโครงสร้าง ไม่ใช่ข้อความ</h2><pre class="code-vs"><code>คิดว่าเป็นข้อความ  →  ต่อกันเอง  →  ผิดเมื่อค่าไม่เป็นอย่างที่คิด
+คิดว่าเป็นโครงสร้าง →  ประกอบด้วย Uri  →  Dart จัดการ encoding ให้</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ถ้าเห็น <code>'$baseUrl$path'</code> หรือ <code>'?search=$value'</code> ในโค้ด แปลว่ากำลังปฏิบัติกับ URL เหมือนข้อความ ซึ่งจะผิดเมื่อค่าจริงมาถึง</div></section>
+
+<section id="section-4"><h2>4. ให้ Uri เป็นคนประกอบ</h2><pre class="code-vs"><code>Uri buildUri(String baseUrl, String path, [Map&lt;String, String&gt;? query]) {
+  final base = Uri.parse(baseUrl);
+  final basePath = base.path.endsWith('/')
+      ? base.path.substring(0, base.path.length - 1)
+      : base.path;
+  final suffix = path.startsWith('/') ? path : '/$path';
+
+  return base.replace(
+    path: '$basePath$suffix',
+    queryParameters: query,   // Dart encode ให้เอง
+  );
+}</code></pre><p>ทดสอบกับค่าที่เคยพังในหัวข้อ 1</p><pre class="code-vs"><code>buildUri('http://wms.local/', '/api/tasks')
+// http://wms.local/api/tasks   ✓
+
+buildUri('http://wms.local', 'api/tasks')
+// http://wms.local/api/tasks   ✓
+
+buildUri('http://wms.local/wms', '/api/tasks', {'search': 'A&B 01'})
+// http://wms.local/wms/api/tasks?search=A%26B+01   ✓</code></pre><p>บรรทัดสุดท้ายคือสิ่งที่การต่อข้อความทำไม่ได้ — <code>&amp;</code> กลายเป็น <code>%26</code> และช่องว่างกลายเป็น <code>+</code> ซึ่งเซิร์ฟเวอร์จะถอดกลับเป็น <code>A&amp;B 01</code> ได้ถูกต้อง</p></section>
+
+<section id="section-5"><h2>5. ระวัง resolve ที่ทิ้ง path เดิม</h2><p>Dart มีเมธอด <code>resolve</code> ที่ดูเหมือนจะเหมาะกับงานนี้ แต่มีพฤติกรรมที่ทำให้พลาดง่าย</p><pre class="code-vs"><code>final base = Uri.parse('http://wms.local/wms');
+
+base.resolve('/api/tasks')    // http://wms.local/api/tasks   ← /wms หายไป
+base.resolve('api/tasks')     // http://wms.local/api/tasks   ← หายเหมือนกัน</code></pre><p>เพราะ <code>resolve</code> ทำตามกติกาของลิงก์ในหน้าเว็บ — path ที่ขึ้นต้นด้วยขีดทับหมายถึง “จากรากของ host” ไม่ใช่ “ต่อจากที่อยู่ปัจจุบัน”</p><p>อาการที่เจอคือแอปทำงานได้ตอนที่เซิร์ฟเวอร์อยู่ที่รากของ host แล้วพังทันทีที่ย้ายไปอยู่ใต้เส้นทางย่อย ซึ่งมักเกิดตอนขึ้น production</p><div class="warn">ถ้าจะใช้ <code>resolve</code> ต้องเขียนเทสต์ที่ base URL มีเส้นทางย่อยเสมอ — ไม่ใช่ทดสอบแค่ <code>http://localhost:5000</code> ที่ไม่มี path</div></section>
+
+<section id="section-6"><h2>6. ตกลงให้ชัดว่า base URL รวมอะไร</h2><p>คำถามที่ต้องตอบครั้งเดียวแล้วยึดตลอด — <strong>base URL รวม <code>/api</code> แล้วหรือยัง</strong></p><table><thead><tr><th>ทางเลือก</th><th>base URL</th><th>ที่ repository เขียน</th></tr></thead><tbody>
+<tr><td>ไม่รวม</td><td><code>http://wms.local:5000</code></td><td><code>/api/WMS/mobile_tasks</code></td></tr>
+<tr><td>รวม</td><td><code>http://wms.local:5000/api</code></td><td><code>/WMS/mobile_tasks</code></td></tr>
+</tbody></table><p>ทั้งสองแบบใช้ได้ แต่ต้องเลือกอย่างเดียวและเขียนไว้ให้ชัด</p><p>lab เลือกแบบแรก — ดูได้จาก <code>task_repository.dart</code></p><pre class="code-vs"><code>final json = await api.getJson('/api/WMS/mobile_tasks');</code></pre><p>เหตุผลที่แบบแรกมักดีกว่าคือ <strong>ไม่ใช่ทุก endpoint ที่อยู่ใต้ <code>/api</code></strong> — หน้าตรวจสุขภาพเซิร์ฟเวอร์อาจอยู่ที่ <code>/health</code> เฉย ๆ ถ้ายัด <code>/api</code> ไว้ใน base URL จะเรียก endpoint นั้นไม่ได้</p></section>
+
+<section id="section-7"><h2>7. ตรวจ URL ตอนที่ผู้ใช้กรอก</h2><p>ในแอปคลังจริง ผู้ใช้เป็นคนกรอกที่อยู่เซิร์ฟเวอร์เอง เพราะแต่ละสาขาคนละที่</p><pre class="code-vs"><code>/// ตรวจและทำให้เป็นรูปแบบมาตรฐานตั้งแต่ตอนบันทึก
+/// ไม่ใช่ตอนใช้งาน — ผู้ใช้จะได้รู้ทันทีว่าพิมพ์ผิด
+Uri parseBaseUrl(String raw) {
+  final trimmed = raw.trim();
+  final uri = Uri.tryParse(trimmed);
+
   if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-    throw const FormatException('กรุณาระบุ URL เช่น http://host:5000');
+    throw const FormatException('กรุณาระบุที่อยู่ เช่น http://192.168.1.50:5000');
   }
-  return uri;
-}</code></pre></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>base URL คือ <code>http://10.0.2.2:5000/wms/</code> และ search คือ <code>A&amp;B 01</code> จงสร้าง URI ที่ไม่ทำ base path หาย</p><details><summary>เฉลย</summary><p>ใช้ <code>Uri.replace</code> กับ <code>queryParameters</code> และ normalize slash; ห้ามเอา string search ไปต่อท้ายตรง ๆ</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn"><code>Uri.resolve('/api/...')</code> ที่ path ขึ้นต้นด้วย slash จะทิ้ง base path เดิม เช่น <code>/wms</code>; ต้องตั้ง contract การประกอบ path และมี unit test</div></section>
+  if (uri.scheme != 'http' &amp;&amp; uri.scheme != 'https') {
+    throw FormatException('รองรับเฉพาะ http และ https แต่ได้ ${uri.scheme}');
+  }
+  // ตัดขีดทับปิดท้ายทิ้งที่นี่ที่เดียว จะได้ไม่ต้องระวังทุกที่ที่ใช้
+  return uri.replace(path: uri.path.replaceAll(RegExp(r'/+$'), ''));
+}</code></pre><table><thead><tr><th>ผู้ใช้พิมพ์</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td><code>  http://wms.local:5000/  </code></td><td><code>http://wms.local:5000</code></td></tr>
+<tr><td><code>wms.local:5000</code></td><td>ปฏิเสธ — ไม่มี scheme</td></tr>
+<tr><td><code>ftp://wms.local</code></td><td>ปฏิเสธ — scheme ที่ไม่รองรับ</td></tr>
+</tbody></table><p>สังเกตว่าแถวสองน่าสนใจ — <code>Uri.tryParse('wms.local:5000')</code> ไม่คืน <code>null</code> เพราะมันตีความว่า <code>wms.local</code> คือ scheme การตรวจ <code>host.isEmpty</code> จึงจำเป็น</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>404 ทั้งที่ endpoint มีอยู่</td><td>มีขีดทับซ้อนหรือหายไป</td><td>ประกอบด้วย <code>Uri</code> ที่จัดการขีดทับ</td></tr>
+<tr><td>ค้นหาด้วยรหัสที่มี <code>&amp;</code> แล้วไม่เจอ</td><td>ต่อ query เป็นข้อความ</td><td>ใช้ <code>queryParameters</code></td></tr>
+<tr><td>ค้นหาภาษาไทยแล้วได้ผลแปลก</td><td>ไม่ได้ encode</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ทำงานได้ตอน dev พังตอน production</td><td>ใช้ <code>resolve</code> กับ base ที่มีเส้นทางย่อย</td><td>ประกอบ path เอง หรือทดสอบด้วย base ที่มี path</td></tr>
+<tr><td>เรียก health check ไม่ได้</td><td>ยัด <code>/api</code> ไว้ใน base URL</td><td>ให้ base URL เป็นแค่ที่อยู่เซิร์ฟเวอร์</td></tr>
+<tr><td>ผู้ใช้กรอกที่อยู่แล้วใช้ไม่ได้ โดยไม่มีอะไรบอก</td><td>ไม่ได้ตรวจตอนบันทึก</td><td>ตรวจและทำให้เป็นมาตรฐานที่จุดบันทึก</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ผู้ใช้บันทึกที่อยู่เซิร์ฟเวอร์เป็น <code>http://10.0.2.2:5000/wms/</code> และต้องเรียกสาม endpoint</p><table><thead><tr><th>งาน</th><th>เส้นทาง</th><th>query</th></tr></thead><tbody>
+<tr><td>รายการงาน</td><td><code>/api/WMS/mobile_tasks</code></td><td><code>search</code> = <code>A&amp;B 01</code>, <code>page</code> = <code>2</code></td></tr>
+<tr><td>ปิดงาน</td><td><code>/api/WMS/mobile_tasks/T-001/complete</code></td><td>ไม่มี</td></tr>
+<tr><td>ตรวจสุขภาพ</td><td><code>/health</code></td><td>ไม่มี</td></tr>
+</tbody></table><ol><li>เขียน URL ที่ถูกต้องของทั้งสาม</li><li>อธิบายว่าถ้ารหัสงานเป็น <code>T/001</code> ที่มีขีดทับ จะเกิดอะไร และแก้อย่างไร</li><li>ตอบว่าควรตรวจที่อยู่ตอนบันทึก หรือตอนยิงคำขอครั้งแรก</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — URL ที่ถูกต้อง</strong></p><pre class="code-vs"><code>http://10.0.2.2:5000/wms/api/WMS/mobile_tasks?search=A%26B+01&amp;page=2
+http://10.0.2.2:5000/wms/api/WMS/mobile_tasks/T-001/complete
+http://10.0.2.2:5000/wms/health</code></pre><p>ทั้งสามต้องเก็บ <code>/wms</code> ไว้ — ซึ่งเป็นจุดที่ <code>resolve</code> จะทำหาย</p><p>และสังเกตว่าอันที่สามยังอยู่ใต้ <code>/wms</code> แม้จะไม่มี <code>/api</code> ซึ่งเป็นเหตุผลที่ base URL ไม่ควรรวม <code>/api</code> ไว้</p><p><strong>ข้อ 2 — รหัสงานที่มีขีดทับ</strong></p><p>ถ้าเอาไปต่อเข้ากับ path ตรง ๆ ขีดทับจะกลายเป็นตัวแบ่งเส้นทาง</p><pre class="code-vs"><code>'/api/WMS/mobile_tasks/T/001/complete'
+//                      └─┬─┘
+//                        server เห็นเป็นสองส่วน ไม่ใช่รหัสเดียว → 404</code></pre><p>ทางแก้คือ encode เฉพาะส่วนที่เป็นค่า ไม่ใช่ทั้ง path</p><pre class="code-vs"><code>final encodedId = Uri.encodeComponent(taskId);   // T/001 → T%2F001
+final path = '/api/WMS/mobile_tasks/$encodedId/complete';</code></pre><table><thead><tr><th>ฟังก์ชัน</th><th>ทำอะไร</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>Uri.encodeComponent</code></td><td>encode ทุกอย่างรวมขีดทับ</td><td>ค่าที่จะไปอยู่ใน path หรือ query</td></tr>
+<tr><td><code>Uri.encodeFull</code></td><td>ไม่ encode ขีดทับและตัวคั่น</td><td>URL ทั้งอันที่ประกอบมาแล้ว</td></tr>
+</tbody></table><p>การใช้ <code>encodeFull</code> กับรหัสงานจะไม่แก้ปัญหา เพราะมันตั้งใจไม่แตะขีดทับ</p><p><strong>แต่คำถามที่ควรถามต่อคือ — รหัสงานควรมีขีดทับได้หรือไม่</strong></p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>encode แล้วส่งไป</td><td>ใช้ได้ แต่ต้องมั่นใจว่าเซิร์ฟเวอร์ decode กลับถูก</td></tr>
+<tr><td>ส่งใน query แทน path</td><td>ปลอดภัยกว่า แต่เปลี่ยนสัญญา</td></tr>
+<tr><td>ห้ามรหัสมีขีดทับตั้งแต่ต้นทาง</td><td>ดีที่สุดถ้าทำได้ แต่มักแก้ไม่ได้เพราะข้อมูลเก่า</td></tr>
+</tbody></table><p>ในทางปฏิบัติต้อง encode และ <strong>เขียนเทสต์ที่ใช้รหัสมีขีดทับจริง ๆ</strong> เพราะไม่งั้นจะไม่มีใครรู้ว่ามันพังจนกว่าจะเจอข้อมูลชุดนั้น</p><p><strong>ข้อ 3 — ตรวจตอนไหน</strong></p><p><strong>ตอนบันทึก</strong> และเหตุผลไม่ใช่แค่เรื่องความสะดวก</p><table><thead><tr><th></th><th>ตรวจตอนบันทึก</th><th>ตรวจตอนยิงคำขอ</th></tr></thead><tbody>
+<tr><td>ผู้ใช้รู้ตอนไหน</td><td>ทันทีที่กดบันทึก</td><td>ตอนกดปุ่มทำงาน ซึ่งอาจเป็นวันถัดไป</td></tr>
+<tr><td>ผู้ใช้อยู่ที่ไหนตอนรู้</td><td>หน้าตั้งค่า ที่แก้ได้เลย</td><td>กลางคลัง ที่ไม่รู้ว่าต้องไปแก้ที่ไหน</td></tr>
+<tr><td>ข้อความบอกอะไรได้</td><td>“กรุณาระบุที่อยู่ เช่น http://...”</td><td>“เชื่อมต่อไม่ได้” — ซึ่งไม่ได้บอกว่าพิมพ์ผิด</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญที่สุด — ที่อยู่ที่พิมพ์ผิดกับเน็ตหลุด ให้อาการเหมือนกันตอนยิงคำขอ ผู้ใช้จะไปตามช่างเรื่อง Wi-Fi ทั้งที่ปัญหาคือพิมพ์ <code>htp://</code></p><p><strong>แต่การตรวจตอนบันทึกก็ยังไม่พอ</strong> — มันตรวจได้แค่ว่ารูปแบบถูก ไม่ได้ตรวจว่าที่อยู่นั้นมีเซิร์ฟเวอร์อยู่จริง</p><pre class="code-vs"><code>ตรวจรูปแบบตอนบันทึก      → รู้ว่าพิมพ์ถูกรูปแบบไหม
+ยิงทดสอบตอนกดปุ่มทดสอบ  → รู้ว่าที่อยู่นั้นมีเซิร์ฟเวอร์จริงไหม</code></pre><p>สองอย่างนี้ตอบคนละคำถาม และหน้าตั้งค่าที่ดีควรมีทั้งคู่ — ซึ่งเป็นสิ่งที่ 7.16 จะทำ</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>URL เป็นโครงสร้าง ไม่ใช่ข้อความที่ต่อกันได้</li><li>ประกอบด้วย <code>Uri</code> เพื่อให้จัดการขีดทับและ encoding ให้</li><li><code>resolve</code> ทิ้ง path เดิมเมื่อ path ขึ้นต้นด้วยขีดทับ</li><li>ตกลงครั้งเดียวว่า base URL รวม <code>/api</code> หรือไม่</li><li>อย่ายัด <code>/api</code> ไว้ใน base URL เพราะบาง endpoint ไม่ได้อยู่ใต้นั้น</li><li>ตรวจและทำที่อยู่ให้เป็นมาตรฐานตอนบันทึก ไม่ใช่ตอนใช้</li><li>ค่าที่ไปอยู่ใน path ต้อง <code>encodeComponent</code> เสมอ</li><li>ตรวจรูปแบบกับทดสอบการเชื่อมต่อ ตอบคนละคำถาม</li></ul></div><p><strong>บทถัดไป:</strong> 7.3 จะตอบคำถามที่ทำให้คนใหม่เสียเวลามากที่สุด — ทำไมที่อยู่ที่เปิดได้บนคอมพิวเตอร์ กลับเปิดไม่ได้บนเครื่อง PDA</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

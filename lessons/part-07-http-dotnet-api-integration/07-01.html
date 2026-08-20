@@ -4,31 +4,141 @@
 <title>Flutter → .NET Flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">07-01 · Flutter + .NET</span><h1>Flutter → .NET Flow</h1><p>Part 7: Flutter + .NET API</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">อย่าเริ่มอ่านที่ HTTP</a></li><li><a href="#section-2">เส้นทางไปและกลับ</a></li><li><a href="#section-3">Boundary แต่ละชั้น</a></li><li><a href="#section-4">ไฟล์จริง</a></li><li><a href="#section-5">ตัวอย่าง orchestration</a></li><li><a href="#section-6">แบ่งความรับผิดชอบ</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Checklist</a></li></ol></nav>
-<div class="note"><strong>ภาพใหญ่:</strong> ผู้ใช้แตะหรือสแกน → Store/Service สร้าง request → ApiClient ส่ง HTTP → .NET endpoint ทำงานกับ service/DB → JSON กลับมาเป็น model/state → UI rebuild</div>
-<section id="section-1"><h2>1. อย่าเริ่มอ่านที่ HTTP</h2><p>เริ่มจากเหตุการณ์ของผู้ใช้และผลลัพธ์ที่หน้าจอต้องแสดง แล้วจึงตาม call chain ลงไป วิธีนี้ทำให้รู้ว่า request มีไว้ตอบโจทย์ workflow ใด ไม่หลงอยู่ใน utility code</p></section>
-<section id="section-2"><h2>2. เส้นทางไปและกลับ</h2><pre class="code-vs"><code>ScanScreen
-  → TaskStore.submit(barcode)
-  → TasksApi.complete(request)
-  → ApiClient.post('/tasks/complete')
-  → .NET endpoint → service → database
-  ← HTTP status + JSON
-  ← TaskDto → Task domain model
-  ← AsyncState.success/error → widget rebuild</code></pre></section>
-<section id="section-3"><h2>3. Boundary แต่ละชั้น</h2><ul><li>Widget รับ input และ render state</li><li>Store คุม loading/race/workflow</li><li>API class รู้ endpoint และ DTO</li><li>ApiClient รู้ HTTP, header, timeout และ decode</li><li>.NET รับ/validate DTO และคืน contract</li></ul></section>
-<section id="section-4"><h2>4. ไฟล์จริง</h2><p>ดู <code>wmsapp/lib/services/api_service.dart</code> และ <code>wms_absolute_mobile/lib/core/api_client.dart</code> เป็น transport boundary จากนั้นดู API ราย feature เช่น <code>api/tasks_api.dart</code> เพื่อเห็น endpoint-specific mapping</p></section>
-<section id="section-5"><h2>5. ตัวอย่าง orchestration</h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
-  state = const TaskState.loading(); notifyListeners();
-  try {
-    final page = await api.fetchTasks();
-    state = TaskState.ready(page.items);
-  } on ApiException catch (e) {
-    state = TaskState.failed(e.userMessage);
-  }
-  notifyListeners();
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: ห้าชั้น ไม่ใช่สองชั้น</a></li><li><a href="#section-4">ดูของจริงใน lab</a></li><li><a href="#section-5">ทำไมต้องมี repository คั่นกลาง</a></li><li><a href="#section-6">ฝั่ง .NET เห็นอะไร</a></li><li><a href="#section-7">ไล่หาปัญหาให้ถูกชั้น</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 25–35 นาที</span><span>ลงมือทำ: ไล่เส้นทางของข้อมูลจากปุ่มถึงฐานข้อมูลและกลับ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 6.1 (การแยกชั้น model) และ 4.5 (store)<br><strong>จบบทนี้แล้วจะทำได้:</strong> บอกได้ว่าแต่ละชั้นรับผิดชอบอะไร และรู้ว่าจะไปหาโค้ดที่ต้องแก้ที่ไหนเมื่อมีปัญหา</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>หกส่วนที่ผ่านมา ข้อมูลทั้งหมดมาจากสองที่ — ค่าที่เขียนไว้ในโค้ด และไฟล์ตัวอย่างใน <code>test/fixtures/</code></p><p>ตอนนี้ถึงเวลาไปเอาของจริง ซึ่งเปิดคำถามชุดใหม่ทั้งหมด</p><table><thead><tr><th>คำถามใหม่</th><th>อยู่ในบท</th></tr></thead><tbody>
+<tr><td>ที่อยู่ของเซิร์ฟเวอร์เขียนอย่างไร</td><td>7.2, 7.3</td></tr>
+<tr><td>ส่งอะไรไปและได้อะไรกลับ</td><td>7.4, 7.8</td></tr>
+<tr><td>เน็ตหลุดแล้วเกิดอะไร</td><td>7.7</td></tr>
+<tr><td>เซิร์ฟเวอร์ปฏิเสธแล้วรู้ได้อย่างไรว่าทำไม</td><td>7.9, 7.11</td></tr>
+<tr><td>ลองใหม่ได้ไหม</td><td>7.14, 7.15</td></tr>
+</tbody></table><p>แต่ก่อนจะตอบคำถามเหล่านั้น ต้องรู้ก่อนว่า <strong>ของแต่ละชิ้นอยู่ที่ไหน</strong> ไม่งั้นจะแก้ปัญหาผิดที่</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>HTTP</td><td>กติกาที่แอปกับเซิร์ฟเวอร์ใช้คุยกัน</td></tr>
+<tr><td>request</td><td>คำขอที่แอปส่งไป</td></tr>
+<tr><td>response</td><td>คำตอบที่เซิร์ฟเวอร์ส่งกลับ</td></tr>
+<tr><td>endpoint</td><td>ที่อยู่หนึ่งที่ของเซิร์ฟเวอร์ที่รับคำขอเรื่องหนึ่ง</td></tr>
+<tr><td>client</td><td>ตัวที่ทำหน้าที่ส่ง HTTP</td></tr>
+<tr><td>repository</td><td>ชั้นที่รู้ว่า endpoint ไหนให้ข้อมูลอะไร</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: ห้าชั้น ไม่ใช่สองชั้น</h2><pre class="code-vs"><code>ผู้ใช้แตะปุ่ม
+    │
+    ▼  หน้าจอ           รับการกระทำ แสดงผล — ไม่รู้จัก HTTP เลย
+    │
+    ▼  store            คุมสถานะ กันกดซ้ำ ตัดสินใจ — ไม่รู้จัก URL
+    │
+    ▼  repository       รู้ว่า endpoint ไหน และแปลง JSON เป็น model
+    │
+    ▼  ApiClient        รู้ HTTP, header, timeout, รหัสตอบกลับ
+    │
+    ▼  เครือข่าย → .NET → ฐานข้อมูล</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> แต่ละชั้นรู้เรื่องของชั้นที่อยู่ต่ำกว่าตัวเองหนึ่งชั้นเท่านั้น — หน้าจอที่รู้จัก URL คือสัญญาณว่ามีอะไรรั่วขึ้นมา</div></section>
+
+<section id="section-4"><h2>4. ดูของจริงใน lab</h2><p>เปิดสี่ไฟล์นี้ตามลำดับ จะเห็นชั้นทั้งหมด</p><table><thead><tr><th>ไฟล์</th><th>รู้อะไร</th><th>ไม่รู้อะไร</th></tr></thead><tbody>
+<tr><td><code>features/tasks/task_screen.dart</code></td><td>ปุ่มไหนทำอะไร</td><td>URL, HTTP, JSON</td></tr>
+<tr><td><code>features/tasks/task_store.dart</code></td><td>สถานะ กันกดซ้ำ ตัวนับรุ่น</td><td>URL, ชื่อ field ใน JSON</td></tr>
+<tr><td><code>features/tasks/task_repository.dart</code></td><td>เส้นทาง <code>/api/WMS/mobile_tasks</code> และรูปแบบข้อมูล</td><td>header, timeout, รหัสตอบกลับ</td></tr>
+<tr><td><code>core/api_client.dart</code></td><td>HTTP ทั้งหมด</td><td>ว่ากำลังคุยเรื่องงานหรือเรื่องพาเลท</td></tr>
+</tbody></table><pre class="code-vs"><code>// task_repository.dart — รู้เส้นทางและรูปแบบ
+Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen() async {
+  final json = await api.getJson('/api/WMS/mobile_tasks');
+  final items = json['items'];
+  ...
+}</code></pre><pre class="code-vs"><code>// api_client.dart — รู้ HTTP แต่ไม่รู้ว่าเป็นข้อมูลอะไร
+Future&lt;Map&lt;String, dynamic&gt;&gt; getJson(String path) async {
+  final response = await _client
+      .get(Uri.parse('$baseUrl$path'), headers: _headers())
+      .timeout(const Duration(seconds: 15));
+  return _decode(response);
 }</code></pre></section>
-<section id="section-6"><h2>6. แบ่งความรับผิดชอบ</h2><p>อย่าให้ widget ต่อ URL, อ่าน status code และ cast JSON เอง เพราะจะทดสอบยากและ error policy กระจายหลายหน้า ส่วน business logic ภายใน .NET เรียนละเอียดในคอร์ส backend; บทนี้เน้น contract ที่ Flutter ต้องพึ่งพา</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เลือกปุ่มหนึ่งในแอป วาดลูกศรไป-กลับครบทุกชั้น พร้อมเขียน input, output และ failure ของแต่ละ boundary</p><details><summary>แนวคำตอบ</summary><p>เส้นทางต้องจบกลับที่ state ของ UI และแยก network failure ออกจาก contract/business failure</p></details></section>
-<section id="section-8"><h2>8. Checklist</h2><div class="success">ตอบให้ได้ว่าใครสร้าง DTO, ใครส่ง HTTP, ใคร parse JSON, ใครถือ loading/error และ endpoint ใดเป็นเจ้าของ contract</div></section>
+
+<section id="section-5"><h2>5. ทำไมต้องมี repository คั่นกลาง</h2><p>คำถามที่สมเหตุสมผล — ทำไม store ไม่เรียก <code>ApiClient</code> ตรง ๆ</p><table><thead><tr><th>ถ้า store เรียกเอง</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>store ต้องรู้เส้นทาง <code>/api/WMS/mobile_tasks</code></td><td>เปลี่ยน endpoint ต้องแก้ store</td></tr>
+<tr><td>store ต้องแปลง JSON เอง</td><td>ตรรกะการแปลงกระจายไปทุก store</td></tr>
+<tr><td>ทดสอบ store ต้องปลอม HTTP</td><td>ยากกว่าปลอม repository มาก</td></tr>
+</tbody></table><pre class="code-vs"><code>abstract interface class TaskRepository {
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();
+  Future&lt;TaskCompletion&gt; complete(String id, {required String commandId});
+}</code></pre><p>เพราะ <code>TaskRepository</code> เป็นสัญญา ไม่ใช่คลาสจริง store จึงทดสอบได้โดยไม่ต้องมีเซิร์ฟเวอร์ — เป็นรูปแบบเดียวกับ <code>PickRepository</code> ใน 4.5</p><p>และมันยังทำให้เปลี่ยนแหล่งข้อมูลได้โดยไม่แตะ store เลย ซึ่งจะได้ใช้จริงใน Part 12 ตอนทำให้ทำงานได้ตอนไม่มีเน็ต</p></section>
+
+<section id="section-6"><h2>6. ฝั่ง .NET เห็นอะไร</h2><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+app.MapGet("/api/WMS/mobile_tasks", async (ITaskService service) =&gt;
+{
+    var tasks = await service.GetOpenTasksAsync();
+    return Results.Ok(new { items = tasks, totalCount = tasks.Count });
+});</code></pre><table><thead><tr><th>ฝั่งไหน</th><th>รับผิดชอบอะไร</th></tr></thead><tbody>
+<tr><td>Flutter</td><td>แสดงผล กันกดซ้ำ จัดการเน็ตหลุด แปลง JSON เป็น model</td></tr>
+<tr><td>.NET</td><td>ตรวจสิทธิ์ ตรวจกฎธุรกิจ คุยกับฐานข้อมูล คืนข้อมูลตามสัญญา</td></tr>
+</tbody></table><p>คอร์สนี้สอนเฉพาะรอยต่อ — สิ่งที่ Flutter ต้องรู้เพื่อคุยกับ .NET ได้ถูก ส่วนตรรกะข้างใน .NET อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a></p><div class="note">ประโยคที่ใช้ตัดสินว่าเรื่องไหนอยู่คอร์สไหน — <em>ถ้าเปลี่ยนแล้วสัญญา JSON เปลี่ยน เรื่องนั้นเกี่ยวกับเรา ถ้าเปลี่ยนแล้วสัญญาเหมือนเดิม เป็นเรื่องภายในของ .NET</em></div></section>
+
+<section id="section-7"><h2>7. ไล่หาปัญหาให้ถูกชั้น</h2><p>เมื่อมีคนบอกว่า “แอปโหลดงานไม่ขึ้น” ให้ไล่จากล่างขึ้นบน</p><table><thead><tr><th>ขั้น</th><th>ตรวจอะไร</th><th>ถ้าผิดตรงนี้</th></tr></thead><tbody>
+<tr><td>1</td><td>เปิด URL ในเบราว์เซอร์บนเครื่องนั้นได้ไหม</td><td>ปัญหาเครือข่าย ไม่ใช่โค้ด (7.3)</td></tr>
+<tr><td>2</td><td>เซิร์ฟเวอร์ตอบรหัสอะไร</td><td>ปัญหาสิทธิ์หรือเส้นทาง (7.9)</td></tr>
+<tr><td>3</td><td>JSON ที่ได้หน้าตาตรงสัญญาไหม</td><td>ปัญหาสัญญา (Part 6)</td></tr>
+<tr><td>4</td><td>store ได้ข้อมูลแล้วแต่จอไม่เปลี่ยนไหม</td><td>ปัญหาการวาดใหม่ (4.6)</td></tr>
+</tbody></table><p>คนส่วนใหญ่เริ่มที่ขั้น 4 เพราะเป็นที่ที่เห็นอาการ — แต่สาเหตุมักอยู่ขั้น 1 หรือ 2 และการเริ่มผิดที่ทำให้เสียเวลาเป็นชั่วโมง</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยน endpoint แล้วต้องแก้หลายไฟล์</td><td>เส้นทางกระจายอยู่หลายชั้น</td><td>ให้ repository เป็นที่เดียวที่รู้เส้นทาง</td></tr>
+<tr><td>หน้าจอมี <code>http.get</code></td><td>ข้ามชั้นทั้งหมด</td><td>ย้ายลงไปที่ repository</td></tr>
+<tr><td>ทดสอบ store ต้องเปิดเซิร์ฟเวอร์</td><td>store ผูกกับ <code>ApiClient</code> จริง</td><td>ให้ store รับสัญญา ไม่รับคลาสจริง</td></tr>
+<tr><td>แก้ปัญหานานเพราะหาสาเหตุไม่เจอ</td><td>เริ่มไล่จากชั้นบนสุด</td><td>ไล่จากล่างขึ้นบน</td></tr>
+<tr><td>ตรรกะแปลง JSON อยู่ใน store</td><td>ไม่มี repository</td><td>เพิ่มชั้นคั่น</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ทีมได้ความต้องการใหม่ — เพิ่มปุ่มค้นหางานด้วยรหัสพาเลท</p><ol><li>ระบุว่าต้องแก้ไฟล์ไหนบ้าง และแต่ละไฟล์แก้อะไร</li><li>ตอบว่าถ้าฝั่งหลังบ้านเปลี่ยนชื่อ query จาก <code>search</code> เป็น <code>keyword</code> จะกระทบกี่ไฟล์</li><li>ตอบว่าถ้าต่อไปต้องให้ค้นหาได้ตอนไม่มีเน็ต จะกระทบกี่ไฟล์</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ไฟล์ที่ต้องแก้</strong></p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>task_screen.dart</code></td><td>เพิ่มช่องค้นหา และเรียก <code>store.search(query)</code></td></tr>
+<tr><td><code>task_store.dart</code></td><td>เพิ่มเมธอด <code>search</code> พร้อมตัวนับรุ่นและ debounce (4.10)</td></tr>
+<tr><td><code>task_repository.dart</code></td><td>เพิ่ม <code>fetchOpen({String? search})</code> และประกอบ query</td></tr>
+<tr><td><code>api_client.dart</code></td><td><strong>ไม่ต้องแก้</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่บอกว่าชั้นถูกวางถูก — <code>ApiClient</code> รับ path มาแล้วยิง ไม่สนใจว่า path นั้นมี query อะไร</p><p><strong>ข้อ 2 — เปลี่ยนชื่อ query</strong></p><p><strong>ไฟล์เดียว</strong> คือ <code>task_repository.dart</code></p><pre class="code-vs"><code>// เดิม
+'/api/WMS/mobile_tasks?search=$encoded'
+// ใหม่
+'/api/WMS/mobile_tasks?keyword=$encoded'</code></pre><p>store ไม่รู้จักชื่อ query อยู่แล้ว มันรู้แค่ว่า “ค้นด้วยข้อความนี้” ส่วนหน้าจอก็ไม่รู้จักทั้งคู่</p><p>นี่คือประโยชน์ที่จับต้องได้ของการมี repository คั่น — <strong>การเปลี่ยนที่ฝั่งเซิร์ฟเวอร์หยุดอยู่ที่ชั้นเดียว</strong></p><p><strong>ข้อ 3 — ค้นหาได้ตอนไม่มีเน็ต</strong></p><p>คำตอบที่คนมักให้คือ “แก้ repository” ซึ่งใกล้เคียงแต่ยังไม่ตรง</p><p>สิ่งที่ควรทำคือ <strong>เพิ่มคลาสใหม่ ไม่ใช่แก้ของเดิม</strong></p><pre class="code-vs"><code>abstract interface class TaskRepository {           // สัญญาเดิม ไม่แตะ
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen({String? search});
+}
+
+class RemoteTaskRepository implements TaskRepository { ... }   // เดิม
+
+class OfflineFirstTaskRepository implements TaskRepository {   // ใหม่
+  const OfflineFirstTaskRepository({required this.remote, required this.local});
+
+  final TaskRepository remote;
+  final TaskDatabase local;
+
+  @override
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen({String? search}) async {
+    try {
+      final tasks = await remote.fetchOpen(search: search);
+      await local.save(tasks);      // เก็บไว้ใช้ตอนไม่มีเน็ต
+      return tasks;
+    } on ApiException catch (error) {
+      if (error.kind != ApiFailureKind.network) rethrow;
+      return local.search(search);  // เน็ตไม่มี ใช้ของที่เก็บไว้
+    }
+  }
+}</code></pre><table><thead><tr><th>ไฟล์</th><th>ต้องแก้ไหม</th></tr></thead><tbody>
+<tr><td><code>task_screen.dart</code></td><td>ไม่</td></tr>
+<tr><td><code>task_store.dart</code></td><td>ไม่</td></tr>
+<tr><td><code>task_repository.dart</code></td><td>ไม่ — เพิ่มคลาสใหม่แทน</td></tr>
+<tr><td><code>api_client.dart</code></td><td>ไม่</td></tr>
+<tr><td>จุดที่ประกอบแอปตอนเริ่ม</td><td><strong>ใช่</strong> — เปลี่ยนว่าจะส่ง repository ตัวไหนให้ store</td></tr>
+</tbody></table><pre class="code-vs"><code>// เดิม
+final store = TaskStore(RemoteTaskRepository(apiClient));
+
+// ใหม่ — store ไม่รู้ด้วยซ้ำว่าอะไรเปลี่ยน
+final store = TaskStore(OfflineFirstTaskRepository(
+  remote: RemoteTaskRepository(apiClient),
+  local: taskDatabase,
+));</code></pre><p><strong>ทำไมเพิ่มคลาสดีกว่าแก้ของเดิม</strong></p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>RemoteTaskRepository</code> ยังทดสอบแยกได้</td><td>เทสต์เดิมไม่ต้องแก้</td></tr>
+<tr><td>ตรรกะ “ลองเน็ตก่อนแล้วค่อยใช้ของเก่า” อยู่ที่เดียว</td><td>เอาไปใช้กับ repository อื่นได้</td></tr>
+<tr><td>สลับกลับได้ทันทีถ้ามีปัญหา</td><td>เปลี่ยนบรรทัดเดียวที่จุดประกอบ</td></tr>
+</tbody></table><p><strong>บทเรียนที่ควรจำ:</strong> การวางชั้นที่ดีวัดได้จากคำถามว่า <em>ความเปลี่ยนแปลงหนึ่งอย่างกระทบกี่ไฟล์</em> — ถ้าคำตอบคือหนึ่ง แสดงว่าวางถูก ถ้าคำตอบคือทุกไฟล์ แสดงว่ายังไม่ได้แยกชั้นจริง</p></details></section>
+
+<section id="section-10"><h2>10. สรุปท้ายบท</h2><div class="success"><ul><li>มีห้าชั้น ไม่ใช่แค่หน้าจอกับเซิร์ฟเวอร์</li><li>แต่ละชั้นรู้เรื่องของชั้นที่ต่ำกว่าหนึ่งชั้นเท่านั้น</li><li>หน้าจอไม่รู้จัก HTTP, store ไม่รู้จัก URL</li><li>repository เป็นที่เดียวที่รู้เส้นทางและรูปแบบข้อมูล</li><li><code>ApiClient</code> รู้ HTTP แต่ไม่รู้ว่ากำลังคุยเรื่องอะไร</li><li>ให้ store รับสัญญา ไม่รับคลาสจริง เพื่อให้ทดสอบได้</li><li>ไล่หาปัญหาจากล่างขึ้นบน ไม่ใช่จากที่ที่เห็นอาการ</li><li>วัดว่าวางชั้นถูกไหม จากจำนวนไฟล์ที่กระทบเมื่อมีการเปลี่ยนแปลง</li></ul></div><p><strong>บทถัดไป:</strong> 7.2 จะเริ่มจากสิ่งที่พื้นฐานที่สุดและผิดบ่อยที่สุด — การประกอบที่อยู่ของเซิร์ฟเวอร์ให้ถูก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
