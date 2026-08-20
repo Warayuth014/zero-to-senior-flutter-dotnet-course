@@ -1,15 +1,199 @@
-<div class="note">Route-level settings sheet เป็น mini application: มี draft, validation, async test/save, dirty guardและ typed decisions แต่ shared ConnectionControllerยังเป็น source of truthหลัง commit</div>
-<section><h2>1. Open from shell</h2><pre class="code-vs"><code>Future&lt;void&gt; openConnectionSettings(BuildContext context) =&gt;
-  showModalBottomSheet&lt;void&gt;(
-    context: context,
-    useSafeArea: true,
-    isScrollControlled: true,
-    builder: (_) =&gt; ConnectionSettingsSheet(controller: connection),
-  );</code></pre></section>
-<section><h2>2. Draft isolation</h2><p>Controllersแก้ draft copy ไม่เปลี่ยน active profileทันที Test connectionใช้ draft URL; Save validates duplicate nameและ persist; Applyจึง activate/refresh status</p></section>
-<section><h2>3. Dirty state</h2><p>คำนวณ dirtyจาก normalized draftเทียบ original ไม่ set boolจากทุก keystrokeอย่างเดียว PopScopeถาม discardและ closeทุกทางผ่านเดียวกัน</p></section>
-<section><h2>4. Async commands</h2><p>busy guardปิด test/save/deleteซ้ำ, try/finally, mountedหลัง await และ stale draft guardถ้าผู้ใช้แก้ระหว่าง probe ผลต้องผูก URL snapshot</p></section>
-<section><h2>5. Duplicate decisions</h2><p>Dialogคืน typed enum/string rename/overwrite/cancel ดีกว่า business logicใน dialog ConnectionControllerรักษา invariant active profileและ persistence atomic</p></section>
-<section><h2>6. Route-level benefit</h2><p>Sheetอยู่เหนือ workflowแต่ไม่ต้องออกจาก shell; root/shared controllerทำ header dotอัปเดตผ่าน ListenableBuilderหลัง apply และ app lifecycle refresh serverเดียวกับ API</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Probe URL Aกำลังวิ่ง ผู้ใช้แก้เป็น Bก่อนผลกลับ ควรแสดงผล Aเป็นของ Bไหม?</p><details><summary>เฉลย</summary><p>ไม่ Capture normalized URL/generationตอนเริ่ม Apply resultเฉพาะ draftยังตรงหรือ labelชัดว่าเป็น A; cancel/ignore staleและปลด busyตาม token</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าแก้ singleton active URLทุก onChanged เพราะ requestอื่นอาจสลับ serverกลางงาน Commit draftผ่าน explicit Save/Applyเท่านั้น</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: ทำแผ่นตั้งค่าที่มีร่างของตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.9 (แผ่นด้านล่าง), 5.5 (<code>PopScope</code>) และ 5.7 (ชั้นของข้อมูล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำแผ่นที่แก้ค่าได้โดยไม่กระทบของจริงจนกว่าจะกดบันทึก และรู้ว่าแผ่นควรตัดสินใจแค่ไหน</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>แผ่นตั้งค่าดูเหมือนเป็นแค่รายการสวิตช์ แต่จริง ๆ แล้วมีทุกอย่างที่หน้าจอเต็มมี</p><table><thead><tr><th>สิ่งที่ต้องมี</th><th>เรียนมาจาก</th></tr></thead><tbody>
+<tr><td>ร่างที่แยกจากค่าจริง</td><td>5.7</td></tr>
+<tr><td>รู้ว่ามีอะไรแก้ค้างอยู่</td><td>5.5</td></tr>
+<tr><td>กันการปิดโดยไม่ตั้งใจ</td><td>5.5</td></tr>
+<tr><td>ถามยืนยันก่อนทิ้ง</td><td>5.8</td></tr>
+<tr><td>ปุ่มออกจากระบบที่ต้องล้าง stack</td><td>5.4</td></tr>
+</tbody></table><p>และมีสิ่งที่ทำผิดง่ายที่สุดคือ — <strong>แก้ค่าจริงทันทีที่ผู้ใช้แตะสวิตช์</strong> ซึ่งทำให้ไม่มีทางกดยกเลิกได้</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>draft</td><td>ค่าที่ผู้ใช้กำลังแก้ แต่ยังไม่ได้บันทึก</td></tr>
+<tr><td>commit</td><td>การเอาร่างไปทับค่าจริง</td></tr>
+<tr><td>source of truth</td><td>ที่ที่ถือค่าจริง</td></tr>
+<tr><td>validation</td><td>การตรวจว่าค่าที่กรอกใช้ได้ไหม</td></tr>
+<tr><td>apply</td><td>การทำให้ค่าใหม่มีผลกับระบบ</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: แผ่นยืมค่าไปแก้ แล้วค่อยคืน</h2><pre class="code-vs"><code>AppSession (ค่าจริง)          SettingsSheet (ร่าง)
+  scanSound = true    ──คัดลอก──→  _scanSound = true
+                                        │
+                                   ผู้ใช้แตะสวิตช์
+                                        │
+                                   _scanSound = false   ← ค่าจริงยังเป็น true
+                                        │
+                                   กดบันทึก
+  scanSound = false   ←──ทับ────────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ระหว่างที่แผ่นเปิดอยู่ ค่าจริงต้องไม่เปลี่ยนเลย — ทางเดียวที่มันจะเปลี่ยนคือผู้ใช้กดบันทึก</div><p>ถ้าไม่ทำแบบนี้ ปุ่มยกเลิกจะไม่มีความหมาย และผู้ใช้ที่แค่เปิดดูการตั้งค่าอาจเปลี่ยนค่าไปโดยไม่ตั้งใจ</p></section>
+
+<section><h2>4. ร่างที่คัดลอกครั้งเดียว</h2><p>เปิด <code>lib/nav_basics/nav_feedback.dart</code></p><pre class="code-vs"><code>class _SettingsSheetState extends State&lt;SettingsSheet&gt; {
+  late bool _scanSound;
+
+  @override
+  void initState() {
+    super.initState();
+    // อ่านค่าตั้งต้นครั้งเดียว จากนั้นแผ่นนี้ถือค่าที่ยังไม่บันทึกของตัวเอง
+    _scanSound = widget.session.scanSound;
+  }
+
+  bool get _isDirty =&gt; _scanSound != widget.session.scanSound;
+</code></pre><p>สองบรรทัดนี้ทำงานคู่กัน</p><table><thead><tr><th>บรรทัด</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td>คัดลอกใน <code>initState</code></td><td>ให้แผ่นมีร่างของตัวเอง</td></tr>
+<tr><td><code>_isDirty</code> เทียบกับค่าจริง</td><td>รู้ว่ามีอะไรแก้ค้างอยู่</td></tr>
+</tbody></table><p>สังเกตว่า <code>_isDirty</code> เป็น getter ที่คำนวณทุกครั้ง ไม่ใช่ field ที่ตั้งค่าตอนแตะสวิตช์ — เหตุผลเดียวกับ 5.5 หัวข้อ 6 คือแตะไปแล้วแตะกลับ ต้องรู้ว่าไม่มีอะไรเปลี่ยน</p><p>และเพราะเทียบกับค่าจริงตลอดเวลา ปุ่มบันทึกจึงเปิดปิดได้เอง</p><pre class="code-vs"><code>FilledButton(
+  onPressed: _isDirty ? _save : null,   // ไม่มีอะไรเปลี่ยน = กดไม่ได้
+  child: const Text('บันทึก'),
+)</code></pre></section>
+
+<section><h2>5. บันทึกคือจุดเดียวที่แตะค่าจริง</h2><pre class="code-vs"><code>void _save() {
+  widget.session.setScanSound(enabled: _scanSound);
+  Navigator.of(context).pop();
+}</code></pre><p>เทียบกับสิ่งที่ไม่ควรทำ</p><pre class="code-vs"><code>// ผิด — แก้ค่าจริงทันทีที่แตะ
+SwitchListTile(
+  value: widget.session.scanSound,
+  onChanged: (value) =&gt; widget.session.setScanSound(enabled: value),
+)</code></pre><table><thead><tr><th></th><th>แก้ทันที</th><th>แก้ตอนบันทึก</th></tr></thead><tbody>
+<tr><td>ปุ่มยกเลิกทำอะไรได้</td><td>ไม่ได้ — เปลี่ยนไปแล้ว</td><td>ทิ้งร่าง ค่าจริงเหมือนเดิม</td></tr>
+<tr><td>ระหว่างแก้ ระบบใช้ค่าไหน</td><td>ค่าที่แก้ครึ่ง ๆ</td><td>ค่าเดิมที่ถูกต้อง</td></tr>
+<tr><td>แก้หลายค่าที่ต้องสอดคล้องกัน</td><td>มีช่วงที่ไม่สอดคล้อง</td><td>เปลี่ยนพร้อมกันทีเดียว</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญเมื่อการตั้งค่ามีหลายค่าที่เกี่ยวกัน เช่นที่อยู่เซิร์ฟเวอร์กับหมายเลขพอร์ต — ถ้าแก้ทีละค่าและมีผลทันที จะมีจังหวะที่ที่อยู่ใหม่คู่กับพอร์ตเก่า แล้วคำขอที่ยิงตอนนั้นจะไปผิดที่</p></section>
+
+<section><h2>6. กันการปิดโดยไม่ตั้งใจ</h2><pre class="code-vs"><code>@override
+Widget build(BuildContext context) =&gt; PopScope(
+  canPop: !_isDirty,
+  onPopInvokedWithResult: (didPop, result) async {
+    if (didPop) return;
+    final discard = await showDiscardDialog(context);
+    if (!discard || !context.mounted) return;
+    Navigator.of(context).pop();
+  },
+  child: SafeArea(...),
+);</code></pre><p>แผ่นปิดง่ายกว่าหน้าจอมาก จึงต้องกันให้ครบทุกทาง</p><table><thead><tr><th>ทางปิด</th><th>ผ่าน <code>PopScope</code> ไหม</th></tr></thead><tbody>
+<tr><td>แตะนอกแผ่น</td><td>ผ่าน</td></tr>
+<tr><td>ลากแผ่นลง</td><td>ผ่าน</td></tr>
+<tr><td>กดปุ่มย้อนกลับ</td><td>ผ่าน</td></tr>
+<tr><td>ปุ่มบันทึก</td><td>ไม่ผ่าน — แต่ถูกต้อง เพราะตัดสินใจแล้ว</td></tr>
+</tbody></table><p>ใน lab มีเทสต์ตรึงไว้</p><pre class="code-vs"><code>testWidgets('แผ่นตั้งค่าที่แก้ค้างไว้ ต้องถามก่อนปิด', (tester) async {
+  ...
+  await tester.tap(find.byKey(const Key('scan-sound-switch')));
+  await tester.pumpAndSettle();
+  await tester.tapAt(const Offset(20, 20));      // แตะนอกแผ่น
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('discard-dialog')), findsOneWidget);
+  expect(session.scanSound, isTrue);             // ค่าจริงยังไม่เปลี่ยน
+});</code></pre><p>บรรทัดสุดท้ายคือสิ่งที่ยืนยันหัวข้อ 3 — ผู้ใช้แตะสวิตช์ไปแล้ว แต่ค่าจริงยังเป็นค่าเดิม</p></section>
+
+<section><h2>7. ปุ่มออกจากระบบในแผ่น</h2><p>ปุ่มนี้พิเศษ เพราะทำสองอย่างที่ขัดกันในตัวเอง — มันทั้งปิดแผ่นและเปลี่ยนเส้นทางทั้งแอป</p><pre class="code-vs"><code>Future&lt;void&gt; _signOut() async {
+  // ออกจากระบบทิ้งค่าที่ยังไม่บันทึกอยู่แล้ว จึงถามก่อนถ้ามีของค้าง
+  if (_isDirty &amp;&amp; !await showDiscardDialog(context)) return;
+  if (!mounted) return;
+  Navigator.of(context).pop();      // ปิดแผ่นก่อน
+  widget.onSignOut();               // แล้วให้เจ้าของหน้าจอจัดการเส้นทาง
+}</code></pre><p>สามจุดที่ตั้งใจ</p><table><thead><tr><th>จุด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ถามก่อนถ้ามีของค้าง</td><td>ออกจากระบบก็ทิ้งร่างเหมือนกัน จึงควรใช้ด่านเดียวกัน</td></tr>
+<tr><td>ปิดแผ่นก่อน</td><td>ไม่ให้แผ่นค้างอยู่ตอนที่หน้าจอข้างหลังถูกล้าง</td></tr>
+<tr><td>เรียก callback ไม่ใช่ <code>Navigator</code></td><td>แผ่นไม่รู้จักเส้นทาง (5.4 หัวข้อ 9)</td></tr>
+</tbody></table><pre class="code-vs"><code>/// แผ่นนี้ไม่รู้จักเส้นทางของแอป จึงบอกได้แค่ว่า "ผู้ใช้ขอออกจากระบบ"
+/// แล้วให้เจ้าของหน้าจอเป็นคนตัดสินว่าต้องล้าง stack อย่างไร
+final VoidCallback onSignOut;</code></pre><p>ผลที่ได้คือแผ่นนี้เอาไปเปิดจากที่ไหนก็ได้ และแต่ละที่กำหนดได้เองว่าออกจากระบบแล้วต้องไปไหน</p></section>
+
+<section><h2>8. เมื่อการตั้งค่าต้องตรวจก่อนบันทึก</h2><p>แผ่นใน lab มีแค่สวิตช์ จึงไม่ต้องตรวจอะไร แต่การตั้งค่าจริงมักมีช่องกรอก</p><pre class="code-vs"><code>ที่อยู่เซิร์ฟเวอร์: [ https://wms.company.local     ]
+พอร์ต:            [ 8443                          ]
+                                     [ ทดสอบการเชื่อมต่อ ]</code></pre><p>ปุ่มทดสอบทำให้เกิดปัญหาที่เคยเจอมาแล้วทั้งหมดใน Part 4</p><table><thead><tr><th>ปัญหา</th><th>บท</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>กดทดสอบรัว ๆ</td><td>4.14</td><td>ธงกันซ้ำ</td></tr>
+<tr><td>ทดสอบค้างแล้วปุ่มไม่กลับมา</td><td>4.8</td><td>ปลดใน <code>finally</code></td></tr>
+<tr><td>แก้ที่อยู่ระหว่างรอผล แล้วผลเก่ามาทับ</td><td>4.10</td><td><strong>ตัวนับรุ่น</strong></td></tr>
+<tr><td>ปิดแผ่นแล้วผลกลับมาเขียนลง state</td><td>4.9</td><td>ตรวจ <code>mounted</code></td></tr>
+</tbody></table><p>แถวที่สามเป็นกรณีที่ตรงกับ 4.10 มากที่สุด</p><pre class="code-vs"><code>0.0s  กดทดสอบที่อยู่ A → กำลังรอ
+1.0s  ผู้ใช้แก้เป็นที่อยู่ B
+3.0s  ผลของ A กลับมา "เชื่อมต่อสำเร็จ"
+      → จอแสดงว่าสำเร็จ ทั้งที่ตอนนี้ช่องเป็นที่อยู่ B ที่ยังไม่เคยทดสอบ</code></pre><p>ผู้ใช้จะกดบันทึกด้วยความมั่นใจ แล้วแอปเชื่อมต่อไม่ได้ — ทางแก้คือจับคู่ผลกับที่อยู่ที่ทดสอบ หรือทิ้งผลเมื่อค่าเปลี่ยน</p></section>
+
+<section><h2>9. แผ่นตัดสินใจได้แค่ไหน</h2><p>เส้นแบ่งที่ควรถือ</p><table><thead><tr><th>แผ่นทำได้</th><th>แผ่นไม่ควรทำ</th></tr></thead><tbody>
+<tr><td>เก็บร่างและตรวจรูปแบบ</td><td>ตัดสินกติกาทางธุรกิจ</td></tr>
+<tr><td>บอกว่าผู้ใช้เลือกอะไร</td><td>ตัดสินว่าหลังจากนั้นต้องไปหน้าไหน</td></tr>
+<tr><td>เรียกคำสั่งของ store</td><td>ยิง API เอง</td></tr>
+</tbody></table><pre class="code-vs"><code>// เลี่ยง — กติกาธุรกิจอยู่ในแผ่น
+if (_profiles.where((p) =&gt; p.name == _name).length &gt; 1) {
+  // ตัดสินเองว่าจะทับหรือเปลี่ยนชื่อ
+}</code></pre><pre class="code-vs"><code>// ดีกว่า — แผ่นถาม แล้วให้ที่ที่ถือกติกาเป็นคนบังคับ
+final result = await store.saveProfile(draft);
+switch (result) {
+  case SaveOk():         Navigator.of(context).pop();
+  case DuplicateName():  setState(() =&gt; _nameError = 'ชื่อนี้ถูกใช้แล้ว');
+  case InvalidUrl():     setState(() =&gt; _urlError = 'ที่อยู่ไม่ถูกต้อง');
+}</code></pre><p>เหตุผลคือกติกาเดียวกันอาจถูกเรียกจากที่อื่นด้วย เช่นตอนนำเข้าไฟล์ตั้งค่า ถ้ากติกาอยู่ในแผ่น ที่อื่นจะไม่ได้ใช้</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปิดดูการตั้งค่าเฉย ๆ แล้วค่าเปลี่ยน</td><td>แก้ค่าจริงทันทีที่แตะ</td><td>เก็บร่างแล้วทับตอนบันทึก</td></tr>
+<tr><td>ปุ่มยกเลิกไม่มีผล</td><td>เหมือนข้างบน</td><td>เหมือนข้างบน</td></tr>
+<tr><td>ปุ่มบันทึกกดได้ทั้งที่ไม่ได้แก้อะไร</td><td>ไม่ได้เทียบกับค่าจริง</td><td>คำนวณ <code>_isDirty</code></td></tr>
+<tr><td>ถามยืนยันทั้งที่แก้แล้วแก้กลับ</td><td>เก็บ dirty เป็น field</td><td>เทียบค่าจริงทุกครั้ง</td></tr>
+<tr><td>ลากแผ่นลงแล้วของหาย</td><td>ไม่มี <code>PopScope</code></td><td>ครอบ</td></tr>
+<tr><td>ผลทดสอบไม่ตรงกับค่าที่กรอกอยู่</td><td>ไม่ได้จับคู่ผลกับค่าที่ทดสอบ</td><td>ตัวนับรุ่น (4.10)</td></tr>
+<tr><td>ออกจากระบบแล้วแผ่นยังค้าง</td><td>ไม่ได้ปิดแผ่นก่อน</td><td>ปิดแผ่นก่อนเปลี่ยนเส้นทาง</td></tr>
+<tr><td>กติกาเดิมต้องเขียนซ้ำในที่อื่น</td><td>กติกาอยู่ในแผ่น</td><td>ย้ายไป store</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>ต้องทำแผ่นตั้งค่าการเชื่อมต่อ ที่มี</p><table><thead><tr><th>ส่วน</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>รายการโปรไฟล์</td><td>เลือกได้ว่าจะใช้อันไหน</td></tr>
+<tr><td>ที่อยู่และพอร์ต</td><td>แก้ได้ของโปรไฟล์ที่เลือก</td></tr>
+<tr><td>ปุ่มทดสอบ</td><td>ยิงไปเช็กว่าเชื่อมต่อได้ไหม</td></tr>
+<tr><td>ปุ่มบันทึก</td><td>บันทึกและเริ่มใช้โปรไฟล์นั้น</td></tr>
+</tbody></table><ol><li>ระบุว่าอะไรเป็นร่าง อะไรเป็นค่าจริง</li><li>ตอบว่าปุ่มทดสอบควรทดสอบค่าไหน และผลควรผูกกับอะไร</li><li>ผู้ใช้แก้ที่อยู่แล้วกดทดสอบ ระหว่างรอเขาสลับไปเลือกโปรไฟล์อื่น — ควรเกิดอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ร่างกับค่าจริง</strong></p><table><thead><tr><th>สิ่งของ</th><th>เป็นอะไร</th><th>อยู่ที่ไหน</th></tr></thead><tbody>
+<tr><td>รายการโปรไฟล์ทั้งหมด</td><td>ค่าจริง</td><td>store</td></tr>
+<tr><td>โปรไฟล์ที่ใช้งานอยู่จริง</td><td>ค่าจริง</td><td>store</td></tr>
+<tr><td>โปรไฟล์ที่เลือกอยู่ในแผ่น</td><td><strong>ร่าง</strong></td><td>แผ่น</td></tr>
+<tr><td>ที่อยู่และพอร์ตที่กำลังพิมพ์</td><td><strong>ร่าง</strong></td><td>แผ่น</td></tr>
+<tr><td>ผลการทดสอบล่าสุด</td><td>ร่าง</td><td>แผ่น</td></tr>
+</tbody></table><p>จุดที่คนมักจัดผิดคือแถวที่สาม — <strong>การเลือกโปรไฟล์ในแผ่น ยังไม่ใช่การสลับโปรไฟล์</strong> ถ้าสลับทันทีที่แตะ คำขอที่กำลังวิ่งอยู่เบื้องหลังจะเปลี่ยนเซิร์ฟเวอร์กลางคัน</p><p><strong>ข้อ 2 — ทดสอบค่าไหน และผลผูกกับอะไร</strong></p><p>ทดสอบ <strong>ค่าในร่าง</strong> ไม่ใช่ค่าจริง — เพราะจุดประสงค์คือดูว่าค่าที่กำลังจะบันทึกใช้ได้ไหม</p><pre class="code-vs"><code>Future&lt;void&gt; _testConnection() async {
+  if (_testing) return;                          // 4.14
+
+  // จับค่าที่กำลังทดสอบไว้ ณ ตอนเริ่ม (4.8 หัวข้อ 7)
+  final testedUrl = _buildUrl(_host, _port);
+  final generation = ++_testGeneration;          // 4.10
+
+  setState(() {
+    _testing = true;
+    _testResult = null;
+  });
+
+  try {
+    final ok = await repository.ping(testedUrl);
+    if (generation != _testGeneration || !mounted) return;
+    setState(() =&gt; _testResult = TestResult(url: testedUrl, success: ok));
+  } on ConnectionException catch (error) {
+    if (generation != _testGeneration || !mounted) return;
+    setState(() =&gt; _testResult = TestResult(
+      url: testedUrl, success: false, message: error.message,
+    ));
+  } finally {                                     // 4.8
+    if (generation == _testGeneration &amp;&amp; mounted) {
+      setState(() =&gt; _testing = false);
+    }
+  }
+}</code></pre><p>ผลต้องผูกกับ <strong>ที่อยู่ที่ถูกทดสอบ</strong> ไม่ใช่ผูกกับแผ่นลอย ๆ</p><pre class="code-vs"><code>// แสดงผลเฉพาะเมื่อยังตรงกับสิ่งที่อยู่ในช่องตอนนี้
+final current = _buildUrl(_host, _port);
+if (_testResult != null &amp;&amp; _testResult!.url == current) {
+  // แสดง "เชื่อมต่อได้" หรือ "เชื่อมต่อไม่ได้"
+} else if (_testResult != null) {
+  // ค่าเปลี่ยนไปแล้ว — บอกว่ายังไม่ได้ทดสอบค่านี้
+}</code></pre><p>ทำแบบนี้แล้วจะไม่มีทางที่จอบอกว่า “เชื่อมต่อได้” ในขณะที่ช่องแสดงที่อยู่คนละอันกับที่ทดสอบไป</p><p><strong>ข้อ 3 — สลับโปรไฟล์ระหว่างรอผล</strong></p><p>สิ่งที่ต้องเกิดตามลำดับ</p><pre class="code-vs"><code>1. ผลการทดสอบเดิมต้องถูกทิ้ง
+     _testGeneration++ → ผลของ A ที่กลับมาทีหลังจะถูกทิ้ง (4.10)
+
+2. ปุ่มทดสอบต้องกลับมากดได้
+     _testing = false — ไม่ใช่ค้างอยู่เพราะคำขอเก่ายังวิ่ง
+
+3. ร่างต้องเปลี่ยนเป็นค่าของโปรไฟล์ใหม่
+     _host, _port อ่านจากโปรไฟล์ที่เพิ่งเลือก
+
+4. ผลการทดสอบที่แสดงอยู่ต้องหายไป
+     เพราะเป็นผลของอีกโปรไฟล์หนึ่ง</code></pre><p><strong>แต่มีคำถามที่ต้องตอบก่อนทั้งหมดนี้</strong> — ถ้าผู้ใช้แก้ที่อยู่ของโปรไฟล์ A ค้างไว้ แล้วสลับไปโปรไฟล์ B การแก้ของ A ควรหายไหม</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ทิ้งเงียบ ๆ</td><td>ผู้ใช้กลับมาที่ A แล้วพบว่าที่แก้ไว้หาย โดยไม่มีใครบอก</td></tr>
+<tr><td>ถามก่อนสลับ</td><td>ชัดเจน แต่ถามบ่อยถ้าผู้ใช้สลับไปมาเพื่อเทียบค่า</td></tr>
+<tr><td>เก็บร่างของทุกโปรไฟล์ไว้</td><td>สลับไปมาได้อิสระ แต่ต้องบอกให้ชัดว่าอันไหนแก้ค้างไว้</td></tr>
+</tbody></table><p><strong>คำตอบที่ควรให้คือทางที่สอง</strong> สำหรับแผ่นตั้งค่าทั่วไป เพราะทางที่สามซับซ้อนเกินความจำเป็น — คนไม่ได้แก้โปรไฟล์หลายอันพร้อมกันบ่อย ๆ</p><p>แต่ถ้าเลือกทางที่สาม ต้องแสดงเครื่องหมายบอกว่าโปรไฟล์ไหนมีการแก้ค้างอยู่ ไม่งั้นผู้ใช้จะกดบันทึกโดยไม่รู้ว่ากำลังบันทึกอะไรบ้าง</p><p><strong>ข้อสังเกตสุดท้าย:</strong> แผ่นตั้งค่านี้มีทั้งร่าง การกันปิด คำสั่ง async ตัวนับรุ่น ธงกันซ้ำ และการแยกกติกาออกไปที่ store — <strong>มันคือแอปเล็ก ๆ หนึ่งตัวที่บังเอิญแสดงเป็นแผ่น</strong> การคิดว่ามันเป็น "แค่หน้าตั้งค่า" คือที่มาของบั๊กเกือบทั้งหมดในหัวข้อ 10</p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>แผ่นคัดลอกค่าจริงมาเป็นร่างครั้งเดียวใน <code>initState</code></li><li>ค่าจริงต้องไม่เปลี่ยนจนกว่าผู้ใช้จะกดบันทึก</li><li><code>_isDirty</code> คำนวณจากการเทียบกับค่าจริง ไม่ใช่เก็บเป็น field</li><li>บันทึกคือจุดเดียวที่แตะค่าจริง และเปลี่ยนทุกค่าพร้อมกัน</li><li>ครอบด้วย <code>PopScope</code> เพราะแผ่นปิดง่ายกว่าหน้าจอ</li><li>ปุ่มออกจากระบบต้องปิดแผ่นก่อน แล้วให้เจ้าของหน้าจอจัดการเส้นทาง</li><li>ปุ่มทดสอบต้องทดสอบค่าในร่าง และผูกผลกับค่าที่ทดสอบ</li><li>กติกาทางธุรกิจอยู่ที่ store ไม่ใช่ในแผ่น</li></ul></div><p><strong>บทถัดไป:</strong> 5.12 เป็นบทปฏิบัติปิดท้าย Part 5 — ประกอบเส้นทางทั้งหมดตั้งแต่เข้าสู่ระบบจนออก แล้วตรวจว่าครบตามเกณฑ์</p></section>

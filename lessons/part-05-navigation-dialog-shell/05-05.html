@@ -4,24 +4,152 @@
 <title>PopScope</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-05 · Flutter UI</span><h1>PopScope</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Guard draft</a></li><li><a href="#section-2">didPop สำคัญ</a></li><li><a href="#section-3">Internal back</a></li><li><a href="#section-4">Unsaved settings</a></li><li><a href="#section-5">Predictive back</a></li><li><a href="#section-6">Transaction in flight</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>PopScope</code> ควบคุม back gestureเชิงคาดการณ์ได้: <code>canPop</code> ต้องสะท้อนว่าปัจจุบัน popได้หรือไม่ และ callbackจัดการกรณีที่ไม่ได้ popโดยไม่เรียก popซ้ำเป็นวง</div>
-<section id="section-1"><h2>1. Guard draft</h2><pre class="code-vs"><code>PopScope(
-  canPop: !isDirty,
-  onPopInvokedWithResult: (didPop, _) async {
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: บอกล่วงหน้า ไม่ใช่ห้ามทีหลัง</a></li><li><a href="#section-4">โครงพื้นฐาน</a></li><li><a href="#section-5">บรรทัด if (didPop) return; คือหัวใจ</a></li><li><a href="#section-6">canPop ต้องคำนวณ ไม่ใช่เก็บ</a></li><li><a href="#section-7">ปุ่มที่เราทำเองก็ต้องผ่านด่านเดียวกัน</a></li><li><a href="#section-8">ใช้ย้อนขั้นตอนภายในหน้าเดียวกัน</a></li><li><a href="#section-9">บางครั้งไม่ควรถาม แต่ควรเก็บให้เลย</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: กันงานที่ทำค้างไว้ไม่ให้หายเพราะกดย้อนกลับ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (ปุ่มย้อนกลับคือ <code>pop</code>) และ 5.3 (ผลลัพธ์ที่ส่งกลับ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>PopScope</code> ถามยืนยันก่อนปิดหน้าที่มีของค้าง โดยไม่ทำให้เกิดวงวนหรือปิดสองรอบ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>คนหน้างานสแกนของเข้ารายการไป 18 บรรทัด แล้วนิ้วไปโดนปุ่มย้อนกลับที่ขอบเครื่อง</p><pre class="code-vs"><code>กดย้อนกลับ → pop() ทันที → 18 บรรทัดหายหมด → ไม่มีทางเอากลับ</code></pre><p>บน PDA เรื่องนี้เกิดบ่อยกว่าบนโทรศัพท์มาก เพราะ</p><table><thead><tr><th>เหตุ</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>เครื่องหนัก ต้องจับแน่น</td><td>นิ้วอยู่ใกล้ขอบและปุ่มตลอดเวลา</td></tr>
+<tr><td>ใส่ถุงมือ</td><td>กะระยะพลาดง่าย</td></tr>
+<tr><td>มีปุ่มฮาร์ดแวร์หลายปุ่ม</td><td>กดผิดปุ่มโดยไม่รู้ตัว</td></tr>
+<tr><td>เดินไปทำไป</td><td>ไม่ได้มองจอตลอด</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>PopScope</code></td><td>widget ที่ควบคุมว่าหน้านี้ถูกปิดได้หรือไม่</td></tr>
+<tr><td><code>canPop</code></td><td>บอกระบบว่าตอนนี้ปิดได้เลยไหม</td></tr>
+<tr><td><code>onPopInvokedWithResult</code></td><td>ถูกเรียกเมื่อมีคนพยายามปิดหน้านี้</td></tr>
+<tr><td><code>didPop</code></td><td>บอกว่าหน้านั้นถูกปิดไปแล้วจริงหรือยัง</td></tr>
+<tr><td>dirty</td><td>มีสิ่งที่แก้ไว้แล้วยังไม่ได้บันทึก</td></tr>
+<tr><td>predictive back</td><td>ท่าปัดย้อนกลับของ Android ที่แสดงตัวอย่างหน้าถัดไปให้เห็นก่อน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: บอกล่วงหน้า ไม่ใช่ห้ามทีหลัง</h2><p>จุดที่ทำให้หลายคนเขียน <code>PopScope</code> ผิด คือคิดว่ามันทำงานแบบ “ดักตอนกด แล้วยกเลิก”</p><pre class="code-vs"><code>สิ่งที่คิด:  ผู้ใช้กด → เราดัก → ยกเลิกการปิด
+สิ่งที่จริง:  เราประกาศไว้ล่วงหน้าว่าปิดได้ไหม → ระบบทำตามนั้น</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>canPop</code> ต้องสะท้อนความจริง <em>ตลอดเวลา</em> ไม่ใช่เฉพาะตอนที่ผู้ใช้กด — เพราะ Android ต้องรู้ล่วงหน้าเพื่อจะวาดตัวอย่างหน้าถัดไปให้เห็นระหว่างปัด</div><p>นี่คือเหตุผลที่ <code>PopScope</code> รับ <code>canPop</code> เป็นค่า ไม่ใช่เป็นฟังก์ชันที่ถามตอนกด</p></section>
+
+<section id="section-4"><h2>4. โครงพื้นฐาน</h2><p>เปิด <code>lib/nav_basics/task_detail_screen.dart</code></p><pre class="code-vs"><code>@override
+Widget build(BuildContext context) =&gt; PopScope(
+  // ปล่อยให้ปิดได้เองเมื่อไม่มีอะไรค้าง
+  canPop: !_isDirty,
+  onPopInvokedWithResult: (didPop, result) async {
+    // ปิดไปแล้ว ห้ามสั่งปิดซ้ำ
     if (didPop) return;
-    final discard = await confirmDiscard(context);
-    if (!context.mounted || !discard) return;
-    Navigator.of(context).pop();
+    final discard = await showDiscardDialog(context);
+    if (!discard || !context.mounted) return;
+    Navigator.of(context).pop(const TaskCancelled());
   },
-  child: const EditorBody(),
-)</code></pre></section>
-<section id="section-2"><h2>2. didPop สำคัญ</h2><p>ถ้า route popไปแล้ว callbackยังถูกเรียก ห้าม popอีก ตรวจ didPopก่อนเสมอ wmsappใช้ PopScopeใน CheckIn/Packing/Pickingเพื่อ backภายใน stepก่อนออก route</p></section>
-<section id="section-3"><h2>3. Internal back</h2><p>Workflow state machineอาจย้อน stepแทน pop route: canPop falseเมื่อไม่อยู่ initial; callbackสั่ง store.previous/cancel dialog เมื่อกลับ initialจึงให้ route popได้</p></section>
-<section id="section-4"><h2>4. Unsaved settings</h2><p>Absolute settings sheetใช้ isDirtyควบคุม canPopแล้วถาม discard ก่อนปิด ทำให้ drag/back/close buttonใช้ policyเดียวกัน Close buttonควรเรียก maybePopไม่ bypass guard</p></section>
-<section id="section-5"><h2>5. Predictive back</h2><p>Androidต้องรู้ canPopล่วงหน้าเพื่อ animation หลีกเลี่ยง async decisionใน canPop; set canPop=falseแล้วถามใน callback จากนั้น popด้วย flag/commandที่ไม่ถามซ้ำ</p></section>
-<section id="section-6"><h2>6. Transaction in flight</h2><p>ระหว่าง commitอาจ canPop=falseและแสดงเหตุผล หรืออนุญาตออกแต่ operationอยู่ store/idempotent ห้ามปล่อยหน้าแล้ว responseเก่าคืน state obsolete</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Packingอยู่ state scanPartและ Backควรกลับ scanPallet ไม่ออกหน้า ทำอย่างไร?</p><details><summary>เฉลย</summary><p>canPopเฉพาะ initial scanPallet; เมื่อ false callbackตรวจ didPopแล้ว dispatch back eventให้ FSMกลับ stateก่อนหน้า คืน focusตาม state เมื่อ initialรอบถัดไปจึง pop route</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าใช้ <code>canPop:false</code> ถาวรโดยไม่มีทางออก/accessibility และอย่าเรียก Navigator.popทันทีใน callbackจน dialog guardไม่ได้ผล</div></section>
+  child: Scaffold(...),
+);</code></pre><p>ไล่ดูสองเส้นทาง</p><table><thead><tr><th><code>_isDirty</code></th><th><code>canPop</code></th><th>กดย้อนกลับแล้วเกิดอะไร</th></tr></thead><tbody>
+<tr><td><code>false</code></td><td><code>true</code></td><td>ปิดทันที แล้ว callback ถูกเรียกด้วย <code>didPop == true</code></td></tr>
+<tr><td><code>true</code></td><td><code>false</code></td><td>ไม่ปิด แล้ว callback ถูกเรียกด้วย <code>didPop == false</code></td></tr>
+</tbody></table><p>สังเกตว่า callback ถูกเรียก <strong>ทั้งสองกรณี</strong> — ซึ่งเป็นที่มาของบั๊กที่พบบ่อยที่สุดในบทนี้</p></section>
+
+<section id="section-5"><h2>5. บรรทัด if (didPop) return; คือหัวใจ</h2><p>ถ้าลืมบรรทัดนี้</p><pre class="code-vs"><code>onPopInvokedWithResult: (didPop, result) async {
+  // ลืมตรวจ didPop
+  final discard = await showDiscardDialog(context);
+  if (discard) Navigator.of(context).pop();
+}</code></pre><p>ผลที่ได้เมื่อ <code>_isDirty</code> เป็น <code>false</code></p><pre class="code-vs"><code>ผู้ใช้กดย้อนกลับ
+  → canPop เป็น true → หน้าถูกปิดไปแล้ว
+  → callback ทำงาน → เปิดกล่องถามบนหน้าที่ปิดไปแล้ว
+  → ผู้ใช้กดทิ้งไป → pop() อีกครั้ง → ปิดหน้าที่อยู่ข้างล่างไปด้วย</code></pre><p>อาการที่เห็นคือ “กดย้อนกลับหนึ่งครั้ง แต่ถอยไปสองหน้า” ซึ่งเกิดเป็นครั้งคราวและอธิบายยากถ้าไม่รู้สาเหตุ</p><div class="warn">กฎที่ใช้ได้ทุกครั้ง — <code>onPopInvokedWithResult</code> ต้องขึ้นต้นด้วย <code>if (didPop) return;</code> เสมอ ยกเว้นจะรู้แน่ว่ากำลังทำอะไรอยู่</div></section>
+
+<section id="section-6"><h2>6. canPop ต้องคำนวณ ไม่ใช่เก็บ</h2><p>เปิดดูว่า <code>_isDirty</code> มาจากไหน</p><pre class="code-vs"><code>/// มีอะไรที่แก้ไว้แล้วยังไม่ได้ส่งกลับหรือไม่
+bool get _isDirty =&gt;
+    _quantity != widget.task.quantity ||
+    _palletCode != widget.task.palletCode ||
+    _noteController.text != widget.task.note;</code></pre><p>เป็น getter ที่เทียบกับค่าตั้งต้น ไม่ใช่ <code>bool _isDirty = false;</code> ที่ตั้งเป็น <code>true</code> ทุกครั้งที่มีการแก้</p><table><thead><tr><th></th><th>เก็บเป็น field</th><th>คำนวณจากค่าจริง</th></tr></thead><tbody>
+<tr><td>แก้แล้วแก้กลับเป็นค่าเดิม</td><td>ยังบอกว่า dirty — ถามทั้งที่ไม่มีอะไรเปลี่ยน</td><td>บอกว่าไม่ dirty ถูกต้อง</td></tr>
+<tr><td>ลืมตั้งค่าในบางเส้นทาง</td><td>เป็นไปได้</td><td>เป็นไปไม่ได้</td></tr>
+</tbody></table><p>เป็นหลักการเดียวกับ 4.2 — <strong>อย่าเก็บสิ่งที่คำนวณได้</strong></p><p>และเพราะ <code>_isDirty</code> อ่านจาก <code>_noteController.text</code> หน้าจอจึงต้องวาดใหม่เมื่อผู้ใช้พิมพ์ ไม่งั้น <code>canPop</code> จะยังเป็นค่าเก่า</p><pre class="code-vs"><code>_noteController.addListener(_onNoteChanged);
+...
+void _onNoteChanged() =&gt; setState(() {});</code></pre><p>ตรงนี้คือเหตุผลที่ต้องฟัง controller ตาม 3.4 — ไม่ใช่แค่เพื่อเปิดปิดปุ่มบันทึก แต่เพื่อให้ <code>canPop</code> ตรงกับความจริงตลอดเวลาตามที่หัวข้อ 3 บอกไว้</p></section>
+
+<section id="section-7"><h2>7. ปุ่มที่เราทำเองก็ต้องผ่านด่านเดียวกัน</h2><p>ปัญหาที่โผล่ทันทีที่มีปุ่มย้อนกลับของตัวเอง</p><pre class="code-vs"><code>// ผิด — ข้าม PopScope ไปเลย
+IconButton(
+  icon: const Icon(Icons.close),
+  onPressed: () =&gt; Navigator.of(context).pop(),
+)</code></pre><pre class="code-vs"><code>// ถูก — ขอปิด แล้วให้ PopScope ตัดสิน
+IconButton(
+  icon: const Icon(Icons.close),
+  onPressed: () =&gt; Navigator.of(context).maybePop(),
+)</code></pre><table><thead><tr><th></th><th><code>pop()</code></th><th><code>maybePop()</code></th></tr></thead><tbody>
+<tr><td>เคารพ <code>PopScope</code></td><td>ไม่</td><td>ใช่</td></tr>
+<tr><td>ใช้เมื่อ</td><td>ตัดสินใจแล้วว่าจะปิดจริง</td><td>ผู้ใช้ขอปิด แต่ยังต้องผ่านการตรวจ</td></tr>
+</tbody></table><p>ใน lab ปุ่มบันทึกและปุ่มพักไว้ก่อนใช้ <code>pop()</code> ตรง ๆ ซึ่งถูกต้อง เพราะทั้งสองเป็นการตัดสินใจที่ชัดเจนแล้ว ไม่ใช่การ “ขอออก”</p><p>ถ้ามีหลายทางออกจากหน้าเดียวกัน ต้องทำให้ทุกทางที่แปลว่า “ขอออกโดยยังไม่ตัดสินใจ” ไปรวมที่ <code>maybePop()</code> ทางเดียว ไม่งั้นจะมีทางที่หลุดการตรวจ</p></section>
+
+<section id="section-8"><h2>8. ใช้ย้อนขั้นตอนภายในหน้าเดียวกัน</h2><p>เมื่อหน้าจอมีหลายขั้นตอน (4.15) ปุ่มย้อนกลับควรถอยทีละขั้น ไม่ใช่ออกจากงานทั้งหมด</p><pre class="code-vs"><code>PopScope(
+  // อยู่ขั้นแรกถึงจะออกจากหน้าได้
+  canPop: _state is ScanPallet,
+  onPopInvokedWithResult: (didPop, result) {
+    if (didPop) return;
+    // ยังไม่ใช่ขั้นแรก — ถอยหนึ่งขั้นแทนการปิดหน้า
+    _goToPreviousStep();
+  },
+  child: ...,
+)</code></pre><p>ผู้ใช้จึงกดย้อนกลับได้ตามสัญชาตญาณ และมันทำสิ่งที่เขาคาดหวังคือ “ถอยหนึ่งก้าว” ไม่ใช่ “ทิ้งงานทั้งหมด”</p><p>สังเกตว่าเมื่อถอยจนถึงขั้นแรก <code>canPop</code> จะกลายเป็น <code>true</code> เอง แล้วการกดครั้งถัดไปจึงออกจากหน้าจริง — โดยไม่ต้องเขียนเงื่อนไขพิเศษอะไรเพิ่ม</p></section>
+
+<section id="section-9"><h2>9. บางครั้งไม่ควรถาม แต่ควรเก็บให้เลย</h2><p><code>PopScope</code> ที่ถามยืนยันไม่ใช่คำตอบของทุกงาน</p><table><thead><tr><th>ลักษณะงาน</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>แก้ไม่กี่ช่อง เสียหายน้อยถ้าหาย</td><td>ถามยืนยัน</td></tr>
+<tr><td>สแกนมาแล้วหลายสิบบรรทัด</td><td>เก็บเป็นร่างอัตโนมัติ แล้วให้กลับมาทำต่อได้</td></tr>
+<tr><td>กำลังส่งข้อมูลอยู่</td><td>ห้ามปิด และบอกว่ากำลังส่ง</td></tr>
+</tbody></table><p>แถวกลางสำคัญ — <strong>ถ้างานที่หายมีมูลค่าสูงพอ การถามว่า “จะทิ้งไหม” ก็ยังเป็นการออกแบบที่ไม่ดี</strong> เพราะผู้ใช้อาจกดผิดอีกรอบ ทางที่ดีกว่าคือทำให้มันไม่หายตั้งแต่แรก</p><p>และแถวล่างคือกรณีที่ต้องใช้ <code>canPop: false</code> จริง ๆ ระหว่างที่คำสั่งยังไม่จบ ตามที่ทำใน 4.14</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดย้อนกลับหนึ่งครั้ง ถอยไปสองหน้า</td><td>ลืม <code>if (didPop) return;</code></td><td>ใส่บรรทัดแรกเสมอ</td></tr>
+<tr><td>ถามยืนยันทั้งที่ไม่ได้แก้อะไร</td><td>เก็บ dirty เป็น field แล้วตั้งค่าไม่ตรง</td><td>คำนวณจากค่าจริง</td></tr>
+<tr><td>ปัดย้อนกลับบน Android แล้วภาพกระตุก</td><td><code>canPop</code> ไม่ตรงกับความจริง ณ ขณะนั้น</td><td>ทำให้หน้าจอวาดใหม่เมื่อค่าที่เกี่ยวข้องเปลี่ยน</td></tr>
+<tr><td>ปุ่มปิดที่ทำเองข้ามการตรวจไปเลย</td><td>ใช้ <code>pop()</code> แทน <code>maybePop()</code></td><td>เปลี่ยนเป็น <code>maybePop()</code></td></tr>
+<tr><td>กล่องยืนยันเด้งซ้อนกันหลายอัน</td><td>กดย้อนกลับรัว ๆ ระหว่างที่กล่องเปิดอยู่</td><td>ธงกันซ้ำ หรือปิดการโต้ตอบระหว่างถาม</td></tr>
+<tr><td>ปิดหน้าไปทั้งที่ยังส่งข้อมูลไม่เสร็จ</td><td>ไม่ได้ตั้ง <code>canPop: false</code> ระหว่างส่ง</td><td>รวมสถานะกำลังส่งเข้าไปในเงื่อนไข</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>หน้าสแกนรับเข้าหนึ่งหน้า มีสามสถานะ</p><table><thead><tr><th>สถานะ</th><th>คำอธิบาย</th></tr></thead><tbody>
+<tr><td>ยังไม่ได้สแกนอะไร</td><td>รายการว่าง</td></tr>
+<tr><td>สแกนไปแล้วบางส่วน</td><td>มี 1 บรรทัดขึ้นไป ยังไม่ได้ส่ง</td></tr>
+<tr><td>กำลังส่งขึ้นเซิร์ฟเวอร์</td><td>กดยืนยันแล้ว รอผลอยู่</td></tr>
+</tbody></table><ol><li>เขียน <code>canPop</code> ให้ครบทั้งสามสถานะ</li><li>เขียน <code>onPopInvokedWithResult</code> ที่ทำต่างกันตามสถานะ</li><li>ตอบว่าถ้าสแกนไปแล้ว 40 บรรทัด การถามว่า “จะทิ้งไหม” เพียงพอหรือไม่</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 และ 2 — โค้ด</strong></p><pre class="code-vs"><code>bool get _hasScannedLines =&gt; _lines.isNotEmpty;
+
+@override
+Widget build(BuildContext context) =&gt; PopScope(
+  // ปิดได้เฉพาะตอนที่ไม่มีอะไรค้างและไม่ได้กำลังส่ง
+  canPop: !_hasScannedLines &amp;&amp; !_submitting,
+  onPopInvokedWithResult: (didPop, result) async {
+    if (didPop) return;
+
+    // กำลังส่งอยู่ — ห้ามออก และบอกว่าทำไม
+    if (_submitting) {
+      showResultBanner(
+        ScaffoldMessenger.of(context),
+        'กำลังส่งข้อมูล กรุณารอสักครู่',
+      );
+      return;
+    }
+
+    // มีของค้าง — ให้เลือกสามทาง ไม่ใช่สองทาง
+    final choice = await showExitChoiceDialog(context, lineCount: _lines.length);
+    if (!context.mounted) return;
+    switch (choice) {
+      case ExitChoice.keepScanning:
+        return;                                  // ไม่ทำอะไร
+      case ExitChoice.saveDraft:
+        await _saveDraft();
+        if (!context.mounted) return;
+        Navigator.of(context).pop(const ReceivePaused());
+      case ExitChoice.discard:
+        Navigator.of(context).pop(const ReceiveCancelled());
+      case null:
+        return;                                  // ปิดกล่องเฉย ๆ
+    }
+  },
+  child: ...,
+);</code></pre><p>สังเกตว่ากล่องถามคืน <code>enum</code> สามค่า ไม่ใช่ <code>bool</code> — เป็นเหตุผลเดียวกับ 5.3 คือมีสามทางที่ต้องทำต่างกัน</p><p><strong>ข้อ 3 — 40 บรรทัด การถามว่าจะทิ้งไหม พอไหม</strong></p><p>ไม่พอ และเหตุผลลึกกว่าที่คิด</p><p><em>เหตุผลที่หนึ่ง — กล่องยืนยันกันได้แค่การกดผิดครั้งเดียว</em></p><pre class="code-vs"><code>นิ้วโดนปุ่มย้อนกลับ → กล่องเด้ง → นิ้วยังอยู่ที่เดิม → โดนปุ่ม "ทิ้งไป" พอดี</code></pre><p>บน PDA ที่ถือด้วยมือเดียวและใส่ถุงมือ เหตุการณ์นี้เกิดจริง</p><p><em>เหตุผลที่สอง — คำถามนั้นตอบยากเกินไป</em></p><p>“จะทิ้งไหม” บังคับให้ผู้ใช้เลือกระหว่างเสียงาน 40 บรรทัด กับติดอยู่ในหน้านั้นต่อ ทั้งที่สิ่งที่เขาต้องการจริง ๆ อาจเป็น “ขอไปดูอย่างอื่นแป๊บหนึ่ง แล้วจะกลับมา”</p><p><em>เหตุผลที่สาม — งานสำคัญไม่ควรอยู่ในที่ที่หายได้</em></p><table><thead><tr><th>ทางเลือก</th><th>งานหายเมื่อ</th></tr></thead><tbody>
+<tr><td>เก็บใน <code>State</code> อย่างเดียว + ถามก่อนปิด</td><td>กดผิด, แอปถูกระบบปิด, แบตหมด, เครื่องค้าง</td></tr>
+<tr><td>เก็บลงเครื่องทุกครั้งที่สแกน</td><td>แทบไม่มี</td></tr>
+</tbody></table><p><strong>สิ่งที่ควรทำจริง</strong></p><pre class="code-vs"><code>สแกนแต่ละบรรทัด → เก็บลงเครื่องทันที
+กดย้อนกลับ      → ไม่ต้องถามว่าจะทิ้งไหม
+                   ถามว่า "เก็บไว้ทำต่อ" หรือ "ยกเลิกใบนี้"
+เปิดกลับเข้ามา   → เจอ 40 บรรทัดเดิมรออยู่</code></pre><p>เมื่อทำแบบนี้แล้ว <code>PopScope</code> ยังมีประโยชน์อยู่ แต่หน้าที่ของมันเปลี่ยนไป — จากการ <em>กันไม่ให้งานหาย</em> กลายเป็นการ <em>ถามว่าจบใบนี้อย่างไร</em> ซึ่งเป็นคำถามที่ตอบง่ายกว่ามาก</p><p><strong>หลักที่ได้:</strong> <code>PopScope</code> เหมาะกับงานที่หายแล้วเสียดายนิดหน่อย ส่วนงานที่หายแล้วต้องทำใหม่ทั้งหมด ต้องแก้ด้วยการทำให้มันไม่หาย ไม่ใช่ด้วยการถาม — การเก็บข้อมูลลงเครื่องจะทำจริงใน Part 12</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>PopScope</code> ประกาศล่วงหน้าว่าปิดได้ไหม ไม่ใช่ดักตอนกด</li><li><code>canPop</code> ต้องตรงกับความจริงตลอดเวลา จึงต้องวาดใหม่เมื่อค่าที่เกี่ยวข้องเปลี่ยน</li><li><code>onPopInvokedWithResult</code> ถูกเรียกทั้งตอนที่ปิดได้และปิดไม่ได้</li><li>ขึ้นต้น callback ด้วย <code>if (didPop) return;</code> เสมอ</li><li>คำนวณ dirty จากค่าจริง อย่าเก็บเป็น field</li><li>ทางออกที่แปลว่า “ขอออก” ต้องผ่าน <code>maybePop()</code> ทุกทาง</li><li>ใช้ย้อนขั้นตอนภายในหน้าเดียวกันได้ ไม่ใช่แค่ปิดหน้า</li><li>งานที่หายแล้วต้องทำใหม่ทั้งหมด ต้องแก้ด้วยการเก็บ ไม่ใช่ด้วยการถาม</li></ul></div><p><strong>บทถัดไป:</strong> 5.6 จะขึ้นมาที่ระดับโครงของแอป — แถบล่างที่สลับส่วนงาน และคำถามว่าสลับกลับมาแล้วของเดิมยังอยู่ไหม</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

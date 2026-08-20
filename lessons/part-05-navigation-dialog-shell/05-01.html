@@ -4,22 +4,134 @@
 <title>Navigator push / pop</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-01 · Flutter UI</span><h1>Navigator push / pop</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Stack mental model</a></li><li><a href="#section-2">Push และ await</a></li><li><a href="#section-3">Pop อย่างถูก navigator</a></li><li><a href="#section-4">maybePop/canPop</a></li><li><a href="#section-5">Stack ownership</a></li><li><a href="#section-6">Context หลัง await</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Navigator จัดการ stack ของ Route: <code>push</code> วาง routeใหม่ด้านบน, <code>pop</code> เอาด้านบนออกและคืน result ผู้ใช้ Backคือการขอ pop ไม่ใช่การสร้างหน้าเดิมใหม่</div>
-<section id="section-1"><h2>1. Stack mental model</h2><pre class="code-vs"><code>Login → Home → PickingOrders → PickItems
-                                  ↑ top/current
-pop()       กลับ PickingOrders
-popUntil()  กลับ Home ตาม predicate</code></pre></section>
-<section id="section-2"><h2>2. Push และ await</h2><pre class="code-vs"><code>final result = await Navigator.of(context).push&lt;PickResult&gt;(
-  MaterialPageRoute(builder: (_) =&gt; PickScreen(taskId: task.id)),
-);
-if (!context.mounted) return;
-if (result != null) refreshTask(result.taskId);</code></pre></section>
-<section id="section-3"><h2>3. Pop อย่างถูก navigator</h2><p><code>Navigator.pop(dialogContext, value)</code> ปิด routeของ contextนั้น Nested navigator/root navigatorอาจต่างกัน จึงอย่าใช้ contextสุ่มจาก global ใช้ contextใน builderหรือระบุ <code>rootNavigator</code>ตาม architecture</p></section>
-<section id="section-4"><h2>4. maybePop/canPop</h2><p><code>maybePop</code> เคารพ route pop disposition/PopScopeและคืน bool; <code>canPop</code> บอกว่ามี routeก่อนหน้าแต่ไม่แทน unsaved guard ใช้สำหรับปุ่ม back customโดยไม่ pop rootผิด</p></section>
-<section id="section-5"><h2>5. Stack ownership</h2><p>wmsappใช้ route stackหลาย workflowจาก Home ส่วน Absoluteเก็บ screensภายใน shell/storeมากกว่า ทั้งสองใช้ได้ แต่ห้ามผสมจน backบางครั้ง pop routeและบางครั้งเปลี่ยน storeโดยไม่มี policy</p></section>
-<section id="section-6"><h2>6. Context หลัง await</h2><p>Routeอาจปิดระหว่าง await ตรวจ context.mountedและ current workflowก่อน navigationต่อ ไม่ pushจาก async responseเก่าที่ไม่เกี่ยวกับหน้าปัจจุบัน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จาก listเปิด detailและต้อง refreshเมื่อ detailแก้สำเร็จ ทำอย่างไร?</p><details><summary>เฉลย</summary><p>await <code>push&lt;bool&gt;</code>; detail pop(true)เมื่อ commitสำเร็จ; listตรวจ mounted/resultแล้ว refresh ไม่ใช้ global flagหรือ refreshทุก popโดยไม่จำเป็น</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าเรียก pushใน build และอย่า popสองครั้งจาก callbackเดียวโดยไม่รู้ stack Dialog/bottom sheetก็เป็น routes; popผิด contextอาจปิดหน้าหลักแทน modal</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กองกระดาษ</a></li><li><a href="#section-4">เปิดหน้าใหม่</a></li><li><a href="#section-5">push คืน Future</a></li><li><a href="#section-6">ปิดหน้าและส่งค่ากลับ</a></li><li><a href="#section-7">ปุ่มย้อนกลับก็คือ pop</a></li><li><a href="#section-8">เมธอดอื่นที่ควรรู้จัก</a></li><li><a href="#section-9">pop ให้ถูก Navigator</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: เริ่มต้น–กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: เปิดหน้าใหม่และกลับมาให้ถูกวิธี</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 1.10 (<code>BuildContext</code>) และ 4.9 (การใช้ context หลัง <code>await</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เปิดหน้าจอใหม่ ปิดกลับ และเข้าใจว่าปุ่มย้อนกลับของเครื่องทำอะไรจริง ๆ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ทุกอย่างที่ทำมาตั้งแต่ Part 1 อยู่บนหน้าจอเดียว แต่แอปจริงมีหลายหน้า</p><pre class="code-vs"><code>รายการงาน → แตะบรรทัด → รายละเอียดงาน → กดย้อนกลับ → รายการงาน</code></pre><p>คำถามที่ต้องตอบให้ได้ก่อนเขียนโค้ด</p><table><thead><tr><th>คำถาม</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td>ตอนอยู่หน้ารายละเอียด หน้ารายการหายไปไหน</td><td>ถ้ามันถูกทำลาย ตำแหน่งที่เลื่อนไว้จะหาย</td></tr>
+<tr><td>กดย้อนกลับแล้วหน้ารายการถูกสร้างใหม่ไหม</td><td>ถ้าใช่ ต้องโหลดข้อมูลใหม่ทุกครั้ง</td></tr>
+<tr><td>ผลจากหน้ารายละเอียดกลับมาถึงหน้ารายการได้อย่างไร</td><td>ถ้าไม่รู้ จะไปเขียน callback ซ้อนกันหลายชั้นโดยไม่จำเป็น</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>Navigator</code></td><td>widget ที่ดูแลกองของหน้าจอทั้งหมด</td></tr>
+<tr><td><code>Route</code></td><td>หน้าจอหนึ่งหน้าในกองนั้น</td></tr>
+<tr><td>stack</td><td>กองที่วางทับกัน เอาออกได้เฉพาะใบบนสุด</td></tr>
+<tr><td><code>push</code></td><td>วางหน้าใหม่ทับด้านบน</td></tr>
+<tr><td><code>pop</code></td><td>เอาหน้าบนสุดออก</td></tr>
+<tr><td>result</td><td>ค่าที่หน้าที่ถูกปิดส่งกลับให้หน้าที่เรียกมัน</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กองกระดาษ</h2><pre class="code-vs"><code>            ┌──────────────────┐
+            │ รายละเอียดงาน     │  ← บนสุด คือหน้าที่ผู้ใช้เห็น
+            ├──────────────────┤
+            │ หน้าหลัก          │  ← ยังอยู่ ไม่ได้ถูกทำลาย
+            └──────────────────┘
+
+push  = วางใบใหม่ทับ
+pop   = หยิบใบบนสุดออก แล้วใบข้างล่างโผล่มา</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> หน้าที่อยู่ข้างล่างไม่ได้หายไป มันแค่ถูกบัง — <code>State</code> ของมันยังอยู่ครบ ตำแหน่งที่เลื่อนไว้ก็ยังอยู่</div><p>นี่คือคำตอบของสองคำถามแรกในหัวข้อ 1 — <strong>กดย้อนกลับแล้วหน้าเดิมไม่ได้ถูกสร้างใหม่</strong> มันแค่โผล่กลับมา</p></section>
+
+<section id="section-4"><h2>4. เปิดหน้าใหม่</h2><p>เปิด <code>lib/nav_basics/nav_basics_app.dart</code></p><pre class="code-vs"><code>await Navigator.of(context).push&lt;TaskOutcome&gt;(
+  MaterialPageRoute&lt;TaskOutcome&gt;(
+    builder: (_) =&gt; TaskDetailScreen(task: task),
+  ),
+);</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>Navigator.of(context)</code></td><td>หา <code>Navigator</code> ที่ใกล้ที่สุด โดยเดินขึ้นจาก context (1.10)</td></tr>
+<tr><td><code>MaterialPageRoute</code></td><td>สร้างหน้าใหม่พร้อมท่าเลื่อนเข้าแบบ Material (5.2)</td></tr>
+<tr><td><code>builder</code></td><td>ฟังก์ชันที่สร้าง widget ของหน้านั้น</td></tr>
+<tr><td><code>&lt;TaskOutcome&gt;</code></td><td>บอกว่าหน้านี้จะคืนค่าชนิดอะไรกลับมา (5.3)</td></tr>
+</tbody></table><p><code>Navigator</code> มาจากไหน — <code>MaterialApp</code> สร้างให้อัตโนมัติหนึ่งตัว จึงใช้ได้เลยโดยไม่ต้องประกาศเอง</p></section>
+
+<section id="section-5"><h2>5. push คืน Future</h2><p>จุดที่ทำให้ Flutter ต่างจากที่หลายคนคุ้นเคย — <strong><code>push</code> คืน <code>Future</code> ที่จะเสร็จเมื่อหน้านั้นถูกปิด</strong></p><pre class="code-vs"><code>final outcome = await Navigator.of(context).push&lt;TaskOutcome&gt;(...);
+// บรรทัดนี้ทำงานตอนที่ผู้ใช้ปิดหน้ารายละเอียดแล้ว
+// ซึ่งอาจเป็นสามวินาที หรือสามนาทีหลังจากนั้น</code></pre><p>แปลว่านี่คือ async gap ขนาดใหญ่ที่สุดที่จะเจอ — ทุกอย่างใน 4.9 ใช้กับตรงนี้เต็ม ๆ</p><pre class="code-vs"><code>Future&lt;void&gt; _openTask(NavTask task) async {
+  // หยิบไว้ก่อน await เพราะหลังจากนี้หน้าจออาจถูกปิดไปแล้ว (4.9)
+  final messenger = ScaffoldMessenger.of(context);
+
+  final outcome = await Navigator.of(context).push&lt;TaskOutcome&gt;(...);
+  if (!mounted) return;
+  ...
+}</code></pre></section>
+
+<section id="section-6"><h2>6. ปิดหน้าและส่งค่ากลับ</h2><pre class="code-vs"><code>// ใน TaskDetailScreen
+void _save() =&gt; Navigator.of(context).pop(TaskSaved(_draft));</code></pre><p>ค่าที่ใส่ใน <code>pop</code> คือค่าที่ <code>await push</code> ฝั่งโน้นจะได้รับ</p><pre class="code-vs"><code>หน้ารายการ                    หน้ารายละเอียด
+    │
+    ├── push ────────────────→ เปิดขึ้นมา
+    │   (รออยู่)                    │
+    │                              ├── ผู้ใช้แก้จำนวน
+    │                              │
+    │   ←──────────── pop(TaskSaved(...))
+    │
+    └── outcome = TaskSaved(...)</code></pre></section>
+
+<section id="section-7"><h2>7. ปุ่มย้อนกลับก็คือ pop</h2><p>สิ่งที่คนใหม่มักเข้าใจผิด — คิดว่าปุ่มย้อนกลับเป็นคนละกลไกกับ <code>pop</code></p><table><thead><tr><th>ผู้ใช้ทำอะไร</th><th>เกิดอะไรขึ้น</th><th>ค่าที่ส่งกลับ</th></tr></thead><tbody>
+<tr><td>กดปุ่มลูกศรบน AppBar</td><td><code>pop()</code></td><td><code>null</code></td></tr>
+<tr><td>กดปุ่มย้อนกลับของเครื่อง</td><td><code>pop()</code></td><td><code>null</code></td></tr>
+<tr><td>ปัดจากขอบจอ (iOS)</td><td><code>pop()</code></td><td><code>null</code></td></tr>
+<tr><td>กดปุ่มบันทึกที่เราทำเอง</td><td><code>pop(TaskSaved(...))</code></td><td>ค่าที่ส่ง</td></tr>
+</tbody></table><p>สามทางแรกให้ <code>null</code> ทั้งหมด ซึ่งเป็นเหตุผลที่ต้องจัดการกรณี <code>null</code> เสมอ — เรื่องนี้ลงลึกใน 5.3</p><div class="warn">บน PDA บางรุ่นมีปุ่มย้อนกลับแบบฮาร์ดแวร์ที่กดโดนง่ายขณะถือเครื่อง — การถือว่า “ผู้ใช้คงไม่กดย้อนกลับกลางทาง” จึงผิดเสมอ</div></section>
+
+<section id="section-8"><h2>8. เมธอดอื่นที่ควรรู้จัก</h2><table><thead><tr><th>เมธอด</th><th>ทำอะไร</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>push</code></td><td>วางทับ</td><td>เปิดหน้าใหม่ตามปกติ</td></tr>
+<tr><td><code>pop</code></td><td>เอาบนสุดออก</td><td>ปิดหน้าปัจจุบัน</td></tr>
+<tr><td><code>pushReplacement</code></td><td>แทนที่บนสุด</td><td>เข้าสู่ระบบสำเร็จ (5.4)</td></tr>
+<tr><td><code>pushAndRemoveUntil</code></td><td>วางใหม่แล้วล้างที่เหลือ</td><td>ออกจากระบบ (5.4)</td></tr>
+<tr><td><code>maybePop</code></td><td>ขอปิด โดยเคารพ <code>PopScope</code></td><td>ปุ่มย้อนกลับที่เราทำเอง (5.5)</td></tr>
+<tr><td><code>canPop</code></td><td>ถามว่ามีอะไรให้ปิดไหม</td><td>ตัดสินว่าจะแสดงปุ่มย้อนกลับหรือไม่</td></tr>
+</tbody></table><p><code>pop()</code> ตอนที่เหลือหน้าเดียวจะทำให้แอปปิดหรือได้จอดำ ดังนั้นถ้าไม่แน่ใจให้ถาม <code>canPop()</code> ก่อน</p></section>
+
+<section id="section-9"><h2>9. pop ให้ถูก Navigator</h2><p>ปัญหาที่เจอทันทีที่เริ่มใช้กล่องโต้ตอบ</p><pre class="code-vs"><code>showDialog(
+  context: context,
+  builder: (dialogContext) =&gt; AlertDialog(
+    actions: [
+      TextButton(
+        // ถูก — ปิดกล่อง
+        onPressed: () =&gt; Navigator.of(dialogContext).pop(false),
+        child: const Text('แก้ต่อ'),
+      ),
+    ],
+  ),
+)</code></pre><p>กล่องโต้ตอบเป็น route หนึ่งเหมือนกัน จึงมี context ของตัวเอง ถ้าเผลอใช้ <code>context</code> ของหน้าจอ อาจไปปิดหน้าจอทั้งหน้าแทนที่จะปิดแค่กล่อง</p><div class="note">กฎง่าย ๆ — <em>ใช้ context ที่ builder ตัวนั้นให้มา</em> ซึ่งเป็นกฎเดียวกับที่เรียนใน 4.9 หัวข้อ 5 เรื่อง <code>dialogContext.mounted</code></div></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Navigator operation requested with a context that does not include a Navigator</code></td><td>ใช้ context ที่อยู่เหนือ <code>MaterialApp</code></td><td>ใช้ context ที่อยู่ใต้ <code>MaterialApp</code> เช่นใน <code>Builder</code></td></tr>
+<tr><td>ปิดกล่องแล้วหน้าจอปิดตามไปด้วย</td><td>ใช้ context ผิดตัวใน <code>pop</code></td><td>ใช้ <code>dialogContext</code></td></tr>
+<tr><td><code>Looking up a deactivated widget's ancestor</code></td><td>ใช้ context หลัง <code>await push</code></td><td>ตรวจ <code>mounted</code> หรือหยิบไว้ก่อน (4.9)</td></tr>
+<tr><td>กดย้อนกลับแล้วข้อมูลไม่อัปเดต</td><td>ไม่ได้ <code>await</code> ผลของ <code>push</code></td><td><code>await</code> แล้วจัดการผล (5.3)</td></tr>
+<tr><td>กดปุ่มเปิดหน้ารัว ๆ แล้วได้หลายหน้าซ้อนกัน</td><td>ไม่กันการกดซ้ำ</td><td>ปิดปุ่มระหว่างเปิด หรือเช็กว่ากำลังเปิดอยู่</td></tr>
+<tr><td>แอปปิดตัวเองเมื่อกดย้อนกลับ</td><td><code>pop</code> ตอนเหลือหน้าเดียว</td><td>ตรวจ <code>canPop()</code> ก่อน</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>โค้ดนี้อยู่ในหน้ารายการงาน</p><pre class="code-vs"><code>void _openTask(NavTask task) {
+  Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) =&gt; TaskDetailScreen(task: task)),
+  );
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text('เปิดงาน ${task.id} แล้ว')),
+  );
+  setState(() =&gt; _lastOpenedId = task.id);
+}</code></pre><ol><li>อธิบายว่าข้อความจะขึ้นตอนไหน และทำไมนั่นไม่ใช่สิ่งที่ตั้งใจ</li><li>ถ้าอยากให้ข้อความขึ้นตอนผู้ใช้ปิดหน้ารายละเอียด ต้องแก้อย่างไร</li><li>หลังแก้แล้ว มีปัญหาอะไรเพิ่มขึ้นที่ต้องรับมือ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อความขึ้นตอนไหน</strong></p><p>ขึ้น <strong>ทันที</strong> พร้อมกับที่หน้ารายละเอียดกำลังเลื่อนเข้ามา</p><p>เพราะไม่มี <code>await</code> โค้ดจึงไม่ได้รอ — <code>push</code> คืน <code>Future</code> แต่เมื่อไม่รอ บรรทัดถัดไปทำงานต่อทันที</p><pre class="code-vs"><code>_openTask() เรียก
+  ├─ push        → เริ่มเปิดหน้าใหม่
+  ├─ showSnackBar → ขึ้นทันที บนหน้าที่กำลังจะถูกบัง
+  └─ setState     → ทำงานทันที</code></pre><p>ผลคือผู้ใช้จะเห็นข้อความแวบหนึ่งขณะหน้าเลื่อนเข้า แล้วมันก็หายไปกับหน้าที่ถูกบัง</p><p><strong>ข้อ 2 — แก้อย่างไร</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _openTask(NavTask task) async {
+  final messenger = ScaffoldMessenger.of(context);   // หยิบก่อน await
+
+  await Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) =&gt; TaskDetailScreen(task: task)),
+  );
+  if (!mounted) return;
+
+  messenger.showSnackBar(
+    SnackBar(content: Text('ปิดงาน ${task.id} แล้ว')),
+  );
+  setState(() =&gt; _lastOpenedId = task.id);
+}</code></pre><p>สามอย่างที่เปลี่ยน — เติม <code>async</code>/<code>await</code>, หยิบ <code>messenger</code> ไว้ก่อน, และตรวจ <code>mounted</code> หลัง await</p><p><strong>ข้อ 3 — ปัญหาใหม่ที่ตามมา</strong></p><table><thead><tr><th>ปัญหา</th><th>ทำไมเพิ่งโผล่</th><th>รับมืออย่างไร</th></tr></thead><tbody>
+<tr><td>หน้ารายการอาจถูกปิดไปแล้ว</td><td>ตอนไม่ <code>await</code> โค้ดจบทันที ไม่มีช่องให้อะไรเปลี่ยน</td><td><code>if (!mounted) return;</code></td></tr>
+<tr><td>ผู้ใช้อาจกดเปิดรัว ๆ ได้หลายหน้าซ้อน</td><td>ฟังก์ชันกลายเป็น async จึงเรียกซ้อนกันได้</td><td>ธงกันการกดซ้ำ (4.14)</td></tr>
+<tr><td>ไม่รู้ว่าผู้ใช้ปิดหน้าด้วยเหตุผลอะไร</td><td>ตอนนี้เริ่มสนใจผลแล้ว</td><td>รับค่าที่ pop กลับมา (5.3)</td></tr>
+</tbody></table><p><strong>ทำไมต้องหยิบ <code>messenger</code> ไว้ก่อน ทั้งที่มี <code>if (!mounted) return;</code> แล้ว</strong></p><p>ในโค้ดนี้ตรวจ <code>mounted</code> ก็เพียงพอแล้วจริง ๆ แต่การหยิบไว้ก่อนมีข้อดีที่ต่างออกไป — มันทำให้ <strong>ยังแสดงข้อความได้แม้หน้ารายการถูกปิดไป</strong> ซึ่งบางครั้งเป็นสิ่งที่ต้องการ เช่นข้อความ “บันทึกสำเร็จ” ที่ควรเห็นแม้ผู้ใช้จะเปลี่ยนหน้าไปแล้ว</p><p>ทั้งสองแบบถูก แต่ให้พฤติกรรมต่างกัน จึงต้องเลือกอย่างตั้งใจ — จะกลับมาเรื่องนี้ใน 5.10</p><p><strong>ลองต่อ:</strong> ใน <code>test/nav_basics_test.dart</code> มีเทสต์ <code>'กดย้อนกลับโดยไม่ได้แก้อะไร ต้องไม่มีข้อความใด ๆ'</code> ซึ่งใช้ <code>tester.pageBack()</code> จำลองการกดย้อนกลับ ลองอ่านดูว่ามันตรวจอะไร</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>Navigator</code> เก็บหน้าจอเป็นกอง เอาออกได้ทีละใบบนสุด</li><li>หน้าที่อยู่ข้างล่างไม่ถูกทำลาย <code>State</code> ยังอยู่ครบ</li><li><code>push</code> คืน <code>Future</code> ที่เสร็จเมื่อหน้านั้นถูกปิด — เป็น async gap ที่ยาวที่สุดในแอป</li><li>ค่าที่ใส่ใน <code>pop</code> คือค่าที่ฝั่งที่ <code>await</code> จะได้รับ</li><li>ปุ่มย้อนกลับทุกแบบคือ <code>pop()</code> ที่ให้ <code>null</code></li><li>ปิด route ด้วย context ที่ builder ตัวนั้นให้มา</li><li>หลัง <code>await push</code> ต้องตรวจ <code>mounted</code> เสมอ</li></ul></div><p><strong>บทถัดไป:</strong> 5.2 จะเจาะ <code>MaterialPageRoute</code> ว่า <code>builder</code> ทำงานเมื่อไหร่ และหน้าใหม่ควรได้รับข้อมูลที่ต้องใช้มาอย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

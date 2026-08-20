@@ -1,18 +1,157 @@
-<div class="note"><code>MaterialPageRoute</code> สร้าง route transitionแบบ Materialและ builderสร้าง pageเมื่อ routeต้องใช้ Dependencyควรถูกส่งแบบ typed constructorจาก composition owner ไม่ให้ screenค้น global singletonเองทุกอย่าง</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) =&gt; PickItemsScreen(
-      taskId: task.id,
-      repository: taskRepository,
-      session: session,
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งข้อมูลให้หน้าใหม่โดยไม่สร้างปัญหาทีหลัง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (push/pop) และ 4.12 (ใครสร้าง คนนั้นทำลาย)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่าหน้าใหม่ควรได้รับ id หรือได้รับข้อมูลทั้งก้อน และรู้ว่าใครต้องทำลายอะไร</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>ตอนเปิดหน้าใหม่ เราต้องส่งของให้มันเสมอ — และวิธีส่งที่เลือกจะตามหลอกไปอีกนาน</p><pre class="code-vs"><code>TaskDetailScreen(task: task)        // ส่งข้อมูลทั้งก้อน
+TaskDetailScreen(taskId: task.id)   // ส่งแค่รหัส แล้วให้มันโหลดเอง</code></pre><p>ทั้งสองแบบใช้ได้ แต่ให้พฤติกรรมต่างกันในสถานการณ์ที่สำคัญ และเลือกผิดจะเจอ “ข้อมูลบนสองหน้าไม่ตรงกัน” ซึ่งไล่หาสาเหตุยาก</p></section>
+
+<section><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>MaterialPageRoute</code></td><td>route ที่มาพร้อมท่าเลื่อนเข้าออกแบบ Material</td></tr>
+<tr><td><code>builder</code></td><td>ฟังก์ชันที่สร้าง widget ของหน้านั้น</td></tr>
+<tr><td>constructor injection</td><td>ส่งของที่หน้านั้นต้องใช้ผ่าน constructor</td></tr>
+<tr><td>snapshot</td><td>ข้อมูล ณ ขณะหนึ่ง ที่ไม่อัปเดตตามต้นฉบับ</td></tr>
+<tr><td>ownership</td><td>ใครเป็นเจ้าของ ก็คือคนที่ต้องทำลาย</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Mental model: route คือใบสั่งงาน ไม่ใช่หน้าจอ</h2><pre class="code-vs"><code>MaterialPageRoute(builder: (_) =&gt; TaskDetailScreen(task: task))
+       │                    │
+       │                    └─ ยังไม่ได้สร้าง widget ตอนนี้
+       └─ เป็นแค่คำอธิบายว่า "ถ้าจะสร้างหน้านี้ ให้ทำแบบนี้"</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> <code>builder</code> ถูกเรียกเมื่อ <code>Navigator</code> ต้องการวาดหน้านั้นจริง ๆ ไม่ใช่ตอนที่เราเขียนบรรทัดนั้น</div><p>ผลตามมาที่ต้องรู้ — ค่าที่อ่านไว้ <em>ก่อน</em> เขียน <code>MaterialPageRoute</code> จะถูกจับไว้ในตัวมัน ส่วนค่าที่อ่าน <em>ใน</em> <code>builder</code> จะเป็นค่า ณ ตอนที่หน้าถูกสร้าง</p></section>
+
+<section><h2>4. ส่งของผ่าน constructor</h2><p>เปิด <code>lib/nav_basics/nav_basics_app.dart</code></p><pre class="code-vs"><code>MaterialPageRoute&lt;TaskOutcome&gt;(
+  builder: (_) =&gt; TaskDetailScreen(task: task),
+)</code></pre><p>สังเกตว่า <code>builder</code> รับ context มาแต่ไม่ได้ใช้ จึงเขียนเป็น <code>_</code></p><table><thead><tr><th>วิธีส่งของ</th><th>ควรใช้ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ผ่าน constructor</td><td>ใช่</td><td>compiler ตรวจให้ว่าครบและถูกชนิด</td></tr>
+<tr><td>ผ่านตัวแปร global</td><td>ไม่</td><td>ทดสอบยาก และไม่รู้ว่าหน้านั้นต้องใช้อะไรบ้าง</td></tr>
+<tr><td>ผ่าน <code>RouteSettings.arguments</code></td><td>เท่าที่จำเป็น</td><td>เป็น <code>Object?</code> ต้อง cast เอง พังตอนรัน</td></tr>
+</tbody></table><pre class="code-vs"><code>// เลี่ยง — ผิดแล้วรู้ตอนรัน
+final args = ModalRoute.of(context)!.settings.arguments as Map&lt;String, dynamic&gt;;
+final taskId = args['taskId'] as String;   // พิมพ์ผิดชื่อคีย์ = พังตอนใช้งาน
+
+// ดีกว่า — ผิดแล้วรู้ตอน compile
+class TaskDetailScreen extends StatefulWidget {
+  const TaskDetailScreen({super.key, required this.task});
+  final NavTask task;
+}</code></pre><p><code>RouteSettings</code> ยังมีประโยชน์สำหรับตั้งชื่อ route ไว้ดูใน log หรือส่งให้ระบบเก็บสถิติ แต่ไม่ควรใช้เป็นทางหลักในการส่งข้อมูล</p></section>
+
+<section><h2>5. ส่ง id หรือส่งข้อมูลทั้งก้อน</h2><p>นี่คือการตัดสินใจหลักของบทนี้</p><table><thead><tr><th></th><th>ส่งข้อมูลทั้งก้อน</th><th>ส่งแค่ id</th></tr></thead><tbody>
+<tr><td>หน้าใหม่แสดงได้ทันที</td><td>ได้</td><td>ต้องรอโหลดก่อน</td></tr>
+<tr><td>ข้อมูลสดแค่ไหน</td><td>เท่าที่เห็นตอนกด</td><td>สดที่สุด ณ ตอนเปิด</td></tr>
+<tr><td>ต้องมีสถานะโหลด/ผิดพลาดไหม</td><td>ไม่ต้อง</td><td>ต้องมีครบ (4.7)</td></tr>
+<tr><td>เหมาะกับ</td><td>ข้อมูลที่เห็นบนรายการก็พอแล้ว</td><td>ข้อมูลที่คนอื่นแก้ได้ หรือมีรายละเอียดมากกว่าในรายการ</td></tr>
+</tbody></table><p>ใน lab เลือกส่งทั้งก้อน เพราะหน้ารายละเอียดต้องการแค่สิ่งที่แสดงอยู่ในรายการอยู่แล้ว และการทำให้หน้าจอเปิดขึ้นมาพร้อมใช้ทันทีสำคัญกว่าบน PDA</p><p>แต่ถ้าเป็นงานที่คนอื่นแย่งทำได้ ควรส่ง id แล้วโหลดใหม่ เพราะข้อมูลบนรายการอาจเก่าไปหลายนาทีแล้ว</p><div class="note">มีทางสายกลางที่ใช้ได้ดีในหลายกรณี — <em>ส่งทั้งก้อนเพื่อให้แสดงได้ทันที แล้วโหลดใหม่เบื้องหลังเพื่อยืนยัน</em> ซึ่งเป็นรูปแบบเดียวกับ 4.7 หัวข้อ 8 เรื่องโหลดครั้งแรกกับโหลดซ้ำ</div></section>
+
+<section><h2>6. ห้ามส่งของที่แก้ได้ให้สองหน้าถือร่วมกัน</h2><p>อันตรายที่สุดคือส่งวัตถุที่แก้ค่าในตัวเองได้</p><pre class="code-vs"><code>// อันตราย ถ้า NavTask แก้ค่าในตัวเองได้
+TaskDetailScreen(task: task)
+// หน้ารายละเอียดแก้ task.quantity
+// → หน้ารายการเปลี่ยนตามทันที ทั้งที่ผู้ใช้ยังไม่ได้กดบันทึก
+// → กดยกเลิกก็ย้อนไม่ได้แล้ว</code></pre><p><code>NavTask</code> ใน lab จึงเป็นวัตถุที่แก้ไม่ได้ ทุก field เป็น <code>final</code> และเปลี่ยนค่าด้วย <code>copyWith</code> เท่านั้น</p><pre class="code-vs"><code>NavTask get _draft =&gt; widget.task.copyWith(
+  palletCode: _palletCode,
+  quantity: _quantity,
+  note: _noteController.text,
+);</code></pre><p>ผลคือหน้ารายละเอียดถือ <strong>สำเนาของตัวเอง</strong> และไม่มีทางไปแตะข้อมูลของหน้ารายการได้เลย ทางเดียวที่ผลจะกลับไปคือผ่านค่าที่ <code>pop</code> ออกไป</p><p>เป็นหลักการเดียวกับ 4.13 หัวข้อ 5 — ถ้าวัตถุแก้ได้ สำเนาก็ไม่มีความหมาย</p></section>
+
+<section><h2>7. ใครสร้าง คนนั้นทำลาย</h2><p>เมื่อหน้าใหม่ต้องใช้ store หรือ controller คำถามเดิมจาก 4.12 กลับมาอีกครั้ง</p><table><thead><tr><th>สร้างที่ไหน</th><th>ใครทำลาย</th></tr></thead><tbody>
+<tr><td>หน้าใหม่สร้างเองใน <code>initState</code></td><td>หน้านั้น ใน <code>dispose</code></td></tr>
+<tr><td>ส่งเข้ามาทาง constructor</td><td><strong>ห้ามทำลาย</strong> — คนที่สร้างเป็นคนทำลาย</td></tr>
+</tbody></table><pre class="code-vs"><code>// ใน TaskDetailScreen — controller ตัวนี้เป็นของหน้านี้
+@override
+void initState() {
+  super.initState();
+  _noteController = TextEditingController(text: widget.task.note);
+  _noteController.addListener(_onNoteChanged);
+}
+
+@override
+void dispose() {
+  _noteController
+    ..removeListener(_onNoteChanged)   // คู่ตรงข้าม (4.12)
+    ..dispose();
+  super.dispose();
+}</code></pre><p>ส่วน <code>AppSession</code> ที่ส่งต่อกันลงมาหลายชั้น — ไม่มีหน้าไหนทำลายมันเลย เพราะมันมีอายุยาวกว่าทุกหน้าจอ</p><div class="warn">อย่าสร้างของที่ควรใช้ร่วมกัน เช่น client ที่คุยกับ API ขึ้นมาใหม่ในทุก route — จะได้การตั้งค่าและ token คนละชุด แล้วเกิดอาการ “บางหน้าใช้ได้ บางหน้าไม่ได้”</div></section>
+
+<section><h2>8. ส่งผ่านหลายชั้นแล้วเริ่มรก</h2><p>ใน lab จะเห็นว่า <code>AppSession</code> ถูกส่งต่อลงไปเรื่อย ๆ</p><pre class="code-vs"><code>NavBasicsApp(session)
+  └─ LoginScreen(session)
+       └─ HomeShell(session)
+            ├─ ProfileTab(session)
+            └─ SettingsSheet(session)</code></pre><p>ตอนนี้ยังรับได้ แต่พอแอปโตขึ้นจะเริ่มมีหน้าที่ไม่ได้ใช้ <code>session</code> เลยแต่ต้องรับไว้เพื่อส่งต่อ ซึ่งเป็นสัญญาณว่าถึงเวลาต้องมีวิธีที่ดีกว่า</p><table><thead><tr><th>วิธี</th><th>เหมาะเมื่อ</th><th>เรียนที่</th></tr></thead><tbody>
+<tr><td>ส่งผ่าน constructor</td><td>ลึกไม่เกิน 3–4 ชั้น</td><td>บทนี้</td></tr>
+<tr><td><code>InheritedWidget</code></td><td>ของที่หลายหน้าต้องใช้</td><td>1.14</td></tr>
+<tr><td>Provider / Riverpod</td><td>แอปที่โตแล้ว</td><td>Part 10</td></tr>
+</tbody></table><p>อย่าเพิ่งข้ามไปใช้ของหลังตั้งแต่ยังไม่เจอปัญหา — การส่งผ่าน constructor อ่านง่ายที่สุดและ compiler ช่วยตรวจให้มากที่สุด</p></section>
+
+<section><h2>9. หน้าที่รับของครบ ทดสอบง่าย</h2><p>ผลพลอยได้ที่สำคัญของการส่งผ่าน constructor</p><pre class="code-vs"><code>testWidgets('...', (tester) async {
+  await tester.pumpWidget(MaterialApp(
+    home: TaskDetailScreen(
+      task: const NavTask(id: 'T-001', palletCode: 'PAL-0101', quantity: 12),
     ),
-  ),
-);</code></pre></section>
-<section><h2>2. ส่ง ID หรือ object</h2><p>ส่ง immutable snapshotเมื่อ pageใช้ข้อมูล ณ จุดเปิดและไม่ต้องสด; ส่ง IDแล้วให้ feature owner/repositoryโหลดเมื่อ authorityอาจเปลี่ยน อย่าส่ง mutable entityแล้วทั้งสองหน้าแก้คนละทาง</p></section>
-<section><h2>3. Builder context</h2><p>underscore contextใน builderอยู่ใต้ routeใหม่ ใช้สร้าง pageได้ แต่ callbackก่อน pushยังใช้ source context อย่า capture dialog contextไปใช้หลัง modalปิด</p></section>
-<section><h2>4. Dependency lifetime</h2><p>ถ้า routeสร้าง controller/store ให้ route/page dispose; shared auth/repositoryมาจาก app ownerไม่ disposeใน page Absolute Loginส่ง AuthRepositoryเข้า WarehouseShellและ shellสร้าง WarehouseStoreจาก repositories</p></section>
-<section><h2>5. RouteSettings</h2><p>กำหนด name/argumentsสำหรับ analytics/debug/restorationได้ แต่ typed constructorยังปลอดภัยกว่า Map dynamic เมื่อ appโตใช้ Router/declarative routesภายหลังโดยรักษา dependency boundaryเดิม</p></section>
-<section><h2>6. Testability</h2><p>Screenรับ interfaceทำ widget testด้วย fake repository ไม่ต้องตั้ง global HTTP client Navigation testใช้ NavigatorObserverหรือ pump routeแล้ว assert UI/result</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Settingsต้องใช้ ConnectionController sharedและ draft local ควรส่งอะไร?</p><details><summary>เฉลย</summary><p>ส่ง controller interface/shared ownerเข้า route; sheetสร้าง immutable draft/controllers localและ disposeตน เมื่อ saveจึงเรียก controller command ไม่แก้ shared profilesระหว่างพิมพ์</p></details></section>
-<section><h2>8. จุดพลาด</h2><div class="warn">อย่าส่ง BuildContextเป็น dependencyให้ repository/store และอย่าสร้าง ApiClientใหม่ทุก routeจน config/session/cacheต่างกัน ให้ composition rootกำหนด lifetime</div></section>
+  ));
+  ...
+});</code></pre><p>ไม่ต้องตั้งค่าอะไรทั้งนั้น ไม่ต้องมีเซิร์ฟเวอร์ ไม่ต้องล็อกอิน — เพราะทุกอย่างที่หน้านี้ต้องใช้ถูกประกาศไว้ใน constructor แล้ว</p><p>ถ้าหน้าจอไปหยิบของจากตัวแปร global เอง จะทดสอบไม่ได้เลยจนกว่าจะจำลองสภาพแวดล้อมทั้งแอป</p></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แก้ในหน้ารายละเอียดแล้วหน้ารายการเปลี่ยนตามทันที</td><td>ส่งวัตถุที่แก้ได้ไป</td><td>ใช้วัตถุที่แก้ไม่ได้ + <code>copyWith</code></td></tr>
+<tr><td><code>type 'Null' is not a subtype of type 'String'</code> ตอนเปิดหน้า</td><td>ใช้ <code>arguments</code> แล้ว cast ผิด</td><td>ส่งผ่าน constructor</td></tr>
+<tr><td>ข้อมูลบนหน้ารายละเอียดเก่ากว่าความจริง</td><td>ส่ง snapshot ทั้งที่ข้อมูลแข่งกัน</td><td>ส่ง id แล้วโหลดใหม่</td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>ทำลายของที่รับมาทาง constructor</td><td>ใครสร้าง คนนั้นทำลาย</td></tr>
+<tr><td>บางหน้าเรียก API ไม่ผ่าน</td><td>สร้าง client ใหม่ทุก route</td><td>สร้างที่เดียวแล้วส่งต่อ</td></tr>
+<tr><td>ทดสอบหน้าจอไม่ได้ ต้องรันทั้งแอป</td><td>หน้าจอหยิบของจาก global เอง</td><td>รับทุกอย่างผ่าน constructor</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><p>หน้าจอเลือกช่องเก็บสินค้า ต้องใช้สามอย่าง</p><table><thead><tr><th>สิ่งที่ต้องใช้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>รหัสพาเลทที่กำลังจะเก็บ</td><td>มาจากหน้าก่อนหน้า</td></tr>
+<tr><td>ตัวโหลดรายการช่องว่าง</td><td>ใช้ร่วมกันทั้งแอป</td></tr>
+<tr><td>คำค้นที่ผู้ใช้พิมพ์</td><td>เกิดในหน้านี้เท่านั้น</td></tr>
+</tbody></table><ol><li>ตัดสินว่าแต่ละอย่างควรมาจากไหน</li><li>เขียน constructor และ <code>initState</code>/<code>dispose</code> ให้ครบ</li><li>ตอบว่าถ้าผู้ใช้เปิดหน้านี้ ค้างไว้ห้านาที แล้วค่อยเลือก จะมีปัญหาอะไร</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แต่ละอย่างมาจากไหน</strong></p><table><thead><tr><th>สิ่งที่ต้องใช้</th><th>มาจาก</th><th>ใครทำลาย</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท</td><td>constructor — เป็น <code>String</code> ที่แก้ไม่ได้อยู่แล้ว</td><td>ไม่ต้องทำลาย</td></tr>
+<tr><td>ตัวโหลดรายการช่องว่าง</td><td>constructor — สร้างที่เดียวระดับแอป</td><td><strong>ไม่ใช่หน้านี้</strong></td></tr>
+<tr><td>คำค้น</td><td>สร้างเองใน <code>initState</code></td><td>หน้านี้ ใน <code>dispose</code></td></tr>
+</tbody></table><p><strong>ข้อ 2 — โค้ด</strong></p><pre class="code-vs"><code>class LocationPickerScreen extends StatefulWidget {
+  const LocationPickerScreen({
+    super.key,
+    required this.palletCode,        // ข้อมูลจากหน้าก่อน
+    required this.repository,        // ของใช้ร่วม รับมา ไม่ได้สร้าง
+  });
+
+  final String palletCode;
+  final LocationRepository repository;
+
+  @override
+  State&lt;LocationPickerScreen&gt; createState() =&gt; _LocationPickerScreenState();
+}
+
+class _LocationPickerScreenState extends State&lt;LocationPickerScreen&gt; {
+  late final TextEditingController _searchController;   // ของหน้านี้เอง
+  late final LocationStore _store;                      // ของหน้านี้เอง
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    _searchController.addListener(_onSearchChanged);
+    // store เป็นของหน้านี้ แต่ repository ที่มันใช้เป็นของคนอื่น
+    _store = LocationStore(repository: widget.repository);
+    _store.load();
+  }
+
+  @override
+  void dispose() {
+    _searchController
+      ..removeListener(_onSearchChanged)
+      ..dispose();
+    _store.dispose();          // ทำลายเฉพาะที่สร้างเอง
+    // ไม่แตะ widget.repository เด็ดขาด
+    super.dispose();
+  }
+  ...
+}</code></pre><p>จุดที่ต้องระวังคือ <code>_store</code> — หน้านี้สร้างเอง จึงต้องทำลายเอง แต่ <code>repository</code> ข้างในมันเป็นของคนอื่น การ <code>dispose</code> store ต้องไม่ไปทำลาย repository ตามไปด้วย</p><p><strong>ข้อ 3 — เปิดค้างไว้ห้านาที</strong></p><p>รายการช่องว่างที่โหลดมาตอนเปิดหน้า จะเก่าไปห้านาที และในคลังจริงช่องว่างเปลี่ยนเร็วมาก</p><table><thead><tr><th>สิ่งที่จะเกิด</th><th>ความเสียหาย</th></tr></thead><tbody>
+<tr><td>ช่องที่เลือกเต็มไปแล้ว</td><td>ถูกปฏิเสธตอนยืนยัน ต้องเลือกใหม่</td></tr>
+<tr><td>มีช่องว่างใหม่ที่ดีกว่าแต่ไม่เห็น</td><td>เดินไกลกว่าที่จำเป็น</td></tr>
+<tr><td>ผู้ใช้เชื่อว่าสิ่งที่เห็นคือของจริง</td><td>เสียเวลาเดินไปแล้วพบว่าใช้ไม่ได้</td></tr>
+</tbody></table><p><strong>ทางรับมือ เรียงจากถูกสุดไปแพงสุด</strong></p><table><thead><tr><th>วิธี</th><th>ต้นทุน</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>แสดงเวลาที่โหลดล่าสุด + ปุ่มรีเฟรช</td><td>ต่ำ</td><td>ผู้ใช้ตัดสินเองได้ (4.7)</td></tr>
+<tr><td>รีเฟรชเมื่อกลับมาที่แอป</td><td>ต่ำ</td><td>ครอบกรณีวางเครื่องไว้ (4.11)</td></tr>
+<tr><td>polling ทุก 30 วินาที</td><td>กลาง</td><td>สดตลอด แต่กินแบต (4.11)</td></tr>
+<tr><td>ให้เซิร์ฟเวอร์ตรวจตอนยืนยันและตอบว่าเต็มแล้ว</td><td>ต้องคุยกับหลังบ้าน</td><td><strong>จำเป็นเสมอ ไม่ว่าจะทำข้ออื่นหรือไม่</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญที่สุดและมักถูกลืม — <strong>ต่อให้รีเฟรชถี่แค่ไหน ก็ยังมีช่องว่างระหว่างที่ผู้ใช้เห็นกับตอนที่กดยืนยัน</strong> จึงต้องมีการตรวจที่ปลายทางเสมอ และแอปต้องรับมือกับคำตอบว่า “ช่องนี้เต็มแล้ว” ให้ดี ซึ่งเป็นเรื่องที่ออกแบบไว้ใน 4.15 แบบฝึกหัดข้อ 3 พอดี</p><p>นี่คือหลักเดียวกับ 4.14 — <em>ฝั่งแอปทำได้แค่ลดโอกาส ความถูกต้องต้องมาจากปลายทาง</em></p></details></section>
+
+<section><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li><code>MaterialPageRoute</code> เป็นคำอธิบายวิธีสร้างหน้า ไม่ใช่ตัวหน้าเอง</li><li><code>builder</code> ทำงานเมื่อ <code>Navigator</code> ต้องการวาดหน้านั้น</li><li>ส่งของผ่าน constructor เพื่อให้ compiler ตรวจให้</li><li>อย่าใช้ <code>arguments</code> เป็นทางหลัก เพราะ cast ผิดแล้วรู้ตอนรัน</li><li>ส่งทั้งก้อนเมื่อข้อมูลบนรายการพอแล้ว ส่ง id เมื่อข้อมูลแข่งกัน</li><li>วัตถุที่ส่งต้องแก้ไม่ได้ ไม่งั้นสองหน้าจะแก้ข้อมูลชุดเดียวกัน</li><li>ใครสร้าง คนนั้นทำลาย — ของที่รับมาห้ามทำลาย</li><li>หน้าที่รับของครบผ่าน constructor คือหน้าที่ทดสอบได้</li></ul></div><p><strong>บทถัดไป:</strong> 5.3 จะกลับมาที่ค่าที่ <code>pop</code> ส่งกลับ — ทำไม <code>bool</code> ไม่พอ และทำไมต้องแยก “ยกเลิก” ออกจาก “กดย้อนกลับเฉย ๆ”</p></section>

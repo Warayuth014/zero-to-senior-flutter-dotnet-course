@@ -4,27 +4,186 @@
 <title>AlertDialog</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-08 · Flutter UI</span><h1>AlertDialog</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Confirm result</a></li><li><a href="#section-2">barrier policy</a></li><li><a href="#section-3">Dialog context</a></li><li><a href="#section-4">Content</a></li><li><a href="#section-5">Async confirm</a></li><li><a href="#section-6">Accessibility/focus</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">AlertDialog เป็น modal decisionสั้นที่คืน typed result ควรใช้กับ actionเสี่ยง ไม่ใช้ทุก scan และต้อง lock scanner/background actionเพื่อไม่ให้ Enterกดยืนยันโดยบังเอิญ</div>
-<section id="section-1"><h2>1. Confirm result</h2><pre class="code-vs"><code>final ok = await showDialog&lt;bool&gt;(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: กล่องคือหน้าจอหนึ่งหน้า</a></li><li><a href="#section-4">โครงที่ถูกต้อง</a></li><li><a href="#section-5">null คือกรณีที่ต้องเลือกทางที่ปลอดภัย</a></li><li><a href="#section-6">barrierDismissible: ให้แตะนอกกล่องได้ไหม</a></li><li><a href="#section-7">ปุ่มต้องเป็นคำกริยา</a></li><li><a href="#section-8">อย่าถามในสิ่งที่ควรทำให้ย้อนได้แทน</a></li><li><a href="#section-9">กล่องกับเครื่องสแกน</a></li><li><a href="#section-10">ให้ใครเป็นคนทำงานหลังกดยืนยัน</a></li><li><a href="#section-11">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-12">แบบฝึกหัด</a></li><li><a href="#section-13">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ถามยืนยันให้ผู้ใช้อ่านจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (route และการ pop ให้ถูกตัว) และ 5.3 (ผลลัพธ์ที่ส่งกลับ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนกล่องยืนยันที่คืนค่าถูกต้องทุกทางออก และรู้ว่าเมื่อไหร่ไม่ควรถามเลย</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>กล่องยืนยันเป็นสิ่งที่เขียนง่ายที่สุด และออกแบบผิดบ่อยที่สุด</p><pre class="code-vs"><code>┌────────────────────────────┐
+│  แจ้งเตือน                  │
+│                            │
+│  คุณแน่ใจหรือไม่?           │
+│                            │
+│         [ ไม่ ]  [ ใช่ ]    │
+└────────────────────────────┘</code></pre><p>ปัญหาสามชั้นในกล่องเดียว</p><table><thead><tr><th>ชั้น</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>เนื้อหา</td><td>ไม่บอกว่าจะเกิดอะไรขึ้น ผู้ใช้ต้องเดาเอง</td></tr>
+<tr><td>ปุ่ม</td><td>“ใช่” กับ “ไม่” ต้องอ่านคำถามก่อนถึงจะรู้ว่ากดอะไร</td></tr>
+<tr><td>โค้ด</td><td>ถ้าแตะนอกกล่องจะได้ <code>null</code> ซึ่งมักถูกลืม</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>showDialog</code></td><td>เปิดกล่องเป็น route ใหม่ทับหน้าปัจจุบัน</td></tr>
+<tr><td><code>AlertDialog</code></td><td>กล่องแบบมาตรฐานที่มีหัวข้อ เนื้อหา และปุ่ม</td></tr>
+<tr><td>barrier</td><td>พื้นที่มืดรอบกล่อง</td></tr>
+<tr><td><code>barrierDismissible</code></td><td>แตะนอกกล่องแล้วปิดได้ไหม</td></tr>
+<tr><td>modal</td><td>ต้องตอบก่อนถึงจะทำอย่างอื่นได้</td></tr>
+<tr><td>destructive action</td><td>การกระทำที่ย้อนกลับไม่ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: กล่องคือหน้าจอหนึ่งหน้า</h2><pre class="code-vs"><code>┌──────────────────┐
+│  ┌────────────┐  │  ← route ใหม่
+│  │ กล่อง       │  │     มี context ของตัวเอง
+│  └────────────┘  │     คืนค่าได้เหมือนหน้าจอทั่วไป
+│ หน้าเดิม          │  ← ยังอยู่ครบ ไม่ถูกทำลาย
+└──────────────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> กล่องโต้ตอบไม่ใช่ของพิเศษ มันคือ route ที่ <code>push</code> ขึ้นมาทับ — ทุกอย่างที่รู้จาก 5.1 และ 5.3 ใช้กับมันได้หมด</div></section>
+
+<section id="section-4"><h2>4. โครงที่ถูกต้อง</h2><p>เปิด <code>lib/nav_basics/nav_feedback.dart</code></p><pre class="code-vs"><code>Future&lt;bool&gt; showDiscardDialog(BuildContext context) async {
+  final confirmed = await showDialog&lt;bool&gt;(
+    context: context,
+    builder: (dialogContext) =&gt; AlertDialog(
+      title: const Text('ทิ้งสิ่งที่แก้ไว้?'),
+      content: const Text('จำนวนและหมายเหตุที่แก้ไว้จะหายไปทั้งหมด'),
+      actions: [
+        TextButton(
+          // ใช้ dialogContext ไม่ใช่ context ของหน้าจอ — คนละ route กัน
+          onPressed: () =&gt; Navigator.of(dialogContext).pop(false),
+          child: const Text('แก้ต่อ'),
+        ),
+        FilledButton(
+          onPressed: () =&gt; Navigator.of(dialogContext).pop(true),
+          child: const Text('ทิ้งไป'),
+        ),
+      ],
+    ),
+  );
+  // แตะนอกกล่องหรือกดย้อนกลับได้ null ซึ่งต้องแปลว่า "ไม่ทิ้ง"
+  return confirmed ?? false;
+}</code></pre><p>สี่จุดที่ทำให้ฟังก์ชันนี้ปลอดภัย</p><table><thead><tr><th>จุด</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>คืน <code>Future&lt;bool&gt;</code> ไม่ใช่ <code>bool?</code></td><td>ฝั่งที่เรียกไม่ต้องคิดเรื่อง <code>null</code> เลย</td></tr>
+<tr><td><code>confirmed ?? false</code></td><td>ทุกทางออกที่ไม่ใช่การกดยืนยัน แปลว่าไม่ทำ</td></tr>
+<tr><td>ใช้ <code>dialogContext</code></td><td>ปิดกล่อง ไม่ใช่ปิดหน้าจอ (5.1 หัวข้อ 9)</td></tr>
+<tr><td>แยกเป็นฟังก์ชันของตัวเอง</td><td>เรียกจากหลายที่ได้ และเทสต์ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. null คือกรณีที่ต้องเลือกทางที่ปลอดภัย</h2><p>กล่องหนึ่งกล่องมีทางออกสี่ทาง แต่เราควบคุมได้แค่สองทาง</p><table><thead><tr><th>ทางออก</th><th>ค่าที่ได้</th><th>เราควบคุมได้ไหม</th></tr></thead><tbody>
+<tr><td>กด “แก้ต่อ”</td><td><code>false</code></td><td>ได้</td></tr>
+<tr><td>กด “ทิ้งไป”</td><td><code>true</code></td><td>ได้</td></tr>
+<tr><td>แตะนอกกล่อง</td><td><code>null</code></td><td>ไม่ได้</td></tr>
+<tr><td>กดปุ่มย้อนกลับ</td><td><code>null</code></td><td>ไม่ได้</td></tr>
+</tbody></table><pre class="code-vs"><code>// อันตรายมาก
+if (await showDeleteDialog(context)!) { ... }   // แตะนอกกล่อง = พัง
+
+// อันตรายกว่า
+final result = await showDialog&lt;bool&gt;(...);
+if (result != false) deleteEverything();        // null ก็ผ่าน — ลบทันที</code></pre><p>บรรทัดที่สองคือบั๊กที่ร้ายจริง เพราะ <code>null != false</code> เป็นจริง การแตะนอกกล่องโดยไม่ตั้งใจจึงกลายเป็นการยืนยัน</p><div class="note">กฎที่ใช้ได้ทุกครั้ง — <em><code>null</code> ต้องแปลว่า “ไม่ทำ” เสมอ</em> เพราะมันหมายถึงผู้ใช้ยังไม่ได้ตัดสินใจ</div></section>
+
+<section id="section-6"><h2>6. barrierDismissible: ให้แตะนอกกล่องได้ไหม</h2><table><thead><tr><th>สถานการณ์</th><th>ตั้งเป็น</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ถามยืนยันทั่วไป</td><td><code>true</code> (ค่าเริ่มต้น)</td><td>ปิดง่าย และ <code>null</code> แปลว่าไม่ทำอยู่แล้ว</td></tr>
+<tr><td>การกระทำที่ย้อนไม่ได้</td><td><code>false</code></td><td>บังคับให้เลือกอย่างมีสติ</td></tr>
+<tr><td>กำลังส่งข้อมูลอยู่</td><td><code>false</code></td><td>ปิดไปแล้วผู้ใช้จะไม่รู้ผล</td></tr>
+</tbody></table><pre class="code-vs"><code>showDialog&lt;bool&gt;(
   context: context,
-  barrierDismissible: false,
-  builder: (ctx) =&gt; AlertDialog(
-    title: const Text('ยืนยันออกจากงาน'),
-    content: const Text('บันทึกขั้นตอนแล้วกลับรายการ?'),
-    actions: [
-      TextButton(onPressed: () =&gt; Navigator.pop(ctx, false), child: const Text('ทำต่อ')),
-      FilledButton(onPressed: () =&gt; Navigator.pop(ctx, true), child: const Text('พักงาน')),
-    ],
-  ),
-);
-if (ok == true &amp;&amp; context.mounted) store.pause();</code></pre></section>
-<section id="section-2"><h2>2. barrier policy</h2><p>falseเมื่อ decisionต้อง explicit/transactionกำลังทำ; trueได้สำหรับข้อมูลไม่เสี่ยง Backยังต้องมี policyและ null resultเสมอ</p></section>
-<section id="section-3"><h2>3. Dialog context</h2><p>ใช้ ctx pop dialog หลัง awaitใช้ page contextที่ตรวจ mounted ไม่เก็บ ctxหลัง pop Absolute/wmsappใช้ patternนี้สม่ำเสมอ</p></section>
-<section id="section-4"><h2>4. Content</h2><p>สรุป entity/action/ผลกระทบ เช่น pallet→location/quantity ปุ่มใช้คำกริยา ไม่ใช้ Yes/No และ destructive actionมี styleชัด</p></section>
-<section id="section-5"><h2>5. Async confirm</h2><p>ปิด dialogแล้ว owner submitหรือทำ stateful dialog loading หาก submitใน dialogต้อง guard duplicateและไม่ให้ closeกลาง commitโดยไม่มี policy</p></section>
-<section id="section-6"><h2>6. Accessibility/focus</h2><p>Title/contentอ่านได้, focus safe action, large touch targets, scanner disabledระหว่าง modal และคืน focusหลังปิด</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Delete connection profileที่ activeควรถามอะไร?</p><details><summary>เฉลย</summary><p>บอกชื่อ profile/ผลต่อ connectionและเลือก profileถัดไปก่อน delete ปุ่ม “ลบโปรไฟล์”/“ยกเลิก”; controller validateห้ามเหลือ config invalidและ persist atomically</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">Modal fatigueทำให้ผู้ใช้กดโดยไม่อ่าน ใช้ dialogเฉพาะ irreversible/high-impact ส่วน scanที่ undoได้ใช้ feedback+undoดีกว่า</div></section>
+  barrierDismissible: false,     // ต้องเลือกปุ่ม
+  builder: (dialogContext) =&gt; AlertDialog(...),
+);</code></pre><div class="warn"><code>barrierDismissible: false</code> ไม่ได้กันปุ่มย้อนกลับของเครื่อง — ยังปิดได้และยังได้ <code>null</code> อยู่ดี ถ้าต้องกันจริงต้องครอบด้วย <code>PopScope</code> ตาม 5.5</div></section>
+
+<section id="section-7"><h2>7. ปุ่มต้องเป็นคำกริยา</h2><p>ผู้ใช้ที่รีบจะอ่านปุ่มก่อน แล้วอ่านคำถามทีหลัง (หรือไม่อ่านเลย) ปุ่มจึงต้องบอกตัวเองได้</p><pre class="code-vs"><code>ยกเลิกใบรับเข้านี้?
+[ ไม่ใช่ ]  [ ใช่ ]          ← ต้องอ่านคำถามก่อนถึงจะรู้
+
+ยกเลิกใบรับเข้านี้?
+[ ทำต่อ ]  [ ยกเลิกใบนี้ ]    ← อ่านปุ่มอย่างเดียวก็รู้</code></pre><table><thead><tr><th>หลัก</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>ปุ่มบอกว่าจะเกิดอะไร</td><td>“ทิ้งไป” ไม่ใช่ “ตกลง”</td></tr>
+<tr><td>ทางที่ปลอดภัยอยู่ซ้าย</td><td>ตำแหน่งที่นิ้วโดนน้อยกว่า</td></tr>
+<tr><td>เนื้อหาบอกสิ่งที่จะเสีย</td><td>“18 บรรทัดที่สแกนไว้จะหายไป”</td></tr>
+<tr><td>ระบุตัวสิ่งของให้ชัด</td><td>“ลบโปรไฟล์ WMS-PROD” ไม่ใช่ “ลบรายการนี้”</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญเมื่อผู้ใช้เปิดหลายอย่างพร้อมกัน — ถ้ากล่องไม่บอกว่ากำลังจะลบอะไร เขาต้องปิดกล่องไปดูก่อนแล้วกลับมาใหม่</p></section>
+
+<section id="section-8"><h2>8. อย่าถามในสิ่งที่ควรทำให้ย้อนได้แทน</h2><p>กล่องยืนยันเป็นเครื่องมือที่แพงที่สุดในการขอความสนใจ — มันหยุดทุกอย่างและบังคับให้ตอบ</p><table><thead><tr><th>การกระทำ</th><th>ควรใช้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ลบใบรับเข้าทั้งใบ</td><td>กล่องยืนยัน</td><td>ย้อนไม่ได้ ผลกระทบสูง</td></tr>
+<tr><td>ทิ้งร่างที่แก้ไว้</td><td>กล่องยืนยัน</td><td>ย้อนไม่ได้</td></tr>
+<tr><td>ลบบรรทัดที่เพิ่งสแกน</td><td>ลบเลย + ปุ่มเลิกทำ</td><td>ย้อนได้ง่าย และเกิดบ่อย</td></tr>
+<tr><td>สแกนซ้ำ</td><td>เตือนด้วยสีและเสียง</td><td>เกิดทุกไม่กี่วินาที ถ้าเด้งกล่องคืองานหยุด</td></tr>
+</tbody></table><p>สองแถวล่างสำคัญบน PDA เป็นพิเศษ เพราะงานสแกนคือการทำสิ่งเดิมซ้ำเร็ว ๆ หลายร้อยครั้ง</p><pre class="code-vs"><code>สแกน 200 ชิ้น × เด้งกล่องทุกครั้งที่ผิด = งานช้าลงเท่าตัว
+                                          และผู้ใช้เริ่มกดปุ่มโดยไม่อ่าน</code></pre><p>เมื่อผู้ใช้ถูกถามบ่อยเกินไป เขาจะเรียนรู้ที่จะกดปุ่มขวาโดยอัตโนมัติ — และวันที่กล่องนั้นถามเรื่องสำคัญจริง ๆ เขาก็จะกดผ่านไปเหมือนกัน</p><div class="note">เกณฑ์ตัดสิน — <em>ถ้าย้อนกลับได้ ให้ทำเลยแล้วมีปุ่มเลิกทำ ถ้าย้อนไม่ได้ ให้ถาม</em></div></section>
+
+<section id="section-9"><h2>9. กล่องกับเครื่องสแกน</h2><p>ปัญหาเฉพาะของ PDA ที่ไม่มีบนแอปทั่วไป</p><pre class="code-vs"><code>กล่องยืนยันเปิดอยู่
+   → ผู้ใช้ยิงบาร์โค้ดโดยไม่ได้ตั้งใจ
+   → เครื่องสแกนส่งข้อมูลตามด้วยปุ่ม Enter
+   → Enter ไปกดปุ่มที่กำลังโฟกัสอยู่ในกล่อง</code></pre><p>ผลคือกล่องถูกตอบโดยที่ผู้ใช้ไม่ได้ตั้งใจ และถ้าปุ่มที่โฟกัสคือ “ยืนยันลบ” ก็เสียหายทันที</p><table><thead><tr><th>ทางกัน</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ให้ปุ่มที่ปลอดภัยได้โฟกัสตั้งต้น</td><td>Enter ที่หลุดเข้ามาจึงไม่ทำอันตราย</td></tr>
+<tr><td>ปิดการรับข้อมูลจากเครื่องสแกนระหว่างเปิดกล่อง</td><td>ตรงที่สุด แต่ต้องมีทางเปิดกลับให้ครบทุกเส้นทาง</td></tr>
+<tr><td>คืนโฟกัสให้ช่องสแกนหลังปิดกล่อง</td><td>ไม่งั้นผู้ใช้จะสแกนแล้วไม่มีอะไรเกิดขึ้น (3.6)</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นอาการที่ผู้ใช้รายงานว่า “สแกนไม่ติด” บ่อยที่สุด ทั้งที่เครื่องสแกนทำงานปกติ — แค่ไม่มีช่องไหนรับข้อมูลอยู่</p></section>
+
+<section id="section-10"><h2>10. ให้ใครเป็นคนทำงานหลังกดยืนยัน</h2><pre class="code-vs"><code>// เลี่ยง — ทำงานข้างในกล่อง
+FilledButton(
+  onPressed: () async {
+    await repository.delete(id);          // ปิดกล่องไม่ได้ระหว่างนี้
+    Navigator.of(dialogContext).pop();    // ถ้าพังก่อนถึงบรรทัดนี้ กล่องค้าง
+  },
+  child: const Text('ลบ'),
+)</code></pre><pre class="code-vs"><code>// ดีกว่า — กล่องตอบอย่างเดียว คนเรียกเป็นคนทำ
+final confirmed = await showDeleteDialog(context, name: profile.name);
+if (!confirmed || !context.mounted) return;
+await store.delete(profile.id);           // จัดการ busy/error ที่ store (4.8)</code></pre><table><thead><tr><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>กล่องปิดทันทีที่ตอบ ผู้ใช้ไม่ต้องมองกล่องค้าง</td></tr>
+<tr><td>สถานะกำลังทำงานและข้อผิดพลาดอยู่ที่เดียวกับที่อื่น</td></tr>
+<tr><td>กล่องกลายเป็นฟังก์ชันบริสุทธิ์ที่ทดสอบได้</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 5.4 หัวข้อ 9 — ชั้นที่อยู่ลึกควรตัดสินใจน้อยที่สุด</p></section>
+
+<section id="section-11"><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Null check operator used on a null value</code></td><td>ลืมว่าแตะนอกกล่องได้ <code>null</code></td><td>ใช้ <code>?? false</code></td></tr>
+<tr><td>แตะนอกกล่องแล้วมันลบให้เลย</td><td>เขียน <code>if (result != false)</code></td><td><code>null</code> ต้องแปลว่าไม่ทำ</td></tr>
+<tr><td>ปิดกล่องแล้วหน้าจอปิดตามไปด้วย</td><td>ใช้ context ผิดตัว</td><td>ใช้ <code>dialogContext</code></td></tr>
+<tr><td>กล่องค้างหลังกดยืนยัน</td><td>ทำงาน async ในกล่องแล้วเกิดข้อผิดพลาด</td><td>ให้กล่องตอบอย่างเดียว</td></tr>
+<tr><td>ผู้ใช้กดผ่านโดยไม่อ่าน</td><td>ถามบ่อยเกินไป</td><td>ถามเฉพาะสิ่งที่ย้อนไม่ได้</td></tr>
+<tr><td>กล่องถูกตอบเองโดยไม่มีใครกด</td><td>Enter จากเครื่องสแกน</td><td>ให้ปุ่มปลอดภัยได้โฟกัส</td></tr>
+<tr><td>ปิดกล่องแล้วสแกนไม่ติด</td><td>ไม่ได้คืนโฟกัส</td><td>คืนโฟกัสหลังปิด (3.6)</td></tr>
+<tr><td>ไม่รู้ว่ากำลังจะลบอะไร</td><td>ข้อความไม่ระบุตัวสิ่งของ</td><td>ใส่ชื่อลงไปในข้อความ</td></tr>
+</tbody></table></section>
+
+<section id="section-12"><h2>12. แบบฝึกหัด</h2><p>ผู้ใช้กดลบโปรไฟล์การเชื่อมต่อชื่อ <code>WMS-PROD</code> ซึ่งเป็นโปรไฟล์ที่กำลังใช้งานอยู่ และมีอีกสองโปรไฟล์ในระบบ</p><ol><li>เขียนข้อความและปุ่มของกล่อง</li><li>เขียนโค้ดฝั่งที่เรียก โดยจัดการทุกทางออก</li><li>ตอบว่ากล่องนี้ควรเป็นกล่องยืนยันธรรมดา หรือควรเป็นอย่างอื่น</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ข้อความและปุ่ม</strong></p><pre class="code-vs"><code>┌──────────────────────────────────────┐
+│ ลบโปรไฟล์ WMS-PROD?                   │
+│                                      │
+│ โปรไฟล์นี้กำลังใช้งานอยู่               │
+│ หลังลบแล้วจะสลับไปใช้ WMS-UAT แทน     │
+│                                      │
+│              [ ยกเลิก ]  [ ลบโปรไฟล์ ] │
+└──────────────────────────────────────┘</code></pre><table><thead><tr><th>สิ่งที่ใส่</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ชื่อโปรไฟล์ในหัวข้อ</td><td>ผู้ใช้อาจเปิดหลายอันแล้วสับสน</td></tr>
+<tr><td>บอกว่ากำลังใช้งานอยู่</td><td>ข้อมูลที่เปลี่ยนการตัดสินใจ</td></tr>
+<tr><td><strong>บอกว่าจะสลับไปใช้อะไร</strong></td><td>สำคัญที่สุด — ผู้ใช้ต้องรู้ว่าหลังลบแล้วจะเกิดอะไร</td></tr>
+<tr><td>ปุ่มว่า “ลบโปรไฟล์”</td><td>อ่านปุ่มอย่างเดียวก็รู้</td></tr>
+</tbody></table><p>ข้อความว่า “คุณแน่ใจหรือไม่?” ไม่ให้ข้อมูลอะไรเลย และควรถูกแทนที่ด้วยผลที่จะเกิดขึ้นเสมอ</p><p><strong>ข้อ 2 — ฝั่งที่เรียก</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _deleteProfile(ConnectionProfile profile) async {
+  final nextProfile = store.profileAfterDeleting(profile.id);
+  if (nextProfile == null) {
+    // ไม่มีโปรไฟล์อื่นเหลือ — ไม่ใช่เรื่องที่ถามยืนยันแล้วจบ
+    showResultBanner(
+      ScaffoldMessenger.of(context),
+      'ต้องมีอย่างน้อยหนึ่งโปรไฟล์ กรุณาเพิ่มโปรไฟล์ใหม่ก่อน',
+      isError: true,
+    );
+    return;
+  }
+
+  final confirmed = await showDeleteProfileDialog(
+    context,
+    name: profile.name,
+    isActive: profile.id == store.activeProfileId,
+    nextName: nextProfile.name,
+  );
+  if (!confirmed || !context.mounted) return;    // ครอบทั้ง false และ null
+
+  await store.deleteProfile(profile.id);         // busy/error อยู่ที่ store
+}</code></pre><p>สังเกตว่าการตรวจ “เหลือโปรไฟล์เดียว” เกิด <strong>ก่อน</strong> เปิดกล่อง — เพราะการเปิดกล่องถามแล้วบอกทีหลังว่าทำไม่ได้ เป็นการเสียเวลาผู้ใช้เปล่า ๆ</p><p><strong>ข้อ 3 — ควรเป็นกล่องยืนยันธรรมดาไหม</strong></p><p>ขึ้นกับว่ามีโปรไฟล์อื่นเหลือหรือไม่ ซึ่งแยกเป็นสามกรณี</p><table><thead><tr><th>สถานการณ์</th><th>ควรใช้</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>โปรไฟล์ที่ไม่ได้ใช้อยู่</td><td>ลบเลย + ปุ่มเลิกทำ</td><td>ย้อนได้ง่าย ไม่กระทบอะไร</td></tr>
+<tr><td>โปรไฟล์ที่กำลังใช้ และมีอันอื่นเหลือ</td><td><strong>กล่องยืนยัน</strong></td><td>กระทบการเชื่อมต่อทันที ต้องรู้ว่าจะสลับไปไหน</td></tr>
+<tr><td>โปรไฟล์สุดท้าย</td><td>ห้ามลบ + บอกเหตุผล</td><td>ลบแล้วแอปใช้งานไม่ได้เลย</td></tr>
+</tbody></table><p>โจทย์ระบุว่ามีอีกสองโปรไฟล์ จึงตกอยู่ในแถวกลาง — <strong>กล่องยืนยันเหมาะแล้ว</strong></p><p><strong>ทำไมแถวแรกไม่ควรถาม</strong></p><p>โปรไฟล์ที่ไม่ได้ใช้ ลบแล้วไม่มีอะไรเปลี่ยนทันที การถามทุกครั้งจะทำให้ผู้ใช้ที่กำลังจัดระเบียบโปรไฟล์ห้าอัน ต้องกดยืนยันห้ารอบ — ซึ่งเป็นการฝึกให้เขากดผ่านโดยไม่อ่าน ตามหัวข้อ 8</p><p><strong>ทำไมแถวสุดท้ายไม่ควรถาม</strong></p><p>เพราะคำตอบมีทางเดียวคือ “ทำไม่ได้” การเปิดกล่องถามว่า “แน่ใจไหม” แล้วพอกดยืนยันกลับบอกว่าทำไม่ได้ คือการหลอกให้ผู้ใช้เสียเวลา</p><p><strong>หลักที่ได้จากข้อนี้</strong> — คำถามที่ต้องตอบก่อนตัดสินใจใส่กล่องยืนยัน ไม่ใช่ “อันตรายไหม” แต่คือ</p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบ</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ทำได้ไหม</td><td>ไม่ได้</td><td>บอกเหตุผล อย่าถาม</td></tr>
+<tr><td>ย้อนกลับได้ไหม</td><td>ได้</td><td>ทำเลย + ปุ่มเลิกทำ</td></tr>
+<tr><td>ย้อนไม่ได้และมีผลที่ผู้ใช้อาจไม่รู้</td><td>ใช่</td><td>ถาม และบอกผลนั้นในกล่อง</td></tr>
+</tbody></table><p>ลำดับนี้ทำให้กล่องยืนยันเหลือน้อยลงมาก และกล่องที่เหลืออยู่ก็เป็นกล่องที่ผู้ใช้จะอ่านจริง</p></details></section>
+
+<section id="section-13"><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>กล่องโต้ตอบคือ route จึงมี context ของตัวเองและคืนค่าได้</li><li>ปิดกล่องด้วย <code>dialogContext</code> เสมอ</li><li><code>null</code> ต้องแปลว่า “ไม่ทำ” และควรแปลงเป็นค่าที่ปลอดภัยตั้งแต่ในฟังก์ชัน</li><li><code>barrierDismissible: false</code> ไม่กันปุ่มย้อนกลับ</li><li>ปุ่มต้องเป็นคำกริยาที่บอกตัวเองได้ ไม่ใช่ “ใช่/ไม่”</li><li>เนื้อหาต้องบอกว่าจะเกิดอะไรขึ้น และระบุตัวสิ่งของให้ชัด</li><li>ย้อนได้ให้ทำเลยพร้อมปุ่มเลิกทำ ย้อนไม่ได้จึงถาม</li><li>ถามบ่อยเกินไปทำให้ผู้ใช้เลิกอ่านทุกกล่อง</li><li>บน PDA ต้องระวัง Enter จากเครื่องสแกน และคืนโฟกัสหลังปิด</li><li>ให้กล่องตอบอย่างเดียว แล้วให้คนเรียกเป็นคนทำงาน</li></ul></div><p><strong>บทถัดไป:</strong> 5.9 จะดูแผ่นด้านล่าง ซึ่งใช้เมื่อกล่องเล็กเกินไป — และมีเรื่องแป้นพิมพ์กับรายการยาวที่ต้องจัดการเพิ่ม</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

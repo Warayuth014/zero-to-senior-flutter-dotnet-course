@@ -4,24 +4,149 @@
 <title>Login / Logout Routes</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-04 · Flutter UI</span><h1>Login / Logout Routes</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Login success</a></li><li><a href="#section-2">Logout</a></li><li><a href="#section-3">Session source of truth</a></li><li><a href="#section-4">Deep stack policy</a></li><li><a href="#section-5">Expired session</a></li><li><a href="#section-6">Navigation ownership</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note"><code>pushReplacement</code> แทน routeบนสุด เหมาะ Login→Shellและ Logout→Loginเพื่อไม่ให้ Backกลับเข้า sessionเก่า แต่การล้าง authต้องเกิดใน repositoryก่อน/ร่วมกับ navigationอย่างถูกลำดับ</div>
-<section id="section-1"><h2>1. Login success</h2><pre class="code-vs"><code>await auth.login(employeeId, password);
-if (!mounted) return;
-Navigator.of(context).pushReplacement(
-  MaterialPageRoute(builder: (_) =&gt; WarehouseShell(auth: auth)),
-);</code></pre><p>Absoluteใช้รูปแบบนี้ทำให้ Loginไม่ค้างใต้ shell</p></section>
-<section id="section-2"><h2>2. Logout</h2><pre class="code-vs"><code>await auth.logout();
-if (!context.mounted) return;
-Navigator.of(context).pushAndRemoveUntil(
-  MaterialPageRoute(builder: (_) =&gt; LoginScreen(auth: auth)),
-  (_) =&gt; false,
-);</code></pre><p>ถ้ามี nested workflow routes การล้างทั้ง stackปลอดภัยกว่า replacement routeบนสุดอย่างเดียว</p></section>
-<section id="section-3"><h2>3. Session source of truth</h2><p>Navigationไม่ใช่ auth security Token/sessionต้อง clearใน repository/storage และ APIต้องปฏิเสธ tokenหมดอายุ Shell routeที่ยังค้างไม่ควรเข้าถึง secretหลัง logout</p></section>
-<section id="section-4"><h2>4. Deep stack policy</h2><p>pushReplacementแทนแค่ top หาก logoutเกิดจาก detailใต้ shell อาจเหลือ shellใน stack ใช้ pushAndRemoveUntil/root auth gateตาม architecture และทดสอบ hardware Back</p></section>
-<section id="section-5"><h2>5. Expired session</h2><p>API 401ควรส่ง eventไป auth ownerครั้งเดียว ป้องกันหลาย requestเปิด Loginซ้อนกัน แล้ว clear stack/draftตาม policy อาจเก็บ unsynced workแบบปลอดภัยแต่ห้ามเก็บ tokenเก่า</p></section>
-<section id="section-6"><h2>6. Navigation ownership</h2><p>Repositoryไม่ควรเรียก Navigator ให้ return auth outcome/event; UI/app coordinatorตัดสิน route ทำให้ testได้และไม่ผูก data layerกับ BuildContext</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Logoutจาก workflowลึกสาม routeใช้ replacementพอไหม?</p><details><summary>เฉลย</summary><p>ไม่พอเสมอ แทนเฉพาะ workflow topแล้ว Backอาจกลับ shell ใช้ root navigator + pushAndRemoveUntil falseหรือ declarative auth gate และ clear store/timers/sessionก่อนเผย Login</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า navigateก่อน awaited logout/secure storage cleanupโดยไม่มี policy และอย่าให้ double logoutสร้าง Loginหลาย route ใช้ auth transition guard</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: เข้าคือแทนที่ ออกคือล้างทั้งกอง</a></li><li><a href="#section-4">เข้าสู่ระบบ: pushReplacement</a></li><li><a href="#section-5">ออกจากระบบ: pushReplacement ไม่พอ</a></li><li><a href="#section-6">ทางที่ถูก: pushAndRemoveUntil</a></li><li><a href="#section-7">ล้างหน้าจอ ไม่เท่ากับ ออกจากระบบ</a></li><li><a href="#section-8">ลำดับสำคัญ</a></li><li><a href="#section-9">ใครควรเป็นคนสั่งเปลี่ยนหน้า</a></li><li><a href="#section-10">เมื่อเซิร์ฟเวอร์บอกว่าหมดอายุ</a></li><li><a href="#section-11">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-12">แบบฝึกหัด</a></li><li><a href="#section-13">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: เข้าและออกจากระบบโดยไม่เหลือหน้าเก่าค้าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (stack ของหน้าจอ) และ 4.12 (การเก็บกวาดทรัพยากร)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกใช้ <code>pushReplacement</code> กับ <code>pushAndRemoveUntil</code> ได้ถูกจังหวะ และรู้ว่าการล้างหน้าจอไม่เท่ากับการออกจากระบบ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ลองนึกภาพว่าใช้ <code>push</code> ธรรมดากับการเข้าสู่ระบบ</p><pre class="code-vs"><code>┌──────────────────┐
+│ หน้าหลัก          │  ← ผู้ใช้อยู่ตรงนี้
+├──────────────────┤
+│ เข้าสู่ระบบ       │  ← ยังค้างอยู่ข้างล่าง
+└──────────────────┘</code></pre><p>กดปุ่มย้อนกลับหนึ่งครั้ง แล้วจะกลับไปหน้าเข้าสู่ระบบทั้งที่ล็อกอินอยู่ — สับสนทันที</p><p>และปัญหาฝั่งตรงข้ามที่ร้ายแรงกว่า — ออกจากระบบขณะอยู่ลึก ๆ ในแอป แล้วปุ่มย้อนกลับพากลับเข้าไปดูข้อมูลของคนที่ออกไปแล้ว</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>pushReplacement</code></td><td>วางหน้าใหม่แทนหน้าบนสุด</td></tr>
+<tr><td><code>pushAndRemoveUntil</code></td><td>วางหน้าใหม่แล้วเอาหน้าที่เหลือออกตามเงื่อนไข</td></tr>
+<tr><td>predicate</td><td>ฟังก์ชันที่ตอบว่าจะเก็บหน้านั้นไว้ไหม</td></tr>
+<tr><td>session</td><td>ข้อมูลของผู้ใช้ที่ล็อกอินอยู่</td></tr>
+<tr><td>token</td><td>บัตรผ่านที่ใช้คุยกับเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: เข้าคือแทนที่ ออกคือล้างทั้งกอง</h2><pre class="code-vs"><code>เข้าสู่ระบบ   [เข้าสู่ระบบ]  →  [หน้าหลัก]
+              แทนที่ใบเดียว เพราะตอนนั้นมีใบเดียว
+
+ออกจากระบบ   [เข้าสู่ระบบ]  ←  [หน้าหลัก][รายละเอียด][ยืนยัน]
+              ต้องล้างทุกใบ ไม่ใช่แทนแค่ใบบนสุด</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ตอนเข้าสู่ระบบเรารู้ว่ามีกี่ใบ ตอนออกจากระบบเราไม่รู้ — จึงต้องใช้เมธอดที่ไม่ต้องรู้</div></section>
+
+<section id="section-4"><h2>4. เข้าสู่ระบบ: pushReplacement</h2><p>เปิด <code>lib/nav_basics/nav_basics_app.dart</code></p><pre class="code-vs"><code>void _signIn(BuildContext context) {
+  session.signIn('somchai');
+  // pushReplacement แทนหน้าเข้าสู่ระบบด้วยหน้าหลัก
+  // ถ้าใช้ push เฉย ๆ ปุ่มย้อนกลับจะพากลับเข้าหน้าเข้าสู่ระบบเดิม
+  Navigator.of(context).pushReplacement(
+    MaterialPageRoute&lt;void&gt;(builder: (_) =&gt; HomeShell(session: session)),
+  );
+}</code></pre><p>เทสต์ที่ยืนยันว่าทำถูก</p><pre class="code-vs"><code>expect(tester.state&lt;NavigatorState&gt;(find.byType(Navigator)).canPop(), isFalse);</code></pre><p><code>canPop()</code> เป็น <code>false</code> แปลว่าเหลือหน้าเดียวในกอง — หน้าเข้าสู่ระบบถูกเอาออกไปแล้วจริง</p></section>
+
+<section id="section-5"><h2>5. ออกจากระบบ: pushReplacement ไม่พอ</h2><p>ตอนสร้าง lab นี้ ผมเขียนวิธีที่ดูสวยกว่าไว้ก่อน — ให้แอปสลับระหว่างหน้าเข้าสู่ระบบกับหน้าหลักตามสถานะของ <code>session</code></p><pre class="code-vs"><code>// วิธีที่ผมเขียนไว้ตอนแรก และมันผิด
+MaterialApp(
+  home: ListenableBuilder(
+    listenable: session,
+    builder: (context, child) =&gt; session.authenticated
+        ? HomeShell(session: session)
+        : LoginScreen(session: session),
+  ),
+)</code></pre><p>ดูสมเหตุสมผล — พอ <code>signOut()</code> ถูกเรียก สถานะเปลี่ยน หน้าจอก็สลับกลับไปหน้าเข้าสู่ระบบเอง โดยไม่ต้องไล่ pop</p><p>เทสต์จับได้ทันทีว่าไม่จริง</p><pre class="code-vs"><code>await openFirstTask(tester);       // push หน้ารายละเอียดขึ้นมา
+session.signOut();
+await tester.pumpAndSettle();
+
+expect(find.text('งาน T-001'), findsNothing);   // ล้มเหลว — ยังเจออยู่</code></pre><p>สาเหตุคือ <code>home</code> เป็นแค่ <strong>หน้าแรกในกอง ไม่ใช่ทั้งกอง</strong></p><pre class="code-vs"><code>┌──────────────────┐
+│ รายละเอียดงาน     │  ← push ขึ้นมา ไม่เกี่ยวกับ home
+├──────────────────┤
+│ home             │  ← เปลี่ยนได้ แต่เปลี่ยนแค่ใบนี้
+└──────────────────┘</code></pre><p>การเปลี่ยน <code>home</code> ทำให้ใบล่างสุดกลายเป็นหน้าเข้าสู่ระบบ แต่หน้ารายละเอียดยังทับอยู่ข้างบนเหมือนเดิม ผู้ใช้จึงยังเห็นข้อมูลงานอยู่ทั้งที่ออกจากระบบไปแล้ว</p><div class="warn">บทเรียนที่ได้ — <em>การเปลี่ยนสิ่งที่หน้าจอแสดง กับการเปลี่ยนสิ่งที่อยู่ในกอง เป็นคนละเรื่อง</em> ตราบใดที่ยังใช้ <code>Navigator</code> แบบ stack การล้างกองต้องสั่งอย่างชัดเจน</div></section>
+
+<section id="section-6"><h2>6. ทางที่ถูก: pushAndRemoveUntil</h2><pre class="code-vs"><code>void _signOut() {
+  widget.session.signOut();
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute&lt;void&gt;(
+      builder: (_) =&gt; LoginScreen(session: widget.session),
+    ),
+    (route) =&gt; false,        // ไม่เก็บ route ไหนไว้เลย
+  );
+}</code></pre><p>พารามิเตอร์ตัวที่สองคือเงื่อนไขว่า <strong>จะหยุดลบเมื่อไหร่</strong></p><table><thead><tr><th>เงื่อนไข</th><th>ผลลัพธ์</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>(route) =&gt; false</code></td><td>ลบทั้งหมด</td><td>ออกจากระบบ</td></tr>
+<tr><td><code>(route) =&gt; route.isFirst</code></td><td>เก็บใบล่างสุดไว้</td><td>กลับไปหน้าแรกของแอป</td></tr>
+<tr><td><code>(route) =&gt; route.settings.name == '/home'</code></td><td>ลบจนถึงหน้าที่ระบุ</td><td>จบ workflow แล้วกลับหน้าหลัก</td></tr>
+</tbody></table><p>สังเกตว่ามันอ่านกลับหัวจากที่คิด — คืน <code>false</code> แปลว่า “ยังไม่ใช่ ลบต่อ” ไม่ใช่ “ห้ามลบ”</p><p>เทสต์ที่ตรึงพฤติกรรมนี้</p><pre class="code-vs"><code>testWidgets('ออกจากระบบตอนอยู่ลึกในแอป ต้องไม่มีหน้าเก่าค้างอยู่', (tester) async {
+  ...
+  expect(session.authenticated, isFalse);
+  expect(find.byKey(const Key('bottom-nav')), findsNothing);
+  // ล้าง stack หมดแล้ว จึงย้อนกลับเข้าหน้าหลักไม่ได้อีก
+  expect(tester.state&lt;NavigatorState&gt;(find.byType(Navigator)).canPop(), isFalse);
+});</code></pre></section>
+
+<section id="section-7"><h2>7. ล้างหน้าจอ ไม่เท่ากับ ออกจากระบบ</h2><p>นี่เป็นจุดที่สำคัญกว่าเรื่อง <code>Navigator</code> ทั้งหมดในบทนี้</p><pre class="code-vs"><code>Navigator.pushAndRemoveUntil(...)   ← ทำให้ผู้ใช้ "มองไม่เห็น" ข้อมูลเก่า
+                                       ไม่ได้ทำให้เขา "เข้าถึงไม่ได้"</code></pre><table><thead><tr><th>ต้องล้างอะไรบ้าง</th><th>ถ้าลืม</th></tr></thead><tbody>
+<tr><td>token ที่เก็บไว้ในเครื่อง</td><td>เปิดแอปใหม่แล้วเข้าได้เลยโดยไม่ต้องล็อกอิน</td></tr>
+<tr><td>ข้อมูลใน store ที่ยังอยู่ในหน่วยความจำ</td><td>ล็อกอินคนใหม่แล้วเห็นงานของคนเก่า</td></tr>
+<tr><td>ตัวจับเวลาที่ยังเดินอยู่ (4.11)</td><td>ยังยิงคำขอด้วย token เก่าเรื่อย ๆ</td></tr>
+<tr><td>คำขอที่ยังค้างอยู่ (4.10)</td><td>ผลกลับมาแล้วเขียนลง store ของ session ที่จบไปแล้ว</td></tr>
+<tr><td>ไฟล์หรือฐานข้อมูลที่เก็บไว้ในเครื่อง</td><td>คนถัดไปที่ถือ PDA เครื่องนั้นเปิดดูได้</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญเป็นพิเศษกับ PDA เพราะ <strong>เครื่องหนึ่งใช้กันทั้งกะ และเปลี่ยนมือทุกวัน</strong> — ไม่เหมือนโทรศัพท์ส่วนตัวที่คนเดียวใช้</p><p>และต่อให้ล้างทุกอย่างในเครื่องแล้ว ก็ยังไม่พอ — <strong>เซิร์ฟเวอร์ต้องปฏิเสธ token ที่ออกจากระบบไปแล้วด้วย</strong> เพราะฝั่งแอปเป็นแค่ด่านแรก ไม่ใช่ด่านจริง เป็นหลักเดียวกับ 4.14 หัวข้อ 8</p></section>
+
+<section id="section-8"><h2>8. ลำดับสำคัญ</h2><pre class="code-vs"><code>// ลำดับที่ถูก
+1. ล้าง token และข้อมูลในเครื่อง
+2. หยุดตัวจับเวลาและงานที่ยังค้าง
+3. แล้วค่อยเปลี่ยนหน้าจอ</code></pre><p>ถ้าเปลี่ยนหน้าจอก่อน จะมีช่วงหนึ่งที่หน้าเข้าสู่ระบบขึ้นมาแล้วแต่ตัวจับเวลายังยิงคำขออยู่เบื้องหลัง</p><p>ใน lab ลำดับนี้ปรากฏชัดในสองบรรทัด</p><pre class="code-vs"><code>widget.session.signOut();        // ล้างสถานะก่อน
+Navigator.of(context).pushAndRemoveUntil(...);   // แล้วค่อยเปลี่ยนหน้า</code></pre><p>ในแอปจริงขั้นแรกมักเป็น <code>await</code> เพราะต้องลบข้อมูลในเครื่อง ซึ่งแปลว่ามี async gap และต้องตรวจ <code>mounted</code> ตาม 4.9</p><pre class="code-vs"><code>Future&lt;void&gt; _signOut() async {
+  await authRepository.signOut();     // ลบ token จริง
+  if (!context.mounted) return;
+  Navigator.of(context).pushAndRemoveUntil(..., (route) =&gt; false);
+}</code></pre></section>
+
+<section id="section-9"><h2>9. ใครควรเป็นคนสั่งเปลี่ยนหน้า</h2><p>สังเกตว่าใน lab แผ่นตั้งค่าไม่ได้เรียก <code>Navigator</code> เอง</p><pre class="code-vs"><code>// ใน SettingsSheet
+Navigator.of(context).pop();      // ปิดแผ่นก่อน
+widget.onSignOut();               // แล้วให้เจ้าของหน้าจอจัดการเส้นทาง</code></pre><pre class="code-vs"><code>/// แผ่นนี้ไม่รู้จักเส้นทางของแอป จึงบอกได้แค่ว่า "ผู้ใช้ขอออกจากระบบ"
+/// แล้วให้เจ้าของหน้าจอเป็นคนตัดสินว่าต้องล้าง stack อย่างไร
+final VoidCallback onSignOut;</code></pre><table><thead><tr><th>เหตุผล</th><th>ผลที่ได้</th></tr></thead><tbody>
+<tr><td>แผ่นตั้งค่าอาจถูกเปิดจากหลายที่</td><td>แต่ละที่ล้าง stack ไม่เหมือนกันได้</td></tr>
+<tr><td>แผ่นไม่ต้องรู้ว่าหน้าเข้าสู่ระบบชื่ออะไร</td><td>ไม่ต้อง import กันไปมา</td></tr>
+<tr><td>ทดสอบแผ่นได้โดยไม่ต้องมีเส้นทางจริง</td><td>ส่ง callback ปลอมเข้าไปแล้วตรวจว่าถูกเรียก</td></tr>
+</tbody></table><p>หลักนี้ใช้กับทุกชั้นที่อยู่ลึก — <strong>ชั้นที่รู้เรื่องเส้นทางน้อยที่สุด ควรตัดสินใจเรื่องเส้นทางน้อยที่สุด</strong> โดยเฉพาะ repository และ store ซึ่งไม่ควรแตะ <code>Navigator</code> เลย เพราะจะทำให้ทดสอบไม่ได้และผูกกับ <code>BuildContext</code> ตาม 4.9 หัวข้อ 8</p></section>
+
+<section id="section-10"><h2>10. เมื่อเซิร์ฟเวอร์บอกว่าหมดอายุ</h2><p>กรณีที่ผู้ใช้ไม่ได้กดออกเอง แต่ token หมดอายุระหว่างทำงาน</p><pre class="code-vs"><code>คำขอที่ 1 → 401
+คำขอที่ 2 → 401     สามคำขอที่วิ่งพร้อมกัน
+คำขอที่ 3 → 401     ต่างคนต่างสั่งเปลี่ยนหน้า</code></pre><p>ผลคือหน้าเข้าสู่ระบบถูกเปิดซ้อนกันสามชั้น กดย้อนกลับก็เจออีกหน้า</p><table><thead><tr><th>ต้องทำ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ให้จุดเดียวเป็นคนตัดสิน</td><td>ไม่ให้แต่ละคำขอสั่งเปลี่ยนหน้าเอง</td></tr>
+<tr><td>ทำครั้งเดียว แม้ได้ 401 มาสิบครั้ง</td><td>ธงกันซ้ำแบบเดียวกับ 4.14</td></tr>
+<tr><td>บอกผู้ใช้ว่าทำไมถึงหลุด</td><td>ไม่งั้นเขาจะคิดว่าแอปพัง</td></tr>
+<tr><td>เก็บงานที่ทำค้างไว้อย่างปลอดภัย ถ้าทำได้</td><td>อย่าทิ้งงานของผู้ใช้เงียบ ๆ</td></tr>
+</tbody></table><p>รายละเอียดของการดักรหัส 401 อยู่ใน Part 8</p></section>
+
+<section id="section-11"><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ล็อกอินแล้วกดย้อนกลับ กลับไปหน้าเข้าสู่ระบบ</td><td>ใช้ <code>push</code> แทน <code>pushReplacement</code></td><td>เปลี่ยนเป็น <code>pushReplacement</code></td></tr>
+<tr><td>ออกจากระบบแล้วกดย้อนกลับ กลับเข้าหน้าหลัก</td><td>ใช้ <code>pushReplacement</code> ตอนอยู่ลึก</td><td><code>pushAndRemoveUntil</code> พร้อม <code>(route) =&gt; false</code></td></tr>
+<tr><td>เปลี่ยน <code>home</code> แล้วหน้าเก่ายังอยู่</td><td><code>home</code> เป็นแค่ใบล่างสุด</td><td>สั่งล้างกองอย่างชัดเจน</td></tr>
+<tr><td>เปิดแอปใหม่แล้วเข้าได้โดยไม่ต้องล็อกอิน</td><td>ล้างหน้าจอแต่ไม่ได้ล้าง token</td><td>ล้างข้อมูลในเครื่องด้วย</td></tr>
+<tr><td>ล็อกอินคนใหม่แล้วเห็นงานของคนเก่า</td><td>store เก่ายังอยู่ในหน่วยความจำ</td><td>ทำลาย store พร้อม session</td></tr>
+<tr><td>หน้าเข้าสู่ระบบซ้อนกันหลายชั้น</td><td>หลายคำขอได้ 401 พร้อมกัน</td><td>ให้จุดเดียวตัดสิน + ธงกันซ้ำ</td></tr>
+<tr><td>ยังมีคำขอยิงออกไปหลังออกจากระบบ</td><td>ไม่ได้หยุดตัวจับเวลา</td><td>หยุดก่อนเปลี่ยนหน้า (4.11)</td></tr>
+</tbody></table></section>
+
+<section id="section-12"><h2>12. แบบฝึกหัด</h2><p>แอปคลังหนึ่งมีเส้นทางแบบนี้</p><pre class="code-vs"><code>เข้าสู่ระบบ → หน้าหลัก → รายการรับเข้า → ใบรับเข้า → ยืนยัน</code></pre><p>ผู้ใช้ยืนอยู่ที่หน้ายืนยัน มีรายการที่สแกนไว้แล้ว 18 บรรทัดที่ยังไม่ได้ส่ง แล้ว token หมดอายุ</p><ol><li>เขียนลำดับสิ่งที่ต้องทำ ตั้งแต่รู้ว่า token หมดอายุจนถึงหน้าเข้าสู่ระบบ</li><li>ตัดสินว่าจะทำอย่างไรกับ 18 บรรทัดนั้น</li><li>ตอบว่าถ้าผู้ใช้ล็อกอินกลับเข้ามาเป็นคนเดิม กับเป็นคนละคน ควรทำต่างกันไหม</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ลำดับที่ต้องทำ</strong></p><pre class="code-vs"><code>1. คำขอแรกได้ 401
+2. ตัวจัดการกลางตรวจว่ากำลังจัดการอยู่แล้วหรือยัง
+   ถ้ายัง → ตั้งธงว่ากำลังจัดการ  (คำขออื่นที่ได้ 401 ตามมาจะไม่ทำซ้ำ)
+3. หยุดตัวจับเวลาและงานเบื้องหลังทั้งหมด
+4. เก็บงานที่ทำค้างไว้ลงเครื่อง            ← ข้อ 2
+5. ล้าง token และข้อมูลที่อ่อนไหวในเครื่อง
+6. ทำลาย store ของ session นี้
+7. เปลี่ยนหน้าด้วย pushAndRemoveUntil((route) => false)
+8. แสดงข้อความว่า "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่"</code></pre><p>จุดที่คนมักสลับลำดับคือข้อ 4 กับ 5 — <strong>ต้องเก็บงานก่อนล้างข้อมูล</strong> ไม่งั้นจะล้างงานของผู้ใช้ไปด้วย</p><p>และข้อ 3 ต้องมาก่อนข้อ 5 เสมอ ไม่งั้นตัวจับเวลาจะยิงคำขอด้วย token ที่เพิ่งลบไป แล้วได้ 401 กลับมาอีกรอบ</p><p><strong>ข้อ 2 — จะทำอย่างไรกับ 18 บรรทัด</strong></p><p>ต้องเก็บไว้ ไม่ใช่ทิ้ง</p><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>ทิ้งไปเลย</td><td>ผู้ใช้เดินสแกนของ 18 บรรทัดใหม่ทั้งหมด</td></tr>
+<tr><td>ส่งขึ้นเซิร์ฟเวอร์ก่อนออก</td><td>ทำไม่ได้ — token หมดอายุแล้ว จึงส่งไม่ผ่าน</td></tr>
+<tr><td>เก็บลงเครื่องเป็นร่าง</td><td>ล็อกอินกลับมาแล้วทำต่อได้</td></tr>
+</tbody></table><p>สิ่งที่ต้องเก็บคือ <strong>ข้อมูลของงาน ไม่ใช่ข้อมูลของผู้ใช้</strong> — เก็บรหัสสินค้า จำนวน รหัสพาเลท และรหัสคำสั่งที่สร้างไว้แล้ว (4.14) แต่ไม่เก็บ token ไม่เก็บชื่อผู้ใช้</p><p><strong>ข้อ 3 — คนเดิมกับคนละคน</strong></p><p>ต้องทำต่างกัน และนี่คือประเด็นที่มักถูกมองข้ามจนกลายเป็นปัญหาจริง</p><table><thead><tr><th></th><th>คนเดิมกลับเข้ามา</th><th>คนละคนเข้ามา</th></tr></thead><tbody>
+<tr><td>ร่างที่ค้างไว้</td><td>เสนอให้ทำต่อ</td><td><strong>ห้ามเสนอ</strong></td></tr>
+<tr><td>เหตุผล</td><td>เป็นงานของเขาเอง</td><td>เป็นงานของคนอื่น</td></tr>
+</tbody></table><p>ทำไมถึงสำคัญ — บนคลังจริง PDA เครื่องเดียวเปลี่ยนมือทั้งวัน ถ้าคนกะดึกเปิดแอปแล้วเจอ “มีงานรับเข้าค้างอยู่ 18 บรรทัด ทำต่อไหม” ซึ่งเป็นงานของคนกะบ่าย เขาอาจกดทำต่อโดยไม่รู้ แล้วของ 18 บรรทัดนั้นถูกบันทึกในชื่อคนผิด</p><p><strong>วิธีทำให้ถูก</strong> — ผูกร่างไว้กับผู้ใช้ที่สร้างมัน</p><pre class="code-vs"><code>// ตอนเก็บ
+await draftStorage.save(userId: session.userId, draft: draft);
+
+// ตอนล็อกอินกลับมา
+final draft = await draftStorage.load(userId: session.userId);
+if (draft != null) {
+  // เสนอให้ทำต่อ เฉพาะเจ้าของเท่านั้น
+}</code></pre><p>และร่างของคนอื่นที่ยังค้างอยู่ ไม่ควรลบทิ้งเงียบ ๆ เพราะเจ้าของอาจกลับมาที่เครื่องนี้ — แต่ควรมีนโยบายว่าเก็บไว้กี่วัน และควรแจ้งหัวหน้าถ้ามีงานค้างข้ามกะ</p><p><strong>ข้อสังเกตสุดท้าย:</strong> ทั้งบทนี้มีสองชั้นที่ต้องแยกให้ออก — <em>ชั้นหน้าจอ</em> ทำให้มองไม่เห็น และ <em>ชั้นข้อมูล</em> ทำให้เข้าถึงไม่ได้ การทำแค่ชั้นแรกแล้วคิดว่าปลอดภัย คือความผิดพลาดที่พบบ่อยที่สุดในเรื่องนี้</p></details></section>
+
+<section id="section-13"><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>เข้าสู่ระบบใช้ <code>pushReplacement</code> เพราะรู้ว่าแทนใบไหน</li><li>ออกจากระบบใช้ <code>pushAndRemoveUntil</code> เพราะไม่รู้ว่าผู้ใช้อยู่ลึกแค่ไหน</li><li>เงื่อนไข <code>(route) =&gt; false</code> แปลว่าลบทั้งหมด</li><li>เปลี่ยน <code>home</code> ไม่ได้ล้างหน้าที่ push ทับอยู่</li><li>ล้างหน้าจอไม่เท่ากับออกจากระบบ — ต้องล้าง token, store, ตัวจับเวลา และข้อมูลในเครื่อง</li><li>ล้างข้อมูลก่อน แล้วค่อยเปลี่ยนหน้า</li><li>ชั้นที่รู้เรื่องเส้นทางน้อยที่สุด ควรตัดสินใจเรื่องเส้นทางน้อยที่สุด</li><li>เมื่อ token หมดอายุ ให้จุดเดียวตัดสิน และทำครั้งเดียว</li></ul></div><p><strong>บทถัดไป:</strong> 5.5 จะกันสิ่งที่ผู้ใช้ทำค้างไว้ไม่ให้หายเพราะกดปุ่มย้อนกลับโดยไม่ตั้งใจ ซึ่งบน PDA เกิดบ่อยกว่าที่คิดมาก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

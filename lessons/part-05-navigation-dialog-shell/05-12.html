@@ -4,45 +4,168 @@
 <title>Lab: App Navigation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-12 · Flutter UI</span><h1>Lab: App Navigation</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Acceptance criteria</a></li><li><a href="#section-2">Composition</a></li><li><a href="#section-3">Auth transition</a></li><li><a href="#section-4">Workflow result</a></li><li><a href="#section-5">Back/modal policy</a></li><li><a href="#section-6">Logout</a></li><li><a href="#section-7">Tests</a></li><li><a href="#section-8">Part 5 Exit Test</a></li></ol></nav>
-<div class="note"><strong>Lab:</strong> ประกอบ Login → authenticated Shell → Workflow → Logout โดยกำหนด route stack, dependency/store lifetime, back policy, modal resultsและ session cleanupให้ทดสอบได้</div>
-<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>loginสำเร็จแทน Loginด้วย Shell</li><li>shellสร้าง/dispose session storeครั้งเดียว</li><li>bottom navigationใช้ destination sourceเดียว</li><li>workflowคืน Saved/Paused/Cancelledแบบ typed</li><li>PopScopeป้องกัน draft/commitสูญหาย</li><li>settings sheetมี dirty guard</li><li>logoutล้าง session/timers/stackทั้งหมด</li></ul></section>
-<section id="section-2"><h2>2. Composition</h2><pre class="code-vs"><code>App(auth, repositories)
-└─ LoginScreen(auth)
-   └─ pushReplacement WarehouseShell
-      ├─ WarehouseStore(repositories, session)
-      ├─ Home / Tasks / Picking destination
-      ├─ SettingsSheet(connection)
-      └─ Workflow routes → typed results</code></pre></section>
-<section id="section-3"><h2>3. Auth transition</h2><pre class="code-vs"><code>Future&lt;void&gt; login() async {
-  if (submitting) return;
-  final session = await auth.login(user, password);
-  if (!mounted) return;
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(builder: (_) =&gt; WarehouseShell(session: session)),
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บทนี้ทำอะไร</a></li><li><a href="#section-2">แผนที่ของ lab</a></li><li><a href="#section-3">เส้นทางทั้งหมดในภาพเดียว</a></li><li><a href="#section-4">โจทย์</a></li><li><a href="#section-5">เกณฑ์ที่ต้องผ่าน</a></li><li><a href="#section-6">สองทางเลือกของโครง</a></li><li><a href="#section-7">เกณฑ์ข้อ 5: ย้อนกลับภายในงาน</a></li><li><a href="#section-8">เกณฑ์ข้อ 10: ล้มเหลวแล้วไปไหน</a></li><li><a href="#section-9">เทสต์ที่ต้องเขียน</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</a></li><li><a href="#section-11">แบบทดสอบตัวเองก่อนจบ Part 5</a></li><li><a href="#section-12">สรุปท้าย Part 5</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ประกอบเส้นทางทั้งแอปให้ทดสอบได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1–5.11 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> วางโครงเส้นทางของแอปทั้งตัว ตั้งแต่เข้าสู่ระบบจนออก พร้อมเทสต์ที่พิสูจน์ได้ทีละข้อ</div>
+
+<section id="section-1"><h2>1. บทนี้ทำอะไร</h2><p>Part 5 สอนมาทีละเรื่อง บทนี้จะประกอบทั้งหมดเข้าด้วยกัน</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>lib/nav_basics/</code> ทั้งหมด พร้อมรู้ว่าทุกส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>เขียนเส้นทางของงาน putaway ตามเกณฑ์ที่ให้ พร้อมเทสต์</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 6</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>nav_models.dart</code></td><td><code>NavTask</code>, <code>TaskOutcome</code>, <code>AppSession</code></td><td>5.2, 5.3, 5.7</td></tr>
+<tr><td><code>nav_basics_app.dart</code></td><td>เส้นทางเข้าออก แถบล่าง หน้ารายการ</td><td>5.1, 5.4, 5.6</td></tr>
+<tr><td><code>task_detail_screen.dart</code></td><td>หน้ารายละเอียดที่มีร่างและด่านกันปิด</td><td>5.5, 5.7</td></tr>
+<tr><td><code>nav_feedback.dart</code></td><td>กล่อง แผ่น ข้อความ และแผ่นตั้งค่า</td><td>5.8–5.11</td></tr>
+<tr><td><code>test/nav_basics_test.dart</code></td><td>เทสต์ 15 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/nav_basics_test.dart</code></pre></section>
+
+<section id="section-3"><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>NavBasicsApp
+  └─ MaterialApp(home: LoginScreen)
+       │
+       │ pushReplacement เมื่อเข้าสู่ระบบ            ← 5.4
+       ▼
+     HomeShell ─────────────────────────────────── 5.6
+       ├─ NavigationBar (3 ปลายทาง)
+       ├─ IndexedStack
+       │    ├─ TaskListTab
+       │    │    └─ push TaskDetailScreen ───────── 5.1
+       │    │         ├─ PopScope กันปิด ────────── 5.5
+       │    │         ├─ showPalletPicker ───────── 5.9
+       │    │         └─ pop(TaskOutcome) ───────── 5.3
+       │    ├─ HistoryTab
+       │    └─ ProfileTab
+       └─ showSettingsSheet ──────────────────────  5.11
+            └─ onSignOut → pushAndRemoveUntil ───── 5.4</code></pre><p>ทั้งแอปมี <code>Navigator</code> ตัวเดียว และมีจุดที่ล้าง stack จุดเดียว</p></section>
+
+<section id="section-4"><h2>4. โจทย์</h2><p>สร้างเส้นทางของงาน putaway ในโฟลเดอร์ใหม่ <code>lib/nav_lab/</code></p><pre class="code-vs"><code>รายการงาน putaway
+    └─ เลือกงาน → หน้าสแกนพาเลท
+                    └─ สแกนพาเลทแล้ว → หน้าเลือกช่องเก็บ
+                                        └─ ยืนยัน → กลับหน้ารายการ</code></pre><p>โจทย์นี้ต่างจาก lab ตรงที่ <strong>งานหนึ่งชิ้นกินเวลาหลายหน้าจอ</strong> ซึ่งทำให้คำถามเรื่องร่างและการย้อนกลับซับซ้อนขึ้น</p></section>
+
+<section id="section-5"><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>เข้าสู่ระบบแล้วย้อนกลับเข้าหน้าเดิมไม่ได้</td><td>5.4</td></tr>
+<tr><td>2</td><td>ออกจากระบบตอนอยู่ลึกสามหน้า แล้วไม่เหลืออะไรใน stack</td><td>5.4</td></tr>
+<tr><td>3</td><td>ทุกหน้ารับของที่ต้องใช้ผ่าน constructor</td><td>5.2</td></tr>
+<tr><td>4</td><td>ผลลัพธ์เป็น <code>sealed class</code> และจัดการ <code>null</code> แยกจาก “ยกเลิก”</td><td>5.3</td></tr>
+<tr><td>5</td><td>กดย้อนกลับที่หน้าเลือกช่องเก็บ ต้องกลับไปหน้าสแกนพาเลท ไม่ใช่ออกจากงาน</td><td>5.5</td></tr>
+<tr><td>6</td><td>สแกนพาเลทแล้วกดย้อนกลับ ต้องถามก่อน</td><td>5.5</td></tr>
+<tr><td>7</td><td>สลับแท็บแล้วกลับมา รายการยังอยู่ที่เดิม</td><td>5.6</td></tr>
+<tr><td>8</td><td>แผ่นเลือกช่องเก็บคืนค่าแบบ typed และคืน <code>null</code> เมื่อปิด</td><td>5.9</td></tr>
+<tr><td>9</td><td>ข้อความแจ้งผลไม่ต่อคิว และเรียกได้หลัง <code>await</code></td><td>5.10</td></tr>
+<tr><td>10</td><td>ยืนยันไม่สำเร็จเพราะช่องเต็ม ต้องกลับไปเลือกช่องใหม่โดยไม่เสียรหัสพาเลท</td><td>4.15, 5.3</td></tr>
+<tr><td>11</td><td>ไม่มี <code>Navigator</code> ใน store หรือ repository</td><td>5.4</td></tr>
+<tr><td>12</td><td>ทุกงานที่สร้างเองถูกทำลาย และของที่รับมาไม่ถูกทำลาย</td><td>4.12, 5.2</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 5 กับ 10 เป็นสองข้อที่ยากที่สุด และทั้งคู่เป็นเรื่องเดียวกัน — <strong>ล้มเหลวหรือย้อนกลับ ต้องไปให้ใกล้จุดที่ผิดที่สุด ไม่ใช่กลับไปเริ่มใหม่</strong></p></section>
+
+<section id="section-6"><h2>6. สองทางเลือกของโครง</h2><p>งานหลายขั้นตอนทำได้สองแบบ และต้องเลือกก่อนเขียน</p><table><thead><tr><th></th><th>หลายหน้าจอ (หลาย route)</th><th>หน้าเดียวที่เปลี่ยนสถานะ</th></tr></thead><tbody>
+<tr><td>ปุ่มย้อนกลับ</td><td>ทำงานเองตามธรรมชาติ</td><td>ต้องเขียน <code>PopScope</code> ให้ถอยขั้น (5.5)</td></tr>
+<tr><td>ร่างอยู่ที่ไหน</td><td>ต้องส่งต่อกันทุกหน้า</td><td>อยู่ที่เดียว</td></tr>
+<tr><td>ล้มเหลวแล้วย้อนไปขั้นก่อน</td><td>ต้อง pop หลายชั้นให้ถูก</td><td>เปลี่ยนสถานะเดียว (4.15)</td></tr>
+<tr><td>ทดสอบ</td><td>ต้องเดินผ่านทุกหน้า</td><td>ทดสอบตรรกะแยกได้</td></tr>
+</tbody></table><p><strong>สำหรับโจทย์นี้แนะนำแบบที่สอง</strong> — หน้าเดียวที่เปลี่ยนสถานะตาม 4.15 เพราะงาน putaway เป็นงานชิ้นเดียวที่มีสามขั้น ไม่ใช่สามงานแยกกัน</p><pre class="code-vs"><code>รายการงาน
+  └─ push PutawayScreen(task)          ← route เดียว
+       │
+       ScanPallet → ScanLocation → ReadyToConfirm → Submitting
+       │                                              │
+       └─ pop(PutawayOutcome) ─────────────────────────┘</code></pre><p>แต่ถ้าเลือกแบบแรกก็ทำได้ ขอให้เกณฑ์ข้อ 5 กับ 10 ยังผ่าน — ซึ่งจะยากกว่าเพราะต้องจัดการการ pop หลายชั้น</p></section>
+
+<section id="section-7"><h2>7. เกณฑ์ข้อ 5: ย้อนกลับภายในงาน</h2><pre class="code-vs"><code>PopScope(
+  // ออกจากหน้าได้เฉพาะตอนอยู่ขั้นแรกและยังไม่ได้สแกนอะไร
+  canPop: _state is ScanPallet,
+  onPopInvokedWithResult: (didPop, result) async {
+    if (didPop) return;
+
+    // ยังส่งอยู่ — ห้ามออก
+    if (_state is Submitting) {
+      showResultBanner(_messenger, 'กำลังบันทึก กรุณารอสักครู่');
+      return;
+    }
+
+    // ไม่ใช่ขั้นแรก — ถอยหนึ่งขั้น ไม่ใช่ออกจากงาน
+    _goToPreviousStep();
+  },
+  child: ...,
+)</code></pre><p>ผลที่ผู้ใช้ได้รับ</p><pre class="code-vs"><code>ScanLocation   → กดย้อนกลับ → ScanPallet
+ScanPallet     → กดย้อนกลับ → ออกจากหน้า (ถ้ายังไม่ได้สแกน)
+ScanPallet + มีรหัสแล้ว → กดย้อนกลับ → ถามก่อน (เกณฑ์ข้อ 6)</code></pre><p>สังเกตว่าไม่ต้องเขียนเงื่อนไขพิเศษให้ขั้นสุดท้าย — พอถอยมาถึงขั้นแรก <code>canPop</code> กลายเป็น <code>true</code> เอง</p></section>
+
+<section id="section-8"><h2>8. เกณฑ์ข้อ 10: ล้มเหลวแล้วไปไหน</h2><p>ผู้ใช้ยืนยันแล้วเซิร์ฟเวอร์ตอบว่าช่องเก็บเต็ม</p><table><thead><tr><th>ข้อมูล</th><th>ยังถูกต้องไหม</th></tr></thead><tbody>
+<tr><td>รหัสพาเลท</td><td>ถูก — ของยังอยู่บนรถยกคันเดิม</td></tr>
+<tr><td>รหัสช่องเก็บ</td><td>ผิดแล้ว — ช่องเต็ม</td></tr>
+</tbody></table><pre class="code-vs"><code>} on LocationFullException {
+  if (!_isStillSubmitting(commandId)) return;      // 4.15
+  _errorMessage = 'ช่องเก็บนี้เต็มแล้ว กรุณาสแกนช่องอื่น';
+  _transitionTo(ScanLocation(current.palletCode));  // เก็บรหัสพาเลทไว้
+}</code></pre><p>ทดสอบข้อนี้ได้โดยไม่ต้องมี widget เลย ถ้าแยกตรรกะออกมาตาม 4.15 หัวข้อ 9</p><pre class="code-vs"><code>test('ช่องเต็มต้องกลับไปสแกนช่องใหม่ โดยไม่เสียรหัสพาเลท', () async {
+  repository.failWith = const LocationFullException();
+  await store.confirm();
+
+  final state = store.state;
+  expect(state, isA&lt;ScanLocation&gt;());
+  expect((state as ScanLocation).palletCode, 'PAL-0101');
+});</code></pre></section>
+
+<section id="section-9"><h2>9. เทสต์ที่ต้องเขียน</h2><p>อย่างน้อย 12 ข้อ ข้อละหนึ่งเกณฑ์ ตัวอย่างสามข้อที่เขียนยากที่สุด</p><pre class="code-vs"><code>testWidgets('ออกจากระบบตอนอยู่ลึกสามหน้า ต้องไม่เหลืออะไรใน stack', (tester) async {
+  await pumpLoggedIn(tester);
+  await tester.tap(find.byKey(const ValueKey&lt;String&gt;('PUT-001')));
+  await tester.pumpAndSettle();
+  // ... เดินไปจนถึงขั้นสุดท้าย
+
+  await tester.pageBack();                    // กลับมาหน้ารายการก่อน
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('settings-button')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('sign-out-button')));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('sign-in-button')), findsOneWidget);
+  expect(
+    tester.state&lt;NavigatorState&gt;(find.byType(Navigator)).canPop(),
+    isFalse,
   );
-}</code></pre></section>
-<section id="section-4"><h2>4. Workflow result</h2><pre class="code-vs"><code>final result = await Navigator.push&lt;WorkflowResult&gt;(
-  context,
-  MaterialPageRoute(builder: (_) =&gt; ReceiveFlow(store: store)),
-);
-if (!context.mounted) return;
-switch (result) {
-  case Saved(): await store.refreshReceiving();
-  case Paused(): await store.refreshTasks();
-  case Cancelled() || null: break;
-}</code></pre></section>
-<section id="section-5"><h2>5. Back/modal policy</h2><p>Initial workflow popได้; draftถาม discard/pause; submitting lockหรือย้าย operationเข้า store; confirm dialogคืน bool; selection sheetคืน model; ทุก modalปิดด้วย builder contextและคืน focus</p></section>
-<section id="section-6"><h2>6. Logout</h2><pre class="code-vs"><code>final confirmed = await confirmLogout(context);
-if (!confirmed) return;
-await auth.logout();
-if (!context.mounted) return;
-Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-  MaterialPageRoute(builder: (_) =&gt; LoginScreen(auth: auth)),
-  (_) =&gt; false,
-);</code></pre><p>Shell dispose store/timerเมื่อ routeถูกล้าง</p></section>
-<section id="section-7"><h2>7. Tests</h2><p>ใช้ fake auth/repositories + NavigatorObserver ทดสอบ failed loginไม่ navigate, success replacement, workflow result refreshถูก command, dirty backไม่ pop, double logoutหนึ่ง transition, logoutแล้ว Backไม่เข้า shell และ store disposeยกเลิก polling</p></section>
-<section id="section-8"><h2>8. Part 5 Exit Test</h2><div class="success"><ul><li>อธิบาย stack/push/pop/replacement/resultได้</li><li>ส่ง dependencyและกำหนด route ownerได้</li><li>ออกแบบ PopScopeกับ transient stateได้</li><li>เลือก dialog/sheet/SnackBar/flashตามงานได้</li><li>สร้าง shellที่รักษา tab/session stateได้</li><li>logoutล้าง auth, resourcesและnavigation stackได้</li></ul></div></section>
+});</code></pre><pre class="code-vs"><code>testWidgets('กดย้อนกลับที่ขั้นเลือกช่องเก็บ ต้องกลับไปขั้นสแกนพาเลท', (tester) async {
+  await pumpLoggedIn(tester);
+  await openTask(tester, 'PUT-001');
+  await scanPallet(tester, 'PAL-0101');
+  expect(find.text('สแกนช่องเก็บ'), findsOneWidget);
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  // ยังอยู่ในหน้าเดิม แค่ถอยขั้น
+  expect(find.text('สแกนพาเลท'), findsOneWidget);
+  expect(find.byKey(const Key('putaway-screen')), findsOneWidget);
+});</code></pre><pre class="code-vs"><code>testWidgets('ปิดแผ่นเลือกช่องโดยไม่เลือก ต้องไม่เปลี่ยนอะไร', (tester) async {
+  ...
+  await tester.tapAt(const Offset(20, 20));
+  await tester.pumpAndSettle();
+
+  expect(find.text('ยังไม่ได้เลือกช่องเก็บ'), findsOneWidget);
+});</code></pre><p>รูปแบบของตัวช่วยอย่าง <code>pumpLoggedIn</code> และ <code>openFirstTask</code> ดูได้จาก <code>test/nav_basics_test.dart</code></p><div class="note"><strong>เคล็ดลับ:</strong> ถ้าหา widget ของแท็บที่ไม่ได้แสดงอยู่ไม่เจอ ให้ใส่ <code>skipOffstage: false</code> ตามที่เจอใน 5.6 หัวข้อ 7</div></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ค้างที่ <code>pumpAndSettle</code></td><td>มี animation ที่ไม่จบ เช่นตัวหมุนที่ไม่หยุด</td><td>ใช้ <code>pump(Duration(...))</code> แทน</td></tr>
+<tr><td>กดย้อนกลับแล้วถอยสองขั้น</td><td>ลืม <code>if (didPop) return;</code></td><td>ใส่บรรทัดแรกเสมอ (5.5)</td></tr>
+<tr><td><code>canPop</code> ไม่อัปเดต</td><td>เปลี่ยนสถานะแล้วไม่ได้วาดใหม่</td><td><code>setState</code> หรือ <code>notifyListeners</code></td></tr>
+<tr><td>หา widget ในแท็บอื่นไม่เจอ</td><td>ตัวค้นหาข้าม offstage</td><td><code>skipOffstage: false</code></td></tr>
+<tr><td><code>Navigator</code> ไม่พบใน context</td><td>ใช้ context ที่อยู่เหนือ <code>MaterialApp</code></td><td>ห่อด้วย <code>Builder</code></td></tr>
+<tr><td>ล้มเหลวแล้วกลับไปเริ่มใหม่ทั้งหมด</td><td>ย้อนไปสถานะแรกสุด</td><td>ย้อนไปให้ใกล้จุดที่ผิด</td></tr>
+<tr><td>ทดสอบตรรกะต้องสร้าง widget</td><td>ตรรกะอยู่ใน <code>State</code></td><td>ย้ายไป store (4.5)</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบทดสอบตัวเองก่อนจบ Part 5</h2><p>ตอบให้ได้โดยไม่เปิดเฉลย ถ้าข้อไหนตอบไม่ได้ ให้กลับไปอ่านบทที่วงเล็บไว้</p><ol><li>กดย้อนกลับแล้วหน้าเดิมถูกสร้างใหม่หรือไม่ เพราะอะไร (5.1)</li><li><code>push</code> คืนอะไร และทำไมมันสำคัญ (5.1)</li><li>ควรส่ง id หรือส่งข้อมูลทั้งก้อนให้หน้าใหม่ ตัดสินจากอะไร (5.2)</li><li>ทำไมผลลัพธ์เป็น <code>bool</code> ถึงไม่พอ (5.3)</li><li><code>null</code> ที่ได้จาก <code>push</code> มาจากไหน และควรแปลว่าอะไร (5.3)</li><li>ทำไม <code>pushReplacement</code> ใช้ตอนออกจากระบบไม่ได้ (5.4)</li><li>การเปลี่ยน <code>home</code> ทำอะไรได้และทำอะไรไม่ได้ (5.4)</li><li>ล้าง stack แล้วยังต้องล้างอะไรอีก (5.4)</li><li>ทำไม <code>onPopInvokedWithResult</code> ต้องขึ้นต้นด้วย <code>if (didPop) return;</code> (5.5)</li><li>ทำไม <code>canPop</code> ต้องคำนวณ ไม่ใช่เก็บเป็น field (5.5)</li><li><code>IndexedStack</code> ให้อะไร และแลกอะไร (5.6)</li><li>ข้อมูลสี่ชั้นตามอายุมีอะไรบ้าง และแต่ละชั้นหายเมื่อไหร่ (5.7)</li><li>ย่อแอปกับระบบปิดแอปต่างกันอย่างไร (5.7)</li><li>เมื่อไหร่ควรถามยืนยัน เมื่อไหร่ควรทำเลยแล้วมีปุ่มเลิกทำ (5.8)</li><li>ทำไมแผ่นที่มีช่องกรอกต้องตั้ง <code>isScrollControlled</code> (5.9)</li><li>ทำไมต้องล้างคิวก่อนแสดงข้อความใหม่ (5.10)</li><li>ทำไมงานสแกนใช้ข้อความเลื่อนขึ้นมาอย่างเดียวไม่ได้ (5.10)</li><li>ทำไมแผ่นตั้งค่าต้องมีร่างของตัวเอง (5.11)</li></ol></section>
+
+<section id="section-12"><h2>12. สรุปท้าย Part 5</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เปิดและปิดหน้าจอ พร้อมรับผลกลับมาอย่างมีความหมาย</li><li>ส่งของให้หน้าใหม่โดยที่ compiler ตรวจให้ และไม่ให้สองหน้าแก้ข้อมูลชุดเดียวกัน</li><li>จัดเส้นทางเข้าและออกจากระบบโดยไม่เหลือหน้าเก่าค้าง</li><li>กันงานที่ทำค้างไว้ไม่ให้หายเพราะกดปุ่มย้อนกลับ</li><li>ทำโครงหลักที่สลับส่วนงานได้โดยไม่เสียของเดิม</li><li>แยกข้อมูลเป็นชั้นตามอายุ และตัดสินได้ว่าอะไรควรอยู่รอด</li><li>เลือกใช้กล่อง แผ่น และข้อความให้ตรงกับงาน</li><li>ทำแผ่นตั้งค่าที่มีร่างของตัวเองและไม่แตะค่าจริงจนกว่าจะบันทึก</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>เส้นทางแบบประกาศ และลิงก์ที่เปิดหน้าใดหน้าหนึ่งได้โดยตรง</td><td>Part 11</td></tr>
+<tr><td><code>Navigator</code> ซ้อนกันในแต่ละแท็บ</td><td>Part 11</td></tr>
+<tr><td>เก็บร่างลงเครื่องให้รอดจากการปิดแอป</td><td>Part 12</td></tr>
+<tr><td>ดักรหัส 401 แล้วพากลับหน้าเข้าสู่ระบบ</td><td>Part 8</td></tr>
+<tr><td>ส่งของข้ามหลายชั้นโดยไม่ต้องผ่าน constructor</td><td>Part 10</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 6 จะเปลี่ยนเรื่องไปที่ข้อมูล — ตอนนี้ทุกอย่างที่ใช้เป็นข้อมูลปลอมที่เขียนไว้ในโค้ด ถึงเวลารับข้อมูลจริงจากเซิร์ฟเวอร์ ซึ่งมาในรูปแบบ JSON ที่ต้องแปลงเป็นวัตถุที่ Dart ใช้งานได้ และต้องรับมือกับกรณีที่ข้อมูลไม่ตรงกับที่คาดไว้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

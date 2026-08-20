@@ -4,20 +4,184 @@
 <title>Route Results</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-03 · Flutter UI</span><h1>Route Results</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Typed selection</a></li><li><a href="#section-2">Cancel คือ null</a></li><li><a href="#section-3">Result object</a></li><li><a href="#section-4">ตัวอย่างจริง</a></li><li><a href="#section-5">Result vs shared state</a></li><li><a href="#section-6">Async safety</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">ทุก Routeมี Future result แบบ typed <code>Navigator.push&lt;T&gt;</code> รอ และ <code>Navigator.pop(context, T)</code> คืน นี่เหมาะกับ selection/editor/modal โดยไม่สร้าง callbackย้อนหลายชั้น</div>
-<section id="section-1"><h2>1. Typed selection</h2><pre class="code-vs"><code>final selected = await Navigator.push&lt;Location&gt;(
-  context,
-  MaterialPageRoute(builder: (_) =&gt; LocationPicker(items: locations)),
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: หน้าที่ปิดไปกำลังรายงานผล</a></li><li><a href="#section-4">ทำไม bool ไม่พอ</a></li><li><a href="#section-5">sealed class คือคำตอบ</a></li><li><a href="#section-6">รับผลด้วย switch ที่ครบทุกทาง</a></li><li><a href="#section-7">null คือกรณีที่ต้องคิด ไม่ใช่กรณีที่เหลือ</a></li><li><a href="#section-8">อย่าใช้ผลลัพธ์เป็นทางส่งข้อมูลทางเดียว</a></li><li><a href="#section-9">เมื่อหน้าเดิมถูกปิดไปแล้ว</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ส่งผลกลับจากหน้าใหม่ให้หน้าเดิมทำต่อได้ถูก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (push คืน Future) และ 4.15 (<code>sealed class</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบค่าที่ส่งกลับให้หน้าเดิมรู้ว่าต้องทำอะไรต่อ โดยไม่ต้องเดา</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>หน้ารายละเอียดถูกปิดแล้ว — หน้ารายการต้องทำอะไรต่อ</p><table><thead><tr><th>ผู้ใช้ทำอะไร</th><th>หน้ารายการต้องทำ</th></tr></thead><tbody>
+<tr><td>กดบันทึก</td><td>อัปเดตแถวนั้น + แจ้งว่าบันทึกแล้ว</td></tr>
+<tr><td>กดพักไว้ก่อน</td><td>เก็บร่างไว้ แต่ทำเครื่องหมายว่ายังไม่เสร็จ</td></tr>
+<tr><td>ยืนยันว่าจะทิ้งที่แก้ไว้</td><td>ไม่เปลี่ยนอะไร + แจ้งว่ายกเลิกแล้ว</td></tr>
+<tr><td>กดย้อนกลับทั้งที่ไม่ได้แก้อะไร</td><td><strong>ไม่ทำอะไรเลย และไม่ต้องแจ้ง</strong></td></tr>
+</tbody></table><p>สี่กรณี สี่การกระทำที่ต่างกัน แต่โค้ดที่คนเขียนครั้งแรกมักได้แค่สอง</p><pre class="code-vs"><code>final saved = await Navigator.push&lt;bool&gt;(...);
+if (saved == true) refresh();     // แยกได้แค่ "บันทึก" กับ "ไม่บันทึก"</code></pre></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>route result</td><td>ค่าที่หน้าที่ถูกปิดส่งกลับให้หน้าที่เรียก</td></tr>
+<tr><td>typed result</td><td>ผลที่มีชนิดชัดเจน ไม่ใช่ <code>dynamic</code> หรือ <code>Map</code></td></tr>
+<tr><td>exhaustive switch</td><td><code>switch</code> ที่ครอบทุกกรณี ไม่มีทางตกหล่น</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: หน้าที่ปิดไปกำลังรายงานผล</h2><pre class="code-vs"><code>หน้ารายการ: "ไปทำงาน T-001 มา แล้วบอกฉันว่าเกิดอะไรขึ้น"
+                    ↓ push
+หน้ารายละเอียด: ... ทำงาน ...
+                    ↓ pop(รายงาน)
+หน้ารายการ: อ่านรายงาน แล้วตัดสินใจว่าจะทำอะไรต่อ</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ผลที่ส่งกลับต้องบอกว่า <em>เกิดอะไรขึ้น</em> ไม่ใช่แค่ <em>สำเร็จหรือไม่</em> — เพราะหน้าเดิมต้องทำต่างกันตามเหตุการณ์ ไม่ใช่ตามความสำเร็จ</div></section>
+
+<section id="section-4"><h2>4. ทำไม bool ไม่พอ</h2><pre class="code-vs"><code>final saved = await Navigator.push&lt;bool&gt;(...);</code></pre><p><code>bool?</code> เก็บได้สามค่า คือ <code>true</code>, <code>false</code>, <code>null</code> ซึ่งดูเหมือนพอสำหรับสามกรณี แต่พอเขียนจริงจะพบว่า</p><table><thead><tr><th>ค่า</th><th>ควรแปลว่าอะไร</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td><code>true</code></td><td>บันทึกแล้ว</td><td>แต่บันทึกอะไร? ต้องไปโหลดใหม่ทั้งรายการ</td></tr>
+<tr><td><code>false</code></td><td>ยกเลิก?</td><td>ต้องจำเองว่า <code>false</code> แปลว่าอะไร ไม่มีอะไรบอก</td></tr>
+<tr><td><code>null</code></td><td>กดย้อนกลับ</td><td>เผลอเขียน <code>if (saved!)</code> แล้วพังทันที</td></tr>
+</tbody></table><p>และเมื่อมีกรณีที่สี่คือ “พักไว้ก่อน” ก็หมดที่ให้เก็บ ต้องเปลี่ยนไปใช้ <code>String</code> หรือ <code>Map</code> ซึ่งแย่กว่าเดิม</p><pre class="code-vs"><code>// เคยเห็นในโปรเจกต์จริง
+final result = await Navigator.push&lt;Map&lt;String, dynamic&gt;&gt;(...);
+if (result?['status'] == 'saved') { ... }   // พิมพ์ผิดแล้วรู้ตอนรัน</code></pre></section>
+
+<section id="section-5"><h2>5. sealed class คือคำตอบ</h2><p>เปิด <code>lib/nav_basics/nav_models.dart</code></p><pre class="code-vs"><code>sealed class TaskOutcome {
+  const TaskOutcome();
+}
+
+/// บันทึกแล้ว ต้องอัปเดตรายการและแจ้งผู้ใช้
+class TaskSaved extends TaskOutcome {
+  const TaskSaved(this.task);
+  final NavTask task;          // พาข้อมูลที่บันทึกกลับมาด้วย
+}
+
+/// พักไว้ก่อน เก็บร่างไว้แต่ยังไม่ถือว่าเสร็จ
+class TaskPaused extends TaskOutcome {
+  const TaskPaused(this.draft);
+  final NavTask draft;
+}
+
+/// ทิ้งการแก้ไข กลับไปใช้ค่าเดิม
+class TaskCancelled extends TaskOutcome {
+  const TaskCancelled();       // ไม่มีข้อมูลอะไรต้องพากลับ
+}</code></pre><p>สังเกตว่าแต่ละกรณีพกสิ่งที่ต่างกัน ตามที่เรียนใน 4.15 — <code>TaskSaved</code> มีข้อมูลแน่นอน ส่วน <code>TaskCancelled</code> ไม่มีอะไรเลย</p><p>ประโยชน์ที่ได้ทันทีคือ <strong>หน้ารายการไม่ต้องโหลดข้อมูลใหม่</strong> เพราะข้อมูลที่บันทึกแล้วเดินทางกลับมาพร้อมผลลัพธ์</p></section>
+
+<section id="section-6"><h2>6. รับผลด้วย switch ที่ครบทุกทาง</h2><p>เปิด <code>lib/nav_basics/nav_basics_app.dart</code></p><pre class="code-vs"><code>final outcome = await Navigator.of(context).push&lt;TaskOutcome&gt;(...);
+if (!mounted) return;
+
+switch (outcome) {
+  case TaskSaved(task: final saved):
+    setState(() {
+      _tasks = [
+        for (final item in _tasks) item.id == saved.id ? saved : item,
+      ];
+      _pausedIds.remove(saved.id);
+    });
+    showResultBanner(messenger, 'บันทึก ${saved.id} แล้ว');
+
+  case TaskPaused(draft: final draft):
+    setState(() {
+      _tasks = [
+        for (final item in _tasks) item.id == draft.id ? draft : item,
+      ];
+      _pausedIds.add(draft.id);
+    });
+    showResultBanner(messenger, 'พัก ${draft.id} ไว้ก่อน');
+
+  case TaskCancelled():
+    showResultBanner(messenger, 'ยกเลิกการแก้ไข ${task.id}');
+
+  // ผู้ใช้กดปุ่มย้อนกลับโดยไม่ได้แก้อะไร — ไม่ต้องทำอะไรและไม่ต้องแจ้ง
+  case null:
+    break;
+}</code></pre><p>สามอย่างที่ควรสังเกต</p><table><thead><tr><th>สิ่งที่เห็น</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td>ไม่มี <code>default:</code></td><td>เพิ่มผลลัพธ์ชนิดใหม่แล้ว compiler จะไล่ชี้ทุกจุดที่ต้องกลับมาตัดสินใจ</td></tr>
+<tr><td>มี <code>case null:</code></td><td>ชนิดจริงคือ <code>TaskOutcome?</code> — ถ้าลืม compiler ก็เตือน</td></tr>
+<tr><td>ดึงข้อมูลออกมาใช้เลย</td><td><code>TaskSaved(task: final saved)</code> ไม่ต้อง cast และไม่ต้องเช็ก null</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. null คือกรณีที่ต้องคิด ไม่ใช่กรณีที่เหลือ</h2><p>นี่คือหัวใจของบทนี้</p><pre class="code-vs"><code>ผู้ใช้กดปุ่มย้อนกลับ → pop() ไม่มีค่า → outcome เป็น null</code></pre><p>คนส่วนใหญ่จับ <code>null</code> รวมกับ “ยกเลิก” ซึ่งผิดในทางที่มองไม่เห็น</p><table><thead><tr><th></th><th>กดย้อนกลับ (<code>null</code>)</th><th>ยืนยันว่าจะทิ้ง (<code>TaskCancelled</code>)</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ตั้งใจอะไร</td><td>แค่ออกจากหน้า ไม่ได้แก้อะไรอยู่แล้ว</td><td>แก้ไว้แล้ว แต่ตัดสินใจทิ้ง</td></tr>
+<tr><td>ควรแจ้งอะไรไหม</td><td>ไม่ — ไม่มีอะไรเกิดขึ้น</td><td>ควร — เพื่อยืนยันว่างานที่แก้ไว้หายไปแล้วจริง</td></tr>
+</tbody></table><p>ถ้ารวมสองอย่างนี้เข้าด้วยกัน ผู้ใช้ที่แค่เปิดดูงานแล้วกดย้อนกลับ จะโดนข้อความ “ยกเลิกการแก้ไข” เด้งขึ้นมาทุกครั้ง ทั้งที่ไม่เคยแก้อะไร — ซึ่งกวนใจและทำให้เขาเริ่มไม่อ่านข้อความอื่นด้วย</p><p>ใน lab มีเทสต์ตรึงพฤติกรรมนี้ไว้</p><pre class="code-vs"><code>testWidgets('กดย้อนกลับโดยไม่ได้แก้อะไร ต้องไม่มีข้อความใด ๆ', (tester) async {
+  await pumpLoggedIn(tester);
+  await openFirstTask(tester);
+
+  await tester.pageBack();          // จำลองการกดปุ่มย้อนกลับ
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('result-banner')), findsNothing);
+  expect(find.text('12 ชิ้น'), findsOneWidget);
+});</code></pre></section>
+
+<section id="section-8"><h2>8. อย่าใช้ผลลัพธ์เป็นทางส่งข้อมูลทางเดียว</h2><p>ข้อจำกัดที่ต้องรู้ตั้งแต่ต้น</p><pre class="code-vs"><code>หน้าใหม่ ── pop(ผล) ──→ หน้าเดิม        ✓ ได้
+หน้าใหม่ ── ระหว่างที่ยังเปิดอยู่ ──→ หน้าเดิม   ✗ ไม่ได้</code></pre><p>ผลลัพธ์เดินทางกลับได้ครั้งเดียว คือตอนปิด ถ้าต้องการให้หน้าเดิมรู้เรื่องระหว่างที่หน้าใหม่ยังเปิดอยู่ ต้องใช้ store ร่วมกันตาม Part 4</p><table><thead><tr><th>สถานการณ์</th><th>ใช้อะไร</th></tr></thead><tbody>
+<tr><td>แก้เสร็จแล้วกลับมา</td><td>route result</td></tr>
+<tr><td>หน้าใหม่ปิดงานไปเรื่อย ๆ และหน้าเดิมต้องเห็นทันที</td><td>store ที่ทั้งสองหน้าฟังอยู่</td></tr>
+<tr><td>เปิดหน้าใหม่ซ้อนอีกสามชั้นแล้วต้องบอกหน้าล่างสุด</td><td>store — อย่าไล่ pop ส่งค่าต่อกันเป็นทอด ๆ</td></tr>
+</tbody></table><div class="warn">การส่งผลต่อกันเป็นทอด ๆ ผ่านหลาย <code>pop</code> ทำงานได้ในตอนแรก แต่พอมีเส้นทางเข้าออกมากกว่าหนึ่งทาง จะเริ่มมีกรณีที่ค่าหายกลางทางโดยไม่มีใครสังเกต</div></section>
+
+<section id="section-9"><h2>9. เมื่อหน้าเดิมถูกปิดไปแล้ว</h2><p>กรณีที่คนลืมบ่อย — ผลลัพธ์กลับมาแต่ไม่มีใครรออยู่แล้ว</p><pre class="code-vs"><code>final outcome = await Navigator.of(context).push&lt;TaskOutcome&gt;(...);
+if (!mounted) return;      // หน้ารายการถูกล้างไปแล้ว (เช่นออกจากระบบ)</code></pre><p>ตรงนี้ <code>return</code> ได้อย่างปลอดภัย เพราะข้อมูลจริงไม่ได้อยู่ที่นี่ — แต่ถ้าหน้ารายการเป็นที่เดียวที่เก็บผล การ <code>return</code> เฉย ๆ คือการทิ้งงานของผู้ใช้ ซึ่งเป็นปัญหาเดียวกับ 4.9 แบบฝึกหัดข้อ 3</p><p>หลักคือ <strong>ถ้าผลลัพธ์นั้นสำคัญกว่าหน้าจอ ต้องให้มันไปจบที่ store ไม่ใช่ที่หน้าจอ</strong></p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Null check operator used on a null value</code></td><td>เขียน <code>result!</code> โดยลืมว่ากดย้อนกลับได้ <code>null</code></td><td>จัดการ <code>null</code> ให้ครบ</td></tr>
+<tr><td>ขึ้นข้อความยกเลิกทั้งที่แค่เปิดดู</td><td>รวม <code>null</code> เข้ากับ “ยกเลิก”</td><td>แยกสองกรณีออกจากกัน</td></tr>
+<tr><td>บันทึกแล้วรายการไม่อัปเดต</td><td>ไม่ได้ <code>await</code> หรือไม่ได้ใช้ผล</td><td><code>await</code> แล้ว <code>switch</code></td></tr>
+<tr><td>ต้องโหลดรายการใหม่ทุกครั้งที่กลับมา</td><td>ผลลัพธ์เป็น <code>bool</code> ไม่พาข้อมูลกลับ</td><td>ให้ผลลัพธ์พาข้อมูลที่บันทึกกลับมาด้วย</td></tr>
+<tr><td>เพิ่มผลลัพธ์ชนิดใหม่แล้วบางจุดไม่รองรับ</td><td>มี <code>default:</code> ใน switch</td><td>ตัดออก</td></tr>
+<tr><td><code>result?['status']</code> อ่านค่าไม่เจอ</td><td>ใช้ <code>Map</code> เป็นผลลัพธ์</td><td>ใช้ <code>sealed class</code></td></tr>
+<tr><td>ค่าหายเมื่อปิดหลายหน้าพร้อมกัน</td><td>ส่งผลต่อกันเป็นทอด ๆ</td><td>ใช้ store ร่วมกัน</td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>หน้าเลือกช่องเก็บสินค้าถูกเปิดจากหน้างาน putaway และผู้ใช้ทำได้สี่อย่าง</p><table><thead><tr><th>ผู้ใช้ทำ</th><th>หน้างานต้องทำต่อ</th></tr></thead><tbody>
+<tr><td>เลือกช่องเก็บหนึ่งช่อง</td><td>ใช้ช่องนั้นและไปขั้นถัดไป</td></tr>
+<tr><td>สแกนช่องที่เต็มแล้ว ระบบแจ้ง แล้วเขากดออก</td><td>อยู่ขั้นเดิม + บอกว่าให้ลองช่องอื่น</td></tr>
+<tr><td>กดปุ่ม “ยังไม่มีที่ว่าง แจ้งหัวหน้า”</td><td>ส่งเรื่องให้หัวหน้า + ออกจากงานนี้</td></tr>
+<tr><td>กดปุ่มย้อนกลับเฉย ๆ</td><td>ไม่ทำอะไร</td></tr>
+</tbody></table><ol><li>ออกแบบชนิดของผลลัพธ์</li><li>เขียน <code>switch</code> ฝั่งที่รับผล</li><li>ตอบว่าทำไมกรณีที่สองไม่ควรใช้ <code>null</code> ทั้งที่ผู้ใช้ก็แค่ออกจากหน้าเหมือนกัน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — ชนิดของผลลัพธ์</strong></p><pre class="code-vs"><code>sealed class LocationPickOutcome {
+  const LocationPickOutcome();
+}
+
+/// เลือกได้แล้ว
+class LocationPicked extends LocationPickOutcome {
+  const LocationPicked(this.locationCode);
+  final String locationCode;
+}
+
+/// ลองแล้วแต่ช่องที่หมายตาไว้ใช้ไม่ได้ ยังอยากทำงานนี้ต่อ
+class LocationUnavailable extends LocationPickOutcome {
+  const LocationUnavailable(this.triedCode, this.reason);
+  final String triedCode;
+  final String reason;
+}
+
+/// ไม่มีที่ว่างจริง ๆ ส่งเรื่องต่อแล้ว
+class LocationEscalated extends LocationPickOutcome {
+  const LocationEscalated(this.ticketId);
+  final String ticketId;
+}</code></pre><p>สังเกตว่า <code>LocationUnavailable</code> พา <code>triedCode</code> กลับมาด้วย เพื่อให้หน้างานบอกได้ว่า “ช่อง A-12 เต็ม ลองช่องอื่น” แทนที่จะบอกลอย ๆ ว่า “ไม่สำเร็จ”</p><p><strong>ข้อ 2 — ฝั่งที่รับผล</strong></p><pre class="code-vs"><code>final outcome = await Navigator.of(context).push&lt;LocationPickOutcome&gt;(
+  MaterialPageRoute&lt;LocationPickOutcome&gt;(
+    builder: (_) =&gt; LocationPickerScreen(palletCode: _palletCode),
+  ),
 );
-if (!context.mounted || selected == null) return;
-store.selectLocation(selected.id);</code></pre></section>
-<section id="section-2"><h2>2. Cancel คือ null</h2><p>Back/barrierมักคืน null แยกจาก valid false/empty list ให้ typeมีความหมาย เช่น bool resultควรเช็ค <code>== true</code> ไม่ใช้ <code>result!</code></p></section>
-<section id="section-3"><h2>3. Result object</h2><p>เมื่อมีหลายค่าใช้ record/sealed result เช่น <code>({String id, bool changed})</code> หรือ Saved/Deleted/Cancelled อย่าใช้ Map string keysที่ runtimeพัง</p></section>
-<section id="section-4"><h2>4. ตัวอย่างจริง</h2><p>wmsapp SerialSelect pop Listของ serials, image source sheetคืน enum, part/lot sheetsคืน typed model ส่วน Absolute dialog scannerคืน custom scan object/string/int ตามงาน</p></section>
-<section id="section-5"><h2>5. Result vs shared state</h2><p>Resultเหมาะ one-shot outcome Shared storeเหมาะข้อมูลที่หลาย routes observeต่อเนื่อง ใช้ resultบอก “changed”แล้ว source route refresh authoritative dataได้</p></section>
-<section id="section-6"><h2>6. Async safety</h2><p>หลัง await route sourceอาจ unmountedหรือ selectionไม่ relevant ตรวจ context/current entityก่อน apply และอย่าเก็บ resultใน controllerของ routeที่ disposeแล้ว</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Editorมี Save/Delete/Back จะออกแบบ resultอย่างไร?</p><details><summary>เฉลย</summary><p>sealed <code>EditorResult</code>: Saved(entity), Deleted(id); Backคืน null จากนั้น caller switchเฉพาะ non-nullและ refresh/เอา rowออกตาม authoritative policy</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า pop resultก่อน API saveสำเร็จ มิฉะนั้น callerแสดงข้อมูลที่ยังไม่ commit ระหว่าง submit lock modal/pageและคืน resultหลัง authoritative success</div></section>
+if (!mounted) return;
+
+switch (outcome) {
+  case LocationPicked(:final locationCode):
+    setState(() =&gt; _locationCode = locationCode);
+    _goToConfirmStep();
+
+  case LocationUnavailable(:final triedCode, :final reason):
+    showResultBanner(messenger, 'ช่อง $triedCode ใช้ไม่ได้: $reason');
+    // อยู่ขั้นเดิม ให้ลองใหม่ได้เลย
+
+  case LocationEscalated(:final ticketId):
+    showResultBanner(messenger, 'แจ้งหัวหน้าแล้ว เลขที่ $ticketId');
+    _exitTask();
+
+  case null:
+    break;    // ไม่ทำอะไร
+}</code></pre><p><strong>ข้อ 3 — ทำไมกรณีที่สองไม่ใช่ <code>null</code></strong></p><p>เพราะ <code>null</code> กับ <code>LocationUnavailable</code> ตอบคำถามคนละข้อ</p><table><thead><tr><th></th><th><code>null</code></th><th><code>LocationUnavailable</code></th></tr></thead><tbody>
+<tr><td>บอกว่าอะไร</td><td>“ไม่มีอะไรเกิดขึ้น”</td><td>“มีบางอย่างเกิดขึ้น และมันล้มเหลว”</td></tr>
+<tr><td>ผู้ใช้ได้ลองอะไรไปหรือยัง</td><td>ยัง</td><td>ลองแล้ว</td></tr>
+<tr><td>หน้างานมีอะไรจะบอกไหม</td><td>ไม่มี</td><td>มี — และต้องบอก</td></tr>
+</tbody></table><p>ถ้าใช้ <code>null</code> ในกรณีที่สอง จะเกิดสิ่งนี้ — ผู้ใช้เดินไปที่ช่อง A-12 สแกนแล้วพบว่าเต็ม กดออกมา แล้ว <strong>หน้าจอไม่บอกอะไรเลย</strong> เขาจะไม่แน่ใจว่าระบบรับรู้หรือเปล่า และมีโอกาสสูงที่จะเดินกลับไปสแกนช่องเดิมอีกรอบ</p><p><strong>วิธีตัดสินที่ใช้ได้ทุกครั้ง</strong> — ถามว่า <em>"หน้าที่เรียกจะทำอะไรต่างไปหรือไม่"</em></p><table><thead><tr><th>คำตอบ</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td>ทำเหมือนกันทุกอย่าง</td><td>ยุบรวมเป็นกรณีเดียวได้</td></tr>
+<tr><td>ทำต่างกันแม้แต่นิดเดียว</td><td>ต้องเป็นคนละกรณี</td></tr>
+</tbody></table><p>เกณฑ์นี้ทำให้ไม่ออกแบบผลลัพธ์เยอะเกินจำเป็น และไม่ยุบสิ่งที่ต้องแยก</p><p><strong>ข้อสังเกตสุดท้าย:</strong> <code>null</code> เป็นกรณีเดียวที่เรากำหนดไม่ได้ เพราะระบบเป็นคนส่งมาให้เมื่อผู้ใช้กดย้อนกลับ — จึงควรใช้มันแทน “ไม่มีอะไรเกิดขึ้น” เท่านั้น และอย่าเอาความหมายอื่นไปฝากไว้กับมัน</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>ผลลัพธ์ต้องบอกว่าเกิดอะไรขึ้น ไม่ใช่แค่สำเร็จหรือไม่</li><li><code>bool</code> และ <code>Map</code> ไม่พอ และพังตอนรัน</li><li><code>sealed class</code> ให้แต่ละกรณีพกข้อมูลของตัวเองมาด้วย</li><li>ให้ผลลัพธ์พาข้อมูลที่บันทึกกลับมา จะได้ไม่ต้องโหลดใหม่</li><li><code>switch</code> ที่ไม่มี <code>default:</code> ทำให้ compiler ไล่จุดที่ลืมให้</li><li><code>null</code> มาจากการกดย้อนกลับ และควรแปลว่า “ไม่มีอะไรเกิดขึ้น” เท่านั้น</li><li>ตัดสินว่าต้องแยกกรณีไหม จากคำถามว่าหน้าที่เรียกจะทำต่างกันหรือเปล่า</li><li>ผลลัพธ์เดินทางกลับได้ครั้งเดียวตอนปิด — เรื่องที่ต้องรู้ระหว่างทางให้ใช้ store</li></ul></div><p><strong>บทถัดไป:</strong> 5.4 จะจัดการเส้นทางเข้าและออกจากระบบ ซึ่งเป็นจุดที่ <code>push</code> ธรรมดาใช้ไม่ได้ และเป็นที่ที่ผมเองเขียนผิดตอนสร้าง lab นี้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,20 +4,181 @@
 <title>Bottom Navigation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-06 · Flutter UI</span><h1>Bottom Navigation</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Shell tree</a></li><li><a href="#section-2">Single selected destination</a></li><li><a href="#section-3">Preserve tab state</a></li><li><a href="#section-4">Nested Navigator</a></li><li><a href="#section-5">Store lifetime</a></li><li><a href="#section-6">Responsive navigation</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Application shellถือองค์ประกอบคงที่ของ session เช่น header, body slot, bottom navigation, feedback overlay และ feature store Navigation itemเปลี่ยน destinationภายใน shellโดยไม่สร้าง session/storeใหม่ทุก tap</div>
-<section id="section-1"><h2>1. Shell tree</h2><pre class="code-vs"><code>WarehouseShell (owns session store)
-└─ Scaffold
-   ├─ AppBar / status / user menu
-   ├─ Body destination
-   ├─ feedback overlay
-   └─ NavigationBar / bottomNavigationBar</code></pre></section>
-<section id="section-2"><h2>2. Single selected destination</h2><p>เก็บ selected index/screen key sourceเดียว Map index↔destinationอย่างแน่นอน ไม่ให้ highlight tabหนึ่งแต่ bodyอีกหน้า Absolute store.screenกำหนด bodyและ bottom navผ่าน ListenableBuilder</p></section>
-<section id="section-3"><h2>3. Preserve tab state</h2><p>IndexedStackรักษา subtree/scrollแต่ใช้ memoryและ background listeners; สร้างตาม selectedทิ้ง transient stateแต่เบา เลือก per tabตาม UX และย้าย business stateเข้า storeไม่พึ่ง widgetค้าง</p></section>
-<section id="section-4"><h2>4. Nested Navigator</h2><p>แต่ละ tabมี nested stackได้เมื่อ backต้องย้อนภายใน tabและสลับ tabแล้วเก็บ stack แต่ complexityเพิ่มเรื่อง root dialog/deep link ใช้เมื่อมี requirementจริง Shellแบบ screen keyง่ายกว่าสำหรับ PDA workflowตื้น</p></section>
-<section id="section-5"><h2>5. Store lifetime</h2><p>Shellสร้าง WarehouseStoreครั้งเดียวใน initState, loadAllและ disposeพร้อม shell ทำ polling/session stateอยู่ถูกช่วง Logoutต้องหยุด timerผ่าน dispose</p></section>
-<section id="section-6"><h2>6. Responsive navigation</h2><p>PDAใช้ bottom navจำนวน destinationหลักจำกัด; tabletอาจ NavigationRail แต่เลือก stateเดียวและ callbacksเดียว ไม่สร้าง shellสองชุดที่ behaviorต่างกัน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Tab Tasksเลื่อน listแล้วไป Home/กลับ Tasksควรรักษา offsetอย่างไร?</p><details><summary>เฉลย</summary><p>ถ้า UXต้องรักษาใช้ IndexedStack/PageStorageKeyหรือ owner ScrollControllerตาม tab; dataอยู่ storeและ refreshตาม policy ไม่เก็บ controllerใน global repository</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่า push Shellใหม่ทุกครั้งที่แตะ Home และอย่ามี Navigatorหลายตัวโดยไม่มี back/root modal policy มิฉะนั้น logout/dialogปิดผิด stack</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: เปลี่ยนไส้ ไม่ใช่เปลี่ยนหน้า</a></li><li><a href="#section-4">โครงพื้นฐาน</a></li><li><a href="#section-5">IndexedStack: เก็บทุกแท็บไว้</a></li><li><a href="#section-6">ทางเลือกอีกทาง: สร้างใหม่ทุกครั้ง</a></li><li><a href="#section-7">offstage: เรื่องที่ต้องรู้ตอนเขียนเทสต์</a></li><li><a href="#section-8">แท็บที่มีหน้าซ้อนของตัวเอง</a></li><li><a href="#section-9">อย่าให้ shell ถูกสร้างใหม่</a></li><li><a href="#section-10">จำนวนปลายทางบน PDA</a></li><li><a href="#section-11">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-12">แบบฝึกหัด</a></li><li><a href="#section-13">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ทำโครงหลักที่สลับส่วนงานได้โดยไม่เสียของเดิม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.1 (stack ของหน้าจอ) และ 4.6 (ขอบเขตการวาดใหม่)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้างโครงหลักที่มีแถบล่าง และตัดสินได้ว่าแท็บที่ไม่ได้ดูควรถูกเก็บไว้หรือทิ้ง</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>แอปคลังไม่ได้มีแค่งานเดียว — มีงานวันนี้ ประวัติ และข้อมูลของผู้ใช้ ซึ่งผู้ใช้ต้องสลับไปมาได้ตลอด</p><p>วิธีที่คนเขียนครั้งแรกมักคิดถึงคือ push หน้าใหม่เมื่อแตะแถบล่าง</p><pre class="code-vs"><code>แตะ "ประวัติ"  → push หน้าประวัติ
+แตะ "งานวันนี้" → push หน้างานวันนี้อีกใบ
+แตะ "ประวัติ"  → push อีกใบ
+
+┌──────────┐
+│ ประวัติ   │
+│ งานวันนี้ │   กองสูงขึ้นเรื่อย ๆ
+│ ประวัติ   │   กดย้อนกลับสิบครั้งกว่าจะออก
+│ งานวันนี้ │
+└──────────┘</code></pre><p>อาการที่ผู้ใช้เจอคือกดย้อนกลับแล้วเจอหน้าที่เคยดูไปเรื่อย ๆ ไม่รู้จบ</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>app shell</td><td>โครงคงที่ของแอป เช่นแถบบน แถบล่าง ที่อยู่ตลอดทุกแท็บ</td></tr>
+<tr><td>destination</td><td>ปลายทางหนึ่งอันในแถบล่าง</td></tr>
+<tr><td><code>NavigationBar</code></td><td>แถบล่างแบบ Material 3</td></tr>
+<tr><td><code>BottomNavigationBar</code></td><td>แถบล่างแบบ Material 2 ที่ยังใช้ได้อยู่</td></tr>
+<tr><td><code>IndexedStack</code></td><td>widget ที่เก็บลูกทุกตัวไว้ แต่แสดงทีละตัว</td></tr>
+<tr><td>offstage</td><td>อยู่ในต้นไม้แต่ไม่ถูกวาด</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: เปลี่ยนไส้ ไม่ใช่เปลี่ยนหน้า</h2><pre class="code-vs"><code>┌────────────────────────┐
+│ แถบบน                   │  ← อยู่ตลอด
+├────────────────────────┤
+│                        │
+│   ส่วนที่เปลี่ยน         │  ← เปลี่ยนตามแท็บที่เลือก
+│                        │
+├────────────────────────┤
+│ [งาน] [ประวัติ] [ของฉัน] │  ← อยู่ตลอด
+└────────────────────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> การแตะแถบล่างไม่ใช่การไปหน้าใหม่ แต่เป็นการเปลี่ยนว่า <em>หน้าเดิมกำลังแสดงอะไร</em> — จึงไม่มี <code>push</code> เข้ามาเกี่ยวเลย</div></section>
+
+<section id="section-4"><h2>4. โครงพื้นฐาน</h2><p>เปิด <code>lib/nav_basics/nav_basics_app.dart</code></p><pre class="code-vs"><code>class _HomeShellState extends State&lt;HomeShell&gt; {
+  static const List&lt;String&gt; _titles = ['งานวันนี้', 'ประวัติ', 'ของฉัน'];
+
+  int _tabIndex = 0;                       // แหล่งความจริงเดียว
+
+  @override
+  Widget build(BuildContext context) =&gt; Scaffold(
+    appBar: AppBar(title: Text(_titles[_tabIndex])),
+    body: IndexedStack(
+      index: _tabIndex,
+      children: [
+        const TaskListTab(),
+        const HistoryTab(),
+        ProfileTab(session: widget.session),
+      ],
+    ),
+    bottomNavigationBar: NavigationBar(
+      selectedIndex: _tabIndex,
+      onDestinationSelected: (index) =&gt; setState(() =&gt; _tabIndex = index),
+      destinations: const [...],
+    ),
+  );
+}</code></pre><p>จุดสำคัญคือ <strong><code>_tabIndex</code> ตัวเดียวคุมสามอย่าง</strong> — ชื่อบนแถบบน เนื้อหาตรงกลาง และปุ่มที่ถูกเน้นในแถบล่าง</p><pre class="code-vs"><code>// อย่าทำแบบนี้
+int _selectedTab = 0;
+Widget _currentBody = const TaskListTab();   // ค่าที่สองที่ต้องดูแลให้ตรงกัน</code></pre><p>สองค่าที่ต้องตรงกันเสมอ คือสองค่าที่วันหนึ่งจะไม่ตรงกัน — เป็นหลักเดียวกับ 4.2</p></section>
+
+<section id="section-5"><h2>5. IndexedStack: เก็บทุกแท็บไว้</h2><p><code>IndexedStack</code> สร้างลูกทุกตัวและเก็บไว้ในต้นไม้ แต่วาดเฉพาะตัวที่เลือก</p><pre class="code-vs"><code>index: 1
+
+TaskListTab   ← อยู่ในต้นไม้ State ยังอยู่ แต่ไม่ถูกวาด (offstage)
+HistoryTab    ← ถูกวาด
+ProfileTab    ← อยู่ในต้นไม้ แต่ไม่ถูกวาด</code></pre><table><thead><tr><th>ได้อะไร</th><th>แลกอะไร</th></tr></thead><tbody>
+<tr><td>ตำแหน่งที่เลื่อนไว้ยังอยู่</td><td>ทุกแท็บกินหน่วยความจำพร้อมกัน</td></tr>
+<tr><td>ข้อความที่พิมพ์ค้างไว้ยังอยู่</td><td>สร้างทุกแท็บตั้งแต่เปิดหน้าจอ</td></tr>
+<tr><td>ไม่ต้องโหลดข้อมูลใหม่ทุกครั้งที่สลับ</td><td>ตัวจับเวลาในแท็บที่ไม่ได้ดูก็ยังเดิน</td></tr>
+</tbody></table><p>แถวสุดท้ายคือกับดักที่ต้องระวัง — ถ้าแท็บประวัติมี polling ทุก 10 วินาที (4.11) มันจะยิงต่อไปแม้ผู้ใช้ดูแท็บอื่นอยู่ ต้องหยุดเองเมื่อไม่ได้ถูกแสดง</p></section>
+
+<section id="section-6"><h2>6. ทางเลือกอีกทาง: สร้างใหม่ทุกครั้ง</h2><pre class="code-vs"><code>body: switch (_tabIndex) {
+  0 =&gt; const TaskListTab(),
+  1 =&gt; const HistoryTab(),
+  _ =&gt; ProfileTab(session: widget.session),
+},</code></pre><table><thead><tr><th></th><th><code>IndexedStack</code></th><th><code>switch</code></th></tr></thead><tbody>
+<tr><td>สลับกลับมาแล้ว</td><td>อยู่ที่เดิมทุกอย่าง</td><td>เริ่มใหม่หมด</td></tr>
+<tr><td>หน่วยความจำ</td><td>ทุกแท็บพร้อมกัน</td><td>ทีละแท็บ</td></tr>
+<tr><td><code>initState</code> ของแท็บ</td><td>ทำงานครั้งเดียว</td><td>ทำงานทุกครั้งที่กลับมา</td></tr>
+</tbody></table><p>วิธีเลือก — ถามว่า <strong>สิ่งที่จะหายไปนั้น ผู้ใช้เสียดายไหม</strong></p><table><thead><tr><th>แท็บ</th><th>ควรใช้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>รายการงานที่เลื่อนมาลึก</td><td>เก็บไว้</td><td>เลื่อนใหม่ทุกครั้งน่ารำคาญมาก</td></tr>
+<tr><td>ฟอร์มที่กรอกค้างไว้</td><td>เก็บไว้</td><td>หายแล้วต้องกรอกใหม่</td></tr>
+<tr><td>หน้าข้อมูลผู้ใช้ที่มีไม่กี่บรรทัด</td><td>สร้างใหม่ก็ได้</td><td>ไม่มีอะไรให้เสียดาย</td></tr>
+</tbody></table><p>และมีข้อสำคัญที่ต้องเข้าใจ — <strong>ข้อมูลทางธุรกิจไม่ควรอยู่ใน widget ตั้งแต่แรก</strong> ถ้ามันอยู่ใน store ตาม Part 4 การสร้าง widget ใหม่ก็ไม่ทำให้ข้อมูลหาย เหลือแค่เรื่องตำแหน่งที่เลื่อนและข้อความที่พิมพ์ค้าง ซึ่งเป็นของ widget จริง ๆ</p></section>
+
+<section id="section-7"><h2>7. offstage: เรื่องที่ต้องรู้ตอนเขียนเทสต์</h2><p>ตอนเขียนเทสต์ของ lab นี้ ผมเจอสิ่งนี้เข้าเต็ม ๆ</p><pre class="code-vs"><code>await tester.tap(find.text('ประวัติ'));
+await tester.pumpAndSettle();
+
+expect(find.byKey(const Key('task-list')), findsOneWidget);   // ล้มเหลว</code></pre><p>ทั้งที่ <code>IndexedStack</code> เก็บแท็บแรกไว้ในต้นไม้จริง ๆ</p><p>สาเหตุคือ <strong>ตัวค้นหาของ Flutter ข้าม widget ที่ไม่ถูกวาดโดยค่าเริ่มต้น</strong> ซึ่งสมเหตุสมผล เพราะเทสต์ส่วนใหญ่ต้องการรู้ว่าผู้ใช้เห็นอะไร</p><pre class="code-vs"><code>expect(find.byKey(const Key('task-list')), findsNothing);
+// IndexedStack เก็บแท็บที่ไม่ได้เลือกไว้แบบ offstage — ยังอยู่ในต้นไม้
+// แต่ไม่ถูกวาด ตัวค้นหาจึงต้องบอกให้รวม offstage ด้วย
+expect(
+  find.byKey(const Key('task-list'), skipOffstage: false),
+  findsOneWidget,
+);</code></pre><p>สองบรรทัดนี้อธิบายความต่างได้ชัดกว่าคำพูด — <strong>ไม่เห็น ไม่ได้แปลว่าไม่มี</strong></p></section>
+
+<section id="section-8"><h2>8. แท็บที่มีหน้าซ้อนของตัวเอง</h2><p>คำถามที่จะเจอทันทีเมื่อแอปโตขึ้น — ถ้าเปิดรายละเอียดงานจากแท็บแรก แล้วสลับไปแท็บสอง แล้วกลับมา ควรเห็นอะไร</p><table><thead><tr><th>แบบ</th><th>กลับมาแล้วเห็น</th><th>ความซับซ้อน</th></tr></thead><tbody>
+<tr><td>หน้าซ้อนอยู่บน shell (ที่ lab ใช้)</td><td>หน้ารายละเอียดทับแถบล่างอยู่ตลอด</td><td>ง่าย</td></tr>
+<tr><td>แต่ละแท็บมี <code>Navigator</code> ของตัวเอง</td><td>กลับมาเจอหน้ารายละเอียดของแท็บนั้น</td><td>สูงขึ้นมาก</td></tr>
+</tbody></table><p>ใน lab หน้ารายละเอียดถูก <code>push</code> ขึ้นไปทับทั้ง shell รวมถึงแถบล่างด้วย</p><pre class="code-vs"><code>┌──────────────────┐
+│ รายละเอียดงาน     │  ← ทับทั้งหมด ไม่เห็นแถบล่าง
+├──────────────────┤
+│ HomeShell        │
+└──────────────────┘</code></pre><p>ซึ่งเหมาะกับ PDA เพราะงานหนึ่งชิ้นควรได้พื้นที่เต็มจอ และไม่ควรให้ผู้ใช้สลับแท็บหนีระหว่างทำงานที่ยังไม่จบอยู่แล้ว</p><div class="warn">การให้แต่ละแท็บมี <code>Navigator</code> ของตัวเอง ทำให้ต้องตัดสินอีกหลายเรื่อง เช่นกล่องโต้ตอบควรอยู่บน navigator ตัวไหน และปุ่มย้อนกลับของเครื่องควรถอยใน navigator ตัวไหน — อย่าทำจนกว่าจะมีความต้องการจริง เรื่องนี้อยู่ใน Part 11</div></section>
+
+<section id="section-9"><h2>9. อย่าให้ shell ถูกสร้างใหม่</h2><pre class="code-vs"><code>// ผิด — แตะ "งานวันนี้" แล้ว push shell ใหม่ทับ shell เดิม
+onDestinationSelected: (index) =&gt; Navigator.of(context).push(
+  MaterialPageRoute(builder: (_) =&gt; HomeShell(session: session)),
+),</code></pre><p>ผลที่ตามมาไม่ใช่แค่กองสูงขึ้น แต่ทุกอย่างที่ shell ถืออยู่จะถูกสร้างใหม่หมด</p><table><thead><tr><th>ถ้า shell ถูกสร้างใหม่</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>store ที่ shell สร้างไว้ ถูกสร้างใหม่</td><td>โหลดข้อมูลใหม่ทั้งหมด</td></tr>
+<tr><td>ตัวจับเวลาถูกตั้งใหม่</td><td>มีสองตัววิ่งพร้อมกัน ถ้าตัวเก่าไม่ถูกยกเลิก (4.11)</td></tr>
+<tr><td>ข้อมูลที่ยังไม่ได้บันทึกหาย</td><td>ผู้ใช้เสียงาน</td></tr>
+</tbody></table><p>shell ควรถูกสร้างครั้งเดียวหลังเข้าสู่ระบบ และถูกทำลายตอนออกจากระบบเท่านั้น — ซึ่งเป็นเหตุผลที่ <code>pushAndRemoveUntil</code> ใน 5.4 สำคัญ เพราะมันคือจุดที่ shell ถูกทำลายจริงพร้อมกับทุกอย่างที่มันถืออยู่</p></section>
+
+<section id="section-10"><h2>10. จำนวนปลายทางบน PDA</h2><table><thead><tr><th>จำนวน</th><th>ผลบนจอ PDA</th></tr></thead><tbody>
+<tr><td>3–4</td><td>ปุ่มใหญ่พอกดด้วยถุงมือ อ่านชื่อได้</td></tr>
+<tr><td>5</td><td>เริ่มแคบ ชื่อถูกตัด</td></tr>
+<tr><td>มากกว่า 5</td><td>กดผิดบ่อย</td></tr>
+</tbody></table><p>ข้อจำกัดนี้ไม่ใช่เรื่องความสวย แต่เป็นเรื่องเดียวกับ 2.13 — พื้นที่แตะขั้นต่ำ 48 หน่วย เมื่อจอกว้าง 320 หน่วย ห้าปลายทางเหลือช่องละ 64 หน่วยซึ่งรวมช่องว่างรอบด้วย</p><p>ถ้ามีส่วนงานมากกว่านั้น ให้จัดกลุ่มแล้วซ่อนไว้ในแท็บเดียว ดีกว่ายัดทุกอย่างลงแถบล่าง</p></section>
+
+<section id="section-11"><h2>11. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>กดย้อนกลับแล้วเจอแท็บเก่าไปเรื่อย ๆ</td><td>push หน้าใหม่เมื่อแตะแถบล่าง</td><td>เปลี่ยนเฉพาะ index</td></tr>
+<tr><td>ปุ่มที่เน้นกับเนื้อหาไม่ตรงกัน</td><td>เก็บสองค่าที่ต้องตรงกัน</td><td>ใช้ค่าเดียว</td></tr>
+<tr><td>สลับแท็บแล้วตำแหน่งที่เลื่อนหาย</td><td>สร้างใหม่ทุกครั้ง</td><td><code>IndexedStack</code></td></tr>
+<tr><td>เปิดแอปช้าลง</td><td><code>IndexedStack</code> สร้างทุกแท็บพร้อมกัน</td><td>ทำให้แท็บที่หนักโหลดข้อมูลเมื่อถูกเลือกเท่านั้น</td></tr>
+<tr><td>ยังยิงคำขอของแท็บที่ไม่ได้ดู</td><td>ตัวจับเวลาไม่รู้ว่าถูกซ่อน</td><td>หยุดเมื่อไม่ได้ถูกแสดง (4.11)</td></tr>
+<tr><td>เทสต์หา widget ของแท็บอื่นไม่เจอ</td><td>ตัวค้นหาข้าม offstage</td><td><code>skipOffstage: false</code></td></tr>
+<tr><td>ข้อมูลโหลดใหม่ทุกครั้งที่แตะแถบล่าง</td><td>push shell ใหม่</td><td>อย่า push shell</td></tr>
+</tbody></table></section>
+
+<section id="section-12"><h2>12. แบบฝึกหัด</h2><p>แอปคลังหนึ่งมีสี่แท็บ</p><table><thead><tr><th>แท็บ</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>งานวันนี้</td><td>รายการ 200 บรรทัด รีเฟรชทุก 10 วินาที</td></tr>
+<tr><td>สแกนด่วน</td><td>ฟอร์มที่กรอกค้างไว้ได้</td></tr>
+<tr><td>ประวัติ</td><td>รายการที่โหลดครั้งเดียวตอนเปิด ไม่เปลี่ยนอีก</td></tr>
+<tr><td>ของฉัน</td><td>สามบรรทัด ไม่มีอะไรเลย</td></tr>
+</tbody></table><ol><li>ตัดสินว่าแต่ละแท็บควรถูกเก็บไว้หรือสร้างใหม่</li><li>อธิบายว่าจะจัดการ polling ของแท็บแรกอย่างไร</li><li>ตอบว่าถ้าเปิดแอปแล้วช้าเพราะสร้างทุกแท็บพร้อมกัน ควรแก้ที่ไหน</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — เก็บหรือสร้างใหม่</strong></p><table><thead><tr><th>แท็บ</th><th>ตัดสิน</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>งานวันนี้</td><td>เก็บ</td><td>เลื่อนมาลึกแล้ว การเด้งกลับบนสุดทำให้หาที่เดิมไม่เจอ</td></tr>
+<tr><td>สแกนด่วน</td><td>เก็บ</td><td>ฟอร์มที่กรอกค้างไว้จะหาย</td></tr>
+<tr><td>ประวัติ</td><td>เก็บ</td><td>โหลดครั้งเดียวแพง ไม่ควรโหลดซ้ำทุกครั้งที่สลับ</td></tr>
+<tr><td>ของฉัน</td><td>สร้างใหม่ก็ได้</td><td>ไม่มีอะไรให้เสียดาย</td></tr>
+</tbody></table><p>ในทางปฏิบัติ เมื่อสามในสี่ต้องเก็บ ก็ใช้ <code>IndexedStack</code> ทั้งหมดไปเลย — การผสมสองวิธีในหน้าเดียวเพิ่มความซับซ้อนโดยได้กลับมาน้อย</p><p>แต่ข้อสังเกตที่สำคัญกว่าคือ <strong>สองในสามเหตุผลนั้นไม่ควรเป็นเหตุผลตั้งแต่แรก</strong></p><table><thead><tr><th>เหตุผล</th><th>ถ้าออกแบบดีแล้ว</th></tr></thead><tbody>
+<tr><td>รายการ 200 บรรทัดจะโหลดใหม่</td><td>ไม่ควรเป็นปัญหา ถ้าข้อมูลอยู่ใน store ไม่ใช่ใน widget</td></tr>
+<tr><td>ประวัติโหลดใหม่แพง</td><td>เหมือนกัน — เก็บไว้ที่ store</td></tr>
+<tr><td>ตำแหน่งที่เลื่อนไว้หาย</td><td><strong>นี่คือเหตุผลที่แท้จริง</strong> เพราะเป็นของ widget จริง ๆ</td></tr>
+</tbody></table><p>ถ้าย้ายข้อมูลไปไว้ที่ store ตาม Part 4 แล้ว เหตุผลที่เหลือจะเหลือแค่ตำแหน่งที่เลื่อนและข้อความที่พิมพ์ค้าง ซึ่งแก้ด้วย <code>PageStorageKey</code> ได้โดยไม่ต้องเก็บทั้งแท็บไว้ในหน่วยความจำ</p><p><strong>ข้อ 2 — polling ของแท็บแรก</strong></p><p>ปัญหาคือ <code>IndexedStack</code> ไม่บอกลูกว่าตอนนี้ถูกแสดงอยู่หรือเปล่า มันแค่ไม่วาด</p><pre class="code-vs"><code>// shell เป็นคนรู้ จึงเป็นคนบอก
+body: IndexedStack(
+  index: _tabIndex,
+  children: [
+    TaskListTab(isActive: _tabIndex == 0),
+    ScanTab(isActive: _tabIndex == 1),
+    ...
+  ],
+),</code></pre><pre class="code-vs"><code>// ในแท็บ — เริ่มหรือหยุดตามว่าถูกแสดงอยู่ไหม
+@override
+void didUpdateWidget(covariant TaskListTab oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  if (oldWidget.isActive == widget.isActive) return;   // ต้องเทียบก่อน (4.12)
+  if (widget.isActive) {
+    _store.load();                    // กลับมาดู — รีเฟรชทันที
+    _store.startPolling(const Duration(seconds: 10));
+  } else {
+    _store.stopPolling();             // ไม่ได้ดูแล้ว — หยุด
+  }
+}</code></pre><p>สองอย่างที่ต้องมีคู่กันเสมอ ตาม 4.11 — <strong>หยุดเมื่อไม่มีใครดู และรีเฟรชทันทีเมื่อกลับมาดู</strong> ถ้าทำแค่อย่างแรก ผู้ใช้จะกลับมาเจอข้อมูลค้างจากเมื่อสิบนาทีก่อน</p><p>และยังต้องหยุดเมื่อแอปถูกย่อลงด้วย ซึ่งเป็นคนละเรื่องกับการสลับแท็บ</p><p><strong>ข้อ 3 — เปิดแอปช้า</strong></p><p>อาการนี้บอกว่าแท็บถูกสร้างพร้อมกันทั้งหมด แต่ <strong>ต้องแยกให้ออกก่อนว่าอะไรช้า</strong></p><table><thead><tr><th>สิ่งที่ช้า</th><th>แก้ที่</th></tr></thead><tbody>
+<tr><td>สร้าง widget สี่แท็บ</td><td>แทบไม่มีทางเป็นสาเหตุ — การสร้าง widget ถูกมาก (1.4)</td></tr>
+<tr><td><code>initState</code> ของทุกแท็บยิงคำขอพร้อมกัน</td><td><strong>นี่คือสาเหตุจริง</strong></td></tr>
+<tr><td>สร้าง store สี่ตัวพร้อมกัน</td><td>ถ้าแต่ละตัวโหลดข้อมูลทันที ก็เป็นเรื่องเดียวกัน</td></tr>
+</tbody></table><p>ดังนั้นไม่ควรแก้ด้วยการเลิกใช้ <code>IndexedStack</code> แต่ควรแก้ที่ <strong>แยกการสร้าง widget ออกจากการโหลดข้อมูล</strong></p><pre class="code-vs"><code>// แท็บถูกสร้างตั้งแต่ต้น แต่ยังไม่โหลดอะไรจนกว่าจะถูกเปิดดูครั้งแรก
+bool _loadedOnce = false;
+
+void _loadIfNeeded() {
+  if (_loadedOnce || !widget.isActive) return;
+  _loadedOnce = true;
+  _store.load();
+}</code></pre><p>ผลที่ได้คือเปิดแอปแล้วยิงคำขอเดียว ไม่ใช่สี่ และแท็บที่ผู้ใช้ไม่เคยแตะเลยทั้งกะ ก็ไม่เคยยิงคำขอเลย</p><p><strong>บทเรียนที่ควรจำ:</strong> เวลาเจออาการช้า ให้หาว่าอะไรช้าจริง ก่อนเปลี่ยนโครงสร้าง — ตามลำดับใน 2.10 คือวัดก่อนเสมอ การเลิกใช้ <code>IndexedStack</code> จะแก้อาการได้จริง แต่แลกด้วยการเสียประโยชน์ทั้งหมดของมัน ทั้งที่สาเหตุจริงอยู่คนละที่</p></details></section>
+
+<section id="section-13"><h2>13. สรุปท้ายบท</h2><div class="success"><ul><li>แตะแถบล่างคือเปลี่ยนไส้ ไม่ใช่ push หน้าใหม่</li><li>ใช้ค่าเดียวคุมทั้งชื่อ เนื้อหา และปุ่มที่ถูกเน้น</li><li><code>IndexedStack</code> เก็บทุกแท็บไว้ในต้นไม้ แต่วาดทีละตัว</li><li>สิ่งที่เก็บได้คือของที่เป็นของ widget จริง ๆ ส่วนข้อมูลควรอยู่ที่ store</li><li>แท็บที่ไม่ได้ถูกแสดงยังทำงานอยู่ — ต้องบอกให้มันหยุดเอง</li><li>เทสต์ต้องใช้ <code>skipOffstage: false</code> เมื่อจะหาของในแท็บที่ไม่ได้แสดง</li><li>อย่า push shell ใหม่ — shell ควรมีตัวเดียวตลอด session</li><li>ปลายทางบน PDA ควรมี 3–4 อัน ตามข้อจำกัดพื้นที่แตะ</li></ul></div><p><strong>บทถัดไป:</strong> 5.7 จะตอบคำถามที่ค้างจากบทนี้ — ข้อมูลที่ผู้ใช้ทำค้างไว้ ควรอยู่รอดแค่ไหน เมื่อสลับแท็บ เมื่อเปิดกล่องโต้ตอบ และเมื่อออกจากงานกลางคัน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

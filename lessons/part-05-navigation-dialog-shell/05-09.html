@@ -4,22 +4,225 @@
 <title>Modal Bottom Sheet</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">05-09 · Flutter UI</span><h1>Modal Bottom Sheet</h1><p>Part 5: Navigation &amp; App Shell</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Typed sheet</a></li><li><a href="#section-2">Keyboard</a></li><li><a href="#section-3">DraggableScrollableSheet</a></li><li><a href="#section-4">Dirty guard</a></li><li><a href="#section-5">ตัวอย่างจริง</a></li><li><a href="#section-6">Root navigator</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">จุดพลาด</a></li></ol></nav>
-<div class="note">Modal bottom sheet เหมาะ selection/form/contextual actionsที่ต้องพื้นที่มากกว่า dialogและยังเห็นบริบทด้านหลัง ต้องจัด keyboard, safe area, scroll และ typed resultให้ครบ</div>
-<section id="section-1"><h2>1. Typed sheet</h2><pre class="code-vs"><code>final location = await showModalBottomSheet&lt;Location&gt;(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่บทนี้แก้</a></li><li><a href="#section-2">คำศัพท์ที่ต้องรู้ก่อน</a></li><li><a href="#section-3">Mental model: แผ่นก็คือ route เหมือนกล่อง</a></li><li><a href="#section-4">โครงพื้นฐาน</a></li><li><a href="#section-5">รายการยาวต้องสร้างตามต้องการ</a></li><li><a href="#section-6">แป้นพิมพ์บังแผ่น</a></li><li><a href="#section-7">แผ่นที่มีของค้างต้องกันการปิด</a></li><li><a href="#section-8">เลือกให้ถูกว่าจะใช้อะไร</a></li><li><a href="#section-9">แผ่นควรอยู่บน Navigator ตัวไหน</a></li><li><a href="#section-10">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-11">แบบฝึกหัด</a></li><li><a href="#section-12">สรุปท้ายบท</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 30–40 นาที</span><span>ลงมือทำ: ให้ผู้ใช้เลือกจากรายการโดยไม่ต้องออกจากงาน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 5.8 (กล่องโต้ตอบ) และ 2.7 (รายการที่สร้างตามต้องการ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้แผ่นด้านล่างรับค่ากลับมาอย่างปลอดภัย และจัดการแป้นพิมพ์กับรายการยาวได้</div>
+
+<section id="section-1"><h2>1. ปัญหาที่บทนี้แก้</h2><p>ผู้ใช้กำลังกรอกงานอยู่ แล้วต้องเลือกพาเลทปลายทางจาก 40 รายการ</p><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>กล่องโต้ตอบ</td><td>เล็กเกินไป ใส่รายการยาวไม่ได้</td></tr>
+<tr><td>เปิดหน้าใหม่เต็มจอ</td><td>หลุดบริบท ไม่เห็นว่ากำลังกรอกอะไรอยู่</td></tr>
+<tr><td><code>DropdownButton</code></td><td>รายการลอยแคบ ๆ กดยากเมื่อใส่ถุงมือ</td></tr>
+</tbody></table><p>แผ่นที่เลื่อนขึ้นมาจากด้านล่างแก้ทั้งสามข้อ — พื้นที่กว้าง ยังเห็นบริบทด้านหลัง และปุ่มใหญ่พอกด</p></section>
+
+<section id="section-2"><h2>2. คำศัพท์ที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>showModalBottomSheet</code></td><td>เปิดแผ่นจากด้านล่างเป็น route ใหม่</td></tr>
+<tr><td><code>isScrollControlled</code></td><td>ให้แผ่นสูงเกินครึ่งจอได้</td></tr>
+<tr><td><code>useSafeArea</code></td><td>หลบพื้นที่ของระบบ เช่นแถบด้านบน</td></tr>
+<tr><td><code>viewInsets</code></td><td>พื้นที่ที่แป้นพิมพ์กินไป</td></tr>
+<tr><td><code>DraggableScrollableSheet</code></td><td>แผ่นที่ลากปรับความสูงได้</td></tr>
+<tr><td><code>shrinkWrap</code></td><td>ให้รายการสูงเท่าเนื้อหา ไม่ยืดเต็มพื้นที่</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. Mental model: แผ่นก็คือ route เหมือนกล่อง</h2><pre class="code-vs"><code>┌──────────────────┐
+│ หน้าเดิม          │  ← ยังอยู่ ยังเห็น
+│                  │
+│ ╔══════════════╗ │
+│ ║ เลือกพาเลท    ║ │  ← route ใหม่
+│ ║ PAL-0101     ║ │     คืนค่าได้เหมือน 5.3
+│ ║ PAL-0102     ║ │
+│ ╚══════════════╝ │
+└──────────────────┘</code></pre><div class="note"><strong>ประโยคเดียวที่ต้องจำ:</strong> ทุกอย่างที่รู้จาก 5.8 ใช้กับแผ่นได้หมด — ต่างกันแค่พื้นที่ที่ใหญ่กว่า และเรื่องแป้นพิมพ์ที่ต้องจัดการเพิ่ม</div></section>
+
+<section id="section-4"><h2>4. โครงพื้นฐาน</h2><p>เปิด <code>lib/nav_basics/nav_feedback.dart</code></p><pre class="code-vs"><code>Future&lt;String?&gt; showPalletPicker(
+  BuildContext context, {
+  required List&lt;String&gt; codes,
+}) =&gt; showModalBottomSheet&lt;String&gt;(
+  context: context,
+  builder: (sheetContext) =&gt; SafeArea(
+    child: ListView(
+      shrinkWrap: true,
+      children: [
+        const ListTile(title: Text('เลือกพาเลทปลายทาง')),
+        const Divider(height: 1),
+        for (final code in codes)
+          ListTile(
+            key: ValueKey&lt;String&gt;('pallet-$code'),
+            title: Text(code),
+            onTap: () =&gt; Navigator.of(sheetContext).pop(code),
+          ),
+      ],
+    ),
+  ),
+);</code></pre><p>สังเกตว่าคืน <code>String?</code> ไม่ใช่ <code>String</code> — ต่างจาก <code>showDiscardDialog</code> ใน 5.8 ที่แปลง <code>null</code> เป็น <code>false</code></p><table><thead><tr><th></th><th>กล่องยืนยัน</th><th>แผ่นเลือก</th></tr></thead><tbody>
+<tr><td><code>null</code> แปลว่า</td><td>ไม่ทำ — แปลงเป็น <code>false</code> ได้</td><td>ไม่ได้เลือก — ไม่มีค่าอื่นแทนได้</td></tr>
+<tr><td>ฝั่งที่เรียกต้องทำ</td><td>ไม่ต้องคิดเรื่อง <code>null</code></td><td>ต้องเช็ก <code>null</code></td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; _pickPallet() async {
+  final code = await showPalletPicker(context, codes: kPalletCodes);
+  if (code == null) return;      // ปิดแผ่นโดยไม่เลือก
+  setState(() =&gt; _palletCode = code);
+}</code></pre><p>ใน lab มีเทสต์ตรึงไว้ว่าปิดแผ่นแล้วค่าต้องไม่เปลี่ยน</p><pre class="code-vs"><code>await tester.tapAt(const Offset(20, 20));   // แตะนอกแผ่น
+await tester.pumpAndSettle();
+expect(find.text('PAL-0101'), findsOneWidget);   // ยังเป็นค่าเดิม</code></pre></section>
+
+<section id="section-5"><h2>5. รายการยาวต้องสร้างตามต้องการ</h2><p>ตัวอย่างข้างบนใช้ <code>for</code> สร้างทุกรายการล่วงหน้า ซึ่งใช้ได้เพราะมีแค่สามรายการ</p><pre class="code-vs"><code>// พังเมื่อมี 500 ช่องเก็บ — สร้าง 500 widget พร้อมกัน
+ListView(
+  shrinkWrap: true,
+  children: [for (final item in items) ListTile(...)],
+)</code></pre><pre class="code-vs"><code>// ถูก — สร้างเฉพาะที่เห็น (2.7)
+ListView.builder(
+  itemCount: items.length,
+  itemBuilder: (context, index) =&gt; ListTile(...),
+)</code></pre><p>แต่ <code>ListView.builder</code> ต้องการความสูงที่แน่นอน จึงต้องบอกความสูงให้แผ่นด้วย</p><pre class="code-vs"><code>showModalBottomSheet&lt;String&gt;(
   context: context,
   isScrollControlled: true,
-  useSafeArea: true,
-  builder: (ctx) =&gt; LocationPicker(
-    onSelected: (value) =&gt; Navigator.pop(ctx, value),
+  builder: (sheetContext) =&gt; SizedBox(
+    height: MediaQuery.of(sheetContext).size.height * 0.7,
+    child: Column(
+      children: [
+        const ListTile(title: Text('เลือกช่องเก็บ')),
+        const Divider(height: 1),
+        Expanded(          // ให้รายการกินพื้นที่ที่เหลือ (2.4)
+          child: ListView.builder(
+            itemCount: locations.length,
+            itemBuilder: (context, index) =&gt; ListTile(...),
+          ),
+        ),
+      ],
+    ),
   ),
-);</code></pre></section>
-<section id="section-2"><h2>2. Keyboard</h2><p>isScrollControlledให้ sheetขยายและรับ viewInsets; contentควร scrollและ padding bottomตาม keyboardเมื่อ Scaffoldไม่จัดให้ จำกัด maxHeightสำหรับ landscape/PDA</p></section>
-<section id="section-3"><h2>3. DraggableScrollableSheet</h2><p>เหมาะ listยาวที่ลากขนาดได้และต้องส่ง scrollControllerให้ listเพื่อ gestureทำงานร่วมกัน ไม่จำเป็นกับ action sheetสั้น</p></section>
-<section id="section-4"><h2>4. Dirty guard</h2><p>ครอบ contentด้วย PopScopeและให้ close/drag/backผ่าน discard policyเดียว Absolute settings sheetทำเช่นนี้เพื่อป้องกันค่าที่แก้หาย</p></section>
-<section id="section-5"><h2>5. ตัวอย่างจริง</h2><p>wmsappใช้ sheetsเลือก part/lot/image sourceและ workflow detail; Absoluteใช้ route-level connection settings form แสดงว่า sheetเป็น routeที่มี state/resultได้เต็ม</p></section>
-<section id="section-6"><h2>6. Root navigator</h2><p>ใน nested shellกำหนด useRootNavigatorเมื่อ sheetต้องครอบ bottom navทั้งหมด มิฉะนั้นใช้ nearest navigatorเพื่ออยู่ใน feature stack ทดสอบ pop context</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Picker 500 locationsควร Column childrenทั้งหมดไหม?</p><details><summary>เฉลย</summary><p>ใช้ bounded/draggable sheet + ListView.builder, search state, typed Location result และ empty/loading/error ไม่ใช้ SingleChildScrollViewสร้าง 500 rows</p></details></section>
-<section id="section-8"><h2>8. จุดพลาด</h2><div class="warn">อย่าเรียก Navigator.pop(pageContext)จาก sheetโดยไม่แน่ใจ navigator ใช้ builder contextและคืน result; หลัง awaitตรวจ page mounted</div></section>
+);</code></pre><div class="note">เมื่อรายการยาวเกินสิบกว่ารายการ การเลื่อนหาเริ่มช้ากว่าการพิมพ์ค้น — ควรมีช่องค้นหาแทนที่จะให้เลื่อนอย่างเดียว ซึ่งเป็นเหตุผลเดียวกับที่บันทึกไว้ใน 3.13</div></section>
+
+<section id="section-6"><h2>6. แป้นพิมพ์บังแผ่น</h2><p>ปัญหาที่เจอทันทีที่ใส่ช่องกรอกลงในแผ่น</p><pre class="code-vs"><code>ผู้ใช้แตะช่องค้นหา → แป้นพิมพ์ขึ้นมา → บังแผ่นครึ่งหนึ่ง
+                                       ช่องที่กำลังพิมพ์อยู่ใต้แป้นพิมพ์</code></pre><p>สองอย่างที่ต้องทำคู่กัน</p><pre class="code-vs"><code>showModalBottomSheet&lt;String&gt;(
+  context: context,
+  isScrollControlled: true,        // 1. ให้แผ่นสูงเกินครึ่งจอได้
+  builder: (sheetContext) =&gt; Padding(
+    // 2. ดันเนื้อหาขึ้นเท่าความสูงของแป้นพิมพ์
+    padding: EdgeInsets.only(
+      bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+    ),
+    child: ...,
+  ),
+);</code></pre><table><thead><tr><th>ถ้าขาด</th><th>อาการ</th></tr></thead><tbody>
+<tr><td><code>isScrollControlled</code></td><td>แผ่นสูงได้แค่ครึ่งจอ ใส่อะไรไม่ค่อยได้</td></tr>
+<tr><td><code>viewInsets</code></td><td>ช่องกรอกอยู่ใต้แป้นพิมพ์ พิมพ์ไปโดยไม่เห็นสิ่งที่พิมพ์</td></tr>
+</tbody></table><p>บน PDA ที่จอสูงไม่มาก ปัญหานี้รุนแรงกว่าบนโทรศัพท์ เพราะแป้นพิมพ์กินสัดส่วนของจอมากกว่า</p><p>แต่มีข้อดีอย่างหนึ่ง — <strong>งานสแกนส่วนใหญ่ไม่ต้องใช้แป้นพิมพ์เลย</strong> เพราะข้อมูลมาจากเครื่องสแกน ถ้าออกแบบให้พิมพ์เฉพาะเมื่อจำเป็นจริง ปัญหานี้ก็แทบไม่เกิด</p></section>
+
+<section id="section-7"><h2>7. แผ่นที่มีของค้างต้องกันการปิด</h2><p>แผ่นเลือกรายการปิดทิ้งได้ทุกเมื่อ เพราะยังไม่ได้เลือกอะไร แต่แผ่นที่มีฟอร์มต่างออกไป</p><pre class="code-vs"><code>PopScope(
+  canPop: !_isDirty,
+  onPopInvokedWithResult: (didPop, result) async {
+    if (didPop) return;
+    final discard = await showDiscardDialog(context);
+    if (!discard || !context.mounted) return;
+    Navigator.of(context).pop();
+  },
+  child: ...,
+)</code></pre><p><code>PopScope</code> ใช้กับแผ่นได้เหมือนกับหน้าจอ เพราะแผ่นก็เป็น route</p><p>สิ่งที่ต้องระวังคือมีหลายทางที่ปิดแผ่นได้</p><table><thead><tr><th>ทางปิด</th><th><code>PopScope</code> ครอบไหม</th></tr></thead><tbody>
+<tr><td>แตะนอกแผ่น</td><td>ครอบ</td></tr>
+<tr><td>ลากแผ่นลง</td><td>ครอบ</td></tr>
+<tr><td>กดปุ่มย้อนกลับ</td><td>ครอบ</td></tr>
+<tr><td>ปุ่มปิดที่เราทำเองแล้วเรียก <code>pop()</code></td><td><strong>ไม่ครอบ</strong> — ต้องใช้ <code>maybePop()</code> (5.5)</td></tr>
+</tbody></table><p>ตัวอย่างจริงอยู่ใน <code>SettingsSheet</code> ของ lab ซึ่งจะดูเต็ม ๆ ใน 5.11</p></section>
+
+<section id="section-8"><h2>8. เลือกให้ถูกว่าจะใช้อะไร</h2><table><thead><tr><th>ใช้</th><th>เมื่อ</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>กล่องโต้ตอบ</td><td>ตัดสินใจสั้น ๆ สองสามทาง</td><td>ยืนยันลบ</td></tr>
+<tr><td>แผ่นด้านล่าง</td><td>เลือกจากรายการ หรือกรอกฟอร์มสั้น</td><td>เลือกพาเลท ตั้งค่า</td></tr>
+<tr><td>หน้าจอเต็ม</td><td>งานที่มีหลายขั้นตอน</td><td>รับเข้าทั้งใบ</td></tr>
+<tr><td><code>DraggableScrollableSheet</code></td><td>รายการยาวที่ผู้ใช้อาจอยากดูมากขึ้น</td><td>ค้นหาช่องเก็บ</td></tr>
+</tbody></table><p>เกณฑ์ที่ใช้ได้ — ถามว่า <strong>ผู้ใช้ต้องเห็นสิ่งที่อยู่ข้างหลังหรือไม่</strong></p><table><thead><tr><th>คำตอบ</th><th>ใช้</th></tr></thead><tbody>
+<tr><td>ต้องเห็น เพราะกำลังเลือกให้สิ่งนั้น</td><td>แผ่น</td></tr>
+<tr><td>ไม่ต้อง เพราะเป็นงานใหม่ทั้งชิ้น</td><td>หน้าจอเต็ม</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แผ่นควรอยู่บน Navigator ตัวไหน</h2><p>เรื่องนี้จะสำคัญเมื่อแอปมี <code>Navigator</code> มากกว่าหนึ่งตัว (Part 11)</p><pre class="code-vs"><code>showModalBottomSheet(
+  context: context,
+  useRootNavigator: true,     // ให้แผ่นทับทุกอย่าง รวมถึงแถบล่าง
+  builder: ...,
+);</code></pre><table><thead><tr><th>ตั้งเป็น</th><th>ผล</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>false</code> (ค่าเริ่มต้น)</td><td>อยู่ใน <code>Navigator</code> ที่ใกล้ที่สุด</td><td>แผ่นที่เป็นส่วนหนึ่งของงานในแท็บนั้น</td></tr>
+<tr><td><code>true</code></td><td>อยู่บนสุดของแอป</td><td>ตั้งค่า หรืออะไรที่ไม่ผูกกับแท็บ</td></tr>
+</tbody></table><p>ใน lab มี <code>Navigator</code> ตัวเดียว จึงไม่ต้องตั้งอะไร — แต่ต้องรู้ไว้ เพราะเมื่อมีหลายตัวแล้ว การเปิดแผ่นบน navigator ผิดตัวจะทำให้ปิดผิดที่ตามไปด้วย</p></section>
+
+<section id="section-10"><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แผ่นสูงได้แค่ครึ่งจอ</td><td>ไม่ได้ตั้ง <code>isScrollControlled</code></td><td>ตั้งเป็น <code>true</code></td></tr>
+<tr><td>ช่องกรอกอยู่ใต้แป้นพิมพ์</td><td>ไม่ได้ดันเนื้อหาขึ้น</td><td>ใส่ padding ตาม <code>viewInsets.bottom</code></td></tr>
+<tr><td>แผ่นล้นออกนอกจอ</td><td><code>shrinkWrap</code> กับรายการยาว</td><td>จำกัดความสูง + <code>ListView.builder</code></td></tr>
+<tr><td>เปิดแผ่นแล้วแอปหน่วง</td><td>สร้างทุกรายการล่วงหน้า</td><td><code>ListView.builder</code></td></tr>
+<tr><td>ปิดแผ่นแล้วหน้าจอปิดตามไปด้วย</td><td>ใช้ context ผิดตัวใน <code>pop</code></td><td>ใช้ <code>sheetContext</code></td></tr>
+<tr><td>ลากแผ่นลงแล้วของที่กรอกหาย</td><td>ไม่มี <code>PopScope</code></td><td>ครอบด้วย <code>PopScope</code></td></tr>
+<tr><td>ปุ่มปิดที่ทำเองข้ามการตรวจ</td><td>ใช้ <code>pop()</code></td><td>ใช้ <code>maybePop()</code></td></tr>
+<tr><td>เนื้อหาชนแถบล่างของระบบ</td><td>ไม่ได้ครอบ <code>SafeArea</code></td><td>ครอบ หรือใช้ <code>useSafeArea: true</code></td></tr>
+</tbody></table></section>
+
+<section id="section-11"><h2>11. แบบฝึกหัด</h2><p>ต้องทำแผ่นเลือกช่องเก็บสินค้า โดยมีข้อกำหนด</p><table><thead><tr><th>ข้อกำหนด</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>จำนวนช่อง</td><td>500 ช่อง</td></tr>
+<tr><td>ค้นหา</td><td>มีช่องพิมพ์กรองรายการ</td></tr>
+<tr><td>สถานะ</td><td>โหลดอยู่ / มีรายการ / ไม่พบ / โหลดไม่สำเร็จ</td></tr>
+<tr><td>ผลลัพธ์</td><td>คืนช่องที่เลือก หรือไม่คืนอะไรถ้าปิด</td></tr>
+</tbody></table><ol><li>ตัดสินว่าจะใช้แผ่นแบบไหน และตั้งค่าอะไรบ้าง</li><li>อธิบายว่าโครงข้างในควรเป็นอย่างไร</li><li>ตอบว่าถ้าผู้ใช้พิมพ์ค้นหาแล้วรายการโหลดจากเซิร์ฟเวอร์ จะมีปัญหาอะไรจากบทก่อน ๆ ที่ต้องรับมือ</li></ol><details class="answer"><summary>ดูแนวคำตอบและเหตุผล</summary><p><strong>ข้อ 1 — แบบไหนและตั้งค่าอะไร</strong></p><pre class="code-vs"><code>Future&lt;Location?&gt; showLocationPicker(
+  BuildContext context, {
+  required LocationStore store,
+}) =&gt; showModalBottomSheet&lt;Location&gt;(
+  context: context,
+  isScrollControlled: true,     // มีช่องพิมพ์ ต้องสูงเกินครึ่งจอได้
+  useSafeArea: true,            // ไม่ให้ชนแถบระบบ
+  builder: (sheetContext) =&gt; LocationPickerSheet(store: store),
+);</code></pre><p>ใช้แผ่นธรรมดาที่จำกัดความสูงไว้ ไม่ใช้ <code>DraggableScrollableSheet</code> เพราะมีช่องค้นหาแล้ว ผู้ใช้จะพิมพ์กรองมากกว่าลากดูรายการยาว — การเพิ่มท่าลากทำให้ต้องส่ง <code>ScrollController</code> เข้าไปในรายการอีก ซึ่งเพิ่มความซับซ้อนโดยได้กลับมาน้อย</p><p><strong>ข้อ 2 — โครงข้างใน</strong></p><pre class="code-vs"><code>SizedBox(
+  height: MediaQuery.of(context).size.height * 0.75,
+  child: Padding(
+    padding: EdgeInsets.only(
+      bottom: MediaQuery.of(context).viewInsets.bottom,   // หลบแป้นพิมพ์
+    ),
+    child: Column(
+      children: [
+        const ListTile(title: Text('เลือกช่องเก็บ')),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _searchController,
+            autofocus: false,        // อย่าเด้งแป้นพิมพ์ขึ้นมาเอง
+            decoration: const InputDecoration(hintText: 'ค้นหาช่องเก็บ'),
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListenableBuilder(
+            listenable: store,
+            builder: (context, child) =&gt; switch (store.state) {   // 4.7
+              LoadState.idle || LoadState.loading =&gt; const LoadingView(),
+              LoadState.empty =&gt; const EmptyView('ไม่พบช่องเก็บที่ค้นหา'),
+              LoadState.failed =&gt; FailedView(
+                message: store.errorMessage ?? 'โหลดไม่สำเร็จ',
+                onRetry: store.load,
+              ),
+              LoadState.ready =&gt; ListView.builder(     // 2.7
+                itemCount: store.locations.length,
+                itemBuilder: (context, index) {
+                  final location = store.locations[index];
+                  return ListTile(
+                    title: Text(location.code),
+                    subtitle: Text('ว่าง ${location.freeSlots} ช่อง'),
+                    onTap: () =&gt; Navigator.of(context).pop(location),
+                  );
+                },
+              ),
+            },
+          ),
+        ),
+      ],
+    ),
+  ),
+)</code></pre><p>ประเด็นที่ควรสังเกต — <code>autofocus: false</code> เพราะบน PDA การเด้งแป้นพิมพ์ขึ้นมาเองจะกินจอไปครึ่งหนึ่งทันทีที่เปิดแผ่น ทั้งที่ผู้ใช้อาจแค่อยากดูรายการ</p><p><strong>ข้อ 3 — ปัญหาจากบทก่อน ๆ ที่ต้องรับมือ</strong></p><p>ทันทีที่ค้นหายิงไปเซิร์ฟเวอร์ ทั้ง Part 4 กลับมาหมด</p><table><thead><tr><th>ปัญหา</th><th>บท</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>พิมพ์เร็ว ๆ ยิงคำขอทุกตัวอักษร</td><td>4.10</td><td>debounce ~300ms</td></tr>
+<tr><td>ผลของ <code>pa</code> มาช้ากว่า <code>pallet</code> แล้วทับ</td><td>4.10</td><td><strong>ตัวนับรุ่น — ขาดไม่ได้</strong></td></tr>
+<tr><td>ตัวหมุนหายทั้งที่ยังค้นอยู่</td><td>4.10</td><td>ตรวจรุ่นก่อนตั้งสถานะ</td></tr>
+<tr><td>ปิดแผ่นแล้วผลยังกลับมาเขียนลง store</td><td>4.11</td><td>เพิ่มเลขรุ่นตอนปิด</td></tr>
+<tr><td>ไม่รู้ว่าใครทำลาย store ของแผ่น</td><td>4.12</td><td>ใครสร้าง คนนั้นทำลาย</td></tr>
+</tbody></table><p><strong>สองข้อที่มักถูกลืมและอธิบายเพิ่ม</strong></p><p><em>ข้อที่สี่</em> — แผ่นถูกปิดได้ง่ายกว่าหน้าจอมาก (แตะนอกแผ่น ลากลง) จึงมีโอกาสสูงที่ผู้ใช้จะปิดขณะที่คำขอยังวิ่งอยู่ ถ้า store ไม่ได้เพิ่มเลขรุ่นตอนถูกทำลาย ผลที่กลับมาจะไปแตะ store ที่ตายแล้ว</p><p><em>ข้อที่ห้า</em> — ต้องตัดสินตั้งแต่ออกแบบว่า store ของแผ่นเป็นของใคร</p><table><thead><tr><th>ทางเลือก</th><th>ใครทำลาย</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>แผ่นสร้างเองใน <code>initState</code></td><td>แผ่นนั้น</td><td>ผลค้นหาไม่ต้องเก็บไว้</td></tr>
+<tr><td>รับมาจากหน้าจอที่เปิดแผ่น</td><td>หน้าจอนั้น</td><td>อยากให้เปิดแผ่นครั้งหน้าเจอผลเดิม</td></tr>
+</tbody></table><p>โจทย์นี้ควรเลือกแบบแรก — ผลค้นหาไม่ควรค้างข้ามครั้ง เพราะช่องว่างในคลังเปลี่ยนตลอดเวลา และการเห็นผลเก่าจากเมื่อสิบนาทีก่อนอันตรายกว่าการรอโหลดใหม่สองวินาที</p><p><strong>ข้อสังเกตสุดท้าย:</strong> แผ่นที่มีทั้งการค้นหา สถานะสี่แบบ และ store ของตัวเอง ไม่ใช่ “แค่ตัวเลือก” อีกต่อไป — มันเป็นหน้าจอเล็ก ๆ หนึ่งหน้าที่บังเอิญแสดงเป็นแผ่น จึงต้องได้รับการดูแลเท่ากับหน้าจอทั่วไป ซึ่งเป็นประเด็นหลักของ 5.11</p></details></section>
+
+<section id="section-12"><h2>12. สรุปท้ายบท</h2><div class="success"><ul><li>แผ่นด้านล่างคือ route จึงคืนค่าได้เหมือนหน้าจอ</li><li>ใช้เมื่อผู้ใช้ต้องเห็นบริบทด้านหลังขณะเลือก</li><li>รายการยาวต้องใช้ <code>ListView.builder</code> พร้อมกำหนดความสูงให้แผ่น</li><li>มีช่องกรอกต้องตั้ง <code>isScrollControlled</code> และหลบแป้นพิมพ์ด้วย <code>viewInsets</code></li><li>อย่าตั้ง <code>autofocus</code> บน PDA — แป้นพิมพ์กินจอมากเกินไป</li><li>แผ่นที่มีของค้างต้องครอบ <code>PopScope</code> และปุ่มปิดต้องใช้ <code>maybePop()</code></li><li>ปิดแผ่นด้วย context ที่ builder ของแผ่นให้มา</li><li>เมื่อแผ่นมี store ของตัวเอง ต้องตอบให้ได้ว่าใครสร้างและใครทำลาย</li></ul></div><p><strong>บทถัดไป:</strong> 5.10 จะจัดการการแจ้งผลแบบสั้น ๆ — เมื่อไหร่ใช้ข้อความเลื่อนขึ้นมา เมื่อไหร่ใช้สีและเสียง และทำไมงานสแกนต้องใช้คนละแบบ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
