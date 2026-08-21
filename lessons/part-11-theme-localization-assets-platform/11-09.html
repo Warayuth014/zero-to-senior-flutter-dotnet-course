@@ -4,19 +4,131 @@
 <title>Date &amp; Number Format</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-09 · Flutter UI</span><h1>Date &amp; Number Format</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">NumberFormat</a></li><li><a href="#section-2">DateFormat</a></li><li><a href="#section-3">Cached formatter</a></li><li><a href="#section-4">Machine values</a></li><li><a href="#section-5">Relative time</a></li><li><a href="#section-6">Calendar expectations</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>intl formatตาม locale ไม่เปลี่ยน business value:</strong> เก็บ DateTime/numแบบ typedและ timezoneถูกก่อน แล้ว formatเฉพาะ presentation boundary</div>
-<section id="section-1"><h2>1. NumberFormat</h2><pre class="code-vs"><code>final locale = Localizations.localeOf(context).toLanguageTag();
-final qtyText = NumberFormat.decimalPattern(locale).format(quantity);
-final moneyText = NumberFormat.currency(
-  locale: locale, symbol: '฿', decimalDigits: 2).format(amount);</code></pre></section>
-<section id="section-2"><h2>2. DateFormat</h2><pre class="code-vs"><code>final local = utcTimestamp.toLocal();
-final text = DateFormat.yMMMd(locale).add_Hm().format(local);</code></pre><p>แปลง timezoneตาม contractก่อน formatและอย่า parse display stringกลับเป็น data</p></section>
-<section id="section-3"><h2>3. Cached formatter</h2><p>สร้าง formatterซ้ำใน listใหญ่มี costแต่ cacheต้อง keyedด้วย locale/pattern/currencyและ invalidateเมื่อภาษาเปลี่ยน ไม่ใช้ singleton formatterภาษาเดิม</p></section>
-<section id="section-4"><h2>4. Machine values</h2><p>barcode, pallet ID, location codeและ API numbersใช้ invariant wire format ไม่ format comma/Thai digitก่อนส่ง server การ localizeใช้เฉพาะข้อความแสดง</p></section>
-<section id="section-5"><h2>5. Relative time</h2><p>“12 วินาทีที่แล้ว” ควรใช้ fake Clockใน testและ update intervalเหมาะสม ไม่ให้ widgetหลายร้อยตัวมี Timerของตัวเอง</p></section>
-<section id="section-6"><h2>6. Calendar expectations</h2><p>กำหนด product policyเรื่อง Gregorian/Buddhist Eraและ timezoneโรงงานให้ชัด อย่า assumeว่า locale thหมายถึงต้องเปลี่ยน business calendarโดยอัตโนมัติ</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>quantity 1234.5ควรส่ง APIหลัง NumberFormatภาษาไทยไหม?</p><details><summary>เฉลย</summary><p>ไม่ ส่ง numeric JSON 1234.5; formatสำหรับ Textเท่านั้น มิฉะนั้น separator/เลข localizedทำ contractพัง</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">en/th decimal/date, zero/negative/large, UTC→local, locale switch, timezone boundaryและ invariant API serialization</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทำไมเรื่องนี้อันตราย</a></li><li><a href="#section-2">รวมไว้ที่เดียว</a></li><li><a href="#section-3">ตัวเลข</a></li><li><a href="#section-4">เวลา — กฎที่ห้ามสลับ</a></li><li><a href="#section-5">ปี พ.ศ. — กรณีที่ intl ไม่ช่วย</a></li><li><a href="#section-6">เวลาที่ผ่านมาแล้ว</a></li><li><a href="#section-7">intl ต้องโหลดข้อมูลก่อนใช้</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน <code>wms_formats.dart</code> แล้วรันเทสต์ทั้งเก้า</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.7, 6.9 (เวลาต้องเป็น UTC)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แสดงตัวเลขและวันที่ให้ถูกต้องทั้งสองภาษา และรู้ว่าความผิดพลาดตรงไหนที่เงียบที่สุด</div>
+
+<section id="section-1"><h2>1. ทำไมเรื่องนี้อันตราย</h2><p>ข้อความที่แปลผิด ผู้ใช้เห็นแล้วรู้ทันที แต่ตัวเลขและวันที่ที่จัดรูปแบบผิด <strong>ดูปกติทุกประการ</strong></p><table><thead><tr><th>สิ่งที่แสดง</th><th>อาจหมายถึง</th><th>ผู้ใช้รู้ไหม</th></tr></thead><tbody>
+<tr><td><code>08/09/2026</code></td><td>9 สิงหาคม หรือ 8 กันยายน</td><td>ไม่</td></tr>
+<tr><td><code>1,234</code></td><td>หนึ่งพันสองร้อยสามสิบสี่ หรือ 1.234 ในบางประเทศ</td><td>ไม่</td></tr>
+<tr><td><code>15 มี.ค. 26</code></td><td>ปี ค.ศ. 2026 หรือ พ.ศ. 2526</td><td>ไม่</td></tr>
+<tr><td><code>14:32</code></td><td>เวลาเครื่อง หรือเวลา UTC</td><td>ไม่</td></tr>
+</tbody></table><p>แถวสุดท้ายเจ็บที่สุดในงานคลัง — ใบรับของที่บอกว่ารับเข้าตอน 14:32 ทั้งที่จริงคือ 21:32 จะทำให้การสอบทานย้อนหลังผิดทั้งกะ</p></section>
+
+<section id="section-2"><h2>2. รวมไว้ที่เดียว</h2><pre class="code-vs"><code>/// การจัดรูปแบบวันที่และตัวเลขให้ตรงกับภาษาที่ผู้ใช้เลือก
+///
+/// รวมไว้ที่เดียวเพราะกฎเหล่านี้ต้องเหมือนกันทุกจอ และเพราะกฎบางข้อ
+/// (เช่นปี พ.ศ.) ผิดง่ายมากถ้าปล่อยให้แต่ละจอทำเอง
+library;</code></pre><p>เหตุผลเดียวกับ <code>json_read.dart</code> ใน Part 6 — กฎที่ต้องเหมือนกันทุกที่ ต้องอยู่ที่เดียว</p></section>
+
+<section id="section-3"><h2>3. ตัวเลข</h2><pre class="code-vs"><code>/// จำนวนชิ้น
+///
+/// ใส่ตัวคั่นหลักพันเสมอ เพราะ 12000 กับ 1200 บนจอเล็กที่มองแวบเดียว
+/// แยกยาก แต่ 12,000 กับ 1,200 แยกออกทันที
+String formatCount(num value, AppLanguage language) =&gt;
+    NumberFormat.decimalPattern(language.code).format(value);</code></pre><pre class="code-vs"><code>/// จำนวนที่มีทศนิยม เช่นน้ำหนักหรือความยาว
+///
+/// บังคับให้แสดงทศนิยมตามที่กำหนดเสมอ ไม่ตัดศูนย์ท้ายทิ้ง — 12.0 กับ 12
+/// สื่อความแม่นยำต่างกันในใบรับของ
+String formatQuantity(num value, AppLanguage language, {int decimals = 2}) {
+  final pattern = decimals == 0 ? '#,##0' : '#,##0.${'0' * decimals}';
+  return NumberFormat(pattern, language.code).format(value);
+}</code></pre><table><thead><tr><th>สัญลักษณ์ในรูปแบบ</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>#</code></td><td>แสดงถ้ามีค่า ไม่แสดงถ้าเป็นศูนย์นำหน้า</td></tr>
+<tr><td><code>0</code></td><td>แสดงเสมอ เติมศูนย์ถ้าไม่มี</td></tr>
+<tr><td><code>,</code></td><td>ตัวคั่นกลุ่ม</td></tr>
+</tbody></table><p><code>#,##0.00</code> จึงแปลว่า “คั่นหลักพัน อย่างน้อยหนึ่งหลักหน้าจุด และสองหลักหลังจุดเสมอ”</p></section>
+
+<section id="section-4"><h2>4. เวลา — กฎที่ห้ามสลับ</h2><div class="note"><strong>เก็บเป็น UTC แสดงเป็นเวลาท้องถิ่น</strong> — สลับเมื่อไหร่พังเมื่อนั้น</div><pre class="code-vs"><code>String formatTime(DateTime utc, AppLanguage language) =&gt;
+    DateFormat.Hm(language.code).format(utc.toLocal());</code></pre><table><thead><tr><th>ขั้น</th><th>รูปแบบ</th><th>ใครรับผิดชอบ</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ส่งมา</td><td>ISO พร้อม Z</td><td>ทีมหลังบ้าน</td></tr>
+<tr><td>อ่านเข้าโมเดล</td><td><code>DateTime</code> ที่เป็น UTC</td><td><code>requireUtcTime</code> (6.9)</td></tr>
+<tr><td>เก็บในหน่วยความจำ</td><td>UTC</td><td>store</td></tr>
+<tr><td>แสดงบนจอ</td><td>เวลาท้องถิ่น</td><td><code>formatTime</code></td></tr>
+<tr><td>ส่งกลับเซิร์ฟเวอร์</td><td>UTC</td><td>repository</td></tr>
+</tbody></table><p>มีจุดเดียวที่แปลงเป็นเวลาท้องถิ่น คือตอนแสดง เทสต์บันทึกกฎนี้ไว้</p><pre class="code-vs"><code>test('เวลาแปลงจาก UTC เป็นเวลาเครื่องก่อนแสดง', () {
+  final utc = DateTime.utc(2026, 8, 21, 7, 32);
+  final expected = utc.toLocal();
+  final shown = formatTime(utc, AppLanguage.english);
+
+  expect(shown, '${expected.hour.toString().padLeft(2, '0')}:'
+      '${expected.minute.toString().padLeft(2, '0')}');
+});</code></pre><p>สังเกตว่าเทสต์คำนวณค่าที่คาดหวังจาก <code>toLocal()</code> เอง ไม่ได้เขียน <code>'14:32'</code> ตรง ๆ — ไม่งั้นเทสต์จะผ่านเฉพาะบนเครื่องที่ตั้งเขตเวลาเป็นไทย และล้มบนเครื่องของทีมงานที่อยู่คนละประเทศหรือบน CI</p></section>
+
+<section id="section-5"><h2>5. ปี พ.ศ. — กรณีที่ intl ไม่ช่วย</h2><pre class="code-vs"><code>String formatDate(DateTime utc, AppLanguage language) {
+  final local = utc.toLocal();
+  if (language == AppLanguage.thai) {
+    // ไทยใช้ พ.ศ. ซึ่ง intl ไม่ได้แปลงให้ ต้องบวก 543 เอง แล้วใส่ลงไป
+    // เป็นข้อความ ไม่ใช่ปล่อยให้ DateFormat อ่านปีจาก DateTime
+    final buddhistYear = local.year + 543;
+    final day = local.day.toString().padLeft(2, '0');
+    final month = DateFormat.MMM('th').format(local);
+    return '$day $month ${buddhistYear % 100}';
+  }
+  return DateFormat('dd MMM yy', language.code).format(local);
+}</code></pre><p>นี่คือกับดักที่คนไทยเจอกันทุกโปรเจกต์ — <code>DateFormat('dd MMM yyyy', 'th')</code> ให้ชื่อเดือนเป็นภาษาไทยถูกต้อง แต่<strong>ปียังเป็น ค.ศ.</strong> ผลคือได้ “15 มี.ค. 2026” ซึ่งดูเป็นภาษาไทยทุกอย่าง ยกเว้นปีที่ผิดไป 543 ปี</p><p>ทางที่ปลอดภัยคือคำนวณปีเองแล้วประกอบข้อความ ไม่ใช่หวังว่า <code>DateFormat</code> จะรู้</p><pre class="code-vs"><code>test('วันที่ภาษาไทยใช้ปี พ.ศ.', () {
+  final utc = DateTime.utc(2026, 3, 15, 4, 0);
+  final local = utc.toLocal();
+  final thai = formatDate(utc, AppLanguage.thai);
+
+  // 2026 + 543 = 2569 → แสดงสองหลักท้ายคือ 69
+  expect(thai, contains(((local.year + 543) % 100).toString()));
+  // และต้องไม่มี ค.ศ. หลุดออกมา
+  expect(thai, isNot(contains('26')));
+});</code></pre><div class="note"><strong>คำถามที่ต้องถามทีมก่อนเขียน:</strong> ใบรับของที่พิมพ์ออกมาใช้ พ.ศ. หรือ ค.ศ. — เพราะถ้าหน้าจอกับใบพิมพ์ไม่ตรงกัน จะเกิดปัญหาตอนสอบทาน และเป็นคำถามที่โปรแกรมเมอร์ตอบเองไม่ได้</div></section>
+
+<section id="section-6"><h2>6. เวลาที่ผ่านมาแล้ว</h2><pre class="code-vs"><code>String formatElapsed(DateTime utc, AppLanguage language, {DateTime? now}) {
+  final elapsed = (now ?? DateTime.now()).toUtc().difference(utc.toUtc());
+  final thai = language == AppLanguage.thai;
+
+  if (elapsed.isNegative || elapsed.inSeconds &lt; 60) {
+    return thai ? 'เมื่อครู่' : 'just now';
+  }
+  ...
+  // เกินหนึ่งวันแล้ว เวลาที่ผ่านมาไม่มีประโยชน์เท่าวันที่จริง
+  return formatDate(utc, language);
+}</code></pre><table><thead><tr><th>รายละเอียด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>now</code> รับเข้ามาได้</td><td>เทสต์คุมเวลาได้ ไม่ต้องพึ่งนาฬิกาจริง (9.8)</td></tr>
+<tr><td><code>elapsed.isNegative</code></td><td>นาฬิกาเครื่องกับเซิร์ฟเวอร์ไม่ตรงกันเป็นเรื่องปกติ (8.3) — ถ้าไม่ดัก จะได้ “-3 นาทีที่แล้ว”</td></tr>
+<tr><td>เกินหนึ่งวันแล้วเปลี่ยนเป็นวันที่</td><td>“73 ชั่วโมงที่แล้ว” ต้องเอาไปคำนวณในหัว ส่วน “18 ส.ค.” อ่านแล้วรู้เลย</td></tr>
+</tbody></table><pre class="code-vs"><code>test('เวลาในอนาคตต้องไม่กลายเป็นค่าติดลบประหลาด', () {
+  final now = DateTime.utc(2026, 8, 21, 12, 0);
+  final future = now.add(const Duration(minutes: 2));
+
+  expect(formatElapsed(future, AppLanguage.thai, now: now), 'เมื่อครู่');
+});</code></pre></section>
+
+<section id="section-7"><h2>7. intl ต้องโหลดข้อมูลก่อนใช้</h2><pre class="code-vs"><code>// ในเทสต์
+setUpAll(() =&gt; initializeDateFormatting());</code></pre><p>ถ้าไม่เรียก <code>DateFormat.MMM('th')</code> จะคืนชื่อเดือนภาษาอังกฤษเงียบ ๆ ไม่โยนข้อผิดพลาด — เป็นความล้มเหลวที่เงียบที่สุดในบทนี้</p><p>ในแอปจริง <code>flutter_localizations</code> เรียกให้อัตโนมัติเมื่อ <code>MaterialApp</code> ถูกสร้าง แต่ในเทสต์ที่ทดสอบฟังก์ชันล้วน ๆ ไม่มี <code>MaterialApp</code> จึงต้องเรียกเอง</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปีไทยผิดไป 543</td><td>หวังว่า <code>DateFormat</code> จะแปลงให้</td><td>บวกเอง</td></tr>
+<tr><td>เวลาเพี้ยนไป 7 ชั่วโมง</td><td>ลืม <code>toLocal()</code> หรือเรียกสองครั้ง</td><td>แปลงที่จุดแสดงจุดเดียว</td></tr>
+<tr><td>เทสต์ผ่านบนเครื่องเรา ล้มบน CI</td><td>เขียนค่าเวลาที่คาดหวังตรง ๆ</td><td>คำนวณจาก <code>toLocal()</code> ในเทสต์</td></tr>
+<tr><td>ชื่อเดือนเป็นอังกฤษทั้งที่ตั้ง locale แล้ว</td><td>ลืม <code>initializeDateFormatting()</code></td><td>เรียกใน <code>setUpAll</code></td></tr>
+<tr><td>“-5 นาทีที่แล้ว”</td><td>นาฬิกาไม่ตรง</td><td>ดัก <code>isNegative</code></td></tr>
+<tr><td>จำนวนแสดง 12 แทน 12.00</td><td>ใช้ <code>toString()</code></td><td>ใช้รูปแบบที่บังคับทศนิยม</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>หน้าจอประวัติการรับเข้าแสดงเวลาแบบ <code>formatElapsed</code> ผู้ใช้รายงานสองเรื่อง</p><ol><li>“รายการที่รับเข้าเมื่อวานขึ้นว่า 23 ชั่วโมงที่แล้ว ทั้งที่เป็นคนละวัน”</li><li>“หัวหน้าให้ส่งรายงานว่ารับของเข้าเวลาไหนบ้าง แต่หน้าจอไม่บอกเวลาจริง”</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ถูกตามที่เขียนไว้ แต่ผิดตามที่ผู้ใช้คิด — เขาไม่ได้นับเป็นชั่วโมง เขานับเป็น “วันนี้” กับ “เมื่อวาน”</p><pre class="code-vs"><code>String formatElapsed(DateTime utc, AppLanguage language, {DateTime? now}) {
+  final current = (now ?? DateTime.now()).toLocal();
+  final local = utc.toLocal();
+  ...
+  // เทียบวันตามปฏิทิน ไม่ใช่ตามจำนวนชั่วโมง
+  final today = DateTime(current.year, current.month, current.day);
+  final day = DateTime(local.year, local.month, local.day);
+  final dayDiff = today.difference(day).inDays;
+
+  if (dayDiff == 1) {
+    return thai ? 'เมื่อวาน ${formatTime(utc, language)}' : 'Yesterday ...';
+  }
+  ...
+}</code></pre><p>บทเรียนที่ใหญ่กว่าโค้ด: <strong>“หนึ่งวัน” ในความหมายของผู้ใช้คือขอบเขตของปฏิทิน ไม่ใช่ 24 ชั่วโมง</strong> — เวลา 23:50 กับ 00:10 ห่างกันยี่สิบนาทีแต่เป็นคนละวัน</p><p><strong>2.</strong> นี่ไม่ใช่บั๊ก แต่เป็นข้อจำกัดของการเลือกใช้ “เวลาที่ผ่านมา” ซึ่งดีสำหรับการดูว่าเพิ่งเกิดหรือเปล่า แต่ใช้อ้างอิงไม่ได้</p><table><thead><tr><th>ทางแก้</th><th>ผล</th></tr></thead><tbody>
+<tr><td>แสดงทั้งสองอย่าง</td><td>“3 นาทีที่แล้ว · 14:32” — กินที่ แต่ตอบได้ทั้งสองคำถาม</td></tr>
+<tr><td>เวลาที่ผ่านมาในลิสต์ เวลาจริงในหน้ารายละเอียด</td><td>ลิสต์ยังสะอาด และคนที่ต้องการเวลาจริงกดเข้าไปดูได้</td></tr>
+<tr><td>กดค้างเพื่อดูเวลาจริง</td><td>ไม่กินที่เลย แต่ไม่มีใครรู้ว่าทำได้</td></tr>
+</tbody></table><p>ทางที่สองดีที่สุดสำหรับ PDA เพราะจอแคบ และสิ่งที่หัวหน้าต้องการคือ<strong>รายงาน</strong> ซึ่งควรมาจากระบบเว็บที่ออกรายงานได้ ไม่ใช่จากการที่พนักงานอ่านทีละรายการจากหน้าจอ PDA แล้วจดใส่กระดาษ</p><p>ข้อสังเกตสุดท้ายสำคัญกว่าโค้ด — เมื่อผู้ใช้ขอฟีเจอร์ ให้ถามว่าเขาจะเอาไปทำอะไร บ่อยครั้งคำตอบที่ดีที่สุดไม่ได้อยู่ในแอปนี้</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>ตัวเลขและวันที่ที่ผิด ดูเหมือนถูกทุกประการ</li><li>เก็บเป็น UTC แสดงเป็นเวลาท้องถิ่น แปลงที่จุดเดียว</li><li>ปี พ.ศ. ต้องบวกเอง <code>intl</code> ไม่แปลงให้</li><li>เทสต์ต้องคำนวณเวลาที่คาดหวังเอง ไม่ใช่เขียนค่าตรง ๆ</li><li>ดักเวลาในอนาคต เพราะนาฬิกาไม่ตรงกันเป็นเรื่องปกติ</li><li>“หนึ่งวัน” ของผู้ใช้คือขอบเขตปฏิทิน ไม่ใช่ 24 ชั่วโมง</li></ul></div><p><strong>บทหน้า:</strong> ไอคอน — เลือกอย่างไรให้มองแวบเดียวเข้าใจ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

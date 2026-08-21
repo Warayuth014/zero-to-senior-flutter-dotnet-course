@@ -1,19 +1,116 @@
-<div class="note"><strong>Design tokens เป็น vocabularyของ UI:</strong> spacing, radius, typography, colors, elevationและmotionที่ตั้งชื่อตามความหมาย ช่วยให้ brand/ergonomicsเปลี่ยนจากจุดเดียว</div>
-<section><h2>1. Token groups</h2><pre class="code-vs"><code>abstract final class AppSpacing {
-  static const xs = 4.0, sm = 8.0, md = 16.0, lg = 24.0;
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ตั้งชื่อ token ใหม่ให้โปรเจกต์ตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1, 11.2<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งชื่อและจัดกลุ่มค่าหน้าตาให้เปลี่ยนได้โดยไม่ต้องเปลี่ยนชื่อทั้งโปรเจกต์</div>
+
+<section><h2>1. design token คืออะไร</h2><div class="note">ค่าเล็ก ๆ ที่ใช้ซ้ำทั่วแอป — สี ระยะห่าง ขนาดตัวอักษร ความโค้ง — ที่ถูกตั้งชื่อและเก็บไว้ที่เดียว</div><p>คำว่า token มาจากวงการออกแบบ หมายถึงหน่วยที่เล็กที่สุดที่ยังมีความหมาย ไม่ใช่ศัพท์ของ Flutter โดยเฉพาะ</p></section>
+
+<section><h2>2. กฎข้อเดียวที่สำคัญที่สุด</h2><div class="note"><strong>ตั้งชื่อตามหน้าที่ ไม่ใช่ตามหน้าตา</strong></div><table><thead><tr><th>ชื่อที่ผูกกับหน้าตา</th><th>ชื่อที่ผูกกับหน้าที่</th></tr></thead><tbody>
+<tr><td><code>blue</code></td><td><code>primary</code></td></tr>
+<tr><td><code>lightGrey</code></td><td><code>border</code></td></tr>
+<tr><td><code>red</code></td><td><code>danger</code></td></tr>
+<tr><td><code>size14</code></td><td><code>bodyMedium</code></td></tr>
+<tr><td><code>padding12</code></td><td><code>screenPadding</code></td></tr>
+</tbody></table><p>เหตุผลชัดตอนที่ต้องเปลี่ยน — วันที่แบรนด์เปลี่ยนจากน้ำเงินเป็นเขียว โค้ดที่เขียนว่า <code>blue</code> จะกลายเป็นคำโกหกทั้งโปรเจกต์ ทางเลือกคือไล่เปลี่ยนชื่อทุกที่ หรือปล่อยให้ <code>AppColors.blue</code> เป็นสีเขียวไปตลอดกาล ซึ่งทั้งสองทางแย่</p><p>กฎนี้มีข้อยกเว้นเดียว คือชั้นล่างสุดที่เป็น <strong>ชุดสีดิบ</strong></p><pre class="code-vs"><code>// ชั้นล่าง — ชื่อตามสีได้ เพราะมันคือสีจริง ๆ
+class Palette {
+  static const blue600 = Color(0xFF2E73B9);
+  static const blue900 = Color(0xFF174D80);
 }
-abstract final class AppRadius {
-  static const field = 12.0, card = 16.0, dialog = 20.0;
+
+// ชั้นบน — ชื่อตามหน้าที่ อ้างถึงชั้นล่าง
+class PdaColors {
+  static const primary = Palette.blue600;
+  static const primaryDark = Palette.blue900;
+}</code></pre><p>สองชั้นแบบนี้คุ้มเมื่อมีธีมหลายชุด ถ้ามีธีมเดียวก็ใช้ชั้นเดียวพอ ตามหลักใน 9.12</p></section>
+
+<section><h2>3. token ที่มีเหตุผลเขียนไว้</h2><pre class="code-vs"><code>/// ขนาดต่ำสุดของสิ่งที่กดได้
+///
+/// 48 มาจากแนวทางของ Material แต่บน PDA มีเหตุผลเพิ่มคือผู้ใช้ใส่ถุงมือ
+/// และกดขณะเดิน ปุ่มหลักในแอปนี้จึงสูง 54 ไม่ใช่ 48
+static const double minTapTarget = 48;
+static const double primaryButtonHeight = 54;</code></pre><p>คอมเมนต์นี้ตอบคำถามที่จะถูกถามแน่นอน คือ “ทำไม 54 ไม่ใช่ 48 หรือ 56” ถ้าไม่เขียนไว้ วันหนึ่งจะมีคนเปลี่ยนเป็น 48 เพราะ “มาตรฐานบอกว่า 48” แล้วผู้ใช้ที่ใส่ถุงมือจะกดพลาดบ่อยขึ้นโดยไม่มีใครโยงสาเหตุได้</p><div class="note"><strong>เกณฑ์:</strong> ตัวเลขที่ไม่ใช่ค่าที่ชัดในตัวเอง ต้องมีคอมเมนต์บอกที่มา — <code>screenPadding = 12</code> ไม่ต้อง แต่ <code>primaryButtonHeight = 54</code> ต้อง</div></section>
+
+<section><h2>4. อย่าตั้ง token ให้ทุกค่า</h2><table><thead><tr><th>ควรเป็น token</th><th>ไม่ควร</th></tr></thead><tbody>
+<tr><td>ใช้ซ้ำอย่างน้อยสามที่</td><td>ใช้ที่เดียว</td></tr>
+<tr><td>เปลี่ยนแล้วต้องเปลี่ยนพร้อมกันทุกที่</td><td>ค่าที่เฉพาะเจาะจงกับจอเดียว</td></tr>
+<tr><td>มีคนถามว่า “ค่านี้ควรเป็นเท่าไหร่”</td><td>ค่าที่ไม่มีใครสนใจ</td></tr>
+</tbody></table><pre class="code-vs"><code>// อย่าทำ — token ที่ไม่มีใครใช้ซ้ำ
+static const double receivingCardTopMargin = 7;
+static const double palletBadgeLetterSpacing = 0.4;</code></pre><p>ผลของการทำเกินคือรายการ token ยาวจนหาไม่เจอ แล้วคนก็เขียนค่าลงไปตรง ๆ อยู่ดี — <strong>token ที่หาไม่เจอ มีค่าเท่ากับไม่มี</strong></p></section>
+
+<section><h2>5. ระยะห่างควรมาจากมาตราส่วน</h2><pre class="code-vs"><code>class Spacing {
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 24;
+}</code></pre><p>ประโยชน์ไม่ใช่การประหยัดการพิมพ์ แต่คือการ<strong>ตัดตัวเลือกที่ไม่ควรมี</strong> — เมื่อมีแค่ห้าค่า จะไม่มีจอไหนใช้ 7 หรือ 13 และหน้าจอทั้งแอปจะดูเป็นชุดเดียวกันโดยอัตโนมัติ</p><p>ถ้าเจอที่ที่ค่าในมาตราส่วนใช้ไม่ได้เลย ให้ถามว่าเป็นเพราะ layout ผิดหรือเปล่า ก่อนที่จะเพิ่มค่าใหม่เข้าไป</p></section>
+
+<section><h2>6. token ไม่ควรรู้จัก Flutter มากเกิน</h2><pre class="code-vs"><code>// ดี — เก็บค่า
+static const Color primary = Color(0xFF2E73B9);
+static const double cardRadius = 16;
+
+// ไม่ดี — เก็บ widget
+static Widget get primaryButton =&gt; FilledButton(...);
+static BoxDecoration get cardDecoration =&gt; BoxDecoration(...);</code></pre><p>บรรทัดล่างทำให้ไฟล์ token กลายเป็นไฟล์ UI ซึ่งจะโตขึ้นเรื่อย ๆ จนกลายเป็นไฟล์ที่ทุกคนต้องแก้ — ปัญหาเดียวกับ <code>common_widgets.dart</code> ที่ 9.14 พูดถึง</p><p>สิ่งที่ประกอบจาก token ควรอยู่ในธีม (ถ้าเป็นค่าตั้งต้นของ widget สำเร็จรูป) หรือเป็น widget ของตัวเอง (ถ้าเป็นความหมายเฉพาะ) ตามที่ 11.1 §9 สรุปไว้</p></section>
+
+<section><h2>7. ของจริง: สองชั้นที่ทับกัน</h2><pre class="code-vs"><code>// core/app_theme.dart — ของกลางทั้งแอป
+class AppColors {
+  static const Color primary = Color(0xFF2E73B9);
+  static const Color heading = Color(0xFF102A43);
+  static const Color success = Color(0xFF1F9D62);
+  ...
 }
-abstract final class AppSize { static const touchTarget = 48.0; }</code></pre></section>
-<section><h2>2. Semantic names</h2><p><code>surfaceMuted</code>, <code>statusBar</code>, <code>touchTarget</code> สื่อ intentดีกว่า blue100/size48ใน widget แต่ primitive paletteยังใช้ภายใน themeได้</p></section>
-<section><h2>3. Reusable widget</h2><pre class="code-vs"><code>class StatusChip extends StatelessWidget {
-  const StatusChip({required this.label, required this.tone});
-  final String label; final StatusTone tone;
-  // map tone → theme tokens + icon, not raw API status string
-}</code></pre></section>
-<section><h2>4. Avoid giant CommonWidgets</h2><p>shared componentควร cohesiveและ APIแคบ หากไฟล์ commonหลายร้อยบรรทัดรวม dialog/card/toastทุกอย่างให้แยกตาม primitive/pattern/featureและไม่ genericเร็วเกิน</p></section>
-<section><h2>5. PDA ergonomics</h2><p>มือเปียก/ถุงมือ/สแกนเร็วต้อง targetใหญ่, spacingชัด, primary actionตำแหน่งคงที่, feedbackหลายช่องทาง และไม่ใช้ dense UIจนแตะผิด</p></section>
-<section><h2>6. Theme extensions</h2><p>semantic tokensที่ต่าง light/darkสามารถใช้ <code>ThemeExtension</code> แทน static context getters ทำให้ interpolateและเข้าถึงผ่าน ThemeDataอย่างเป็นระบบ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>status OPENใช้สี primaryใน 12 screensควรแก้ตรงไหน?</p><details><summary>เฉลย</summary><p>map typed status→StatusToneใน presentation mapperและ StatusChip/theme tokenหนึ่งจุด ไม่ค้น replaceสีทุก screen</p></details></section>
-<section><h2>8. Review</h2><div class="success">ไม่มี magic spacing/radiusกระจาย, component statesครบ, token namesสื่อ semantics, accessibilityไม่ถูก wrapperซ่อนและ feature-specific widgetไม่ถูกย้าย commonก่อนเวลา</div></section>
+
+// features/warehouse/ui/pda_colors.dart — เฉพาะฟีเจอร์คลัง
+class PdaColors {
+  static const shellNavy = Color(0xFF062B50);      // ของฟีเจอร์นี้
+  static const agv = Color(0xFF16845C);            // สีของรถ AGV
+  static const fork = Color(0xFFB4770C);           // สีของรถโฟล์คลิฟท์
+  static const hdr = AppColors.primary;            // ← อ้างของกลาง
+  static const green = AppColors.success;          // ← อ้างของกลาง
+}</code></pre><p>โครงนี้ตรงกับกฎใน 9.11 คือของกลางอยู่ <code>core</code> ของเฉพาะฟีเจอร์อยู่ในฟีเจอร์ และฟีเจอร์อ้างของกลางได้ แต่ไม่กลับกัน</p><p>จุดที่ต้องระวังคือบรรทัดอย่าง <code>static const green = AppColors.success;</code> — เป็นการสร้างชื่อที่สองให้ของเดิม ซึ่งทำให้ค้นหาว่าใครใช้สีนี้บ้างยากขึ้น เพราะต้องค้นสองชื่อ</p><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>โค้ดในฟีเจอร์เขียนสั้น อ่านง่าย</td><td>ค้นหาไม่เจอครบ</td></tr>
+<tr><td>เปลี่ยนใจภายหลังได้ว่าฟีเจอร์นี้จะใช้สีเขียวของตัวเอง</td><td>คนใหม่ไม่รู้ว่าสองชื่อนี้คือสีเดียวกัน</td></tr>
+</tbody></table><p>คุ้มไม่คุ้มขึ้นกับว่าฟีเจอร์นั้นมีโอกาสแยกตัวจริงไหม ถ้าไม่มี ให้ใช้ชื่อเดียว</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>AppColors.blue</code> เป็นสีเขียว</td><td>ตั้งชื่อตามสี</td><td>ตั้งตามหน้าที่</td></tr>
+<tr><td>ไม่มีใครใช้ token ที่มีอยู่</td><td>รายการยาวเกินจนหาไม่เจอ</td><td>ตัดตัวที่ใช้ที่เดียวออก</td></tr>
+<tr><td>ระยะห่างในแอปไม่เป็นชุดเดียวกัน</td><td>ไม่มีมาตราส่วน</td><td>กำหนด 5–6 ค่าแล้วใช้แค่นั้น</td></tr>
+<tr><td>ไฟล์ token กลายเป็นไฟล์ที่ทุกคนต้องแก้</td><td>เก็บ widget ไว้ในนั้น</td><td>เก็บแต่ค่า</td></tr>
+<tr><td>เปลี่ยนตัวเลขแล้วไม่มีใครรู้ว่าทำไมเคยเป็นค่านั้น</td><td>ไม่มีคอมเมนต์บอกที่มา</td><td>เขียนเหตุผลไว้กับค่าที่ไม่ชัดในตัวเอง</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมกำลังจะเริ่มโปรเจกต์ใหม่ และเสนอโครง token นี้</p><pre class="code-vs"><code>class Tokens {
+  static const white = Color(0xFFFFFFFF);
+  static const black = Color(0xFF000000);
+  static const blue = Color(0xFF2E73B9);
+  static const lightBlue = Color(0xFFE9F3FF);
+  static const grey1 = Color(0xFFF6F9FC);
+  static const grey2 = Color(0xFFD9E5EF);
+  static const grey3 = Color(0xFF60758A);
+  static const grey4 = Color(0xFF102A43);
+}</code></pre><p>ปรับปรุงอย่างไร</p><details><summary>แนวคำตอบ</summary><p>ปัญหาสามข้อ</p><table><thead><tr><th>ปัญหา</th><th>ผลที่เกิด</th></tr></thead><tbody>
+<tr><td>ชื่อตามสี</td><td>เปลี่ยนแบรนด์แล้วชื่อโกหก</td></tr>
+<tr><td><code>grey1..grey4</code> ไม่บอกอะไรเลย</td><td>คนเลือกใช้แบบสุ่ม แล้วสีเทาในแอปจะปนกันสี่แบบ</td></tr>
+<tr><td>ไม่มีสีคู่</td><td>ไม่มีใครรู้ว่าตัวอักษรบน <code>blue</code> ควรเป็นสีอะไร (11.2)</td></tr>
+</tbody></table><pre class="code-vs"><code>class AppColors {
+  // พื้นผิว เรียงจากลึกไปตื้น
+  static const pageBg = Color(0xFFF6F9FC);
+  static const surface = Color(0xFFFFFFFF);
+
+  // เส้น
+  static const border = Color(0xFFD9E5EF);
+
+  // ตัวอักษร เรียงตามลำดับความสำคัญ
+  static const heading = Color(0xFF102A43);
+  static const body = Color(0xFF102A43);
+  static const subtitle = Color(0xFF60758A);
+
+  // แบรนด์ พร้อมสีที่วางบนได้
+  static const primary = Color(0xFF2E73B9);
+  static const onPrimary = Color(0xFFFFFFFF);
+  static const primarySoft = Color(0xFFE9F3FF);
+  static const onPrimarySoft = Color(0xFF174D80);
+}</code></pre><p>สังเกตสองอย่าง</p><ul><li><code>heading</code> กับ <code>body</code> เป็นสีเดียวกันตอนนี้ แต่แยกชื่อไว้ เพราะวันที่ฝ่ายออกแบบอยากให้หัวข้อเข้มกว่าเนื้อความ จะแก้ได้โดยไม่ต้องไล่ดูว่าที่ไหนเป็นหัวข้อ</li><li>ไม่มี <code>black</code> และ <code>white</code> ล้วน — ดำสนิทบนขาวสนิทมีความต่างสูงถึง 21 ซึ่งจ้าเกินไปเมื่ออ่านนาน ๆ ตัวอักษรจึงใช้ <code>#102A43</code> ที่เป็นน้ำเงินเข้มมากแทน</li></ul><p>ข้อสุดท้ายเป็นรายละเอียดที่ทำให้แอปดูดีขึ้นโดยที่ผู้ใช้บอกไม่ถูกว่าเพราะอะไร</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ตั้งชื่อตามหน้าที่ ยกเว้นชั้นล่างสุดที่เป็นชุดสีดิบ</li><li>เขียนเหตุผลไว้กับตัวเลขที่ไม่ชัดในตัวเอง</li><li>ทำ token เฉพาะค่าที่ใช้ซ้ำจริง — รายการที่ยาวเกินคือรายการที่ไม่มีใครใช้</li><li>ระยะห่างมาจากมาตราส่วนที่มีไม่กี่ค่า</li><li>เก็บแต่ค่า อย่าเก็บ widget</li></ul></div><p><strong>บทหน้า:</strong> เรื่องที่กระทบทุกบรรทัดของข้อความไทย</p></section>

@@ -1,16 +1,80 @@
-<div class="note"><strong>Asset imageอยู่ใน bundleและต้องประกาศถูก:</strong> path/case, resolution variants, fit, cacheและ error stateมีผลต่างกันบน Windows/Android/release</div>
-<section><h2>1. Declare</h2><pre class="code-vs"><code>flutter:
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ใส่รูปหลายความละเอียดแล้วดูว่า Flutter เลือกตัวไหน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.10<br><strong>จบบทนี้แล้วจะทำได้:</strong> จัดการไฟล์รูปให้คมทุกเครื่องโดยไม่ทำให้แอปใหญ่เกินจำเป็น</div>
+
+<section><h2>1. ประกาศให้ Flutter รู้จัก</h2><pre class="code-vs"><code>flutter:
   assets:
-    - assets/icons/wms/
-    - assets/images/branding/</code></pre><p>directory entryรวมไฟล์ใน directoryตาม manifestแต่จัดโครงชัดและตรวจ case-sensitive CI</p></section>
-<section><h2>2. Resolution variants</h2><pre class="code-vs"><code>assets/images/logo.png
-assets/images/2.0x/logo.png
-assets/images/3.0x/logo.png</code></pre><p>Flutterเลือกตาม device pixel ratio ใช้ขนาด logicalใน widget</p></section>
-<section><h2>3. Fit and constraints</h2><pre class="code-vs"><code>Image.asset('assets/images/branding/logo.png',
-  width: 160, height: 56, fit: BoxFit.contain,
-  errorBuilder: (_, __, ___) =&gt; const Icon(Icons.broken_image));</code></pre></section>
-<section><h2>4. Raster vs vector</h2><p>PNGเหมาะภาพ/alphaซับซ้อน, SVGเหมาะ logo/iconที่ scaleหลายจอ แต่ SVG featureบางอย่างอาจ renderต่าง ต้อง optimizeและ test package</p></section>
-<section><h2>5. Memory</h2><p>อย่า decodeรูปกล้องหลาย megapixelเต็มขนาดเพื่อ thumbnail ใช้ cacheWidth/cacheHeightหรือ preprocess; assetขนาดใหญ่เพิ่ม appและmemoryแม้แสดงเล็ก</p></section>
-<section><h2>6. Hot reload</h2><p>เพิ่ม pubspec/assetใหม่มักต้อง <code>flutter pub get</code> และ full restart หาก releaseหาไฟล์ไม่ได้ตรวจ case/pathและ asset manifestก่อนแก้ code</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ไฟล์ <code>Logo.png</code> เปิดได้ Windowsแต่ Androidหา <code>logo.png</code> ไม่เจอเพราะอะไร?</p><details><summary>เฉลย</summary><p>filesystem case sensitivityต่างกัน ใช้ชื่อ/path caseตรงและ CIบน case-sensitive environment</p></details></section>
-<section><h2>8. Visual tests</h2><div class="success">1x/2x/3x, small/large PDA, missing asset, dark background, text scalingรอบภาพและ release build smoke test</div></section>
+    - assets/icons/wms/          # ทั้งโฟลเดอร์ (ไม่รวมโฟลเดอร์ย่อย)
+    - assets/images/logo.png     # ไฟล์เดียว</code></pre><table><thead><tr><th>เขียนแบบ</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>ลงท้ายด้วย <code>/</code></td><td>ทุกไฟล์ในโฟลเดอร์นั้น แต่<strong>ไม่รวมโฟลเดอร์ย่อย</strong></td></tr>
+<tr><td>ชื่อไฟล์เต็ม</td><td>เฉพาะไฟล์นั้น</td></tr>
+</tbody></table><p>ข้อที่ทำให้เสียเวลาบ่อยคือโฟลเดอร์ย่อย — <code>assets/images/</code> ไม่ครอบคลุม <code>assets/images/products/</code> ต้องประกาศแยก</p></section>
+
+<section><h2>2. ความละเอียดหลายระดับ</h2><p>จอโทรศัพท์มีความหนาแน่นพิกเซลต่างกันมาก รูปที่คมบนจอธรรมดาจะเบลอบนจอความละเอียดสูง Flutter จึงใช้กติกาชื่อโฟลเดอร์</p><pre class="code-vs"><code>assets/images/
+  logo.png            ← 1x  (120×40)
+  2.0x/
+    logo.png          ← 2x  (240×80)
+  3.0x/
+    logo.png          ← 3x  (360×120)</code></pre><pre class="code-vs"><code>// ประกาศแค่ตัว 1x ตัวอื่นถูกหยิบมาให้อัตโนมัติ
+flutter:
+  assets:
+    - assets/images/logo.png</code></pre><pre class="code-vs"><code>// เรียกด้วยชื่อเดียว Flutter เลือกไฟล์ตามจอ
+Image.asset('assets/images/logo.png', width: 120)</code></pre><div class="note"><code>width: 120</code> คือ<strong>หน่วยอิสระจากพิกเซล</strong> ไม่ใช่จำนวนพิกเซลจริง บนจอ 3x จะกินพื้นที่ 360 พิกเซลจริง ซึ่งเป็นเหตุผลที่ไฟล์ 3x ต้องกว้าง 360</div><p>ถ้าไม่มีไฟล์ตรงความละเอียด Flutter จะใช้ตัวที่ใกล้ที่สุดแล้วย่อขยายให้ ซึ่งได้ผลที่ยอมรับได้แต่ไม่คมเท่า</p></section>
+
+<section><h2>3. เลือกอย่างไรว่าต้องมีกี่ระดับ</h2><table><thead><tr><th>รูป</th><th>ควรมี</th></tr></thead><tbody>
+<tr><td>ไอคอน</td><td>ไม่ต้อง — ใช้ SVG แทน (11.10)</td></tr>
+<tr><td>โลโก้</td><td>1x 2x 3x หรือใช้ SVG</td></tr>
+<tr><td>ภาพประกอบหน้าจอว่าง</td><td>2x ตัวเดียวก็พอ ถ้าไม่ได้เน้นความคม</td></tr>
+<tr><td>ภาพสินค้าที่โหลดจากเซิร์ฟเวอร์</td><td>ไม่เกี่ยว — เป็นเรื่องของ Part 13</td></tr>
+</tbody></table><p>บน PDA ที่จอมักเป็น 2x หรือต่ำกว่า การทำครบ 3x บ่อยครั้งเป็นการเพิ่มขนาดแอปโดยไม่มีใครได้ประโยชน์ — ตรวจจากเครื่องจริงที่ใช้งานก่อนตัดสิน</p><pre class="code-vs"><code>// ดูค่าจริงของเครื่อง
+debugPrint(MediaQuery.devicePixelRatioOf(context).toString());</code></pre></section>
+
+<section><h2>4. รูปที่โหลดจากเน็ต ต่างกันคนละเรื่อง</h2><table><thead><tr><th> </th><th><code>Image.asset</code></th><th><code>Image.network</code></th></tr></thead><tbody>
+<tr><td>อยู่ที่ไหน</td><td>ในแอป</td><td>บนเซิร์ฟเวอร์</td></tr>
+<tr><td>ล้มเหลวได้ไหม</td><td>ไม่ ถ้าประกาศถูก</td><td>ได้ตลอดเวลา</td></tr>
+<tr><td>ต้องมีสถานะระหว่างโหลด</td><td>ไม่</td><td>ต้อง</td></tr>
+<tr><td>ต้องจัดการ error</td><td>ไม่</td><td>ต้อง</td></tr>
+</tbody></table><pre class="code-vs"><code>Image.network(
+  url,
+  loadingBuilder: (context, child, progress) =&gt;
+      progress == null ? child : const Center(child: CircularProgressIndicator()),
+  // ขาดไม่ได้ — บน PDA ที่สัญญาณไม่ดี รูปโหลดไม่ขึ้นเป็นเรื่องปกติ
+  errorBuilder: (context, error, stack) =&gt; const Icon(Icons.broken_image),
+)</code></pre><p>ถ้าไม่ใส่ <code>errorBuilder</code> จะได้กล่องแดงพร้อมข้อความ exception เต็มจอในโหมด debug และพื้นที่ว่างในโหมด release ซึ่งทั้งสองอย่างไม่ควรให้ผู้ใช้เห็น</p></section>
+
+<section><h2>5. <code>fit</code> ตัดสินว่าอะไรถูกตัด</h2><table><thead><tr><th><code>BoxFit</code></th><th>ผล</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td><code>contain</code></td><td>เห็นทั้งรูป มีที่ว่างเหลือ</td><td>โลโก้ รูปสินค้าที่ต้องเห็นครบ</td></tr>
+<tr><td><code>cover</code></td><td>เต็มพื้นที่ ส่วนเกินถูกตัด</td><td>ภาพพื้นหลัง</td></tr>
+<tr><td><code>fill</code></td><td>ยืดให้พอดี รูปบิดเบี้ยว</td><td>แทบไม่มี</td></tr>
+<tr><td><code>fitWidth</code> / <code>fitHeight</code></td><td>พอดีด้านเดียว</td><td>กรณีเฉพาะ</td></tr>
+</tbody></table><p>ในงานคลัง <code>contain</code> เป็นค่าที่ปลอดภัยสำหรับรูปสินค้า เพราะ <code>cover</code> อาจตัดส่วนที่มีฉลากหรือรหัสออกไปพอดี</p></section>
+
+<section><h2>6. รูปกินหน่วยความจำมากกว่าขนาดไฟล์</h2><p>รูป JPEG ขนาดไฟล์ 200 KB ที่มีขนาด 3000×2000 พิกเซล เมื่อถูกแสดงจะกินหน่วยความจำ</p><pre class="code-vs"><code>3000 × 2000 × 4 ไบต์ = 24 MB</code></pre><p>ไม่ใช่ 200 KB เพราะรูปต้องถูกคลายการบีบอัดออกมาเป็นพิกเซลก่อนวาด ห้ารูปแบบนี้ในลิสต์เดียวคือ 120 MB ซึ่งทำให้แอปถูกระบบปิดบน PDA ที่แรมน้อย</p><pre class="code-vs"><code>Image.asset(
+  'assets/images/product.jpg',
+  width: 80,
+  height: 80,
+  // บอกให้คลายการบีบอัดที่ขนาดนี้ ไม่ใช่ขนาดเต็ม
+  cacheWidth: 160,     // 80 × devicePixelRatio ของเครื่องเป้าหมาย
+  cacheHeight: 160,
+)</code></pre><div class="note"><code>cacheWidth</code> ลดหน่วยความจำได้มหาศาลและควรใส่เสมอกับรูปที่แสดงเล็กกว่าขนาดจริง — เป็นบรรทัดเดียวที่มักแก้ปัญหาแอปค้างในลิสต์รูปได้ทั้งหมด</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Unable to load asset</code></td><td>ไม่ได้ประกาศใน <code>pubspec.yaml</code> หรือสะกดชื่อผิด</td><td>ตรวจทั้งสองอย่าง ชื่อไฟล์ต้องตรงตัวพิมพ์</td></tr>
+<tr><td>ประกาศแล้วยังไม่เจอ</td><td>hot reload ไม่โหลด asset ใหม่</td><td>รันใหม่</td></tr>
+<tr><td>ไฟล์ในโฟลเดอร์ย่อยไม่ถูกรวม</td><td>ประกาศแค่โฟลเดอร์แม่</td><td>ประกาศแยกทุกโฟลเดอร์</td></tr>
+<tr><td>แอปค้างเมื่อเลื่อนลิสต์ที่มีรูป</td><td>รูปใหญ่กว่าที่แสดงมาก</td><td>ใส่ <code>cacheWidth</code></td></tr>
+<tr><td>รูปเบลอบนบางเครื่อง</td><td>ไม่มีไฟล์ความละเอียดสูง</td><td>เพิ่ม 2x หรือใช้ SVG</td></tr>
+<tr><td>รูปจากเน็ตหายเป็นพื้นที่ว่าง</td><td>ไม่มี <code>errorBuilder</code></td><td>ใส่เสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ฟีเจอร์ใหม่ต้องแสดงรูปสินค้าในลิสต์ รูปมาจากเซิร์ฟเวอร์ ขนาดต้นฉบับราว 2000×2000 และลิสต์แสดงรูปขนาด 64×64</p><ol><li>จะทำอย่างไร</li><li>ถ้าเน็ตในคลังช้ามาก ควรทำอะไรเพิ่ม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สิ่งที่ควรทำ เรียงตามลำดับผลที่ได้</p><table><thead><tr><th>ทำ</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><strong>ขอให้เซิร์ฟเวอร์ส่งรูปย่อ</strong></td><td>ได้ผลมากที่สุด — โหลดเร็วขึ้นหลายสิบเท่า และประหยัดทั้งเน็ตและแรม</td></tr>
+<tr><td>ใส่ <code>cacheWidth: 128</code></td><td>ถ้าเซิร์ฟเวอร์ส่งรูปเต็มมาแล้ว อย่างน้อยไม่กินแรม</td></tr>
+<tr><td><code>errorBuilder</code> และ <code>loadingBuilder</code></td><td>ผู้ใช้รู้ว่าเกิดอะไรขึ้น</td></tr>
+<tr><td>ใช้ <code>cached_network_image</code></td><td>ไม่โหลดซ้ำเมื่อเลื่อนกลับขึ้น</td></tr>
+</tbody></table><p>แถวแรกสำคัญที่สุดและมักถูกข้าม เพราะเป็นงานของทีมหลังบ้าน — แต่การดาวน์โหลดรูป 2000×2000 มาแสดงที่ 64×64 คือการโยนข้อมูลทิ้ง 99.9% หลังจากส่งมันข้ามเครือข่ายมาแล้ว</p><p><strong>2.</strong> เมื่อเน็ตช้า ให้ถามคำถามที่ตรงกว่า คือ <strong>รูปนี้จำเป็นต่อการทำงานไหม</strong></p><table><thead><tr><th>ถ้าจำเป็น</th><th>ถ้าไม่จำเป็น</th></tr></thead><tbody>
+<tr><td>โหลดเฉพาะแถวที่เห็นบนจอ</td><td>ซ่อนรูปในลิสต์ แสดงเฉพาะหน้ารายละเอียด</td></tr>
+<tr><td>เก็บลงเครื่องหลังโหลดครั้งแรก</td><td>มีสวิตช์ให้ปิดรูป</td></tr>
+<tr><td>แสดงกล่องสีเทาที่มีขนาดเท่ารูปไว้ก่อน</td><td>—</td></tr>
+</tbody></table><p>ข้อสุดท้ายในคอลัมน์ซ้ายสำคัญ — ถ้าไม่จองพื้นที่ไว้ ลิสต์จะกระตุกทุกครั้งที่รูปโหลดเสร็จ และผู้ใช้ที่กำลังจะกดแถวหนึ่งจะกดโดนอีกแถว ซึ่งในงานคลังแปลว่าหยิบของผิด</p><p><strong>คำถามที่ควรถามก่อนทั้งหมดนี้:</strong> ผู้ใช้ใช้รูปทำอะไร ถ้าใช้ยืนยันว่าหยิบของถูกใบ รูปย่อ 64×64 อาจไม่พอตั้งแต่แรก และคำตอบที่ถูกคือให้สแกนบาร์โค้ดยืนยันแทน ซึ่งเร็วกว่าและแม่นกว่ารูป</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ประกาศ asset ใน <code>pubspec.yaml</code> และโฟลเดอร์ย่อยต้องประกาศแยก</li><li>โฟลเดอร์ <code>2.0x</code> และ <code>3.0x</code> ถูกเลือกอัตโนมัติ ประกาศแค่ตัว 1x</li><li>ทำเท่าที่เครื่องจริงต้องการ</li><li>รูปกินแรมตามจำนวนพิกเซล ไม่ใช่ตามขนาดไฟล์ — ใส่ <code>cacheWidth</code> เสมอ</li><li>รูปจากเน็ตต้องมี <code>errorBuilder</code> และต้องจองพื้นที่ไว้ก่อน</li></ul></div><p><strong>บทหน้า:</strong> ไอคอนของแอปเองที่ผู้ใช้เห็นก่อนเปิดแอป</p></section>

@@ -4,24 +4,134 @@
 <title>Light / Dark Mode</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-02 · Flutter UI</span><h1>Light / Dark Mode</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Controller</a></li><li><a href="#section-2">MaterialApp wiring</a></li><li><a href="#section-3">Persist explicit choice</a></li><li><a href="#section-4">Effective brightness</a></li><li><a href="#section-5">No global context</a></li><li><a href="#section-6">ของจริง</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>Theme mode เป็น app state:</strong> ValueNotifierเหมาะ stateเล็กที่เปลี่ยนทั้ง MaterialApp; persist choiceแยกจาก effective system brightness</div>
-<section id="section-1"><h2>1. Controller</h2><pre class="code-vs"><code>class ThemeController extends ValueNotifier&lt;ThemeMode&gt; {
-  ThemeController() : super(ThemeMode.system);
-  void setMode(ThemeMode mode) =&gt; value = mode;
-  void toggle(bool systemIsDark) =&gt; value =
-      (value == ThemeMode.dark || value == ThemeMode.system &amp;&amp; systemIsDark)
-          ? ThemeMode.light : ThemeMode.dark;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สองโปรเจกต์ เลือกคนละทาง</a></li><li><a href="#section-2">ราคาของโหมดมืด</a></li><li><a href="#section-3">ถ้าจะทำ ทำอย่างไรให้ไม่พัง</a></li><li><a href="#section-4">คำถามที่แท้จริงไม่ใช่สว่างหรือมืด แต่คืออ่านออกไหม</a></li><li><a href="#section-5">วัดด้วยโค้ด</a></li><li><a href="#section-6">เทสต์ที่จับปัญหาจริงได้</a></li><li><a href="#section-7">ทางแก้สามทาง และทางที่ lab เลือก</a></li><li><a href="#section-8">สีอย่างเดียวไม่พอ</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: วัดความต่างของสีในธีมตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินว่าแอปควรมีโหมดมืดไหม และวัดได้ว่าสีที่เลือกอ่านออกจริงหรือเปล่า</div>
+
+<section id="section-1"><h2>1. สองโปรเจกต์ เลือกคนละทาง</h2><table><thead><tr><th> </th><th><code>wmsapp</code></th><th><code>wms_absolute_mobile</code></th></tr></thead><tbody>
+<tr><td>โหมด</td><td>สว่างและมืด สลับได้</td><td>สว่างอย่างเดียว</td></tr>
+<tr><td>โค้ด</td><td><code>ThemeProvider extends ValueNotifier&lt;ThemeMode&gt;</code></td><td><code>buildAppTheme()</code> ตัวเดียว</td></tr>
+<tr><td>จำนวนสีที่ต้องดูแล</td><td>สองชุด</td><td>ชุดเดียว</td></tr>
+</tbody></table><pre class="code-vs"><code>// wmsapp/lib/theme/theme.dart
+class ThemeProvider extends ValueNotifier&lt;ThemeMode&gt; {
+  ThemeProvider() : super(ThemeMode.light);
+
+  bool get isDark =&gt; value == ThemeMode.dark;
+  void toggle() { value = isDark ? ThemeMode.light : ThemeMode.dark; }
+}
+
+final themeProvider = ThemeProvider();</code></pre><p>ทั้งสองทางไม่ผิด แต่มีราคาที่ต่างกัน และบทนี้จะพูดถึงราคานั้นตรง ๆ</p></section>
+
+<section id="section-2"><h2>2. ราคาของโหมดมืด</h2><table><thead><tr><th>ต้นทุน</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>สีทุกตัวต้องมีคู่</td><td>สีเดียวที่ลืมกำหนดคู่ = ตัวอักษรดำบนพื้นดำ</td></tr>
+<tr><td>ทดสอบสองเท่า</td><td>ทุกจอต้องดูสองครั้ง และ CI ไม่ได้ตรวจให้</td></tr>
+<tr><td>รูปภาพและไอคอนที่มีพื้นขาว</td><td>โลโก้ที่ทำมาเป็นพื้นขาวจะเป็นกล่องสว่างกลางจอมืด</td></tr>
+<tr><td>เงาหายไป</td><td>วิธีแยกชั้นบนพื้นมืดต้องใช้สีพื้นที่ต่างกัน ไม่ใช่เงา</td></tr>
+</tbody></table><p>คำถามที่ควรถามคือ <strong>“ผู้ใช้ของเราได้อะไรจากโหมดมืด”</strong></p><table><thead><tr><th>สภาพแวดล้อม</th><th>โหมดมืดช่วยไหม</th></tr></thead><tbody>
+<tr><td>คลังกลางวัน หลังคาโปร่งแสง</td><td><strong>ทำให้แย่ลง</strong> — จอมืดสะท้อนแสงจนมองไม่เห็น</td></tr>
+<tr><td>ห้องเย็นที่ไฟสลัว</td><td>ช่วย</td></tr>
+<tr><td>ลานจอดรถกลางคืน</td><td>ช่วย</td></tr>
+<tr><td>ทำงานทั้งวันในที่แสงคงที่</td><td>เป็นความชอบส่วนตัว</td></tr>
+</tbody></table><p>คลังของโปรเจกต์นี้อยู่แถวแรก ซึ่งเป็นเหตุผลที่ <code>wms_absolute_mobile</code> ทำสว่างอย่างเดียว และตั้งสีพื้นเป็น <code>#EDF3F8</code> ที่สว่างแต่ไม่ขาวจ้า</p><div class="note"><strong>หลัก:</strong> โหมดมืดไม่ใช่ฟีเจอร์ที่ควรมีเสมอ มันคือฟีเจอร์ที่ควรมีเมื่อผู้ใช้อยู่ในที่มืดจริง</div></section>
+
+<section id="section-3"><h2>3. ถ้าจะทำ ทำอย่างไรให้ไม่พัง</h2><pre class="code-vs"><code>MaterialApp(
+  theme: buildPdaTheme(Brightness.light),
+  darkTheme: buildPdaTheme(Brightness.dark),
+  themeMode: controller.mode,     // light / dark / system
+)</code></pre><table><thead><tr><th><code>themeMode</code></th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>ThemeMode.system</code></td><td>ตามการตั้งค่าของเครื่อง</td></tr>
+<tr><td><code>ThemeMode.light</code> / <code>dark</code></td><td>บังคับ ไม่สนเครื่อง</td></tr>
+</tbody></table><p>สิ่งที่ต้องระวังที่สุดคือ <strong>อย่าเขียนฟังก์ชันสร้างธีมสองตัวแยกกัน</strong> ให้เขียนตัวเดียวที่รับ <code>Brightness</code> เข้าไป ไม่งั้นจะมีค่าที่แก้ในตัวหนึ่งแต่ลืมแก้ในอีกตัวเสมอ</p><pre class="code-vs"><code>ThemeData buildPdaTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme(
+    brightness: brightness,
+    primary: dark ? PdaColors.primaryLight : PdaColors.primary,
+    onPrimary: Colors.white,
+    surface: dark ? PdaColors.surfaceDark : PdaColors.surface,
+    onSurface: dark ? PdaColors.headingDark : PdaColors.heading,
+    ...
+  );
+  // ส่วนที่ไม่เกี่ยวกับสี เช่นความสูงปุ่มและมุมโค้ง เขียนครั้งเดียว
+  return ThemeData(colorScheme: scheme, ...);
 }</code></pre></section>
-<section id="section-2"><h2>2. MaterialApp wiring</h2><pre class="code-vs"><code>ValueListenableBuilder(
-  valueListenable: themeController,
-  builder: (_, mode, __) =&gt; MaterialApp(
-    theme: AppTheme.light, darkTheme: AppTheme.dark, themeMode: mode));</code></pre></section>
-<section id="section-3"><h2>3. Persist explicit choice</h2><p>เก็บ enum string <code>system/light/dark</code> ใน preferences โหลดก่อนหรือระหว่าง bootstrapโดยมี default system อย่าเก็บ boolเพราะเพิ่ม mode systemภายหลัง migrateยาก</p></section>
-<section id="section-4"><h2>4. Effective brightness</h2><p>เวลาเลือก icon/overlayใช้ <code>Theme.of(context).brightness</code> ไม่อนุมานจาก controller value เพราะ <code>ThemeMode.system</code> ต้องตาม platform</p></section>
-<section id="section-5"><h2>5. No global context</h2><p>ThemeControllerไม่ควรถือ BuildContextหรือสี เป็นเจ้าของ modeเท่านั้น Widget/theme builderอ่าน contextและ render</p></section>
-<section id="section-6"><h2>6. ของจริง</h2><p><code>wmsapp</code> ใช้ <code>ThemeProvider extends ValueNotifier&lt;ThemeMode&gt;</code> และ MaterialAppมี light/dark theme เป็น patternเรียบง่ายที่เหมาะกับ stateนี้</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>controller valueเป็น systemแต่โทรศัพท์ dark ควรแสดงไอคอนพระอาทิตย์หรือพระจันทร์?</p><details><summary>แนวคำตอบ</summary><p>ตัดสินจาก effective brightnessใน contextและ tooltipบอก actionที่จะเกิด ไม่ใช่ value enumอย่างเดียว</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">restoreทั้งสาม mode, system brightnessเปลี่ยน, toggle, persistence failureและ system UI overlayตาม effective theme</div></section>
+
+<section id="section-4"><h2>4. คำถามที่แท้จริงไม่ใช่สว่างหรือมืด แต่คืออ่านออกไหม</h2><div class="note"><strong>Contrast ratio</strong> คือตัวเลขบอกความต่างระหว่างสีตัวอักษรกับสีพื้น มีค่าตั้งแต่ 1 (สีเดียวกัน) ถึง 21 (ดำสนิทบนขาวสนิท)</div><table><thead><tr><th>เกณฑ์ WCAG</th><th>ใช้กับ</th></tr></thead><tbody>
+<tr><td>4.5 ขึ้นไป</td><td>ตัวอักษรขนาดปกติ</td></tr>
+<tr><td>3.0 ขึ้นไป</td><td>ตัวใหญ่ 18pt ขึ้นไป หรือ 14pt ตัวหนา</td></tr>
+<tr><td>3.0 ขึ้นไป</td><td>เส้นขอบของช่องกรอกและไอคอนที่สื่อความหมาย</td></tr>
+</tbody></table><p>ในคลังที่แสงจ้า ตัวเลขที่ผ่านเกณฑ์บนจอคอมอาจยังอ่านไม่ออกที่หน้างาน ตัวเลขนี้จึงเป็น<strong>ขั้นต่ำ</strong> ไม่ใช่เป้าหมาย</p></section>
+
+<section id="section-5"><h2>5. วัดด้วยโค้ด</h2><pre class="code-vs"><code>/// ความสว่างสัมพัทธ์ตามสูตรของ WCAG
+///
+/// ไม่ใช่ค่าเฉลี่ยของ R G B ธรรมดา — ตาคนไวต่อสีเขียวมากที่สุดและไวต่อ
+/// สีน้ำเงินน้อยที่สุด สูตรนี้จึงถ่วงน้ำหนักต่างกัน
+double relativeLuminance(Color color) {
+  double channel(double value) =&gt; value &lt;= 0.03928
+      ? value / 12.92
+      : math.pow((value + 0.055) / 1.055, 2.4).toDouble();
+
+  return 0.2126 * channel(color.r) +
+      0.7152 * channel(color.g) +
+      0.0722 * channel(color.b);
+}
+
+double contrastRatio(Color foreground, Color background) {
+  final a = relativeLuminance(foreground);
+  final b = relativeLuminance(background);
+  final lighter = math.max(a, b);
+  final darker = math.min(a, b);
+  return (lighter + 0.05) / (darker + 0.05);
+}</code></pre><p>สังเกตน้ำหนัก 0.7152 ของสีเขียว เทียบกับ 0.0722 ของสีน้ำเงิน — นี่คือเหตุผลที่ตัวอักษรสีน้ำเงินเข้มบนพื้นดำอ่านไม่ออก ทั้งที่ดูเหมือนต่างกันมากตอนเลือกสี</p></section>
+
+<section id="section-6"><h2>6. เทสต์ที่จับปัญหาจริงได้</h2><pre class="code-vs"><code>test('ตัวอักษรบนพื้นต้องผ่านเกณฑ์ความต่างของ WCAG', () {
+  final pairs = &lt;String, (Color, Color)&gt;{
+    'หัวข้อบนพื้นขาว': (PdaColors.heading, PdaColors.surface),
+    'หัวข้อบนพื้นหน้า': (PdaColors.heading, PdaColors.pageBg),
+    'ตัวอักษรขาวบนปุ่มหลัก': (Colors.white, PdaColors.primary),
+  };
+
+  for (final entry in pairs.entries) {
+    final (foreground, background) = entry.value;
+    expect(contrastRatio(foreground, background), greaterThanOrEqualTo(4.5),
+        reason: '${entry.key} ความต่างไม่พอ');
+  }
+});</code></pre><p><strong>เทสต์นี้จับปัญหาจริงตอนเขียน lab นี้</strong> — สีบอกสถานะสามสีที่คัดลอกมาจากโปรเจกต์จริง ไม่ผ่านเกณฑ์เมื่อใช้ตัวอักษรสีขาว</p><table><thead><tr><th>สีพื้น</th><th>ตัวอักษรขาว</th><th>เกณฑ์ 4.5</th></tr></thead><tbody>
+<tr><td><code>#D64545</code> แดง</td><td>4.38</td><td>ไม่ผ่าน (เฉียด)</td></tr>
+<tr><td><code>#1F9D62</code> เขียว</td><td>3.47</td><td>ไม่ผ่าน</td></tr>
+<tr><td><code>#D78A13</code> เหลืองส้ม</td><td><strong>2.79</strong></td><td>ไม่ผ่านชัดเจน</td></tr>
+</tbody></table><p>ตัวเลขเหล่านี้ไม่ได้แปลว่าโปรเจกต์จริงเขียนผิด — สีชุดนี้เป็นสีมาตรฐานที่แอปจำนวนมากใช้กัน และป้ายสถานะส่วนใหญ่ในแอปนั้นใช้สีเข้มบนพื้นจาง (<code>greenSoft</code>, <code>redSoft</code>, <code>amberSoft</code>) ซึ่งเป็นการแก้ปัญหาแบบหนึ่ง แต่มันแปลว่า<strong>ถ้าวันไหนมีคนเผลอใช้ตัวขาวบนพื้นสีเต็ม จะไม่มีอะไรเตือน</strong></p></section>
+
+<section id="section-7"><h2>7. ทางแก้สามทาง และทางที่ lab เลือก</h2><table><thead><tr><th>ทาง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ทำสีให้เข้มขึ้น</td><td>ได้ผลกับแดงและเขียว แต่เหลืองส้มที่เข้มพอจะรับตัวขาวได้ จะกลายเป็นสีน้ำตาล</td></tr>
+<tr><td>ใช้ตัวอักษรใหญ่ขึ้นหรือหนาขึ้น</td><td>เกณฑ์ลดเหลือ 3.0 แต่ป้ายสถานะบนจอเล็กใหญ่ขึ้นไม่ได้มาก</td></tr>
+<tr><td>เปลี่ยนสีตัวอักษรตามพื้น</td><td>ได้ผลทุกกรณี แต่ต้องประกาศเป็นคู่</td></tr>
+</tbody></table><pre class="code-vs"><code>// ค่าที่ใช้ถูกทำให้เข้มกว่าสีแบรนด์ดั้งเดิม เพราะเทสต์จับได้ว่า
+// ตัวอักษรขาวบนสีเดิมอ่านไม่ออกตามเกณฑ์
+static const Color danger = Color(0xFFB3261E);
+static const Color success = Color(0xFF157C4C);
+static const Color warning = Color(0xFFD78A13);
+
+/// สีตัวอักษรที่คู่กับพื้นสีสถานะ
+///
+/// ต้องประกาศคู่กันเสมอ ไม่ใช่สมมติว่าใช้สีขาวได้ทุกอัน
+static const Color onDanger = Colors.white;
+static const Color onSuccess = Colors.white;
+static const Color onWarning = heading;      // ← ตัวเดียวที่ต่าง</code></pre><p>และมีเทสต์ที่บันทึกข้อจำกัดไว้ ไม่ใช่บันทึกบั๊ก</p><pre class="code-vs"><code>test('ตัวอักษรขาวใช้กับสีเหลืองส้มไม่ได้ ไม่ว่าจะอยากใช้แค่ไหน', () {
+  // เทสต์นี้บันทึกข้อจำกัดทางฟิสิกส์ไว้ เพื่อให้คนที่มาเปลี่ยน onWarning
+  // เป็นสีขาวในอนาคต เห็นทันทีว่าทำไมถึงทำไม่ได้
+  expect(contrastRatio(Colors.white, PdaColors.warning), lessThan(4.5));
+});</code></pre></section>
+
+<section id="section-8"><h2>8. สีอย่างเดียวไม่พอ</h2><p>ผู้ชายประมาณ 8 คนใน 100 แยกแดงกับเขียวได้ไม่ดี ป้ายสถานะที่ต่างกันแค่สีจึงไม่ควรใช้</p><table><thead><tr><th>ไม่พอ</th><th>พอ</th></tr></thead><tbody>
+<tr><td>จุดเขียว / จุดแดง</td><td>จุดเขียว + ✓ / จุดแดง + ✕</td></tr>
+<tr><td>แถวสีแดงในตาราง</td><td>แถวสีแดง + ไอคอน + ข้อความ</td></tr>
+</tbody></table><p>ในคลังยังมีเหตุผลเพิ่มอีกข้อ คือผู้ใช้บางคนใส่แว่นตานิรภัยสีเหลือง ซึ่งเปลี่ยนการรับรู้สีทั้งหมด</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ฝ่ายออกแบบส่งสีใหม่มาสำหรับข้อความรอง คือ <code>#9AA8B5</code> บนพื้นขาว บอกว่า “ดูสบายตากว่าเดิม”</p><ol><li>ควรรับไหม</li><li>ถ้าไม่รับ จะอธิบายอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ต้องวัดก่อนตอบ ไม่ใช่ตอบจากความรู้สึก</p><pre class="code-vs"><code>test('สีข้อความรองที่เสนอมา', () {
+  expect(contrastRatio(const Color(0xFF9AA8B5), Colors.white),
+      greaterThanOrEqualTo(4.5));
+});</code></pre><p>สีนี้ได้ประมาณ 2.5 ซึ่งไม่ผ่านแม้แต่เกณฑ์ของตัวใหญ่ ส่วนสีเดิม <code>#60758A</code> ได้ประมาณ 4.9 ผ่าน</p><p><strong>2.</strong> สามอย่างที่ควรพูด และลำดับสำคัญ</p><ul><li><strong>เห็นด้วยกับเจตนาก่อน</strong> — ฝ่ายออกแบบพูดถูกว่าข้อความรองไม่ควรเด่นเท่าหัวข้อ นั่นคือเป้าหมายที่ถูกต้อง</li><li><strong>แสดงตัวเลข ไม่ใช่ความเห็น</strong> — 2.5 กับ 4.5 เป็นข้อเท็จจริงที่เถียงกันไม่ได้ ต่างจาก “ผมว่าจางไป”</li><li><strong>เสนอทางที่ได้ทั้งสองอย่าง</strong> — ลดขนาดหรือน้ำหนักตัวอักษรแทนการลดความเข้มของสี ได้ลำดับความสำคัญเหมือนกันโดยยังอ่านออก</li></ul><p>ที่สำคัญกว่านั้น ให้เสนอว่า<strong>เพิ่มเทสต์นี้เข้าไปในโปรเจกต์</strong> — ครั้งหน้าที่มีคนเสนอสีใหม่ จะรู้คำตอบภายในสิบวินาทีโดยไม่ต้องถกเถียงกัน</p><p>และควรบอกด้วยว่าสีที่ดูจางบนจอคอมในออฟฟิศ จะจางกว่านั้นมากบนจอ PDA กลางแดด ซึ่งเป็นข้อมูลที่ฝ่ายออกแบบไม่มี เพราะเขาไม่ได้ยืนอยู่ตรงนั้น</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>โหมดมืดมีราคา ตัดสินจากที่ที่ผู้ใช้ยืนอยู่จริง ไม่ใช่จากว่ามันดูดี</li><li>ถ้าทำ ให้เขียนฟังก์ชันเดียวที่รับ <code>Brightness</code> ไม่ใช่สองฟังก์ชัน</li><li>ความต่างของสีวัดเป็นตัวเลขได้ และวัดในเทสต์ได้</li><li>สีพื้นกับสีตัวอักษรต้องประกาศเป็นคู่เสมอ</li><li>เหลืองส้มรับตัวอักษรขาวไม่ได้ ไม่ว่าจะปรับอย่างไร</li><li>อย่าให้สีเป็นสัญญาณเดียว</li></ul></div><p><strong>บทหน้า:</strong> ค่าดิบเหล่านี้ควรตั้งชื่อและจัดเก็บอย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

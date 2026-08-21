@@ -1,16 +1,107 @@
-<div class="note"><strong><code>tr(en, th)</code> เริ่มเร็ว แต่ scaleมีเพดาน:</strong> ARB/gen-l10nให้ key, placeholders, plural/select, toolingและตรวจ missing translationเหมาะเมื่อข้อความโตหรือมีนักแปล</div>
-<section><h2>1. Inline helper</h2><pre class="code-vs"><code>String tr(String english, String thai) =&gt;
-    AppLanguageController.instance.isThai ? thai : english;
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: ตั้ง gen_l10n ในโปรเจกต์เปล่าแล้วเทียบกับที่เขียนเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.7<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้เครื่องมือมาตรฐานของ Flutter เป็น และตัดสินได้ว่าโปรเจกต์ควรใช้หรือไม่</div>
 
-Text(tr('Connection failed', 'เชื่อมต่อล้มเหลว'));</code></pre><p>อ่านง่ายสำหรับสองภาษาและแอปทีมเล็ก</p></section>
-<section><h2>2. Inline drawbacks</h2><p>ข้อความซ้ำ/สะกดไม่ตรง, ค้น missingยาก, ไม่มี key/contextสำหรับนักแปล, plural/interpolationยุ่งและ global helperไม่ทำ widget rebuildเองหาก callerไม่ listen</p></section>
-<section><h2>3. ARB example</h2><pre class="code-vs"><code>// app_en.arb
-{"tasksRemaining":"{count, plural, =0{No tasks} one{1 task} other{{count} tasks}}"}
+<section><h2>1. เครื่องมือมาตรฐาน</h2><div class="note"><strong>gen_l10n</strong> คือเครื่องมือที่มากับ Flutter อ่านไฟล์ข้อความแล้วสร้างคลาส Dart ให้อัตโนมัติ ไม่ต้องติดตั้งอะไรเพิ่ม</div><p>ไฟล์ข้อความใช้รูปแบบ <strong>ARB</strong> (Application Resource Bundle) ซึ่งเป็น JSON ที่มีกติกาเพิ่มนิดหน่อย</p><pre class="code-vs"><code>// lib/l10n/app_en.arb
+{
+  "@@locale": "en",
+  "scanPallet": "Scan pallet",
+  "@scanPallet": {
+    "description": "ปุ่มหลักบนหน้าจอค้นพาเลท"
+  },
+  "palletCount": "{count, plural, =1{1 pallet} other{{count} pallets}}",
+  "@palletCount": {
+    "description": "จำนวนพาเลทในโซนที่เลือก",
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  }
+}</code></pre><pre class="code-vs"><code>// lib/l10n/app_th.arb
+{
+  "@@locale": "th",
+  "scanPallet": "สแกนพาเลท",
+  "palletCount": "พาเลท {count} ใบ"
+}</code></pre><table><thead><tr><th>ส่วน</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>@@locale</code></td><td>ภาษาของไฟล์นี้</td></tr>
+<tr><td><code>@ชื่อคีย์</code></td><td>ข้อมูลประกอบ ใส่เฉพาะในไฟล์ภาษาหลัก</td></tr>
+<tr><td><code>description</code></td><td>คำอธิบายให้คนแปล — สำคัญมาก คนแปลไม่เห็นหน้าจอ</td></tr>
+<tr><td><code>placeholders</code></td><td>ค่าที่จะแทรก พร้อมชนิด</td></tr>
+</tbody></table></section>
 
-// Widget
-Text(AppLocalizations.of(context)!.tasksRemaining(count));</code></pre></section>
-<section><h2>4. Migration strategy</h2><p>เริ่ม new stringsใน generated localization, สร้าง adapterสำหรับ common labels, migrate screenเมื่อแก้ ไม่ big-bang replaceและไม่ใช้ English sentenceเป็น key</p></section>
-<section><h2>5. Placeholders</h2><p>อย่าต่อ fragmentเช่น <code>tr('Loaded','โหลดแล้ว') + '$n'</code> เพราะลำดับคำต่างภาษา ใช้ข้อความเต็มพร้อม named placeholder</p></section>
-<section><h2>6. Backend messages</h2><p>อย่าแปล server detailด้วย string matching ให้ map stable error/status codeเป็น localization keyและมี safe fallbackสำหรับ unknown</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ข้อความ “โหลดแล้ว 1/5 รายการ” ควรออกแบบอย่างไร?</p><details><summary>เฉลย</summary><p>หนึ่ง localization messageพร้อม placeholders loaded/totalและ plural/selectเมื่อจำเป็น ไม่ต่อคำแยกสามส่วน</p></details></section>
-<section><h2>8. Decision</h2><div class="success">ใช้ tr helperได้เมื่อสองภาษา/ข้อความน้อย/ทีมเดียว; ขยับ ARBเมื่อมี plural, QA translation, reuse, localeเพิ่มหรือ compile-time missing-key checks</div></section>
+<section><h2>2. ตั้งค่าและสร้าง</h2><pre class="code-vs"><code># l10n.yaml ที่รากโปรเจกต์
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart</code></pre><pre class="code-vs"><code>flutter gen-l10n</code></pre><p>ได้คลาสมาให้ใช้ทันที</p><pre class="code-vs"><code>MaterialApp(
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  locale: controller.locale,
+)
+
+// ในจอ
+Text(AppLocalizations.of(context)!.scanPallet)
+Text(AppLocalizations.of(context)!.palletCount(12))</code></pre><div class="note"><code>AppLocalizations.localizationsDelegates</code> รวมสาม delegate ของ Flutter (11.5) กับ delegate ของข้อความเราไว้ให้แล้ว จึงไม่ต้องเขียนรายการเอง</div></section>
+
+<section><h2>3. สิ่งที่ได้ที่เขียนเองไม่ได้</h2><p><strong>เอกพจน์–พหูพจน์ที่ถูกต้องทุกภาษา</strong></p><pre class="code-vs"><code>"palletCount": "{count, plural, =1{1 pallet} other{{count} pallets}}"</code></pre><table><thead><tr><th>ภาษา</th><th>จำนวนรูป</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>ไทย จีน ญี่ปุ่น</td><td>1</td><td>ไม่เปลี่ยนตามจำนวน</td></tr>
+<tr><td>อังกฤษ</td><td>2</td><td>one, other</td></tr>
+<tr><td>รัสเซีย</td><td>4</td><td>one, few, many, other</td></tr>
+<tr><td>อาหรับ</td><td>6</td><td>zero, one, two, few, many, other</td></tr>
+</tbody></table><p>โค้ดที่เขียนเองแบบ <code>count == 1 ? ... : ...</code> ใช้ได้กับสองภาษาแรกเท่านั้น ส่วน gen_l10n รู้กฎของทุกภาษาจากข้อมูล CLDR</p><p><strong>เพศทางไวยากรณ์</strong></p><pre class="code-vs"><code>"assignedTo": "{gender, select, male{เขาได้รับมอบหมาย} female{เธอได้รับมอบหมาย} other{ได้รับมอบหมาย}}"</code></pre><p><strong>การจัดรูปแบบตัวเลขและวันที่ในประโยค</strong></p><pre class="code-vs"><code>"receivedAt": "รับเข้าเมื่อ {time}",
+"@receivedAt": {
+  "placeholders": { "time": { "type": "DateTime", "format": "Hm" } }
+}</code></pre><p><strong>เครื่องมือแปลรองรับ ARB</strong> — ระบบจัดการงานแปลเชิงพาณิชย์ส่วนใหญ่นำเข้าและส่งออก ARB ได้ ต่างจากรายการที่เขียนเป็นโค้ด Dart ที่ต้องแปลงเอง</p></section>
+
+<section><h2>4. ราคาที่ต้องจ่าย</h2><table><thead><tr><th>ต้นทุน</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ต้องสร้างโค้ดใหม่ทุกครั้งที่แก้ข้อความ</td><td>ลืมสั่ง <code>gen-l10n</code> แล้วสงสัยว่าทำไมข้อความไม่เปลี่ยน</td></tr>
+<tr><td>ไฟล์ที่สร้างขึ้นต้องตัดสินว่าจะ commit ไหม</td><td>ไม่ commit แล้ว CI ต้องสร้าง — commit แล้ว diff รกทุก PR</td></tr>
+<tr><td>ต้องมี <code>BuildContext</code> ถึงจะอ่านข้อความได้</td><td>เขียนเทสต์ตรวจข้อความโดยไม่สร้าง widget ไม่ได้</td></tr>
+<tr><td>JSON แก้ยากกว่า Dart</td><td>ไม่มีการเติมคำอัตโนมัติ พิมพ์คีย์ผิดรู้ตอนสร้างโค้ด</td></tr>
+<tr><td><code>AppLocalizations.of(context)!</code> มี <code>!</code></td><td>ลืมห่อ <code>MaterialApp</code> แล้วพังตอนรัน ไม่ใช่ตอนคอมไพล์</td></tr>
+</tbody></table><p>แถวที่สามคือเหตุผลตรง ๆ ที่ lab ไม่ใช้ — เทสต์ที่ตรวจว่าข้อความทุกก้อนแปลครบ ต้องเรียกได้โดยไม่มี widget</p></section>
+
+<section><h2>5. เทสต์ที่ทำหน้าที่แทนเครื่องมือ</h2><pre class="code-vs"><code>test('ทุกก้อนมีทั้งสองภาษา และไม่มีก้อนไหนว่าง', () {
+  for (final message in AppText.all) {
+    expect(message.en.trim(), isNotEmpty, reason: 'ภาษาอังกฤษว่าง');
+    expect(message.th.trim(), isNotEmpty, reason: 'ภาษาไทยว่าง');
+  }
+});</code></pre><p>เทสต์นี้พึ่งรายการ <code>AppText.all</code> ที่ต้องเติมด้วยมือ ซึ่งเป็นจุดอ่อนที่ต้องรู้ตัว — ถ้ามีคนเพิ่ม <code>Message</code> ใหม่แล้วลืมเติมลงรายการ เทสต์จะไม่จับ</p><p>gen_l10n ไม่มีปัญหานี้เพราะรายการคือไฟล์ ARB เอง</p><table><thead><tr><th>วิธีปิดช่องโหว่</th><th>แรงที่ต้องลง</th></tr></thead><tbody>
+<tr><td>รีวิวโค้ดให้ตรวจว่าเติมรายการแล้ว</td><td>ไม่มี แต่พึ่งคน</td></tr>
+<tr><td>เขียนเทสต์ที่อ่านไฟล์ต้นฉบับแล้วนับ <code>static const Message</code> เทียบกับ <code>all.length</code></td><td>ปานกลาง เชื่อถือได้</td></tr>
+<tr><td>ย้ายไปใช้ gen_l10n</td><td>สูง แต่หมดปัญหาถาวร</td></tr>
+</tbody></table></section>
+
+<section><h2>6. ทั้งสองโปรเจกต์จริงไม่ได้ใช้</h2><table><thead><tr><th>โปรเจกต์</th><th>ทำอย่างไร</th><th>เหตุผลที่พอเข้าใจได้</th></tr></thead><tbody>
+<tr><td><code>wms_absolute_mobile</code></td><td><code>tr(en, th)</code></td><td>สองภาษา ทีมเล็ก ไม่มีคนแปลภายนอก</td></tr>
+<tr><td><code>wmsapp</code></td><td>ภาษาไทยเขียนตรงในโค้ด</td><td>ผู้ใช้ทุกคนอ่านไทย ไม่เคยต้องรองรับภาษาที่สอง</td></tr>
+</tbody></table><p>ทั้งสองทางเลือกสมเหตุสมผลในบริบทของตัวเอง แต่มีสิ่งที่ต้องรู้ล่วงหน้า</p><div class="note"><strong>ต้นทุนของการไม่ใช้ ไม่ได้จ่ายวันนี้ แต่จ่ายวันที่มีภาษาที่สาม</strong> — และตอนนั้นข้อความจะมีเป็นพันก้อนกระจายอยู่ทั่วโปรเจกต์</div></section>
+
+<section><h2>7. ตัดสินใจอย่างไร</h2><table><thead><tr><th>สถานการณ์</th><th>ควรใช้</th></tr></thead><tbody>
+<tr><td>ภาษาเดียว ไม่มีแผนจะเพิ่ม</td><td>เขียนตรงในโค้ด</td></tr>
+<tr><td>สองภาษา ทีมเดียวดูแล ข้อความไม่เกินร้อยก้อน</td><td>รายการที่เขียนเอง</td></tr>
+<tr><td>สามภาษาขึ้นไป</td><td>gen_l10n</td></tr>
+<tr><td>มีคนแปลที่ไม่ใช่โปรแกรมเมอร์</td><td>gen_l10n</td></tr>
+<tr><td>ต้องรองรับภาษาที่มีกฎพหูพจน์ซับซ้อน</td><td>gen_l10n</td></tr>
+<tr><td>เขียนไลบรารีให้คนอื่นใช้</td><td>gen_l10n</td></tr>
+</tbody></table><p>สังเกตว่าเกณฑ์เกือบทั้งหมดไม่ใช่เรื่องเทคนิค แต่เป็นเรื่อง<strong>ใครเป็นคนแก้ข้อความ</strong> — ถ้าคนแก้คือโปรแกรมเมอร์ที่เปิดโปรเจกต์อยู่แล้ว รายการที่เขียนเองก็พอ</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แก้ ARB แล้วข้อความไม่เปลี่ยน</td><td>ยังไม่ได้สร้างโค้ดใหม่</td><td><code>flutter gen-l10n</code> หรือรันแอปใหม่</td></tr>
+<tr><td><code>AppLocalizations.of(context)</code> เป็น null</td><td>ไม่มี <code>MaterialApp</code> เหนือขึ้นไป</td><td>ห่อในเทสต์ด้วย</td></tr>
+<tr><td>คีย์ที่มีในไฟล์ไทยแต่ไม่มีในอังกฤษ ถูกทิ้ง</td><td>ไฟล์ต้นแบบเป็นตัวกำหนดรายการ</td><td>เพิ่มในไฟล์ต้นแบบก่อนเสมอ</td></tr>
+<tr><td>คนแปลแปลผิดความหมาย</td><td>ไม่ได้ใส่ <code>description</code></td><td>ใส่ทุกคีย์ที่กำกวม</td></tr>
+<tr><td>ข้อความไทยขึ้น <code>{count}</code> ตรง ๆ</td><td>ไฟล์ไทยเขียน placeholder ผิดชื่อ</td><td>ชื่อ placeholder ต้องตรงกับไฟล์ต้นแบบ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ข้อความนี้อยู่ในหน้าจอสรุปงานประจำวัน</p><pre class="code-vs"><code>Text('${done.length} งานเสร็จแล้ว จาก ${all.length} งาน')</code></pre><ol><li>เขียนเป็น ARB อย่างไร</li><li>ถ้าต้องรองรับภาษาอังกฤษด้วย ต้องระวังอะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong></p><pre class="code-vs"><code>// app_th.arb
+"tasksProgress": "{done} งานเสร็จแล้ว จาก {total} งาน",
+
+// app_en.arb (ไฟล์ต้นแบบ)
+"tasksProgress": "{done} of {total} tasks done",
+"@tasksProgress": {
+  "description": "แถบสรุปบนหน้าจอหลัก แสดงความคืบหน้าของงานวันนี้",
+  "placeholders": {
+    "done": { "type": "int" },
+    "total": { "type": "int" }
+  }
+}</code></pre><p><strong>2.</strong> สามเรื่อง</p><ul><li><strong>ลำดับของ placeholder ต่างกันได้</strong> และนั่นคือเหตุผลที่ต้องใช้ชื่อ ไม่ใช่ตำแหน่ง — ภาษาที่เอา total ขึ้นก่อนก็เขียน <code>"{total} งาน เสร็จแล้ว {done}"</code> ได้โดยไม่ต้องแก้โค้ด</li><li><strong>อังกฤษต้องเลือกรูปพหูพจน์</strong> — “1 of 5 tasks done” ถูก แต่ “1 of 1 task done” ต้องใช้ <code>task</code> ไม่ใช่ <code>tasks</code> ซึ่งต้องใช้ <code>plural</code> ซ้อนใน placeholder</li><li><strong>ระวัง 0 งาน</strong> — “0 of 0 tasks done” อ่านแล้วสับสน ควรมีข้อความแยกสำหรับกรณีที่ยังไม่มีงานเลย ซึ่งเป็นการตัดสินใจด้าน UX ที่ระบบแปลช่วยไม่ได้</li></ul><p>ข้อสุดท้ายเป็นบทเรียนที่ใหญ่กว่าเรื่อง ARB — <strong>เครื่องมือแปลจัดการรูปแบบของภาษาได้ แต่ตัดสินใจแทนเราไม่ได้ว่าข้อความไหนควรมีอยู่</strong></p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>gen_l10n มากับ Flutter อ่าน ARB แล้วสร้างคลาสให้</li><li>ได้กฎพหูพจน์ของทุกภาษาและรูปแบบวันที่ในประโยค ซึ่งเขียนเองยากมาก</li><li>แลกด้วยการต้องสร้างโค้ดใหม่ และต้องมี <code>BuildContext</code> ถึงจะอ่านข้อความได้</li><li>เกณฑ์ตัดสินคือใครเป็นคนแก้ข้อความ ไม่ใช่เรื่องเทคนิค</li><li>ตั้งแต่ภาษาที่สามขึ้นไป ให้ใช้เครื่องมือ</li></ul></div><p><strong>บทหน้า:</strong> ตัวเลขและวันที่ ที่ผิดแล้วไม่มีใครเห็นจนกว่าจะสายเกินไป</p></section>

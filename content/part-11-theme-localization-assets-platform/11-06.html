@@ -1,16 +1,103 @@
-<div class="note"><strong>Locale เป็น dataของแอป:</strong> MaterialAppรับ Locale, delegatesและ supported localesร่วมกัน ภาษาเปลี่ยนต้อง rebuildเหนือ Navigatorเพื่อให้ทุก routeเห็นค่าใหม่</div>
-<section><h2>1. Locale identity</h2><p><code>Locale('th')</code> กว้างกว่า <code>Locale('th','TH')</code> เลือกระดับที่ resourcesรองรับจริงและ normalize preferenceเป็น language code stable</p></section>
-<section><h2>2. Wiring</h2><pre class="code-vs"><code>ListenableBuilder(
-  listenable: languageController,
-  builder: (_, __) =&gt; MaterialApp(
-    locale: languageController.locale,
-    supportedLocales: const [Locale('en'), Locale('th')],
-    localizationsDelegates: appDelegates,
-  ),
-);</code></pre></section>
-<section><h2>3. System vs explicit</h2><p>ใช้ <code>Locale?</code> nullเพื่อ follow systemหรือ explicit user choiceและ persist mode/code หาก productต้องมี “ตามเครื่อง” อย่าเก็บเพียง th/enจนแยกไม่ได้</p></section>
-<section><h2>4. Context timing</h2><p><code>Localizations.localeOf(context)</code> ต้องใช้ contextใต้ MaterialApp ไม่อ่านใน mainก่อน delegatesพร้อม สำหรับ formatterสร้างตาม localeปัจจุบันไม่ cacheตลอด process</p></section>
-<section><h2>5. Directionality</h2><p>en/thเป็น LTRแต่ architectureควรใช้ EdgeInsetsDirectional/AlignmentDirectionalเมื่อรองรับ RTLในอนาคต ไม่ hardcode left/rightโดยไม่จำเป็น</p></section>
-<section><h2>6. Backend values</h2><p>แยก UI labelsที่ translateได้จาก codes/namesที่ serverเป็นเจ้าของ เช่น location codeต้อง verbatim ส่วน typed status mapเป็น localized labelได้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปลี่ยนภาษาใน dialogแล้ว dialogเดิมไม่เปลี่ยนเพราะอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตรวจว่า MaterialApp rebuildจาก controllerและ dialog builderอ่าน localizationใน context ไม่จับ translated stringก่อนเปิดหรืออยู่นอก listener</p></details></section>
-<section><h2>8. Tests</h2><div class="success">explicit/system/fallback, runtime toggleบน nested routes/dialogs, persistenceและ formatterไม่ใช้ localeเก่า</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เขียน delegate ของตัวเองหนึ่งตัว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.5<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านและเขียน localization delegate ได้ และรู้ว่า Flutter หาข้อความเจอได้อย่างไร</div>
+
+<section><h2>1. <code>Locale</code> คืออะไร</h2><div class="note">วัตถุเล็ก ๆ ที่บอกว่า “ภาษาอะไร ในภูมิภาคไหน”</div><pre class="code-vs"><code>const Locale('th')                   // ภาษาไทย ไม่ระบุประเทศ
+const Locale('th', 'TH')              // ภาษาไทย ประเทศไทย
+const Locale('en', 'US')              // อังกฤษ อเมริกัน
+const Locale('en', 'GB')              // อังกฤษ อังกฤษ</code></pre><table><thead><tr><th>ส่วน</th><th>มาตรฐาน</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>รหัสภาษา</td><td>ISO 639 ตัวพิมพ์เล็ก</td><td><code>th</code>, <code>en</code>, <code>ja</code></td></tr>
+<tr><td>รหัสประเทศ</td><td>ISO 3166 ตัวพิมพ์ใหญ่</td><td><code>TH</code>, <code>US</code></td></tr>
+</tbody></table><p>ประเทศมีผลกับสิ่งที่ไม่ใช่ภาษาโดยตรง เช่น <code>en_US</code> เขียนวันที่เป็น <code>08/21/2026</code> ส่วน <code>en_GB</code> เขียน <code>21/08/2026</code> — ตัวเลขชุดเดียวกันแต่คนละความหมาย</p><div class="note">แอปนี้ใช้ <code>Locale('th')</code> ไม่ระบุประเทศ เพราะไม่มีความต่างระหว่างภาษาไทยในแต่ละประเทศที่ต้องรองรับ การเพิ่มประเทศเข้าไปตอนที่ยังไม่ต้องใช้ คือการเดาอนาคต</div></section>
+
+<section><h2>2. delegate คืออะไร</h2><p>คือวัตถุที่รับผิดชอบสามอย่าง</p><table><thead><tr><th>เมธอด</th><th>ตอบคำถามว่า</th></tr></thead><tbody>
+<tr><td><code>isSupported(locale)</code></td><td>ภาษานี้มีข้อความให้ไหม</td></tr>
+<tr><td><code>load(locale)</code></td><td>โหลดข้อความของภาษานี้มา</td></tr>
+<tr><td><code>shouldReload(old)</code></td><td>ต้องโหลดใหม่เมื่อ delegate ถูกสร้างใหม่ไหม</td></tr>
+</tbody></table><pre class="code-vs"><code>class AppTextDelegate extends LocalizationsDelegate&lt;AppTexts&gt; {
+  const AppTextDelegate();
+
+  @override
+  bool isSupported(Locale locale) =&gt; ['en', 'th'].contains(locale.languageCode);
+
+  @override
+  Future&lt;AppTexts&gt; load(Locale locale) async =&gt;
+      AppTexts(AppLanguage.fromCode(locale.languageCode));
+
+  // ข้อความของเราอยู่ในโค้ด ไม่ได้โหลดจากไฟล์ จึงไม่มีอะไรต้องโหลดใหม่
+  @override
+  bool shouldReload(AppTextDelegate old) =&gt; false;
+}</code></pre><p>สังเกตว่า <code>load</code> คืน <code>Future</code> เพราะบางระบบต้องอ่านไฟล์หรือดาวน์โหลด แต่ของเราอยู่ในโค้ดอยู่แล้ว จึงเสร็จทันที</p></section>
+
+<section><h2>3. ใช้ผ่าน <code>Localizations.of</code></h2><pre class="code-vs"><code>class AppTexts {
+  const AppTexts(this.language);
+  final AppLanguage language;
+
+  String get scanPallet =&gt; AppText.scanPallet.of(language);
+
+  static AppTexts of(BuildContext context) =&gt;
+      Localizations.of&lt;AppTexts&gt;(context, AppTexts)!;
+}
+
+// ในจอ
+Text(AppTexts.of(context).scanPallet)</code></pre><p><code>Localizations.of</code> ทำงานเหมือน <code>Theme.of</code> คือไต่ต้นไม้ widget ขึ้นไปหาตัวที่ใกล้ที่สุด</p></section>
+
+<section><h2>4. แล้วทำไม lab ไม่ใช้วิธีนี้</h2><p>lab ใช้ <code>InheritedNotifier</code> กับ <code>LanguageController</code> แทน ซึ่งต่างกันที่จุดเดียวแต่สำคัญ</p><table><thead><tr><th> </th><th><code>LocalizationsDelegate</code></th><th><code>InheritedNotifier</code> (lab)</th></tr></thead><tbody>
+<tr><td>เปลี่ยนภาษาอย่างไร</td><td>เปลี่ยน <code>locale</code> ของ <code>MaterialApp</code></td><td>เรียก <code>controller.toggle()</code></td></tr>
+<tr><td>ใครถือสถานะ</td><td><code>MaterialApp</code></td><td>controller ที่เราถือเอง</td></tr>
+<tr><td>บันทึกลงเครื่อง</td><td>ต้องมีที่เก็บแยกอยู่ดี</td><td>อยู่ใน controller เลย</td></tr>
+<tr><td>ทดสอบข้อความโดยไม่มี widget</td><td>ไม่ได้ ต้องมี <code>BuildContext</code></td><td>ได้ <code>AppText.signIn.of(AppLanguage.thai)</code></td></tr>
+<tr><td>เข้ากับ widget ของ Flutter</td><td>เข้ากันเป็นธรรมชาติ</td><td>ต้องส่ง <code>locale</code> ให้ <code>MaterialApp</code> เอง</td></tr>
+</tbody></table><p>แถวรองสุดท้ายคือเหตุผลหลัก — เทสต์ที่ตรวจว่าข้อความถูกแปลครบ (11.8) ต้องเรียกได้โดยไม่สร้าง widget ถ้าผูกกับ <code>BuildContext</code> จะเขียนเทสต์แบบนั้นไม่ได้</p><p>ในทางกลับกัน ถ้าโปรเจกต์ใช้ <code>gen_l10n</code> (11.8) จะได้ delegate มาให้อัตโนมัติ และวิธีแรกก็เป็นทางที่ถูกต้อง</p></section>
+
+<section><h2>5. <code>InheritedNotifier</code> ทำงานอย่างไร</h2><pre class="code-vs"><code>/// ใช้ InheritedNotifier ซึ่งทำสองอย่างพร้อมกัน คือส่งของลงไปโดยไม่ต้อง
+/// ต่อ parameter เป็นทอด ๆ และสั่งให้ widget ที่อ่านค่านี้วาดใหม่เมื่อ
+/// controller ประกาศว่ามีอะไรเปลี่ยน
+class LanguageScope extends InheritedNotifier&lt;LanguageController&gt; {
+  const LanguageScope({
+    super.key,
+    required LanguageController controller,
+    required super.child,
+  }) : super(notifier: controller);
+
+  static LanguageController of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType&lt;LanguageScope&gt;();
+    assert(scope != null, 'ไม่พบ LanguageScope เหนือ widget นี้');
+    return scope!.notifier!;
+  }
+}</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>InheritedWidget</code></td><td>ส่งของลงต้นไม้ widget ให้ลูกหลานอ่านได้โดยไม่ต้องส่งผ่านทุกชั้น</td></tr>
+<tr><td><code>InheritedNotifier</code></td><td>เพิ่มความสามารถ คือฟัง <code>Listenable</code> แล้วสั่งให้ผู้ที่พึ่งพาวาดใหม่</td></tr>
+<tr><td><code>dependOnInheritedWidgetOfExactType</code></td><td>อ่านค่า<strong>และ</strong>ลงทะเบียนว่า widget นี้ต้องวาดใหม่เมื่อค่าเปลี่ยน</td></tr>
+<tr><td><code>assert</code></td><td>ฟ้องตอน dev ถ้าลืมห่อ <code>LanguageScope</code> — ต่างจากการคืน null ที่จะไปพังที่อื่นทีหลัง</td></tr>
+</tbody></table><div class="note">คำที่ต้องแยกให้ออก — <code>dependOnInheritedWidgetOfExactType</code> ลงทะเบียนการพึ่งพา ส่วน <code>getInheritedWidgetOfExactType</code> อ่านอย่างเดียวไม่วาดใหม่ ใช้ตอนอ่านใน <code>initState</code> ที่ยังลงทะเบียนไม่ได้</div></section>
+
+<section><h2>6. ทางลัดที่ทำให้โค้ดในจออ่านง่าย</h2><pre class="code-vs"><code>extension LanguageContext on BuildContext {
+  String t(Message message) =&gt; LanguageScope.of(this).text(message);
+  String t1&lt;T&gt;(Message1&lt;T&gt; message, T value) =&gt;
+      LanguageScope.of(this).text1(message, value);
+  AppLanguage get language =&gt; LanguageScope.of(this).language;
+}</code></pre><table><thead><tr><th>ไม่มี extension</th><th>มี extension</th></tr></thead><tbody>
+<tr><td><code>LanguageScope.of(context).text(AppText.signIn)</code></td><td><code>context.t(AppText.signIn)</code></td></tr>
+</tbody></table><p>สั้นลงมาก และสำคัญเพราะข้อความโผล่ในทุกบรรทัดของ UI ถ้าเขียนยาวทุกครั้ง โครงของ layout จะจมอยู่ใต้โค้ดอ่านข้อความ</p><p>ข้อควรระวังคือ extension บน <code>BuildContext</code> จะปรากฏในรายการเติมคำอัตโนมัติของทุก context ในโปรเจกต์ ชื่อจึงควรสั้นแต่ไม่ทั่วไปเกิน — <code>t</code> ใช้ได้เพราะสื่อชัดในบริบทของ UI แต่ชื่ออย่าง <code>get</code> หรือ <code>value</code> จะสร้างความสับสน</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนภาษาแล้วจอไม่วาดใหม่</td><td>ใช้ <code>getInheritedWidgetOfExactType</code></td><td>ใช้ <code>dependOn...</code></td></tr>
+<tr><td><code>Null check operator used on a null value</code></td><td>ลืมห่อ <code>LanguageScope</code></td><td>ใส่ <code>assert</code> ที่บอกชัดว่าลืมอะไร</td></tr>
+<tr><td>อ่านภาษาใน <code>initState</code> แล้วพัง</td><td>ยังลงทะเบียนการพึ่งพาไม่ได้ในจังหวะนั้น</td><td>ย้ายไป <code>didChangeDependencies</code> หรืออ่านใน <code>build</code></td></tr>
+<tr><td>บางส่วนของจอไม่เปลี่ยนภาษา</td><td>ส่วนนั้นเป็น <code>const</code> จึงไม่วาดใหม่</td><td>เอา <code>const</code> ออกจาก widget ที่มีข้อความ</td></tr>
+</tbody></table><p>แถวสุดท้ายเจอบ่อยและงงมาก — <code>const Text('Sign in')</code> จะไม่มีวันเปลี่ยนเป็นไทย เพราะ Flutter ข้ามการวาดใหม่ให้ widget ที่เป็น <code>const</code> ทั้งก้อน ซึ่งปกติเป็นเรื่องดีด้านประสิทธิภาพ แต่กลายเป็นกับดักเมื่อข้อความต้องเปลี่ยนได้</p></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมจะเพิ่มภาษาที่สาม คือภาษาพม่า สำหรับพนักงานที่อ่านไทยไม่คล่อง</p><ol><li>ต้องแก้อะไรบ้างในโครงของ lab</li><li>โครงนี้เหมาะกับสามภาษาไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> จุดที่ต้องแก้</p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>app_messages.dart</code></td><td>เพิ่ม <code>AppLanguage.burmese</code> และเพิ่มพารามิเตอร์ตัวที่สามให้ <code>Message</code> ทุกก้อน</td></tr>
+<tr><td><code>pda_shell.dart</code></td><td>เพิ่มใน <code>supportedLocales</code></td></tr>
+<tr><td>ปุ่มสลับภาษา</td><td><code>toggle()</code> ที่สลับไปมาสองค่า ใช้ไม่ได้แล้ว ต้องเป็นเมนูให้เลือก</td></tr>
+<tr><td>ฟอนต์</td><td>ต้องตรวจว่าฟอนต์ที่ใช้มีอักษรพม่าไหม (11.4)</td></tr>
+</tbody></table><p><strong>2. ไม่เหมาะ</strong> และนี่คือคำตอบที่สำคัญกว่า</p><p><code>Message(String en, String th)</code> เป็นคลาสที่มีพารามิเตอร์ตายตัวสองตัว การเพิ่มภาษาที่สามแปลว่าต้องแก้ <strong>ทุกก้อนข้อความ</strong> ในไฟล์ ไม่ใช่แค่เพิ่มภาษา</p><p>โครงที่รองรับได้ดีกว่าคือเก็บเป็น map</p><pre class="code-vs"><code>class Message {
+  const Message(this._byLanguage);
+  final Map&lt;AppLanguage, String&gt; _byLanguage;
+
+  String of(AppLanguage language) =&gt;
+      _byLanguage[language] ?? _byLanguage[AppLanguage.english]!;
+}</code></pre><p>แต่แลกมาด้วยสิ่งที่เสียไป คือ<strong>คอมไพเลอร์ไม่บังคับให้ใส่ครบทุกภาษาอีกต่อไป</strong> ต้องพึ่งเทสต์แทน ซึ่งเป็นการแลกที่ต้องยอมเมื่อภาษาเกินสองภาษา</p><p><strong>ข้อคิดที่สำคัญกว่าตัวโค้ด:</strong> โครงสองภาษาของ lab ไม่ใช่ความผิดพลาด — มันคือโครงที่ถูกต้องสำหรับความต้องการที่มีอยู่จริงตอนนี้ ตามหลักใน 9.12 ที่ว่าอย่าเผื่ออนาคตที่ยังไม่มา แต่คนที่เขียนต้องรู้ว่าเส้นแบ่งอยู่ตรงไหน และตรงนี้คือ “ภาษาที่สาม”</p><p>และถ้าถึงจุดนั้นจริง <code>gen_l10n</code> ที่ 11.8 จะพูดถึงเป็นคำตอบที่ตรงกว่าการเขียนเอง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>Locale</code> คือภาษาบวกภูมิภาค ซึ่งมีผลกับรูปแบบวันที่และตัวเลข</li><li>delegate ตอบสามคำถาม คือรองรับไหม โหลดอย่างไร และต้องโหลดใหม่ไหม</li><li><code>InheritedNotifier</code> ส่งของลงต้นไม้พร้อมสั่งวาดใหม่</li><li><code>dependOn...</code> ลงทะเบียนการพึ่งพา ส่วน <code>get...</code> ไม่</li><li><code>const Text</code> ที่มีข้อความจะไม่เปลี่ยนภาษา</li></ul></div><p><strong>บทหน้า:</strong> ใครเป็นเจ้าของภาษาที่ผู้ใช้เลือก และเก็บไว้อย่างไร</p></section>

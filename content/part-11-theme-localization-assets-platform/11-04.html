@@ -1,21 +1,90 @@
-<div class="note"><strong>ฟอนต์ไทยต้องประกาศ family + weightจริง:</strong> หาก weightไม่มี Flutterอาจ synthesize ทำให้ตัวอักษรเบลอ/metricsเปลี่ยนและ layout overflowต่างจากเครื่องพัฒนา</div>
-<section><h2>1. pubspec</h2><pre class="code-vs"><code>flutter:
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เทียบฟอนต์ไทยสองแบบบนเครื่องจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกและติดตั้งฟอนต์ไทยได้ถูก และรู้ว่าทำไมข้อความไทยต้องการที่มากกว่าอังกฤษ</div>
+
+<section><h2>1. ปัญหาที่มองไม่เห็นจนกว่าจะเห็น</h2><p>ภาษาไทยเขียนซ้อนกันได้ถึงสี่ชั้น</p><pre class="code-vs"><code>       ่           ← วรรณยุกต์ (ชั้นบนสุด)
+      ิ            ← สระบน
+    ป              ← พยัญชนะ
+      ุ            ← สระล่าง</code></pre><p>คำว่า “ปุ๋ย” หรือ “กี่” กินความสูงมากกว่าตัวอักษรอังกฤษที่สูงเท่ากันอย่างชัดเจน ผลคือ</p><table><thead><tr><th>ปัญหา</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td>วรรณยุกต์ถูกตัดหาย</td><td>กล่องข้อความสูงพอดีเกินไป</td></tr>
+<tr><td>สระบนของบรรทัดล่างชนสระล่างของบรรทัดบน</td><td><code>height</code> เป็นค่าปริยาย</td></tr>
+<tr><td>ข้อความไทยดูอัดแน่นกว่าอังกฤษในกล่องเดียวกัน</td><td>ออกแบบโดยดูแต่ข้อความอังกฤษ</td></tr>
+</tbody></table><div class="note">อาการทั้งสามไม่โผล่ตอนทดสอบด้วยคำว่า “ทดสอบ” ซึ่งไม่มีสระบนล่างเลย — <strong>ต้องทดสอบด้วยคำที่มีวรรณยุกต์บนสระบน</strong> เช่น “ปุ๋ย” “กี่” “เดี๋ยว”</div></section>
+
+<section><h2>2. ทางแก้บรรทัดเดียว</h2><pre class="code-vs"><code>// height 1.4 ไม่ใช่ค่าปริยาย 1.0 เพราะสระบนล่างของไทยต้องการที่
+bodyLarge: TextStyle(fontSize: 14.5, color: PdaColors.heading, height: 1.4),
+bodyMedium: TextStyle(fontSize: 13.5, color: PdaColors.heading, height: 1.4),
+bodySmall: TextStyle(fontSize: 12.5, color: PdaColors.subtitle, height: 1.35),</code></pre><div class="note"><code>height</code> ใน Flutter เป็น<strong>ตัวคูณของ <code>fontSize</code></strong> ไม่ใช่หน่วยพิกเซล — <code>fontSize: 14</code> กับ <code>height: 1.4</code> ได้ความสูงบรรทัด 19.6</div><p>เทสต์บันทึกกฎนี้ไว้ เพื่อไม่ให้ใครลบทิ้งเพราะคิดว่าเป็นค่าที่ไม่จำเป็น</p><pre class="code-vs"><code>test('ตัวอักษรเนื้อความมี height เผื่อสระไทย', () {
+  final theme = buildPdaTheme();
+  // ค่าปริยายคือ null ซึ่งแปลว่า 1.0 และทำให้สระบนล่างชนกัน
+  expect(theme.textTheme.bodyMedium!.height, greaterThanOrEqualTo(1.3));
+  expect(theme.textTheme.bodyLarge!.height, greaterThanOrEqualTo(1.3));
+});</code></pre></section>
+
+<section><h2>3. ฟอนต์ปริยายรองรับไทยไหม</h2><p>รองรับ แต่ต้องเข้าใจว่ารองรับอย่างไร</p><table><thead><tr><th>แพลตฟอร์ม</th><th>สิ่งที่เกิดขึ้นกับข้อความไทย</th></tr></thead><tbody>
+<tr><td>Android</td><td>Roboto ไม่มีอักษรไทย ระบบจึงสลับไปใช้ Noto Sans Thai ที่ติดมากับเครื่องโดยอัตโนมัติ</td></tr>
+<tr><td>iOS</td><td>สลับไป Thonburi</td></tr>
+<tr><td>Web</td><td>ขึ้นกับฟอนต์ที่เบราว์เซอร์และระบบปฏิบัติการมี</td></tr>
+</tbody></table><p>กลไกนี้เรียกว่า <strong>font fallback</strong> ทำงานได้ดี แต่มีผลข้างเคียงที่ต้องรู้</p><table><thead><tr><th>ผลข้างเคียง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>หน้าตาต่างกันในแต่ละเครื่อง</td><td>Android รุ่นต่างกันมีฟอนต์ไทยคนละรุ่น ความกว้างไม่เท่ากัน</td></tr>
+<tr><td>ประโยคที่ปนสองภาษาใช้ฟอนต์คนละตัว</td><td>“สแกน Pallet PLT-001” — คำไทยเป็นฟอนต์หนึ่ง คำอังกฤษเป็นอีกฟอนต์ ความหนาไม่เท่ากัน</td></tr>
+<tr><td>น้ำหนักตัวหนาอาจไม่มี</td><td>ฟอนต์สำรองบางตัวไม่มี w800 ระบบจะเลียนแบบโดยทำให้หนาขึ้นเอง ซึ่งดูไม่เรียบร้อย</td></tr>
+</tbody></table><p><code>wms_absolute_mobile</code> ยอมรับผลข้างเคียงนี้และไม่ได้ฝังฟอนต์ ส่วน <code>wmsapp</code> เลือกอีกทาง</p></section>
+
+<section><h2>4. ฝังฟอนต์เอง</h2><pre class="code-vs"><code># wmsapp/pubspec.yaml
+flutter:
   fonts:
     - family: Sarabun
       fonts:
         - asset: assets/fonts/Sarabun-Regular.ttf
-          weight: 400
         - asset: assets/fonts/Sarabun-Medium.ttf
           weight: 500
         - asset: assets/fonts/Sarabun-Bold.ttf
-          weight: 700</code></pre></section>
-<section><h2>2. Apply globally</h2><pre class="code-vs"><code>ThemeData(
-  fontFamily: 'Sarabun',
-  textTheme: const TextTheme(/* Thai-friendly height/weights */),
-);</code></pre></section>
-<section><h2>3. YAML sensitivity</h2><p>indentผิดหรือ asset path/caseไม่ตรงทำ build/runtimeหาไม่ได้ หลังแก้ pubspecรัน <code>flutter pub get</code> และ full restart ไม่หวัง hot reloadกับ asset manifest</p></section>
-<section><h2>4. Thai metrics</h2><p>ทดสอบสระ/วรรณยุกต์, line height, clippingใน button/chip, ตัวเลขและอังกฤษผสม อย่าล็อก container heightจาก Latin textเพียงอย่างเดียว</p></section>
-<section><h2>5. Font license/size</h2><p>เก็บ licenseตามข้อกำหนดและ includeเฉพาะ weightsที่ใช้ ฟอนต์หลายชุดเพิ่ม artifact sizeและ fallbackอาจทำ UIไม่สม่ำเสมอ</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp/pubspec.yaml</code> ประกาศ Sarabun Regular/Medium/Bold และ AppThemeกำหนด <code>fontFamily: 'Sarabun'</code> เป็นตัวอย่างครบเส้นทาง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Textใช้ FontWeight.w600แต่มีไฟล์ 500/700เท่านั้นจะเกิดอะไร?</p><details><summary>เฉลย</summary><p>engineเลือก/synthesize weightใกล้เคียง ผลอาจไม่ตรง design; ใช้ weightที่มีหรือเพิ่มไฟล์ 600พร้อมประกาศถูก</p></details></section>
-<section><h2>8. Visual tests</h2><div class="success">ไทยยาว, mixed Thai/English/code, scale 1.0–2.0, light/darkและ Android/Windows rendererโดยไม่ clip/overflow</div></section>
+          weight: 700</code></pre><table><thead><tr><th>ส่วน</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>family</code></td><td>ชื่อที่ใช้อ้างในโค้ด <code>TextStyle(fontFamily: 'Sarabun')</code></td></tr>
+<tr><td><code>weight</code></td><td>ต้องตรงกับ <code>FontWeight</code> ที่ใช้ — <code>w500</code> คือ 500</td></tr>
+<tr><td>ไฟล์ที่ไม่ระบุ <code>weight</code></td><td>ถือเป็น 400</td></tr>
+</tbody></table><p>ตั้งเป็นฟอนต์ปริยายทั้งแอปด้วย</p><pre class="code-vs"><code>ThemeData(fontFamily: 'Sarabun', ...)</code></pre><div class="note"><strong>Sarabun</strong> เป็นฟอนต์ไทยจากโครงการฟอนต์แห่งชาติ ใช้ฟรีในเชิงพาณิชย์ได้ ออกแบบมาให้อ่านง่ายบนหน้าจอ และมีทั้งอักษรไทยและละตินในไฟล์เดียว ซึ่งแก้ปัญหาประโยคปนสองภาษาได้</div></section>
+
+<section><h2>5. ราคาของการฝังฟอนต์</h2><table><thead><tr><th>ต้นทุน</th><th>ตัวเลขคร่าว ๆ</th></tr></thead><tbody>
+<tr><td>ขนาดแอปโตขึ้น</td><td>ฟอนต์ไทยหนึ่งน้ำหนักราว 100–300 KB คูณจำนวนน้ำหนักที่ใส่</td></tr>
+<tr><td>ต้องตรวจสัญญาอนุญาต</td><td>ฟอนต์เชิงพาณิชย์หลายตัวห้ามฝังในแอป</td></tr>
+<tr><td>ต้องดูแลไฟล์</td><td>ฟอนต์เป็นไฟล์ binary ใน git ที่ diff ไม่ได้</td></tr>
+</tbody></table><p>เมื่อไหร่ควรฝัง</p><table><thead><tr><th>ควรฝัง</th><th>ไม่ต้องฝัง</th></tr></thead><tbody>
+<tr><td>หน้าตาต้องเหมือนกันทุกเครื่อง</td><td>แอปภายในที่เครื่องเป็นรุ่นเดียวกันหมด</td></tr>
+<tr><td>มีประโยคปนไทย–อังกฤษเยอะ</td><td>ข้อความส่วนใหญ่เป็นภาษาเดียว</td></tr>
+<tr><td>แบรนด์กำหนดฟอนต์มา</td><td>ไม่มีข้อกำหนดเรื่องฟอนต์</td></tr>
+<tr><td>ต้องใช้น้ำหนักที่ฟอนต์ระบบไม่มี</td><td>ใช้แค่ปกติกับหนา</td></tr>
+</tbody></table><p>สังเกตว่าทั้งสองโปรเจกต์เลือกไม่เหมือนกัน และทั้งคู่มีเหตุผล — <code>wmsapp</code> มีข้อความไทยเยอะกว่ามาก ส่วน <code>wms_absolute_mobile</code> ใช้อังกฤษเป็นค่าเริ่มต้น (11.7)</p></section>
+
+<section><h2>6. อีกสองเรื่องที่ต่างจากอังกฤษ</h2><p><strong>ภาษาไทยไม่มีช่องว่างระหว่างคำ</strong></p><p>Flutter ตัดบรรทัดภาษาไทยได้ เพราะเอนจินข้อความรู้จักขอบเขตคำของไทย แต่ผลที่ได้ไม่สมบูรณ์เสมอไป โดยเฉพาะกับชื่อเฉพาะและคำทับศัพท์ ถ้าเจอการตัดที่แปลก ให้ใช้</p><pre class="code-vs"><code>Text('ข้อความยาว​ที่อยากให้ตัดตรงนี้')   // U+200B = จุดตัดที่มองไม่เห็น</code></pre><p><strong>ข้อความไทยยาวกว่าอังกฤษ</strong></p><table><thead><tr><th>อังกฤษ</th><th>ไทย</th><th>ยาวขึ้น</th></tr></thead><tbody>
+<tr><td>Save</td><td>บันทึก</td><td>ราว 1.5 เท่า</td></tr>
+<tr><td>Cancel</td><td>ยกเลิก</td><td>ราว 1.2 เท่า</td></tr>
+<tr><td>Sign out</td><td>ออกจากระบบ</td><td>ราว 1.4 เท่า</td></tr>
+</tbody></table><p>ปุ่มที่พอดีกับคำอังกฤษจะล้นเมื่อสลับเป็นไทย ทางแก้ที่ใช้ได้จริงคือ<strong>ออกแบบโดยดูภาษาที่ยาวที่สุดก่อน</strong> แล้วภาษาอื่นจะพอดีเอง</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>วรรณยุกต์หายบนบางเครื่อง</td><td>กล่องสูงพอดีเกิน</td><td>ตั้ง <code>height</code> อย่างน้อย 1.3</td></tr>
+<tr><td>ทดสอบแล้วไม่เจอปัญหา แต่ผู้ใช้เจอ</td><td>ทดสอบด้วยคำที่ไม่มีสระบนล่าง</td><td>ใช้ “ปุ๋ย” “เดี๋ยว” เป็นคำทดสอบมาตรฐาน</td></tr>
+<tr><td>ปุ่มล้นเมื่อสลับเป็นไทย</td><td>ออกแบบด้วยข้อความอังกฤษ</td><td>ออกแบบด้วยภาษาที่ยาวที่สุด</td></tr>
+<tr><td>ตัวหนาดูเบลอ</td><td>ระบบเลียนแบบตัวหนาเพราะไม่มีไฟล์น้ำหนักนั้น</td><td>ฝังไฟล์น้ำหนักที่ใช้จริง หรือใช้เฉพาะน้ำหนักที่มี</td></tr>
+<tr><td>ฟอนต์ไม่ขึ้นทั้งที่ใส่ใน pubspec แล้ว</td><td>ยังไม่ได้รีสตาร์ทแอป</td><td>hot reload ไม่พอ ต้อง <code>flutter run</code> ใหม่</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้รายงานว่า “ตัวหนังสือในตารางบางแถวมีขีดข้างบนหายไป” แต่ส่งภาพมาแล้วเห็นแค่บางแถว</p><ol><li>สาเหตุน่าจะเป็นอะไร</li><li>จะยืนยันอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> แถวที่มีปัญหาน่าจะเป็นแถวที่มีคำที่มีวรรณยุกต์บนสระบน เช่น “กี่” หรือ “ปุ๋ย” ส่วนแถวอื่นมีแค่พยัญชนะกับสระข้าง จึงไม่เห็นปัญหา</p><p>สาเหตุมักเป็นอย่างใดอย่างหนึ่ง</p><table><thead><tr><th>สาเหตุ</th><th>วิธีสังเกต</th></tr></thead><tbody>
+<tr><td>กล่องมีความสูงตายตัว</td><td>มี <code>SizedBox(height: ...)</code> หรือ <code>Container(height: ...)</code> ครอบอยู่</td></tr>
+<tr><td><code>height</code> ต่ำเกิน</td><td>ทุกแถวโดนเหมือนกัน แต่เห็นชัดเฉพาะแถวที่มีวรรณยุกต์</td></tr>
+<tr><td>มี <code>ClipRect</code> หรือ <code>OverflowBox</code></td><td>ขีดถูกตัดตรง ๆ ไม่ใช่จางหาย</td></tr>
+</tbody></table><p><strong>2.</strong> เขียนเทสต์ที่วัดความสูงจริงเทียบกัน</p><pre class="code-vs"><code>testWidgets('แถวที่มีวรรณยุกต์ต้องสูงไม่น้อยกว่าแถวธรรมดา', (tester) async {
+  await tester.pumpWidget(wrap(Column(children: const [
+    PalletRow(key: Key('plain'), name: 'พาเลท'),
+    PalletRow(key: Key('tonal'), name: 'ปุ๋ยเคมี'),
+  ])));
+
+  final plain = tester.getSize(find.byKey(const Key('plain')));
+  final tonal = tester.getSize(find.byKey(const Key('tonal')));
+
+  // ถ้ากล่องถูกบังคับความสูงไว้ สองค่านี้จะเท่ากันเป๊ะ ซึ่งคือตัวปัญหา
+  expect(tonal.height, greaterThanOrEqualTo(plain.height));
+});</code></pre><p>วิธีที่เร็วกว่าสำหรับการยืนยันครั้งแรกคือเปิด <code>debugPaintSizeEnabled = true</code> แล้วดูว่าขอบของกล่องตัดผ่านตัวอักษรตรงไหน</p><p><strong>สิ่งที่ควรทำต่อ:</strong> ตั้งคำทดสอบมาตรฐานของโปรเจกต์ไว้ชุดหนึ่ง เช่น <code>'ปุ๋ยเคมี เดี๋ยวกี่โมง'</code> แล้วใช้คำนี้ในทุกเทสต์ที่วาดข้อความไทย ปัญหาแบบนี้จะถูกจับตั้งแต่ก่อนถึงมือผู้ใช้</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ภาษาไทยซ้อนได้สี่ชั้น ต้องการความสูงบรรทัดมากกว่าอังกฤษ</li><li>ตั้ง <code>height</code> อย่างน้อย 1.3 กับข้อความเนื้อความ</li><li>ฟอนต์ปริยายรองรับไทยผ่าน fallback แต่หน้าตาต่างกันในแต่ละเครื่อง</li><li>ฝังฟอนต์เมื่อต้องการหน้าตาที่แน่นอน หรือมีประโยคปนสองภาษาเยอะ</li><li>ออกแบบด้วยภาษาที่ยาวที่สุด แล้วภาษาอื่นจะพอดีเอง</li><li>ทดสอบด้วยคำที่มีวรรณยุกต์บนสระบนเสมอ</li></ul></div><p><strong>บทหน้า:</strong> ทำให้ widget สำเร็จรูปของ Flutter พูดภาษาไทยด้วย</p></section>

@@ -4,23 +4,77 @@
 <title>Launcher Icon</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-12 · Flutter UI</span><h1>Launcher Icon</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Config</a></li><li><a href="#section-2">Generate</a></li><li><a href="#section-3">Source quality</a></li><li><a href="#section-4">Adaptive icon</a></li><li><a href="#section-5">Flavors/environments</a></li><li><a href="#section-6">Branding governance</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Release checklist</a></li></ol></nav>
-<div class="note"><strong>Launcher iconเป็น platform build asset:</strong> ใช้ sourceภาพที่มี safe zone/contrastและ generateผ่าน config ไม่เปลี่ยนด้วย runtime Flutter theme</div>
-<section id="section-1"><h2>1. Config</h2><pre class="code-vs"><code>dev_dependencies:
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหา</a></li><li><a href="#section-2">ให้เครื่องมือทำ</a></li><li><a href="#section-3">Adaptive icon ของ Android</a></li><li><a href="#section-4">ทำไมเรื่องนี้สำคัญบน PDA</a></li><li><a href="#section-5">ชื่อแอปกับหน้าจอเริ่มต้น</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 35–45 นาที</span><span>ลงมือทำ: สร้างไอคอนแอปด้วย <code>flutter_launcher_icons</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.11<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งไอคอนแอปให้ครบทุกขนาดโดยไม่ต้องทำไฟล์เอง และรู้ว่าทำไมมันสำคัญกว่าที่คิดบน PDA</div>
+
+<section id="section-1"><h2>1. ปัญหา</h2><p>Android ต้องการไอคอนแอปหลายขนาด แยกตามความหนาแน่นของจอ</p><pre class="code-vs"><code>android/app/src/main/res/
+  mipmap-mdpi/ic_launcher.png       48×48
+  mipmap-hdpi/ic_launcher.png       72×72
+  mipmap-xhdpi/ic_launcher.png      96×96
+  mipmap-xxhdpi/ic_launcher.png     144×144
+  mipmap-xxxhdpi/ic_launcher.png    192×192</code></pre><p>ทำมือได้ แต่ต้องทำใหม่ทุกครั้งที่โลโก้เปลี่ยน และพลาดขนาดเดียวก็จะได้ไอคอนเบลอบนเครื่องบางรุ่น</p></section>
+
+<section id="section-2"><h2>2. ให้เครื่องมือทำ</h2><pre class="code-vs"><code># pubspec.yaml
+dev_dependencies:
   flutter_launcher_icons: ^0.14.4
 
 flutter_launcher_icons:
   android: true
-  ios: true
-  image_path: assets/icons/app_icon.png
-  adaptive_icon_background: '#FFFFFF'
-  adaptive_icon_foreground: assets/icons/app_icon_foreground.png</code></pre></section>
-<section id="section-2"><h2>2. Generate</h2><pre class="code-vs"><code>dart run flutter_launcher_icons</code></pre><p>ตรวจ generated platform filesใน gitตาม workflowของ repoและ rebuild/installใหม่เพราะ launcher cacheไม่อัปเดตด้วย hot reload</p></section>
-<section id="section-3"><h2>3. Source quality</h2><p>ใช้ square high-resolution master, ไม่มีตัวหนังสือเล็ก/ขอบชิด, alpha/backgroundตรง platform และดูได้ทั้ง light/dark launcher</p></section>
-<section id="section-4"><h2>4. Adaptive icon</h2><p>Android maskเป็น circle/squircleรูปต่างกัน Foregroundต้องอยู่ safe zoneและ backgroundแยก layer ไม่เอา legacy full iconมาเป็น foregroundตรง ๆ</p></section>
-<section id="section-5"><h2>5. Flavors/environments</h2><p>DEV/UAT/PRODควร icon/name/bannerต่างเพื่อลดเปิดผิดแอป อาจใช้ config/sourceแยกต่อ flavorและ CI generate deterministic</p></section>
-<section id="section-6"><h2>6. Branding governance</h2><p>เก็บ approved master/licenseและไม่ stretch/recolor logoเอง ขนาด generatedไม่ใช่ design source</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เปลี่ยน icon configแล้ว emulatorยังรูปเก่าควรทำอะไร?</p><details><summary>เฉลย</summary><p>run generator, clean/rebuildและ uninstall/reinstallหรือ clear launcher cache ไม่แก้ Image.assetใน UI</p></details></section>
-<section id="section-8"><h2>8. Release checklist</h2><div class="success">Android adaptive/legacy, iOS sizesถ้ารองรับ, Windows/web assets, transparent edge, DEV/PROD distinctionและ store artworkแยกจาก launcher asset</div></section>
+  ios: false
+  image_path: "assets/icons/icon-absolute-cut.png"</code></pre><pre class="code-vs"><code>dart run flutter_launcher_icons</code></pre><p>สร้างไฟล์ทุกขนาดให้อัตโนมัติ สั่งใหม่เมื่อโลโก้เปลี่ยน</p><table><thead><tr><th>ค่า</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>android: true</code></td><td>สร้างให้ Android</td></tr>
+<tr><td><code>ios: false</code></td><td>ข้าม iOS — โปรเจกต์นี้ลงเฉพาะ PDA Android</td></tr>
+<tr><td><code>image_path</code></td><td>ไฟล์ต้นฉบับ ควรเป็น PNG สี่เหลี่ยมจัตุรัสอย่างน้อย 1024×1024</td></tr>
+</tbody></table><div class="note">อยู่ใน <code>dev_dependencies</code> เพราะใช้เฉพาะตอน build ไม่ได้ติดไปกับแอป — ถ้าเผลอใส่ใน <code>dependencies</code> แอปจะใหญ่ขึ้นโดยไม่ได้อะไร</div></section>
+
+<section id="section-3"><h2>3. Adaptive icon ของ Android</h2><p>Android รุ่นใหม่แสดงไอคอนในกรอบที่รูปทรงต่างกันตามผู้ผลิต — วงกลม สี่เหลี่ยมมน หรือทรงหยดน้ำ ไอคอนจึงถูกแบ่งเป็นสองชั้น</p><pre class="code-vs"><code>flutter_launcher_icons:
+  android: true
+  image_path: "assets/icons/icon.png"
+
+  # ชั้นหน้า — โลโก้ ต้องมีพื้นที่ว่างรอบเผื่อถูกตัด
+  adaptive_icon_foreground: "assets/icons/icon-foreground.png"
+  # ชั้นหลัง — สีพื้นหรือรูป
+  adaptive_icon_background: "#062B50"</code></pre><div class="note"><strong>กฎที่ต้องรู้:</strong> ชั้นหน้าขนาด 108×108 หน่วย แต่มีเพียง <strong>66×66 ตรงกลาง</strong>ที่รับประกันว่าจะมองเห็น ที่เหลือถูกตัดหรือใช้ทำเอฟเฟกต์ — โลโก้ที่เต็มกรอบพอดีจะถูกตัดขอบบนเครื่องที่ใช้กรอบวงกลม</div><p>วิธีตรวจที่เร็วที่สุดคือวางวงกลมทับตรงกลางไฟล์ต้นฉบับ ถ้าส่วนสำคัญของโลโก้อยู่นอกวงกลม แปลว่าต้องย่อ</p></section>
+
+<section id="section-4"><h2>4. ทำไมเรื่องนี้สำคัญบน PDA</h2><p>บนโทรศัพท์ส่วนตัว ผู้ใช้มีแอปเป็นร้อยและจำตำแหน่งได้ แต่บน PDA ของคลัง สถานการณ์ต่างออกไป</p><table><thead><tr><th>สถานการณ์</th><th>ผลของไอคอนที่แยกไม่ออก</th></tr></thead><tbody>
+<tr><td>มีแอป WMS สองรุ่นบนเครื่องเดียว — ตัวจริงกับตัวทดสอบ</td><td>พนักงานเปิดตัวทดสอบแล้วบันทึกข้อมูลลงเซิร์ฟเวอร์ทดสอบทั้งกะ</td></tr>
+<tr><td>เครื่องเปลี่ยนมือทุกกะ</td><td>คนใหม่หาแอปไม่เจอ ต้องถาม</td></tr>
+<tr><td>ใส่ถุงมือ กดพลาดง่าย</td><td>เปิดแอปผิดแล้วต้องย้อนกลับ</td></tr>
+</tbody></table><p>แถวแรกเป็นปัญหาที่เกิดจริงและแพง วิธีแก้ที่ตรงที่สุดคือ<strong>ให้ build ที่ชี้เซิร์ฟเวอร์ทดสอบมีไอคอนและชื่อคนละสี</strong></p><pre class="code-vs"><code># สร้างไอคอนคนละชุดตามสภาพแวดล้อม
+flutter_launcher_icons:
+  android: true
+  image_path: "assets/icons/icon-prod.png"
+
+# แล้วสั่งด้วยไฟล์ตั้งค่าอีกไฟล์ตอน build ตัวทดสอบ
+dart run flutter_launcher_icons -f flutter_launcher_icons-dev.yaml</code></pre><p>ต่อยอดจาก 10.2 ที่ใช้ <code>--dart-define</code> ตรึงเซิร์ฟเวอร์ — ไอคอนที่ต่างกันทำให้ความแตกต่างนั้น<strong>มองเห็นได้ก่อนเปิดแอป</strong></p></section>
+
+<section id="section-5"><h2>5. ชื่อแอปกับหน้าจอเริ่มต้น</h2><pre class="code-vs"><code>&lt;!-- android/app/src/main/AndroidManifest.xml --&gt;
+&lt;application
+    android:label="ACETEC WMS"
+    android:icon="@mipmap/ic_launcher"&gt;</code></pre><p>ชื่อนี้คือสิ่งที่แสดงใต้ไอคอน ต่างจาก <code>MaterialApp.title</code> ที่ใช้ในตัวสลับแอปของระบบ</p><p>ส่วนหน้าจอที่แสดงระหว่างแอปกำลังเริ่ม ตั้งด้วยแพ็กเกจแยกอีกตัว</p><pre class="code-vs"><code>dev_dependencies:
+  flutter_native_splash: ^2.4.0
+
+flutter_native_splash:
+  color: "#062B50"
+  image: assets/icons/splash.png
+  android_12:
+    color: "#062B50"
+    image: assets/icons/splash-android12.png</code></pre><div class="note">Android 12 ขึ้นไปเปลี่ยนวิธีทำหน้าจอเริ่มต้นทั้งหมด และบังคับรูปทรงวงกลม — ต้องตั้งค่าแยกในส่วน <code>android_12</code> ไม่งั้นจะได้หน้าจอที่ต่างกันระหว่างเครื่องรุ่นเก่ากับรุ่นใหม่</div></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สั่งสร้างแล้วไอคอนไม่เปลี่ยน</td><td>Android จำไอคอนเก่าไว้</td><td>ถอนแอปแล้วติดตั้งใหม่</td></tr>
+<tr><td>ไอคอนเบลอ</td><td>ไฟล์ต้นฉบับเล็กเกิน</td><td>ใช้ 1024×1024 ขึ้นไป</td></tr>
+<tr><td>โลโก้ถูกตัดขอบบนบางเครื่อง</td><td>ไม่เผื่อพื้นที่ปลอดภัยของ adaptive icon</td><td>ให้ส่วนสำคัญอยู่ใน 66×66 ตรงกลาง</td></tr>
+<tr><td>ไอคอนมีขอบขาวรอบ</td><td>ไฟล์ต้นฉบับมีพื้นหลังทึบ</td><td>ใช้ PNG ที่พื้นหลังโปร่งใส</td></tr>
+<tr><td>แอปทดสอบกับแอปจริงแยกไม่ออก</td><td>ใช้ไอคอนเดียวกัน</td><td>ทำไอคอนคนละชุดต่อสภาพแวดล้อม</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทีมจะส่ง PDA ให้สามสาขา แต่ละสาขาใช้เซิร์ฟเวอร์ของตัวเอง และเคยมีเหตุการณ์ที่พนักงานเปิดแอปที่ชี้ผิดสาขา</p><ol><li>ไอคอนช่วยแก้ปัญหานี้ได้แค่ไหน</li><li>ควรทำอะไรเพิ่ม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ช่วยได้ถ้าแต่ละเครื่องมีแอปหลายตัว แต่แก้ไม่ได้ถ้ามีตัวเดียว</strong></p><p>ต้องแยกให้ออกก่อนว่าเป็นสถานการณ์ไหน</p><table><thead><tr><th>สถานการณ์</th><th>ไอคอนช่วยไหม</th></tr></thead><tbody>
+<tr><td>เครื่องหนึ่งมีแอปหลายตัว ชี้คนละสาขา</td><td>ช่วยมาก — เห็นก่อนกด</td></tr>
+<tr><td>เครื่องหนึ่งมีแอปตัวเดียว แต่สลับ profile ได้ (Part 10)</td><td>ไม่ช่วยเลย เพราะไอคอนเดียวกันตลอด</td></tr>
+</tbody></table><p><strong>2.</strong> ถ้าเป็นกรณีที่สอง สิ่งที่ช่วยได้จริงคือทำให้เซิร์ฟเวอร์ที่ใช้อยู่<strong>เห็นตลอดเวลา ไม่ใช่แค่ตอนเปิดแอป</strong></p><ul><li>แสดงชื่อ profile บนแถบหัวจอทุกจอ ตามที่ 10.12 สรุปไว้ว่า “ต่อผิดเครื่อง” เจอบ่อยกว่า “ต่อไม่ได้”</li><li>ให้สีของแถบหัวจอต่างกันตามสาขา — มองเห็นจากมุมตาโดยไม่ต้องอ่าน</li><li>ยืนยันอีกครั้งตอนทำรายการที่ย้อนกลับยาก โดยแสดงชื่อสาขาในกล่องยืนยัน</li></ul><p>ข้อที่สองมีพลังมากในงานคลัง เพราะผู้ใช้จำ “แถบสีเขียว = สาขาเรา” ได้เร็วกว่าอ่านชื่อ และรู้ตัวทันทีเมื่อเห็นแถบสีที่ไม่คุ้น</p><p><strong>แต่คำถามที่ควรถามก่อนทั้งหมดนี้:</strong> ทำไมพนักงานสาขาหนึ่งถึงเข้าเซิร์ฟเวอร์อีกสาขาได้ตั้งแต่แรก — ถ้าบัญชีผูกกับสาขา เซิร์ฟเวอร์ควรปฏิเสธการเข้าสู่ระบบเลย ซึ่งแก้ปัญหาที่ต้นเหตุ ส่วนไอคอนกับสีเป็นแค่การช่วยให้รู้ตัวเร็วขึ้น</p><p>นี่เป็นรูปแบบเดียวกับ 8.9 — การซ่อนปุ่มตาม role ไม่ใช่การป้องกัน เซิร์ฟเวอร์ต้องบังคับ</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>ใช้ <code>flutter_launcher_icons</code> สร้างทุกขนาด อย่าทำมือ</li><li>adaptive icon มีพื้นที่ปลอดภัยแค่ 66×66 ตรงกลางจาก 108×108</li><li>อยู่ใน <code>dev_dependencies</code> เพราะใช้เฉพาะตอน build</li><li>ไอคอนคนละชุดต่อสภาพแวดล้อม ทำให้เห็นความต่างก่อนเปิดแอป</li><li>Android 12 ต้องตั้งค่าหน้าจอเริ่มต้นแยก</li></ul></div><p><strong>บทหน้า:</strong> แถบสถานะ ปุ่มย้อนกลับ และพื้นที่ที่แอปวาดได้จริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

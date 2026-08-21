@@ -1,15 +1,110 @@
-<div class="note"><strong>Lab ปิด Part 11:</strong> สร้าง branded PDA shellสองภาษา มี light/dark, design tokens, Sarabun/assets, localized formatting, accessible iconsและ system barsที่ถูกต้อง</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>ThemeData light/darkใช้ semantic colors/component themes</li><li>mode/language persistและ bootstrapไม่ flash</li><li>ไทย/อังกฤษเปลี่ยนทั้ง Material + app labels</li><li>date/number formatตาม localeแต่ wire data invariant</li><li>assets/icons/font/launcher configถูก</li><li>SafeArea/system barsผ่านอุปกรณ์จริง</li><li>text scale 200%ไม่มี critical overflow</li></ul></section>
-<section><h2>2. Shell composition</h2><pre class="code-vs"><code>MaterialApp
- └─ AnnotatedRegion&lt;SystemUiOverlayStyle&gt;
-    └─ SafeArea
-       └─ WarehouseShell
-          ├─ PdaStatusBar (server + connection)
-          ├─ Header (logo + language + theme + user)
-          └─ Feature body + bottom navigation</code></pre></section>
-<section><h2>3. State wiring</h2><p>ThemeControllerและAppLanguageControllerเป็น app-scoped listenables; ConnectionController/AuthStoreให้ server/user/status Shell render stateแต่ไม่ถือ duplicate</p></section>
-<section><h2>4. Localization set</h2><p>แปล home actions, settings, auth/error/empty/loading, tooltipsและ dialog buttons; location/product codes verbatim; status/error codeผ่าน typed mapping</p></section>
-<section><h2>5. Visual matrix</h2><ul><li>TH/EN × light/dark</li><li>360×640 PDA และ tablet</li><li>text scale 1.0/1.5/2.0</li><li>online/offline/error/long server name</li><li>keyboard open และ notch</li></ul></section>
-<section><h2>6. Automated checks</h2><p>widget testsเปลี่ยน locale/mode, goldenหรือ screenshot critical states, semantics labels/tooltips, asset load smokeและ analyzeป้องกัน hardcoded deprecated colorsตาม lintทีม</p></section>
-<section><h2>7. Code review</h2><p>ค้น hardcoded user-facing strings/colors/magic spacing, formatter cache localeเก่า, icon-onlyไร้ tooltip, fixed heightที่ clipไทยและ SafeAreaซ้อนจน paddingเกิน</p></section>
-<section><h2>8. Exit test</h2><div class="success">เมื่อจบต้องเปลี่ยน brand/theme/languageจากจุดกลางได้ UIไทย/อังกฤษยังอ่านและแตะง่ายบน PDA, formattingไม่ทำ API contractพัง และ native system UIดูกลมกลืนทุก route</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: ประกอบเปลือกแอปสองภาษาที่ใช้งานได้จริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1–11.13 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำเปลือกแอปที่ผู้ใช้สลับภาษาได้ อ่านออกใต้แสงจ้า และวางบนเครื่องจริงได้</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>theme_lab/</code> ทั้งหมด พร้อมรู้ว่าแต่ละส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ต่อยอดเป็นเปลือกแอปเต็มตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 12</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>pda_tokens.dart</code></td><td>สี ระยะ และการวัดความต่างของสี</td><td>11.2, 11.3</td></tr>
+<tr><td><code>pda_theme.dart</code></td><td>ประกอบ token เป็น <code>ThemeData</code></td><td>11.1, 11.4</td></tr>
+<tr><td><code>app_messages.dart</code></td><td>รายการข้อความสองภาษา</td><td>11.7</td></tr>
+<tr><td><code>language_controller.dart</code></td><td>เจ้าของภาษา + <code>LanguageScope</code></td><td>11.6, 11.7</td></tr>
+<tr><td><code>wms_formats.dart</code></td><td>ตัวเลขและวันที่</td><td>11.9</td></tr>
+<tr><td><code>pda_shell.dart</code></td><td>แอปตัวอย่าง + ปุ่มสลับภาษา</td><td>11.5, 11.7</td></tr>
+<tr><td><code>test/theme_test.dart</code></td><td>เทสต์ 33 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/theme_test.dart</code></pre></section>
+
+<section><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>main()
+  ├─ ensureInitialized()                            ← 11.13
+  ├─ await languageController.load()                ← 11.7 (ก่อนวาดเฟรมแรก)
+  ├─ SystemChrome.setSystemUIOverlayStyle(...)      ← 11.13
+  └─ runApp(PdaApp(controller: ...))
+
+PdaApp
+  └─ LanguageScope(controller)                      ← 11.6
+       └─ ListenableBuilder                         ← วาดใหม่เมื่อสลับภาษา
+            └─ MaterialApp
+                 ├─ theme: buildPdaTheme()          ← 11.1, 11.3
+                 ├─ locale + supportedLocales       ← 11.5
+                 ├─ localizationsDelegates × 3      ← 11.5
+                 └─ builder: AnnotatedRegion         ← 11.13
+                      └─ ColoredBox → SafeArea → จอ
+
+จอ
+  ├─ context.t(AppText.pallets)                     ← 11.7
+  ├─ context.t1(AppText.palletCount, 12)            ← 11.7 (เรียงคำตามภาษา)
+  ├─ formatCount(12000, language)                   ← 11.9
+  └─ Theme.of(context).textTheme.titleLarge         ← 11.1
+
+กดปุ่มสลับภาษา
+  └─ controller.toggle()
+       ├─ notifyListeners()                          ← จอเปลี่ยนทันที
+       └─ await storage.write(...)                   ← จำไว้ข้ามการปิดแอป</code></pre></section>
+
+<section><h2>4. โจทย์</h2><p>ต่อยอด <code>pda_shell.dart</code> ให้เป็นเปลือกแอปเต็ม ในโฟลเดอร์ <code>lib/theme_lab/shell/</code></p><table><thead><tr><th>ส่วน</th><th>ต้องมี</th></tr></thead><tbody>
+<tr><td>แถบหัวจอ</td><td>ชื่อแอป, จุดสถานะการเชื่อมต่อ + ชื่อ profile (10.12), ปุ่มสลับภาษา</td></tr>
+<tr><td>เมนูหลัก</td><td>ปุ่มงานหกอัน พร้อมไอคอนและข้อความ</td></tr>
+<tr><td>จอรายการ</td><td>ลิสต์พาเลท พร้อมจำนวน เวลาที่ผ่านมา และป้ายสถานะ</td></tr>
+<tr><td>หน้าตั้งค่า</td><td>เลือกภาษา และลิงก์ไปหน้าตั้งค่าเซิร์ฟเวอร์ของ Part 10</td></tr>
+</tbody></table></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ไม่มีสีหรือขนาดตัวอักษรเขียนตรงในไฟล์จอ ทุกค่ามาจากธีมหรือ token</td><td>11.1, 11.3</td></tr>
+<tr><td>2</td><td>คู่สีทุกคู่ที่ใช้จริงผ่านเกณฑ์ความต่าง 4.5 พร้อมเทสต์</td><td>11.2</td></tr>
+<tr><td>3</td><td>ป้ายสถานะไม่พึ่งสีอย่างเดียว มีไอคอนหรือข้อความด้วย</td><td>11.2, 11.10</td></tr>
+<tr><td>4</td><td>ข้อความไทยที่มีวรรณยุกต์บนสระบนไม่ถูกตัด</td><td>11.4</td></tr>
+<tr><td>5</td><td>ตัวเลือกวันที่ขึ้นภาษาไทยเมื่อเลือกไทย</td><td>11.5</td></tr>
+<tr><td>6</td><td><code>MaterialApp.locale</code> ตรงกับภาษาที่เลือก พร้อมเทสต์</td><td>11.5</td></tr>
+<tr><td>7</td><td>ทุกข้อความมาจาก <code>AppText</code> ไม่มีสตริงเขียนตรงในจอ</td><td>11.7</td></tr>
+<tr><td>8</td><td>ข้อความที่มีตัวเลขแทรก เรียงคำถูกต้องทั้งสองภาษา</td><td>11.7</td></tr>
+<tr><td>9</td><td>เทสต์จับได้ถ้ามีข้อความก้อนไหนไม่ได้แปล</td><td>11.7, 11.8</td></tr>
+<tr><td>10</td><td>ภาษาที่เลือกถูกจำข้ามการปิดแอป และเขียนไม่ได้ก็ยังสลับได้</td><td>11.7</td></tr>
+<tr><td>11</td><td>วันที่ภาษาไทยเป็น พ.ศ. ภาษาอังกฤษเป็น ค.ศ.</td><td>11.9</td></tr>
+<tr><td>12</td><td>เวลาแสดงเป็นเวลาเครื่อง แต่เก็บเป็น UTC</td><td>11.9</td></tr>
+<tr><td>13</td><td>ไอคอนที่กดได้มีพื้นที่กดอย่างน้อย 48</td><td>11.10</td></tr>
+<tr><td>14</td><td>เนื้อหาไม่ไปอยู่ใต้แถบสถานะ และพื้นที่ใต้แถบถูกทาสี</td><td>11.13</td></tr>
+<tr><td>15</td><td>ทุกจอใช้งานได้ที่ <code>textScaler</code> 1.3 โดยไม่มี overflow</td><td>11.13</td></tr>
+<tr><td>16</td><td>สลับภาษาแล้วทุกส่วนของจอเปลี่ยน รวมถึงจอที่ push อยู่</td><td>11.6</td></tr>
+</tbody></table><p>เกณฑ์ 15 และ 16 เป็นสองข้อที่ทดสอบด้วยมือแล้วมักหลุด</p></section>
+
+<section><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 16 — จอที่ push อยู่ก็ต้องเปลี่ยน</strong></p><p><code>ListenableBuilder</code> ต้องอยู่<strong>เหนือ</strong> <code>MaterialApp</code> หรือครอบ <code>MaterialApp</code> ไว้ ไม่ใช่อยู่ข้างใน ถ้าอยู่ข้างใน จอที่ push ไปแล้วจะไม่ถูกวาดใหม่</p><pre class="code-vs"><code>// ถูก — ครอบทั้ง MaterialApp
+LanguageScope(
+  controller: controller,
+  child: ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) =&gt; MaterialApp(...),
+  ),
+)</code></pre><p><strong>เกณฑ์ 15 — ทดสอบขนาดตัวอักษรใหญ่</strong></p><pre class="code-vs"><code>for (final scale in [1.0, 1.15, 1.3]) {
+  testWidgets('ใช้งานได้ที่ขนาดตัวอักษร $scale เท่า', (tester) async {
+    await tester.pumpWidget(MediaQuery(
+      data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+      child: PdaApp(controller: controller),
+    ));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+}</code></pre><p><strong>เกณฑ์ 4 — ทดสอบข้อความไทย</strong></p><p>ตั้งคำทดสอบมาตรฐานไว้ชุดหนึ่งแล้วใช้ทุกที่</p><pre class="code-vs"><code>const thaiStressTest = 'ปุ๋ยเคมี เดี๋ยวกี่โมง';</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สลับภาษาแล้วบางข้อความไม่เปลี่ยน</td><td>widget เป็น <code>const</code></td><td>เอา <code>const</code> ออกจาก widget ที่มีข้อความ</td></tr>
+<tr><td>จอที่ push ไม่เปลี่ยนภาษา</td><td><code>ListenableBuilder</code> อยู่ใต้ <code>MaterialApp</code></td><td>ย้ายขึ้นไปครอบ</td></tr>
+<tr><td>เทสต์ล้มด้วย <code>No MaterialLocalizations found</code></td><td>เทสต์ไม่มี <code>MaterialApp</code></td><td>ห่อในเทสต์</td></tr>
+<tr><td>ชื่อเดือนเป็นอังกฤษในเทสต์</td><td>ลืม <code>initializeDateFormatting()</code></td><td>เรียกใน <code>setUpAll</code></td></tr>
+<tr><td>ปุ่มล้นเมื่อสลับเป็นไทย</td><td>ออกแบบด้วยข้อความอังกฤษ</td><td>ทดสอบด้วยไทยก่อน</td></tr>
+<tr><td>เทสต์เวลาล้มบนเครื่องอื่น</td><td>เขียนค่าเวลาที่คาดหวังตรง ๆ</td><td>คำนวณจาก <code>toLocal()</code></td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบทดสอบตัวเองก่อนจบ Part 11</h2><ol><li>รูปแบบ <code>x</code>/<code>onX</code> ใน <code>ColorScheme</code> บังคับให้ตอบคำถามอะไร (11.1)</li><li>ทำไมต้องตั้ง <code>materialTapTargetSize</code> และ <code>visualDensity</code> (11.1)</li><li>ตัดสินอย่างไรว่าแอปควรมีโหมดมืดไหม (11.2)</li><li>contrast ratio 4.5 กับ 3.0 ใช้กับอะไร (11.2)</li><li>ทำไมสีตัวอักษรกับสีพื้นต้องประกาศเป็นคู่ (11.2)</li><li>ทำไม token ควรตั้งชื่อตามหน้าที่ (11.3)</li><li>ค่าไหนควรเป็น token ค่าไหนไม่ควร (11.3)</li><li>ทำไมข้อความไทยต้องการ <code>height</code> มากกว่าค่าปริยาย (11.4)</li><li>ควรฝังฟอนต์เมื่อไหร่ (11.4)</li><li>สาม delegate ของ Flutter แปลอะไรและไม่แปลอะไร (11.5)</li><li><code>supportedLocales</code> ตัวแรกมีความหมายพิเศษอย่างไร (11.5)</li><li><code>dependOn...</code> ต่างจาก <code>get...</code> อย่างไร (11.6)</li><li>ทำไม <code>const Text</code> ถึงไม่เปลี่ยนภาษา (11.6)</li><li>รายการข้อความได้อะไรที่ <code>tr(en, th)</code> ไม่ได้ (11.7)</li><li>ทำไมข้อความที่มีค่าแทรกต้องให้แต่ละภาษาสร้างประโยคเอง (11.7)</li><li>ทำไมต้องประกาศการเปลี่ยนก่อนเขียนลงเครื่อง (11.7)</li><li>เมื่อไหร่ควรใช้ gen_l10n (11.8)</li><li>ทำไม intl ไม่แปลงปี พ.ศ. ให้ (11.9)</li><li>ทำไมเทสต์เวลาต้องคำนวณค่าที่คาดหวังเอง (11.9)</li><li>ควรใช้ไอคอนสำเร็จรูปเมื่อไหร่ และทำเองเมื่อไหร่ (11.10)</li><li>ทำไมรูปกินแรมมากกว่าขนาดไฟล์ (11.11)</li><li>adaptive icon มีพื้นที่ปลอดภัยเท่าไหร่ (11.12)</li><li><code>statusBarIconBrightness</code> กับ <code>statusBarBrightness</code> ต่างกันอย่างไร (11.13)</li><li>ทำไมไม่ควรปิดการปรับขนาดตัวอักษรของระบบ (11.13)</li></ol></section>
+
+<section><h2>9. สรุปท้าย Part 11</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>ตั้งธีมทั้งแอปที่จุดเดียว และรู้ว่าอะไรควรอยู่ในธีม</li><li>วัดความต่างของสีเป็นตัวเลข และเขียนเทสต์บังคับไว้</li><li>ตั้งชื่อและจัดกลุ่ม token ให้เปลี่ยนได้โดยไม่ต้องเปลี่ยนชื่อทั้งโปรเจกต์</li><li>จัดการข้อความไทยที่ต้องการที่มากกว่าอังกฤษ</li><li>เปิดใช้ localization ของ Flutter ให้ widget สำเร็จรูปพูดไทย</li><li>ทำระบบสองภาษาที่จำค่าได้ ทดสอบได้ และหาก้อนที่ยังไม่แปลเจอ</li><li>ตัดสินได้ว่าโปรเจกต์ควรใช้ gen_l10n หรือเขียนเอง</li><li>แสดงตัวเลขและวันที่ให้ถูกทั้งสองภาษา รวมถึงปี พ.ศ.</li><li>เลือกและใช้ไอคอนกับรูปโดยไม่ทำให้แอปใหญ่หรือกินแรมเกิน</li><li>ตั้งไอคอนแอปและจัดการแถบระบบบนเครื่องจริง</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>รูปที่โหลดจากเซิร์ฟเวอร์และการอัปโหลด</td><td>Part 13</td></tr>
+<tr><td>วัดและแก้ปัญหาการวาดที่ช้า</td><td>Part 14</td></tr>
+<tr><td>build สำหรับส่งจริงและการย่อขนาดแอป</td><td>Part 15</td></tr>
+<tr><td>อ่านธีมและระบบภาษาจริงของ <code>wms_absolute_mobile</code></td><td>Part 20</td></tr>
+<tr><td>อ่านธีมที่มีโหมดมืดของ <code>wmsapp</code></td><td>Part 16</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 12 ว่าด้วยข้อมูลที่เปลี่ยนโดยที่ผู้ใช้ไม่ได้กดอะไร — SignalR, การถามซ้ำเป็นระยะ และการตัดสินว่าจะใช้แบบไหน ซึ่งเป็นเรื่องที่ทั้งสองโปรเจกต์จริงทำไว้แล้วและทำคนละแบบ</p></section>

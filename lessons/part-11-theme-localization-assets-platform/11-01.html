@@ -4,24 +4,112 @@
 <title>ThemeData &amp; ColorScheme</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-01 · Flutter UI</span><h1>ThemeData &amp; ColorScheme</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Color roles</a></li><li><a href="#section-2">Component themes</a></li><li><a href="#section-3">Material 3</a></li><li><a href="#section-4">Semantic status</a></li><li><a href="#section-5">Context-aware access</a></li><li><a href="#section-6">ของจริง</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Theme tests</a></li></ol></nav>
-<div class="note"><strong>ThemeData คือระบบ ไม่ใช่แค่สีหลัก:</strong> ColorSchemeกำหนด semantic colors ส่วน ThemeDataกำหนด typography, component defaults, density, shapesและ platform behaviorให้ UIสม่ำเสมอ</div>
-<section id="section-1"><h2>1. Color roles</h2><pre class="code-vs"><code>const scheme = ColorScheme.light(
-  primary: AppColors.primary,
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่ธีมแก้</a></li><li><a href="#section-2">โครงสามชั้น</a></li><li><a href="#section-3">ColorScheme คือหัวใจ</a></li><li><a href="#section-4">ตั้งค่าตามชนิดของ widget</a></li><li><a href="#section-5">สองค่าที่มีเฉพาะบน PDA</a></li><li><a href="#section-6">ธีมเป็นค่าตั้งต้น ไม่ใช่กฎเหล็ก</a></li><li><a href="#section-7">อ่านค่าจากธีมในจอ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน <code>pda_theme.dart</code> แล้วเทียบกับของจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 1 (widget), Part 2 (layout)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งธีมทั้งแอปที่จุดเดียว และรู้ว่าอะไรควรอยู่ในธีมกับอะไรไม่ควร</div>
+
+<section id="section-1"><h2>1. ปัญหาที่ธีมแก้</h2><p>ลองนึกว่าไม่มีธีม ทุกปุ่มในแอปจะเขียนแบบนี้</p><pre class="code-vs"><code>FilledButton(
+  style: FilledButton.styleFrom(
+    backgroundColor: const Color(0xFF2E73B9),
+    minimumSize: const Size.fromHeight(54),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  ),
+  onPressed: ...,
+)</code></pre><p>เจ็ดบรรทัดต่อปุ่มหนึ่งอัน คูณด้วยปุ่มสองร้อยอันในแอป ผลที่ตามมา</p><table><thead><tr><th>ปัญหา</th><th>รูปธรรม</th></tr></thead><tbody>
+<tr><td>เปลี่ยนสีแบรนด์ต้องแก้ทุกที่</td><td>ค้นหาแทนที่ 200 จุด แล้วพลาดสัก 5 จุด</td></tr>
+<tr><td>ปุ่มไม่เหมือนกันโดยไม่ตั้งใจ</td><td>คนหนึ่งเขียน 54 อีกคนเขียน 52</td></tr>
+<tr><td>อ่านโค้ดหน้าจอยาก</td><td>ตรรกะจมอยู่ในโค้ดจัดหน้าตา</td></tr>
+</tbody></table><div class="note"><strong>ThemeData</strong> คือที่รวมค่าหน้าตาทั้งหมดของแอป ส่งลงไปให้ทุก widget ผ่านต้นไม้ widget โดยอัตโนมัติ</div></section>
+
+<section id="section-2"><h2>2. โครงสามชั้น</h2><pre class="code-vs"><code>PdaColors / PdaMetrics     ← ค่าดิบ ไม่รู้จัก Flutter (11.3)
+        ↓
+buildPdaTheme()            ← ประกอบเป็น ThemeData
+        ↓
+Theme.of(context)          ← จออ่านค่า</code></pre><p>สามชั้นนี้แยกกันด้วยเหตุผลเดียวกับ Part 9 — ค่าดิบเปลี่ยนตามฝ่ายออกแบบ ส่วนการประกอบเปลี่ยนตามที่ Flutter รองรับ</p></section>
+
+<section id="section-3"><h2>3. <code>ColorScheme</code> คือหัวใจ</h2><pre class="code-vs"><code>const scheme = ColorScheme.light(
+  primary: PdaColors.primary,
   onPrimary: Colors.white,
-  surface: AppColors.surface,
-  onSurface: AppColors.heading,
-  error: AppColors.danger,
+  primaryContainer: PdaColors.primarySoft,
+  onPrimaryContainer: PdaColors.primaryDark,
+  error: PdaColors.danger,
   onError: Colors.white,
-);</code></pre><p>ใช้ roleเช่น <code>surface/onSurface</code> แทน hardcode black/whiteเพื่อรองรับหลาย theme</p></section>
-<section id="section-2"><h2>2. Component themes</h2><p>กำหนด Card, InputDecoration, Filled/OutlinedButton, Dialog, SnackBarและProgressIndicatorส่วนกลาง ลด styleซ้ำและทำ touch targetทั้งแอปถูกพร้อมกัน</p></section>
-<section id="section-3"><h2>3. Material 3</h2><p><code>useMaterial3: true</code> เปลี่ยน defaultsหลาย component ควร screenshot/testหน้าหลักหลังเปิดและ customizeผ่าน theme ไม่แก้ widgetทุกจุด</p></section>
-<section id="section-4"><h2>4. Semantic status</h2><p>success/warning/dangerอาจเป็น app tokensนอก ColorSchemeมาตรฐาน แต่ต้องมีคู่ foreground/backgroundที่ contrastพอและไม่ใช้สีเป็นข้อมูลเพียงอย่างเดียว</p></section>
-<section id="section-5"><h2>5. Context-aware access</h2><pre class="code-vs"><code>final theme = Theme.of(context);
-Text('งานรับเข้า', style: theme.textTheme.titleLarge);
-Icon(Icons.inventory_2, color: theme.colorScheme.primary);</code></pre></section>
-<section id="section-6"><h2>6. ของจริง</h2><p><code>wmsapp/theme/theme.dart</code> สร้าง light/darkจาก ColorSchemeและกำหนด component themesจำนวนมาก อีกแอปใช้ <code>buildAppTheme()</code> สำหรับ compact PDA light theme</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Card hardcode <code>Colors.white</code> และ text <code>Colors.black</code> จะเกิดอะไรใน dark mode?</p><details><summary>เฉลย</summary><p>Cardสว่างผิดธีม/contrastไม่สม่ำเสมอ ให้ใช้ colorScheme.surface/onSurfaceหรือ CardTheme</p></details></section>
-<section id="section-8"><h2>8. Theme tests</h2><div class="success">ตรวจ contrast, disabled/error/focus states, text scaling, light/dark, Material 3 componentsและ PDA touch targetsอย่างน้อย 48dp</div></section>
+  surface: PdaColors.surface,
+  onSurface: PdaColors.heading,
+  outline: PdaColors.border,
+  outlineVariant: PdaColors.divider,
+);</code></pre><p>สิ่งที่ต้องเข้าใจคือรูปแบบ <strong><code>x</code> คู่กับ <code>onX</code></strong></p><table><thead><tr><th>ชื่อ</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>primary</code></td><td>สีพื้นของสิ่งที่เด่นที่สุด เช่นปุ่มหลัก</td></tr>
+<tr><td><code>onPrimary</code></td><td>สีของสิ่งที่วางอยู่<strong>บน</strong> <code>primary</code> เช่นตัวอักษรบนปุ่ม</td></tr>
+<tr><td><code>surface</code></td><td>สีพื้นของการ์ดและแผง</td></tr>
+<tr><td><code>onSurface</code></td><td>สีตัวอักษรบนการ์ด</td></tr>
+</tbody></table><p>การประกาศเป็นคู่ไม่ใช่แค่ความเรียบร้อย — มันบังคับให้ต้องตอบว่า “ตัวอักษรบนสีนี้จะเป็นสีอะไร” ทุกครั้งที่เพิ่มสีพื้น ซึ่งเป็นคำถามที่คนลืมถามบ่อยที่สุด และ 11.2 จะแสดงให้เห็นว่าลืมแล้วเกิดอะไร</p></section>
+
+<section id="section-4"><h2>4. ตั้งค่าตามชนิดของ widget</h2><pre class="code-vs"><code>filledButtonTheme: FilledButtonThemeData(
+  style: FilledButton.styleFrom(
+    backgroundColor: PdaColors.primary,
+    foregroundColor: Colors.white,
+    disabledBackgroundColor: PdaColors.border,
+    disabledForegroundColor: PdaColors.subtitle,
+    minimumSize: const Size.fromHeight(PdaMetrics.primaryButtonHeight),
+    elevation: 0,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(PdaMetrics.controlRadius),
+    ),
+    textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+  ),
+),</code></pre><p>เขียนครั้งเดียว ปุ่มทุกอันในแอปได้หน้าตานี้ทันทีโดยไม่ต้องเขียนอะไรเพิ่ม</p><pre class="code-vs"><code>FilledButton(onPressed: _scan, child: Text(context.t(AppText.scanPallet)))</code></pre><p>สังเกตสองบรรทัดที่คนมักลืม</p><table><thead><tr><th>บรรทัด</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td><code>disabledBackgroundColor</code></td><td>ค่าปริยายของ Material ทำให้ปุ่มที่กดไม่ได้จางมากจนดูเหมือนหายไป ผู้ใช้จะหาปุ่มไม่เจอ ไม่ใช่แค่กดไม่ได้</td></tr>
+<tr><td><code>elevation: 0</code></td><td>เงาบนจอเล็กกินที่และทำให้ขอบดูเบลอ ในคลังที่แสงจ้า ขอบชัดสำคัญกว่าความสวย</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. สองค่าที่มีเฉพาะบน PDA</h2><pre class="code-vs"><code>materialTapTargetSize: MaterialTapTargetSize.padded,
+visualDensity: VisualDensity.standard,</code></pre><table><thead><tr><th>ค่า</th><th>ทำอะไร</th><th>ทำไมต้องตั้ง</th></tr></thead><tbody>
+<tr><td><code>MaterialTapTargetSize.padded</code></td><td>ขยายพื้นที่กดให้ถึง 48 แม้ widget จะเล็กกว่า</td><td>ค่าอีกตัวคือ <code>shrinkWrap</code> ซึ่งย่อพื้นที่กดให้เท่ากับที่เห็น — ใช้บนเดสก์ท็อปที่มีเมาส์ได้ แต่บน PDA ที่ใช้นิ้วใส่ถุงมือคือหายนะ</td></tr>
+<tr><td><code>VisualDensity.standard</code></td><td>ไม่ให้ Flutter บีบ widget ตามแพลตฟอร์ม</td><td>ค่าปริยาย <code>adaptivePlatformDensity</code> จะบีบให้แน่นขึ้นบนเดสก์ท็อป ซึ่งทำให้ผลตอนทดสอบบนคอมกับบนเครื่องจริงไม่ตรงกัน</td></tr>
+</tbody></table><p>เทสต์บันทึกกฎนี้ไว้</p><pre class="code-vs"><code>test('พื้นที่กดไม่ถูกย่อ', () {
+  expect(buildPdaTheme().materialTapTargetSize, MaterialTapTargetSize.padded);
+});</code></pre></section>
+
+<section id="section-6"><h2>6. ธีมเป็นค่าตั้งต้น ไม่ใช่กฎเหล็ก</h2><p>จอที่ต้องการหน้าตาต่างจากธีมยังทำได้</p><pre class="code-vs"><code>FilledButton(
+  style: FilledButton.styleFrom(backgroundColor: PdaColors.danger),
+  onPressed: _delete,
+  child: Text(context.t(AppText.confirm)),
+)</code></pre><p>ค่าที่ระบุจะทับค่าจากธีมเฉพาะที่ระบุ ส่วนที่เหลือ เช่นความสูงและมุมโค้ง ยังมาจากธีม</p><div class="note"><strong>เกณฑ์:</strong> ถ้าเขียนทับซ้ำเกินสองที่ แปลว่าควรย้ายขึ้นไปเป็นค่าในธีม หรือเป็น widget ของตัวเอง — เขียนทับเพราะจอนั้นพิเศษจริง ๆ ได้ แต่ต้องเป็นข้อยกเว้น ไม่ใช่นิสัย</div></section>
+
+<section id="section-7"><h2>7. อ่านค่าจากธีมในจอ</h2><pre class="code-vs"><code>Text(
+  context.t(AppText.pallets),
+  style: Theme.of(context).textTheme.titleLarge,
+)</code></pre><table><thead><tr><th>อย่าเขียน</th><th>ให้เขียน</th></tr></thead><tbody>
+<tr><td><code>style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)</code></td><td><code>style: Theme.of(context).textTheme.titleLarge</code></td></tr>
+<tr><td><code>color: const Color(0xFF2E73B9)</code></td><td><code>color: Theme.of(context).colorScheme.primary</code></td></tr>
+</tbody></table><p><code>Theme.of(context)</code> ไต่ต้นไม้ widget ขึ้นไปหา <code>Theme</code> ที่ใกล้ที่สุด ผลข้างเคียงที่เป็นประโยชน์คือ ห่อส่วนใดส่วนหนึ่งของจอด้วย <code>Theme</code> ตัวใหม่ แล้วเฉพาะส่วนนั้นจะใช้ธีมอื่นได้</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนธีมแล้วบางจอไม่เปลี่ยน</td><td>จอนั้นเขียนสีลงไปตรง ๆ</td><td>อ่านผ่าน <code>Theme.of</code></td></tr>
+<tr><td>ปุ่มที่กดไม่ได้หายไปจากสายตา</td><td>ไม่ได้ตั้ง <code>disabledBackgroundColor</code></td><td>ตั้งให้เห็นแต่จาง</td></tr>
+<tr><td>หน้าตาบนคอมกับบนเครื่องจริงไม่ตรงกัน</td><td><code>visualDensity</code> ปรับตามแพลตฟอร์ม</td><td>ตั้งเป็น <code>standard</code></td></tr>
+<tr><td><code>Theme.of(context)</code> ได้ธีมเปล่า</td><td>เรียกจาก context ที่อยู่เหนือ <code>MaterialApp</code></td><td>ใช้ <code>Builder</code> คั่น หรือย้ายไป widget ลูก</td></tr>
+<tr><td>ปุ่มหลายแบบในจอเดียว</td><td>เขียนทับกันคนละที่</td><td>ตกลงว่าปุ่มมีกี่ชนิด แล้วตั้งในธีม</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ฝ่ายออกแบบขอให้ปุ่ม “ยืนยัน” ทุกอันในแอปเปลี่ยนจากสีน้ำเงินเป็นสีเขียว แต่ปุ่มอื่นยังเป็นน้ำเงินเหมือนเดิม</p><ol><li>ควรทำอย่างไร</li><li>ถ้าใช้วิธีเขียนทับที่ปุ่มยืนยันทุกอัน จะเกิดอะไรในหกเดือน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สร้าง widget ของตัวเอง ไม่ใช่เขียนทับ และไม่ใช่เพิ่มค่าในธีม</p><pre class="code-vs"><code>class ConfirmButton extends StatelessWidget {
+  const ConfirmButton({super.key, required this.onPressed, required this.label});
+
+  final VoidCallback? onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) =&gt; FilledButton(
+    style: FilledButton.styleFrom(
+      backgroundColor: PdaColors.success,
+      foregroundColor: PdaColors.onSuccess,   // คู่กันเสมอ (11.2)
+    ),
+    onPressed: onPressed,
+    child: Text(label),
+  );
+}</code></pre><p>ทำไมไม่ใส่ในธีม เพราะธีมตั้งค่าตาม<strong>ชนิดของ widget</strong> ไม่ใช่ตาม<strong>ความหมาย</strong> — Flutter ไม่มีชนิดที่ชื่อ “ปุ่มยืนยัน” การจะแยกได้ต้องสร้างชนิดนั้นขึ้นมาเอง</p><p><strong>2.</strong> จะได้ปุ่มยืนยันสามเฉด เพราะคนที่มาทีหลังคัดลอกจากจอที่ตัวเองเปิดอยู่ และบางจอถูกเขียนก่อนที่ฝ่ายออกแบบจะเปลี่ยนใจครั้งที่สอง</p><p>ปัญหาที่แท้จริงคือ <strong>ไม่มีที่เดียวที่ตอบได้ว่า “ปุ่มยืนยันหน้าตาอย่างไร”</strong> — และการมี <code>ConfirmButton</code> แก้ทั้งข้อนี้และข้อที่ว่าคนอ่านโค้ดเห็นเจตนาทันที</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>ธีมทำให้เปลี่ยนหน้าตาทั้งแอปได้ที่จุดเดียว</li><li><code>ColorScheme</code> ประกาศสีเป็นคู่ <code>x</code>/<code>onX</code> ซึ่งบังคับให้ตอบว่าตัวอักษรบนสีนั้นเป็นสีอะไร</li><li>ตั้ง <code>materialTapTargetSize</code> และ <code>visualDensity</code> ให้ตรงกับอุปกรณ์จริง</li><li>ธีมแยกตามชนิดของ widget ความหมายต้องแยกด้วยการสร้าง widget ของตัวเอง</li></ul></div><p><strong>บทหน้า:</strong> โหมดสว่างกับมืด และเหตุผลที่แอปคลังเลือกอย่างเดียว</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

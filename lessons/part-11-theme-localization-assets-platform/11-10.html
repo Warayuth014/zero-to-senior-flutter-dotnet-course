@@ -4,21 +4,89 @@
 <title>App Icons</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-10 · Flutter UI</span><h1>App Icons</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Material icons</a></li><li><a href="#section-2">Icon packages</a></li><li><a href="#section-3">SVG</a></li><li><a href="#section-4">Icon meaning</a></li><li><a href="#section-5">Alignment/optical size</a></li><li><a href="#section-6">Licensing/tree shaking</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Accessibility</a></li></ol></nav>
-<div class="note"><strong>เลือก icon systemตามงาน:</strong> Materialสำหรับมาตรฐาน platform, Font Awesome/MDIสำหรับ glyphเฉพาะ และ SVGสำหรับ brand/warehouse artที่ต้องคุมรูปทรง</div>
-<section id="section-1"><h2>1. Material icons</h2><p><code>uses-material-design: true</code> ทำให้ <code>Icons.*</code> พร้อมใช้และเข้ากับ IconTheme/semantic labels เหมาะ actionsทั่วไปเช่น back, settings, refresh</p></section>
-<section id="section-2"><h2>2. Icon packages</h2><p><code>font_awesome_flutter</code> หรือ <code>material_design_icons_flutter</code> เพิ่มตัวเลือกแต่เพิ่ม dependency/font footprintและชื่อ glyphอาจเปลี่ยนตาม version ให้รวม mappingใน design system</p></section>
-<section id="section-3"><h2>3. SVG</h2><pre class="code-vs"><code>SvgPicture.asset(
-  'assets/icons/wms/pallet.svg',
-  width: 24, height: 24,
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สามแหล่งของไอคอน</a></li><li><a href="#section-2">เมื่อไหร่ควรทำเอง</a></li><li><a href="#section-3">SVG กับ PNG</a></li><li><a href="#section-4">ไอคอนบน PDA ต้องใหญ่กว่าที่คิด</a></li><li><a href="#section-5">ไอคอนต้องไม่เป็นสัญญาณเดียว</a></li><li><a href="#section-6">ไอคอนที่มีความหมายต่างกันในแต่ละวัฒนธรรม</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ดูไอคอนจริงใน <code>assets/icons/wms/</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1, Part 2 (layout)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกและใช้ไอคอนให้ผู้ใช้เข้าใจ และรู้ว่าเมื่อไหร่ควรใช้ไอคอนของตัวเอง</div>
+
+<section id="section-1"><h2>1. สามแหล่งของไอคอน</h2><table><thead><tr><th>แหล่ง</th><th>คืออะไร</th><th>ขนาดที่เพิ่ม</th></tr></thead><tbody>
+<tr><td><code>Icons.*</code></td><td>ไอคอน Material ที่มากับ Flutter ราวสองพันตัว</td><td>รวมอยู่แล้วถ้าตั้ง <code>uses-material-design: true</code></td></tr>
+<tr><td><code>font_awesome_flutter</code></td><td>ชุดไอคอนยอดนิยม มีของที่ Material ไม่มี</td><td>ราว 1 MB ถ้าใช้ทั้งชุด</td></tr>
+<tr><td>SVG ของตัวเอง</td><td>ไอคอนที่ออกแบบเฉพาะงาน</td><td>ไฟล์ละไม่กี่ KB</td></tr>
+</tbody></table><p><code>wms_absolute_mobile</code> ใช้ทั้งสามแหล่ง</p><pre class="code-vs"><code># pubspec.yaml
+dependencies:
+  font_awesome_flutter: ^11.0.0
+  flutter_svg: ^2.3.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/wms/</code></pre><pre class="code-vs"><code>assets/icons/wms/
+  agv.svg           forklift.svg      picking.svg
+  cycle_count.svg   inventory.svg     receive.svg
+  dispatch.svg      withdraw.svg</code></pre><p>สังเกตว่าไอคอนที่ทำเองทั้งแปดตัวเป็น<strong>ชื่องานในคลัง</strong>ทั้งหมด — ไม่มีชุดไอคอนสำเร็จรูปไหนมีไอคอน “นับสต๊อกหน้าแร็ค” หรือ “จ่ายงานให้ AGV”</p></section>
+
+<section id="section-2"><h2>2. เมื่อไหร่ควรทำเอง</h2><table><thead><tr><th>ใช้ของสำเร็จรูป</th><th>ทำเอง</th></tr></thead><tbody>
+<tr><td>การกระทำทั่วไป — ค้นหา ลบ แก้ไข ย้อนกลับ</td><td>สิ่งเฉพาะของธุรกิจ — รถ AGV, พาเลท, สายพาน</td></tr>
+<tr><td>ผู้ใช้เคยเห็นในแอปอื่น</td><td>ไม่มีสัญลักษณ์มาตรฐาน</td></tr>
+<tr><td>ต้องเข้าใจทันทีโดยไม่ต้องเรียนรู้</td><td>ผู้ใช้จะเห็นทุกวันจนจำได้</td></tr>
+</tbody></table><div class="note"><strong>เกณฑ์:</strong> ถ้าต้องมีข้อความกำกับตลอดเวลา แปลว่าไอคอนนั้นสื่อไม่ได้ด้วยตัวเอง — ซึ่งไม่ผิด แต่ต้องรู้ว่าไอคอนกำลังทำหน้าที่แค่ช่วยหาตำแหน่ง ไม่ได้ทำหน้าที่บอกความหมาย</div></section>
+
+<section id="section-3"><h2>3. SVG กับ PNG</h2><table><thead><tr><th> </th><th>SVG</th><th>PNG</th></tr></thead><tbody>
+<tr><td>ขยายแล้วคมไหม</td><td>คมทุกขนาด</td><td>ต้องมีหลายไฟล์ตามความละเอียด</td></tr>
+<tr><td>เปลี่ยนสีจากโค้ด</td><td>ได้</td><td>ไม่ได้ (ทำได้แค่ย้อมทั้งภาพ)</td></tr>
+<tr><td>ขนาดไฟล์</td><td>เล็กกว่ามากสำหรับรูปทรงเรียบง่าย</td><td>เล็กกว่าสำหรับภาพที่ซับซ้อน</td></tr>
+<tr><td>ความเร็วตอนวาด</td><td>ต้องแปลงก่อน ช้ากว่าเล็กน้อย</td><td>วาดได้ทันที</td></tr>
+</tbody></table><pre class="code-vs"><code>SvgPicture.asset(
+  'assets/icons/wms/forklift.svg',
+  width: 24,
+  height: 24,
+  // ย้อมสีตามสถานะ — ทำแบบนี้กับ PNG ไม่ได้ถ้าไฟล์ไม่ได้เป็นสีเดียว
   colorFilter: ColorFilter.mode(
-    Theme.of(context).colorScheme.primary, BlendMode.srcIn),
-  semanticsLabel: tr('Pallet', 'พาเลท'),
-);</code></pre></section>
-<section id="section-4"><h2>4. Icon meaning</h2><p>อย่าใช้ iconกำกวมโดยไม่มี label/tooltipโดยเฉพาะ PDA icon-only action และอย่าใช้สีอย่างเดียวบอก error/success</p></section>
-<section id="section-5"><h2>5. Alignment/optical size</h2><p>glyphจากหลายชุดมี baseline/stroke/visual weightต่างกัน กำหนด container sizeและตรวจจริง ไม่คิดว่า <code>size: 24</code> ดูเท่ากันทุก library</p></section>
-<section id="section-6"><h2>6. Licensing/tree shaking</h2><p>ตรวจ licenseและ dynamic icon lookupอาจขัด tree shaking หากสร้าง IconData runtime ต้องพิจารณาขนาด/ข้อจำกัด release build</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>brand logoควรทำเป็น Font Awesomeใกล้เคียงหรือ asset SVGจริง?</p><details><summary>เฉลย</summary><p>ใช้ approved SVG/assetจริงเพื่อ brand accuracy; package iconใช้สำหรับ functional icons</p></details></section>
-<section id="section-8"><h2>8. Accessibility</h2><div class="success">icon buttonมี tooltip/semantic label, touch target≥48, contrastพอ, disabled stateชัดและ screen readerไม่อ่าน decorative iconซ้ำกับ Text</div></section>
+    task.isUrgent ? PdaColors.danger : PdaColors.subtitle,
+    BlendMode.srcIn,
+  ),
+)</code></pre><p>สำหรับไอคอน SVG ชนะเกือบทุกกรณี ยกเว้นภาพประกอบที่มีรายละเอียดมาก</p></section>
+
+<section id="section-4"><h2>4. ไอคอนบน PDA ต้องใหญ่กว่าที่คิด</h2><table><thead><tr><th>ขนาด</th><th>ใช้กับ</th></tr></thead><tbody>
+<tr><td>16–18</td><td>ไอคอนประกอบข้อความ ไม่ต้องกด</td></tr>
+<tr><td>24</td><td>ค่าปริยายของ Material ใช้กับไอคอนในลิสต์</td></tr>
+<tr><td>28–32</td><td>ไอคอนของเมนูหลักที่ต้องเห็นชัดขณะเดิน</td></tr>
+</tbody></table><p>สิ่งที่แยกจากขนาดไอคอนคือ<strong>พื้นที่กด</strong> — ไอคอนขนาด 24 ที่กดได้ ต้องมีพื้นที่กดอย่างน้อย 48 รอบตัว ซึ่ง <code>IconButton</code> จัดการให้อยู่แล้ว แต่ <code>GestureDetector</code> ที่ครอบ <code>Icon</code> ตรง ๆ ไม่จัดการให้</p><pre class="code-vs"><code>// พื้นที่กดเท่ากับไอคอน คือ 24×24 — เล็กเกินไปสำหรับนิ้วที่ใส่ถุงมือ
+GestureDetector(onTap: _refresh, child: const Icon(Icons.refresh))
+
+// พื้นที่กด 48×48 ตามที่ Material กำหนด
+IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh))</code></pre></section>
+
+<section id="section-5"><h2>5. ไอคอนต้องไม่เป็นสัญญาณเดียว</h2><p>ต่อจาก 11.2 ที่ว่าสีไม่ควรเป็นสัญญาณเดียว ไอคอนก็เช่นกัน</p><table><thead><tr><th>ไม่พอ</th><th>พอ</th></tr></thead><tbody>
+<tr><td>ไอคอนถังขยะอย่างเดียว</td><td>ไอคอน + ข้อความ “ลบ”</td></tr>
+<tr><td>ไอคอนรถโฟล์คลิฟท์อย่างเดียวในลิสต์</td><td>ไอคอน + ข้อความ “โฟล์คลิฟท์”</td></tr>
+</tbody></table><p>เหตุผลบน PDA ไม่ใช่แค่ความเข้าถึงได้ แต่เป็นเรื่องความเร็ว — ผู้ใช้ที่<strong>อ่าน</strong>คำว่า “โฟล์คลิฟท์” มั่นใจได้ทันที ส่วนคนที่ต้อง<strong>ตีความ</strong>ไอคอนจะลังเลเสี้ยววินาที ซึ่งคูณด้วยห้าร้อยครั้งต่อวันแล้วมีความหมาย</p><p>เมื่อที่ไม่พอจริง ๆ ให้ใส่ <code>Semantics</code> อย่างน้อย เพื่อให้โปรแกรมอ่านหน้าจอบอกได้</p><pre class="code-vs"><code>Semantics(
+  label: context.t(AppText.forklift),
+  child: SvgPicture.asset('assets/icons/wms/forklift.svg', width: 24),
+)</code></pre></section>
+
+<section id="section-6"><h2>6. ไอคอนที่มีความหมายต่างกันในแต่ละวัฒนธรรม</h2><table><thead><tr><th>ไอคอน</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>แผ่นดิสก์สำหรับ “บันทึก”</td><td>ผู้ใช้อายุน้อยไม่เคยเห็นของจริง แต่ยังใช้ได้เพราะเป็นธรรมเนียมที่แพร่หลาย</td></tr>
+<tr><td>นกฮูกสำหรับ “ความรู้”</td><td>บางวัฒนธรรมมองว่าเป็นลางร้าย</td></tr>
+<tr><td>ท่าทางมือ</td><td>ความหมายต่างกันมากในแต่ละประเทศ</td></tr>
+<tr><td>เครื่องหมายถูกสีเขียว</td><td>ปลอดภัยที่สุด เข้าใจตรงกันเกือบทุกที่</td></tr>
+</tbody></table><p>ในแอปคลังที่มีพนักงานหลายสัญชาติ กฎง่าย ๆ คือ<strong>ใช้ไอคอนที่แทนของจริงที่จับต้องได้</strong> — รถโฟล์คลิฟท์หน้าตาเหมือนกันทุกประเทศ</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ไอคอนไม่ขึ้น ขึ้นเป็นกล่องเปล่า</td><td>ลืมประกาศโฟลเดอร์ใน <code>pubspec.yaml</code></td><td>เพิ่มใน <code>assets:</code> แล้วรันใหม่</td></tr>
+<tr><td>เพิ่มไฟล์ใหม่ในโฟลเดอร์ที่ประกาศแล้ว แต่ไม่ขึ้น</td><td>ต้องรีสตาร์ท ไม่ใช่ hot reload</td><td><code>flutter run</code> ใหม่</td></tr>
+<tr><td>SVG ขึ้นเป็นสีดำหมด</td><td>ไฟล์ SVG ใช้ <code>currentColor</code></td><td>กำหนด <code>colorFilter</code></td></tr>
+<tr><td>SVG บางไฟล์ไม่แสดง</td><td><code>flutter_svg</code> ไม่รองรับทุกฟีเจอร์ของ SVG เช่น filter และ mask ที่ซับซ้อน</td><td>ส่งออกจากโปรแกรมออกแบบแบบ “ทำให้เรียบง่าย” หรือแปลงเป็น path</td></tr>
+<tr><td>ขนาดแอปโตขึ้นมาก</td><td>ใช้ทั้งชุด font awesome เพื่อไอคอนสามตัว</td><td>ใช้ SVG เฉพาะตัวที่ต้องการ</td></tr>
+<tr><td>ไอคอนกดยาก</td><td>ครอบด้วย <code>GestureDetector</code></td><td>ใช้ <code>IconButton</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมออกแบบส่งไอคอนใหม่มา 40 ตัวเป็น PNG ขนาด 512×512 สำหรับเมนูทั้งหมดในแอป</p><ol><li>ควรรับแบบนี้ไหม</li><li>จะขออะไรเพิ่ม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่ควรรับตามที่ส่งมา</strong> ด้วยเหตุผลที่วัดได้</p><table><thead><tr><th>ปัญหา</th><th>ผล</th></tr></thead><tbody>
+<tr><td>512×512 ใหญ่เกินความจำเป็นมาก</td><td>ไอคอนแสดงที่ 24–32 การเก็บไฟล์ 512 คือเปลืองพื้นที่และหน่วยความจำ 200 เท่า</td></tr>
+<tr><td>PNG เปลี่ยนสีไม่ได้</td><td>ต้องมีไฟล์แยกสำหรับสถานะปกติ เลือกอยู่ และปิดใช้งาน — กลายเป็น 120 ไฟล์</td></tr>
+<tr><td>40 ไฟล์ × หลายความละเอียด</td><td>ถ้าทำครบ 1x 2x 3x คือ 120 ไฟล์ และขนาดแอปโตขึ้นหลาย MB</td></tr>
+</tbody></table><p><strong>2.</strong> ขอ SVG พร้อมข้อกำหนดที่ชัดเจน</p><ul><li><strong>SVG ที่แปลงเป็น path แล้ว</strong> — ไม่มี text ที่ต้องพึ่งฟอนต์ ไม่มี filter หรือ mask ที่ <code>flutter_svg</code> อาจไม่รองรับ</li><li><strong>สีเดียว ใช้ <code>currentColor</code></strong> — จะได้ย้อมจากโค้ดตามสถานะได้ ไอคอนหนึ่งไฟล์ใช้ได้ทุกสถานะ</li><li><strong>กรอบ 24×24 เท่ากันทุกไฟล์</strong> — ไม่งั้นไอคอนจะดูขนาดไม่เท่ากันเมื่อวางเรียงกัน แม้จะกำหนด <code>width</code> เท่ากัน</li><li><strong>เส้นหนาอย่างน้อย 1.5</strong> — เส้นบางหายไปบนจอ PDA ความละเอียดต่ำกลางแดด</li></ul><p>ข้อสุดท้ายเป็นข้อที่ฝ่ายออกแบบมักไม่รู้ เพราะเขาดูบนจอ Retina ในห้องที่แสงพอดี ควรส่งภาพถ่ายหน้าจอ PDA จริงกลางแดดให้ดูสักครั้ง — มีพลังกว่าอธิบายด้วยคำพูดมาก</p><p>และควรเสนอว่า<strong>เริ่มจาก 8 ตัวที่ใช้บ่อยที่สุดก่อน</strong> ไม่ใช่ 40 ตัวพร้อมกัน จะได้เห็นว่าข้อกำหนดที่ตกลงกันใช้ได้จริงไหม ก่อนที่อีก 32 ตัวจะถูกทำผิดแบบเดียวกันทั้งหมด</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ใช้ของสำเร็จรูปกับการกระทำทั่วไป ทำเองกับสิ่งเฉพาะของธุรกิจ</li><li>SVG ชนะเกือบทุกกรณีสำหรับไอคอน เพราะย้อมสีได้และคมทุกขนาด</li><li>ขนาดไอคอนกับพื้นที่กดเป็นคนละเรื่อง</li><li>ไอคอนไม่ควรเป็นสัญญาณเดียว ใส่ข้อความหรืออย่างน้อย <code>Semantics</code></li><li>ขอ SVG ที่แปลงเป็น path สีเดียว กรอบเท่ากัน เส้นไม่บาง</li></ul></div><p><strong>บทหน้า:</strong> รูปภาพที่ใหญ่กว่าไอคอน และกฎเรื่องความละเอียด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

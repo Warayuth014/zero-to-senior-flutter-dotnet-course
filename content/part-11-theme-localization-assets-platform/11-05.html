@@ -1,16 +1,82 @@
-<div class="note"><strong>flutter_localizations ให้ widgetระบบแปลได้:</strong> Material date picker, pagination labels, text directionและ built-in controlsต้องมี delegates—notแค่ข้อความของแอป</div>
-<section><h2>1. Dependency</h2><pre class="code-vs"><code>dependencies:
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เปิดใช้ localization แล้วดูว่าอะไรเปลี่ยน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกออกว่าข้อความไหนเป็นของเรา ข้อความไหนเป็นของ Flutter และรู้ว่าแต่ละอย่างแปลอย่างไร</div>
+
+<section><h2>1. ข้อความในแอปมีสองประเภท</h2><table><thead><tr><th> </th><th>ข้อความของเรา</th><th>ข้อความของ Flutter</th></tr></thead><tbody>
+<tr><td>ตัวอย่าง</td><td>“สแกนพาเลท”, “ไม่มีพาเลทในโซนนี้”</td><td>ปุ่ม OK/Cancel ในตัวเลือกวันที่, คำว่า “Search”, ข้อความ “Paste” ในเมนูคลิกขวา</td></tr>
+<tr><td>ใครเขียน</td><td>เรา</td><td>ทีม Flutter</td></tr>
+<tr><td>แปลอย่างไร</td><td>เราแปลเอง (11.7, 11.8)</td><td>เปิดใช้ delegate ที่มีมาให้แล้ว</td></tr>
+<tr><td>ลืมแล้วเกิดอะไร</td><td>เห็นภาษาอังกฤษบนหน้าจอที่เหลือเป็นไทย</td><td>ตัวเลือกวันที่ขึ้นภาษาอังกฤษทั้งกล่อง</td></tr>
+</tbody></table><p>บทนี้พูดถึงประเภทที่สอง ซึ่งใช้แรงน้อยที่สุดแต่คนลืมบ่อยที่สุด เพราะมันโผล่เฉพาะในหน้าจอที่ไม่ค่อยได้เปิด</p></section>
+
+<section><h2>2. เปิดใช้งาน</h2><pre class="code-vs"><code># pubspec.yaml
+dependencies:
   flutter_localizations:
     sdk: flutter
-  intl: any</code></pre><p>version intlต้องเข้ากับ Flutter SDK resolution ไม่ pinขัดกันโดยไม่ตรวจ</p></section>
-<section><h2>2. Delegates</h2><pre class="code-vs"><code>localizationsDelegates: const [
+  intl: any</code></pre><div class="note"><code>sdk: flutter</code> แปลว่าแพ็กเกจนี้มาพร้อม Flutter SDK ไม่ได้โหลดจากอินเทอร์เน็ต ส่วน <code>intl: any</code> ปล่อยให้ Flutter เลือกรุ่นที่เข้ากับ SDK ที่ติดตั้งอยู่ ถ้าตรึงรุ่นเองมักจะชนกัน</div><pre class="code-vs"><code>MaterialApp(
+  locale: controller.locale,
+  supportedLocales: const [Locale('en'), Locale('th')],
+  localizationsDelegates: const [
+    GlobalMaterialLocalizations.delegate,
+    GlobalWidgetsLocalizations.delegate,
+    GlobalCupertinoLocalizations.delegate,
+  ],
+  home: const PdaHomeScreen(),
+)</code></pre></section>
+
+<section><h2>3. สาม delegate ทำอะไรกัน</h2><table><thead><tr><th>delegate</th><th>แปลอะไร</th><th>ถ้าไม่ใส่</th></tr></thead><tbody>
+<tr><td><code>GlobalMaterialLocalizations</code></td><td>ข้อความใน widget ของ Material — ตัวเลือกวันที่และเวลา, <code>SearchBar</code>, ปุ่มใน <code>AboutDialog</code>, ป้ายกำกับของ <code>Scaffold</code></td><td>ขึ้นภาษาอังกฤษหมด</td></tr>
+<tr><td><code>GlobalWidgetsLocalizations</code></td><td>ทิศทางการเขียน (ซ้ายไปขวา หรือขวาไปซ้าย)</td><td>ภาษาอาหรับและฮีบรูจะแสดงผิดทิศ</td></tr>
+<tr><td><code>GlobalCupertinoLocalizations</code></td><td>ข้อความใน widget สไตล์ iOS</td><td>ขึ้นภาษาอังกฤษ ถ้าใช้ widget เหล่านั้น</td></tr>
+</tbody></table><p>ทั้งสามตัวไม่ได้แปลข้อความของเราแม้แต่คำเดียว — เป็นความเข้าใจผิดที่พบบ่อยที่สุดเรื่องนี้</p><pre class="code-vs"><code>// สาม delegate นี้ไม่ได้แปลข้อความของเรา แต่แปลข้อความที่ฝังอยู่ใน
+// Material, Cupertino และ widget พื้นฐาน ถ้าไม่ใส่ ตัวเลือกวันที่จะขึ้น
+// ภาษาอังกฤษแม้ผู้ใช้เลือกไทย
+localizationsDelegates: const [
   GlobalMaterialLocalizations.delegate,
-  GlobalWidgetsLocalizations.delegate,
-  GlobalCupertinoLocalizations.delegate,
+  ...
 ],</code></pre></section>
-<section><h2>3. supportedLocales</h2><pre class="code-vs"><code>supportedLocales: const [Locale('en'), Locale('th')],</code></pre><p>รายการนี้เป็น contractให้ frameworkเลือก localeและ fallback</p></section>
-<section><h2>4. What it does not do</h2><p>ไม่แปลข้อความ businessของแอปอัตโนมัติ ต้องมี tr/ARB และ backend-owned product/location/statusควรกำหนดว่าจะ translateหรือแสดง verbatim</p></section>
-<section><h2>5. Locale resolution</h2><p>ถ้า deviceใช้ localeไม่รองรับ MaterialAppเลือก fallbackตาม callback/default ควรกำหนด deterministicและเก็บ user preferenceแยกจาก system locale</p></section>
-<section><h2>6. Thai specifics</h2><p>date picker/Material labelsเปลี่ยนตาม localeแต่ business date/timezoneยังต้อง formatด้วย intlและ contract UTC ไม่ถือว่า localizationแก้ timezoneให้</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เปลี่ยน app localeเป็น thแต่ปุ่ม Cancelใน date pickerยังอังกฤษควรตรวจอะไร?</p><details><summary>เฉลย</summary><p>flutter_localizations dependency, delegates, supportedLocalesและ localeที่ MaterialAppได้รับจริง</p></details></section>
-<section><h2>8. Smoke tests</h2><div class="success">Material widgetsไทย/อังกฤษ, unsupported locale fallback, localeเปลี่ยน runtimeและไม่มี missing delegate exception</div></section>
+
+<section><h2>4. เห็นผลตรงไหนบ้าง</h2><p>ลองเรียกตัวเลือกวันที่ดู</p><pre class="code-vs"><code>final picked = await showDatePicker(
+  context: context,
+  initialDate: DateTime.now(),
+  firstDate: DateTime(2020),
+  lastDate: DateTime(2030),
+);</code></pre><table><thead><tr><th>ส่วน</th><th>ไม่มี delegate</th><th>มี delegate + locale th</th></tr></thead><tbody>
+<tr><td>ชื่อเดือน</td><td>January</td><td>มกราคม</td></tr>
+<tr><td>ชื่อวัน</td><td>M T W T F</td><td>จ อ พ พฤ ศ</td></tr>
+<tr><td>ปุ่ม</td><td>CANCEL / OK</td><td>ยกเลิก / ตกลง</td></tr>
+<tr><td>ข้อความช่วยเหลือ</td><td>Select date</td><td>เลือกวันที่</td></tr>
+</tbody></table><p>ที่อื่นที่ได้ประโยชน์โดยไม่ต้องทำอะไรเพิ่ม</p><ul><li>ข้อความสำหรับโปรแกรมอ่านหน้าจอ เช่น “ปุ่ม” “แถบเลื่อน”</li><li>ข้อความ “แสดง x จาก y” ใน <code>PaginatedDataTable</code></li><li>เมนูคัดลอก–วางเมื่อกดค้างในช่องข้อความ</li></ul><div class="note">ข้อสุดท้ายมีผลกับ PDA จริง — ผู้ใช้ที่กดค้างในช่องรหัสพาเลทเพื่อวางค่าที่คัดลอกมา จะเห็นเมนูภาษาอังกฤษถ้าไม่ได้ตั้ง</div></section>
+
+<section><h2>5. <code>supportedLocales</code> สำคัญกว่าที่ดู</h2><pre class="code-vs"><code>supportedLocales: const [Locale('en'), Locale('th')],</code></pre><p>รายการนี้บอกสองอย่าง</p><table><thead><tr><th>บอกอะไร</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ภาษาที่แอปรองรับ</td><td>ถ้าเครื่องตั้งเป็นภาษาญี่ปุ่น Flutter จะเลือกตัวแรกในรายการ</td></tr>
+<tr><td>ลำดับความสำคัญ</td><td>ตัวแรกคือค่าสำรอง ควรเป็นภาษาที่แปลครบที่สุด</td></tr>
+</tbody></table><p>วิธีที่ Flutter เลือก locale เมื่อไม่ได้กำหนด <code>locale</code> เอง</p><pre class="code-vs"><code>1. หา locale ที่ตรงทั้งภาษาและประเทศ  (th_TH ตรงกับ th_TH)
+2. หา locale ที่ตรงเฉพาะภาษา          (th_TH ตรงกับ th)
+3. ใช้ตัวแรกใน supportedLocales</code></pre><p>ในแอปนี้เรากำหนด <code>locale</code> เองจากที่ผู้ใช้เลือก จึงข้ามการเดาไปทั้งหมด ซึ่งเป็นสิ่งที่ถูกต้องสำหรับแอปที่มีปุ่มสลับภาษา — <strong>ถ้าผู้ใช้เลือกไว้แล้ว อย่าให้การตั้งค่าของเครื่องมาทับ</strong></p></section>
+
+<section><h2>6. เทสต์ว่าส่ง locale ลงไปจริง</h2><pre class="code-vs"><code>testWidgets('MaterialApp ได้ locale ตามที่เลือก', (tester) async {
+  await pumpApp(tester);
+
+  await tester.tap(find.byKey(const Key('language-button')));
+  await tester.pumpAndSettle();
+
+  final app = tester.widget&lt;MaterialApp&gt;(find.byType(MaterialApp));
+  // ถ้าไม่ส่ง locale ลงไป widget สำเร็จรูปของ Material จะยังเป็นอังกฤษ
+  expect(app.locale, const Locale('th'));
+});</code></pre><p>เทสต์นี้ตรวจสิ่งที่มองไม่เห็นบนหน้าจอหลัก — ข้อความของเราเปลี่ยนเป็นไทยแล้วดูเหมือนถูกต้อง ทั้งที่ <code>locale</code> อาจยังไม่ถูกส่งลงไป และจะไปพบตอนเปิดตัวเลือกวันที่ในอีกสามเดือน</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ใส่ delegate แล้วข้อความของเรายังไม่แปล</td><td>เข้าใจผิดว่า delegate แปลให้ทุกอย่าง</td><td>ข้อความของเราต้องแปลเอง (11.7)</td></tr>
+<tr><td>ตัวเลือกวันที่ยังเป็นอังกฤษ</td><td>ไม่ได้ส่ง <code>locale</code> หรือลืม delegate</td><td>ใส่ทั้งสองอย่าง</td></tr>
+<tr><td><code>No MaterialLocalizations found</code></td><td>ใช้ widget ของ Material นอก <code>MaterialApp</code></td><td>ห่อด้วย <code>MaterialApp</code> หรือ <code>Localizations</code></td></tr>
+<tr><td>เทสต์ล้มด้วยข้อความเดียวกัน</td><td>เทสต์สร้าง widget โดยไม่มี <code>MaterialApp</code></td><td>ห่อด้วย <code>MaterialApp</code> ในเทสต์</td></tr>
+<tr><td>ภาษาเปลี่ยนแต่บางส่วนของจอไม่เปลี่ยน</td><td>ส่วนนั้นไม่ได้อยู่ใต้ <code>MaterialApp</code> ที่ rebuild</td><td>ตรวจว่า <code>ListenableBuilder</code> ครอบถูกที่</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>แอปรองรับไทยกับอังกฤษ ผู้ใช้คนหนึ่งตั้งเครื่องเป็นภาษาลาว</p><ol><li>เขาจะเห็นภาษาอะไร</li><li>ถ้าอยากให้เห็นภาษาไทยแทน ควรทำอย่างไร และควรทำไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ในแอปนี้เห็นภาษาอังกฤษ เพราะเรากำหนด <code>locale</code> เองจากค่าที่ผู้ใช้เลือก และค่าเริ่มต้นคืออังกฤษ — การตั้งค่าของเครื่องไม่มีผลเลย</p><p>ถ้าไม่ได้กำหนด <code>locale</code> เอง Flutter จะไล่ตามขั้นใน §5 หาไม่เจอ แล้วใช้ <code>Locale('en')</code> ซึ่งเป็นตัวแรก ผลเหมือนกัน</p><p><strong>2.</strong> ทำได้ด้วย <code>localeResolutionCallback</code></p><pre class="code-vs"><code>localeResolutionCallback: (deviceLocale, supported) {
+  // ลาวอ่านไทยได้มากกว่าอ่านอังกฤษ
+  if (deviceLocale?.languageCode == 'lo') return const Locale('th');
+  ...
+},</code></pre><p><strong>แต่ไม่ควรทำในแอปนี้</strong> ด้วยเหตุผลสามข้อ</p><ul><li>เป็นการเดาแทนผู้ใช้ จากสมมติฐานเรื่องภาษาที่อาจไม่จริงสำหรับคนคนนั้น</li><li>ผู้ใช้เปลี่ยนเองได้อยู่แล้วด้วยปุ่มเดียว การเดาจึงไม่ได้แก้ปัญหาที่แก้ไม่ได้</li><li>เมื่อเดาผิด ผู้ใช้จะไม่รู้ว่าทำไมแอปขึ้นภาษาที่ตัวเองไม่ได้เลือก</li></ul><p>สิ่งที่ควรทำแทนคือ <strong>ทำให้ปุ่มสลับภาษาหาเจอง่ายตั้งแต่หน้าแรก</strong> ซึ่งในแอปนี้อยู่บนแถบหัวจอตลอดเวลา ไม่ได้ซ่อนอยู่ในหน้าตั้งค่า</p><p>หลักเดียวกับ 10.11 — เมื่อต้องเดาเจตนาของผู้ใช้ ให้ถามหรือทำให้เขาเปลี่ยนเองได้ง่าย แทนที่จะเดา</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ข้อความในแอปมีสองประเภท และ delegate แปลให้เฉพาะของ Flutter</li><li>สาม delegate ใส่ครั้งเดียวได้ผลทั้งแอป</li><li><code>supportedLocales</code> ตัวแรกคือค่าสำรอง</li><li>เมื่อผู้ใช้เลือกภาษาไว้แล้ว อย่าให้การตั้งค่าของเครื่องมาทับ</li><li>เขียนเทสต์ตรวจว่า <code>locale</code> ถูกส่งลงไปจริง</li></ul></div><p><strong>บทหน้า:</strong> <code>Locale</code> คืออะไรกันแน่ และ delegate ทำงานอย่างไรข้างใน</p></section>

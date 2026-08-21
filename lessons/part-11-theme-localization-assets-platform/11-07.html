@@ -4,20 +4,147 @@
 <title>Language Controller</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">11-07 · Flutter UI</span><h1>Language Controller</h1><p>Part 11: Theme &amp; Localization</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Controller shape</a></li><li><a href="#section-2">Load before UI</a></li><li><a href="#section-3">Set flow</a></li><li><a href="#section-4">No global strings in models</a></li><li><a href="#section-5">LanguageButton</a></li><li><a href="#section-6">Persistence key</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Controller tests</a></li></ol></nav>
-<div class="note"><strong>AppLanguageController เป็น SSOT:</strong> ถือ enum/Locale, โหลดและ persist preference, notifyหนึ่งครั้งเมื่อเปลี่ยน และไม่แปล business dataเอง</div>
-<section id="section-1"><h2>1. Controller shape</h2><pre class="code-vs"><code>enum AppLanguage { english, thai }
-class AppLanguageController extends ChangeNotifier {
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สองแบบที่ใช้กันจริง</a></li><li><a href="#section-2">เทียบสองแบบตรง ๆ</a></li><li><a href="#section-3">คลาส Message</a></li><li><a href="#section-4">ข้อความที่ต้องเติมค่า</a></li><li><a href="#section-5">เจ้าของภาษา</a></li><li><a href="#section-6">ลำดับที่ถูกต้องตอนสลับ</a></li><li><a href="#section-7">ปุ่มสลับภาษาแสดงอะไร</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน <code>language_controller.dart</code> แล้วเทียบกับของจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 11.6, 9.7 (store), 10.5 (เก็บลงเครื่อง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำระบบสองภาษาที่จำค่าได้ ทดสอบได้ และหาข้อความที่ยังไม่แปลเจอ</div>
+
+<section id="section-1"><h2>1. สองแบบที่ใช้กันจริง</h2><p><code>wms_absolute_mobile</code> ใช้แบบที่ง่ายที่สุด</p><pre class="code-vs"><code>String tr(String english, String thai) =&gt;
+    AppLanguageController.instance.text(english, thai);
+
+// ใช้ในโค้ด
+Text(tr('Scan pallet', 'สแกนพาเลท'))</code></pre><p>lab ใช้แบบที่มีรายการข้อความ</p><pre class="code-vs"><code>static const Message scanPallet = Message('Scan pallet', 'สแกนพาเลท');
+
+// ใช้ในโค้ด
+Text(context.t(AppText.scanPallet))</code></pre><p>ทั้งสองแบบทำงานได้ ต่างกันที่สิ่งที่<strong>ทำได้หลังจากนั้น</strong></p></section>
+
+<section id="section-2"><h2>2. เทียบสองแบบตรง ๆ</h2><table><thead><tr><th> </th><th><code>tr(en, th)</code> ในที่ที่ใช้</th><th>รายการข้อความ</th></tr></thead><tbody>
+<tr><td>เขียนครั้งแรก</td><td>เร็วกว่ามาก</td><td>ต้องไปเพิ่มในไฟล์กลางก่อน</td></tr>
+<tr><td>อ่านโค้ดจอ</td><td>เห็นข้อความทันที ไม่ต้องเปิดไฟล์อื่น</td><td>ต้องไปดูว่าข้อความคืออะไร</td></tr>
+<tr><td>รู้ว่าแอปมีข้อความกี่ก้อน</td><td>ไม่ได้</td><td>นับจากรายการได้</td></tr>
+<tr><td>หาก้อนที่ยังไม่แปล</td><td>ต้องไล่อ่านทุกไฟล์</td><td>เทสต์จับได้</td></tr>
+<tr><td>ข้อความเดียวกันใช้หลายที่</td><td>คัดลอกไปวาง แล้วแก้ไม่ครบตอนเปลี่ยนคำ</td><td>อ้างตัวเดียวกัน</td></tr>
+<tr><td>ให้คนที่ไม่ใช่โปรแกรมเมอร์ตรวจคำ</td><td>ต้องส่งโค้ดทั้งโปรเจกต์ให้ดู</td><td>ส่งไฟล์เดียว</td></tr>
+</tbody></table><p>สามแถวล่างคือเหตุผลที่ lab เลือกแบบรายการ และแถวที่สองคือราคาที่ต้องจ่าย ซึ่งของจริงตัดสินว่าไม่คุ้มในบริบทของตัวเอง</p><div class="note">เกณฑ์ที่ใช้ตัดสินได้จริง: <strong>ข้อความในแอปเกินร้อยก้อน หรือมีคนที่ไม่ใช่โปรแกรมเมอร์ต้องตรวจคำหรือไม่</strong> ถ้าตอบว่าใช่ข้อใดข้อหนึ่ง ให้ใช้รายการ</div></section>
+
+<section id="section-3"><h2>3. คลาส <code>Message</code></h2><pre class="code-vs"><code>/// คู่ข้อความอังกฤษ–ไทยหนึ่งก้อน
+///
+/// เป็นคลาสแทนที่จะเป็น `Map&lt;String, String&gt;` เพื่อให้ลืมภาษาใดภาษาหนึ่ง
+/// ไม่ได้ — คอมไพเลอร์บังคับให้ใส่ครบทั้งสองตัวตั้งแต่ตอนสร้าง
+class Message {
+  const Message(this.en, this.th);
+
+  final String en;
+  final String th;
+
+  String of(AppLanguage language) =&gt;
+      language == AppLanguage.thai ? th : en;
+}</code></pre><p>ถ้าใช้ <code>Map&lt;String, String&gt;</code> แทน จะเขียน <code>{'en': 'Save'}</code> โดยลืม <code>th</code> ได้ และจะไปพบตอนผู้ใช้สลับภาษาแล้วเจอข้อความว่าง</p></section>
+
+<section id="section-4"><h2>4. ข้อความที่ต้องเติมค่า</h2><p>นี่คือจุดที่แยกระบบที่คิดมาแล้วออกจากระบบที่ต่อสตริงเอา</p><pre class="code-vs"><code>// วิธีที่ดูเหมือนใช้ได้
+Text('${store.count} ${tr('pallets', 'พาเลท')}')</code></pre><p>ได้ภาษาอังกฤษว่า “12 pallets” ถูกต้อง และภาษาไทยว่า “12 พาเลท” ซึ่ง<strong>ผิดหลักภาษา</strong> — ภาษาไทยพูดว่า “พาเลท 12 ใบ” โดยเอาคำนามขึ้นก่อนและมีลักษณนามต่อท้าย</p><pre class="code-vs"><code>class Message1&lt;T&gt; {
+  const Message1(this._en, this._th);
+
+  final String Function(T) _en;
+  final String Function(T) _th;
+
+  String of(AppLanguage language, T value) =&gt;
+      language == AppLanguage.thai ? _th(value) : _en(value);
+}
+
+// ภาษาอังกฤษต้องเลือกรูปเอกพจน์/พหูพจน์ ส่วนภาษาไทยไม่ต้อง
+String _palletCountEn(int count) =&gt; count == 1 ? '1 pallet' : '$count pallets';
+String _palletCountTh(int count) =&gt; 'พาเลท $count ใบ';</code></pre><p>แต่ละภาษาสร้างประโยคของตัวเองทั้งประโยค จึงเรียงคำได้ตามหลักของภาษานั้น</p><pre class="code-vs"><code>test('ข้อความที่มีค่าแทรก เรียงคำตามภาษาของตัวเอง', () {
+  expect(AppText.palletCount.of(AppLanguage.english, 12), '12 pallets');
+  expect(AppText.palletCount.of(AppLanguage.thai, 12), 'พาเลท 12 ใบ');
+
+  expect(AppText.heldBy.of(AppLanguage.english, 'สมชาย'), 'Held by สมชาย');
+  expect(AppText.heldBy.of(AppLanguage.thai, 'สมชาย'), 'สมชาย ล็อกไว้อยู่');
+});</code></pre><p>คู่ที่สองแสดงปัญหาชัดกว่า — อังกฤษเอาชื่อไว้ท้าย ไทยเอาไว้หน้า การต่อสตริงแบบ <code>tr('Held by ', '') + name</code> จึงเป็นไปไม่ได้ตั้งแต่ต้น</p></section>
+
+<section id="section-5"><h2>5. เจ้าของภาษา</h2><pre class="code-vs"><code>class LanguageController extends ChangeNotifier {
+  LanguageController(this.storage);
+
+  final SettingsStorage storage;
+
+  /// อังกฤษเป็นค่าเริ่มต้นของเครื่องที่เพิ่งติดตั้ง
+  ///
+  /// เลือกอังกฤษเพราะรหัสสินค้าและชื่อตำแหน่งที่เซิร์ฟเวอร์ส่งมาเป็น
+  /// อังกฤษอยู่แล้ว หน้าจอที่ปนสองภาษาอ่านยากกว่าหน้าจอที่เป็นอังกฤษล้วน
   AppLanguage _language = AppLanguage.english;
-  Locale get locale =&gt; Locale(_language == AppLanguage.thai ? 'th' : 'en');
-  bool get isThai =&gt; _language == AppLanguage.thai;
-}</code></pre></section>
-<section id="section-2"><h2>2. Load before UI</h2><p>โหลดระหว่าง bootstrapเพื่อลด flashภาษา default หาก plugin unavailableใน testให้ fallback deterministicและยัง switch in-memoryได้</p></section>
-<section id="section-3"><h2>3. Set flow</h2><p>ถ้าค่าเดิม return; update memory+notifyเพื่อ UIตอบสนองเร็ว แล้ว persistด้วย error policy หรือ persistก่อน notifyหาก productต้อง guaranteeข้าม restart—ระบุให้ชัด</p></section>
-<section id="section-4"><h2>4. No global strings in models</h2><p>Domain/modelไม่เรียก singleton <code>tr</code> เพราะผลลัพธ์เปลี่ยนตาม global stateและ testยาก ให้ UI/localization mapperแปล typed enum</p></section>
-<section id="section-5"><h2>5. LanguageButton</h2><p>ปุ่มต้องบอก actionหรือ current codeชัด, touch target, tooltip localizedและไม่ใช้ธงชาติแทนภาษาเสมอไป ของจริงแสดงไอคอนโลก + TH/EN</p></section>
-<section id="section-6"><h2>6. Persistence key</h2><p>ใช้ namespaced/versioned keyเช่น <code>app.v1.language</code> และรองรับค่า unknownด้วย default ไม่ throwตอน startup</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>เขียน preferencesล้มหลัง notifyควร revertภาษาไหม?</p><details><summary>แนวคำตอบ</summary><p>ขึ้นกับ contract; ของจริงคงภาษาปัจจุบันและเปิดใหม่กลับ default ควร log/แจ้งเฉพาะถ้าการ persistสำคัญ ไม่ crash UI</p></details></section>
-<section id="section-8"><h2>8. Controller tests</h2><div class="success">load th/en/unknown/failure, no notifyเมื่อค่าเดิม, notifyครั้งเดียว, persist valueถูกและ MaterialApp localeเปลี่ยนตาม</div></section>
+  ...
+}</code></pre><p>สังเกตว่ารับ <code>SettingsStorage</code> เข้ามา ซึ่งเป็น interface ตัวเดียวกับที่ <code>ProfileStore</code> ใช้ใน Part 10 — ของกลางที่เขียนไว้แล้วถูกใช้ซ้ำโดยไม่ต้องเขียนใหม่</p><p>ของจริงเป็น singleton</p><pre class="code-vs"><code>class AppLanguageController extends ChangeNotifier {
+  AppLanguageController._();
+  static final AppLanguageController instance = AppLanguageController._();
+}</code></pre><table><thead><tr><th> </th><th>singleton (ของจริง)</th><th>รับเข้ามา (lab)</th></tr></thead><tbody>
+<tr><td>เรียกใช้จากที่ไหนก็ได้</td><td>ได้ รวมถึงในฟังก์ชัน <code>tr()</code> ที่ไม่มี context</td><td>ต้องมี context หรือส่งเข้าไป</td></tr>
+<tr><td>เทสต์แต่ละข้อแยกจากกัน</td><td>ไม่ ต้องรีเซ็ตเอง</td><td>ได้ สร้างใหม่ทุกเทสต์</td></tr>
+<tr><td>ใส่ที่เก็บปลอมได้</td><td>ไม่ได้</td><td>ได้</td></tr>
+</tbody></table><p>singleton เป็นสิ่งที่ทำให้ <code>tr()</code> เขียนสั้นได้ — สองอย่างนี้มาคู่กัน เลือกอย่างหนึ่งแล้วอีกอย่างตามมา</p></section>
+
+<section id="section-6"><h2>6. ลำดับที่ถูกต้องตอนสลับ</h2><pre class="code-vs"><code>Future&lt;void&gt; setLanguage(AppLanguage value) async {
+  if (_language == value) return;
+  _language = value;
+
+  // ประกาศก่อนเขียนลงเครื่อง เพราะหน้าจอต้องเปลี่ยนทันทีที่กด
+  // ไม่ใช่รอให้เขียนดิสก์เสร็จ
+  notifyListeners();
+
+  try {
+    await storage.write(storageKey, value.code);
+  } catch (_) {
+    // เขียนไม่ได้ก็ยังสลับได้ในรอบนี้
+  }
+}</code></pre><table><thead><tr><th>บรรทัด</th><th>ป้องกันอะไร</th></tr></thead><tbody>
+<tr><td><code>if (_language == value) return;</code></td><td>ประกาศทั้งที่ไม่มีอะไรเปลี่ยน ทำให้ทั้งจอวาดใหม่ฟรี ๆ</td></tr>
+<tr><td><code>notifyListeners()</code> ก่อน <code>await</code></td><td>หน้าจอค้างครึ่งวินาทีบนเครื่องที่ดิสก์ช้า</td></tr>
+<tr><td><code>catch</code> ที่ไม่ทำอะไร</td><td>สลับภาษาไม่ได้เพราะเขียนดิสก์ไม่ได้</td></tr>
+</tbody></table><pre class="code-vs"><code>test('เลือกภาษาเดิมซ้ำ ต้องไม่ประกาศ', () async {
+  var notified = 0;
+  controller.addListener(() =&gt; notified++);
+
+  await controller.setLanguage(AppLanguage.english);
+  expect(notified, 0);
+});</code></pre></section>
+
+<section id="section-7"><h2>7. ปุ่มสลับภาษาแสดงอะไร</h2><pre class="code-vs"><code>/// แสดงป้ายของภาษา**ที่ใช้อยู่** ไม่ใช่ภาษาที่จะสลับไป — ผู้ใช้ที่มองแวบเดียว
+/// ต้องตอบได้ว่า "ตอนนี้ภาษาอะไร" ซึ่งเป็นคำถามที่ถูกถามบ่อยกว่า
+/// "กดแล้วจะได้ภาษาอะไร"
+child: Text(controller.language.label),      // EN หรือ TH</code></pre><p>เป็นคำถามที่เถียงกันได้จริง และคำตอบขึ้นกับว่าปุ่มนั้นอยู่ตรงไหน</p><table><thead><tr><th>ปุ่มอยู่ที่</th><th>ควรแสดง</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>แถบหัวจอ เห็นตลอดเวลา</td><td>ภาษาที่ใช้อยู่</td><td>ทำหน้าที่เป็นตัวบอกสถานะด้วย</td></tr>
+<tr><td>ในเมนูตั้งค่า</td><td>ภาษาที่จะสลับไป</td><td>ผู้ใช้เข้ามาเพื่อเปลี่ยน ไม่ได้เข้ามาเพื่อดู</td></tr>
+</tbody></table><p>ทางออกที่ครอบคลุมคือแสดงสถานะบนปุ่ม แล้วบอกผลของการกดใน tooltip</p><pre class="code-vs"><code>Tooltip(
+  // ข้อความบอกผลของการกด ซึ่งต่างจากป้ายบนปุ่ม
+  message: controller.isThai ? 'Switch to English' : 'เปลี่ยนเป็นภาษาไทย',
+  child: TextButton(...),
+)</code></pre></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สลับภาษาแล้วบางข้อความไม่เปลี่ยน</td><td>widget เป็น <code>const</code> (11.6)</td><td>เอา <code>const</code> ออก</td></tr>
+<tr><td>ข้อความไทยหลุดไปอยู่ในโค้ดที่ควรเป็นอังกฤษ</td><td>เขียน <code>tr()</code> ในที่ที่ใช้ แล้วสลับที่พารามิเตอร์</td><td>ใช้รายการที่ตั้งชื่อฟิลด์ชัด</td></tr>
+<tr><td>เปลี่ยนคำในจอหนึ่ง แต่จออื่นยังเป็นคำเก่า</td><td>ข้อความถูกคัดลอกไปวาง</td><td>อ้างก้อนเดียวกัน</td></tr>
+<tr><td>ภาษาไทยที่ผู้ใช้เลือกหายหลังปิดแอป</td><td>ลืมบันทึก</td><td>เขียนลงเครื่อง</td></tr>
+<tr><td>ประโยคที่มีตัวเลขอ่านแปลกในภาษาไทย</td><td>ต่อสตริงเอง</td><td>ใช้ <code>Message1</code> ที่แต่ละภาษาสร้างประโยคเอง</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>โปรเจกต์ที่มีอยู่ใช้ <code>tr('English', 'ไทย')</code> กระจายอยู่ 400 จุด ทีมอยากย้ายไปใช้รายการข้อความ</p><ol><li>จะย้ายอย่างไรโดยไม่หยุดงานอื่น</li><li>รู้ได้อย่างไรว่าย้ายครบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ย้ายทีละส่วนโดยให้สองแบบอยู่ร่วมกันได้ ตามหลักเดียวกับ 9.15</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>สร้าง <code>AppText</code> ไว้ก่อน โดยยังไม่ย้ายอะไร</td></tr>
+<tr><td>2</td><td>ทำให้ <code>tr()</code> ยังทำงานเหมือนเดิม — ไม่แตะ</td></tr>
+<tr><td>3</td><td>ย้ายทีละฟีเจอร์ เริ่มจากข้อความที่ใช้ซ้ำหลายที่ เพราะได้ประโยชน์มากสุดต่อแรงที่ลง</td></tr>
+<tr><td>4</td><td>เมื่อไม่มีใครเรียก <code>tr()</code> แล้ว ค่อยลบ</td></tr>
+</tbody></table><p>ข้อสำคัญคือ<strong>อย่าย้ายทั้ง 400 จุดใน PR เดียว</strong> — รีวิวไม่ได้ ชนกับงานคนอื่นแน่นอน และถ้าพลาดจะหาไม่เจอว่าพลาดตรงไหน</p><p><strong>2.</strong> สามอย่างที่วัดได้</p><pre class="code-vs"><code># นับที่ยังเหลือ — ควรลดลงทุกสัปดาห์
+grep -r "tr(" lib --include=*.dart | wc -l</code></pre><pre class="code-vs"><code>// ข้อความไทยที่เหมือนอังกฤษเป๊ะ มักแปลว่าลืมแปล — ยกเว้นชื่อเฉพาะ
+test('ก้อนที่ยังไม่ได้แปล ต้องถูกจับได้', () {
+  const properNouns = {'ACETEC WMS'};
+
+  final untranslated = [
+    for (final message in AppText.all)
+      if (message.en == message.th &amp;&amp; !properNouns.contains(message.en))
+        message.en,
+  ];
+
+  expect(untranslated, isEmpty, reason: 'ยังไม่ได้แปล: $untranslated');
+});</code></pre><p>และข้อที่คนลืม คือหาข้อความที่<strong>ยังไม่ได้ผ่านระบบแปลเลย</strong> — สตริงไทยที่เขียนตรง ๆ ใน widget ซึ่ง <code>grep</code> หาได้ด้วยการค้นอักษรไทยในไฟล์ <code>.dart</code> ที่อยู่นอกโฟลเดอร์ข้อความ</p><pre class="code-vs"><code>grep -rP "[\x{0E00}-\x{0E7F}]" lib --include=*.dart | grep -v "app_messages.dart"</code></pre><p>คำสั่งนี้จะเจอทั้งสตริงที่ลืมแปล และคอมเมนต์ภาษาไทย ซึ่งต้องคัดด้วยตาอีกที แต่ก็ยังเร็วกว่าอ่านทุกไฟล์</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li><code>tr(en, th)</code> เขียนเร็วกว่า แต่ตอบไม่ได้ว่าแอปมีข้อความกี่ก้อนและก้อนไหนยังไม่แปล</li><li>รายการข้อความคุ้มเมื่อเกินร้อยก้อน หรือมีคนนอกทีมต้องตรวจคำ</li><li>ข้อความที่มีค่าแทรก ต้องให้แต่ละภาษาสร้างประโยคเอง</li><li>ประกาศการเปลี่ยนก่อนเขียนลงเครื่อง</li><li>ปุ่มบนหัวจอแสดงภาษาที่ใช้อยู่ ส่วนผลของการกดไว้ใน tooltip</li></ul></div><p><strong>บทหน้า:</strong> เครื่องมือมาตรฐานที่ทำงานนี้ให้ และเหตุผลที่ทั้งสองโปรเจกต์ไม่ได้ใช้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
