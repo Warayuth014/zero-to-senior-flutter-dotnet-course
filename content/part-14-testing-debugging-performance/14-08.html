@@ -1,22 +1,126 @@
-<div class="note"><strong>Finder ควรยึด semantic intent:</strong> ใช้ text/label/key ที่ผู้ใช้หรือ contract รู้จัก หลีกเลี่ยง <code>find.byType(TextField).at(3)</code> เพราะลำดับ widget เปลี่ยนง่าย</div>
-<section><h2>1. Finder ที่พบบ่อย</h2><pre class="code-vs"><code>find.text('Save Changes')
-find.byKey(const ValueKey('receiving-scan-input'))
-find.byIcon(Icons.close_rounded)
-find.widgetWithText(TextField, 'Pallet barcode')</code></pre></section>
-<section><h2>2. จำกัดขอบเขต</h2><pre class="code-vs"><code>final dialog = find.byType(AlertDialog);
-final cancel = find.descendant(
-  of: dialog,
-  matching: find.text('Cancel'),
-);
-await tester.tap(cancel);</code></pre><p>จำเป็นเมื่อ sheet และ dialog มีคำว่า Cancel เหมือนกัน ดังตัวอย่าง settings tests ของโปรเจกต์จริง</p></section>
-<section><h2>3. Input เหมือนผู้ใช้</h2><pre class="code-vs"><code>await tester.enterText(scanInput, 'PLT-0006');
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: หา widget ที่หายากในเทสต์ของตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.7<br><strong>จบบทนี้แล้วจะทำได้:</strong> หา widget ในต้นไม้ได้แม่นยำ และสั่งให้มันทำงานเหมือนผู้ใช้</div>
+
+<section><h2>1. ตัวหาที่ใช้บ่อย</h2><table><thead><tr><th>เขียน</th><th>หา</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>find.byKey(const Key('scan-button'))</code></td><td>ตาม key</td><td>ปกติที่สุด แนะนำ</td></tr>
+<tr><td><code>find.text('พาเลท')</code></td><td>ตามข้อความ</td><td>เมื่อข้อความคือสิ่งที่ทดสอบ</td></tr>
+<tr><td><code>find.byType(FilledButton)</code></td><td>ตามชนิด</td><td>เมื่อมีตัวเดียวในจอ</td></tr>
+<tr><td><code>find.byIcon(Icons.refresh)</code></td><td>ตามไอคอน</td><td>ปุ่มไอคอนที่ไม่มีข้อความ</td></tr>
+<tr><td><code>find.byTooltip('โหลดใหม่')</code></td><td>ตาม tooltip</td><td>ปุ่มไอคอนที่ตั้ง tooltip ไว้</td></tr>
+<tr><td><code>find.byWidgetPredicate(...)</code></td><td>ตามเงื่อนไข</td><td>เมื่อต้องตรวจค่าข้างใน</td></tr>
+</tbody></table><pre class="code-vs"><code>// ตรวจค่าข้างใน widget ที่หาไม่ได้ด้วยวิธีอื่น
+expect(
+  find.byWidgetPredicate(
+    (w) =&gt; w is Image &amp;&amp; w.width == 56 &amp;&amp; w.height == 56,
+  ),
+  findsWidgets,
+);</code></pre></section>
+
+<section><h2>2. อ่านค่าจาก widget ที่เจอ</h2><pre class="code-vs"><code>final app = tester.widget&lt;MaterialApp&gt;(find.byType(MaterialApp));
+// ถ้าไม่ส่ง locale ลงไป widget สำเร็จรูปของ Material จะยังเป็นอังกฤษ
+expect(app.locale, const Locale('th'));</code></pre><p><code>tester.widget&lt;T&gt;()</code> คืนตัว widget จริง ทำให้ตรวจค่าที่ไม่ได้แสดงบนหน้าจอได้ — เช่น <code>locale</code>, <code>onPressed</code> ที่เป็น null, หรือค่าที่ส่งเข้า constructor</p><table><thead><tr><th>เมธอด</th><th>คืนอะไร</th></tr></thead><tbody>
+<tr><td><code>tester.widget&lt;T&gt;(finder)</code></td><td>widget ตัวเดียว — โยนถ้าเจอมากกว่าหนึ่ง</td></tr>
+<tr><td><code>tester.widgetList&lt;T&gt;(finder)</code></td><td>ทุกตัวที่เจอ</td></tr>
+<tr><td><code>tester.getSize(finder)</code></td><td>ขนาดจริงหลังจัดวางแล้ว</td></tr>
+<tr><td><code>tester.getTopLeft(finder)</code></td><td>ตำแหน่งบนจอ</td></tr>
+</tbody></table><pre class="code-vs"><code>testWidgets('ปุ่มสลับภาษากดโดนแม้ใส่ถุงมือ', (tester) async {
+  final size = tester.getSize(find.byKey(const Key('language-button')));
+  expect(size.height, greaterThanOrEqualTo(PdaMetrics.minTapTarget));
+  expect(size.width, greaterThanOrEqualTo(PdaMetrics.minTapTarget));
+});</code></pre><p>เทสต์นี้ตรวจสิ่งที่<strong>ตาคนมองแล้วบอกไม่ได้</strong> — ปุ่มที่ดูใหญ่พออาจมีพื้นที่กดจริงเล็กกว่าที่เห็น</p></section>
+
+<section><h2>3. ผสมตัวหาเข้าด้วยกัน</h2><pre class="code-vs"><code>// หาข้อความที่อยู่ในการ์ดใบนั้นเท่านั้น
+find.descendant(
+  of: find.byKey(const Key('pallet-PLT-001')),
+  matching: find.text('ล็อกแล้ว'),
+)
+
+// หา widget ที่มีลูกเป็นสิ่งนี้
+find.ancestor(
+  of: find.text('PLT-001'),
+  matching: find.byType(Card),
+)</code></pre><p><code>find.descendant</code> จำเป็นเมื่อมีข้อความซ้ำกันหลายที่</p><pre class="code-vs"><code>// ลิสต์มีคำว่า "ล็อกแล้ว" หลายแถว — ตรวจแบบนี้จะกำกวม
+expect(find.text('ล็อกแล้ว'), findsOneWidget);   // ล้มเมื่อมีสองแถว
+
+// ตรวจว่าแถวนี้ล็อกแล้ว
+expect(
+  find.descendant(
+    of: find.byKey(const Key('pallet-PLT-001')),
+    matching: find.text('ล็อกแล้ว'),
+  ),
+  findsOneWidget,
+);</code></pre></section>
+
+<section><h2>4. จำนวนที่คาด</h2><table><thead><tr><th>เขียน</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>findsOneWidget</code></td><td>หนึ่งตัวพอดี</td></tr>
+<tr><td><code>findsNothing</code></td><td>ไม่มีเลย</td></tr>
+<tr><td><code>findsWidgets</code></td><td>อย่างน้อยหนึ่งตัว</td></tr>
+<tr><td><code>findsNWidgets(3)</code></td><td>สามตัวพอดี</td></tr>
+<tr><td><code>findsAtLeastNWidgets(2)</code></td><td>อย่างน้อยสองตัว</td></tr>
+</tbody></table><p>ของจริงใน <code>wms_absolute_mobile</code> ใช้ <code>findsNWidgets</code> พร้อมคอมเมนต์อธิบาย</p><pre class="code-vs"><code>expect(find.text('SIGN IN'), findsNWidgets(2)); // heading + button</code></pre><p>คอมเมนต์นั้นสำคัญ — ถ้าไม่มี คนที่มาอ่านทีหลังจะไม่รู้ว่า 2 มาจากไหน และไม่กล้าแก้เมื่อเลขเปลี่ยน</p></section>
+
+<section><h2>5. สั่งให้ทำงาน</h2><table><thead><tr><th>เขียน</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>tester.tap(finder)</code></td><td>แตะ</td></tr>
+<tr><td><code>tester.enterText(finder, 'PLT-001')</code></td><td>พิมพ์ลงช่อง</td></tr>
+<tr><td><code>tester.drag(finder, Offset(0, -300))</code></td><td>ลาก — ใช้เลื่อนลิสต์</td></tr>
+<tr><td><code>tester.longPress(finder)</code></td><td>กดค้าง</td></tr>
+<tr><td><code>tester.pageBack()</code></td><td>กดย้อนกลับ</td></tr>
+<tr><td><code>tester.testTextInput.receiveAction(TextInputAction.done)</code></td><td>กด Enter บนแป้นพิมพ์</td></tr>
+</tbody></table><p>ทุกตัวต้องตามด้วย <code>pump</code> ถ้าจะตรวจผลบนหน้าจอ</p><pre class="code-vs"><code>await tester.tap(find.byKey(const Key('language-button')));
+await tester.pumpAndSettle();
+
+expect(find.text('พาเลท'), findsOneWidget);</code></pre><p>แถวสุดท้ายในตารางสำคัญสำหรับ PDA — เครื่องสแกนส่งข้อมูลเหมือนแป้นพิมพ์แล้วจบด้วย Enter ซึ่งจำลองได้แบบนี้</p><pre class="code-vs"><code>await tester.enterText(find.byKey(const Key('scan-field')), 'PLT-001');
 await tester.testTextInput.receiveAction(TextInputAction.done);
-await tester.pump();</code></pre><p>ถ้า production ใช้ <code>onSubmitted</code> การเรียก controller method ตรง ๆ ไม่พิสูจน์ wiring ของ input</p></section>
-<section><h2>4. Tap ที่มองเห็น</h2><p>ก่อน tap item ที่อยู่ใต้ fold ใช้ <code>ensureVisible</code> หรือ <code>scrollUntilVisible</code> แล้ว pump; warning ว่า hit test ไม่ได้มักหมายถึง test ไม่ได้ทำ gesture แบบผู้ใช้จริง ไม่ควรปิด warning เพื่อให้ผ่าน</p></section>
-<section><h2>5. Drag และ layout assertion</h2><pre class="code-vs"><code>final top = tester.getTopLeft(scanner).dy;
-await tester.drag(results, const Offset(0, -260));
 await tester.pump();
-expect(tester.getTopLeft(scanner).dy, top);</code></pre><p>นี่คือ assertion เชิงพฤติกรรมที่ดีกว่า golden ทั้งหน้าสำหรับข้อกำหนด “scanner ต้อง fixed”</p></section>
-<section><h2>6. Matcher จำนวน</h2><p>ใช้ <code>findsOneWidget</code>, <code>findsNothing</code>, <code>findsNWidgets</code> ให้ตรง contract ระวัง text ซ้ำใน offstage route หรือ lazy list และใช้ <code>skipOffstage: false</code> เฉพาะเมื่อกำลังทดสอบสิ่งนั้นจริง</p></section>
-<section><h2>7. Keys เป็น public test API</h2><p>ตั้ง stable <code>ValueKey</code> ตามความหมาย เช่น <code>confirm-receive</code> หรือรวม entity ID สำหรับแถว dynamic ห้ามใช้ index เป็น identity เมื่อ reorder/filter ได้ Keys ยังช่วยรักษา State ถูกแถว</p></section>
-<section><h2>8. Accessibility bonus</h2><div class="success">Finder ที่ยึด semantic label กระตุ้นให้ UI มี label สำหรับ icon/scanner action ซึ่งช่วยทั้ง test และผู้ใช้ screen reader; เพิ่ม semantics test สำหรับ action สำคัญเมื่อเหมาะสม</div></section>
+
+expect(store.lastScanned, 'PLT-001');</code></pre></section>
+
+<section><h2>6. widget ที่อยู่นอกจอ</h2><p>นี่คือกับดักที่เสียเวลาหาสาเหตุนานที่สุดในบทนี้</p><pre class="code-vs"><code>// find.byKey ข้าม widget ที่ถูกซ่อนอยู่ (offstage) โดยปริยาย
+expect(find.byKey(const Key('task-list')), findsNothing);        // ล้ม
+
+// บอกให้หารวมตัวที่ซ่อนอยู่ด้วย
+expect(
+  find.byKey(const Key('task-list'), skipOffstage: false),
+  findsOneWidget,
+);</code></pre><table><thead><tr><th>เกิดเมื่อ</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td><code>IndexedStack</code></td><td>แท็บที่ไม่ได้เลือกอยู่ ยังอยู่ในต้นไม้แต่ถูกซ่อน (5.6)</td></tr>
+<tr><td><code>Offstage</code></td><td>widget ที่ถูกซ่อนโดยตั้งใจ</td></tr>
+<tr><td>เส้นทางที่ถูก push ทับ</td><td>จอเก่ายังอยู่ใต้จอใหม่</td></tr>
+</tbody></table><p>ส่วน widget ที่อยู่ในลิสต์แต่<strong>ยังไม่ถูกเลื่อนมาถึง</strong> เป็นคนละเรื่อง — มันไม่มีอยู่ในต้นไม้เลย ต้องเลื่อนไปหาก่อน</p><pre class="code-vs"><code>await tester.scrollUntilVisible(
+  find.byKey(const Key('pallet-PLT-450')),
+  200,                                    // เลื่อนทีละ 200
+  scrollable: find.byType(Scrollable),
+);
+expect(find.byKey(const Key('pallet-PLT-450')), findsOneWidget);</code></pre></section>
+
+<section><h2>7. การกดที่ไม่โดน</h2><pre class="code-vs"><code>// ปุ่มถูก disable แล้ว แต่ยิง tap ซ้ำที่ตำแหน่งเดิมเพื่อจำลองการกดรัว
+await tester.tap(find.byKey(const Key('hold-PLT-001')), warnIfMissed: false);</code></pre><p><code>warnIfMissed: false</code> ใช้เมื่อ<strong>ตั้งใจ</strong>กดสิ่งที่รับไม่ได้ ซึ่งเป็นการจำลองผู้ใช้ที่กดรัว ๆ บน PDA</p><p>ถ้าไม่ใส่ จะได้คำเตือนยาว ๆ ที่บอกว่า “widget ที่กดไม่ได้รับเหตุการณ์” ซึ่งในกรณีนี้เป็นสิ่งที่ต้องการ</p><div class="note">แต่ระวัง — ถ้าใส่ <code>warnIfMissed: false</code> โดยไม่ตั้งใจ จะกลบข้อผิดพลาดจริงที่ว่า “กดไม่โดนเพราะมีอะไรบัง” ซึ่งเป็นบั๊กที่ควรรู้</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หาไม่เจอทั้งที่มั่นใจว่ามี</td><td>อยู่ใน <code>IndexedStack</code> ที่ไม่ได้เลือก</td><td><code>skipOffstage: false</code></td></tr>
+<tr><td>หาไม่เจอเพราะอยู่ล่างสุดของลิสต์</td><td>ยังไม่ถูกสร้าง</td><td><code>scrollUntilVisible</code></td></tr>
+<tr><td>เจอมากกว่าหนึ่งตัว</td><td>ข้อความซ้ำในหลายแถว</td><td><code>find.descendant</code></td></tr>
+<tr><td>กดแล้วไม่มีอะไรเกิด</td><td>ลืม <code>pump</code></td><td>ใส่หลังทุกการกระทำที่จะตรวจผล</td></tr>
+<tr><td>คำเตือน “tap missed”</td><td>กดสิ่งที่ถูก disable หรือมีอะไรบัง</td><td>ตรวจว่าตั้งใจ ถ้าใช่ใส่ <code>warnIfMissed: false</code></td></tr>
+<tr><td>เทสต์พังเมื่อสลับภาษา</td><td>หาด้วย <code>find.text</code></td><td>ใส่ <code>Key</code></td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>เทสต์นี้ล้มด้วยข้อความว่า “Found 0 widgets” ทั้งที่เปิดแอปดูแล้วเห็นปุ่มอยู่</p><pre class="code-vs"><code>testWidgets('กดยืนยันแล้วส่งคำสั่ง', (tester) async {
+  await tester.pumpWidget(wrap(ReceivingScreen(store: store)));
+
+  await tester.tap(find.text('ยืนยันการรับ'));
+  expect(repository.confirmed, isTrue);
+});</code></pre><p>หาสาเหตุที่เป็นไปได้ทั้งหมด</p><details><summary>แนวคำตอบ</summary><p>ห้าสาเหตุ เรียงจากที่พบบ่อยที่สุด</p><table><thead><tr><th>สาเหตุ</th><th>ตรวจอย่างไร</th><th>แก้</th></tr></thead><tbody>
+<tr><td>ปุ่มยังไม่ปรากฏเพราะข้อมูลยังโหลดไม่เสร็จ</td><td>เพิ่ม <code>await tester.pumpAndSettle()</code></td><td>ใส่ pump ก่อนหา</td></tr>
+<tr><td>ปุ่มอยู่ล่างจอ ยังไม่ถูกเลื่อนมาถึง</td><td>ลอง <code>scrollUntilVisible</code></td><td>เลื่อนก่อน หรือขยายจอในเทสต์</td></tr>
+<tr><td>ข้อความไม่ตรง เช่นมีเว้นวรรคหรือขึ้นบรรทัดใหม่</td><td><code>debugDumpApp()</code> แล้วอ่าน</td><td>ใช้ <code>Key</code></td></tr>
+<tr><td>แอปเป็นภาษาอังกฤษในเทสต์</td><td>ดูว่า controller ตั้งภาษาอะไร</td><td>ตั้งภาษาใน <code>setUp</code> หรือใช้ <code>Key</code></td></tr>
+<tr><td>ข้อความถูกแบ่งเป็นหลาย <code>TextSpan</code></td><td><code>find.text</code> หาเฉพาะข้อความที่อยู่ใน widget เดียว</td><td>ใช้ <code>find.textContaining</code> หรือ <code>Key</code></td></tr>
+</tbody></table><p><strong>วิธีหาที่เร็วที่สุด</strong> คือดูว่าต้นไม้มีอะไรอยู่จริง</p><pre class="code-vs"><code>await tester.pumpWidget(wrap(ReceivingScreen(store: store)));
+debugDumpApp();       // พิมพ์ต้นไม้ทั้งหมดออกมา</code></pre><p>หรือถ้าต้นไม้ใหญ่เกินอ่าน ให้จำกัดขอบเขต</p><pre class="code-vs"><code>// ดูว่ามีข้อความอะไรอยู่ในจอบ้าง
+final texts = tester.widgetList&lt;Text&gt;(find.byType(Text))
+    .map((t) =&gt; t.data)
+    .toList();
+debugPrint(texts.join(' | '));</code></pre><p><strong>ข้อสรุปที่ควรจำ:</strong> สี่ในห้าสาเหตุนี้หายไปทันทีถ้าใช้ <code>Key</code> แทน <code>find.text</code> — ซึ่งเป็นเหตุผลที่ 14.7 แนะนำให้ใส่ <code>Key</code> กับสิ่งที่เทสต์ต้องหา</p><p>สาเหตุแรกยังอยู่ และเป็นเรื่องของจังหวะการ pump ซึ่ง 14.10 จะพูดถึง</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li><code>find.byKey</code> เป็นตัวหาที่แนะนำ เพราะไม่พังตามคำและตามภาษา</li><li><code>tester.widget&lt;T&gt;()</code> อ่านค่าที่ไม่ได้แสดงบนหน้าจอได้</li><li><code>tester.getSize</code> ตรวจสิ่งที่ตามองแล้วบอกไม่ได้</li><li><code>find.descendant</code> จำเป็นเมื่อข้อความซ้ำหลายแถว</li><li>widget ใน <code>IndexedStack</code> ต้องหาด้วย <code>skipOffstage: false</code></li><li>widget ที่ยังไม่ถูกเลื่อนมาถึง ไม่มีอยู่ในต้นไม้เลย</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบสิ่งที่โผล่มาทับหน้าจอ</p></section>

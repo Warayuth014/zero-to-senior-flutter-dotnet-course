@@ -4,19 +4,119 @@
 <title>DevTools</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-14 · Testing</span><h1>DevTools</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Build mode</a></li><li><a href="#section-2">Widget Inspector</a></li><li><a href="#section-3">Debugger</a></li><li><a href="#section-4">Logging ที่สืบได้</a></li><li><a href="#section-5">Network</a></li><li><a href="#section-6">CPU/frames</a></li><li><a href="#section-7">Memory</a></li><li><a href="#section-8">Debug record</a></li></ol></nav>
-<div class="note"><strong>Debug จากหลักฐาน:</strong> เริ่มจาก reproduce ที่เล็กที่สุด เก็บ state/request/timeline แล้วใช้ Inspector, Debugger, Network และ Memory ตามอาการ หลีกเลี่ยงใส่ print แบบไม่มีโครงทั่วแอป</div>
-<section id="section-1"><h2>1. Build mode</h2><p>debug เหมาะ breakpoints/assert/hot reload แต่ performance ไม่แทน release; profile ใช้วัด CPU/GPU/memory ใกล้ของจริง; release ใช้ตรวจพฤติกรรมสุดท้าย ห้ามสรุป jank จาก debug mode</p></section>
-<section id="section-2"><h2>2. Widget Inspector</h2><p>ใช้ Select Widget, Layout Explorer และ constraints ดู overflow/พื้นที่ว่าง ตรวจ parent ที่ส่ง unbounded constraint, flex/scroll nesting และ repaint boundaries ก่อนแก้ด้วย hard-coded size</p></section>
-<section id="section-3"><h2>3. Debugger</h2><p>ตั้ง conditional breakpoint ที่ partId/step เฉพาะ, inspect call stack และ watch expression ใช้ pause on uncaught exceptions เพื่อเจอต้นทางก่อน error ถูกแปล หลีกเลี่ยง breakpoint ใน build ที่ถูกเรียกถี่จนทำ timing เปลี่ยน</p></section>
-<section id="section-4"><h2>4. Logging ที่สืบได้</h2><pre class="code-vs"><code>log.info('receive.submit', {
-  'operationId': operationId,
-  'partId': partId,
-  'step': state.step.name,
-});</code></pre><p>ใส่ correlation/operation ID และ event name แต่ไม่ log JWT, password, serial ส่วนบุคคลหรือ response body ใหญ่</p></section>
-<section id="section-5"><h2>5. Network</h2><p>ดู method, URL, status, duration, request/response size และ waterfall เปรียบเทียบ operation ID กับ .NET logs จำลอง offline/slow/timeout และตรวจ duplicate calls หลัง rebuild ไม่อ่านเพียงข้อความ error UI</p></section>
-<section id="section-6"><h2>6. CPU/frames</h2><p>เปิด Performance overlay/DevTools Timeline ใน profile mode บันทึกช่วง reproduce สั้น ๆ แยก UI thread/raster jank แล้วหา expensive build/layout/paint, synchronous JSON/image decode หรือ widget ที่ rebuild เกินจำเป็น</p></section>
-<section id="section-7"><h2>7. Memory</h2><p>ถ่าย heap snapshot ก่อนเข้า flow, หลังใช้งาน และหลังออก/GC ดู retaining path ของ Store, Timer, StreamSubscription, Controller, Image และ BuildContext การที่ memory สูงครั้งเดียวไม่เท่ากับ leak—ต้องดูวัตถุที่ควรถูกปล่อยแต่ยังถูก retain</p></section>
-<section id="section-8"><h2>8. Debug record</h2><div class="success">บันทึก device/build/commit, ขั้น reproduce, expected/actual, timestamp, operation ID, screenshot/timeline และ test ที่เพิ่มหลังแก้ เพื่อให้ bug เดิมกลับมาแล้ว CI จับได้</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เมื่อเทสต์ไม่พอ</a></li><li><a href="#section-2">เปิดอย่างไร</a></li><li><a href="#section-3">แท็บที่ใช้จริง</a></li><li><a href="#section-4">Inspector — ดูว่าทำไม layout เป็นแบบนั้น</a></li><li><a href="#section-5">Performance — หาเฟรมที่ช้า</a></li><li><a href="#section-6">Memory — หาว่าอะไรไม่ถูกเก็บ</a></li><li><a href="#section-7">Network — ดูว่ายิงอะไรไปบ้าง</a></li><li><a href="#section-8">เครื่องมือที่ไม่ต้องเปิด DevTools</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด DevTools แล้วดูแอปตัวเองทำงาน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 1–13 (ต้องมีแอปให้ดู)<br><strong>จบบทนี้แล้วจะทำได้:</strong> หาสาเหตุของปัญหาที่เทสต์จับไม่ได้ ด้วยเครื่องมือที่มากับ Flutter</div>
+
+<section id="section-1"><h2>1. เมื่อเทสต์ไม่พอ</h2><table><thead><tr><th>ปัญหา</th><th>เทสต์จับได้ไหม</th></tr></thead><tbody>
+<tr><td>ตรรกะผิด</td><td>ได้ ถ้าเขียนไว้</td></tr>
+<tr><td>เนื้อหาล้น</td><td>ได้ (14.13)</td></tr>
+<tr><td>รั่ว</td><td>ได้ (14.11)</td></tr>
+<tr><td><strong>ช้าบนเครื่องจริง</strong></td><td>ไม่ได้ — เทสต์รันบนคอมที่เร็วกว่ามาก</td></tr>
+<tr><td><strong>กินหน่วยความจำจนถูกปิด</strong></td><td>ไม่ได้</td></tr>
+<tr><td><strong>วาดใหม่บ่อยเกินจนกระตุก</strong></td><td>ได้บางส่วน (14.15)</td></tr>
+</tbody></table><p>สามแถวล่างต้องดูจากแอปที่ทำงานจริง และ DevTools คือเครื่องมือนั้น</p></section>
+
+<section id="section-2"><h2>2. เปิดอย่างไร</h2><pre class="code-vs"><code>flutter run
+# แล้วกด 'v' ใน terminal หรือเปิด URL ที่มันพิมพ์ออกมา</code></pre><table><thead><tr><th>วิธี</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>กด <code>v</code> ใน terminal</td><td>รันจากบรรทัดคำสั่ง</td></tr>
+<tr><td>ปุ่มใน VS Code หรือ Android Studio</td><td>รันจาก IDE</td></tr>
+<tr><td><code>dart devtools</code> แล้วต่อด้วย URL</td><td>ต่อกับแอปที่รันอยู่แล้ว</td></tr>
+</tbody></table><div class="note"><strong>ต้องรันในโหมด profile หรือ debug</strong> — โหมด release ปิดเครื่องมือส่วนใหญ่ไว้ และตัวเลขประสิทธิภาพในโหมด debug ช้ากว่าของจริงมาก จึงต้องใช้ <code>flutter run --profile</code> เมื่อจะวัดความเร็ว</div></section>
+
+<section id="section-3"><h2>3. แท็บที่ใช้จริง</h2><table><thead><tr><th>แท็บ</th><th>ตอบคำถามว่า</th><th>ใช้ตอน</th></tr></thead><tbody>
+<tr><td>Flutter Inspector</td><td>ต้นไม้ widget หน้าตาเป็นอย่างไร</td><td>layout ไม่เป็นอย่างที่คิด</td></tr>
+<tr><td>Performance</td><td>เฟรมไหนใช้เวลานาน</td><td>แอปกระตุก</td></tr>
+<tr><td>CPU Profiler</td><td>เวลาหมดไปกับฟังก์ชันไหน</td><td>ช้าแต่ไม่รู้ว่าตรงไหน</td></tr>
+<tr><td>Memory</td><td>อะไรกินหน่วยความจำ</td><td>แอปถูกปิดเอง</td></tr>
+<tr><td>Network</td><td>ยิงคำขออะไรไปบ้าง</td><td>ข้อมูลไม่มา หรือยิงถี่เกิน</td></tr>
+<tr><td>Logging</td><td>ข้อความที่แอปพิมพ์</td><td>ทั่วไป</td></tr>
+</tbody></table><p>สามแท็บแรกใช้บ่อยที่สุด และแท็บ Network มีค่ามากกับแอปที่คุยกับเซิร์ฟเวอร์ตลอดเวลาแบบนี้</p></section>
+
+<section id="section-4"><h2>4. Inspector — ดูว่าทำไม layout เป็นแบบนั้น</h2><table><thead><tr><th>ปุ่มที่ใช้บ่อย</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>Select Widget Mode</td><td>กดบนแอปแล้วมันชี้ว่าเป็น widget ไหน</td></tr>
+<tr><td>Show Guidelines</td><td>วาดเส้นขอบของทุก widget</td></tr>
+<tr><td>Highlight Repaints</td><td>เปลี่ยนสีขอบทุกครั้งที่วาดใหม่</td></tr>
+<tr><td>Show Baselines</td><td>ดูการวางแนวของข้อความ</td></tr>
+</tbody></table><p><strong>Highlight Repaints</strong> เป็นตัวที่ให้ข้อมูลมากที่สุดต่อการกดปุ่มเดียว — เปิดแล้วใช้แอปตามปกติ ส่วนไหนที่ขอบเปลี่ยนสีรัว ๆ คือส่วนที่วาดใหม่บ่อยเกินจำเป็น</p><div class="note">ในจอที่ผู้ใช้แค่พิมพ์ในช่องค้นหา ถ้าเห็นทั้งจอกะพริบ แปลว่ามีปัญหาแบบเดียวกับที่ 13.6 เจอในโค้ดจริง</div><pre class="code-vs"><code>// เปิดจากในโค้ดก็ได้ ถ้าอยากเปิดเฉพาะตอนพัฒนา
+import 'package:flutter/rendering.dart';
+
+void main() {
+  debugRepaintRainbowEnabled = true;   // เฉพาะตอน debug
+  runApp(const WmsApp());
+}</code></pre></section>
+
+<section id="section-5"><h2>5. Performance — หาเฟรมที่ช้า</h2><p>Flutter ตั้งเป้าที่ 60 เฟรมต่อวินาที ซึ่งแปลว่าแต่ละเฟรมมีเวลา<strong>16 มิลลิวินาที</strong></p><table><thead><tr><th>สีในกราฟ</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td>แท่งเตี้ยสีน้ำเงิน</td><td>ปกติ</td></tr>
+<tr><td>แท่งสูงเกินเส้น</td><td>เฟรมนั้นใช้เกิน 16ms — ผู้ใช้เห็นเป็นการกระตุก</td></tr>
+<tr><td>ส่วนสีน้ำเงิน</td><td>เวลาที่ใช้ใน Dart — โค้ดของเรา</td></tr>
+<tr><td>ส่วนสีเขียว</td><td>เวลาที่ใช้วาดจริง — มักเป็นเรื่องของ layout ที่ซับซ้อน</td></tr>
+</tbody></table><p>กดที่แท่งที่สูงผิดปกติแล้วดูว่าเวลาหมดไปกับอะไร</p><table><thead><tr><th>สาเหตุที่พบบ่อย</th><th>แก้อย่างไร</th></tr></thead><tbody>
+<tr><td>วาดใหม่ทั้งจอทั้งที่เปลี่ยนนิดเดียว</td><td>14.15</td></tr>
+<tr><td>รูปใหญ่ถูกคลายในเฟรมนั้น</td><td><code>cacheWidth</code> (13.7)</td></tr>
+<tr><td>สร้าง widget ทั้งลิสต์พร้อมกัน</td><td><code>ListView.builder</code> (14.16)</td></tr>
+<tr><td>คำนวณหนักใน <code>build</code></td><td>ย้ายออกไปคำนวณครั้งเดียว</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. Memory — หาว่าอะไรไม่ถูกเก็บ</h2><p>วิธีที่ได้ผลที่สุดคือ<strong>เทียบสองภาพ</strong></p><pre class="code-vs"><code>1. เปิดจอที่สงสัย แล้วกดปุ่มถ่ายภาพหน่วยความจำ
+2. เปิดปิดจอนั้นสิบครั้ง
+3. กดปุ่ม GC เพื่อบังคับให้เก็บขยะ
+4. ถ่ายภาพอีกครั้ง แล้วเทียบ</code></pre><table><thead><tr><th>สิ่งที่เห็น</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td>จำนวน <code>_TaskScreenState</code> เพิ่มขึ้นสิบตัว</td><td><strong>รั่ว</strong> — จอเก่าไม่ถูกเก็บ (12.8)</td></tr>
+<tr><td>จำนวนเท่าเดิม</td><td>ปกติ</td></tr>
+<tr><td>ขนาดรวมโตขึ้นเรื่อย ๆ</td><td>อาจเป็นแคชรูป — ตรวจที่ <code>imageCache</code> (13.7)</td></tr>
+</tbody></table><div class="note">การรั่วแบบนี้ <code>fakeAsync</code> จับได้บางส่วน (14.11) แต่การรั่วที่เกิดจากการถืออ้างอิงไว้โดยไม่ตั้งใจ ต้องดูที่นี่</div></section>
+
+<section id="section-7"><h2>7. Network — ดูว่ายิงอะไรไปบ้าง</h2><table><thead><tr><th>ใช้ตรวจ</th><th>สิ่งที่มักพบ</th></tr></thead><tbody>
+<tr><td>ยิงถี่เกิน</td><td>ตัวจับเวลาซ้อนกัน (12.11)</td></tr>
+<tr><td>ยิงซ้ำ</td><td>ลืมกันกดซ้ำ (4.9)</td></tr>
+<tr><td>ยิงตอนอยู่พื้นหลัง</td><td>ไม่ได้หยุดตอน <code>paused</code> (12.1)</td></tr>
+<tr><td>คำขอที่ช้าผิดปกติ</td><td>endpoint ที่ต้องบอกทีมหลังบ้าน</td></tr>
+<tr><td>ขนาดของคำตอบ</td><td>โหลดข้อมูลเกินความจำเป็น</td></tr>
+</tbody></table><p>แท็บนี้ตอบคำถามที่ 12.11 แบบฝึกหัดถามไว้ได้ตรง ๆ — “แอปยิงคำขอกี่ครั้งต่อนาที” และ “ยิงตอนที่ไม่ควรยิงหรือเปล่า”</p><p>สิ่งที่ควรทำคู่กันคือ<strong>บันทึกลง log ของเราเองด้วย</strong> ตามที่ 7.17 วางไว้ เพราะ DevTools ดูได้เฉพาะตอนที่ต่ออยู่ ส่วน log ที่เก็บไว้ในเครื่องดูย้อนหลังได้จากหน้างาน</p></section>
+
+<section id="section-8"><h2>8. เครื่องมือที่ไม่ต้องเปิด DevTools</h2><pre class="code-vs"><code>// พิมพ์ต้นไม้ widget ทั้งหมด
+debugDumpApp();
+
+// พิมพ์ต้นไม้ของการวาด — ใช้ตอน layout แปลก
+debugDumpRenderTree();
+
+// วาดเส้นขอบของทุก widget
+debugPaintSizeEnabled = true;
+
+// วาดเส้นแสดงพื้นที่กด
+debugPaintPointersEnabled = true;
+
+// พิมพ์ทุกครั้งที่มีการสร้าง widget ใหม่
+debugPrintRebuildDirtyWidgets = true;</code></pre><table><thead><tr><th>ตัวไหนใช้เมื่อ</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>debugDumpApp()</code></td><td>หา widget ไม่เจอในเทสต์ (14.8)</td></tr>
+<tr><td><code>debugPaintSizeEnabled</code></td><td>ข้อความถูกตัด ไม่รู้ว่ากล่องไหนบีบ (11.4)</td></tr>
+<tr><td><code>debugPrintRebuildDirtyWidgets</code></td><td>สงสัยว่าวาดใหม่บ่อยเกิน (14.15)</td></tr>
+</tbody></table><p>ตัวสุดท้ายพิมพ์ออกมาเยอะมาก แต่ใช้ได้ดีเมื่อจำกัดขอบเขต — เปิดก่อนกดปุ่มที่สงสัย แล้วปิดทันที</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ตัวเลขประสิทธิภาพแย่มาก</td><td>วัดในโหมด debug</td><td>ใช้ <code>--profile</code></td></tr>
+<tr><td>แท็บส่วนใหญ่ว่างเปล่า</td><td>รันในโหมด release</td><td>ใช้ profile หรือ debug</td></tr>
+<tr><td>วัดบน emulator แล้วเชื่อผล</td><td>emulator เร็วกว่าเครื่องจริงมาก</td><td>วัดบน PDA จริง</td></tr>
+<tr><td>เห็นการรั่วแต่หาต้นตอไม่เจอ</td><td>ไม่ได้กด GC ก่อนถ่ายภาพ</td><td>กด GC ก่อน</td></tr>
+<tr><td>Highlight Repaints กะพริบทั้งจอตลอด</td><td>อาจเป็นเรื่องปกติของ animation</td><td>ดูตอนที่ไม่มี animation</td></tr>
+<tr><td>ลืมปิด flag ที่เปิดไว้</td><td>เขียนใน <code>main</code> แล้วลืม</td><td>ครอบด้วย <code>if (kDebugMode)</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>ผู้ใช้บอกว่า “จอรายการงานกระตุกตอนเลื่อน แต่จออื่นปกติ” ไล่หาสาเหตุอย่างเป็นระบบ</p><details><summary>แนวคำตอบ</summary><p>ห้าขั้น เรียงจากถูกที่สุดไปแพงที่สุด</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ตัดอะไรออกได้</th></tr></thead><tbody>
+<tr><td>1</td><td>รันบนเครื่องจริงในโหมด profile แล้วเลื่อนดู</td><td>ยืนยันว่ากระตุกจริง ไม่ใช่เฉพาะโหมด debug</td></tr>
+<tr><td>2</td><td>เปิด Performance ดูว่าเฟรมไหนเกิน 16ms</td><td>รู้ว่าเป็นเรื่องของ Dart หรือของการวาด</td></tr>
+<tr><td>3</td><td>เปิด Highlight Repaints</td><td>รู้ว่าส่วนไหนวาดใหม่บ่อย</td></tr>
+<tr><td>4</td><td>ดู Memory ตอนเลื่อน</td><td>รู้ว่ามีการคลายรูปตอนเลื่อนไหม</td></tr>
+<tr><td>5</td><td>CPU Profiler</td><td>รู้ว่าฟังก์ชันไหนกินเวลา</td></tr>
+</tbody></table><p><strong>สาเหตุที่เป็นไปได้ เรียงตามความน่าจะเป็น</strong></p><table><thead><tr><th>สาเหตุ</th><th>เห็นได้จาก</th><th>แก้</th></tr></thead><tbody>
+<tr><td>รูปย่อไม่มี <code>cacheWidth</code></td><td>Memory โตพรวดตอนเลื่อน</td><td>ใส่ (13.7)</td></tr>
+<tr><td>ใช้ <code>Column</code> แทน <code>ListView.builder</code></td><td>เฟรมแรกช้ามาก แต่หลังจากนั้นปกติ</td><td>14.16</td></tr>
+<tr><td>สร้าง <code>Future</code> ใน <code>build</code></td><td>Highlight Repaints กะพริบตอนเลื่อน</td><td>13.6</td></tr>
+<tr><td>คำนวณหนักใน <code>itemBuilder</code></td><td>CPU Profiler ชี้ฟังก์ชันนั้น</td><td>คำนวณล่วงหน้า</td></tr>
+<tr><td>ไม่ได้ตั้ง <code>itemExtent</code></td><td>เวลาไปอยู่ที่ layout</td><td>ตั้งถ้าทุกแถวสูงเท่ากัน</td></tr>
+</tbody></table><p><strong>ข้อสังเกตที่สำคัญกว่าเครื่องมือ:</strong> คำว่า “จออื่นปกติ” เป็นข้อมูลที่มีค่ามาก — มันบอกว่าปัญหาไม่ได้อยู่ที่ธีม การนำทาง หรือเครื่อง แต่อยู่ที่สิ่งที่จอนี้ทำต่างจากจออื่น</p><p>วิธีที่เร็วที่สุดบางครั้งไม่ใช่การเปิดเครื่องมือ แต่คือ<strong>เปิดโค้ดของจอนี้เทียบกับจอที่ปกติ แล้วดูว่าต่างกันตรงไหน</strong></p><p>และเมื่อเจอสาเหตุแล้ว ให้เขียนเทสต์ที่จับได้ก่อนแก้ — ซึ่ง 14.15 กับ 14.16 จะแสดงว่าทำอย่างไร</p></details></section>
+
+<section id="section-11"><h2>11. สรุป</h2><div class="success"><ul><li>เทสต์จับตรรกะได้ แต่จับความช้าบนเครื่องจริงไม่ได้</li><li>วัดในโหมด profile บนเครื่องจริงเท่านั้น</li><li>Highlight Repaints ให้ข้อมูลมากที่สุดต่อการกดปุ่มเดียว</li><li>Memory ใช้เทียบภาพก่อนและหลัง เพื่อหาการรั่ว</li><li>Network ตอบว่ายิงถี่เกินหรือยิงตอนไม่ควร</li><li>บางครั้งการเทียบโค้ดสองจอเร็วกว่าการเปิดเครื่องมือ</li></ul></div><p><strong>บทหน้า:</strong> วัดการวาดใหม่ให้เป็นตัวเลขที่เทสต์ตรวจได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

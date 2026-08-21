@@ -1,15 +1,135 @@
-<div class="note"><strong>JSON test คือ executable contract:</strong> fixture ต้องสะท้อน payload .NET จริงทั้ง happy path และข้อมูลสกปรก ไม่ใช่สร้างเฉพาะ object ที่ parser รับได้แน่นอน</div>
-<section><h2>1. Happy-path fixture</h2><pre class="code-vs"><code>test('parses receiving line from API contract', () {
-  final json = fixture('receiving_line.json');
-  final line = ReceivingLine.fromJson(jsonDecode(json));
-  expect(line.partCode, 'P-001');
-  expect(line.qty, 5);
-});</code></pre></section>
-<section><h2>2. Missing, null และ wrong type</h2><p>ทดสอบ required field หาย, nullable field เป็น null, number มาเป็น int/double/string ตาม contract จริง และ list/object ผิดชนิด Parser ต้อง fail แบบมี path หรือใช้ fallback ที่ตัดสินใจแล้ว ไม่ cast จน error คลุมเครือ</p></section>
-<section><h2>3. Unknown fields</h2><p>โดยทั่วไป client ควร ignore field ใหม่เพื่อ forward compatibility แต่ field สำคัญที่ rename/hide ต้องทำ contract versioning Test payload ที่มี extra field เพื่อกัน parser เข้มเกินเหตุ</p></section>
-<section><h2>4. Enum/status</h2><pre class="code-vs"><code>expect(TaskStatusCodec.parse('OPEN'), TaskStatus.open);
-expect(TaskStatusCodec.parse('new-server-value'), TaskStatus.unknown);</code></pre><p>unknown status ไม่ควร crash ทั้งรายการ แต่อาจต้อง block action และส่ง telemetry</p></section>
-<section><h2>5. Date/time</h2><p>ทดสอบ UTC <code>Z</code>, offset <code>+07:00</code>, fractional seconds และ invalid date ตกลงว่าชั้น model เก็บ UTC หรือ instant อย่างไร อย่าให้ timezone ของเครื่อง CI เปลี่ยน expected</p></section>
-<section><h2>6. Round-trip ไม่พอ</h2><p><code>fromJson(toJson(object))</code> อาจผ่านแม้ทั้งสองฝั่งสะกด key ผิดเหมือนกัน ต้องมี golden JSON ที่มาจาก OpenAPI/.NET integration response และ assert key outbound แยกต่างหาก</p></section>
-<section><h2>7. Contract drift</h2><p>เก็บ fixture พร้อม schema/version และให้ backend integration test serialize DTO เดียวกัน หรือ generate schema/OpenAPI snapshot ที่ review ได้ เมื่อ payload เปลี่ยน CI ฝั่งใดฝั่งหนึ่งต้องเตือนก่อน deploy</p></section>
-<section><h2>8. Security cases</h2><div class="success">เพิ่ม string ยาวมาก, Unicode/Thai, HTML-like text, null ใน list, duplicate IDs และเลขเกินช่วง การ parse ไม่ควรรัน code หรือเอาข้อความ server ไปเป็น trusted HTML/log โดยไม่กรอง</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เก็บไฟล์ตัวอย่างจากเซิร์ฟเวอร์จริงแล้วทำเป็นเทสต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.4, Part 6 (การอ่าน JSON)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำให้สัญญากับเซิร์ฟเวอร์เป็นสิ่งที่ตรวจได้อัตโนมัติ แทนที่จะเป็นสิ่งที่ต้องเชื่อกัน</div>
+
+<section><h2>1. ปัญหาที่ 14.4 ทิ้งไว้</h2><p><code>MockClient</code> ตอบตามที่เราเขียนไว้ ซึ่งแปลว่าเทสต์ทั้งหมด<strong>ตรวจความเข้าใจของเราเอง</strong> ถ้าเข้าใจผิดตั้งแต่ต้น เทสต์จะเขียวและแอปจะพัง</p><pre class="code-vs"><code>// เราคิดว่าเซิร์ฟเวอร์ส่งแบบนี้
+MockClient((_) async =&gt; http.Response('{"items": [...]}', 200))
+
+// แต่จริง ๆ มันส่ง {"data": {"tasks": [...]}}
+// เทสต์เขียว แอปพัง</code></pre><p>ทางแก้คือใช้<strong>ข้อมูลจริง</strong>แทนข้อมูลที่เราแต่ง</p></section>
+
+<section><h2>2. ไฟล์ตัวอย่างที่คัดลอกมาจากของจริง</h2><pre class="code-vs"><code>test/fixtures/
+  tasks_page.json           ← คัดลอกจากคำตอบจริงของเซิร์ฟเวอร์
+  tasks_page_pascal.json    ← จากระบบเก่าที่ส่ง PascalCase
+  inbound_order.json</code></pre><pre class="code-vs"><code>/// อ่านไฟล์ตัวอย่างที่เก็บไว้ใน test/fixtures
+///
+/// เก็บเป็นไฟล์แยก ไม่ใช่สตริงในเทสต์ เพราะเป็น**สำเนาของสิ่งที่เซิร์ฟเวอร์
+/// ส่งมาจริง** — คัดลอกจาก log ได้ตรง ๆ และอัปเดตได้โดยไม่ต้องแก้โค้ด
+Map&lt;String, dynamic&gt; loadFixture(String name) {
+  final file = File('test/fixtures/$name');
+  return jsonDecode(file.readAsStringSync()) as Map&lt;String, dynamic&gt;;
+}</code></pre><table><thead><tr><th>เก็บเป็นไฟล์</th><th>เขียนเป็นสตริงในเทสต์</th></tr></thead><tbody>
+<tr><td>คัดลอกจาก log มาวางได้ตรง ๆ</td><td>ต้อง escape เครื่องหมายคำพูด</td></tr>
+<tr><td>อัปเดตได้โดยไม่แตะโค้ด</td><td>ต้องแก้ไฟล์เทสต์</td></tr>
+<tr><td>ส่งให้ทีมหลังบ้านดูได้ว่า “นี่คือสิ่งที่เราคาด”</td><td>ต้องคัดลอกออกมาก่อน</td></tr>
+<tr><td>diff อ่านรู้เรื่องเมื่อสัญญาเปลี่ยน</td><td>diff รกเพราะปนกับโค้ด</td></tr>
+</tbody></table><p>แถวสุดท้ายมีค่ามาก — วันที่ทีมหลังบ้านเปลี่ยนสัญญา การอัปเดตไฟล์ตัวอย่างจะทำให้เห็นชัดใน pull request ว่าอะไรเปลี่ยนไปบ้าง</p></section>
+
+<section><h2>3. เทสต์สัญญาที่ง่ายที่สุด</h2><pre class="code-vs"><code>test('ไฟล์ตัวอย่างที่เก็บไว้ ต้องอ่านได้ด้วยโมเดลปัจจุบัน', () {
+  final json = loadFixture('tasks_page.json');
+  final items = requireList(json, 'items');
+
+  final tasks = [
+    for (var i = 0; i &lt; items.length; i++)
+      TaskDto.fromJson(requireMap(items[i], 'items[$i]')),
+  ];
+
+  expect(tasks, isNotEmpty);
+  for (final task in tasks) {
+    expect(task.id.trim(), isNotEmpty);
+    expect(task.quantity, greaterThanOrEqualTo(0));
+  }
+});</code></pre><p>เทสต์นี้จับได้สองอย่างที่ <code>MockClient</code> จับไม่ได้</p><table><thead><tr><th>จับได้</th><th>อย่างไร</th></tr></thead><tbody>
+<tr><td>เราแก้โมเดลแล้วอ่านข้อมูลจริงไม่ได้</td><td>ไฟล์ตัวอย่างไม่เปลี่ยน แต่โค้ดเปลี่ยน</td></tr>
+<tr><td>เซิร์ฟเวอร์เปลี่ยนสัญญา</td><td>เมื่ออัปเดตไฟล์ตัวอย่างแล้วเทสต์ล้ม</td></tr>
+</tbody></table><div class="note">แถวที่สองต้องมีคนอัปเดตไฟล์ ซึ่งไม่เกิดเอง — จึงควรมีขั้นตอนที่ทำให้เกิด เช่นให้ CI ดึงคำตอบจริงจากเซิร์ฟเวอร์ทดสอบมาเทียบกับไฟล์ที่เก็บไว้</div></section>
+
+<section><h2>4. รองรับสองรูปแบบด้วยตัวอ่านชุดเดียว</h2><pre class="code-vs"><code>test('รูปแบบ PascalCase ที่ระบบเก่าส่งมา ต้องอ่านได้ด้วยตัวอ่านชุดเดียวกัน', () {
+  // ไฟล์นี้มาจากระบบเก่าที่ส่งชื่อฟิลด์เป็น PascalCase ทั้งหมด
+  // โค้ดที่อ่านเป็นชุดเดียวกับที่อ่าน camelCase ไม่มีสาขาแยก (6.6)
+  final json = loadFixture('tasks_page_pascal.json');
+  final items = requireList(json, 'items');
+
+  final tasks = [
+    for (var i = 0; i &lt; items.length; i++)
+      TaskDto.fromJson(requireMap(items[i], 'items[$i]')),
+  ];
+
+  expect(tasks.single.id, 'T-101');
+  expect(tasks.single.quantity, 5);
+  expect(tasks.single.palletCode, 'PAL-0201');
+});</code></pre><p>สังเกตว่าโค้ดที่อ่านทั้งสองไฟล์<strong>เหมือนกันทุกบรรทัด</strong> — ไม่มี <code>if</code> ที่ตรวจว่าเป็นรูปแบบไหน เพราะ <code>json_read.dart</code> จัดการให้ที่เดียว</p><pre class="code-vs"><code>Object? _raw(Map&lt;String, dynamic&gt; json, String key) {
+  if (json.containsKey(key)) return json[key];
+  final pascal = key[0].toUpperCase() + key.substring(1);
+  if (json.containsKey(pascal)) return json[pascal];
+  return _absent;
+}</code></pre><p>ไฟล์ตัวอย่างสองไฟล์คือสิ่งที่พิสูจน์ว่ากลไกนี้ทำงานจริง</p></section>
+
+<section><h2>5. เทสต์ที่ตรวจว่าสัญญาที่หายไปจะดัง</h2><pre class="code-vs"><code>test('ฟิลด์ที่หายไปจากไฟล์ตัวอย่าง ต้องทำให้เทสต์ล้ม ไม่ใช่ผ่านเงียบ ๆ', () {
+  // จำลองว่าเซิร์ฟเวอร์รุ่นใหม่เลิกส่ง quantity
+  final json = loadFixture('tasks_page.json');
+  final items = requireList(json, 'items');
+  final broken = Map&lt;String, dynamic&gt;.from(requireMap(items.first, 'x'))
+    ..remove('quantity')
+    ..remove('Quantity');
+
+  expect(
+    () =&gt; TaskDto.fromJson(broken),
+    throwsA(isA&lt;ContractException&gt;()),
+    reason: 'สัญญาที่หายไปต้องดัง ไม่ใช่กลายเป็นศูนย์เงียบ ๆ',
+  );
+});</code></pre><p>เทสต์นี้ทดสอบ<strong>พฤติกรรมเมื่อสัญญาถูกละเมิด</strong> ซึ่งเป็นเรื่องที่ Part 6 ใช้เวลาทั้ง Part ตัดสินใจ</p><p>ถ้าวันหนึ่งมีคนเปลี่ยน <code>requireInt</code> เป็นอ่านแล้วคืน 0 เมื่อไม่มีค่า เทสต์นี้จะล้ม — ซึ่งเป็นการเตือนที่ถูกต้อง เพราะการเปลี่ยนแบบนั้นทำให้ของหายในคลังโดยไม่มีใครรู้</p></section>
+
+<section><h2>6. ระดับที่สูงขึ้น — ยิงเซิร์ฟเวอร์จริง</h2><p>เทสต์ที่ยิงเซิร์ฟเวอร์ทดสอบจริงคือสิ่งเดียวที่จับ “ฝั่งเซิร์ฟเวอร์เปลี่ยน” ได้</p><pre class="code-vs"><code>@Tags(['live'])
+library;
+
+void main() {
+  // รันเฉพาะเมื่อสั่ง: flutter test --tags live
+  final baseUrl = Platform.environment['WMS_TEST_BASE_URL'];
+
+  test('สัญญาของ mobile_tasks ยังตรงกับโมเดล', () async {
+    final api = ApiClient(baseUrl: baseUrl!);
+    final json = await api.getJson('/api/WMS/mobile_tasks');
+
+    // อ่านด้วยโมเดลจริง ถ้าสัญญาเปลี่ยนจะโยน ContractException
+    final items = requireList(json, 'items');
+    for (var i = 0; i &lt; items.length; i++) {
+      TaskDto.fromJson(requireMap(items[i], 'items[$i]'));
+    }
+  }, skip: baseUrl == null ? 'ไม่ได้ตั้ง WMS_TEST_BASE_URL' : null);
+}</code></pre><table><thead><tr><th>รายละเอียด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>@Tags(['live'])</code></td><td>ไม่รันปนกับเทสต์ปกติ ซึ่งต้องรันได้ทุกที่ทุกเวลา</td></tr>
+<tr><td>อ่าน URL จาก environment</td><td>แต่ละคนชี้เซิร์ฟเวอร์คนละตัวได้</td></tr>
+<tr><td><code>skip</code> เมื่อไม่มีค่า</td><td>คนที่ไม่มีเซิร์ฟเวอร์ยังรันเทสต์ที่เหลือได้</td></tr>
+<tr><td>ไม่ตรวจค่าเฉพาะเจาะจง</td><td>ข้อมูลบนเซิร์ฟเวอร์ทดสอบเปลี่ยนได้ ตรวจแค่ว่า<strong>อ่านได้</strong></td></tr>
+</tbody></table><div class="note">แถวสุดท้ายสำคัญ — เทสต์ที่ตรวจว่า “ต้องมีงานสามรายการ” จะล้มทุกครั้งที่มีคนไปกดในเซิร์ฟเวอร์ทดสอบ แล้วจะไม่มีใครเชื่อถือมันอีก</div></section>
+
+<section><h2>7. ทำให้ไฟล์ตัวอย่างไม่ล้าสมัย</h2><p>ปัญหาที่แท้จริงของวิธีนี้คือ<strong>ไม่มีอะไรบังคับให้อัปเดตไฟล์</strong> ทางแก้ที่ได้ผลจริง</p><table><thead><tr><th>วิธี</th><th>ราคา</th></tr></thead><tbody>
+<tr><td>เขียนสคริปต์ที่ดึงคำตอบจริงมาทับไฟล์ แล้วดู diff</td><td>ต่ำ ทำครั้งเดียวใช้ตลอด</td></tr>
+<tr><td>ให้ CI รันเทสต์แบบ live สัปดาห์ละครั้ง</td><td>กลาง</td></tr>
+<tr><td>ให้ทีมหลังบ้านส่งไฟล์ตัวอย่างมาพร้อมทุกการเปลี่ยนสัญญา</td><td>ต้องตกลงกันเป็นกระบวนการ</td></tr>
+</tbody></table><pre class="code-vs"><code># tool/refresh_fixtures.sh
+curl -s "$WMS_TEST_BASE_URL/api/WMS/mobile_tasks" \
+  | python -m json.tool &gt; test/fixtures/tasks_page.json
+git diff --stat test/fixtures/</code></pre><p>รันก่อนปล่อยรุ่น แล้วถ้า diff ว่าง แปลว่าสัญญายังเหมือนเดิม ถ้าไม่ว่าง แปลว่ามีอะไรเปลี่ยนที่ต้องดู</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์เขียวแต่แอปอ่านข้อมูลจริงไม่ได้</td><td>ข้อมูลในเทสต์เป็นของที่เราแต่งเอง</td><td>ใช้ไฟล์ที่คัดลอกจากของจริง</td></tr>
+<tr><td>ไฟล์ตัวอย่างล้าสมัยมาหนึ่งปี</td><td>ไม่มีกระบวนการอัปเดต</td><td>ทำสคริปต์ดึงมาทับ</td></tr>
+<tr><td>เทสต์ live ล้มบ่อยจนไม่มีใครสนใจ</td><td>ตรวจค่าเฉพาะเจาะจงบนข้อมูลที่เปลี่ยนได้</td><td>ตรวจแค่ว่าอ่านได้</td></tr>
+<tr><td>เทสต์ปกติรันไม่ได้เพราะไม่มีเซิร์ฟเวอร์</td><td>ไม่ได้แยก tag</td><td>ใช้ <code>@Tags</code> และ <code>skip</code></td></tr>
+<tr><td>ไฟล์ตัวอย่างอ่านไม่ออก</td><td>เป็นบรรทัดเดียวยาว</td><td>จัดรูปแบบก่อนเก็บ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมหลังบ้านบอกว่าจะเพิ่มฟิลด์ <code>priority</code> ใน <code>mobile_tasks</code> สัปดาห์หน้า</p><ol><li>ต้องทำอะไรกับเทสต์ตอนนี้</li><li>ถ้าเขาเพิ่มแล้วแอปรุ่นเก่ายังใช้อยู่ จะเป็นอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ยังไม่ต้องทำอะไร</strong> — และนี่คือคำตอบที่ถูกแม้จะดูเหมือนขี้เกียจ</p><p>การเพิ่มฟิลด์ใหม่ที่แอปไม่ได้อ่าน ไม่กระทบอะไรเลย เพราะ <code>json_read.dart</code> อ่านเฉพาะคีย์ที่ขอ ส่วนคีย์อื่นถูกละไว้</p><p>สิ่งที่ควรทำคือ<strong>ถามว่าฟิลด์นี้บังคับหรือไม่</strong> เพราะคำตอบเปลี่ยนสิ่งที่ต้องทำ</p><table><thead><tr><th>ถ้า</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>เพิ่มฟิลด์ใหม่เฉย ๆ</td><td>ไม่ต้องทำอะไร อ่านเมื่อจะใช้</td></tr>
+<tr><td>ฟิลด์เดิมจะหายไปด้วย</td><td>ต้องแก้โมเดลก่อนที่เซิร์ฟเวอร์จะเปลี่ยน</td></tr>
+<tr><td>ความหมายของฟิลด์เดิมเปลี่ยน</td><td>อันตรายที่สุด เพราะไม่มีอะไรจับได้เลย</td></tr>
+</tbody></table><p>แถวสุดท้ายคือกรณีที่เทสต์สัญญาก็ช่วยไม่ได้ — เช่นถ้า <code>quantity</code> เปลี่ยนจาก “จำนวนที่ต้องหยิบ” เป็น “จำนวนที่หยิบไปแล้ว” ทุกอย่างจะยังอ่านได้และเทสต์จะเขียว แต่ความหมายผิดหมด</p><p>ป้องกันได้ทางเดียวคือ<strong>คุยกัน</strong> ซึ่งเป็นเหตุผลที่ 12.2 ยืนยันว่าต้องตกลงสัญญาให้ชัดก่อนเขียน</p><p><strong>2.</strong> แอปรุ่นเก่าจะทำงานได้ปกติ เพราะไม่ได้อ่านฟิลด์นั้น — นี่คือเหตุผลที่การ<strong>เพิ่ม</strong>ฟิลด์ปลอดภัยกว่าการ<strong>ลบ</strong>หรือ<strong>เปลี่ยนความหมาย</strong>มาก</p><table><thead><tr><th>การเปลี่ยน</th><th>แอปรุ่นเก่า</th></tr></thead><tbody>
+<tr><td>เพิ่มฟิลด์ใหม่</td><td>ไม่กระทบ</td></tr>
+<tr><td>ทำฟิลด์ที่บังคับให้เป็นทางเลือกได้</td><td>พังถ้าแอปเรียก <code>require</code></td></tr>
+<tr><td>ลบฟิลด์</td><td>พังทันที</td></tr>
+<tr><td>เปลี่ยนชนิด</td><td>พังทันที</td></tr>
+<tr><td>เปลี่ยนความหมาย</td><td><strong>ไม่พัง แต่ผิด</strong></td></tr>
+</tbody></table><p>ควรเสนอให้ทีมใช้กฎนี้เป็นข้อตกลง — <strong>เพิ่มได้เสมอ ลบต้องรอให้แอปทุกเครื่องอัปเดตก่อน</strong> ซึ่งเป็นกฎเดียวกับที่ระบบที่มีผู้ใช้หลายรุ่นใช้กัน</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ข้อมูลที่เราแต่งเอง ทดสอบความเข้าใจของเราเอง</li><li>เก็บไฟล์ตัวอย่างที่คัดลอกจากคำตอบจริง</li><li>ไฟล์แยกดีกว่าสตริงในเทสต์ เพราะ diff อ่านรู้เรื่อง</li><li>เทสต์ที่ยิงเซิร์ฟเวอร์จริงต้องแยก tag และ skip ได้</li><li>เทสต์ live ตรวจแค่ว่าอ่านได้ อย่าตรวจค่าเฉพาะเจาะจง</li><li>ต้องมีกระบวนการที่ทำให้ไฟล์ตัวอย่างไม่ล้าสมัย</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบ store ซึ่งเป็นที่ที่ตรรกะส่วนใหญ่อยู่</p></section>

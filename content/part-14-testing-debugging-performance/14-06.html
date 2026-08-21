@@ -1,20 +1,134 @@
-<div class="note"><strong>ทดสอบ Store ผ่าน state ที่สังเกตได้:</strong> ให้ fake repository ควบคุม I/O แล้ว assert loading/data/error, notification และ race behavior ไม่เรียก private method หรือพึ่ง widget</div>
-<section><h2>1. ตัวอย่าง WarehouseStore</h2><p><code>wms_absolute_mobile</code> inject receiving/tasks/inventory/cycle-count repositories เข้า <code>WarehouseStore extends ChangeNotifier</code> ทำให้ <code>flow_navigation_test.dart</code> เปิด line, advance, back และตรวจการล้าง state ได้ใน pure test</p></section>
-<section><h2>2. สังเกต notifications</h2><pre class="code-vs"><code>var notifications = 0;
-store.addListener(() =&gt; notifications++);
-await store.load();
-expect(store.loading, isFalse);
-expect(store.items, hasLength(2));
-expect(notifications, greaterThanOrEqualTo(2));</code></pre><p>อย่าล็อกจำนวน exact หาก contract ไม่กำหนด เพราะ batch/refactor อาจลด notification โดย behavior เท่าเดิม</p></section>
-<section><h2>3. Loading transition</h2><pre class="code-vs"><code>final pending = Completer&lt;List&lt;Task&gt;&gt;();
-repo.nextFetch = pending.future;
-final operation = store.load();
-expect(store.loading, isTrue);
-pending.complete([task]);
-await operation;
-expect(store.loading, isFalse);</code></pre></section>
-<section><h2>4. Error และข้อมูลเดิม</h2><p>กำหนด policy ว่า refresh ล้มแล้วคงข้อมูลเดิมพร้อม banner หรือ clear list Test ต้องยืนยันทั้ง error type, loading reset และ state เดิม ไม่เพียง expect ว่า future throw</p></section>
-<section><h2>5. Async race</h2><p>สร้าง Completer สองตัว: request B เริ่มทีหลังแต่จบก่อน แล้ว A จบทีหลัง ตรวจว่า generation/cancel logic ไม่ให้ A ทับ B นี่จับ bug ที่ happy-path test ไม่เห็น</p></section>
-<section><h2>6. Dispose</h2><p>ใช้ <code>addTearDown(store.dispose)</code> ทุก test และพิสูจน์ timer/subscription ถูกหยุด ห้าม notify หลัง dispose Store ที่เริ่ม polling ใน constructor ทำ test ยาก—แยก <code>start()</code> หรือ inject scheduler</p></section>
-<section><h2>7. Business navigation state</h2><p>ตัวอย่างจริงตรวจว่า Back ลด step ก่อน, exit เก็บ resumable draft และ bottom navigation ล้าง receiving state นี่คือ logic ที่เหมาะกับ Store test เพราะไม่ต้อง render UI แต่ครอบคลุม workflow สำคัญ</p></section>
-<section><h2>8. Store test matrix</h2><div class="success">initial, success, empty, failure, retry, double-submit, stale response, dispose mid-flight, navigation reset/resume และ notification หลังทุก public command โดย fixture แต่ละ test แยกขาดจากกัน</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่านเทสต์ของ store ทั้งสี่ไฟล์ใน lab</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.3, 9.7 (store)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทดสอบ store ให้ครอบคลุมสิ่งที่สำคัญ โดยไม่ต้องสร้าง widget แม้แต่ตัวเดียว</div>
+
+<section><h2>1. ทำไม store คือที่ที่คุ้มที่สุด</h2><table><thead><tr><th>store ถือ</th><th>ซึ่งคือที่ที่บั๊กอยู่</th></tr></thead><tbody>
+<tr><td>ลำดับของสถานะ</td><td>วงหมุนค้าง ปุ่มกดไม่ได้</td></tr>
+<tr><td>การกันกดซ้ำ</td><td>คำสั่งซ้ำ ของหายของเกิน</td></tr>
+<tr><td>การจัดการคำตอบที่มาไม่เรียง</td><td>ข้อมูลเก่าทับข้อมูลใหม่</td></tr>
+<tr><td>การแปลความล้มเหลวเป็นสิ่งที่ผู้ใช้ทำต่อได้</td><td>ข้อความที่ไม่ช่วยอะไร</td></tr>
+</tbody></table><p>และทั้งหมดนี้ทดสอบได้<strong>โดยไม่ต้องมี widget</strong> เพราะ store ไม่ import <code>material.dart</code> (9.7)</p><pre class="code-vs"><code>test('เหตุการณ์เก่าที่มาถึงช้า ต้องไม่ทับของใหม่', () async {
+  repository.result = [task('T-1', version: 5)];
+  await store.start();
+
+  inner.emit(const TaskCompleted(taskId: 'T-1', version: 3));
+  await Future&lt;void&gt;.delayed(Duration.zero);
+
+  expect(store.tasks.single.status, LiveTaskStatus.waiting);
+});</code></pre><p>เจ็ดบรรทัด รันในไมโครวินาที และทดสอบสิ่งที่ทดสอบด้วยมือไม่มีทางทำได้</p></section>
+
+<section><h2>2. สี่กลุ่มที่ควรมีในทุก store</h2><table><thead><tr><th>กลุ่ม</th><th>ตัวอย่างจาก lab</th></tr></thead><tbody>
+<tr><td>เส้นทางที่สำเร็จ</td><td>โหลดแล้วได้ข้อมูล</td></tr>
+<tr><td>เส้นทางที่ล้มเหลว</td><td>โหลดล้มเหลวแล้วเก็บข้อความไว้แสดง</td></tr>
+<tr><td>กฎที่ต้องจริงเสมอ</td><td>มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ</td></tr>
+<tr><td>จังหวะเวลา</td><td>กดซ้ำ คำตอบมาไม่เรียง ยกเลิกกลางทาง</td></tr>
+</tbody></table><p>กลุ่มที่สามกับสี่คือที่ที่ค่าอยู่ เพราะกลุ่มแรกสองกลุ่มมักถูกทดสอบด้วยมืออยู่แล้วตอนพัฒนา</p></section>
+
+<section><h2>3. ทดสอบว่ามีการประกาศ ไม่ใช่แค่ค่าเปลี่ยน</h2><pre class="code-vs"><code>test('สลับแล้วประกาศให้หน้าจอวาดใหม่', () async {
+  var notified = 0;
+  controller.addListener(() =&gt; notified++);
+
+  await controller.toggle();
+  expect(notified, 1);
+  expect(controller.isThai, isTrue);
+});</code></pre><p>สองบรรทัดสุดท้ายทดสอบคนละเรื่อง — <code>isThai</code> ตรวจว่าค่าเปลี่ยน ส่วน <code>notified</code> ตรวจว่า<strong>หน้าจอจะรู้</strong></p><p>ค่าที่เปลี่ยนโดยไม่ประกาศ คือบั๊กที่ผู้ใช้เห็นเป็น “กดแล้วไม่มีอะไรเกิดขึ้น” และเป็นบั๊กที่หาสาเหตุยากเพราะข้อมูลใน store ถูกต้องทุกอย่าง</p><pre class="code-vs"><code>test('เลือกภาษาเดิมซ้ำ ต้องไม่ประกาศ', () async {
+  var notified = 0;
+  controller.addListener(() =&gt; notified++);
+
+  await controller.setLanguage(AppLanguage.english);
+  expect(notified, 0);
+});</code></pre><p>ด้านกลับก็สำคัญ — ประกาศทั้งที่ไม่มีอะไรเปลี่ยน ทำให้ทั้งจอวาดใหม่ฟรี ๆ (14.15)</p></section>
+
+<section><h2>4. ทดสอบลำดับของสถานะ</h2><pre class="code-vs"><code>test('ตรวจแล้วประกาศสองครั้ง คือกำลังตรวจ และผลลัพธ์', () async {
+  final states = &lt;ServerStatus&gt;[];
+  store.addListener(() =&gt; states.add(store.status));
+
+  await store.refreshStatus(client: ...);
+
+  // ต้องเห็น checking ด้วย ไม่งั้นผู้ใช้กดปุ่มแล้วเหมือนไม่มีอะไรเกิดขึ้น
+  expect(states, [ServerStatus.checking, ServerStatus.connected]);
+});</code></pre><p>เก็บสถานะทุกครั้งที่ประกาศลงลิสต์ แล้วตรวจทั้งลิสต์ — วิธีนี้จับ<strong>สถานะระหว่างทาง</strong>ได้ ซึ่งการตรวจค่าสุดท้ายอย่างเดียวมองไม่เห็น</p><table><thead><tr><th>ตรวจแค่ค่าสุดท้าย</th><th>ตรวจทั้งลำดับ</th></tr></thead><tbody>
+<tr><td>รู้ว่าจบถูก</td><td>รู้ว่าระหว่างทางถูกด้วย</td></tr>
+<tr><td>ไม่รู้ว่าผู้ใช้เห็นอะไรระหว่างรอ</td><td>รู้</td></tr>
+<tr><td>ไม่จับการวาดใหม่ที่ไม่จำเป็น</td><td>จับได้</td></tr>
+</tbody></table></section>
+
+<section><h2>5. ทดสอบกฎที่ต้องจริงเสมอ</h2><pre class="code-vs"><code>test('สลับไป id ที่ไม่มีอยู่ ต้องไม่ทำให้ไม่มีตัวที่ใช้งานอยู่', () async {
+  await store.load();
+
+  await store.activate('ไม่มีจริง');
+
+  expect(store.active, isNotNull);
+});
+
+test('ลบตัวสุดท้ายไม่ได้', () async {
+  await store.load();
+  expect(await store.remove(store.active!.id), isFalse);
+  expect(store.profiles, hasLength(1));
+});
+
+test('ลบตัวที่ใช้งานอยู่ ต้องมีตัวใหม่มาแทนเสมอ', () async { ... });</code></pre><p>สามข้อนี้ทดสอบกฎเดียวกันจากสามทิศทาง — กฎ “มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ” ที่ 10.6 วางไว้</p><div class="note"><strong>วิธีหากฎที่ควรทดสอบ:</strong> อ่านคอมเมนต์ในโค้ดที่ขึ้นต้นด้วย “ต้อง” หรือ “เสมอ” — ทุกประโยคแบบนั้นคือเทสต์ที่ยังไม่ได้เขียน</div></section>
+
+<section><h2>6. ทดสอบสิ่งที่ต้อง<strong>ไม่</strong>เกิด</h2><pre class="code-vs"><code>test('รูปที่ไม่ผ่านการตรวจ ต้องไม่ถูกส่ง', () async {
+  picker.result = image(bytes: jpegBytes(size: 9 * 1024 * 1024));
+
+  await store.pick(PickSource.camera);
+  await store.upload(path: '/upload');
+
+  expect(store.stage, UploadStage.idle);
+  expect(uploadCalls, 0, reason: 'ไม่ควรยิงเลย');
+});</code></pre><p>เทสต์ที่ตรวจว่า “ต้องไม่เกิด” มักถูกลืม แต่จับบั๊กประเภทที่แพงที่สุด — คำสั่งที่ยิงไปทั้งที่ไม่ควร</p><table><thead><tr><th>ตัวอย่างจาก lab</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td><code>expect(uploadCalls, 0)</code></td><td>ส่งไฟล์ที่จะถูกปฏิเสธ</td></tr>
+<tr><td><code>expect(postCount, 1)</code> หลังกดสองครั้ง</td><td>คำสั่งซ้ำ</td></tr>
+<tr><td><code>expect(repository.fetchCalls, callsBefore)</code></td><td>โหลดใหม่ทั้งที่ไม่ต้อง</td></tr>
+<tr><td><code>expect(inner.connectCalls, 1)</code> หลังขอสามครั้ง</td><td>เปิดการเชื่อมต่อซ้ำ</td></tr>
+</tbody></table><p>รูปแบบที่ใช้ได้คือ<strong>ให้ของปลอมนับ แล้วตรวจตัวเลข</strong> ซึ่งเป็นเหตุผลที่ของปลอมใน 14.3 มีตัวนับทุกตัว</p></section>
+
+<section><h2>7. ทดสอบการเก็บของตอนทิ้ง</h2><pre class="code-vs"><code>test('ทิ้ง store แล้วปล่อยการเชื่อมต่อที่ใช้ร่วมกัน', () async {
+  await store.start();
+  expect(shared.userCount, 1);
+
+  store.dispose();
+  await Future&lt;void&gt;.delayed(Duration.zero);
+
+  expect(shared.userCount, 0);
+  expect(inner.disconnectCalls, 1);
+});</code></pre><p>เทสต์กลุ่มนี้จับการรั่วซึ่งมองไม่เห็นด้วยตา (12.8) และควรมีในทุก store ที่ถือทรัพยากร</p><table><thead><tr><th>store ถืออะไร</th><th>ต้องมีเทสต์ว่า</th></tr></thead><tbody>
+<tr><td>ตัวจับเวลา</td><td>หยุดหลัง <code>dispose</code></td></tr>
+<tr><td>การฟัง stream</td><td>ยกเลิกแล้ว</td></tr>
+<tr><td>การเชื่อมต่อที่ใช้ร่วมกัน</td><td>ปล่อยแล้ว</td></tr>
+<tr><td>งาน async ที่ค้างอยู่</td><td>ผลที่กลับมาไม่ทำให้พัง</td></tr>
+</tbody></table></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทดสอบ store ไม่ได้เลย</td><td>store สร้าง repository เอง</td><td>รับเข้ามาทาง constructor (9.8)</td></tr>
+<tr><td>ต้องสร้าง widget เพื่อทดสอบ store</td><td>store import <code>material.dart</code></td><td>ใช้ <code>foundation.dart</code> (9.7)</td></tr>
+<tr><td>ทดสอบค่าถูกแต่หน้าจอไม่อัปเดต</td><td>ไม่ได้ตรวจการประกาศ</td><td>นับ <code>notified</code></td></tr>
+<tr><td>ทดสอบจังหวะเวลาไม่ได้</td><td>ของปลอมตอบทันที</td><td>ใช้ <code>Completer</code> (14.3)</td></tr>
+<tr><td>เทสต์ล้มแบบสุ่ม</td><td>ใช้ store ตัวเดิมข้ามข้อ</td><td>สร้างใหม่ใน <code>setUp</code></td></tr>
+<tr><td>ลืมทดสอบว่าอะไรต้องไม่เกิด</td><td>คิดแต่เส้นทางที่สำเร็จ</td><td>ให้ของปลอมนับแล้วตรวจ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>มี store ที่จัดการการนับสต๊อก มีเมธอด <code>scanPart</code>, <code>setQuantity</code>, <code>confirm</code> เขียนรายการเทสต์ที่ควรมี</p><details><summary>แนวคำตอบ</summary><p>เรียงตามสี่กลุ่มใน §2</p><table><thead><tr><th>กลุ่ม</th><th>เทสต์</th></tr></thead><tbody>
+<tr><td rowspan="2">สำเร็จ</td><td>สแกนแล้วรายการโผล่ในลิสต์</td></tr>
+<tr><td>ยืนยันแล้วส่งจำนวนทั้งหมดไปครั้งเดียว (9.5)</td></tr>
+<tr><td rowspan="2">ล้มเหลว</td><td>ยืนยันแล้วเน็ตหลุด ต้องเก็บที่นับไว้ ไม่ล้างทิ้ง</td></tr>
+<tr><td>เซิร์ฟเวอร์ปฏิเสธ ต้องบอกว่าทำไม</td></tr>
+<tr><td rowspan="3">กฎที่ต้องจริงเสมอ</td><td>สแกนรหัสเดิมซ้ำ ต้องไม่เพิ่มแถวใหม่</td></tr>
+<tr><td>จำนวนติดลบตั้งไม่ได้</td></tr>
+<tr><td>ยืนยันตอนยังไม่ได้สแกนอะไร ต้องไม่ยิง</td></tr>
+<tr><td rowspan="3">จังหวะเวลา</td><td>กดยืนยันซ้ำระหว่างรอ ต้องยิงครั้งเดียว</td></tr>
+<tr><td>สแกนระหว่างที่กำลังยืนยัน ต้องไม่เข้าไปในชุดที่ส่งไปแล้ว</td></tr>
+<tr><td>ทิ้ง store ระหว่างยืนยัน ต้องไม่พัง</td></tr>
+</tbody></table><p><strong>แถวที่ควรสังเกตที่สุดคือแถวสุดท้ายของกลุ่มล้มเหลว</strong> — “เก็บที่นับไว้ ไม่ล้างทิ้ง”</p><pre class="code-vs"><code>test('ยืนยันไม่สำเร็จ ต้องเก็บที่นับไว้', () async {
+  await store.scanPart('P-001');
+  await store.scanPart('P-002');
+  repository.throwOnConfirm = Exception('เชื่อมต่อไม่ได้');
+
+  await store.confirm();
+
+  // ผู้ใช้เดินนับมาสี่สิบนาที ห้ามให้เริ่มใหม่เพราะเน็ตหลุด
+  expect(store.counted, hasLength(2));
+  expect(store.canConfirm, isTrue, reason: 'ต้องกดยืนยันซ้ำได้');
+});</code></pre><p>เทสต์นี้บันทึกการตัดสินใจที่สำคัญที่สุดของฟีเจอร์นั้นไว้ — และเป็นเทสต์ที่จะช่วยชีวิตในวันที่มีคนมา refactor แล้วเผลอย้าย <code>_counted.clear()</code> ไปไว้ผิดที่</p><p>สังเกตว่าเทสต์ส่วนใหญ่ในรายการมาจาก<strong>การถามว่าอะไรจะทำให้ผู้ใช้เสียงาน</strong> ไม่ใช่จากการไล่ดูว่าโค้ดมีกี่บรรทัด</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>store คือที่ที่ตรรกะอยู่ และทดสอบได้โดยไม่ต้องมี widget</li><li>ทดสอบสี่กลุ่ม — สำเร็จ ล้มเหลว กฎที่ต้องจริงเสมอ และจังหวะเวลา</li><li>ตรวจการประกาศด้วย ไม่ใช่แค่ค่าที่เปลี่ยน</li><li>เก็บสถานะทุกครั้งที่ประกาศลงลิสต์ เพื่อตรวจลำดับ</li><li>ทดสอบสิ่งที่ต้องไม่เกิด โดยให้ของปลอมนับ</li><li>คอมเมนต์ที่มีคำว่า “ต้อง” หรือ “เสมอ” คือเทสต์ที่ยังไม่ได้เขียน</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบสิ่งที่ผู้ใช้เห็นจริง</p></section>

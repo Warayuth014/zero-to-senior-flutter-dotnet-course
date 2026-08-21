@@ -4,25 +4,179 @@
 <title>Navigation Tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-12 · Testing</span><h1>Navigation Tests</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Observer บันทึก route</a></li><li><a href="#section-2">Assert UI ปลายทาง</a></li><li><a href="#section-3">Result จาก route</a></li><li><a href="#section-4">Back semantics</a></li><li><a href="#section-5">Replacement และ logout</a></li><li><a href="#section-6">Deep link/arguments</a></li><li><a href="#section-7">Bottom navigation</a></li><li><a href="#section-8">Navigation matrix</a></li></ol></nav>
-<div class="note"><strong>Navigation test มีสองชั้น:</strong> pure Store test พิสูจน์ business step/reset/resume ส่วน widget test พิสูจน์ว่า gesture/button ผูกกับ Navigator และแสดง route ถูกจริง</div>
-<section id="section-1"><h2>1. Observer บันทึก route</h2><pre class="code-vs"><code>class RecordingObserver extends NavigatorObserver {
-  final pushed = &lt;Route&lt;dynamic&gt;&gt;[];
-  void didPush(Route route, Route? previous) {
-    pushed.add(route);
-    super.didPush(route, previous);
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สิ่งที่ต้องทดสอบ</a></li><li><a href="#section-2">เทสต์ที่จับบั๊กจาก 5.4</a></li><li><a href="#section-3">ผลที่ส่งกลับจากจอลูก</a></li><li><a href="#section-4">ทดสอบว่าไปจอไหน</a></li><li><a href="#section-5">การนำทางที่ไม่ใช้ Navigator</a></li><li><a href="#section-6">ทดสอบว่าย้อนกลับไม่ได้</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน <code>flow_navigation_test.dart</code> ของโปรเจกต์จริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.9, Part 5 (การนำทาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทดสอบการเดินทางระหว่างจอ รวมถึงกรณีที่ 5.4 พบว่าเขียนผิดง่ายที่สุด</div>
+
+<section id="section-1"><h2>1. สิ่งที่ต้องทดสอบ</h2><table><thead><tr><th>เรื่อง</th><th>ผลถ้าผิด</th></tr></thead><tbody>
+<tr><td>กดแล้วไปจอที่ถูก</td><td>ผู้ใช้หลงทาง</td></tr>
+<tr><td>ปุ่มย้อนกลับพากลับจอเดิม</td><td>งานที่ทำค้างหาย</td></tr>
+<tr><td>ออกจากระบบแล้วจอเก่าต้องไม่ค้าง</td><td><strong>คนถัดไปเห็นข้อมูลของคนก่อน</strong></td></tr>
+<tr><td>ผลที่ส่งกลับจากจอลูก</td><td>สแกนแล้วค่าไม่กลับมา</td></tr>
+</tbody></table><p>แถวที่สามคือกรณีที่ 5.4 ใช้เวลาทั้งบทอธิบาย และเป็นบั๊กที่พบตอนเขียน lab จริง ๆ</p></section>
+
+<section id="section-2"><h2>2. เทสต์ที่จับบั๊กจาก 5.4</h2><pre class="code-vs"><code>testWidgets('ออกจากระบบตอนอยู่ลึกในแอป', (tester) async {
+  await tester.pumpWidget(NavBasicsApp(session: session));
+  await tester.pumpAndSettle();
+
+  // เข้าไปลึก ๆ ก่อน
+  await tester.tap(find.byKey(const Key('task-T-1')));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('task-detail')), findsOneWidget);
+
+  // แล้วออกจากระบบจากตรงนั้น
+  await tester.tap(find.byKey(const Key('sign-out')));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('login-screen')), findsOneWidget);
+  // จอเก่าต้องไม่เหลืออยู่ใต้จอเข้าสู่ระบบ
+  expect(
+    find.byKey(const Key('task-detail'), skipOffstage: false),
+    findsNothing,
+  );
+});</code></pre><p>บรรทัดสุดท้ายคือหัวใจ — ถ้าใช้ <code>pushReplacement</code> อย่างเดียว จอรายละเอียดจะยังอยู่ในกอง และผู้ใช้คนถัดไปกดย้อนกลับก็เห็นข้อมูลของคนก่อน</p><pre class="code-vs"><code>/// pushReplacement อย่างเดียวไม่พอ เพราะมันแทนแค่ route บนสุด
+void _signOut() {
+  widget.session.signOut();
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute&lt;void&gt;(builder: (_) =&gt; LoginScreen(session: widget.session)),
+    (route) =&gt; false, // ไม่เก็บ route ไหนไว้เลย
+  );
+}</code></pre><div class="note"><code>skipOffstage: false</code> จำเป็นตรงนี้ (14.8) — จอที่ถูกทับยังอยู่ในต้นไม้แต่ถูกซ่อน ถ้าไม่บอกให้หารวมตัวที่ซ่อน เทสต์จะผ่านทั้งที่บั๊กยังอยู่</div></section>
+
+<section id="section-3"><h2>3. ผลที่ส่งกลับจากจอลูก</h2><pre class="code-vs"><code>testWidgets('สแกนแล้วค่ากลับมาที่จอหลัก', (tester) async {
+  await tester.pumpWidget(wrap(ReceivingScreen()));
+  await tester.pumpAndSettle();
+
+  await tester.tap(find.byKey(const Key('open-scanner')));
+  await tester.pumpAndSettle();
+
+  await tester.enterText(find.byKey(const Key('manual-code')), 'PLT-001');
+  await tester.tap(find.byKey(const Key('confirm-scan')));
+  await tester.pumpAndSettle();
+
+  // กลับมาจอเดิมแล้ว และค่าที่สแกนอยู่ในช่อง
+  expect(find.byKey(const Key('scanner-screen')), findsNothing);
+  expect(find.text('PLT-001'), findsOneWidget);
+});</code></pre><p>เทสต์นี้ครอบคลุมทั้งเส้นทาง — เปิดจอลูก ทำงาน ปิด และค่ากลับมา ซึ่งเป็นสิ่งที่ทดสอบแยกเป็นชิ้นแล้วไม่ครอบคลุม</p><pre class="code-vs"><code>final code = await Navigator.push&lt;String&gt;(
+  context,
+  MaterialPageRoute(builder: (_) =&gt; const ScannerScreen()),
+);
+// ผู้ใช้กดย้อนกลับได้ ซึ่งคืน null — ต้องเผื่อเสมอ
+if (code == null || !mounted) return;
+_controller.text = code;</code></pre><pre class="code-vs"><code>testWidgets('กดย้อนกลับจากจอสแกน ค่าเดิมต้องไม่หาย', (tester) async {
+  // พิมพ์ค่าไว้ก่อน
+  await tester.enterText(find.byKey(const Key('pallet-field')), 'PLT-999');
+  await tester.tap(find.byKey(const Key('open-scanner')));
+  await tester.pumpAndSettle();
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.text('PLT-999'), findsOneWidget);
+});</code></pre></section>
+
+<section id="section-4"><h2>4. ทดสอบว่าไปจอไหน</h2><p>สองวิธี และเลือกตามสิ่งที่ทดสอบ</p><table><thead><tr><th>วิธี</th><th>เขียน</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ดูสิ่งที่แสดง</td><td><code>expect(find.byKey(const Key('task-detail')), findsOneWidget)</code></td><td>ปกติ — ทดสอบสิ่งที่ผู้ใช้เห็น</td></tr>
+<tr><td>ดักที่ <code>Navigator</code></td><td><code>NavigatorObserver</code> ปลอม</td><td>ทดสอบว่าเรียก push อะไร โดยไม่สนใจว่าจอนั้นวาดอะไร</td></tr>
+</tbody></table><pre class="code-vs"><code>class RecordingObserver extends NavigatorObserver {
+  final List&lt;String?&gt; pushed = [];
+
+  @override
+  void didPush(Route&lt;dynamic&gt; route, Route&lt;dynamic&gt;? previous) {
+    pushed.add(route.settings.name);
   }
-}</code></pre></section>
-<section id="section-2"><h2>2. Assert UI ปลายทาง</h2><p>โดยมากการ tap แล้ว <code>pumpAndSettle</code> และหา title/key เฉพาะปลายทางแข็งแรงกว่า assert concrete Route class เพราะพิสูจน์ผลที่ผู้ใช้เห็นและยอมให้ refactor routing</p></section>
-<section id="section-3"><h2>3. Result จาก route</h2><pre class="code-vs"><code>await tester.tap(find.text('Choose pallet'));
+}
+
+// ในเทสต์
+final observer = RecordingObserver();
+await tester.pumpWidget(MaterialApp(
+  navigatorObservers: [observer],
+  home: const HomeScreen(),
+));
+
+await tester.tap(find.byKey(const Key('open-tasks')));
 await tester.pumpAndSettle();
-await tester.tap(find.text('PLT-001'));
-await tester.pumpAndSettle();
-expect(find.text('Selected: PLT-001'), findsOneWidget);</code></pre></section>
-<section id="section-4"><h2>4. Back semantics</h2><p>ทดสอบ app-bar back, system back/<code>handlePopRoute</code> และ business Back แยกกัน หาก step &gt; 0 ต้องลด stepก่อน pop route ดังที่ flow_navigation_test ตรวจ Store; เมื่อมี unsaved draft ต้องถามตาม policy</p></section>
-<section id="section-5"><h2>5. Replacement และ logout</h2><p>หลัง login <code>pushReplacement</code> ต้องไม่ย้อนกลับ login; หลัง logout clear stack/session และ back ไม่เข้าหน้า protected ใช้ observer หรือ attempt pop แล้ว assert route ปัจจุบัน</p></section>
-<section id="section-6"><h2>6. Deep link/arguments</h2><p>test valid/invalid entity ID, missing argument และ unauthorized destination Router ต้องแสดง fallback/error ไม่ force unwrap แล้ว crash และ refresh state ที่จำเป็นก่อน render</p></section>
-<section id="section-7"><h2>7. Bottom navigation</h2><p>ทดสอบสลับแท็บแล้ว state ที่ควรคงยังอยู่ และ flow ที่ต้อง clear ถูก reset ตัวอย่างจริงวน destinations หลายค่าและยืนยัน receiving draft ถูกล้างเหมือนกันทุกแท็บ</p></section>
-<section id="section-8"><h2>8. Navigation matrix</h2><div class="success">push, pop, cancel, result, replacement, logout clear-stack, system back, deep link, tab switch และ async callback หลังออกจากหน้า โดยไม่มี duplicate route หรือ context หลัง unmount</div></section>
+
+expect(observer.pushed, contains('/tasks'));</code></pre><div class="note">วิธีแรกดีกว่าในเกือบทุกกรณี เพราะทดสอบสิ่งที่ผู้ใช้เห็น ส่วนวิธีที่สองผูกกับรายละเอียดภายในซึ่งขัดกับหลักใน 14.1 — ใช้เมื่อจอปลายทางแพงเกินจะสร้างในเทสต์</div></section>
+
+<section id="section-5"><h2>5. การนำทางที่ไม่ใช้ <code>Navigator</code></h2><p><code>wms_absolute_mobile</code> ใช้สถานะแทนกองของ route</p><pre class="code-vs"><code>// warehouse_store.dart
+String screen = 'home';
+
+void nav(String s, {bool preserveFlow = false}) { ... }
+void goBack() { ... }</code></pre><p>วิธีนี้ทดสอบง่ายกว่ามาก เพราะเป็นเรื่องของ store ล้วน ๆ</p><pre class="code-vs"><code>// จาก flow_navigation_test.dart ของจริง
+test('ออกจาก flow แล้วกลับหน้าแรก', () {
+  store.nav('recvrun');
+  store.exitFlow();
+  expect(store.screen, 'home');
+});</code></pre><table><thead><tr><th> </th><th><code>Navigator</code></th><th>สถานะใน store</th></tr></thead><tbody>
+<tr><td>ทดสอบ</td><td>ต้องสร้าง widget</td><td>เทสต์ unit ธรรมดา</td></tr>
+<tr><td>ปุ่มย้อนกลับของเครื่อง</td><td>ทำงานเอง</td><td>ต้องเขียนจัดการเอง</td></tr>
+<tr><td>animation ระหว่างจอ</td><td>มีให้</td><td>ต้องทำเอง</td></tr>
+<tr><td>สถานะของ flow ที่ทำค้าง</td><td>อยู่ในแต่ละจอ</td><td>อยู่ที่เดียว ตรวจได้หมด</td></tr>
+</tbody></table><p>แถวสุดท้ายคือเหตุผลที่โปรเจกต์นั้นเลือกทางนี้ — งานในคลังเป็นขั้นตอนที่ต่อกัน และการมีสถานะของทั้ง flow อยู่ที่เดียวทำให้ตรวจได้ว่าอยู่ขั้นไหน</p></section>
+
+<section id="section-6"><h2>6. ทดสอบว่าย้อนกลับไม่ได้</h2><pre class="code-vs"><code>testWidgets('กลางขั้นตอนยืนยัน ปุ่มย้อนกลับต้องเตือนก่อน', (tester) async {
+  await startReceivingFlow(tester);
+  await tester.enterText(find.byKey(const Key('quantity')), '5');
+  await tester.pump();
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  // ยังอยู่จอเดิม พร้อมกล่องเตือน
+  expect(find.byKey(const Key('receiving-run')), findsOneWidget);
+  expect(find.text('ยังไม่ได้บันทึก'), findsOneWidget);
+});</code></pre><p>ทดสอบ <code>PopScope</code> ที่ 5.9 สอน และรายละเอียดที่ต้องระวังคือ <code>tester.pageBack()</code> จำลองปุ่มย้อนกลับของระบบ ซึ่งเป็นทางที่ผู้ใช้ PDA ใช้จริง</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ผ่านแต่จอเก่ายังค้าง</td><td>ไม่ได้ใส่ <code>skipOffstage: false</code></td><td>ใส่</td></tr>
+<tr><td>หาจอปลายทางไม่เจอ</td><td>ไม่ได้ <code>pumpAndSettle</code> หลัง push</td><td>ใส่ — การเปลี่ยนจอมี animation</td></tr>
+<tr><td><code>pageBack</code> ไม่ทำงาน</td><td>ไม่มี <code>Scaffold</code> หรือไม่มีอะไรให้ pop</td><td>ตรวจว่ามีจอซ้อนอยู่จริง</td></tr>
+<tr><td>ค่าที่ส่งกลับเป็น null</td><td>จอลูก pop โดยไม่ส่งค่า</td><td>ตรวจว่า <code>Navigator.pop(context, value)</code></td></tr>
+<tr><td>เทสต์พังเมื่อเปลี่ยนชื่อ route</td><td>ใช้ <code>NavigatorObserver</code></td><td>ทดสอบสิ่งที่แสดงแทน</td></tr>
+<tr><td><code>Looking up a deactivated widget's ancestor</code></td><td>ใช้ <code>context</code> หลัง pop</td><td>เช็ค <code>mounted</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้รายงานว่า “กดออกจากระบบแล้วกดย้อนกลับ กลับเข้าไปในแอปได้เลย ไม่ต้องล็อกอิน” เขียนเทสต์ที่จับได้</p><details><summary>แนวคำตอบ</summary><p>เทสต์ต้องจำลองสามขั้น — เข้าไปลึก ออกจากระบบ แล้วกดย้อนกลับ</p><pre class="code-vs"><code>testWidgets('ออกจากระบบแล้วกดย้อนกลับ ต้องไม่กลับเข้าแอป', (tester) async {
+  await tester.pumpWidget(AuthLabApp(dependencies: deps));
+  await signIn(tester);
+  await tester.pumpAndSettle();
+
+  // เข้าไปลึกสองชั้น
+  await tester.tap(find.byKey(const Key('task-T-1')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('task-edit')));
+  await tester.pumpAndSettle();
+
+  await tester.tap(find.byKey(const Key('sign-out')));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('login-screen')), findsOneWidget);
+
+  // กดย้อนกลับ — ต้องไม่มีอะไรให้กลับไป
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('login-screen')), findsOneWidget);
+  expect(find.byKey(const Key('task-detail'), skipOffstage: false), findsNothing);
+});</code></pre><p>แต่<strong>เทสต์นี้อาจล้มด้วยเหตุผลที่ไม่เกี่ยวกับบั๊ก</strong> — <code>pageBack()</code> จะโยนถ้าไม่มีอะไรให้ pop ซึ่งเป็นสิ่งที่เราต้องการพอดี</p><pre class="code-vs"><code>// ถ้าทำถูก จะไม่มีอะไรให้ pop จึงต้องเผื่อ
+expect(
+  () async =&gt; tester.pageBack(),
+  throwsA(anything),
+  reason: 'ไม่ควรมี route ให้กลับไป',
+);</code></pre><p>เขียนแบบนี้อ่านยาก ทางที่ชัดกว่าคือตรวจกองของ route ตรง ๆ</p><pre class="code-vs"><code>final navigator = tester.state&lt;NavigatorState&gt;(find.byType(Navigator));
+expect(navigator.canPop(), isFalse, reason: 'ต้องไม่เหลือ route ไหนเลย');</code></pre><p><strong>สิ่งที่ต้องตรวจเพิ่มและสำคัญกว่า</strong> — การที่จอหายไม่ได้แปลว่าข้อมูลหาย</p><pre class="code-vs"><code>testWidgets('ออกจากระบบแล้วข้อมูลของคนก่อนต้องไม่เหลือ', (tester) async {
+  await signIn(tester, username: 'somchai');
+  await tester.pumpAndSettle();
+  expect(find.text('somchai'), findsOneWidget);
+
+  await signOut(tester);
+  await signIn(tester, username: 'somsri');
+  await tester.pumpAndSettle();
+
+  expect(find.text('somchai'), findsNothing, reason: 'store ต้องถูกล้าง');
+  expect(store.tasks, isEmpty, reason: 'ข้อมูลของคนก่อนต้องไม่ค้าง');
+});</code></pre><p>เทสต์คู่นี้ครอบคลุมทั้งสองด้านของกฎเดียวกันจาก 8.8 — <strong>ล้างทั้งกองของ route และล้างทั้ง store</strong> ซึ่งเป็นคนละเรื่องและลืมได้ทีละอย่าง</p><p>วิธีที่ทำให้ลืมไม่ได้คือผูกอายุของ store ไว้กับ shell ที่มีเฉพาะตอนเข้าสู่ระบบแล้ว (12.9 §8) — แล้วการล้างจะเกิดขึ้นเองโดยไม่ต้องเขียนโค้ด</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ทดสอบว่าจอเก่าไม่เหลืออยู่ ด้วย <code>skipOffstage: false</code></li><li><code>pumpAndSettle</code> หลัง push เสมอ เพราะมี animation</li><li>ทดสอบทั้งค่าที่ส่งกลับ และกรณีที่ผู้ใช้กดย้อนกลับ</li><li>ทดสอบสิ่งที่แสดง ดีกว่าดักที่ <code>Navigator</code></li><li>การนำทางด้วยสถานะใน store ทดสอบง่ายกว่า แต่ต้องจัดการปุ่มย้อนกลับเอง</li><li>ล้างกองของ route กับล้าง store เป็นคนละเรื่อง ต้องทดสอบทั้งคู่</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบว่าหน้าจอพอดีกับเครื่องจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

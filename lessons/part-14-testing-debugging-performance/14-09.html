@@ -4,30 +4,184 @@
 <title>Dialog Tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-09 · Testing</span><h1>Dialog Tests</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เปิดจาก harness</a></li><li><a href="#section-2">ตรวจ confirm/cancel</a></li><li><a href="#section-3">ค่าจาก Navigator.pop</a></li><li><a href="#section-4">Sheet ไม่ควรบีบ shell</a></li><li><a href="#section-5">Lazy content ใน sheet</a></li><li><a href="#section-6">Nested routes</a></li><li><a href="#section-7">Unsaved changes</a></li><li><a href="#section-8">Cleanup assertion</a></li></ol></nav>
-<div class="note"><strong>Dialog และ bottom sheet เป็น route:</strong> test ต้องเปิดผ่าน context จริง, pump transition, จำกัด finder ใน route นั้น และตรวจค่าที่ pop กลับมาหรือ side effect หลังปิด</div>
-<section id="section-1"><h2>1. เปิดจาก harness</h2><pre class="code-vs"><code>await tester.pumpWidget(MaterialApp(
-  home: Builder(builder: (context) =&gt; ElevatedButton(
-    onPressed: () =&gt; showConfirmDialog(context),
-    child: const Text('open'),
-  )),
-));
-await tester.tap(find.text('open'));
-await tester.pumpAndSettle();</code></pre></section>
-<section id="section-2"><h2>2. ตรวจ confirm/cancel</h2><p>แยก test cancel แล้วไม่มี repository call, confirm แล้ว call ครั้งเดียว, barrier/back ตาม policy และ error แล้ว dialog ยังอยู่ อย่าทดสอบเฉพาะว่าข้อความแสดง</p></section>
-<section id="section-3"><h2>3. ค่าจาก Navigator.pop</h2><pre class="code-vs"><code>bool? answer;
-onPressed: () async {
-  answer = await showDialog&lt;bool&gt;(...);
-}
-// tap Yes → pump → expect(answer, isTrue)</code></pre><p>แยก <code>null</code> จาก barrier/back กับ <code>false</code> จากปุ่ม Cancel หาก business semantics ต่างกัน</p></section>
-<section id="section-4"><h2>4. Sheet ไม่ควรบีบ shell</h2><p><code>connection_settings_sheet_test.dart</code> เก็บ rect ของ bottom nav ก่อนเปิด sheet แล้ว assert rect เท่าเดิมหลังเปิด พิสูจน์ว่า route-level sheet ลอยทับ ไม่ใช่ panel ใน body ที่ดัน layout</p></section>
-<section id="section-5"><h2>5. Lazy content ใน sheet</h2><pre class="code-vs"><code>await tester.scrollUntilVisible(
-  find.byKey(const ValueKey('connection-url-preview')),
-  140,
-  scrollable: find.byType(Scrollable).first,
-);</code></pre><p>ListView สร้าง child เมื่อเข้า viewport จึงหา widget ใต้ fold ไม่เจอจน scroll</p></section>
-<section id="section-6"><h2>6. Nested routes</h2><p>เมื่อ dialog อยู่เหนือ sheet คำว่า Delete/Cancel อาจซ้ำ ใช้ <code>find.descendant(of: find.byType(AlertDialog), ...)</code> และตรวจว่าหลังปิด dialog sheet ยังอยู่ หรือทั้งคู่ปิดตาม contract</p></section>
-<section id="section-7"><h2>7. Unsaved changes</h2><p>test untouched close ไม่ถาม, edited close ถาม, cancel discard คงค่าที่พิมพ์, confirm discard ปิด และ system back ให้ผลเหมือนปุ่ม X นี่ครอบคลุม state มากกว่าถ่าย golden</p></section>
-<section id="section-8"><h2>8. Cleanup assertion</h2><div class="success">หลังปิด route ให้ assert dialog/sheet หาย, focus/controller ถูก dispose ไม่มี exception, underlying screen ยังอยู่ และ side effect เกิดจำนวนถูกต้องแม้ผู้ใช้แตะ confirm เร็วสองครั้ง</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทำไม dialog ถึงต้องมีเทสต์</a></li><li><a href="#section-2">โครงของเทสต์ dialog</a></li><li><a href="#section-3">เทสต์ที่สำคัญกว่าคือการยกเลิก</a></li><li><a href="#section-4">ปัดปิดโดยไม่กดปุ่ม</a></li><li><a href="#section-5">bottom sheet</a></li><li><a href="#section-6">SnackBar</a></li><li><a href="#section-7">dialog ที่เปิดจากที่ที่ไม่ใช่การกดปุ่ม</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ทดสอบกล่องยืนยันที่มีอยู่ใน lab</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.8, Part 5 (dialog และ bottom sheet)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทดสอบกล่องยืนยัน กล่องเลือก และแถบข้อความ ซึ่งเป็นที่ที่บั๊กชอบซ่อน</div>
+
+<section id="section-1"><h2>1. ทำไม dialog ถึงต้องมีเทสต์</h2><table><thead><tr><th>สิ่งที่ dialog ทำ</th><th>ผลถ้าผิด</th></tr></thead><tbody>
+<tr><td>ยืนยันก่อนทำสิ่งที่ย้อนกลับยาก</td><td>ทำไปแล้วโดยผู้ใช้ไม่ตั้งใจ</td></tr>
+<tr><td>เตือนก่อนทิ้งงานที่กรอกค้าง</td><td>ผู้ใช้เสียงานที่ทำมาสี่สิบนาที (10.11)</td></tr>
+<tr><td>ให้เลือกที่มาของรูป</td><td>เลือกไม่ได้ ทำงานไม่ได้ (13.1)</td></tr>
+</tbody></table><p>ทั้งสามอย่างเป็นจุดที่ผู้ใช้อยู่กลางงานพอดี — ผิดตรงนี้เสียหายกว่าผิดที่อื่น</p></section>
+
+<section id="section-2"><h2>2. โครงของเทสต์ dialog</h2><pre class="code-vs"><code>testWidgets('ยืนยันแล้วจึงส่งคำสั่ง', (tester) async {
+  await tester.pumpWidget(wrap(TaskScreen(store: store)));
+  await tester.pumpAndSettle();
+
+  // 1. กดสิ่งที่เปิด dialog
+  await tester.tap(find.byKey(const Key('complete-T-1')));
+  // 2. ต้อง settle เพื่อให้ dialog วาดเสร็จ
+  await tester.pumpAndSettle();
+
+  // 3. ตรวจว่า dialog โผล่จริง
+  expect(find.text('ยืนยันปิด T-1?'), findsOneWidget);
+
+  // 4. กดปุ่มใน dialog
+  await tester.tap(find.text('ยืนยัน'));
+  await tester.pumpAndSettle();
+
+  // 5. ตรวจผล
+  expect(repository.completed, contains('T-1'));
+});</code></pre><div class="note">ขั้นที่ 2 ขาดไม่ได้ — <code>showDialog</code> มี animation การเปิด ถ้าไม่ <code>pumpAndSettle</code> จะหา widget ใน dialog ไม่เจอ</div></section>
+
+<section id="section-3"><h2>3. เทสต์ที่สำคัญกว่าคือการยกเลิก</h2><pre class="code-vs"><code>testWidgets('กดยกเลิกแล้วต้องไม่ส่งคำสั่ง', (tester) async {
+  await tester.pumpWidget(wrap(TaskScreen(store: store)));
+  await tester.pumpAndSettle();
+
+  await tester.tap(find.byKey(const Key('complete-T-1')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('ยกเลิก'));
+  await tester.pumpAndSettle();
+
+  expect(repository.completed, isEmpty, reason: 'ยกเลิกแล้วต้องไม่ยิง');
+  expect(find.byType(AlertDialog), findsNothing, reason: 'dialog ต้องปิด');
+});</code></pre><p>สองบรรทัดสุดท้ายทดสอบคนละเรื่อง และทั้งคู่เคยพังจริงในโปรเจกต์ต่าง ๆ</p><table><thead><tr><th>บั๊กที่เกิดได้</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>ยิงคำสั่งก่อนรอผลจาก dialog</td><td>กดยกเลิกแล้วงานก็ถูกปิดอยู่ดี</td></tr>
+<tr><td><code>Navigator.pop</code> สองครั้ง</td><td>dialog ปิดพร้อมพาออกจากจอไปด้วย</td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; _confirmAndComplete(WmsTask task) async {
+  final confirmed = await showDialog&lt;bool&gt;(...);
+  // ต้องตรวจทั้งสองอย่าง — ผู้ใช้อาจปัดปิดโดยไม่กดปุ่ม (ได้ null)
+  // และจออาจถูกทิ้งไปแล้วระหว่างที่ dialog เปิดอยู่
+  if (confirmed != true || !mounted) return;
+  await widget.store.complete(task);
+}</code></pre></section>
+
+<section id="section-4"><h2>4. ปัดปิดโดยไม่กดปุ่ม</h2><pre class="code-vs"><code>testWidgets('ปิด dialog โดยไม่เลือกอะไร ต้องไม่ทำอะไร', (tester) async {
+  await tester.tap(find.byKey(const Key('complete-T-1')));
+  await tester.pumpAndSettle();
+
+  // แตะนอกกล่อง = ปิดโดยไม่เลือก ได้ null กลับมา
+  await tester.tapAt(const Offset(10, 10));
+  await tester.pumpAndSettle();
+
+  expect(repository.completed, isEmpty);
+});</code></pre><p>กรณีนี้คืนค่า <code>null</code> ซึ่งต่างจาก <code>false</code> — และเป็นเหตุผลที่ต้องเขียน <code>if (confirmed != true)</code> ไม่ใช่ <code>if (confirmed == false)</code></p><table><thead><tr><th>ผู้ใช้ทำ</th><th><code>showDialog</code> คืน</th></tr></thead><tbody>
+<tr><td>กด “ยืนยัน”</td><td><code>true</code></td></tr>
+<tr><td>กด “ยกเลิก”</td><td><code>false</code></td></tr>
+<tr><td>แตะนอกกล่อง</td><td><code>null</code></td></tr>
+<tr><td>กดปุ่มย้อนกลับของเครื่อง</td><td><code>null</code></td></tr>
+</tbody></table><p>สองแถวล่างคือทางที่ผู้ใช้ PDA ใช้บ่อยที่สุด เพราะกดปุ่มย้อนกลับเร็วกว่าเล็งกดปุ่มบนจอ</p></section>
+
+<section id="section-5"><h2>5. bottom sheet</h2><pre class="code-vs"><code>testWidgets('เลือกกล้องจาก sheet แล้วเรียก picker ถูกที่มา', (tester) async {
+  await tester.pumpWidget(wrap(UploadScreen(store: store)));
+
+  await tester.tap(find.byKey(const Key('add-photo')));
+  await tester.pumpAndSettle();
+
+  expect(find.text('ถ่ายรูป'), findsOneWidget);
+  expect(find.text('เลือกจากแกลเลอรี'), findsOneWidget);
+
+  await tester.tap(find.text('ถ่ายรูป'));
+  await tester.pumpAndSettle();
+
+  expect(picker.lastSource, PickSource.camera);
+});</code></pre><p>ทดสอบเหมือน dialog ทุกประการ ต่างที่ <code>showModalBottomSheet</code> ปิดด้วยการปัดลงได้ด้วย</p><pre class="code-vs"><code>await tester.drag(find.byType(BottomSheet), const Offset(0, 400));
+await tester.pumpAndSettle();
+expect(find.byType(BottomSheet), findsNothing);</code></pre></section>
+
+<section id="section-6"><h2>6. <code>SnackBar</code></h2><pre class="code-vs"><code>testWidgets('ปิดงานสำเร็จแล้วขึ้นข้อความ', (tester) async {
+  await tester.tap(find.byKey(const Key('complete-T-1')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('ยืนยัน'));
+  await tester.pump();          // ให้ SnackBar เริ่มปรากฏ
+  await tester.pump(const Duration(milliseconds: 750));   // ให้ animation จบ
+
+  expect(find.text('ปิด T-1 สำเร็จ'), findsOneWidget);
+});</code></pre><div class="note"><strong>อย่าใช้ <code>pumpAndSettle</code> กับ <code>SnackBar</code></strong> — มันมีตัวจับเวลาที่จะปิดตัวเองในสี่วินาที <code>pumpAndSettle</code> จะรอจนกว่าจะปิด แล้วเทสต์จะหาไม่เจอ</div><p>ใช้ <code>pump</code> พร้อมระบุเวลาแทน ซึ่งเป็นรูปแบบเดียวกับที่ 14.10 จะอธิบาย</p></section>
+
+<section id="section-7"><h2>7. dialog ที่เปิดจากที่ที่ไม่ใช่การกดปุ่ม</h2><p>ใน 12.7 มีกรณีที่เหตุการณ์จากเซิร์ฟเวอร์ทำให้ dialog เด้ง ซึ่งทดสอบได้เหมือนกัน</p><pre class="code-vs"><code>testWidgets('เหตุการณ์จุดคัดแยกเต็ม ต้องเด้งเตือน', (tester) async {
+  await tester.pumpWidget(wrap(SortingScreen(client: shared)));
+  await tester.pumpAndSettle();
+
+  client.emit(const StationFull(stationId: 'ST-01'));
+  await tester.pumpAndSettle();
+
+  expect(find.text('จุดคัดแยก ST-01 เต็ม'), findsOneWidget);
+});
+
+testWidgets('จอที่ถูก push ทับ ต้องไม่เด้ง dialog', (tester) async {
+  await tester.pumpWidget(wrap(SortingScreen(client: shared)));
+  await tester.pumpAndSettle();
+
+  // เปิดจอรายละเอียดทับ
+  await tester.tap(find.byKey(const Key('station-ST-01')));
+  await tester.pumpAndSettle();
+
+  client.emit(const StationFull(stationId: 'ST-01'));
+  await tester.pumpAndSettle();
+
+  expect(find.byType(AlertDialog), findsNothing);
+});</code></pre><p>เทสต์คู่นี้บันทึกกฎจาก 12.7 §5 ไว้ — และเป็นสิ่งที่ทดสอบด้วยมือได้ยากมากเพราะต้องจับจังหวะให้เหตุการณ์มาถึงตอนที่จออื่นเปิดอยู่พอดี</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หา widget ใน dialog ไม่เจอ</td><td>ไม่ได้ <code>pumpAndSettle</code> หลังเปิด</td><td>ใส่</td></tr>
+<tr><td>หา <code>SnackBar</code> ไม่เจอ</td><td>ใช้ <code>pumpAndSettle</code> ซึ่งรอจนมันปิด</td><td>ใช้ <code>pump</code> พร้อมเวลา</td></tr>
+<tr><td>เทสต์ผ่านทั้งที่กดยกเลิก</td><td>ยิงคำสั่งก่อนรอผล</td><td>รอ <code>await showDialog</code> ก่อน</td></tr>
+<tr><td>dialog ปิดแล้วออกจากจอด้วย</td><td><code>Navigator.pop</code> สองครั้ง</td><td>ตรวจว่า pop ที่ถูก context</td></tr>
+<tr><td>ทดสอบการปัดปิดไม่ได้</td><td>ตั้ง <code>barrierDismissible: false</code></td><td>ถูกแล้วถ้าตั้งใจ — ทดสอบปุ่มย้อนกลับแทน</td></tr>
+<tr><td><code>Looking up a deactivated widget's ancestor</code></td><td>ใช้ <code>context</code> หลังจอถูกทิ้ง</td><td>เช็ค <code>mounted</code> หลัง <code>await</code></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นข้อผิดพลาดที่เจอบ่อยที่สุดกับ dialog เพราะระหว่างที่รอผู้ใช้ตัดสินใจ จออาจถูกทิ้งไปแล้ว</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>10.11 ออกแบบกล่องเตือนก่อนทิ้งงานที่กรอกค้างไว้ เขียนเทสต์ให้ครบทุกเส้นทาง</p><details><summary>แนวคำตอบ</summary><p>ห้าเส้นทาง และแต่ละเส้นทางเป็นเทสต์แยก</p><pre class="code-vs"><code>testWidgets('เปิดฟอร์มเปล่าแล้วปิดทันที ต้องไม่เตือน', (tester) async {
+  await openForm(tester);
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.byType(AlertDialog), findsNothing);
+  expect(find.byKey(const Key('profile-list')), findsOneWidget);
+});
+
+testWidgets('พิมพ์แล้วปิด ต้องเตือน', (tester) async {
+  await openForm(tester);
+  await tester.enterText(find.byKey(const Key('host')), '10.0.0.5');
+  await tester.pump();
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.text('ยังไม่ได้บันทึก'), findsOneWidget);
+});
+
+testWidgets('กดกลับไปแก้ต่อ ต้องอยู่ในฟอร์มและค่ายังอยู่', (tester) async {
+  ...
+  await tester.tap(find.text('กลับไปแก้ต่อ'));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('host')), findsOneWidget);
+  expect(find.text('10.0.0.5'), findsOneWidget);
+});
+
+testWidgets('กดออกโดยไม่บันทึก ต้องออกจริง', (tester) async {
+  ...
+  await tester.tap(find.text('ออกโดยไม่บันทึก'));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('profile-list')), findsOneWidget);
+  expect(store.profiles, hasLength(1), reason: 'ไม่ควรบันทึกอะไร');
+});
+
+testWidgets('บันทึกแล้วปิด ต้องไม่เตือน', (tester) async {
+  await openForm(tester);
+  await fillValidForm(tester);
+  await tester.tap(find.byKey(const Key('save')));
+  await tester.pumpAndSettle();
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.byType(AlertDialog), findsNothing);
+});</code></pre><p><strong>เทสต์ข้อสุดท้ายคือข้อที่สำคัญที่สุด</strong> และเป็นข้อที่คนลืมบ่อยที่สุด</p><p>บั๊กที่มันจับคือ “เตือนหลังบันทึกสำเร็จแล้ว” ซึ่งเกิดเมื่อไม่ได้อัปเดตตัวที่ใช้เทียบหลังบันทึก (10.11 §7) — ผู้ใช้จะสับสนมากเพราะเขาเพิ่งกดบันทึกไป</p><p>ข้อที่สามก็มีรายละเอียดที่ควรสังเกต — ตรวจว่า<strong>ค่าที่พิมพ์ไว้ยังอยู่</strong> ไม่ใช่แค่ตรวจว่ายังอยู่ในฟอร์ม เพราะการกลับมาแล้วพบว่าต้องพิมพ์ใหม่ ก็เท่ากับเสียงานอยู่ดี</p><p>สังเกตว่าใช้ <code>openForm</code> และ <code>fillValidForm</code> เป็นฟังก์ชันช่วย ซึ่งทำให้แต่ละเทสต์เหลือแค่สิ่งที่ต่าง ตามหลักใน 14.2</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>ต้อง <code>pumpAndSettle</code> หลังเปิด dialog ไม่งั้นหาไม่เจอ</li><li>เทสต์การยกเลิกสำคัญกว่าเทสต์การยืนยัน</li><li>ปัดปิดกับกดย้อนกลับได้ <code>null</code> ไม่ใช่ <code>false</code></li><li>อย่าใช้ <code>pumpAndSettle</code> กับ <code>SnackBar</code></li><li>ทดสอบว่าจอที่ถูก push ทับต้องไม่เด้ง dialog</li><li>เทสต์ที่คนลืมบ่อยที่สุดคือ “บันทึกแล้วต้องไม่เตือน”</li></ul></div><p><strong>บทหน้า:</strong> <code>pump</code> กับ <code>pumpAndSettle</code> ต่างกันอย่างไร และเมื่อไหร่ใช้อันไหน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

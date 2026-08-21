@@ -1,15 +1,147 @@
-<div class="note"><strong>Scanner test ต้องพิสูจน์ทั้ง input และ ergonomics:</strong> barcode scanner อาจทำตัวเป็น keyboard wedge จึงต้องทดสอบ focus, Enter, duplicate guard และ layout บน viewport PDA ไม่ใช่เพียงเรียก submit method ตรง ๆ</div>
-<section><h2>1. ส่งข้อมูลผ่าน TextInput</h2><pre class="code-vs"><code>final input = find.byKey(const ValueKey('receiving-scan-input'));
-await tester.enterText(input, 'PLT-0001');
-await tester.testTextInput.receiveAction(TextInputAction.done);
-await tester.pump();</code></pre><p>พิสูจน์ว่า <code>onSubmitted</code> wiring ทำงานเหมือน scanner ที่ส่ง Enter</p></section>
-<section><h2>2. Hardware key path</h2><p>ถ้า screen ฟัง <code>HardwareKeyboard</code>/<code>Focus</code> โดยตรง ให้ส่ง key down/up ตามลำดับและรวม buffer จน Enter; แยก test repeated key, modifier, CR/LF และ event หลัง focus หลุด อย่าพึ่งเฉพาะ <code>enterText</code></p></section>
-<section><h2>3. Focus contract</h2><p>หลัง success/error/dialog ปิด ตรวจว่า scanner focus กลับมาตาม workflow ใช้ FocusNode ที่ inject/หา widget แล้ว assert <code>hasFocus</code> หลัง pump ห้าม request focus ทุก build เพราะทำ keyboard/focus แข่งกัน</p></section>
-<section><h2>4. Duplicate และ rapid scan</h2><pre class="code-vs"><code>await scan(tester, 'SER-001');
-await scan(tester, 'SER-001');
-expect(repo.receives, hasLength(1));
-expect(find.textContaining('already scanned'), findsOneWidget);</code></pre><p>เพิ่ม case ตัวพิมพ์/ช่องว่าง และ scan ตัวที่สองขณะ request แรก pending</p></section>
-<section><h2>5. Fixed scanner layout</h2><p><code>scanner_layout_test.dart</code> เก็บตำแหน่ง input ก่อน drag รายการ แล้ว assert y เท่าเดิม นี่พิสูจน์ข้อกำหนดหน้าปฏิบัติงานว่าช่อง scan ไม่เลื่อนหายบนจอ 390×560</p></section>
-<section><h2>6. Overflow และ keyboard inset</h2><p>ทดสอบ viewport เตี้ย, text scale ใหญ่ และ <code>viewInsets.bottom</code> จำลอง soft keyboard; assert <code>tester.takeException()</code> เป็น null และ action สำคัญยังเข้าถึงได้โดยไม่ให้ทั้งหน้า scroll ผิดโครง</p></section>
-<section><h2>7. Scan state machine</h2><p>part → serial → pallet ต้องยอมรับเฉพาะชนิดปัจจุบัน Test scan ผิดขั้น, server reject, back หนึ่ง step, resume draft และ reset เมื่อออก flow โดยแยก pure state tests จาก widget wiring</p></section>
-<section><h2>8. Device test</h2><div class="success">widget test จำลอง keyboard ได้ แต่ต้อง smoke test กับ scanner รุ่นจริง: suffix Enter/Tab, key timing, IME, screen off/on, Bluetooth disconnect และการสแกนเร็วต่อเนื่องใน build profile/release</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน <code>scanner_layout_test.dart</code> ทั้งไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.8, Part 2 (layout), Part 3 (ช่องสแกน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทดสอบว่าหน้าจอพอดีกับเครื่องจริงและช่องสแกนไม่หายไปไหน</div>
+
+<section><h2>1. ปัญหาที่เทสต์กลุ่มนี้แก้</h2><p>บน PDA มีข้อกำหนดที่ต่างจากแอปทั่วไป และผิดแล้วผู้ใช้ทำงานไม่ได้</p><table><thead><tr><th>ข้อกำหนด</th><th>ผิดแล้วเกิดอะไร</th></tr></thead><tbody>
+<tr><td>ช่องสแกนต้องอยู่ที่เดิมเสมอ</td><td>เลื่อนรายการแล้วช่องหาย สแกนไม่เข้า</td></tr>
+<tr><td>ทั้งจอต้องพอดีโดยไม่ต้องเลื่อนทั้งหน้า</td><td>ปุ่มยืนยันอยู่ล่างจอ ต้องเลื่อนหาทุกครั้ง</td></tr>
+<tr><td>เนื้อหาต้องไม่ล้น</td><td>ได้แถบเหลืองดำและกดปุ่มไม่ได้</td></tr>
+<tr><td>ปุ่มต้องกดโดนแม้ใส่ถุงมือ</td><td>กดพลาดบ่อย</td></tr>
+</tbody></table><p>ทั้งสี่ข้อ<strong>มองด้วยตาบนคอมแล้วดูปกติ</strong> เพราะจอคอมกว้างและสูงกว่าเครื่องจริงมาก</p></section>
+
+<section><h2>2. กำหนดขนาดจอให้ตรงกับของจริง</h2><pre class="code-vs"><code>void useViewport(WidgetTester tester, {double height = 560}) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = Size(390, height);
+  addTearDown(tester.view.reset);
+}</code></pre><table><thead><tr><th>ค่าปริยายของเทสต์</th><th>PDA จริง</th></tr></thead><tbody>
+<tr><td>800×600</td><td>390×560 หรือเล็กกว่า</td></tr>
+</tbody></table><p>ความต่าง 240 พิกเซลในแนวตั้งคือความต่างระหว่าง “พอดี” กับ “ล้น” — และเป็นเหตุผลที่เทสต์ layout ที่ไม่กำหนดขนาดจอ<strong>ไม่มีความหมายเลย</strong></p><div class="note"><code>devicePixelRatio = 1</code> ทำให้ <code>physicalSize</code> เท่ากับหน่วยที่ layout ใช้พอดี ถ้าตั้งเป็น 2 ต้องใส่ <code>Size(780, 1120)</code> เพื่อให้ได้จอ 390×560 ซึ่งชวนสับสน</div></section>
+
+<section><h2>3. ทดสอบว่าช่องสแกนไม่ขยับ</h2><pre class="code-vs"><code>testWidgets('Receiving keeps its scan input fixed while orders scroll', (
+  tester,
+) async {
+  useViewport(tester);
+  final store = createTestStore(username: 'Dev');
+  store.inboundOrders.addAll(List.generate(10, inboundOrder));
+
+  await tester.pumpWidget(
+    MaterialApp(home: Scaffold(body: ReceiveView(store: store))),
+  );
+
+  final input = find.byKey(const ValueKey('receiving-scan-input'));
+  final results = find.byKey(const ValueKey('receiving-results-scroll'));
+  expect(input, findsOneWidget);
+  expect(results, findsOneWidget);
+  final top = tester.getTopLeft(input).dy;
+
+  await tester.drag(results, const Offset(0, -260));
+  await tester.pump();
+
+  expect(tester.getTopLeft(input).dy, top);
+  expect(tester.takeException(), isNull);
+  ...
+});</code></pre><p>สามบรรทัดที่ทำงานหนักที่สุด</p><table><thead><tr><th>บรรทัด</th><th>ตรวจอะไร</th></tr></thead><tbody>
+<tr><td><code>final top = tester.getTopLeft(input).dy;</code></td><td>จดตำแหน่งไว้ก่อนเลื่อน</td></tr>
+<tr><td><code>await tester.drag(results, const Offset(0, -260));</code></td><td>เลื่อนเฉพาะส่วนรายการ</td></tr>
+<tr><td><code>expect(tester.getTopLeft(input).dy, top);</code></td><td>ช่องสแกนต้องอยู่ที่เดิมเป๊ะ</td></tr>
+</tbody></table><p>เทสต์นี้จับบั๊กที่เกิดจากการห่อทั้งจอด้วย <code>SingleChildScrollView</code> ซึ่งเป็นทางแก้ที่คนเลือกเมื่อเจอปัญหาเนื้อหาล้น — แต่ทำให้ช่องสแกนเลื่อนหายไปด้วย</p></section>
+
+<section><h2>4. <code>tester.takeException()</code></h2><pre class="code-vs"><code>expect(tester.takeException(), isNull);</code></pre><p>บรรทัดสั้น ๆ นี้ตรวจสิ่งที่สำคัญมาก — <strong>ไม่มีเนื้อหาล้น</strong></p><p>Flutter โยนข้อผิดพลาดเมื่อ layout ล้นในโหมด debug แต่ในเทสต์มันจะถูกเก็บไว้แทนที่จะทำให้เทสต์ล้มทันที <code>takeException()</code> คือการหยิบมันออกมาดู</p><pre class="code-vs"><code>A RenderFlex overflowed by 42 pixels on the bottom.</code></pre><table><thead><tr><th>จับอะไรได้</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>เนื้อหาล้นแนวตั้ง</td><td>ข้อความไทยยาวกว่าอังกฤษ (11.4)</td></tr>
+<tr><td>เนื้อหาล้นแนวนอน</td><td>รหัสพาเลทยาวเกินการ์ด</td></tr>
+<tr><td>ล้นเมื่อขยายขนาดตัวอักษร</td><td>ผู้ใช้ตั้งตัวใหญ่สุด (11.13)</td></tr>
+</tbody></table><pre class="code-vs"><code>// วนทดสอบทุกขนาดตัวอักษรที่รองรับ
+for (final scale in [1.0, 1.15, 1.3]) {
+  testWidgets('ใช้งานได้ที่ขนาดตัวอักษร $scale เท่า', (tester) async {
+    useViewport(tester);
+    await tester.pumpWidget(MediaQuery(
+      data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+      child: wrap(const ReceivingScreen()),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
+}</code></pre></section>
+
+<section><h2>5. ทดสอบว่าไม่มีการเลื่อนทั้งหน้า</h2><pre class="code-vs"><code>testWidgets('Receiving barcode step has no page-level scroll', (tester) async {
+  useViewport(tester);
+  ...
+  await tester.pumpWidget(
+    MaterialApp(home: Scaffold(body: RecvRunView(store: store))),
+  );
+
+  // ต้องไม่มี Scrollable ที่ครอบทั้งหน้า
+  expect(find.byType(SingleChildScrollView), findsNothing);
+});</code></pre><p>ข้อกำหนดนี้มาจากหน้างานจริง — จอที่ต้องสแกนแล้วยืนยัน ควรเห็นทุกอย่างพร้อมกันโดยไม่ต้องเลื่อน เพราะผู้ใช้ถือเครื่องมือเดียวและอีกมือถือของ</p><p>อีกแบบที่เขียนได้คือตรวจว่าเนื้อหาสูงไม่เกินจอ</p><pre class="code-vs"><code>final size = tester.getSize(find.byKey(const Key('receiving-body')));
+expect(size.height, lessThanOrEqualTo(560));</code></pre></section>
+
+<section><h2>6. ทดสอบว่ารายการเลื่อนได้จริง</h2><pre class="code-vs"><code>testWidgets('withdraw fills the page and scrolls only the available pallet list', (
+  tester,
+) async {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(390, 650);
+  addTearDown(tester.view.reset);
+
+  final store = createTestStore(
+    username: 'Dev',
+    pallets: List.generate(12, (index) =&gt; Pallet(...)),
+  );
+  await store.loadPallets();
+  ...
+});</code></pre><p>สังเกตว่าสร้างข้อมูล 12 รายการ ซึ่ง<strong>มากพอที่จะล้นจอ</strong> — ถ้าใส่แค่สองรายการ เทสต์จะผ่านทั้งที่ layout ผิด</p><div class="note">กฎที่ใช้ได้ทั่วไป — เทสต์ layout ต้องมีข้อมูลมากพอที่จะทำให้เกิดปัญหา ถ้าไม่แน่ใจว่าเท่าไหร่ ให้ใส่จนล้นแล้วลดลงมา</div></section>
+
+<section><h2>7. ทดสอบพื้นที่กด</h2><pre class="code-vs"><code>testWidgets('ปุ่มสลับภาษากดโดนแม้ใส่ถุงมือ', (tester) async {
+  await pumpApp(tester);
+
+  final size = tester.getSize(find.byKey(const Key('language-button')));
+  expect(size.height, greaterThanOrEqualTo(PdaMetrics.minTapTarget));
+  expect(size.width, greaterThanOrEqualTo(PdaMetrics.minTapTarget));
+});</code></pre><p>ตรวจสิ่งที่ตามองแล้วบอกไม่ได้ — ปุ่มไอคอนที่ดูใหญ่พอ อาจมีพื้นที่กดจริงแค่ 24×24 ถ้าห่อด้วย <code>GestureDetector</code> แทน <code>IconButton</code> (13.10)</p><p>เขียนเป็นฟังก์ชันช่วยแล้วใช้กับทุกปุ่มในจอได้</p><pre class="code-vs"><code>void expectTappable(WidgetTester tester, Finder finder, {String? label}) {
+  final size = tester.getSize(finder);
+  expect(size.height, greaterThanOrEqualTo(48), reason: label);
+  expect(size.width, greaterThanOrEqualTo(48), reason: label);
+}
+
+// แล้วตรวจทุกปุ่มในจอ
+for (final key in ['confirm', 'cancel', 'scan', 'back']) {
+  expectTappable(tester, find.byKey(Key(key)), label: key);
+}</code></pre></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ layout ผ่านแต่เครื่องจริงล้น</td><td>ไม่ได้กำหนดขนาดจอ</td><td><code>tester.view.physicalSize</code></td></tr>
+<tr><td>เทสต์ล้มเมื่อรันทั้งไฟล์</td><td>ลืม <code>addTearDown(tester.view.reset)</code></td><td>ใส่</td></tr>
+<tr><td>ไม่จับการล้น</td><td>ลืม <code>takeException()</code></td><td>ใส่ทุกเทสต์ layout</td></tr>
+<tr><td>เทสต์ผ่านเพราะข้อมูลน้อยเกิน</td><td>ใส่แค่สองรายการ</td><td>ใส่จนล้น</td></tr>
+<tr><td>ล้นเฉพาะภาษาไทย</td><td>ทดสอบด้วยอังกฤษอย่างเดียว</td><td>ทดสอบทั้งสองภาษา (11.4)</td></tr>
+<tr><td>ล้นเมื่อผู้ใช้ตั้งตัวอักษรใหญ่</td><td>ไม่ได้ทดสอบ <code>textScaler</code></td><td>วนทดสอบหลายขนาด</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>จอ “นับสต๊อก” มีช่องสแกน รายการที่นับแล้ว และปุ่มยืนยัน เขียนรายการเทสต์ layout ที่ควรมี</p><details><summary>แนวคำตอบ</summary><table><thead><tr><th>เทสต์</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td>ช่องสแกนอยู่ที่เดิมเมื่อเลื่อนรายการ</td><td>ห่อทั้งจอด้วย scroll</td></tr>
+<tr><td>ปุ่มยืนยันอยู่ที่เดิมเมื่อเลื่อนรายการ</td><td>เหมือนกัน แต่คนละมุมจอ</td></tr>
+<tr><td>ไม่มีการเลื่อนทั้งหน้า</td><td>ผู้ใช้ต้องเห็นทุกอย่างพร้อมกัน</td></tr>
+<tr><td>ไม่ล้นเมื่อมี 50 รายการ</td><td>รายการยาวทำให้ layout พัง</td></tr>
+<tr><td>ไม่ล้นเมื่อรายการว่าง</td><td>บางครั้ง <code>Expanded</code> ที่ไม่มีลูกทำให้พัง</td></tr>
+<tr><td>ไม่ล้นที่ขนาดตัวอักษร 1.3 เท่า</td><td>ผู้ใช้ที่มองไม่ชัด</td></tr>
+<tr><td>ไม่ล้นเมื่อชื่อสินค้ายาวมาก</td><td>ข้อมูลจริงยาวกว่าที่ทดสอบ</td></tr>
+<tr><td>ปุ่มทุกปุ่มกดโดน</td><td>พื้นที่กดเล็กเกิน</td></tr>
+</tbody></table><p><strong>สองข้อที่คนมักลืมคือแถวที่ห้าและเจ็ด</strong></p><pre class="code-vs"><code>testWidgets('รายการว่าง layout ต้องไม่พัง', (tester) async {
+  useViewport(tester);
+  await tester.pumpWidget(wrap(CycleCountView(store: emptyStore)));
+
+  expect(tester.takeException(), isNull);
+  // และต้องมีข้อความบอก ไม่ใช่หน้าจอเปล่า
+  expect(find.byKey(const Key('empty-hint')), findsOneWidget);
+});
+
+testWidgets('ชื่อสินค้ายาวมาก ต้องไม่ล้น', (tester) async {
+  useViewport(tester);
+  final store = storeWith(productName: 'สินค้า' * 30);   // ยาวเกินจริง
+  await tester.pumpWidget(wrap(CycleCountView(store: store)));
+
+  expect(tester.takeException(), isNull);
+});</code></pre><p>ข้อมูลที่ยาวเกินจริงมีค่ามาก เพราะข้อมูลในระบบจริงมักยาวกว่าที่ทีมนึกถึงตอนออกแบบ — ชื่อสินค้าที่มีรายละเอียดครบ หรือชื่อที่ถูกคัดลอกมาจากใบสั่งซื้อ</p><p><strong>สิ่งที่ควรทำนอกจากเทสต์</strong> — ถ่ายภาพหน้าจอจากเครื่องจริงมาเทียบกับที่เห็นในเทสต์อย่างน้อยหนึ่งครั้ง เพื่อยืนยันว่าขนาดจอที่ใช้ในเทสต์ตรงกับเครื่องจริง</p><pre class="code-vs"><code>// รันบนเครื่องจริงเพื่อดูขนาดที่แท้จริง
+debugPrint(MediaQuery.sizeOf(context).toString());
+debugPrint(MediaQuery.devicePixelRatioOf(context).toString());</code></pre><p>ถ้าเลขไม่ตรงกับที่ตั้งในเทสต์ เทสต์ทั้งหมดในกลุ่มนี้จะทดสอบจอที่ไม่มีอยู่จริง</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>เทสต์ layout ที่ไม่กำหนดขนาดจอ ไม่มีความหมาย</li><li>จดตำแหน่งก่อนเลื่อน แล้วตรวจว่าไม่ขยับ</li><li><code>tester.takeException()</code> จับการล้นที่ตามองไม่เห็น</li><li>ใส่ข้อมูลมากพอที่จะทำให้เกิดปัญหา</li><li>ทดสอบทั้งรายการว่าง รายการยาว และข้อความยาวเกินจริง</li><li>ยืนยันขนาดจอที่ใช้ในเทสต์กับเครื่องจริงอย่างน้อยหนึ่งครั้ง</li></ul></div><p><strong>บทหน้า:</strong> เครื่องมือที่ดูสิ่งที่เกิดขึ้นตอนแอปทำงานจริง</p></section>

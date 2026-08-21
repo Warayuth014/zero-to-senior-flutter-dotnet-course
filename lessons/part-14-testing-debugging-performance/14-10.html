@@ -4,20 +4,147 @@
 <title>pumpAndSettle</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-10 · Testing</span><h1>pumpAndSettle</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">pump แบบตั้งใจ</a></li><li><a href="#section-2">เมื่อไรใช้ pumpAndSettle</a></li><li><a href="#section-3">Infinite animation</a></li><li><a href="#section-4">จำนวน pumps เป็นสัญญาณ</a></li><li><a href="#section-5">AnimationController lifecycle</a></li><li><a href="#section-6">Reduced motion</a></li><li><a href="#section-7">Time budget</a></li><li><a href="#section-8">Debug เมื่อ settle timeout</a></li></ol></nav>
-<div class="note"><strong><code>pumpAndSettle</code> ไม่ใช่ยาวิเศษ:</strong> มัน pump จนไม่มี scheduled frame ถ้ามี spinner/timer/animation วนไม่สิ้นสุด test จะ timeout และอาจซ่อนจำนวน frame ที่ผิดปกติ</div>
-<section id="section-1"><h2>1. pump แบบตั้งใจ</h2><pre class="code-vs"><code>await tester.tap(button);
-await tester.pump(); // เริ่ม animation/state
-expect(find.byType(CircularProgressIndicator), findsOneWidget);
-response.complete(result);
-await tester.pump(); // apply future result</code></pre><p>ควบคุม frame ทำให้ทดสอบ intermediate state ได้</p></section>
-<section id="section-2"><h2>2. เมื่อไรใช้ pumpAndSettle</h2><p>เหมาะหลัง Navigator push/pop, dialog/sheet transition หรือ finite animation ที่เราต้องการ final UI ตัวอย่าง flow จริงใช้หลังเปิด scanner dialogและ submit แล้วรอทุก transition จบ</p></section>
-<section id="section-3"><h2>3. Infinite animation</h2><p><code>CircularProgressIndicator</code>, repeating controller หรือ polling อาจ schedule frame ต่อเนื่อง ให้ complete fake future ก่อน settle หรือ pump duration ที่ต้องการแล้ว assert loading โดยไม่ settle</p></section>
-<section id="section-4"><h2>4. จำนวน pumps เป็นสัญญาณ</h2><pre class="code-vs"><code>final frames = await tester.pumpAndSettle();
-expect(frames, lessThan(10));</code></pre><p>ใช้เมื่อจำนวน transition เป็น contract เชิง performance จริง มิฉะนั้น exact count เปราะตาม theme/platform</p></section>
-<section id="section-5"><h2>5. AnimationController lifecycle</h2><p>test unmount ขณะ animation ทำงานแล้ว pump ต่อ ตรวจไม่มี ticker leak/<code>setState() called after dispose</code> และ controller ถูก dispose ใช้ <code>addTearDown</code> กับ controller ที่ test เป็นผู้สร้าง</p></section>
-<section id="section-6"><h2>6. Reduced motion</h2><p>ถ้าแอปรองรับ accessibility animation disabled ให้ทดสอบทั้ง normal และ disableAnimations โดย behavior/route result เหมือนกัน ไม่ผูก action กับ animation completion อย่างเดียว</p></section>
-<section id="section-7"><h2>7. Time budget</h2><p><code>pump(const Duration(seconds: 5))</code> ขยับ fake time ไม่ได้ sleep จริง จึงใช้ทดสอบ timeout/debounce ได้เร็ว แต่ async I/O ที่อยู่นอก fake clock ยังต้องควบคุมด้วย Completer/fake scheduler</p></section>
-<section id="section-8"><h2>8. Debug เมื่อ settle timeout</h2><div class="success">หา ticker/timer ที่ยังทำงาน, future ที่ fake ไม่ complete, animation repeat และ pending route; เปลี่ยนเป็น pump ทีละช่วงพร้อม assert แทนการเพิ่ม timeout แบบเดาสุ่ม</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เวลาในเทสต์ไม่เดินเอง</a></li><li><a href="#section-2">งานที่ pumpAndSettle รอ และไม่รอ</a></li><li><a href="#section-3">เมื่อไหร่ใช้ pump() เปล่า ๆ</a></li><li><a href="#section-4">เมื่อไหร่ใช้ pump พร้อมเวลา</a></li><li><a href="#section-5">fakeAsync เมื่อเวลานานเกิน</a></li><li><a href="#section-6">pumpAndSettle ค้างเพราะอะไร</a></li><li><a href="#section-7">รูปแบบที่ใช้ได้เสมอ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: หาเทสต์ที่ใช้ <code>pumpAndSettle</code> ผิดที่</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.7, 14.9<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกใช้ <code>pump</code> แต่ละแบบให้ถูก และรู้ว่าเมื่อไหร่ <code>pumpAndSettle</code> จะค้าง</div>
+
+<section id="section-1"><h2>1. เวลาในเทสต์ไม่เดินเอง</h2><div class="note">ในเทสต์ widget เวลา<strong>หยุดนิ่ง</strong>จนกว่าจะสั่งให้เดิน — นี่คือสิ่งที่ทำให้เทสต์เร็วและทำซ้ำได้ แต่ก็เป็นที่มาของความสับสนทั้งหมดในบทนี้</div><table><thead><tr><th>คำสั่ง</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>pump()</code></td><td>วาดหนึ่งเฟรม โดยเวลาเดินไปน้อยที่สุด</td></tr>
+<tr><td><code>pump(Duration(seconds: 1))</code></td><td>เดินเวลาไปหนึ่งวินาที แล้ววาดหนึ่งเฟรม</td></tr>
+<tr><td><code>pumpAndSettle()</code></td><td>วาดซ้ำจนกว่าจะไม่มีเฟรมที่รออยู่ — สูงสุด 10 วินาที</td></tr>
+</tbody></table><p>สิ่งที่ต้องเข้าใจคือ <code>pumpAndSettle</code> ไม่ได้แปลว่า “รอให้ทุกอย่างเสร็จ” แต่แปลว่า <strong>“วาดไปเรื่อย ๆ จนกว่าจะไม่มี animation ที่ต้องวาดต่อ”</strong></p></section>
+
+<section id="section-2"><h2>2. งานที่ <code>pumpAndSettle</code> รอ และไม่รอ</h2><table><thead><tr><th>รอ</th><th>ไม่รอ</th></tr></thead><tbody>
+<tr><td>animation ของการเปิด dialog</td><td><code>Future</code> ที่ยังไม่ resolve</td></tr>
+<tr><td>animation ของการเปลี่ยนหน้า</td><td>คำขอ HTTP ที่ยังไม่ตอบ</td></tr>
+<tr><td>การเลื่อนที่มีความหน่วง</td><td>ตัวจับเวลาที่ตั้งไว้นานกว่า 10 วินาที</td></tr>
+<tr><td><code>AnimatedContainer</code>, <code>Hero</code></td><td>งานที่รอ I/O จริง</td></tr>
+</tbody></table><p>คอลัมน์ขวาคือที่มาของความเข้าใจผิดที่พบบ่อยที่สุด — <code>pumpAndSettle</code> ไม่ได้ทำให้ <code>Future</code> เสร็จ มันแค่วาดเฟรมไปเรื่อย ๆ</p><pre class="code-vs"><code>// Future ใน MockClient เสร็จทันที (เป็น microtask) จึงทำงานได้
+await tester.pumpWidget(wrap(MockClient((_) async =&gt; http.Response(...))));
+await tester.pumpAndSettle();
+expect(find.byKey(const Key('pallet-PLT-001')), findsOneWidget);   // ผ่าน
+
+// แต่ Future ที่ค้างอยู่ pumpAndSettle ก็ไม่ช่วย
+final gate = Completer&lt;http.Response&gt;();
+await tester.pumpWidget(wrap(MockClient((_) =&gt; gate.future)));
+await tester.pumpAndSettle();
+expect(find.byKey(const Key('pallet-PLT-001')), findsNothing);     // ยังไม่มา</code></pre></section>
+
+<section id="section-3"><h2>3. เมื่อไหร่ใช้ <code>pump()</code> เปล่า ๆ</h2><p>เมื่อต้องการดู<strong>สถานะระหว่างทาง</strong></p><pre class="code-vs"><code>testWidgets('เปิดแอปที่มี session เดิม ต้องไม่เห็นหน้าเข้าสู่ระบบเลย', (tester) async {
+  await storage.write(validSession);
+
+  await tester.pumpWidget(AuthLabApp(dependencies: deps));
+  // ยังไม่ settle — ดูเฟรมแรกก่อน
+  await tester.pump();
+
+  expect(find.byKey(const Key('splash')), findsOneWidget);
+  expect(find.byKey(const Key('login-screen')), findsNothing);
+
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('home-shell')), findsOneWidget);
+});</code></pre><p>เทสต์นี้จับอาการ “เห็นหน้าเข้าสู่ระบบแวบหนึ่ง” จาก 8.6 ซึ่ง <code>pumpAndSettle</code> อย่างเดียวมองไม่เห็น เพราะกว่าจะ settle เสร็จ หน้าจอก็เปลี่ยนไปแล้ว</p><table><thead><tr><th>สถานะที่ต้องใช้ <code>pump()</code> ถึงจะเห็น</th></tr></thead><tbody>
+<tr><td>วงหมุนระหว่างโหลดครั้งแรก</td></tr>
+<tr><td>ปุ่มที่จางลงระหว่างส่งคำสั่ง</td></tr>
+<tr><td>หน้าจอเริ่มต้นก่อนตัดสินใจว่าจะไปไหน</td></tr>
+<tr><td>แถบความคืบหน้าระหว่างอัปโหลด</td></tr>
+</tbody></table><pre class="code-vs"><code>testWidgets('ระหว่างโหลดครั้งแรกเห็นวงหมุน', (tester) async {
+  final gate = Completer&lt;http.Response&gt;();
+  await tester.pumpWidget(wrap(MockClient((_) =&gt; gate.future)));
+  await tester.pump();
+
+  expect(find.byKey(const Key('initial-loading')), findsOneWidget);
+
+  gate.complete(http.Response(zoneBody([palletJson('PLT-001')]), 200, ...));
+  await tester.pumpAndSettle();
+});</code></pre></section>
+
+<section id="section-4"><h2>4. เมื่อไหร่ใช้ <code>pump</code> พร้อมเวลา</h2><table><thead><tr><th>กรณี</th><th>ทำไม <code>pumpAndSettle</code> ใช้ไม่ได้</th></tr></thead><tbody>
+<tr><td><code>SnackBar</code></td><td>มันปิดตัวเองใน 4 วินาที — settle จะรอจนปิด (14.9)</td></tr>
+<tr><td>ตัวจับเวลาที่วนซ้ำ</td><td>ไม่มีวันหยุด — settle จะค้างจนหมดเวลา</td></tr>
+<tr><td>animation ที่วนไม่รู้จบ</td><td><code>CircularProgressIndicator</code> หมุนตลอด</td></tr>
+</tbody></table><pre class="code-vs"><code>await tester.pump();                                    // เริ่มปรากฏ
+await tester.pump(const Duration(milliseconds: 750));    // ให้ animation จบ
+expect(find.text('ปิด T-1 สำเร็จ'), findsOneWidget);</code></pre><div class="note"><strong>ข้อผิดพลาดที่พบบ่อยที่สุด</strong> — ใช้ <code>pumpAndSettle</code> ในจอที่มี <code>CircularProgressIndicator</code> แสดงอยู่ แล้วเทสต์ค้างสิบวินาทีก่อนล้มด้วยข้อความ <code>pumpAndSettle timed out</code></div></section>
+
+<section id="section-5"><h2>5. <code>fakeAsync</code> เมื่อเวลานานเกิน</h2><p>เมื่อต้องทดสอบสิ่งที่เกิดในอีกสิบนาที <code>pump</code> ทำไม่ได้เพราะเทสต์ widget รอไม่ไหว</p><pre class="code-vs"><code>test('หลุดแล้วเริ่มถามซ้ำ ต่อกลับได้แล้วหยุด', () {
+  fakeAsync((async) {
+    ...
+    final callsBefore = repository.fetchCalls;
+    async.elapse(const Duration(seconds: 45));
+    expect(repository.fetchCalls, callsBefore + 3);
+    ...
+    // หลังหยุดแล้วต้องไม่มีคำขอเพิ่มจากตัวจับเวลาอีก
+    async.elapse(const Duration(minutes: 5));
+    expect(repository.fetchCalls, callsAfterReconnect);
+
+    store.dispose();
+    async.flushTimers();
+  });
+});</code></pre><table><thead><tr><th>เมธอด</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>async.elapse(duration)</code></td><td>เดินเวลาไป ตัวจับเวลาที่ถึงกำหนดจะทำงาน</td></tr>
+<tr><td><code>async.flushMicrotasks()</code></td><td>ให้ <code>Future</code> ที่พร้อมแล้วทำงาน</td></tr>
+<tr><td><code>async.flushTimers()</code></td><td>รันตัวจับเวลาที่เหลือทั้งหมด — ใช้ตอนจบเพื่อไม่ให้ค้าง</td></tr>
+</tbody></table><p><code>fakeAsync</code> ใช้กับ <code>test</code> ธรรมดา ไม่ใช่ <code>testWidgets</code> — ถ้าต้องการทั้งสองอย่างพร้อมกัน ให้ใช้ <code>tester.pump(duration)</code> แทน ซึ่งเดินเวลาในเทสต์ widget ได้เหมือนกัน</p><pre class="code-vs"><code>// ในเทสต์ widget เดินเวลาแบบนี้
+await tester.pump(const Duration(seconds: 30));</code></pre></section>
+
+<section id="section-6"><h2>6. <code>pumpAndSettle</code> ค้างเพราะอะไร</h2><pre class="code-vs"><code>pumpAndSettle timed out</code></pre><table><thead><tr><th>สาเหตุ</th><th>วิธีตรวจ</th><th>แก้</th></tr></thead><tbody>
+<tr><td>มี <code>CircularProgressIndicator</code> อยู่</td><td>ดูว่าจอกำลังโหลดอยู่ไหม</td><td>ให้ <code>Future</code> เสร็จก่อน หรือใช้ <code>pump</code></td></tr>
+<tr><td>มี <code>Timer.periodic</code> ทำงานอยู่</td><td>ค้นหา <code>Timer.periodic</code> ในโค้ดที่เกี่ยวข้อง</td><td>ใช้ <code>pump</code> พร้อมเวลา</td></tr>
+<tr><td>animation ที่วนไม่รู้จบ</td><td>ดู <code>repeat()</code> ใน <code>AnimationController</code></td><td>เหมือนกัน</td></tr>
+<tr><td><code>Future</code> ค้างอยู่จริง</td><td>ตรวจว่า <code>Completer</code> ถูก complete หรือยัง</td><td>complete ก่อน settle</td></tr>
+</tbody></table><p>วิธีหาที่เร็วที่สุดคือดูว่ามีอะไรค้างอยู่</p><pre class="code-vs"><code>// พิมพ์รายการ timer ที่ยังทำงานอยู่
+debugPrint(tester.binding.transientCallbackCount.toString());</code></pre></section>
+
+<section id="section-7"><h2>7. รูปแบบที่ใช้ได้เสมอ</h2><pre class="code-vs"><code>// 1. สร้างจอ แล้วดูสถานะแรก
+await tester.pumpWidget(wrap(screen));
+await tester.pump();
+expect(find.byKey(const Key('initial-loading')), findsOneWidget);
+
+// 2. ปล่อยให้ข้อมูลมา แล้วดูสถานะสุดท้าย
+gate.complete(response);
+await tester.pumpAndSettle();
+expect(find.byKey(const Key('pallet-list')), findsOneWidget);
+
+// 3. กด แล้วดูผล
+await tester.tap(find.byKey(const Key('hold-PLT-001')));
+await tester.pumpAndSettle();
+expect(find.text('ล็อกแล้ว'), findsOneWidget);</code></pre><p>สามขั้นนี้ครอบคลุมเทสต์ widget ส่วนใหญ่ และเป็นโครงที่ lab ใช้ทุกไฟล์</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หา widget ไม่เจอทั้งที่ควรมี</td><td>ยังไม่ได้ pump พอ</td><td>เพิ่ม <code>pumpAndSettle</code></td></tr>
+<tr><td>ทดสอบวงหมุนไม่ได้</td><td><code>pumpAndSettle</code> ตั้งแต่แรก</td><td>ใช้ <code>pump()</code> ก่อน</td></tr>
+<tr><td><code>pumpAndSettle timed out</code></td><td>มีอะไรวนไม่หยุด</td><td>ใช้ <code>pump</code> พร้อมเวลา</td></tr>
+<tr><td>เทสต์ค้างเป็นนาที</td><td><code>fakeAsync</code> มี timer ค้างตอนจบ</td><td><code>async.flushTimers()</code></td></tr>
+<tr><td>ผลไม่ตรงเพราะ Future ยังไม่เสร็จ</td><td>ลืมให้ microtask ทำงาน</td><td><code>await Future&lt;void&gt;.delayed(Duration.zero)</code></td></tr>
+<tr><td>เทสต์ผ่านบ้างไม่ผ่านบ้าง</td><td>pump จำนวนครั้งไม่แน่นอน</td><td>ใช้ <code>Completer</code> คุมจังหวะ</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นอาการที่แย่ที่สุด — เทสต์ที่ผ่านบ้างไม่ผ่านบ้างจะถูกเมินในที่สุด และเมื่อถูกเมิน มันจะไม่จับบั๊กอีกเลย</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>เทสต์นี้ล้มด้วย <code>pumpAndSettle timed out</code></p><pre class="code-vs"><code>testWidgets('โหลดเสร็จแล้วเห็นรายการ', (tester) async {
+  await tester.pumpWidget(wrap(TaskScreen(store: store)));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const Key('task-list')), findsOneWidget);
+});</code></pre><p>จอนั้นมี <code>Timer.periodic</code> ที่โหลดข้อมูลใหม่ทุกสิบวินาที หาทางแก้</p><details><summary>แนวคำตอบ</summary><p>สาเหตุชัดเจน — <code>Timer.periodic</code> ทำให้มีงานรออยู่ตลอด <code>pumpAndSettle</code> จึงไม่มีวัน settle</p><p>มีสามทางแก้ และคุณภาพต่างกันมาก</p><table><thead><tr><th>ทาง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>เปลี่ยนเป็น <code>pump()</code> หลาย ๆ ครั้ง</td><td>ทำงานได้ แต่เปราะ — ต้องเดาว่ากี่ครั้ง</td></tr>
+<tr><td>ใช้ <code>pump(Duration)</code></td><td>ดีขึ้น แต่ยังผูกกับเวลาที่ต้องรู้</td></tr>
+<tr><td><strong>ทำให้ช่วงเวลาส่งเข้ามาได้</strong></td><td>ดีที่สุด</td></tr>
+</tbody></table><pre class="code-vs"><code>class TaskStore extends ChangeNotifier {
+  TaskStore(this.repository, {this.pollInterval = const Duration(seconds: 10)});
+
+  final Duration pollInterval;
+}</code></pre><pre class="code-vs"><code>// ในเทสต์ ปิดการถามซ้ำไปเลย
+final store = TaskStore(repository, pollInterval: Duration.zero);
+// หรือให้ยาวมากจนไม่ทำงานระหว่างเทสต์
+final store = TaskStore(repository, pollInterval: const Duration(hours: 1));</code></pre><p>ทางนี้ดีที่สุดเพราะ<strong>แก้ที่สาเหตุ ไม่ใช่ที่อาการ</strong> และได้ประโยชน์อย่างอื่นตามมาด้วย</p><table><thead><tr><th>ได้อะไรเพิ่ม</th></tr></thead><tbody>
+<tr><td>ทดสอบเรื่องการถามซ้ำได้ตรง ๆ ด้วย <code>fakeAsync</code></td></tr>
+<tr><td>ปรับความถี่ตามสภาพเครือข่ายได้ในอนาคต</td></tr>
+<tr><td>ปิดได้เมื่อผู้ใช้อยู่ในหน้าที่ไม่ต้องการข้อมูลสด</td></tr>
+</tbody></table><p>เป็นรูปแบบเดียวกับที่ 9.8 สรุปไว้ — <strong>อะไรที่ทำให้เทสต์เดาไม่ได้ ให้เปิดช่องรับเข้ามาพร้อมค่าเริ่มต้น</strong></p><p><code>LiveTaskStore</code> ใน lab ทำแบบนี้อยู่แล้ว ซึ่งเป็นเหตุผลที่เทสต์ 23 ข้อของมันรันจบใน 0.3 วินาที</p><pre class="code-vs"><code>LiveTaskStore({
+  required this.repository,
+  required this.client,
+  this.pollInterval = const Duration(seconds: 15),
+});</code></pre></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>เวลาในเทสต์หยุดนิ่งจนกว่าจะสั่งให้เดิน</li><li><code>pumpAndSettle</code> รอ animation ไม่ได้รอ <code>Future</code></li><li>ใช้ <code>pump()</code> เมื่อต้องการดูสถานะระหว่างทาง</li><li>ใช้ <code>pump(Duration)</code> กับ <code>SnackBar</code> และตัวจับเวลา</li><li>ใช้ <code>fakeAsync</code> เมื่อต้องเดินเวลาเป็นนาที</li><li>ถ้า <code>pumpAndSettle</code> ค้าง ให้แก้ที่สาเหตุด้วยการรับช่วงเวลาเข้ามา</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบตัวจับเวลาและงานที่กินเวลา</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

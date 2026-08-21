@@ -1,30 +1,112 @@
-<div class="note"><strong>Lab ปลาย Part:</strong> สร้าง safety net ของ receiving flow ตั้งแต่ JSON → repository → Store → widget/scanner/navigation โดยใช้ fake repositories แบบ wms_absolute_mobile และนำหลักไปวางรอบ <code>wmsapp</code> ก่อน refactor screen ใหญ่</div>
-<section><h2>1. Acceptance criteria</h2><ol><li>โหลด open orders และ empty/error/retry</li><li>scan part/serial/pallet ตาม step</li><li>กัน duplicate และ double-submit</li><li>Back ลด step, exit/resume ตาม policy</li><li>timeout/stale response ไม่ทับ state ใหม่</li><li>scanner อยู่ fixed บน PDA และ focus กลับหลัง error</li></ol></section>
-<section><h2>2. Test seam ที่ต้องมี</h2><pre class="code-vs"><code>class ReceivingStore extends ChangeNotifier {
-  ReceivingStore({
-    required ReceivingRepository repository,
-    required Clock clock,
-    required IdGenerator ids,
-  });
-}</code></pre><p>screen รับ store/repository จาก composition root ไม่เรียก singleton HTTP ภายใน callback</p></section>
-<section><h2>3. Fake repository</h2><pre class="code-vs"><code>final repo = FakeReceivingRepository(openOrders: [order]);
-repo.receiveGate = Completer&lt;void&gt;();
-final store = ReceivingStore(
-  repository: repo,
-  clock: FixedClock(now),
-  ids: SequenceIds(['cmd-1']),
-);
-addTearDown(store.dispose);</code></pre></section>
-<section><h2>4. Unit/contract layer</h2><p>ทดสอบ normalization/duplicate/qty/state reducer แบบ pure Dart; fixture response จาก .NET ครอบคลุม null/unknown status/time; MockClient ตรวจ path/auth/body และ mapping 400/401/409/500/timeout โดยไม่เปิด network</p></section>
-<section><h2>5. Store race layer</h2><pre class="code-vs"><code>final first = repo.queueFetch();
-final second = repo.queueFetch();
-store.search('A');
-store.search('B');
-second.complete(pageB);
-first.complete(pageA);
-await Future.wait([firstOperation, secondOperation]);
-expect(store.query, 'B');
-expect(store.items, pageB.items);</code></pre></section>
-<section><h2>6. Widget flow</h2><p>pump ที่ 390×560, enterText + receiveAction(done), assert loading/step/error/focus, scan ซ้ำขณะ receive pending และ confirm repository call หนึ่งครั้ง จากนั้น drag results แล้ว assert scanner y ไม่เปลี่ยนและไม่มี overflow</p></section>
-<section><h2>7. Navigation + lifecycle</h2><p>ทดสอบ business Back, system back, bottom navigation reset, resume draft, dispose ก่อน response และ route result จาก pallet/dialog ปิด timer/subscription ทุกเส้นทางและไม่ใช้ <code>pumpAndSettle</code> ขณะมี polling ไม่สิ้นสุด</p></section>
-<section><h2>8. Definition of Done</h2><div class="success">analyze/test ผ่านซ้ำได้โดยไม่ network/sleep, ทุก critical failure มี test, suite อ่านเป็น receiving specification, profile trace บน PDA ไม่มี jank hotspot ใหม่ และ bug ที่พบทุกตัวเพิ่ม regression test ระดับต่ำที่สุดที่จับได้</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 150–180 นาที</span><span>ลงมือทำ: เขียนชุดเทสต์ของฟีเจอร์รับเข้าให้ครบทุกชั้น</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.1–14.16 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> รับฟีเจอร์ที่ยังไม่มีเทสต์ แล้วสร้างชุดเทสต์ที่จับบั๊กจริงได้</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่านเทสต์ทั้ง 358 ข้อของ lab พร้อมรู้ว่าแต่ละแบบมาจากบทไหน</td></tr>
+<tr><td>2</td><td>เขียนชุดเทสต์ของฟีเจอร์รับเข้าตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 15</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของเทสต์ทั้งหมดใน lab</h2><table><thead><tr><th>เทคนิค</th><th>ดูตัวอย่างที่</th><th>บท</th></tr></thead><tbody>
+<tr><td>ฟังก์ชันบริสุทธิ์</td><td><code>settings_test.dart</code></td><td>14.2</td></tr>
+<tr><td>repository ปลอมที่คุมจังหวะ</td><td><code>architecture_test.dart</code></td><td>14.3</td></tr>
+<tr><td><code>MockClient</code> ตรวจคำขา</td><td><code>upload_test.dart</code></td><td>14.4</td></tr>
+<tr><td>ไฟล์ตัวอย่างจากของจริง</td><td><code>testing_lab_test.dart</code></td><td>14.5</td></tr>
+<tr><td>สถานะและลำดับ</td><td><code>realtime_test.dart</code></td><td>14.6</td></tr>
+<tr><td>widget และการห่อ</td><td><code>theme_test.dart</code></td><td>14.7</td></tr>
+<tr><td>ตัวหาและการกด</td><td><code>nav_basics_test.dart</code></td><td>14.8</td></tr>
+<tr><td><code>Completer</code> คุมจังหวะ</td><td><code>architecture_test.dart</code></td><td>14.10</td></tr>
+<tr><td><code>fakeAsync</code></td><td><code>realtime_test.dart</code></td><td>14.11</td></tr>
+<tr><td>การนำทางและการรั่ว</td><td><code>nav_basics_test.dart</code></td><td>14.12</td></tr>
+<tr><td>ขนาดจอและการล้น</td><td><code>layout_basics_test.dart</code></td><td>14.13</td></tr>
+<tr><td>นับการวาดใหม่</td><td><code>testing_lab_test.dart</code></td><td>14.15, 14.16</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub</code></pre></section>
+
+<section><h2>3. โจทย์</h2><p>ฟีเจอร์รับเข้าเป็นฟีเจอร์ที่ซับซ้อนที่สุดในแอป และรวมเกือบทุกเรื่องที่เรียนมา</p><pre class="code-vs"><code>เลือกใบสั่งซื้อ
+  └─ สแกนพาเลท              → ตรวจกับเซิร์ฟเวอร์ว่าพาเลทว่าง
+       └─ สแกนบาร์โค้ดสินค้า  → ตรวจว่าตรงกับรายการในใบ
+            └─ ใส่จำนวน       → ตรวจว่าไม่เกินที่สั่ง
+                 └─ ยืนยัน    → บันทึก แล้วสร้างงานขนย้าย
+                      └─ ถ่ายรูปหลักฐาน (ถ้ามี)</code></pre><p>สร้างโฟลเดอร์ <code>test/receiving/</code> แล้วเขียนเทสต์ให้ครบตามเกณฑ์</p></section>
+
+<section><h2>4. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>ระดับ</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>กฎ “จำนวนที่รับต้องไม่เกินที่สั่ง” มีเทสต์ครอบทุกขอบ</td><td>unit</td><td>14.2</td></tr>
+<tr><td>2</td><td>บาร์โค้ดที่มีช่องว่างหัวท้าย ต้องตัดก่อนเทียบ</td><td>unit</td><td>14.2</td></tr>
+<tr><td>3</td><td>ไฟล์ตัวอย่างของใบสั่งซื้อ อ่านได้ด้วยโมเดลปัจจุบัน</td><td>unit</td><td>14.5</td></tr>
+<tr><td>4</td><td>ฟิลด์ที่หายจากไฟล์ตัวอย่าง ต้องโยน ไม่ใช่เงียบ</td><td>unit</td><td>14.5</td></tr>
+<tr><td>5</td><td>สแกนพาเลทใหม่ระหว่างที่ตัวเก่ายังตรวจไม่เสร็จ ต้องได้ตัวใหม่</td><td>store</td><td>14.3, 14.6</td></tr>
+<tr><td>6</td><td>กดยืนยันซ้ำระหว่างส่ง ต้องยิงครั้งเดียว</td><td>store</td><td>14.6</td></tr>
+<tr><td>7</td><td>ยืนยันไม่สำเร็จ ต้องเก็บที่สแกนไว้ ไม่ล้างทิ้ง</td><td>store</td><td>14.6</td></tr>
+<tr><td>8</td><td>บันทึกสำเร็จแต่สร้างงานขนย้ายไม่สำเร็จ ต้องบอกให้ชัด</td><td>store</td><td>14.3</td></tr>
+<tr><td>9</td><td>คำขอที่ส่งไปมี <code>Idempotency-Key</code> และใช้เดิมตอนลองใหม่</td><td><code>MockClient</code></td><td>14.4</td></tr>
+<tr><td>10</td><td>เน็ตขาดตอนยืนยัน ต้องบอกว่าไม่รู้ผล</td><td><code>MockClient</code></td><td>14.4</td></tr>
+<tr><td>11</td><td>ระหว่างตรวจพาเลทต้องเห็นสถานะกำลังตรวจ</td><td>widget</td><td>14.10</td></tr>
+<tr><td>12</td><td>กดยกเลิกในกล่องยืนยัน ต้องไม่ส่งอะไร</td><td>widget</td><td>14.9</td></tr>
+<tr><td>13</td><td>ปุ่มย้อนกลับกลางขั้นตอน ต้องเตือนก่อน</td><td>widget</td><td>14.9, 14.12</td></tr>
+<tr><td>14</td><td>ช่องสแกนอยู่ที่เดิมเมื่อเลื่อนรายการ</td><td>layout</td><td>14.13</td></tr>
+<tr><td>15</td><td>ไม่ล้นที่ 12 รายการ ที่ขนาดตัวอักษร 1.3 เท่า และเมื่อชื่อสินค้ายาว</td><td>layout</td><td>14.13</td></tr>
+<tr><td>16</td><td>โหลดรายการใหม่ ต้องไม่วาดหัวจอใหม่</td><td>ประสิทธิภาพ</td><td>14.15</td></tr>
+<tr><td>17</td><td>ใบสั่งซื้อ 500 รายการ สร้างแถวไม่เกิน 40</td><td>ประสิทธิภาพ</td><td>14.16</td></tr>
+<tr><td>18</td><td>ออกจากจอระหว่างส่ง ต้องไม่มีตัวจับเวลาหรือ subscription ค้าง</td><td>การรั่ว</td><td>14.11, 14.12</td></tr>
+</tbody></table><p>เกณฑ์ 5, 7, 8 และ 18 คือสี่ข้อที่ทดสอบด้วยมือแล้วไม่มีทางเจอ และเป็นสี่ข้อที่ทำให้ชุดเทสต์นี้คุ้มค่า</p></section>
+
+<section><h2>5. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 7 — เก็บที่สแกนไว้เมื่อยืนยันไม่สำเร็จ</strong></p><pre class="code-vs"><code>test('ยืนยันไม่สำเร็จ ต้องเก็บที่สแกนไว้', () async {
+  await store.scanPallet('PLT-001');
+  await store.scanPart('P-100');
+  store.setQuantity(5);
+  repository.throwOnConfirm = Exception('เชื่อมต่อไม่ได้');
+
+  await store.confirm();
+
+  // ผู้ใช้สแกนมาสิบรายการ ห้ามให้เริ่มใหม่เพราะเน็ตหลุด
+  expect(store.lines, hasLength(1));
+  expect(store.canConfirm, isTrue, reason: 'ต้องกดยืนยันซ้ำได้');
+});</code></pre><p><strong>เกณฑ์ 8 — สำเร็จครึ่งทาง</strong></p><pre class="code-vs"><code>test('บันทึกสำเร็จแต่สร้างงานไม่สำเร็จ ต้องไม่ทำให้ผู้ใช้เข้าใจผิด', () async {
+  tasks.throwOnDispatch = Exception('เชื่อมต่อไม่ได้');
+
+  await store.confirm();
+
+  // ของรับเข้าไปแล้วจริง ห้ามบอกว่าล้มเหลวทั้งหมด
+  expect(receiving.received, hasLength(1));
+  expect(store.message, contains('งานขนย้าย'));
+  expect(store.message, isNot(contains('ล้มเหลว')));
+});</code></pre><p><strong>เกณฑ์ 18 — การรั่ว</strong></p><pre class="code-vs"><code>testWidgets('เปิดปิดจอ 20 ครั้ง แล้วต้องไม่มีอะไรค้าง', (tester) async {
+  for (var i = 0; i &lt; 20; i++) {
+    await tester.pumpWidget(wrap(ReceivingScreen(store: makeStore())));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+  }
+
+  expect(tester.takeException(), isNull);
+});</code></pre><p><strong>เกณฑ์ 16 — นับการวาดใหม่</strong></p><pre class="code-vs"><code>expect(counter.countOf('header'), 1, reason: 'หัวจอไม่ได้ใช้ข้อมูลรายการ');</code></pre></section>
+
+<section><h2>6. ลำดับการเขียนที่แนะนำ</h2><table><thead><tr><th>ลำดับ</th><th>เขียน</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>1</td><td>ของปลอมและฟังก์ชันสร้างข้อมูล</td><td>ทุกเทสต์ที่เหลือใช้</td></tr>
+<tr><td>2</td><td>เทสต์ฟังก์ชันบริสุทธิ์</td><td>เขียนเร็วที่สุด ได้ความมั่นใจก่อน</td></tr>
+<tr><td>3</td><td>เทสต์ store</td><td>ที่ที่บั๊กอยู่มากที่สุด</td></tr>
+<tr><td>4</td><td>เทสต์ <code>MockClient</code></td><td>ยืนยันว่าส่งอะไรออกไป</td></tr>
+<tr><td>5</td><td>เทสต์ widget</td><td>แพงที่สุด เขียนหลังสุด</td></tr>
+<tr><td>6</td><td>เทสต์ layout และประสิทธิภาพ</td><td>เมื่อพฤติกรรมนิ่งแล้ว</td></tr>
+</tbody></table><p>เหตุผลที่เรียงแบบนี้คือ<strong>ถ้าเขียน widget ก่อนแล้วพบว่าโค้ดทดสอบไม่ได้ จะต้องรื้อทั้งหมด</strong> ส่วนการเริ่มจากชั้นล่างจะเผยให้เห็นก่อนว่าโครงมีปัญหาตรงไหน</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เขียนเทสต์ store ไม่ได้เลย</td><td>store สร้าง repository เอง</td><td>รับเข้ามาทาง constructor (9.8)</td></tr>
+<tr><td>ทดสอบจังหวะเวลาไม่ได้</td><td>ของปลอมตอบทันที</td><td><code>Completer</code></td></tr>
+<tr><td>เทสต์ widget ค้าง</td><td>มีตัวจับเวลาวนอยู่</td><td>รับ <code>pollInterval</code> เข้ามา (14.10)</td></tr>
+<tr><td>เทสต์ layout ผ่านทั้งที่เครื่องจริงล้น</td><td>ไม่ได้กำหนดขนาดจอ</td><td><code>tester.view.physicalSize</code></td></tr>
+<tr><td>เทสต์ล้มแบบสุ่ม</td><td>ใช้ store ตัวเดิมข้ามข้อ</td><td>สร้างใหม่ใน <code>setUp</code></td></tr>
+<tr><td>เขียนเทสต์เยอะแต่ไม่จับบั๊ก</td><td>ทดสอบแต่เส้นทางที่สำเร็จ</td><td>เพิ่มกลุ่ม “กฎที่ต้องจริงเสมอ” และ “จังหวะเวลา” (14.6)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบทดสอบตัวเองก่อนจบ Part 14</h2><ol><li>รูปร่างของชุดเทสต์สะท้อนอะไร (14.1)</li><li>ทำไม <code>wmsapp</code> ถึงมีศูนย์เทสต์ (14.1)</li><li>ทำไม coverage เป็นตัววัดที่ผลักไปผิดทาง (14.1)</li><li>ชื่อเทสต์ที่ดีเขียนอย่างไร (14.2)</li><li>ลืม <code>await</code> ในเทสต์แล้วเกิดอะไร (14.2)</li><li>ของปลอมสามแบบต่างกันอย่างไร (14.3)</li><li><code>Completer</code> ใช้ทดสอบอะไร (14.3)</li><li><code>MockClient</code> จับอะไรได้และจับอะไรไม่ได้ (14.4)</li><li>ทำไมคำตอบที่มีภาษาไทยต้องใส่ <code>charset=utf-8</code> (14.4)</li><li>ทำไมไฟล์ตัวอย่างดีกว่าสตริงในเทสต์ (14.5)</li><li>เทสต์ที่ยิงเซิร์ฟเวอร์จริงควรตรวจอะไร (14.5)</li><li>สี่กลุ่มที่ทุก store ควรมีเทสต์คืออะไร (14.6)</li><li>ทำไมต้องตรวจการประกาศ ไม่ใช่แค่ค่าที่เปลี่ยน (14.6)</li><li>widget ที่ใช้ปุ่ม Material ต้องห่อด้วยอะไร (14.7)</li><li>ทำไมต้อง <code>addTearDown(tester.view.reset)</code> (14.7, 14.13)</li><li>ทำไม <code>find.byKey</code> ดีกว่า <code>find.text</code> (14.8)</li><li>เมื่อไหร่ต้องใช้ <code>skipOffstage: false</code> (14.8, 14.12)</li><li>ทำไมเทสต์การยกเลิกสำคัญกว่าเทสต์การยืนยัน (14.9)</li><li>ผู้ใช้แตะนอกกล่อง <code>showDialog</code> คืนอะไร (14.9)</li><li><code>pumpAndSettle</code> รออะไรและไม่รออะไร (14.10)</li><li>ทำไมไม่ควรใช้ <code>pumpAndSettle</code> กับ <code>SnackBar</code> (14.10)</li><li>ทำไมต้องปลอมนาฬิกาแทนการรอจริง (14.11)</li><li><code>flushTimers()</code> ใช้ตอนไหน (14.11)</li><li>ออกจากระบบแล้วต้องล้างอะไรบ้าง (14.12)</li><li><code>tester.takeException()</code> จับอะไร (14.13)</li><li>ทำไมต้องวัดในโหมด profile บนเครื่องจริง (14.14)</li><li>ตำแหน่งของ <code>ListenableBuilder</code> มีผลอย่างไร (14.15)</li><li><code>Column</code> ต่างจาก <code>ListView.builder</code> อย่างไรเมื่อมี 500 แถว (14.16)</li><li><code>itemExtent</code> ช่วยอะไร (14.16)</li></ol></section>
+
+<section><h2>9. สรุปท้าย Part 14</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เลือกระดับของเทสต์จากราคาและสิ่งที่ได้</li><li>เขียนเทสต์ที่อ่านแล้วรู้ว่าอะไรพัง</li><li>ทำของปลอมที่คุมได้ทั้งคำตอบและจังหวะเวลา</li><li>ทดสอบสิ่งที่ส่งออกไปด้วย <code>MockClient</code></li><li>ทำให้สัญญากับเซิร์ฟเวอร์เป็นสิ่งที่ตรวจได้</li><li>ทดสอบ store ครบสี่กลุ่มโดยไม่ต้องมี widget</li><li>สร้าง หา และสั่งงาน widget ในเทสต์</li><li>ทดสอบ dialog รวมถึงเส้นทางที่คนลืม</li><li>เลือกใช้ <code>pump</code> แต่ละแบบให้ถูก</li><li>ปลอมนาฬิกาเพื่อทดสอบเวลาและจับตัวจับเวลาที่รั่ว</li><li>ทดสอบการนำทางและการล้างสถานะ</li><li>ทดสอบว่าหน้าจอพอดีกับเครื่องจริง</li><li>ใช้ DevTools หาสาเหตุที่เทสต์จับไม่ได้</li><li>วัดการวาดใหม่ให้เป็นตัวเลขที่เทสต์ยืนยันได้</li><li>จัดการลิสต์ยาวและรูปจำนวนมาก</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>รันเทสต์อัตโนมัติทุกครั้งที่ push</td><td>Part 15</td></tr>
+<tr><td>ทดสอบบนเครื่องจริงแบบ integration</td><td>Part 15</td></tr>
+<tr><td>วัดขนาดแอปและเวลาเปิดแอป</td><td>Part 15</td></tr>
+<tr><td>อ่านชุดเทสต์จริงของ <code>wms_absolute_mobile</code></td><td>Part 21 และ Part 22</td></tr>
+<tr><td>เขียนเทสต์ให้ <code>wmsapp</code> ที่ยังไม่มีเลย</td><td>Part 23</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 15 ปิดท้ายกลุ่มนี้ด้วยการนำแอปออกสู่การใช้งานจริง — build ที่ปล่อยได้ การเซ็นแอป การเก็บความลับ การลดขนาด และการดูแลรุ่นที่ปล่อยไปแล้ว ซึ่งเป็นเรื่องที่ต้องทำก่อนที่ PDA เครื่องแรกจะถึงมือผู้ใช้</p></section>

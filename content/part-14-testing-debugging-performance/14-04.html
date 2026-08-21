@@ -1,24 +1,159 @@
-<div class="note"><strong>อย่าให้ repository สร้าง HTTP client เองแบบซ่อน:</strong> inject <code>http.Client</code> หรือ transport interface เพื่อส่ง response ที่ต้องการและตรวจ request โดยไม่เปิด port/network จริง</div>
-<section><h2>1. Constructor injection</h2><pre class="code-vs"><code>class ReceivingApi {
-  ReceivingApi({required http.Client client, required Uri baseUri})
-      : _client = client, _baseUri = baseUri;
-  final http.Client _client;
-  final Uri _baseUri;
-}</code></pre><p>composition root สร้าง client จริงครั้งเดียว ส่วน test ส่ง fake client</p></section>
-<section><h2>2. MockClient</h2><pre class="code-vs"><code>final client = MockClient((request) async {
-  expect(request.method, 'GET');
-  expect(request.url.path, '/api/receiving/open');
-  return http.Response('{"items":[],"total":0}', 200,
-      headers: {'content-type': 'application/json'});
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เขียนเทสต์ที่ตรวจสิ่งที่ส่งออกไป</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.3, Part 7 (HTTP)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทดสอบ repository และ ApiClient ได้โดยไม่ต้องมีเซิร์ฟเวอร์ และตรวจได้ว่าส่งอะไรออกไปจริง</div>
+
+<section><h2>1. <code>MockClient</code> คืออะไร</h2><pre class="code-vs"><code>import 'package:http/testing.dart';
+
+final client = MockClient((request) async {
+  return http.Response('{"items": []}', 200);
+});</code></pre><div class="note"><code>MockClient</code> เป็น <code>http.Client</code> ที่แทนที่การยิงเน็ตด้วยฟังก์ชันของเรา — ได้ <code>request</code> เข้ามา คืน <code>response</code> ออกไป</div><p>มันมากับแพ็กเกจ <code>http</code> อยู่แล้ว ไม่ต้องติดตั้งอะไรเพิ่ม</p></section>
+
+<section><h2>2. สองสิ่งที่ตรวจได้</h2><table><thead><tr><th>ตรวจ</th><th>ตอบคำถามว่า</th></tr></thead><tbody>
+<tr><td>คำขาที่ส่งออกไป</td><td>เราส่งอะไรไปให้เซิร์ฟเวอร์</td></tr>
+<tr><td>การจัดการคำตอบ</td><td>เราอ่านคำตอบถูกไหม</td></tr>
+</tbody></table><pre class="code-vs"><code>test('เข้าสู่ระบบแล้วต้องแนบ token และอ่านค่าล่าสุดทุกครั้ง', () async {
+  final sent = &lt;http.Request&gt;[];
+  final api = ApiClient(
+    baseUrl: baseUrl,
+    client: MockClient((request) async {
+      sent.add(request);
+      return http.Response('{}', 200);
+    }),
+  );
+
+  api.authToken = 'tok-1';
+  await api.getJson('/api/WMS/mobile_tasks');
+  api.authToken = 'tok-2';
+  await api.getJson('/api/WMS/mobile_tasks');
+
+  expect(sent[0].headers['Authorization'], 'Bearer tok-1');
+  expect(sent[1].headers['Authorization'], 'Bearer tok-2');
+});</code></pre><p>เทสต์นี้พิสูจน์ข้อกำหนดจาก 8.4 ว่า <code>ApiClient</code> อ่าน token <strong>ตอนที่จะยิง</strong> ไม่ใช่คัดลอกเก็บไว้ตอนสร้าง — ซึ่งเป็นสิ่งที่ทดสอบด้วยมือไม่มีทางเห็น</p></section>
+
+<section><h2>3. ตรวจสิ่งที่ส่งออกไป</h2><table><thead><tr><th>อ่านจาก <code>request</code></th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><code>request.method</code></td><td><code>GET</code>, <code>POST</code></td></tr>
+<tr><td><code>request.url</code></td><td><code>Uri</code> เต็ม รวม query</td></tr>
+<tr><td><code>request.headers</code></td><td>ทุก header ที่ส่งไป</td></tr>
+<tr><td><code>request.body</code></td><td>เนื้อคำขอเป็นข้อความ</td></tr>
+<tr><td><code>request.bodyBytes</code></td><td>เนื้อคำขอเป็นไบต์ — ใช้กับ multipart (13.3)</td></tr>
+</tbody></table><pre class="code-vs"><code>test('ยิงไปที่เส้นทาง health ของ WMS', () async {
+  Uri? called;
+  await probeServer(
+    baseUrl: 'http://10.0.0.1:6191/wms',
+    client: MockClient((request) async {
+      called = request.url;
+      return http.Response('{}', 200);
+    }),
+  );
+  expect(called.toString(), 'http://10.0.0.1:6191/wms/api/WMS/mobile_health');
+});</code></pre><p>เทสต์นี้จับได้ทั้งเรื่องทับซ้อนใน URL และเรื่องเส้นทางที่ประกอบผิด — สองอย่างที่ 10.3 ใช้เวลาทั้งบทอธิบาย</p></section>
+
+<section><h2>4. จำลองคำตอบแบบต่าง ๆ</h2><pre class="code-vs"><code>// สำเร็จ
+MockClient((_) async =&gt; http.Response(
+  jsonEncode({'url': '/uploads/a.jpg'}),
+  200,
+  headers: {'content-type': 'application/json; charset=utf-8'},
+))
+
+// เซิร์ฟเวอร์ปฏิเสธพร้อมข้อความ
+MockClient((_) async =&gt; http.Response(
+  jsonEncode({'detail': 'พาเลทนี้ถูกล็อกโดยสมชายอยู่'}),
+  409,
+  headers: {'content-type': 'application/json; charset=utf-8'},
+))
+
+// เน็ตหลุด
+MockClient((_) async =&gt; throw http.ClientException('offline'))
+
+// ตอบช้า
+MockClient((_) =&gt; Future.delayed(const Duration(seconds: 20), () =&gt; ...))</code></pre><div class="note"><strong>อย่าลืม <code>charset=utf-8</code></strong> ในคำตอบที่มีภาษาไทย — ถ้าไม่ใส่ <code>http</code> จะถอดรหัสเป็น latin1 แล้วได้ข้อความเพี้ยน ซึ่งทำให้เทสต์ล้มด้วยเหตุผลที่ดูไม่เกี่ยวกับสิ่งที่ทดสอบ</div><pre class="code-vs"><code>test('อ่าน JSON ที่เป็นภาษาไทยได้ถูกต้อง', () async { ... });</code></pre></section>
+
+<section><h2>5. ตอบต่างกันตามคำขอ</h2><pre class="code-vs"><code>final client = MockClient((request) async {
+  final body = request.method == 'POST'
+      ? jsonEncode(palletJson('PLT-001', onHold: true))
+      : zoneBody([palletJson('PLT-001')]);
+  return http.Response(body, 200, headers: {...});
+});</code></pre><p>ทำให้ทดสอบเส้นทางที่มีหลายคำขอต่อกันได้ เช่นโหลดรายการแล้วกดล็อก</p><pre class="code-vs"><code>test('ล็อกพาเลทสำเร็จแล้วแถวนั้นเปลี่ยนเป็นล็อกแล้ว', (tester) async {
+  await tester.pumpWidget(wrap(client));
+  await tester.pumpAndSettle();
+
+  await tester.tap(find.byKey(const Key('hold-PLT-001')));
+  await tester.pumpAndSettle();
+
+  expect(find.text('ล็อกแล้ว'), findsOneWidget);
+});</code></pre><p>อีกแบบที่ใช้บ่อยคือตอบต่างกันตามลำดับครั้งที่เรียก</p><pre class="code-vs"><code>var attempt = 0;
+MockClient((_) async {
+  attempt++;
+  return attempt == 1
+      ? http.Response('', 500)                              // ครั้งแรกล้ม
+      : http.Response(jsonEncode({'url': '/a.jpg'}), 200);  // ครั้งที่สองผ่าน
+})</code></pre><p>ใช้ทดสอบการลองใหม่ และเป็นวิธีเดียวที่ทดสอบได้ว่า<strong>รหัสคำสั่งยังเป็นตัวเดิม</strong>ตอนลองใหม่ (13.4)</p></section>
+
+<section><h2>6. ค้างคำตอบไว้ด้วย <code>Completer</code></h2><pre class="code-vs"><code>testWidgets('ระหว่างโหลดครั้งแรกเห็นวงหมุน', (tester) async {
+  final gate = Completer&lt;http.Response&gt;();
+  await tester.pumpWidget(wrap(MockClient((_) =&gt; gate.future)));
+  await tester.pump();
+
+  expect(find.byKey(const Key('initial-loading')), findsOneWidget);
+
+  gate.complete(http.Response(zoneBody([palletJson('PLT-001')]), 200, ...));
+  await tester.pumpAndSettle();
+});</code></pre><p>รูปแบบนี้ใช้ทดสอบสามอย่างที่จำลองด้วยของจริงไม่ได้</p><table><thead><tr><th>ทดสอบ</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>สถานะระหว่างโหลด</td><td>ค้างไว้แล้วตรวจ</td></tr>
+<tr><td>กดซ้ำระหว่างรอ</td><td>ค้างไว้ แล้วกดอีกครั้ง</td></tr>
+<tr><td>ออกจากจอระหว่างรอ</td><td>ค้างไว้ แล้วทิ้ง widget</td></tr>
+</tbody></table><pre class="code-vs"><code>test('กดล็อกรัว ๆ ต้องส่งคำสั่งไปครั้งเดียว', (tester) async {
+  var postCount = 0;
+  final gate = Completer&lt;http.Response&gt;();
+  final client = MockClient((request) {
+    if (request.method == 'POST') {
+      postCount++;
+      return gate.future;      // ค้างไว้
+    }
+    return Future.value(...);
+  });
+  ...
+  expect(postCount, 1);
 });</code></pre></section>
-<section><h2>3. ตรวจ request semantics</h2><p>assert path/query/headers/body ที่เป็น contract เช่น bearer token, page และ JSON field แต่ไม่ assert header ที่ library จัดให้เองทุกตัวหรือ JSON whitespace/order เพราะทำ test เปราะโดยไม่เพิ่มความมั่นใจ</p></section>
-<section><h2>4. Error matrix</h2><pre class="code-vs"><code>for (final (status, expected) in [
-  (400, Failure.validation),
-  (401, Failure.sessionExpired),
-  (409, Failure.conflict),
-  (500, Failure.server),
-]) { /* arrange response → assert mapped failure */ }</code></pre></section>
-<section><h2>5. Socket กับ timeout</h2><p>callback fake สามารถ throw <code>SocketException</code>, <code>TimeoutException</code> หรือคืน malformed body พิสูจน์ว่า adapter แปล error ไม่รั่ว exception รายละเอียด transport ไปถึง UI</p></section>
-<section><h2>6. Streaming/multipart</h2><p>สำหรับ upload/download ใช้ custom <code>BaseClient</code> จับ <code>BaseRequest</code> และคืน <code>StreamedResponse</code> เพื่อทดสอบ progress/cancel/body stream ระวัง consume stream ได้ครั้งเดียว และไม่ล็อก multipart boundary ที่สุ่ม</p></section>
-<section><h2>7. Ownership</h2><p>ถ้า repository รับ shared client มาจากภายนอก มันไม่ควร close เอง; composition root เป็นผู้ dispose ระบุ ownership ใน API ชัดเจนเพื่อไม่ให้ test หรือ request อื่นล้มตามกัน</p></section>
-<section><h2>8. ระดับที่ HTTP fake พิสูจน์ไม่ได้</h2><div class="success">ยังต้องมี .NET integration/contract tests สำหรับ routing, model binding, auth และ serialization จริง พร้อม sandbox end-to-end เล็กน้อย เพราะ MockClient พิสูจน์เพียง Dart adapter ตาม response ที่เราสร้างเอง</div></section>
+
+<section><h2>7. เมื่อไหร่ควรใช้ <code>MockClient</code> เมื่อไหร่ควรใช้ repository ปลอม</h2><table><thead><tr><th>ใช้ <code>MockClient</code></th><th>ใช้ repository ปลอม</th></tr></thead><tbody>
+<tr><td>ทดสอบว่า path, header, body ถูก</td><td>ทดสอบตรรกะของ store</td></tr>
+<tr><td>ทดสอบการแปลงคำตอบเป็นโมเดล</td><td>ทดสอบจังหวะเวลาและลำดับ</td></tr>
+<tr><td>ทดสอบการแปลรหัสตอบกลับ</td><td>ทดสอบสถานะและการกันกดซ้ำ</td></tr>
+<tr><td>ทดสอบทั้งสายพร้อมกัน</td><td>ทดสอบเฉพาะชั้นบน</td></tr>
+</tbody></table><p>lab ใช้ทั้งคู่ในไฟล์เดียวกันได้ เช่นใน <code>architecture_test.dart</code></p><pre class="code-vs"><code>// ทดสอบพฤติกรรมทั้งสาย → MockClient
+group('พฤติกรรมเดียวกัน · รุ่นแยกชั้น', () {
+  runSharedBehaviourTests((client) {
+    final api = ApiClient(baseUrl: baseUrl, client: client);
+    return PalletScreenV2(store: PalletStore(RemotePalletRepository(api)), ...);
+  });
+});
+
+// ทดสอบจังหวะเวลาของ store → repository ปลอม
+test('คำตอบของคำขอเก่าที่กลับมาช้า ต้องไม่ทับคำตอบใหม่', () async {
+  final repository = _ScriptedRepository();
+  ...
+});</code></pre></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ภาษาไทยในคำตอบเพี้ยน</td><td>ไม่ได้ใส่ <code>charset=utf-8</code></td><td>ใส่ใน headers</td></tr>
+<tr><td><code>Invalid UTF-8 byte</code> ตอนอ่าน body</td><td>คำขอมีไบต์ดิบ</td><td><code>latin1.decode(request.bodyBytes)</code> (13.3)</td></tr>
+<tr><td>เทสต์ผ่านแต่ของจริงยิงผิด path</td><td>ไม่ได้ตรวจ <code>request.url</code></td><td>เก็บคำขอไว้แล้วตรวจ</td></tr>
+<tr><td>เทสต์ค้าง</td><td><code>Completer</code> ไม่เคยถูก complete</td><td>complete ก่อนจบเทสต์เสมอ</td></tr>
+<tr><td>ทดสอบสถานะระหว่างโหลดไม่ได้</td><td>ใช้ <code>pumpAndSettle</code> ตั้งแต่แรก</td><td>ใช้ <code>pump()</code> ดูเฟรมแรก (14.10)</td></tr>
+<tr><td><code>MockClient</code> ไม่ถูกเรียก</td><td>โค้ดสร้าง <code>http.Client</code> เอง</td><td>รับเข้ามาทาง constructor (9.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมเปลี่ยน endpoint จาก <code>/api/WMS/mobile_tasks</code> เป็น <code>/api/WMS/v2/mobile_tasks</code> โดยไม่ได้บอกฝั่งแอป</p><ol><li>เทสต์ที่มีอยู่จับได้ไหม</li><li>จะทำอย่างไรให้จับได้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่ได้</strong> — และนี่คือข้อจำกัดที่สำคัญที่สุดของ <code>MockClient</code></p><p><code>MockClient</code> ตอบตามที่เราเขียนไว้ ไม่ว่าจะยิงไป path ไหน ดังนั้นเทสต์ทั้งหมดจะยังเขียว ส่วนแอปจริงจะได้ 404 ทุกคำขอ</p><table><thead><tr><th>สิ่งที่ <code>MockClient</code> จับได้</th><th>สิ่งที่จับไม่ได้</th></tr></thead><tbody>
+<tr><td>ฝั่งเราเปลี่ยน path แล้วลืมแก้ที่อื่น</td><td>ฝั่งเซิร์ฟเวอร์เปลี่ยน path</td></tr>
+<tr><td>ฝั่งเราส่ง header ไม่ครบ</td><td>ฝั่งเซิร์ฟเวอร์เปลี่ยนชื่อฟิลด์</td></tr>
+<tr><td>ฝั่งเราอ่านคำตอบผิด</td><td>ฝั่งเซิร์ฟเวอร์เปลี่ยนรหัสตอบกลับ</td></tr>
+</tbody></table><p>สังเกตว่าคอลัมน์ซ้ายทั้งหมดคือ “ความผิดพลาดที่มาจากฝั่งเรา” ซึ่งเป็นสาเหตุของปัญหาส่วนใหญ่ — แต่ไม่ใช่ทั้งหมด</p><p><strong>2.</strong> มีสามทาง เรียงตามราคา</p><table><thead><tr><th>ทาง</th><th>ราคา</th><th>จับได้เมื่อ</th></tr></thead><tbody>
+<tr><td>เทสต์ที่ยิงเซิร์ฟเวอร์ทดสอบจริงใน CI</td><td>สูง — ต้องมีเซิร์ฟเวอร์ที่รันได้ใน CI</td><td>ทุกครั้งที่ push</td></tr>
+<tr><td>เทสต์ที่รันด้วยมือก่อนปล่อยรุ่น</td><td>ต่ำ</td><td>ก่อนปล่อย</td></tr>
+<tr><td>ให้เซิร์ฟเวอร์มี endpoint บอกรุ่นของสัญญา</td><td>กลาง — ต้องคุยกับทีมหลังบ้าน</td><td>ตอนเปิดแอป</td></tr>
+</tbody></table><p>ทางที่สามน่าสนใจเพราะต่อยอดจาก health payload ที่ 10.9 ทำไว้แล้ว</p><pre class="code-vs"><code>{"service": "WMS", "ok": true, "apiVersion": 2}</code></pre><pre class="code-vs"><code>if (health.apiVersion != supportedApiVersion) {
+  // แอปรุ่นนี้คุยกับเซิร์ฟเวอร์รุ่นนั้นไม่ได้ บอกให้ชัดตั้งแต่ต้น
+  // ดีกว่าปล่อยให้ทุกจอขึ้น "โหลดไม่สำเร็จ" โดยไม่มีใครรู้สาเหตุ
+}</code></pre><p><strong>ข้อสรุปที่ควรจำ:</strong> <code>MockClient</code> ทดสอบว่า<strong>เราทำตามที่เราเข้าใจ</strong> ไม่ได้ทดสอบว่า<strong>ความเข้าใจของเราตรงกับเซิร์ฟเวอร์</strong> — อย่างหลังต้องมีอะไรที่คุยกับเซิร์ฟเวอร์จริง และ 14.5 จะพูดถึงทางที่ถูกที่สุดที่ทำได้</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li><code>MockClient</code> แทนที่การยิงเน็ตด้วยฟังก์ชันของเรา</li><li>ตรวจได้ทั้งสิ่งที่ส่งออกไปและการจัดการคำตอบ</li><li>ใส่ <code>charset=utf-8</code> เสมอเมื่อคำตอบมีภาษาไทย</li><li><code>Completer</code> ทำให้ทดสอบสถานะระหว่างรอได้</li><li><code>MockClient</code> สำหรับทั้งสาย repository ปลอมสำหรับตรรกะของ store</li><li>มันจับความผิดพลาดจากฝั่งเราได้ แต่จับการเปลี่ยนฝั่งเซิร์ฟเวอร์ไม่ได้</li></ul></div><p><strong>บทหน้า:</strong> ทำให้สัญญากับเซิร์ฟเวอร์เป็นสิ่งที่ตรวจได้</p></section>

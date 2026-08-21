@@ -1,15 +1,91 @@
-<div class="note"><strong>เป้าหมาย:</strong> ชุดทดสอบที่ดีไม่ใช่จำนวน test มากที่สุด แต่คือ feedback ที่เร็วพอจะรันทุกวัน และครอบคลุมความเสี่ยงของ workflow คลัง เช่น scan ซ้ำ, async race และส่งข้อมูลผิด entity</div>
-<section><h2>1. Pyramid สำหรับ Flutter WMS</h2><p>ฐานกว้างคือ pure Dart unit tests ของ model, parser, validator และ state transition; ชั้นกลางคือ repository/store/widget tests; ยอดเล็กคือ integration/end-to-end บนอุปกรณ์จริง ยิ่งสูงยิ่งใกล้ผู้ใช้แต่ช้าและวิเคราะห์สาเหตุยากกว่า</p></section>
-<section><h2>2. แบ่งตามคำถาม</h2><table><thead><tr><th>ระดับ</th><th>พิสูจน์</th><th>ตัวอย่าง</th></tr></thead><tbody><tr><td>Unit</td><td>logic ถูกไหม</td><td>barcode normalization</td></tr><tr><td>Contract</td><td>คุย API ตรงไหม</td><td>JSON/multipart</td></tr><tr><td>Widget</td><td>UI ตอบ state ไหม</td><td>scan → error</td></tr><tr><td>E2E</td><td>ระบบจริงต่อกันไหม</td><td>รับสินค้า 1 line</td></tr></tbody></table></section>
-<section><h2>3. จากสอง codebase จริง</h2><p><code>wmsapp/test/widget_test.dart</code> ยังเป็น template ที่ comment ไว้ จึงไม่มี safety net ขณะที่ <code>wms_absolute_mobile/test</code> มี fake repositories, flow/navigation, scanner layout และ settings tests แสดงให้เห็นว่าการมี dependency seams ทำให้ทดสอบ workflow จริงได้โดยไม่เปิด server</p></section>
-<section><h2>4. Risk-based coverage</h2><p>จัดลำดับจากความเสียหาย × โอกาสเกิด: การรับ serial ซ้ำ, qty เกิน, กด submit ซ้ำ, session หมดอายุ, timeout ที่ server ทำสำเร็จแล้ว และ navigation ทำ draft หาย ควรมี test ก่อนสี/animation ที่ผลกระทบต่ำ</p></section>
-<section><h2>5. Test portfolio</h2><pre class="code-vs"><code>test/units/          // model, parser, reducer
-test/repositories/   // fake HTTP + error mapping
-test/widgets/        // one screen/state
-test/flows/          // several widgets + fake repository
-integration_test/    // real engine/device/backend sandbox</code></pre></section>
-<section><h2>6. Deterministic by design</h2><p>inject clock, random/ID generator, HTTP client, repository และ timer scheduler; freeze locale/timezone และสร้าง fixture ใน test เอง ห้ามพึ่ง API production, เวลาปัจจุบัน, network หรือ test order</p></section>
-<section><h2>7. CI gate</h2><pre class="code-vs"><code>flutter analyze
-flutter test --coverage
-flutter test integration_test -d emulator-5554 // job แยก</code></pre><p>unit/widget ต้องเร็วและบังคับทุก commit ส่วน device tests รันตามความเหมาะสม แต่ failure ต้องเก็บ screenshot/log/artifact ที่สืบได้</p></section>
-<section><h2>8. Definition of useful test</h2><div class="success">ชื่อบอก business behavior, Arrange/Act/Assert อ่านง่าย, ล้มด้วยเหตุผลเดียว, ไม่ sleep, cleanup resource, ไม่ผูก implementation detail และจับ regression ที่มีต้นทุนจริง</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: นับเทสต์ในโปรเจกต์จริงทั้งสองตัว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 1–13 (เทสต์ที่เขียนมาแล้วทั้งหมดคือตัวอย่างของบทนี้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินว่าควรเขียนเทสต์แบบไหนกับโค้ดส่วนไหน โดยดูจากราคาและสิ่งที่ได้</div>
+
+<section><h2>1. Part นี้ต่างจาก Part อื่น</h2><p>สิบสาม Part ที่ผ่านมาเขียนเทสต์ไปแล้ว <strong>347 ข้อ</strong> ใน 26 ไฟล์ Part นี้ไม่ได้สอนสิ่งใหม่ทั้งหมด แต่<strong>รวบสิ่งที่ทำไปแล้วให้เป็นระบบ</strong> แล้วเติมส่วนที่ยังขาด</p><table><thead><tr><th>ไฟล์เทสต์</th><th>จำนวน</th><th>สอนเรื่อง</th></tr></thead><tbody>
+<tr><td><code>settings_test.dart</code></td><td>41</td><td>ฟังก์ชันบริสุทธิ์ + store</td></tr>
+<tr><td><code>upload_test.dart</code></td><td>35</td><td>multipart + การตรวจไฟล์</td></tr>
+<tr><td><code>theme_test.dart</code></td><td>33</td><td>ค่าคงที่ + widget สองภาษา</td></tr>
+<tr><td><code>auth_test.dart</code></td><td>30</td><td>สถานะและการเก็บลงเครื่อง</td></tr>
+<tr><td><code>json_basics_test.dart</code></td><td>27</td><td>สัญญากับเซิร์ฟเวอร์</td></tr>
+<tr><td><code>realtime_test.dart</code></td><td>23</td><td>เวลาและการรั่ว</td></tr>
+<tr><td>อีก 20 ไฟล์</td><td>158</td><td>—</td></tr>
+</tbody></table></section>
+
+<section><h2>2. ปิรามิดที่พูดกันบ่อย</h2><pre class="code-vs"><code>        ╱╲          integration  — รันทั้งแอปบนเครื่องจริง
+       ╱  ╲                          ช้า เปราะ แต่ใกล้ความจริงที่สุด
+      ╱────╲        widget       — สร้าง widget แล้วกด
+     ╱      ╲                        เร็วพอ ครอบคลุมสิ่งที่ผู้ใช้เห็น
+    ╱────────╲      unit         — ฟังก์ชันและคลาสเดี่ยว ๆ
+   ╱__________╲                      เร็วมาก เขียนง่าย ครอบคลุมแคบ</code></pre><table><thead><tr><th>ระดับ</th><th>เวลาต่อข้อ</th><th>จับอะไรได้</th><th>จับอะไรไม่ได้</th></tr></thead><tbody>
+<tr><td>unit</td><td>ไม่ถึงมิลลิวินาที</td><td>ตรรกะ กฎ การแปลงค่า</td><td>ชิ้นส่วนต่อกันผิด</td></tr>
+<tr><td>widget</td><td>สิบถึงร้อยมิลลิวินาที</td><td>สิ่งที่ผู้ใช้เห็นและกด</td><td>ปัญหาบนเครื่องจริง</td></tr>
+<tr><td>integration</td><td>วินาทีถึงนาที</td><td>ทุกอย่างต่อกันจริง</td><td>—</td></tr>
+</tbody></table><div class="note">ปิรามิดไม่ได้บอกว่า “เขียน unit เยอะ ๆ ไว้ก่อน” แต่บอกว่า <strong>เทสต์ที่แพงกว่า ควรมีน้อยกว่า และควรเก็บไว้ทดสอบสิ่งที่เทสต์ถูก ๆ ทดสอบแทนไม่ได้</strong></div></section>
+
+<section><h2>3. รูปร่างจริงของ lab นี้</h2><table><thead><tr><th>ระดับ</th><th>จำนวน</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>unit</td><td>ราว 240</td><td><code>normalizeBasePath</code>, <code>decodeHubEvent</code>, <code>checkImage</code></td></tr>
+<tr><td>widget</td><td>ราว 105</td><td>สลับภาษา, จอพาเลท, การนำทาง</td></tr>
+<tr><td>integration</td><td>0</td><td>ยังไม่มี — 14.17 จะพูดถึง</td></tr>
+</tbody></table><p>สัดส่วนนี้ไม่ได้ตั้งใจให้เป็นแบบนี้ตั้งแต่แรก มัน<strong>เกิดขึ้นเองจากการที่โค้ดถูกแยกให้ทดสอบได้</strong></p><p>สังเกตไฟล์ที่มีเทสต์เยอะที่สุด — <code>settings_test.dart</code> 41 ข้อ ซึ่งทดสอบ <code>normalizeBasePath</code>, <code>validateDraft</code>, <code>decodeProfiles</code> ที่เป็นฟังก์ชันบริสุทธิ์ทั้งหมด</p><pre class="code-vs"><code>test('รูปแบบที่ผู้ใช้พิมพ์ได้ทั้งหมด ต้องให้ผลเดียวกัน', () {
+  for (final raw in ['wms', '/wms', 'wms/', '/wms/', '//wms//', ' /wms ']) {
+    expect(normalizeBasePath(raw), '/wms', reason: 'ผิดที่ "$raw"');
+  }
+});</code></pre><p>เทสต์แบบนี้เขียนได้ในสิบวินาทีและรันในไมโครวินาที — <strong>ราคาถูกจนไม่มีเหตุผลที่จะไม่เขียน</strong></p></section>
+
+<section><h2>4. รูปร่างจริงของโปรเจกต์จริง</h2><table><thead><tr><th> </th><th><code>wms_absolute_mobile</code></th><th><code>wmsapp</code></th></tr></thead><tbody>
+<tr><td>ไฟล์เทสต์</td><td>14 ไฟล์</td><td>1 ไฟล์</td></tr>
+<tr><td>จำนวนเทสต์</td><td>ราว 92</td><td><strong>0</strong></td></tr>
+<tr><td>มีของปลอมไหม</td><td>มี <code>test/fakes/fake_repositories.dart</code></td><td>ไม่มี</td></tr>
+</tbody></table><p>ไฟล์เดียวของ <code>wmsapp</code> คือ <code>widget_test.dart</code> ที่มากับ Flutter ตอนสร้างโปรเจกต์ และถูก comment ทิ้งทั้งไฟล์</p><pre class="code-vs"><code>// // This is a basic Flutter widget test.
+// //
+// // import 'package:flutter/material.dart';
+// // import 'package:flutter_test/flutter_test.dart';
+// ...</code></pre><p>นี่ไม่ใช่ความประมาท แต่เป็นผลที่คาดเดาได้จากสิ่งที่ 9.3 กับ 9.14 อธิบายไว้แล้ว</p><table><thead><tr><th>สาเหตุ</th><th>บทที่พูดถึง</th></tr></thead><tbody>
+<tr><td>จอสร้าง <code>ApiService()</code> เอง ใส่ของปลอมไม่ได้</td><td>9.3</td></tr>
+<tr><td>ตรรกะอยู่ใน <code>State</code> ที่เข้าถึงจากข้างนอกไม่ได้</td><td>9.2</td></tr>
+<tr><td>จอเดียว 84KB ที่ทดสอบต้องประกอบของหลายสิบชิ้น</td><td>9.14</td></tr>
+</tbody></table><div class="note"><strong>ข้อสรุปที่สำคัญที่สุดของบทนี้:</strong> จำนวนเทสต์ที่โปรเจกต์มี ไม่ได้สะท้อนความขยันของทีม แต่สะท้อน<strong>ว่าโค้ดนั้นทดสอบได้ง่ายแค่ไหน</strong> — และความง่ายนั้นถูกกำหนดไปแล้วตอนออกแบบ</div></section>
+
+<section><h2>5. หลักฐานอีกชิ้นจากโปรเจกต์เดียวกัน</h2><p>ใน <code>wms_absolute_mobile</code> ไฟล์ที่มีเทสต์เยอะที่สุดคือ</p><table><thead><tr><th>ไฟล์เทสต์</th><th>จำนวน</th><th>ทดสอบอะไร</th><th>ขนาดโค้ดที่ทดสอบ</th></tr></thead><tbody>
+<tr><td><code>connection_profile_test.dart</code></td><td><strong>37</strong></td><td><code>connection_profile.dart</code></td><td>348 บรรทัด</td></tr>
+<tr><td><code>connection_settings_sheet_test.dart</code></td><td>12</td><td>หน้าตั้งค่า</td><td>34KB</td></tr>
+<tr><td>ไม่มีไฟล์ที่ทดสอบ <code>warehouse_store.dart</code> โดยตรง</td><td>0</td><td>—</td><td><strong>1,684 บรรทัด</strong></td></tr>
+</tbody></table><p>ไฟล์ 348 บรรทัดที่เป็นฟังก์ชันบริสุทธิ์ ได้เทสต์ 37 ข้อ ส่วนไฟล์ 1,684 บรรทัดที่เป็นหัวใจของแอป ไม่ได้เทสต์โดยตรงเลย</p><p>ไม่ใช่เพราะไฟล์แรกสำคัญกว่า แต่เพราะ<strong>ไฟล์แรกทดสอบได้ในสองบรรทัด ส่วนไฟล์ที่สองต้องประกอบ repository สี่ตัวก่อน</strong> (9.15)</p></section>
+
+<section><h2>6. เกณฑ์เลือกระดับ</h2><table><thead><tr><th>ถ้าสิ่งที่จะทดสอบคือ</th><th>ใช้</th></tr></thead><tbody>
+<tr><td>กฎการแปลงค่า การตรวจ การคำนวณ</td><td>unit</td></tr>
+<tr><td>ลำดับของสถานะ การกันกดซ้ำ เลขรุ่น</td><td>unit ที่ store</td></tr>
+<tr><td>สิ่งที่ผู้ใช้เห็นหลังกดปุ่ม</td><td>widget</td></tr>
+<tr><td>การจัดวางที่ต้องพอดีจอ</td><td>widget ที่กำหนดขนาดจอ (14.13)</td></tr>
+<tr><td>ปลั๊กอินที่คุยกับฮาร์ดแวร์</td><td>integration หรือทดสอบด้วยมือ</td></tr>
+<tr><td>สัญญากับเซิร์ฟเวอร์จริง</td><td>เทสต์ที่ยิงเซิร์ฟเวอร์ทดสอบ (14.5)</td></tr>
+</tbody></table><p>คำถามที่ใช้ตัดสินได้เร็วที่สุดคือ <strong>“ระดับที่ถูกที่สุดที่จับบั๊กนี้ได้ คือระดับไหน”</strong></p><pre class="code-vs"><code>// บั๊ก: ปีไทยผิดไป 543 ปี
+// ระดับที่ถูกที่สุดที่จับได้ = unit
+test('วันที่ภาษาไทยใช้ปี พ.ศ.', () { ... });</code></pre><pre class="code-vs"><code>// บั๊ก: กดออกจากระบบตอนอยู่ลึกในแอป แล้วหน้าเก่ายังค้าง
+// ระดับที่ถูกที่สุดที่จับได้ = widget (unit จับไม่ได้เพราะเป็นเรื่องของ Navigator)
+testWidgets('ออกจากระบบตอนอยู่ลึกในแอป', (tester) async { ... });</code></pre></section>
+
+<section><h2>7. เทสต์ที่ไม่ควรเขียน</h2><table><thead><tr><th>อย่าเขียน</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ทดสอบว่า getter คืนค่าที่ตั้งไว้</td><td>ทดสอบภาษา Dart ไม่ใช่ทดสอบโค้ดเรา</td></tr>
+<tr><td>ทดสอบว่า <code>Text</code> แสดงข้อความที่ส่งเข้าไป</td><td>ทดสอบ Flutter</td></tr>
+<tr><td>ทดสอบทุกเส้นทางเพื่อให้ตัวเลข coverage สวย</td><td>ตัวเลขสูงไม่ได้แปลว่าจับบั๊กได้</td></tr>
+<tr><td>ทดสอบรายละเอียดภายในที่ไม่มีใครเห็น</td><td>เปลี่ยนโครงข้างในทีไร เทสต์พังทั้งที่พฤติกรรมเหมือนเดิม</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — เทสต์ที่ดีทดสอบ<strong>สิ่งที่สัญญาไว้</strong> ไม่ใช่<strong>วิธีที่ทำ</strong> ซึ่งเป็นเหตุผลที่เทสต์ใน 9.16 รันได้กับทั้งรุ่นก่อนและหลัง refactor</p><pre class="code-vs"><code>group('พฤติกรรมเดียวกัน · รุ่นรวมทุกอย่างไว้ในจอ', () {
+  runSharedBehaviourTests((client) =&gt; PalletScreenV1(client: client, zone: 'A1'));
+});
+
+group('พฤติกรรมเดียวกัน · รุ่นแยกชั้น', () {
+  runSharedBehaviourTests((client) { ... });
+});</code></pre></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้าตั้งเป้าว่า “ปีนี้ต้องมี code coverage 80%”</p><ol><li>เป้านี้ดีไหม</li><li>จะเสนออะไรแทน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> เจตนาดี แต่ตัววัดผิด และจะพาไปในทางที่ไม่ต้องการ</p><table><thead><tr><th>ปัญหาของ coverage</th><th>รูปธรรม</th></tr></thead><tbody>
+<tr><td>วัดว่าบรรทัดถูกรัน ไม่ได้วัดว่าถูกตรวจ</td><td>เทสต์ที่เรียกฟังก์ชันแล้วไม่ <code>expect</code> อะไรเลย ก็นับเป็น coverage</td></tr>
+<tr><td>ผลักให้ทดสอบสิ่งที่ทดสอบง่าย</td><td>getter กับ <code>toString()</code> ได้เทสต์ ส่วน <code>warehouse_store.dart</code> ยังไม่มี</td></tr>
+<tr><td>ไม่บอกว่าบั๊กที่เกิดจริงถูกจับไหม</td><td>coverage 80% กับบั๊กบนหน้างานสัปดาห์ละสามตัว อยู่ด้วยกันได้สบาย</td></tr>
+</tbody></table><p><strong>2.</strong> เสนอตัววัดที่ผูกกับสิ่งที่หัวหน้าต้องการจริง ซึ่งคือ “บั๊กน้อยลง”</p><table><thead><tr><th>ตัววัด</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>ทุกบั๊กที่หน้างานรายงาน ต้องมีเทสต์ที่จับได้ก่อนแก้</td><td>เทสต์โตตามปัญหาจริง ไม่ใช่ตามตัวเลข</td></tr>
+<tr><td>จำนวนบั๊กที่หลุดถึงหน้างานต่อเดือน</td><td>สิ่งที่หัวหน้าสนใจจริง</td></tr>
+<tr><td>เวลาที่ใช้ตั้งแต่รายงานถึงแก้เสร็จ</td><td>เทสต์ที่ดีทำให้ตัวเลขนี้ลดลงมาก</td></tr>
+</tbody></table><p>ข้อแรกเป็นข้อที่ทรงพลังที่สุดและเริ่มทำได้พรุ่งนี้ — <strong>เจอบั๊ก เขียนเทสต์ที่ล้ม แล้วค่อยแก้</strong> ผลคือเทสต์จะกระจุกอยู่ตรงที่ที่โค้ดเปราะจริง ซึ่งเป็นที่ที่มีค่าที่สุด</p><p>และถ้าเขียนเทสต์ที่จับบั๊กนั้นไม่ได้เพราะโค้ดทดสอบไม่ได้ — นั่นคือข้อมูลที่สำคัญกว่าตัวเลข coverage ใด ๆ เพราะมันบอกว่า<strong>ส่วนไหนของระบบที่เราแก้แล้วไม่มีทางรู้ว่าพังหรือเปล่า</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>เทสต์ที่แพงกว่าควรมีน้อยกว่า และเก็บไว้ทดสอบสิ่งที่เทสต์ถูก ๆ ทำแทนไม่ได้</li><li>รูปร่างของชุดเทสต์สะท้อนว่าโค้ดทดสอบได้ง่ายแค่ไหน ไม่ใช่ความขยัน</li><li>โปรเจกต์ที่จอหยิบของเอง มักจบที่ศูนย์เทสต์</li><li>ถามว่า “ระดับที่ถูกที่สุดที่จับบั๊กนี้ได้คือระดับไหน”</li><li>ทดสอบสิ่งที่สัญญาไว้ ไม่ใช่วิธีที่ทำ</li><li>coverage เป็นตัววัดที่ผลักไปผิดทาง — ใช้ “ทุกบั๊กต้องมีเทสต์” แทน</li></ul></div><p><strong>บทหน้า:</strong> เทสต์ที่ถูกที่สุดและเขียนบ่อยที่สุด</p></section>

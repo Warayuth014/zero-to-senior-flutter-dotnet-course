@@ -1,12 +1,208 @@
-<div class="note"><strong>อย่า optimize จากความรู้สึก:</strong> เปิด rebuild tracking ใน profile/debug, ทำ interaction เดิม แล้วลดเฉพาะ subtree ที่ rebuild/paint แพงโดยยังรักษาความถูกต้อง</div>
-<section><h2>1. ทำไมทั้งหน้าถูก build</h2><p><code>setState</code> rebuild subtree ใต้ State; <code>ChangeNotifier.notifyListeners</code> ทำให้ listener ทุกตัว build ถ้า shell ฟัง Store ก้อนใหญ่ การเปลี่ยน progress จุดเดียวอาจ rebuild menu/list/image ทั้งหน้า</p></section>
-<section><h2>2. วัดก่อน</h2><p>ใช้ DevTools Track Widget Builds, performance timeline และ debug flags เฉพาะงานพัฒนา นับ build ระหว่างพิมพ์ scan, progress tick และ polling response แล้วดู frame time ไม่ใช่นับอย่างเดียว</p></section>
-<section><h2>3. แยก ownership</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;UploadProgress&gt;(
-  valueListenable: upload.progress,
-  builder: (_, value, __) =&gt; ProgressBar(value),
-)</code></pre><p>ให้ progress widget ฟังเฉพาะ progress; list ฟัง immutable items; theme/session อยู่ระดับ shell ไม่รวมทุก state ใน notifier เดียวโดยไม่มี selector</p></section>
-<section><h2>4. const และ stable inputs</h2><p>ใช้ <code>const</code> กับ subtree คงที่, ส่ง immutable value และหลีกเลี่ยงสร้าง list/map/callback ใหม่โดยไม่จำเป็น แต่ const ไม่ช่วยหาก parent logic/selector แจ้งเปลี่ยนค่าจริงทุกครั้ง</p></section>
-<section><h2>5. Selector และ equality</h2><p>select เฉพาะ <code>taskCount</code>/<code>isLoading</code> แล้ว rebuild เมื่อ value เปลี่ยนด้วย equality ที่ถูกต้อง อย่า mutate list เดิมแล้วหวัง selector เห็น หรือสร้าง wrapper ใหม่ที่ equality เป็น identity ทุก notification</p></section>
-<section><h2>6. แยก widget เพื่ออะไร</h2><p>แยกเมื่อมี state/lifecycle/rebuild boundary หรือช่วยอ่าน/test ไม่แยกทุก Container เป็น class โดยไม่มีประโยชน์ ตรวจว่าการย้าย method ไม่ได้เปลี่ยน ownership FocusNode/Controller ผิดที่</p></section>
-<section><h2>7. RepaintBoundary</h2><p>ช่วยแยก paint ของ animation/complex card ที่ส่วนอื่นคงที่ แต่เพิ่ม layer/memory อย่าใส่ทุกแถวโดยไม่วัด ใช้ repaint rainbow/timeline เปรียบเทียบก่อนหลังบน device profile</p></section>
-<section><h2>8. Regression guard</h2><div class="success">มี widget test ยืนยัน behavior และ performance benchmark/integration trace สำหรับ hotspot ที่สำคัญ เก็บ scenario/device/profile เดิมเพื่อเปรียบเทียบ ไม่ใช้เวลา debug test เป็น production budget</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: รันเทสต์นับการวาดใหม่ใน lab</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.14, 9.7 (store), 11.6 (<code>const</code> กับการวาดใหม่)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำให้คำว่า “เร็วขึ้น” เป็นตัวเลขที่เทสต์ยืนยันได้ และลดการวาดใหม่ที่ไม่จำเป็น</div>
+
+<section><h2>1. ปัญหาของการปรับประสิทธิภาพ</h2><p>คำพูดที่ได้ยินบ่อยในทีม</p><table><thead><tr><th>คำพูด</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>“ย้าย <code>ListenableBuilder</code> ลงมาแล้วเร็วขึ้นเยอะ”</td><td>เยอะแค่ไหน วัดจากอะไร</td></tr>
+<tr><td>“ใส่ <code>const</code> แล้วดีขึ้น”</td><td>ดีขึ้นตรงไหน</td></tr>
+<tr><td>“รู้สึกว่าลื่นขึ้น”</td><td>อาจเป็นเพราะเครื่องเย็นลง</td></tr>
+</tbody></table><p>ทางแก้คือ<strong>นับ</strong> แล้วให้เทสต์เป็นคนยืนยัน — ไม่ใช่ความรู้สึก</p></section>
+
+<section><h2>2. ตัวนับ</h2><pre class="code-vs"><code>/// นับจำนวนครั้งที่ widget ถูกวาดใหม่ แยกตามป้ายชื่อ
+///
+/// ประสิทธิภาพเป็นเรื่องที่เถียงกันได้ไม่จบถ้าไม่มีตัวเลข — ตัวนับนี้ทำให้
+/// คำว่า "เร็วขึ้น" กลายเป็นสิ่งที่เทสต์ยืนยันได้ แทนที่จะเป็นความรู้สึก
+class RebuildCounter {
+  final Map&lt;String, int&gt; _counts = {};
+
+  int countOf(String label) =&gt; _counts[label] ?? 0;
+  void record(String label) =&gt; _counts[label] = countOf(label) + 1;
+}</code></pre><pre class="code-vs"><code>class CountedBuilder extends StatelessWidget {
+  const CountedBuilder({
+    super.key,
+    required this.counter,
+    required this.label,
+    required this.builder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    counter.record(label);
+    return builder(context);
+  }
+}</code></pre><div class="note">นับใน <code>build</code> เพราะนั่นคือสิ่งที่อยากวัด — <strong>จำนวนครั้งที่ Flutter ตัดสินใจวาดส่วนนี้ใหม่</strong> ไม่ใช่จำนวนครั้งที่ <code>setState</code> ถูกเรียก ซึ่งเป็นคนละเรื่อง</div></section>
+
+<section><h2>3. สองรุ่นที่ต่างกันบรรทัดเดียว</h2><pre class="code-vs"><code>/// รุ่นที่วาดใหม่ทั้งจอทุกครั้งที่มีอะไรเปลี่ยน
+class WideRebuildBoard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =&gt; ListenableBuilder(
+    listenable: state,                    // ← ครอบทั้งจอ
+    builder: (context, _) =&gt; Column(
+      children: [
+        CountedBuilder(label: 'header', ...),
+        CountedBuilder(label: 'counter', ...),
+        CountedBuilder(label: 'expensive', ...),
+      ],
+    ),
+  );
+}</code></pre><pre class="code-vs"><code>/// รุ่นที่วาดใหม่เฉพาะส่วนที่ค่าเปลี่ยนจริง
+class NarrowRebuildBoard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =&gt; Column(
+    children: [
+      ListenableBuilder(                  // ← ครอบเฉพาะส่วนนี้
+        listenable: state,
+        builder: (context, _) =&gt; CountedBuilder(label: 'header', ...),
+      ),
+      ListenableBuilder(
+        listenable: state,
+        builder: (context, _) =&gt; CountedBuilder(label: 'counter', ...),
+      ),
+      // ไม่ได้อยู่ใต้ ListenableBuilder เลย จึงไม่ถูกวาดใหม่ไม่ว่าอะไรจะเปลี่ยน
+      CountedBuilder(label: 'expensive', ...),
+    ],
+  );
+}</code></pre><p>ต่างกันที่ตำแหน่งของ <code>ListenableBuilder</code> เท่านั้น และผลต่างวัดได้</p></section>
+
+<section><h2>4. ตัวเลข</h2><pre class="code-vs"><code>testWidgets('รุ่นที่ครอบทั้งจอ วาดใหม่ทุกส่วนแม้ค่าที่ใช้ไม่เปลี่ยน', (tester) async {
+  await tester.pumpWidget(wrap(WideRebuildBoard(state: state, counter: counter)));
+
+  state.scan();
+  await tester.pump();
+
+  // ชื่อผู้ปฏิบัติงานไม่ได้เปลี่ยน แต่ยังถูกวาดใหม่
+  expect(counter.countOf('header'), 2);
+  expect(counter.countOf('counter'), 2);
+  // และส่วนที่แพงก็ถูกวาดใหม่ด้วย ทั้งที่ไม่ได้ใช้ค่าอะไรเลย
+  expect(counter.countOf('expensive'), 2);
+});
+
+testWidgets('รุ่นที่ครอบแคบ ส่วนที่แพงไม่ถูกวาดใหม่', (tester) async {
+  await tester.pumpWidget(wrap(NarrowRebuildBoard(state: state, counter: counter)));
+
+  state.scan();
+  await tester.pump();
+
+  expect(counter.countOf('counter'), 2);
+  expect(counter.countOf('expensive'), 1, reason: 'ไม่ควรถูกวาดใหม่เลย');
+});</code></pre><table><thead><tr><th>สแกน 10 ครั้ง</th><th>ครอบทั้งจอ</th><th>ครอบแคบ</th></tr></thead><tbody>
+<tr><td>ส่วนที่แพงถูกวาด</td><td>11 ครั้ง</td><td><strong>1 ครั้ง</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>testWidgets('สแกนสิบครั้ง ส่วนที่แพงยังวาดครั้งเดียว', (tester) async {
+  for (var i = 0; i &lt; 10; i++) {
+    state.scan();
+    await tester.pump();
+  }
+
+  expect(counter.countOf('counter'), 11);
+  expect(counter.countOf('expensive'), 1);
+});</code></pre><p>ตัวเลขนี้คือสิ่งที่เอาไปคุยกับทีมได้ และเป็นเทสต์ที่<strong>จะล้มถ้ามีคนย้าย <code>ListenableBuilder</code> กลับขึ้นไป</strong></p></section>
+
+<section><h2>5. อีกครึ่งที่สำคัญ — อย่าประกาศทั้งที่ไม่มีอะไรเปลี่ยน</h2><pre class="code-vs"><code>testWidgets('ตั้งค่าเดิมซ้ำ ต้องไม่วาดใหม่เลย', (tester) async {
+  await tester.pumpWidget(wrap(NarrowRebuildBoard(state: state, counter: counter)));
+  final before = counter.snapshot;
+
+  // ChangeNotifier ที่ไม่ประกาศเมื่อค่าไม่เปลี่ยน (11.7)
+  state.changeOperator('somchai');
+  await tester.pump();
+
+  expect(counter.snapshot, before);
+});</code></pre><pre class="code-vs"><code>void changeOperator(String name) {
+  if (_operator == name) return;    // ← บรรทัดที่ทำให้เทสต์ผ่าน
+  _operator = name;
+  notifyListeners();
+}</code></pre><p>บรรทัดเดียวนี้กันการวาดใหม่ทั้งจอ และเป็นสิ่งที่ควรมีในทุก setter ของ store</p><table><thead><tr><th>เกิดบ่อยเมื่อ</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลใหม่ที่เหมือนเดิม</td><td>ถามซ้ำทุก 15 วินาทีแล้วไม่มีอะไรเปลี่ยน (12.11)</td></tr>
+<tr><td>ผู้ใช้เลือกค่าเดิมซ้ำ</td><td>กดภาษาเดิม เลือก profile เดิม</td></tr>
+<tr><td>เหตุการณ์ซ้ำจากเซิร์ฟเวอร์</td><td>12.10</td></tr>
+</tbody></table><p>แถวแรกสำคัญที่สุด — การถามซ้ำทุก 15 วินาทีแล้ววาดใหม่ทั้งจอทุกครั้ง คือการเปลืองที่มองไม่เห็น</p></section>
+
+<section><h2>6. เครื่องมือลดการวาดใหม่</h2><table><thead><tr><th>วิธี</th><th>ได้อะไร</th><th>ระวัง</th></tr></thead><tbody>
+<tr><td>ย้าย <code>ListenableBuilder</code> ลงไปครอบให้แคบ</td><td>ได้มากที่สุด</td><td>ต้องรู้ว่าส่วนไหนใช้ค่าอะไร</td></tr>
+<tr><td>ใส่ <code>const</code> ให้ widget ที่ไม่เปลี่ยน</td><td>Flutter ข้ามการสร้างใหม่</td><td><code>const Text</code> ไม่เปลี่ยนภาษา (11.6)</td></tr>
+<tr><td>ตรวจก่อน <code>notifyListeners</code></td><td>กันการวาดที่ไม่จำเป็นตั้งแต่ต้นทาง</td><td>ต้องเทียบค่าให้ถูก</td></tr>
+<tr><td>แยก widget ที่แพงออกเป็นคลาสของตัวเอง</td><td>ทำให้ <code>const</code> ได้</td><td>—</td></tr>
+<tr><td>ใช้ <code>RepaintBoundary</code></td><td>แยกชั้นการวาด</td><td>กินหน่วยความจำเพิ่ม ใช้เมื่อจำเป็นจริง</td></tr>
+</tbody></table><p>สองอันแรกครอบคลุมกรณีส่วนใหญ่ และอันดับความสำคัญคือ<strong>ครอบให้แคบก่อน แล้วค่อยคิดถึงอย่างอื่น</strong></p><pre class="code-vs"><code>// ทำให้ส่วนที่แพงเป็นคลาสของตัวเอง แล้วมันจะ const ได้
+class _ExpensiveSection extends StatelessWidget {
+  const _ExpensiveSection();
+  ...
+}
+
+// แล้วเรียกแบบนี้ Flutter จะข้ามการสร้างใหม่ทั้งก้อน
+const _ExpensiveSection()</code></pre></section>
+
+<section><h2>7. เมื่อไหร่ควรทำ</h2><div class="note"><strong>อย่าปรับก่อนวัด</strong> — การวาดใหม่ที่ไม่จำเป็นส่วนใหญ่ไม่มีผลที่ผู้ใช้รู้สึก และการแยก <code>ListenableBuilder</code> เป็นสิบตัวทำให้โค้ดอ่านยากขึ้นโดยไม่ได้อะไร</div><table><thead><tr><th>ควรทำเมื่อ</th><th>ไม่ต้องทำเมื่อ</th></tr></thead><tbody>
+<tr><td>DevTools บอกว่าเฟรมเกิน 16ms (14.14)</td><td>ยังไม่เคยวัด</td></tr>
+<tr><td>ส่วนที่ถูกวาดใหม่มีของแพง เช่นรูปหรือลิสต์</td><td>เป็นข้อความสองบรรทัด</td></tr>
+<tr><td>ผู้ใช้รายงานว่ากระตุก</td><td>เพราะอ่านมาว่าควรทำ</td></tr>
+<tr><td>วาดใหม่เกิดถี่มาก เช่นทุกตัวอักษรที่พิมพ์</td><td>เกิดปีละครั้ง</td></tr>
+</tbody></table><p>ในโค้ดจริงของ <code>wmsapp</code> มีตัวอย่างที่เข้าเกณฑ์ชัดเจน — <code>_filterParts</code> เรียก <code>setState</code> ทุกตัวอักษรที่พิมพ์ แล้วการ์ดทุกใบสร้าง <code>Future</code> ใหม่ (13.6) ซึ่งเป็นทั้ง “ถี่มาก” และ “มีของแพง”</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปรับแล้วไม่รู้ว่าดีขึ้นไหม</td><td>ไม่ได้วัดก่อน</td><td>นับก่อนและหลัง</td></tr>
+<tr><td>ใส่ <code>const</code> แล้วข้อความไม่เปลี่ยนภาษา</td><td><code>const</code> ทำให้ข้ามการวาดใหม่</td><td>เอาออกจาก widget ที่มีข้อความ (11.6)</td></tr>
+<tr><td>วาดใหม่ทั้งจอทุก 15 วินาที</td><td>ประกาศแม้ข้อมูลเหมือนเดิม</td><td>ตรวจก่อนประกาศ</td></tr>
+<tr><td>แยก <code>ListenableBuilder</code> จนอ่านไม่รู้เรื่อง</td><td>ปรับก่อนวัด</td><td>ปรับเฉพาะที่วัดแล้วว่ามีปัญหา</td></tr>
+<tr><td>ใส่ <code>RepaintBoundary</code> ทุกที่</td><td>คิดว่ายิ่งเยอะยิ่งดี</td><td>ใช้เฉพาะส่วนที่วาดบ่อยและแพง</td></tr>
+<tr><td>เทสต์การวาดใหม่ล้มหลัง refactor</td><td>โครง widget เปลี่ยน</td><td>ปรับตัวเลขที่คาด ถ้าการเปลี่ยนถูกต้อง</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>จอรายการงานมีสามส่วน — หัวจอที่แสดงชื่อผู้ใช้และจุดสถานะ ลิสต์งาน 50 รายการ และแถบสรุปด้านล่าง ทั้งหมดอยู่ใต้ <code>ListenableBuilder</code> ตัวเดียวที่ฟัง <code>TaskStore</code></p><p>ข้อมูลถูกโหลดใหม่ทุก 15 วินาที เขียนเทสต์แล้วปรับปรุง</p><details><summary>แนวคำตอบ</summary><p><strong>ขั้นที่ 1 — วัดก่อน</strong></p><pre class="code-vs"><code>testWidgets('โหลดใหม่หนึ่งครั้ง วาดใหม่กี่ส่วน', (tester) async {
+  final counter = RebuildCounter();
+  await tester.pumpWidget(wrap(TaskBoard(store: store, counter: counter)));
+
+  await store.load();
+  await tester.pump();
+
+  debugPrint(counter.toString());
+  // header=2, list=2, summary=2  ← ทุกส่วนวาดใหม่
+});</code></pre><p><strong>ขั้นที่ 2 — ถามว่าแต่ละส่วนใช้ค่าอะไร</strong></p><table><thead><tr><th>ส่วน</th><th>ใช้ค่าจาก store</th><th>เปลี่ยนบ่อยไหม</th></tr></thead><tbody>
+<tr><td>หัวจอ</td><td>ชื่อผู้ใช้ + สถานะการเชื่อมต่อ</td><td>แทบไม่เปลี่ยน</td></tr>
+<tr><td>ลิสต์</td><td>รายการงาน</td><td>เปลี่ยนทุกครั้งที่โหลด</td></tr>
+<tr><td>แถบสรุป</td><td>จำนวนงานค้าง</td><td>เปลี่ยนตามลิสต์</td></tr>
+</tbody></table><p>หัวจอไม่ควรวาดใหม่เมื่อโหลดรายการ — เป็นเป้าหมายแรก</p><p><strong>ขั้นที่ 3 — ปรับ</strong></p><pre class="code-vs"><code>Column(
+  children: [
+    // หัวจอฟังเฉพาะสิ่งที่ตัวเองใช้
+    ListenableBuilder(
+      listenable: sessionStore,        // คนละ notifier กับ TaskStore
+      builder: (context, _) =&gt; TaskHeader(user: sessionStore.username),
+    ),
+    Expanded(
+      child: ListenableBuilder(
+        listenable: taskStore,
+        builder: (context, _) =&gt; TaskList(tasks: taskStore.tasks),
+      ),
+    ),
+    ListenableBuilder(
+      listenable: taskStore,
+      builder: (context, _) =&gt; TaskSummary(count: taskStore.openCount),
+    ),
+  ],
+)</code></pre><p><strong>ขั้นที่ 4 — ยืนยันด้วยเทสต์</strong></p><pre class="code-vs"><code>testWidgets('โหลดรายการใหม่ ต้องไม่วาดหัวจอใหม่', (tester) async {
+  await tester.pumpWidget(wrap(TaskBoard(...)));
+
+  await store.load();
+  await tester.pump();
+
+  expect(counter.countOf('header'), 1, reason: 'หัวจอไม่ได้ใช้ข้อมูลงาน');
+  expect(counter.countOf('list'), 2);
+});
+
+testWidgets('โหลดแล้วข้อมูลเหมือนเดิม ต้องไม่วาดใหม่เลย', (tester) async {
+  await store.load();
+  await tester.pump();
+  final before = counter.snapshot;
+
+  await store.load();      // ได้ข้อมูลชุดเดิม
+  await tester.pump();
+
+  expect(counter.snapshot, before);
+});</code></pre><p><strong>เทสต์ข้อสุดท้ายคือข้อที่ให้ผลมากที่สุด</strong> เพราะการถามซ้ำทุก 15 วินาทีในคลังที่ไม่มีอะไรเปลี่ยน คือกรณีที่เกิดบ่อยที่สุด</p><p>แต่มันต้องการให้ store เทียบข้อมูลก่อนประกาศ ซึ่งต้องมีวิธีเทียบที่ถูก</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  final result = await repository.fetchOpen();
+  // เทียบด้วยเลขรุ่นรวม ไม่ใช่เทียบลิสต์ทีละตัวซึ่งแพงกว่าการวาดใหม่
+  if (_lastVersion == result.version) return;
+  _lastVersion = result.version;
+  _tasks = result.tasks;
+  notifyListeners();
+}</code></pre><p>ข้อควรระวัง — <strong>อย่าเทียบด้วยการวนทั้งลิสต์ถ้าลิสต์ยาว</strong> เพราะการเทียบอาจแพงกว่าการวาดใหม่ที่ตั้งใจจะประหยัด ซึ่งเป็นกับดักคลาสสิกของการปรับประสิทธิภาพโดยไม่วัด</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>นับการวาดใหม่ ทำให้ “เร็วขึ้น” เป็นตัวเลขที่เทสต์ยืนยันได้</li><li>ตำแหน่งของ <code>ListenableBuilder</code> เปลี่ยนผลได้สิบเท่า</li><li>ตรวจก่อน <code>notifyListeners</code> กันการวาดที่ไม่จำเป็นตั้งแต่ต้นทาง</li><li>อย่าปรับก่อนวัด</li><li>เทสต์การวาดใหม่จะล้มเมื่อมีคนย้ายโค้ดกลับ ซึ่งเป็นการเตือนที่ถูกต้อง</li><li>ระวังการเทียบข้อมูลที่แพงกว่าการวาดใหม่</li></ul></div><p><strong>บทหน้า:</strong> ลิสต์ยาวและรูปจำนวนมาก</p></section>

@@ -4,41 +4,152 @@
 <title>Dart Unit Tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-02 · Testing</span><h1>Dart Unit Tests</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โครงสร้างพื้นฐาน</a></li><li><a href="#section-2">Table-driven tests</a></li><li><a href="#section-3">State transition</a></li><li><a href="#section-4">Exception และ validation</a></li><li><a href="#section-5">เวลาและ ID</a></li><li><a href="#section-6">Value equality</a></li><li><a href="#section-7">ไม่ทดสอบ private method</a></li><li><a href="#section-8">แบบฝึกหัด</a></li></ol></nav>
-<div class="note"><strong>Pure Dart test คือ feedback ที่เร็วที่สุด:</strong> ย้าย logic ออกจาก widget callback มาเป็น function/model/state machine แล้วทดสอบโดยไม่ต้อง <code>pumpWidget</code></div>
-<section id="section-1"><h2>1. โครงสร้างพื้นฐาน</h2><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โครงของเทสต์หนึ่งไฟล์</a></li><li><a href="#section-2">ชื่อเทสต์คือเอกสาร</a></li><li><a href="#section-3">เทสต์ที่ดีทดสอบเรื่องเดียว</a></li><li><a href="#section-4">ตัวเทียบที่ใช้บ่อย</a></li><li><a href="#section-5">เทสต์ที่เป็น async</a></li><li><a href="#section-6">setUp และของที่ใช้ร่วมกัน</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เขียนเทสต์ให้ฟังก์ชันบริสุทธิ์ของตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนเทสต์ที่อ่านแล้วรู้ว่าอะไรพัง โดยไม่ต้องเปิดโค้ดที่ถูกทดสอบ</div>
+
+<section id="section-1"><h2>1. โครงของเทสต์หนึ่งไฟล์</h2><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_wms_companion/settings_lab/server_profile.dart';
 
 void main() {
-  group('normalizeBarcode', () {
-    test('trims and uppercases warehouse code', () {
-      expect(normalizeBarcode(' plt-001\n'), 'PLT-001');
+  group('normalizeBasePath', () {
+    test('รูปแบบที่ผู้ใช้พิมพ์ได้ทั้งหมด ต้องให้ผลเดียวกัน', () {
+      for (final raw in ['wms', '/wms', 'wms/', '/wms/', '//wms//', ' /wms ']) {
+        expect(normalizeBasePath(raw), '/wms', reason: 'ผิดที่ "$raw"');
+      }
     });
   });
-}</code></pre></section>
-<section id="section-2"><h2>2. Table-driven tests</h2><pre class="code-vs"><code>for (final (raw, expected) in [
-  ('P-001', 'P-001'),
-  (' p-001 ', 'P-001'),
-  ('', null),
-]) {
-  test('parse $raw', () =&gt; expect(parsePart(raw), expected));
-}</code></pre><p>เพิ่ม edge cases ได้โดยไม่ทำสำเนา setup และชื่อ case ชี้ค่าที่เสียทันที</p></section>
-<section id="section-3"><h2>3. State transition</h2><pre class="code-vs"><code>final next = ReceivingState.initial().apply(
-  const PartScanned('P-001'),
-);
-expect(next.step, ReceivingStep.serial);
-expect(next.partCode, 'P-001');
-expect(next.error, isNull);</code></pre><p>ถ้า transition ต้องใช้ <code>BuildContext</code> แสดงว่า logic กับ UI ยังติดกันเกินไป</p></section>
-<section id="section-4"><h2>4. Exception และ validation</h2><pre class="code-vs"><code>expect(
-  () =&gt; Quantity.parse('-1'),
-  throwsA(isA&lt;ValidationException&gt;()
-      .having((e) =&gt; e.field, 'field', 'qty')),
-);</code></pre><p>assert type/ข้อมูลสำคัญ ไม่ล็อกข้อความทั้งประโยคจน localization ทำ test แตกโดยไม่เกี่ยว behavior</p></section>
-<section id="section-5"><h2>5. เวลาและ ID</h2><pre class="code-vs"><code>final clock = FakeClock(DateTime.utc(2026, 8, 15, 9));
-final ids = SequenceIds(['cmd-1']);
-final command = factory.create(clock: clock, ids: ids);
-expect(command.createdAt, DateTime.utc(2026, 8, 15, 9));</code></pre></section>
-<section id="section-6"><h2>6. Value equality</h2><p>DTO/state ควร immutable และเปรียบเทียบค่าชัดเจน ใช้ record, overridden equality หรือ matcher แยก field ห้าม assert ด้วย object identity เมื่อ business ต้องการ value equality</p></section>
-<section id="section-7"><h2>7. ไม่ทดสอบ private method</h2><p>ทดสอบ public behavior ผ่าน input/output หาก private logic ซับซ้อนจนอยากเรียกตรง ๆ ให้ extract เป็น collaborator ที่มีความหมาย เช่น <code>ScanValidator</code> มากกว่าเปิด method เพื่อ test อย่างเดียว</p></section>
-<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียน test ของ duplicate serial แบบ case-insensitive และ whitespace-safe</p><details><summary>แนวคำตอบ</summary><p>normalize serial ทั้งค่าที่รับใหม่และ collection เดิมก่อนเทียบ พร้อม case ของค่าใหม่, ซ้ำ, ช่องว่าง และ empty โดยไม่แตะ widget</p></details></section>
+}</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>group</code></td><td>จัดกลุ่มเทสต์ที่เกี่ยวกัน ชื่อกลุ่มจะขึ้นนำหน้าชื่อเทสต์ตอนล้ม</td></tr>
+<tr><td><code>test</code></td><td>หนึ่งข้อ</td></tr>
+<tr><td><code>expect(ค่าที่ได้, ค่าที่คาด)</code></td><td>ลำดับสำคัญ — สลับแล้วข้อความตอนล้มจะกลับด้าน</td></tr>
+<tr><td><code>reason</code></td><td>ข้อความเพิ่มตอนล้ม สำคัญมากเมื่ออยู่ในลูป</td></tr>
+</tbody></table><div class="note"><code>reason</code> ในลูปคือความต่างระหว่าง “เทสต์ล้ม” กับ “เทสต์ล้มที่ค่า <code>//wms//</code>” — อันหลังบอกได้ทันทีว่าต้องไปดูอะไร</div></section>
+
+<section id="section-2"><h2>2. ชื่อเทสต์คือเอกสาร</h2><p>รันเทสต์แล้วอ่านรายชื่อ ควรได้รายการข้อกำหนดของระบบ</p><pre class="code-vs"><code>normalizeBasePath รูปแบบที่ผู้ใช้พิมพ์ได้ทั้งหมด ต้องให้ผลเดียวกัน
+normalizeBasePath ว่างหรือมีแต่ทับ ต้องได้ข้อความว่าง ไม่ใช่ทับเดี่ยว
+การตรวจฟอร์ม พิมพ์ที่อยู่เต็มลงช่อง host ต้องบอกว่าให้ไปเลือกที่ Protocol
+ProfileStore สลับแล้วต้องลืมผลตรวจของเครื่องเก่า</code></pre><table><thead><tr><th>ชื่อที่ไม่ดี</th><th>ชื่อที่ดี</th></tr></thead><tbody>
+<tr><td><code>test('normalizeBasePath works')</code></td><td><code>test('ว่างหรือมีแต่ทับ ต้องได้ข้อความว่าง ไม่ใช่ทับเดี่ยว')</code></td></tr>
+<tr><td><code>test('test1')</code></td><td><code>test('เลือกภาษาเดิมซ้ำ ต้องไม่ประกาศ')</code></td></tr>
+<tr><td><code>test('should return correct value')</code></td><td><code>test('เหตุการณ์เก่าที่มาถึงช้า ต้องไม่ทับของใหม่')</code></td></tr>
+</tbody></table><p>รูปแบบที่ใช้ได้ทั่วไปคือ <strong>“เมื่อ&lt;สถานการณ์&gt; ต้อง&lt;ผลที่คาด&gt;”</strong> — และคำว่า “ต้อง” ทำให้เขียนชื่อที่คลุมเครือได้ยาก</p></section>
+
+<section id="section-3"><h2>3. เทสต์ที่ดีทดสอบเรื่องเดียว</h2><pre class="code-vs"><code>// ไม่ดี — ล้มแล้วไม่รู้ว่าอะไรพัง
+test('profile ทำงานถูก', () {
+  expect(normalizeBasePath('/wms/'), '/wms');
+  expect(profile('p1').baseUrl, 'http://192.168.1.194:6191');
+  expect(validateDraft(draft()).isValid, isTrue);
+});</code></pre><pre class="code-vs"><code>// ดี — ล้มแล้วชื่อบอกทันที
+test('เส้นทางหลายชั้นเก็บครบ', () { ... });
+test('ประกอบจากทุกช่องตามลำดับที่ถูก', () { ... });
+test('ฟอร์มที่ถูกต้องผ่านทุกช่อง', () { ... });</code></pre><p>ข้อยกเว้นคือการวนค่าหลายตัวที่ทดสอบ<strong>กฎเดียวกัน</strong> — แบบนั้นยังเป็นเรื่องเดียว</p><pre class="code-vs"><code>test('ดัก /api ได้ทุกรูปแบบที่พิมพ์', () {
+  for (final raw in ['api', '/api', 'api/', '/API/wms']) {
+    expect(validateDraft(draft(basePath: raw)).basePath, isNotNull,
+        reason: 'ไม่ได้ดัก "$raw"');
+  }
+});</code></pre></section>
+
+<section id="section-4"><h2>4. ตัวเทียบที่ใช้บ่อย</h2><table><thead><tr><th>เขียน</th><th>ตรวจว่า</th></tr></thead><tbody>
+<tr><td><code>expect(x, 5)</code></td><td>เท่ากับ</td></tr>
+<tr><td><code>expect(x, isNull)</code> / <code>isNotNull</code></td><td>เป็น null หรือไม่</td></tr>
+<tr><td><code>expect(list, isEmpty)</code> / <code>isNotEmpty</code></td><td>ว่างหรือไม่</td></tr>
+<tr><td><code>expect(list, hasLength(3))</code></td><td>จำนวนสมาชิก</td></tr>
+<tr><td><code>expect(text, contains('Port'))</code></td><td>มีข้อความย่อย</td></tr>
+<tr><td><code>expect(x, isA&lt;ImageRejected&gt;())</code></td><td>เป็นชนิดนั้น</td></tr>
+<tr><td><code>expect(n, greaterThanOrEqualTo(4.5))</code></td><td>เปรียบเทียบ</td></tr>
+<tr><td><code>expect(list, containsAll(['a', 'b']))</code></td><td>มีครบทุกตัว ไม่สนลำดับ</td></tr>
+<tr><td><code>expect(() =&gt; f(), throwsA(isA&lt;ContractException&gt;()))</code></td><td>โยนชนิดนั้น</td></tr>
+<tr><td><code>expect(() =&gt; f(), returnsNormally)</code></td><td>ไม่โยน</td></tr>
+</tbody></table><p>ตัวที่ทรงพลังแต่ใช้กันน้อยคือ <code>having</code> ซึ่งตรวจฟิลด์ข้างในของสิ่งที่โยนได้</p><pre class="code-vs"><code>await expectLater(
+  repository.fetchInZone('A1'),
+  throwsA(
+    isA&lt;ContractException&gt;().having((e) =&gt; e.path, 'path', 'items[1].quantity'),
+  ),
+);</code></pre><p>สามค่าใน <code>having</code> คือ ฟังก์ชันอ่านค่า, ชื่อที่จะแสดงตอนล้ม, และค่าที่คาด — ทำให้ข้อความตอนล้มบอกว่า <code>path</code> ได้อะไรมาแทน</p></section>
+
+<section id="section-5"><h2>5. เทสต์ที่เป็น async</h2><pre class="code-vs"><code>test('เปิดครั้งแรกต้องมี profile เริ่มต้นให้ใช้ทันที', () async {
+  final store = newStore();
+  await store.load();
+
+  expect(store.profiles, hasLength(1));
+});</code></pre><table><thead><tr><th>สิ่งที่ต้องระวัง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ใส่ <code>async</code> แล้วต้อง <code>await</code></td><td>ลืม <code>await</code> แล้วเทสต์จะจบก่อนงานเสร็จ และผ่านทั้งที่โค้ดพัง</td></tr>
+<tr><td>ใช้ <code>expectLater</code> กับ <code>Future</code></td><td><code>expect(future, throwsA(...))</code> ก็ทำงาน แต่ <code>expectLater</code> ชัดเจนกว่า</td></tr>
+<tr><td>stream ต้องปล่อยให้ microtask ทำงาน</td><td><code>await Future&lt;void&gt;.delayed(Duration.zero)</code></td></tr>
+</tbody></table><p>แถวแรกเป็นข้อผิดพลาดที่เจอบ่อยและอันตราย เพราะ<strong>เทสต์จะเป็นสีเขียวทั้งที่ไม่ได้ตรวจอะไรเลย</strong></p><pre class="code-vs"><code>// ผิด — เทสต์จบก่อน load() ทำงานเสร็จ
+test('...', () async {
+  store.load();                    // ← ลืม await
+  expect(store.profiles, hasLength(1));   // ล้มเสมอ หรือผ่านโดยบังเอิญ
+});</code></pre><div class="note">ตัววิเคราะห์ของ Dart เตือนเรื่องนี้ให้ถ้าเปิด lint <code>unawaited_futures</code> — คุ้มมากที่จะเปิดในโปรเจกต์ที่มีเทสต์เยอะ</div></section>
+
+<section id="section-6"><h2>6. <code>setUp</code> และของที่ใช้ร่วมกัน</h2><pre class="code-vs"><code>group('ProfileStore', () {
+  late InMemorySettingsStorage storage;
+  var idCounter = 0;
+
+  ProfileStore newStore() {
+    idCounter = 0;
+    return ProfileStore(storage, createId: () =&gt; 'p${++idCounter}');
+  }
+
+  setUp(() =&gt; storage = InMemorySettingsStorage());
+  ...
+});</code></pre><table><thead><tr><th>กฎ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>setUp</code> ทำงานก่อน<strong>ทุกข้อ</strong> ไม่ใช่ครั้งเดียว</td><td>แต่ละข้อจึงเริ่มจากสถานะสะอาด</td></tr>
+<tr><td>อย่าใช้ตัวแปรที่ค้างข้ามข้อ</td><td>ลำดับการรันเปลี่ยนได้ และเทสต์ที่พึ่งลำดับจะล้มแบบสุ่ม</td></tr>
+<tr><td><code>setUpAll</code> ใช้เฉพาะของที่แพงและไม่เปลี่ยน</td><td>เช่น <code>initializeDateFormatting()</code> ใน 11.9</td></tr>
+</tbody></table><p>ฟังก์ชันช่วยสร้างข้อมูลตัวอย่างมีค่ามาก เพราะทำให้เทสต์แต่ละข้อเขียนเฉพาะสิ่งที่ต่าง</p><pre class="code-vs"><code>PickedImage image({
+  Uint8List? bytes,
+  String fileName = 'IMG_0001.jpg',
+  String mimeType = 'image/jpeg',
+  int? width = 1024,
+  int? height = 1024,
+}) =&gt; PickedImage(bytes: bytes ?? jpegBytes(), ...);
+
+// แล้วในเทสต์เขียนแค่สิ่งที่ต่างจากปกติ
+checkImage(image(mimeType: 'image/heic'))
+checkImage(image(bytes: jpegBytes(size: 8 * 1024 * 1024)))</code></pre><p>อ่านแล้วเห็นทันทีว่าเทสต์นี้สนใจอะไร — ต่างจากการเขียนพารามิเตอร์ครบทุกตัวทุกครั้ง ซึ่งทำให้สิ่งสำคัญจมอยู่ในกอง</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์เขียว แต่โค้ดพัง</td><td>ลืม <code>await</code></td><td>เปิด lint <code>unawaited_futures</code></td></tr>
+<tr><td>เทสต์ล้มแบบสุ่ม</td><td>มีสถานะค้างข้ามข้อ</td><td>สร้างใหม่ใน <code>setUp</code></td></tr>
+<tr><td>ล้มแล้วไม่รู้ว่าค่าไหน</td><td>ไม่ใส่ <code>reason</code> ในลูป</td><td>ใส่</td></tr>
+<tr><td>ข้อความตอนล้มกลับด้าน</td><td>สลับลำดับ <code>expect</code></td><td>ค่าที่ได้มาก่อน ค่าที่คาดตามหลัง</td></tr>
+<tr><td>แก้โค้ดนิดเดียวแล้วเทสต์พังสิบข้อ</td><td>ทดสอบวิธีที่ทำ ไม่ใช่สิ่งที่สัญญา</td><td>ทดสอบผ่าน API สาธารณะ</td></tr>
+<tr><td>เทสต์ยาวจนอ่านไม่รู้เรื่อง</td><td>ไม่มีฟังก์ชันช่วยสร้างข้อมูล</td><td>ทำ builder ที่มีค่าปริยาย</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียนเทสต์ให้ฟังก์ชันนี้</p><pre class="code-vs"><code>/// แปลงจำนวนที่สแกนได้เป็นข้อความสรุป
+String pickSummary({required int scanned, required int required}) {
+  if (scanned == required) return 'ครบแล้ว';
+  if (scanned &gt; required) return 'เกิน ${scanned - required} ชิ้น';
+  return 'ขาดอีก ${required - scanned} ชิ้น';
+}</code></pre><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>group('pickSummary', () {
+  test('ครบพอดี', () {
+    expect(pickSummary(scanned: 5, required: 5), 'ครบแล้ว');
+  });
+
+  test('ขาด บอกว่าขาดเท่าไหร่', () {
+    expect(pickSummary(scanned: 3, required: 5), 'ขาดอีก 2 ชิ้น');
+  });
+
+  test('เกิน บอกว่าเกินเท่าไหร่', () {
+    expect(pickSummary(scanned: 7, required: 5), 'เกิน 2 ชิ้น');
+  });
+
+  test('ยังไม่ได้สแกนเลย', () {
+    expect(pickSummary(scanned: 0, required: 5), 'ขาดอีก 5 ชิ้น');
+  });
+});</code></pre><p>สี่ข้อนี้ครอบคลุมเส้นทางทั้งหมด แต่<strong>คำถามที่มีค่ากว่าคือค่าที่ยังไม่ได้ถาม</strong></p><table><thead><tr><th>ค่าที่ควรถาม</th><th>ควรเกิดอะไร</th><th>ใครตอบได้</th></tr></thead><tbody>
+<tr><td><code>required: 0</code></td><td>งานที่ไม่ต้องหยิบอะไรเลยมีจริงไหม</td><td>หัวหน้าคลัง</td></tr>
+<tr><td><code>scanned: -1</code></td><td>เป็นไปได้ไหม ถ้าไม่ ควรโยน</td><td>ทีมพัฒนา</td></tr>
+<tr><td>จำนวนที่มีทศนิยม</td><td>สินค้าที่ชั่งน้ำหนักใช้ <code>int</code> ไม่ได้ (9.5)</td><td>หัวหน้าคลัง</td></tr>
+</tbody></table><p>สามแถวนี้คือสิ่งที่การเขียนเทสต์มอบให้นอกจากการจับบั๊ก — <strong>มันบังคับให้ถามคำถามที่ยังไม่มีใครถาม</strong> ตอนที่ยังแก้ได้ถูก</p><p>ถ้าคำตอบคือ “จำนวนติดลบเป็นไปไม่ได้” ก็ควรเขียนลงไปในโค้ด ไม่ใช่แค่รู้กันในหัว</p><pre class="code-vs"><code>String pickSummary({required int scanned, required int required}) {
+  // ทั้งสองค่ามาจากการนับ จึงติดลบไม่ได้ — ถ้าติดลบแปลว่ามีบั๊กที่อื่น
+  assert(scanned &gt;= 0 &amp;&amp; required &gt;= 0, 'จำนวนติดลบ: $scanned/$required');
+  ...
+}</code></pre><p><code>assert</code> ทำงานเฉพาะตอนพัฒนาและตอนรันเทสต์ จึงไม่กระทบผู้ใช้ แต่จับบั๊กของเราได้ตั้งแต่ก่อนถึงมือใคร</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ชื่อเทสต์คือเอกสาร เขียนเป็น “เมื่อ…ต้อง…”</li><li>หนึ่งเทสต์ทดสอบเรื่องเดียว ยกเว้นการวนค่าที่ทดสอบกฎเดียวกัน</li><li>ใส่ <code>reason</code> ทุกครั้งที่อยู่ในลูป</li><li>ลืม <code>await</code> ทำให้เทสต์เขียวทั้งที่ไม่ได้ตรวจอะไร</li><li>สร้างของใหม่ใน <code>setUp</code> อย่าให้สถานะค้างข้ามข้อ</li><li>ฟังก์ชันช่วยสร้างข้อมูลทำให้เทสต์เขียนเฉพาะสิ่งที่ต่าง</li><li>การเขียนเทสต์บังคับให้ถามคำถามที่ยังไม่มีใครถาม</li></ul></div><p><strong>บทหน้า:</strong> ทดสอบ store โดยไม่ต้องมีเซิร์ฟเวอร์</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,28 +4,179 @@
 <title>List &amp; Image Performance</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">14-16 · Testing</span><h1>List &amp; Image Performance</h1><p>Part 14: Testing &amp; Performance</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Lazy list</a></li><li><a href="#section-2">itemExtent/prototype</a></li><li><a href="#section-3">Pagination และ search</a></li><li><a href="#section-4">Image memory</a></li><li><a href="#section-5">Future ต่อแถว</a></li><li><a href="#section-6">งาน CPU</a></li><li><a href="#section-7">Performance test</a></li><li><a href="#section-8">Correctness ระหว่าง optimize</a></li></ol></nav>
-<div class="note"><strong>รายการลื่นมาจากการทำงานเท่าที่มองเห็น:</strong> lazy build, stable identity, pagination, thumbnail decode ตามขนาด และไม่คำนวณหนักใน <code>itemBuilder</code></div>
-<section id="section-1"><h2>1. Lazy list</h2><pre class="code-vs"><code>ListView.builder(
-  itemCount: items.length,
-  itemBuilder: (_, index) =&gt; PartRow(
-    key: ValueKey(items[index].id),
-    part: items[index],
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สองแบบที่ต่างกันมาก</a></li><li><a href="#section-2">ตัวเลขจากเทสต์</a></li><li><a href="#section-3">เลื่อนแล้วสร้างเพิ่ม แต่ไม่ครบ</a></li><li><a href="#section-4">itemExtent ช่วยอะไร</a></li><li><a href="#section-5">รูปในลิสต์</a></li><li><a href="#section-6">อย่าคำนวณหนักใน itemBuilder</a></li><li><a href="#section-7">เมื่อลิสต์ยาวจริง ๆ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: รันเทสต์ที่นับจำนวนแถวที่ถูกสร้าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.15, 13.7 (หน่วยความจำของรูป), 11.11 (asset)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แสดงลิสต์ยาวและรูปจำนวนมากโดยไม่กระตุกและไม่ถูกระบบปิด</div>
+
+<section id="section-1"><h2>1. สองแบบที่ต่างกันมาก</h2><pre class="code-vs"><code>/// รายการพาเลทที่สร้างลูกทุกตัวพร้อมกัน
+///
+/// `Column` ใน `SingleChildScrollView` สร้าง widget ครบทุกตัวตั้งแต่แรก
+/// แม้จะเห็นแค่ห้าตัวบนจอ — 500 แถวคือ 500 widget ที่ถูกสร้างและวาด
+class EagerPalletList extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =&gt; SingleChildScrollView(
+    child: Column(
+      children: [
+        for (final code in codes)
+          CountedBuilder(counter: counter, label: 'row', ...),
+      ],
+    ),
+  );
+}</code></pre><pre class="code-vs"><code>/// รายการเดียวกันที่สร้างเฉพาะแถวที่กำลังจะเห็น
+class LazyPalletList extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =&gt; ListView.builder(
+    itemCount: codes.length,
+    itemExtent: 56,
+    itemBuilder: (context, index) =&gt; CountedBuilder(...),
+  );
+}</code></pre></section>
+
+<section id="section-2"><h2>2. ตัวเลขจากเทสต์</h2><pre class="code-vs"><code>testWidgets('Column สร้างทุกแถวแม้เห็นไม่ถึงสิบ', (tester) async {
+  tester.view.physicalSize = const Size(400, 600);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+
+  await tester.pumpWidget(wrap(EagerPalletList(codes: codes, counter: counter)));
+
+  expect(counter.countOf('row'), 500);
+});
+
+testWidgets('ListView.builder สร้างเฉพาะที่ใกล้จะเห็น', (tester) async {
+  ...
+  // จอสูง 600 แถวละ 56 เห็นได้ราว 11 แถว บวกที่เตรียมไว้ล่วงหน้า
+  expect(counter.countOf('row'), lessThan(40));
+  expect(counter.countOf('row'), greaterThan(5));
+});</code></pre><table><thead><tr><th>500 แถว บนจอที่เห็นได้ 11 แถว</th><th><code>Column</code></th><th><code>ListView.builder</code></th></tr></thead><tbody>
+<tr><td>widget ที่ถูกสร้าง</td><td>500</td><td>ราว 20–35</td></tr>
+<tr><td>เวลาเฟรมแรก</td><td>ช้าตามจำนวนแถว</td><td>คงที่ ไม่ว่าข้อมูลจะยาวแค่ไหน</td></tr>
+<tr><td>หน่วยความจำ</td><td>ตามจำนวนแถว</td><td>ตามขนาดจอ</td></tr>
+</tbody></table><div class="note">ความต่างที่สำคัญที่สุดคือแถวกลาง — <strong><code>ListView.builder</code> ใช้เวลาเท่าเดิมไม่ว่าข้อมูลจะมี 50 หรือ 50,000 แถว</strong> ในขณะที่ <code>Column</code> ช้าลงเป็นสัดส่วนตรง</div></section>
+
+<section id="section-3"><h2>3. เลื่อนแล้วสร้างเพิ่ม แต่ไม่ครบ</h2><pre class="code-vs"><code>testWidgets('เลื่อนแล้วสร้างแถวใหม่เพิ่ม แต่ยังไม่ครบทั้งหมด', (tester) async {
+  await tester.pumpWidget(wrap(LazyPalletList(codes: codes, counter: counter)));
+  final beforeScroll = counter.countOf('row');
+
+  await tester.drag(find.byType(ListView), const Offset(0, -1000));
+  await tester.pump();
+
+  expect(counter.countOf('row'), greaterThan(beforeScroll));
+  expect(counter.countOf('row'), lessThan(200));
+});</code></pre><p>เทสต์นี้พิสูจน์ว่าการสร้างเกิดขึ้น<strong>ตามที่จำเป็น</strong> ไม่ใช่ทั้งหมดตั้งแต่แรก และไม่ใช่ศูนย์</p></section>
+
+<section id="section-4"><h2>4. <code>itemExtent</code> ช่วยอะไร</h2><pre class="code-vs"><code>ListView.builder(
+  itemCount: codes.length,
+  // บอกความสูงล่วงหน้าทำให้ Flutter คำนวณตำแหน่งได้โดยไม่ต้องวัดทุกแถว
+  // และแถบเลื่อนแสดงสัดส่วนที่ถูกต้องตั้งแต่แรก
+  itemExtent: 56,
+  itemBuilder: ...,
+)</code></pre><table><thead><tr><th>ไม่ตั้ง</th><th>ตั้ง</th></tr></thead><tbody>
+<tr><td>ต้องวัดแต่ละแถวเพื่อรู้ตำแหน่ง</td><td>คำนวณได้ทันที</td></tr>
+<tr><td>แถบเลื่อนไม่แม่นจนกว่าจะเลื่อนไปทั่ว</td><td>แม่นตั้งแต่แรก</td></tr>
+<tr><td>กระโดดไปแถวที่ 400 ได้ช้า</td><td>ได้ทันที</td></tr>
+</tbody></table><p>ใช้ได้เฉพาะเมื่อ<strong>ทุกแถวสูงเท่ากัน</strong> ซึ่งในลิสต์ของงานคลังมักเป็นจริง เพราะแต่ละแถวมีข้อมูลชุดเดียวกัน</p><p>ถ้าความสูงต่างกันแต่รู้ล่วงหน้า ใช้ <code>prototypeItem</code> แทน</p><pre class="code-vs"><code>ListView.builder(
+  prototypeItem: const PalletRow(code: 'PLT-0000'),   // ใช้ตัวนี้วัดความสูง
+  itemBuilder: ...,
+)</code></pre></section>
+
+<section id="section-5"><h2>5. รูปในลิสต์</h2><p>13.7 อธิบายเรื่องหน่วยความจำไปแล้ว ตรงนี้เพิ่มเรื่องที่เกี่ยวกับลิสต์โดยเฉพาะ</p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>cacheWidth</code> คูณ <code>devicePixelRatio</code></td><td>รูป 1024×1024 ที่แสดง 56×56 กิน 4 MB ต่อใบ</td></tr>
+<tr><td>จองพื้นที่ด้วยขนาดตายตัว</td><td>ไม่งั้นลิสต์กระตุกทุกครั้งที่รูปโหลดเสร็จ</td></tr>
+<tr><td><code>errorBuilder</code></td><td>รูปโหลดไม่ขึ้นเป็นเรื่องปกติในคลัง</td></tr>
+<tr><td>ขอรูปย่อจากเซิร์ฟเวอร์</td><td>ได้ผลมากที่สุด</td></tr>
+</tbody></table><pre class="code-vs"><code>SizedBox(
+  width: 56,
+  height: 56,        // จองพื้นที่ไว้ก่อน ลิสต์จะไม่กระโดด
+  child: Image.network(
+    imageUrl(item.path),
+    fit: BoxFit.cover,
+    cacheWidth: (56 * MediaQuery.devicePixelRatioOf(context)).round(),
+    errorBuilder: (_, _, _) =&gt; const Icon(Icons.broken_image),
   ),
-)</code></pre><p>อย่าใช้ Column สร้าง 1,000 แถวพร้อมกัน และ key ต้องเป็น entity ID ไม่ใช่ index เมื่อ filter/reorder</p></section>
-<section id="section-2"><h2>2. itemExtent/prototype</h2><p>ถ้าแถวสูงคงที่ ระบุ <code>itemExtent</code>/<code>itemExtentBuilder</code> หรือ prototype เพื่อลด layout work แต่ห้ามบังคับเมื่อข้อความไทยหลายบรรทัดทำความสูงเปลี่ยนจนตัดข้อมูล</p></section>
-<section id="section-3"><h2>3. Pagination และ search</h2><p>debounce query, cancel/ignore stale response และโหลดหน้าถัดไปก่อนถึงท้ายเล็กน้อย กัน request ซ้ำด้วย single-flight; แสดง retry ต่อ page โดยไม่ทิ้งข้อมูลเดิมทั้งหมด</p></section>
-<section id="section-4"><h2>4. Image memory</h2><pre class="code-vs"><code>Image.network(
-  url,
-  width: 72,
-  height: 72,
-  cacheWidth: 144,
-  cacheHeight: 144,
-  fit: BoxFit.cover,
-)</code></pre><p>decoded RGBA ใหญ่กว่าไฟล์ JPEG มาก จึงต้องลด decode size และใช้ versioned URL/cache policy ตาม Part 13</p></section>
-<section id="section-5"><h2>5. Future ต่อแถว</h2><p>อย่าสร้าง Future resolve URL ใหม่ใน <code>itemBuilder/build</code> ทุก scroll/rebuild เก็บ resolved URI ใน model/repository cache หรือ State ที่ผูก key และแสดง error/loading เฉพาะ thumbnail</p></section>
-<section id="section-6"><h2>6. งาน CPU</h2><p>parse JSON ใหญ่, sort/filter ซับซ้อน และ image transform ไม่ควรบล็อก UI isolate ระหว่าง scroll วัดก่อนย้าย isolate เพราะ serialization/copy ก็มีต้นทุน และให้ server paginate/filter เมื่อ dataset ใหญ่จริง</p></section>
-<section id="section-7"><h2>7. Performance test</h2><p>สร้าง fixture 100/1,000 รายการ, scroll ด้วย gesture เดิมใน profile mode เก็บ missed frames, build/layout/raster time และ peak memory ทดสอบภาพ cache cold/warm และ device RAM ต่ำที่ใช้งานจริง</p></section>
-<section id="section-8"><h2>8. Correctness ระหว่าง optimize</h2><div class="success">หลังปรับต้องยังรักษา state ต่อ entity เมื่อ reorder, ไม่มีรูปผิดแถว, search ไม่โดน stale result, pagination ไม่ซ้ำ/ขาด และ accessibility/text scale ยังอ่านได้—ความลื่นที่ข้อมูลผิดไม่ใช่ optimization</div></section>
+)</code></pre><div class="note">แถวที่สองมีผลกับงานคลังมากกว่าที่คิด — ลิสต์ที่กระโดดตอนรูปโหลดเสร็จ ทำให้ผู้ใช้ที่กำลังจะกดแถวหนึ่ง กดโดนอีกแถว ซึ่งแปลว่าหยิบของผิด</div></section>
+
+<section id="section-6"><h2>6. อย่าคำนวณหนักใน <code>itemBuilder</code></h2><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+itemBuilder: (context, index) {
+  final task = tasks[index];
+  // คำนวณใหม่ทุกครั้งที่แถวถูกสร้าง ซึ่งเกิดตอนเลื่อนทุกครั้ง
+  final elapsed = formatElapsed(task.createdAt, language);
+  final total = tasks.where((t) =&gt; t.status == task.status).length;
+  return TaskRow(task: task, elapsed: elapsed, total: total);
+}</code></pre><p>บรรทัด <code>tasks.where(...)</code> วนทั้งลิสต์<strong>ต่อหนึ่งแถว</strong> — 500 แถวคือ 250,000 รอบ</p><pre class="code-vs"><code>// คำนวณครั้งเดียวก่อนสร้างลิสต์
+final countByStatus = &lt;TaskStatus, int&gt;{};
+for (final task in tasks) {
+  countByStatus.update(task.status, (n) =&gt; n + 1, ifAbsent: () =&gt; 1);
+}
+
+itemBuilder: (context, index) {
+  final task = tasks[index];
+  return TaskRow(task: task, total: countByStatus[task.status] ?? 0);
+}</code></pre><p>วิธีที่ดีกว่าคือให้ store คำนวณไว้เป็น getter (9.9) เพราะหลายจออาจต้องใช้ตัวเลขเดียวกัน</p></section>
+
+<section id="section-7"><h2>7. เมื่อลิสต์ยาวจริง ๆ</h2><table><thead><tr><th>จำนวนแถว</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ไม่เกิน 50</td><td><code>ListView</code> ธรรมดาก็พอ</td></tr>
+<tr><td>50–1,000</td><td><code>ListView.builder</code> + <code>itemExtent</code></td></tr>
+<tr><td>เกิน 1,000</td><td><strong>ถามว่าผู้ใช้ต้องเห็นทั้งหมดจริงไหม</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นคำถามที่สำคัญกว่าเทคนิค และเป็นสิ่งที่บันทึกไว้ใน memory ของโปรเจกต์นี้แล้ว</p><table><thead><tr><th>แทนที่จะแสดงทั้งหมด</th><th>ทำ</th></tr></thead><tbody>
+<tr><td>รายการพาเลททั้งคลัง</td><td>สแกนหาตัวที่ต้องการ</td></tr>
+<tr><td>ประวัติทั้งปี</td><td>ค้นหาด้วยช่วงวันที่ หรือให้เว็บออกรายงาน</td></tr>
+<tr><td>สินค้าทุกตัว</td><td>ค้นด้วยรหัสหรือชื่อ</td></tr>
+</tbody></table><p>เหตุผลไม่ใช่แค่เรื่องประสิทธิภาพ — <strong>ผู้ใช้ที่ต้องเลื่อนหา 1,000 แถวบนจอ PDA จะไม่ใช้ฟีเจอร์นั้นอยู่ดี</strong> การแบ่งหน้าหรือค้นหาจึงเป็นทั้งเรื่องความเร็วและเรื่องการใช้งาน</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปิดจอครั้งแรกช้ามาก</td><td><code>Column</code> ใน <code>SingleChildScrollView</code></td><td><code>ListView.builder</code></td></tr>
+<tr><td>เลื่อนแล้วกระตุก</td><td>รูปใหญ่ถูกคลายตอนเลื่อน</td><td><code>cacheWidth</code></td></tr>
+<tr><td>ลิสต์กระโดดตอนรูปมา</td><td>ไม่ได้จองพื้นที่</td><td>ห่อด้วย <code>SizedBox</code></td></tr>
+<tr><td>แถบเลื่อนไม่แม่น</td><td>ไม่ได้ตั้ง <code>itemExtent</code></td><td>ตั้งถ้าทุกแถวสูงเท่ากัน</td></tr>
+<tr><td>เลื่อนช้าลงเรื่อย ๆ ยิ่งลิสต์ยาว</td><td>คำนวณหนักใน <code>itemBuilder</code></td><td>คำนวณล่วงหน้า</td></tr>
+<tr><td>แอปถูกปิดตอนเลื่อนลิสต์รูป</td><td>แคชรูปเต็ม</td><td><code>cacheWidth</code> + ลดขนาดแคช (13.7)</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>จอ “ค้นหาสินค้า” แสดงผลการค้นหาที่อาจมีถึง 3,000 รายการ แต่ละแถวมีรูปย่อ ผู้ใช้บ่นว่าค้นแล้วรอนาน และเลื่อนแล้วกระตุก</p><ol><li>แก้อย่างไร</li><li>เขียนเทสต์อะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> แก้เรียงตามผลที่ได้ต่อแรงที่ลง</p><table><thead><tr><th>ทำ</th><th>แก้อาการไหน</th></tr></thead><tbody>
+<tr><td><strong>ให้เซิร์ฟเวอร์คืนทีละหน้า</strong></td><td>ทั้งสองอาการ — ไม่ต้องดาวน์โหลด 3,000 รายการ</td></tr>
+<tr><td><code>ListView.builder</code> + <code>itemExtent</code></td><td>กระตุกตอนเลื่อน</td></tr>
+<tr><td><code>cacheWidth</code> กับรูปย่อ</td><td>กระตุกและถูกปิด</td></tr>
+<tr><td>ขอรูปย่อจากเซิร์ฟเวอร์</td><td>รอนานและกระตุก</td></tr>
+<tr><td>หน่วงการค้นหา</td><td>ยิงคำขอทุกตัวอักษรที่พิมพ์</td></tr>
+</tbody></table><pre class="code-vs"><code>// หน่วงก่อนค้น — ผู้ใช้พิมพ์หกตัวอักษร ยิงคำขอเดียว
+Timer? _debounce;
+
+void onQueryChanged(String query) {
+  _debounce?.cancel();
+  _debounce = Timer(const Duration(milliseconds: 350), () {
+    unawaited(store.search(query));
+  });
+}</code></pre><p>แถวแรกสำคัญที่สุด — และเป็นสิ่งที่บันทึกไว้แล้วว่า<strong>API ต้องไม่ดึงทั้งหมด</strong> สำหรับจอที่ข้อมูลเป็นหลักร้อยขึ้นไป</p><p><strong>2.</strong> เทสต์ที่ควรมี</p><pre class="code-vs"><code>testWidgets('ผลการค้นหา 3000 รายการ สร้างแถวไม่เกิน 40', (tester) async {
+  useViewport(tester);
+  final counter = RebuildCounter();
+
+  await tester.pumpWidget(wrap(SearchResults(items: items3000, counter: counter)));
+
+  expect(counter.countOf('row'), lessThan(40));
+});
+
+test('พิมพ์หกตัวอักษรรัว ๆ ต้องยิงคำขอเดียว', () {
+  fakeAsync((async) {
+    for (final q in ['P', 'P-', 'P-1', 'P-10', 'P-100', 'P-1001']) {
+      store.onQueryChanged(q);
+      async.elapse(const Duration(milliseconds: 50));
+    }
+    async.elapse(const Duration(milliseconds: 400));
+
+    expect(repository.searchCalls, 1);
+  });
+});
+
+testWidgets('รูปย่อทุกใบต้องมี cacheWidth', (tester) async {
+  await tester.pumpWidget(wrap(SearchResults(items: items, counter: counter)));
+
+  final images = tester.widgetList&lt;Image&gt;(find.byType(Image));
+  expect(images, isNotEmpty);
+  for (final image in images) {
+    expect(image.width, isNotNull, reason: 'ต้องจองพื้นที่');
+  }
+});</code></pre><p>เทสต์ข้อที่สองมีค่ามากเพราะ<strong>การหน่วงเป็นสิ่งที่ทดสอบด้วยมือแทบไม่ได้</strong> — คนทดสอบพิมพ์ช้ากว่าที่คิดเสมอ จึงไม่มีทางเห็นว่าคำขอถูกยิงถี่แค่ไหน</p><p><strong>สิ่งที่ควรถามก่อนแก้ทั้งหมดนี้:</strong> ผู้ใช้ค้นหาสินค้าเพื่ออะไร ถ้าเพื่อหาว่ามีของอยู่ไหม การให้สแกนบาร์โค้ดตรง ๆ เร็วกว่าและแม่นกว่าการพิมพ์ค้นหามาก</p><p>ในคลัง สิ่งของทุกอย่างมีบาร์โค้ดอยู่แล้ว — และการออกแบบให้สแกนเป็นทางหลัก ทำให้ปัญหาลิสต์ยาว 3,000 รายการหายไปทั้งหมด</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li><code>Column</code> ในลิสต์ยาวสร้างทุกแถวตั้งแต่แรก <code>ListView.builder</code> สร้างเฉพาะที่จะเห็น</li><li><code>itemExtent</code> ทำให้แถบเลื่อนแม่นและกระโดดไปแถวไกล ๆ ได้เร็ว</li><li>รูปในลิสต์ต้องมี <code>cacheWidth</code> และต้องจองพื้นที่ไว้</li><li>อย่าคำนวณที่วนทั้งลิสต์ใน <code>itemBuilder</code></li><li>เกิน 1,000 แถว ให้ถามว่าผู้ใช้ต้องเห็นทั้งหมดจริงไหม</li><li>บนอุปกรณ์ที่มีเครื่องสแกน การสแกนชนะการค้นหาเสมอ</li></ul></div><p><strong>บทหน้า:</strong> ประกอบทุกอย่างเป็นชุดเทสต์ของฟีเจอร์จริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

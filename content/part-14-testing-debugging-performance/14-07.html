@@ -1,21 +1,182 @@
-<div class="note"><strong><code>pumpWidget</code> สร้างโลกของ test:</strong> ห่อ widget ด้วย MaterialApp, theme, localization และ dependencies เท่าที่ production screen ต้องใช้ แต่ไม่จำเป็นต้องเปิดทั้งแอปทุก test</div>
-<section><h2>1. Minimal harness</h2><pre class="code-vs"><code>Future&lt;void&gt; pumpScreen(
-  WidgetTester tester, Widget child,
-) =&gt; tester.pumpWidget(
-  MaterialApp(home: Scaffold(body: child)),
-);</code></pre><p><code>MaterialApp</code> ให้ Navigator/Theme/MediaQuery ส่วน Scaffold ให้ snackbar/sheet context หาก test ล้มเพราะ provider หาย ให้ inject fake ตาม composition ของ screen</p></section>
-<section><h2>2. pump คือ frame เดียว</h2><p><code>pumpWidget</code> attach tree แล้ว schedule frame; <code>pump()</code> เดินอีก frame/microtask; <code>pump(duration)</code> ขยับ fake clock ตามเวลา อย่าสมมติว่า async/animation ทั้งหมดเสร็จหลัง pump ครั้งเดียว</p></section>
-<section><h2>3. กำหนด viewport PDA</h2><pre class="code-vs"><code>tester.view.devicePixelRatio = 1;
-tester.view.physicalSize = const Size(390, 560);
-addTearDown(tester.view.reset);</code></pre><p><code>scanner_layout_test.dart</code> ใช้วิธีนี้พิสูจน์ scan input อยู่กับที่เมื่อรายการ scroll ต้อง reset view ไม่ให้ test ถัดไปปน</p></section>
-<section><h2>4. Inject fake ก่อน pump</h2><pre class="code-vs"><code>final repo = FakeReceivingRepository(openOrders: [order]);
-final store = createTestStore(receivingRepository: repo);
-addTearDown(store.dispose);
-await tester.pumpWidget(
-  MaterialApp(home: ReceiveView(store: store)),
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เขียนเทสต์ widget ตัวแรก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 14.2, Part 1 (widget)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้าง widget ในเทสต์ให้ถูกต้อง และรู้ว่าต้องห่ออะไรบ้าง</div>
+
+<section><h2>1. เทสต์ widget ตัวแรก</h2><pre class="code-vs"><code>testWidgets('TaskTile ผูกกับ id ของงานผ่าน ValueKey', (tester) async {
+  await tester.pumpWidget(
+    MaterialApp(home: Scaffold(body: TaskTile(task: task('T-1')))),
+  );
+
+  expect(find.byKey(const ValueKey('T-1')), findsOneWidget);
+});</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>testWidgets</code></td><td>ไม่ใช่ <code>test</code> — ให้ <code>tester</code> มาด้วย</td></tr>
+<tr><td><code>tester.pumpWidget</code></td><td>สร้าง widget แล้ววาดหนึ่งเฟรม</td></tr>
+<tr><td><code>find.byKey(...)</code></td><td>หา widget ในต้นไม้ที่วาดแล้ว</td></tr>
+<tr><td><code>findsOneWidget</code></td><td>ต้องเจอหนึ่งตัวพอดี</td></tr>
+</tbody></table><div class="note">เทสต์ widget รันบนเครื่องคอม ไม่ใช่บนมือถือ — Flutter จำลองการวาดทั้งหมดในหน่วยความจำ จึงเร็วกว่าที่คิด และไม่ต้องมีอุปกรณ์ต่ออยู่</div></section>
+
+<section><h2>2. ต้องห่ออะไรบ้าง</h2><p>widget ส่วนใหญ่ต้องการของจากข้างบนต้นไม้ ถ้าไม่ห่อจะได้ข้อผิดพลาดที่อ่านไม่รู้เรื่อง</p><table><thead><tr><th>widget ที่ใช้</th><th>ต้องห่อด้วย</th><th>ถ้าไม่ห่อ</th></tr></thead><tbody>
+<tr><td><code>Text</code>, <code>Icon</code></td><td><code>MaterialApp</code> หรือ <code>Directionality</code></td><td><code>No Directionality widget found</code></td></tr>
+<tr><td>ปุ่ม, <code>Card</code>, <code>ListTile</code></td><td><code>MaterialApp</code></td><td><code>No Material widget found</code></td></tr>
+<tr><td><code>SnackBar</code>, <code>FloatingActionButton</code></td><td><code>Scaffold</code></td><td><code>No Scaffold widget found</code></td></tr>
+<tr><td>ตัวเลือกวันที่</td><td><code>MaterialApp</code> ที่มี delegate</td><td><code>No MaterialLocalizations found</code></td></tr>
+<tr><td>widget ที่อ่านธีม</td><td><code>MaterialApp(theme: ...)</code></td><td>ได้ธีมปริยาย ไม่ใช่ของแอป</td></tr>
+</tbody></table><p>วิธีที่ทำให้ไม่ต้องจำ คือเขียนฟังก์ชันห่อไว้ที่เดียวในไฟล์เทสต์</p><pre class="code-vs"><code>Widget wrap(Widget child) =&gt; MaterialApp(home: Scaffold(body: child));</code></pre><p>ถ้า widget ต้องการมากกว่านั้น ให้ห่อเพิ่มในตัวเดียวกัน</p><pre class="code-vs"><code>Widget wrap(Widget child) =&gt; LanguageScope(
+  controller: controller,
+  child: MaterialApp(
+    theme: buildPdaTheme(),
+    locale: controller.locale,
+    localizationsDelegates: const [GlobalMaterialLocalizations.delegate, ...],
+    home: Scaffold(body: child),
+  ),
 );</code></pre></section>
-<section><h2>5. Async initialization</h2><p>ถ้า screen load ใน <code>initState</code> ให้ pump ครั้งแรกแล้ว assert loading จากนั้น complete fake future และ pump อีกครั้งเพื่อ assert data การใช้ fake ที่คืนทันทีอย่างเดียวจะไม่พิสูจน์ loading state</p></section>
-<section><h2>6. Exceptions</h2><pre class="code-vs"><code>expect(tester.takeException(), isNull);</code></pre><p>ใช้หลัง layout/interaction เพื่อจับ overflow หรือ setState-after-dispose แต่หากคาด exception ให้ดึงและ assert ทันที ไม่ปล่อย exception ค้างไปทำ test framework fail แบบหาเหตุยาก</p></section>
-<section><h2>7. Unmount ก่อน dispose</h2><pre class="code-vs"><code>await tester.pumpWidget(const SizedBox.shrink());
-store.dispose();</code></pre><p>เหมาะเมื่อ widget ยัง listen store อยู่ ให้ tree ถอด listener ก่อน dispose หรือให้ test harness เป็น owner lifecycle แบบเดียวกับ production</p></section>
-<section><h2>8. Test scope</h2><div class="success">หนึ่ง widget test ควรพิสูจน์ behavior เด่น 1 เรื่อง ใช้ helper ลด setup แต่เก็บ intent ไว้ใน test และไม่ pump app ทั้งระบบหาก screen เดี่ยวให้คำตอบได้</div></section>
+
+<section><h2>3. ห่อเท่าที่จำเป็น</h2><table><thead><tr><th>ห่อน้อย</th><th>ห่อทั้งแอป</th></tr></thead><tbody>
+<tr><td>เทสต์เร็ว</td><td>ช้ากว่า</td></tr>
+<tr><td>ล้มแล้วรู้ว่าอะไรพัง</td><td>ล้มแล้วต้องไล่หา</td></tr>
+<tr><td>ทดสอบ widget เดี่ยว ๆ ได้</td><td>ต้องเตรียมของครบทุกอย่าง</td></tr>
+<tr><td>ไม่ครอบคลุมการต่อกัน</td><td>ครอบคลุม</td></tr>
+</tbody></table><p>lab ใช้ทั้งสองแบบตามความเหมาะสม</p><pre class="code-vs"><code>// ห่อน้อย — ทดสอบ widget เดี่ยว
+await tester.pumpWidget(wrap(TaskTile(task: task('T-1'))));
+
+// ห่อทั้งแอป — ทดสอบการต่อกันและการนำทาง
+await tester.pumpWidget(PdaApp(controller: controller));</code></pre><p>เกณฑ์ที่ใช้ตัดสินคือ <strong>เทสต์นี้ทดสอบ widget ตัวนี้ หรือทดสอบว่าหลายตัวต่อกันถูก</strong></p></section>
+
+<section><h2>4. กำหนดขนาดจอ</h2><p>ค่าปริยายของเทสต์คือ 800×600 ซึ่งไม่ใช่ขนาดของ PDA จริง</p><pre class="code-vs"><code>void useViewport(WidgetTester tester, {double height = 560}) {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = Size(390, height);
+  addTearDown(tester.view.reset);
+}</code></pre><table><thead><tr><th>บรรทัด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>devicePixelRatio = 1</code></td><td>ทำให้ <code>physicalSize</code> เท่ากับหน่วยที่ใช้ใน layout พอดี คิดเลขง่าย</td></tr>
+<tr><td><code>physicalSize = Size(390, 560)</code></td><td>ขนาดจริงของ PDA ที่ใช้งาน</td></tr>
+<tr><td><code>addTearDown(tester.view.reset)</code></td><td><strong>ขาดไม่ได้</strong> — ไม่งั้นเทสต์ข้อถัดไปจะได้จอขนาดนี้ต่อ</td></tr>
+</tbody></table><p>โค้ดนี้มาจาก <code>scanner_layout_test.dart</code> ของ <code>wms_absolute_mobile</code> จริง และเป็นสิ่งที่ทำให้เทสต์การจัดวางมีความหมาย (14.13)</p><div class="note">ลืม <code>addTearDown</code> แล้วจะได้เทสต์ที่ล้มเฉพาะเมื่อรันทั้งไฟล์ แต่ผ่านเมื่อรันเดี่ยว ๆ ซึ่งเป็นอาการที่ทำให้เสียเวลาหาสาเหตุนานมาก</div></section>
+
+<section><h2>5. <code>pumpWidget</code> วาดกี่เฟรม</h2><pre class="code-vs"><code>await tester.pumpWidget(wrap(child));   // วาดหนึ่งเฟรม
+await tester.pump();                     // วาดอีกหนึ่งเฟรม
+await tester.pump(const Duration(seconds: 1));   // เดินเวลาไปหนึ่งวินาที แล้ววาด
+await tester.pumpAndSettle();            // วาดจนกว่าจะไม่มีอะไรขยับ</code></pre><p>ความต่างนี้สำคัญมากและ 14.10 จะพูดถึงทั้งบท ตอนนี้แค่รู้ว่า</p><table><thead><tr><th>อยากทดสอบ</th><th>ใช้</th></tr></thead><tbody>
+<tr><td>สิ่งที่เห็นทันทีหลังสร้าง</td><td><code>pumpWidget</code> อย่างเดียว</td></tr>
+<tr><td>สิ่งที่เห็นระหว่างโหลด</td><td><code>pump()</code></td></tr>
+<tr><td>สิ่งที่เห็นหลังทุกอย่างเสร็จ</td><td><code>pumpAndSettle()</code></td></tr>
+</tbody></table><pre class="code-vs"><code>testWidgets('เปิดแอปที่มี session เดิม ต้องไม่เห็นหน้าเข้าสู่ระบบเลย', (tester) async {
+  await tester.pumpWidget(AuthLabApp(dependencies: deps));
+  // ยังไม่ settle — ดูเฟรมแรกก่อน
+  await tester.pump();
+
+  expect(find.byKey(const Key('splash')), findsOneWidget);
+  expect(find.byKey(const Key('login-screen')), findsNothing);
+
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('home-shell')), findsOneWidget);
+});</code></pre><p>เทสต์นี้จับอาการ “เห็นหน้าเข้าสู่ระบบแวบหนึ่ง” จาก 8.6 ซึ่ง <code>pumpAndSettle</code> อย่างเดียวมองไม่เห็น</p></section>
+
+<section><h2>6. ใส่ <code>Key</code> ให้สิ่งที่จะหา</h2><pre class="code-vs"><code>FilledButton(
+  key: const Key('scan-button'),
+  onPressed: () {},
+  child: Text(context.t(AppText.scanPallet)),
+)</code></pre><table><thead><tr><th>หาด้วย</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td><code>find.text('สแกนพาเลท')</code></td><td>พังเมื่อเปลี่ยนคำ หรือเมื่อสลับภาษา</td></tr>
+<tr><td><code>find.byType(FilledButton)</code></td><td>เจอหลายตัวถ้ามีปุ่มหลายอัน</td></tr>
+<tr><td><code>find.byKey(const Key('scan-button'))</code></td><td>ชัดเจนและไม่พังตามคำ</td></tr>
+</tbody></table><p>แต่<strong>อย่าใส่ <code>Key</code> ให้ทุกอย่าง</strong> — ใส่ให้สิ่งที่เทสต์ต้องหาจริง ซึ่งมักเป็นปุ่ม ช่องกรอก และส่วนที่แสดงสถานะ</p><p>ในทางกลับกัน <code>find.text</code> มีที่ใช้เมื่อ<strong>ข้อความคือสิ่งที่ทดสอบ</strong></p><pre class="code-vs"><code>testWidgets('กดปุ่มเดียวแล้วทั้งจอเปลี่ยนภาษา', (tester) async {
+  await tester.tap(find.byKey(const Key('language-button')));
+  await tester.pumpAndSettle();
+
+  // ตรงนี้ข้อความคือสิ่งที่ทดสอบ จึงใช้ find.text ถูกแล้ว
+  expect(find.text('พาเลท'), findsOneWidget);
+  expect(find.text('Pallets'), findsNothing);
+});</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>No Directionality widget found</code></td><td>ไม่ได้ห่อ <code>MaterialApp</code></td><td>ห่อ</td></tr>
+<tr><td><code>No Material widget found</code></td><td>ไม่ได้ห่อ <code>Scaffold</code> หรือ <code>Material</code></td><td>ห่อ</td></tr>
+<tr><td>เทสต์ล้มเมื่อรันทั้งไฟล์ แต่ผ่านเมื่อรันเดี่ยว</td><td>ลืม <code>addTearDown(tester.view.reset)</code></td><td>ใส่</td></tr>
+<tr><td>หา widget ไม่เจอทั้งที่เห็นในแอป</td><td>ยังไม่ได้ <code>pump</code> พอ</td><td>ดู 14.10</td></tr>
+<tr><td>เทสต์พังทุกครั้งที่เปลี่ยนคำ</td><td>หาด้วย <code>find.text</code></td><td>ใส่ <code>Key</code></td></tr>
+<tr><td>ล้นจอในเทสต์แต่ไม่ล้นในแอป</td><td>ขนาดจอปริยายไม่ตรงกับเครื่องจริง</td><td>กำหนด <code>physicalSize</code></td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>เขียนเทสต์ให้ widget นี้</p><pre class="code-vs"><code>class QuantityStepper extends StatelessWidget {
+  const QuantityStepper({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.max = 99,
+  });
+
+  final int value;
+  final ValueChanged&lt;int&gt; onChanged;
+  final int max;
+
+  @override
+  Widget build(BuildContext context) =&gt; Row(
+    children: [
+      IconButton(
+        key: const Key('minus'),
+        onPressed: value &gt; 0 ? () =&gt; onChanged(value - 1) : null,
+        icon: const Icon(Icons.remove),
+      ),
+      Text('$value', key: const Key('value')),
+      IconButton(
+        key: const Key('plus'),
+        onPressed: value &lt; max ? () =&gt; onChanged(value + 1) : null,
+        icon: const Icon(Icons.add),
+      ),
+    ],
+  );
+}</code></pre><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>Widget wrap(Widget child) =&gt; MaterialApp(home: Scaffold(body: child));
+
+testWidgets('แสดงค่าที่ส่งเข้ามา', (tester) async {
+  await tester.pumpWidget(wrap(QuantityStepper(value: 5, onChanged: (_) {})));
+  expect(find.text('5'), findsOneWidget);
+});
+
+testWidgets('กดบวกแล้วแจ้งค่าที่เพิ่มขึ้น', (tester) async {
+  int? received;
+  await tester.pumpWidget(
+    wrap(QuantityStepper(value: 5, onChanged: (v) =&gt; received = v)),
+  );
+
+  await tester.tap(find.byKey(const Key('plus')));
+  expect(received, 6);
+});
+
+testWidgets('ที่ศูนย์แล้วกดลบไม่ได้', (tester) async {
+  var called = false;
+  await tester.pumpWidget(
+    wrap(QuantityStepper(value: 0, onChanged: (_) =&gt; called = true)),
+  );
+
+  await tester.tap(find.byKey(const Key('minus')));
+  expect(called, isFalse);
+});
+
+testWidgets('ที่ค่าสูงสุดแล้วกดบวกไม่ได้', (tester) async {
+  var called = false;
+  await tester.pumpWidget(
+    wrap(QuantityStepper(value: 99, onChanged: (_) =&gt; called = true, max: 99)),
+  );
+
+  await tester.tap(find.byKey(const Key('plus')));
+  expect(called, isFalse);
+});</code></pre><p>สามอย่างที่ควรสังเกต</p><table><thead><tr><th>ข้อสังเกต</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ไม่ต้อง <code>pump()</code> หลัง <code>tap</code></td><td>เพราะตรวจ callback ไม่ได้ตรวจหน้าจอ — widget นี้ไม่ถือ state เอง</td></tr>
+<tr><td>ไม่มีเทสต์ว่า “กดบวกแล้วเลขเปลี่ยนเป็น 6”</td><td>widget นี้ไม่ได้เปลี่ยนเลขเอง คนเรียกต่างหากที่เปลี่ยน — ทดสอบสิ่งที่มันสัญญาไว้ (14.1)</td></tr>
+<tr><td>ทดสอบว่าปุ่มกดไม่ได้ ด้วยการกดแล้วดูว่าไม่มีอะไรเกิด</td><td>ตรงกว่าการตรวจว่า <code>onPressed</code> เป็น null ซึ่งเป็นรายละเอียดภายใน</td></tr>
+</tbody></table><p>แถวที่สองคือจุดที่คนใหม่มักทำผิด — เขียนเทสต์ที่ตรวจว่าเลขเปลี่ยน แล้วงงว่าทำไมไม่เปลี่ยน ทั้งที่ widget ทำงานถูกต้อง</p><p>สิ่งที่ควรทำถ้าอยากทดสอบเรื่องนั้นคือห่อด้วย <code>StatefulBuilder</code> ซึ่งเป็นการจำลองคนเรียก</p><pre class="code-vs"><code>testWidgets('เมื่อคนเรียกอัปเดตค่า หน้าจอเปลี่ยนตาม', (tester) async {
+  var value = 5;
+  await tester.pumpWidget(wrap(
+    StatefulBuilder(
+      builder: (context, setState) =&gt; QuantityStepper(
+        value: value,
+        onChanged: (v) =&gt; setState(() =&gt; value = v),
+      ),
+    ),
+  ));
+
+  await tester.tap(find.byKey(const Key('plus')));
+  await tester.pump();
+  expect(find.text('6'), findsOneWidget);
+});</code></pre></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>testWidgets</code> ให้ <code>tester</code> มาสร้างและกด widget</li><li>ห่อด้วย <code>MaterialApp</code> และ <code>Scaffold</code> เท่าที่ widget ต้องการ</li><li>กำหนดขนาดจอให้ตรงกับเครื่องจริง และอย่าลืม <code>addTearDown</code></li><li>ใส่ <code>Key</code> ให้สิ่งที่เทสต์ต้องหา</li><li><code>find.text</code> ใช้เมื่อข้อความคือสิ่งที่ทดสอบ</li><li>ทดสอบสิ่งที่ widget สัญญาไว้ ไม่ใช่สิ่งที่คนเรียกทำ</li></ul></div><p><strong>บทหน้า:</strong> หา widget และสั่งให้มันทำงาน</p></section>
