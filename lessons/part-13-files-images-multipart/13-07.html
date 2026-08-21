@@ -4,23 +4,98 @@
 <title>Image Cache &amp; Memory</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-07 · Files &amp; Platform</span><h1>Image Cache &amp; Memory</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คำนวณ decoded memory</a></li><li><a href="#section-2">ลดตั้งแต่ picker</a></li><li><a href="#section-3">Decode ตามขนาดแสดงผล</a></li><li><a href="#section-4">ImageCache</a></li><li><a href="#section-5">Resize กับ compression</a></li><li><a href="#section-6">Orientation และ metadata</a></li><li><a href="#section-7">อย่าถือ bytes หลายสำเนา</a></li><li><a href="#section-8">Performance check</a></li></ol></nav>
-<div class="note"><strong>ไฟล์ 8 MB ไม่ได้แปลว่าใช้ RAM 8 MB:</strong> ภาพ JPEG 4000×3000 เมื่อ decode เป็น RGBA อาจใช้ประมาณ 48 MB ยังไม่รวมสำเนาระหว่าง resize, preview และ upload</div>
-<section id="section-1"><h2>1. คำนวณ decoded memory</h2><pre class="code-vs"><code>width × height × 4 bytes
-4000 × 3000 × 4 ≈ 48,000,000 bytes</code></pre><p>หลาย thumbnail ที่ decode เต็มขนาดสามารถทำให้ PDA memory ต่ำกระตุกหรือถูก kill แม้ไฟล์บน disk เล็ก</p></section>
-<section id="section-2"><h2>2. ลดตั้งแต่ picker</h2><p>wmsapp ใช้ <code>maxWidth: 1024</code>, <code>maxHeight: 1024</code>, <code>imageQuality: 85</code> เป็น baseline ที่ดี แต่ต้องกำหนดตามงาน: รูป part สำหรับดูบนจอไม่ต้องเท่ากล้อง 12 MP ส่วน barcode/ตัวอักษรเล็กต้องรักษาความคมมากกว่า</p></section>
-<section id="section-3"><h2>3. Decode ตามขนาดแสดงผล</h2><pre class="code-vs"><code>Image.network(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เลขที่ต้องรู้</a></li><li><a href="#section-2">ลิสต์ที่มีรูปย่อ</a></li><li><a href="#section-3">บรรทัดเดียวที่แก้ได้</a></li><li><a href="#section-4">แคชรูปของ Flutter</a></li><li><a href="#section-5">แคชลงดิสก์</a></li><li><a href="#section-6">ตัวอย่างรูปก่อนอัปโหลด</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: คำนวณหน่วยความจำที่รูปในลิสต์กินจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.6, 11.11 (asset รูป)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แสดงรูปหลายใบโดยแอปไม่ถูกระบบปิด และรู้ว่าแคชของ Flutter ทำอะไรให้บ้าง</div>
+
+<section id="section-1"><h2>1. เลขที่ต้องรู้</h2><p>รูปที่ถูกวาดบนหน้าจอ ต้องถูกคลายการบีบอัดเป็นพิกเซลก่อน และพิกเซลหนึ่งกิน 4 ไบต์</p><pre class="code-vs"><code>หน่วยความจำ = กว้าง × สูง × 4 ไบต์</code></pre><table><thead><tr><th>รูป</th><th>ขนาดไฟล์</th><th>หน่วยความจำตอนแสดง</th></tr></thead><tbody>
+<tr><td>1024×1024 JPEG</td><td>ราว 300 KB</td><td><strong>4 MB</strong></td></tr>
+<tr><td>4000×3000 JPEG</td><td>ราว 5 MB</td><td><strong>48 MB</strong></td></tr>
+<tr><td>56×56 ที่แสดงจริง</td><td>—</td><td>12 KB</td></tr>
+</tbody></table><div class="note">ขนาดไฟล์กับหน่วยความจำ<strong>ไม่เกี่ยวกันเลย</strong> — JPEG ที่บีบอัดได้ดีมีไฟล์เล็กแต่คลายออกมาเท่าเดิม สิ่งที่กำหนดหน่วยความจำคือจำนวนพิกเซล ไม่ใช่ความสามารถในการบีบอัด</div></section>
+
+<section id="section-2"><h2>2. ลิสต์ที่มีรูปย่อ</h2><p>ในจอจริงของ <code>wmsapp</code> รูปย่อแสดงที่ 56×56 แต่ไฟล์ที่อัปโหลดไปคือ 1024×1024</p><pre class="code-vs"><code>Container(
+  width: 56,
+  height: 56,
+  child: Image.network(snap.data!, fit: BoxFit.cover, ...),
+)</code></pre><table><thead><tr><th>จำนวนรูปในจอ</th><th>หน่วยความจำที่กิน</th><th>ที่จำเป็นจริง</th></tr></thead><tbody>
+<tr><td>1</td><td>4 MB</td><td>12 KB</td></tr>
+<tr><td>10 ใบที่เลื่อนผ่าน</td><td>40 MB</td><td>120 KB</td></tr>
+<tr><td>50 ใบ (แคชเต็ม)</td><td><strong>200 MB</strong></td><td>600 KB</td></tr>
+</tbody></table><p>บน PDA ที่มีแรม 2 GB และระบบปฏิบัติการกินไปแล้วครึ่งหนึ่ง 200 MB คือจุดที่แอปเริ่มถูกระบบปิดตอนสลับไปแอปอื่นแล้วกลับมา</p></section>
+
+<section id="section-3"><h2>3. บรรทัดเดียวที่แก้ได้</h2><pre class="code-vs"><code>Image.network(
   url,
-  width: 96,
-  height: 96,
-  cacheWidth: 192,
-  cacheHeight: 192,
+  width: 56,
+  height: 56,
   fit: BoxFit.cover,
-)</code></pre><p><code>width/height</code> เป็น layout ส่วน <code>cacheWidth/cacheHeight</code> บอก decoder ลด bitmap ควรคูณ devicePixelRatio ให้พอคม ไม่ส่งค่าขนาดเต็มต้นฉบับ</p></section>
-<section id="section-4"><h2>4. ImageCache</h2><p>Flutter มี in-memory image cache; key มักมาจาก URL + scale การเปลี่ยน query version ทำให้เป็นคนละ entry ตั้ง cache budget ให้เหมาะกับอุปกรณ์และอย่าเรียก <code>clear()</code> ทั้งระบบเพื่อแก้รูปเดียว เพราะทำให้ทุกหน้าต้อง decode ใหม่</p></section>
-<section id="section-5"><h2>5. Resize กับ compression</h2><p>resize ลดจำนวนพิกเซล ส่วน quality ลดรายละเอียดการบีบอัด เป็นคนละแกน ทำทั้งสองก่อน upload และตรวจผลลัพธ์อีกครั้ง ถ้าต้องรักษา PNG transparency อย่าแปลง JPEG โดยไม่ตั้งใจ; ภาพถ่ายมักเหมาะ JPEG/WebP ตามที่ backend รองรับ</p></section>
-<section id="section-6"><h2>6. Orientation และ metadata</h2><p>กล้องบางเครื่องเก็บการหมุนใน EXIF เมื่อ resize ต้อง library ที่ normalize orientation มิฉะนั้น server/thumbnail อาจแสดงรูปตะแคง พิจารณาลบ GPS/EXIF ที่ไม่จำเป็นเพื่อความเป็นส่วนตัว และเก็บเฉพาะ metadata ทางธุรกิจใน DB</p></section>
-<section id="section-7"><h2>7. อย่าถือ bytes หลายสำเนา</h2><p>หลัง preview/upload เสร็จให้ปล่อย reference ขนาดใหญ่, dispose controller/subscription และใช้ stream สำหรับไฟล์ใหญ่ หลีกเลี่ยงลำดับ <code>read bytes → copy resize → copy multipart</code> พร้อมกัน ถ้าจำเป็นให้ทำงานหนักนอก UI isolate และวัดจริง</p></section>
-<section id="section-8"><h2>8. Performance check</h2><div class="success">วัด peak memory, jank และเวลา decode บน PDA จริงด้วยรายการ 100 รูป ทดสอบ scroll ไปกลับ, รูป 12 MP, orientation หลายแบบ, low-memory/background และตรวจว่า thumbnail ไม่ decode ขนาดต้นฉบับ</div></section>
+  // บอกให้คลายการบีบอัดที่ขนาดนี้ ไม่ใช่ขนาดเต็ม
+  cacheWidth: 112,      // 56 × devicePixelRatio ของเครื่องเป้าหมาย
+  cacheHeight: 112,
+)</code></pre><table><thead><tr><th> </th><th>ไม่มี <code>cacheWidth</code></th><th>มี</th></tr></thead><tbody>
+<tr><td>พิกเซลที่เก็บ</td><td>1024×1024</td><td>112×112</td></tr>
+<tr><td>หน่วยความจำต่อใบ</td><td>4 MB</td><td>50 KB</td></tr>
+<tr><td>50 ใบ</td><td>200 MB</td><td>2.5 MB</td></tr>
+</tbody></table><p>ลดลง 80 เท่า จากการเขียนเพิ่มสองบรรทัด</p><div class="note"><strong>ทำไมคูณ <code>devicePixelRatio</code></strong> — <code>width: 56</code> เป็นหน่วยอิสระจากพิกเซล (11.11) บนจอ 2x จะกินพื้นที่จริง 112 พิกเซล ถ้าตั้ง <code>cacheWidth: 56</code> รูปจะเบลอเพราะถูกขยายขึ้น</div><pre class="code-vs"><code>// คำนวณจากเครื่องจริง แทนที่จะเดา
+final ratio = MediaQuery.devicePixelRatioOf(context);
+Image.network(url, cacheWidth: (56 * ratio).round(), ...)</code></pre></section>
+
+<section id="section-4"><h2>4. แคชรูปของ Flutter</h2><p>Flutter มีแคชในหน่วยความจำให้อยู่แล้ว ชื่อ <code>ImageCache</code></p><table><thead><tr><th>คุณสมบัติ</th><th>ค่าปริยาย</th></tr></thead><tbody>
+<tr><td>จำนวนรูปสูงสุด</td><td>1000 ใบ</td></tr>
+<tr><td>ขนาดรวมสูงสุด</td><td>100 MB</td></tr>
+<tr><td>วิธีทิ้ง</td><td>ทิ้งตัวที่ไม่ได้ใช้นานที่สุดก่อน</td></tr>
+<tr><td>อยู่ได้นานแค่ไหน</td><td>จนกว่าจะปิดแอป — <strong>ไม่เก็บลงดิสก์</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — ปิดแอปแล้วเปิดใหม่ รูปทุกใบต้องโหลดจากเน็ตอีกครั้ง ซึ่งบนคลังที่เน็ตช้าแปลว่ารอทุกเช้า</p><pre class="code-vs"><code>// ปรับขนาดแคชได้ตามเครื่อง — PDA ที่แรมน้อยควรลดลง
+PaintingBinding.instance.imageCache.maximumSizeBytes = 30 &lt;&lt; 20;   // 30 MB</code></pre><p>และล้างได้เมื่อจำเป็น</p><pre class="code-vs"><code>// เช่นตอนออกจากระบบ — รูปของผู้ใช้คนเก่าไม่ควรค้างอยู่ (8.8)
+PaintingBinding.instance.imageCache.clear();
+PaintingBinding.instance.imageCache.clearLiveImages();</code></pre></section>
+
+<section id="section-5"><h2>5. แคชลงดิสก์</h2><p>ถ้าอยากให้รูปอยู่ข้ามการปิดแอป ต้องใช้แพ็กเกจเพิ่ม</p><pre class="code-vs"><code>dependencies:
+  cached_network_image: ^3.4.1</code></pre><pre class="code-vs"><code>CachedNetworkImage(
+  imageUrl: url,
+  width: 56,
+  height: 56,
+  memCacheWidth: 112,
+  fit: BoxFit.cover,
+  placeholder: (_, _) =&gt; const ColoredBox(color: PdaColors.surfaceMuted),
+  errorWidget: (_, _, _) =&gt; const Icon(Icons.broken_image),
+)</code></pre><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>เปิดแอปใหม่แล้วรูปขึ้นทันที</td><td>กินพื้นที่ในเครื่อง ต้องตั้งขีดจำกัด</td></tr>
+<tr><td>ทำงานได้ตอนเน็ตหลุด</td><td>รูปที่เปลี่ยนบนเซิร์ฟเวอร์อาจยังแสดงของเก่า</td></tr>
+<tr><td>ประหยัดเน็ตมาก</td><td>แพ็กเกจเพิ่มอีกตัวที่ต้องดูแล</td></tr>
+</tbody></table><p>แถวที่สองแก้ด้วยการให้ URL เปลี่ยนเมื่อรูปเปลี่ยน</p><pre class="code-vs"><code>// ชื่อไฟล์มีรหัสคำสั่งอยู่แล้ว (13.4) รูปใหม่จึงได้ URL ใหม่เสมอ
+'/uploads/P-100-upload-1755771234567.jpg'</code></pre><p>วิธีนี้ดีกว่าการใส่ตัวเลขต่อท้ายแบบ <code>?v=2</code> เพราะไฟล์เก่ายังอยู่ ทำให้ย้อนดูได้ และแคชไม่ต้องเดาว่าอะไรเปลี่ยน</p></section>
+
+<section id="section-6"><h2>6. ตัวอย่างรูปก่อนอัปโหลด</h2><pre class="code-vs"><code>// รูปที่เพิ่งเลือก อยู่ในหน่วยความจำแล้ว (13.2)
+Image.memory(
+  store.image!.bytes,
+  width: 200,
+  height: 200,
+  fit: BoxFit.cover,
+  cacheWidth: 400,     // ยังต้องใส่ แม้จะเป็นไบต์ในหน่วยความจำ
+)</code></pre><p><code>cacheWidth</code> ยังจำเป็นเพราะไบต์ที่เก็บไว้เป็นข้อมูลที่บีบอัดแล้ว การวาดยังต้องคลายออกเป็นพิกเซลอยู่ดี — รูป 1024×1024 ที่แสดงที่ 200×200 ก็ยังกิน 4 MB ถ้าไม่บอก</p><div class="note">ตอนแสดงตัวอย่างจะกินหน่วยความจำ<strong>สองก้อน</strong> คือไบต์ที่บีบอัด (300 KB) กับพิกเซลที่คลายแล้ว — ซึ่งยอมรับได้เพราะมีรูปเดียว แต่ถ้าให้เลือกได้สิบใบพร้อมกัน ต้องคิดใหม่</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปถูกปิดตอนสลับกลับมา</td><td>แคชรูปเต็มจนระบบเลือกแอปนี้ไปปิด</td><td><code>cacheWidth</code> และลดขนาดแคช</td></tr>
+<tr><td>เลื่อนลิสต์แล้วกระตุก</td><td>คลายรูปใหญ่ตอนเลื่อน</td><td><code>cacheWidth</code></td></tr>
+<tr><td>รูปเบลอหลังใส่ <code>cacheWidth</code></td><td>ไม่ได้คูณ <code>devicePixelRatio</code></td><td>คูณ</td></tr>
+<tr><td>เปิดแอปใหม่แล้วรอรูปทุกครั้ง</td><td>แคชอยู่ในหน่วยความจำเท่านั้น</td><td><code>cached_network_image</code></td></tr>
+<tr><td>แก้รูปบนเซิร์ฟเวอร์แล้วยังเห็นของเก่า</td><td>แคชลงดิสก์</td><td>ให้ URL เปลี่ยนเมื่อรูปเปลี่ยน</td></tr>
+<tr><td>ผู้ใช้คนใหม่เห็นรูปของคนก่อน</td><td>ไม่ได้ล้างแคชตอนออกจากระบบ</td><td><code>imageCache.clear()</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>หน้าจอ “ประวัติการรับของ” แสดงรายการ 200 แถว แต่ละแถวมีรูปย่อ ผู้ใช้บ่นว่าเลื่อนแล้วกระตุกและบางครั้งแอปปิดเอง</p><ol><li>ตรวจอะไรก่อน</li><li>แก้อย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> วัดก่อนเดา ตามหลักเดียวกับ 12.11</p><table><thead><tr><th>ตรวจ</th><th>ด้วย</th></tr></thead><tbody>
+<tr><td>หน่วยความจำที่แคชรูปใช้</td><td><code>PaintingBinding.instance.imageCache.currentSizeBytes</code></td></tr>
+<tr><td>ขนาดจริงของรูปที่โหลดมา</td><td>DevTools แท็บ Memory ดู <code>_Int32List</code> ของภาพ</td></tr>
+<tr><td>เฟรมที่ใช้เวลานาน</td><td>DevTools แท็บ Performance</td></tr>
+<tr><td>ลิสต์สร้าง widget กี่ตัว</td><td>ใส่ <code>debugPrint</code> ใน <code>itemBuilder</code></td></tr>
+</tbody></table><p><strong>2.</strong> แก้เรียงตามผลที่ได้ต่อแรงที่ลง</p><table><thead><tr><th>ทำ</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><strong>ขอรูปย่อจากเซิร์ฟเวอร์</strong></td><td>มากที่สุด — ไม่ต้องดาวน์โหลด 300 KB มาแสดงที่ 56×56</td></tr>
+<tr><td><code>cacheWidth</code></td><td>ลดหน่วยความจำ 80 เท่า</td></tr>
+<tr><td>จองพื้นที่ให้รูปด้วยขนาดตายตัว</td><td>ลิสต์ไม่กระตุกตอนรูปโหลดเสร็จ (11.11)</td></tr>
+<tr><td>แบ่งหน้าแทนที่จะโหลด 200 แถวรวด</td><td>ลดทั้งเน็ตและหน่วยความจำ</td></tr>
+</tbody></table><p>แถวแรกสำคัญที่สุดและต้องคุยกับทีมหลังบ้าน — endpoint ที่คืนรูปย่อ 128×128 ทำให้ทุกอย่างที่เหลือแทบไม่จำเป็น</p><pre class="code-vs"><code>GET /uploads/parts/P-100.jpg?w=128     ← เซิร์ฟเวอร์ย่อให้</code></pre><p><strong>แต่คำถามที่ควรถามก่อนทั้งหมดนี้:</strong> ผู้ใช้ต้องเห็นรูปในลิสต์ประวัติจริงหรือ</p><p>ประวัติการรับของคือรายการที่คนเปิดดูเพื่อหาว่า “ของล็อตนั้นรับเข้าเมื่อไหร่” ซึ่งตอบได้ด้วยข้อความล้วน ส่วนรูปมีประโยชน์ตอนเปิดดูรายละเอียดของแถวใดแถวหนึ่ง</p><p>ถ้าเอารูปออกจากลิสต์ ปัญหาหายทั้งหมดโดยไม่ต้องเขียนโค้ดเพิ่มแม้แต่บรรทัดเดียว และหน้าจอยังอ่านง่ายขึ้นด้วย — <strong>ทางแก้ที่ดีที่สุดของปัญหาประสิทธิภาพ บ่อยครั้งคือการไม่ทำสิ่งนั้น</strong></p><p>ถ้าทีมยืนยันว่าต้องมี ให้ถามว่าผู้ใช้ใช้รูปนั้นตัดสินใจอะไร แล้วออกแบบจากคำตอบนั้น — เหมือนที่ 11.11 สรุปไว้</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>หน่วยความจำ = กว้าง × สูง × 4 ไม่เกี่ยวกับขนาดไฟล์</li><li><code>cacheWidth</code> ลดได้หลายสิบเท่าจากการเขียนสองบรรทัด</li><li>คูณ <code>devicePixelRatio</code> ไม่งั้นรูปเบลอ</li><li>แคชของ Flutter อยู่ในหน่วยความจำเท่านั้น ปิดแอปแล้วหาย</li><li>ให้ URL เปลี่ยนเมื่อรูปเปลี่ยน จะได้ไม่ต้องสู้กับแคช</li><li>ทางแก้ที่ดีที่สุด บ่อยครั้งคือขอรูปย่อจากเซิร์ฟเวอร์ หรือไม่แสดงรูปตรงนั้นเลย</li></ul></div><p><strong>บทหน้า:</strong> บอกผู้ใช้ว่าอัปโหลดไปถึงไหนแล้ว และเมื่อล้มเหลวต้องทำอย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

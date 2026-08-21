@@ -1,14 +1,131 @@
-<div class="note"><strong>Client validation เพื่อ UX; server validation เพื่อ security:</strong> extension และ <code>Content-Type</code> ที่ client ส่งปลอมได้ ต้องตรวจขนาด, signature และ decode ที่ server ก่อนยอมรับ</div>
-<section><h2>1. Validation matrix</h2><table><thead><tr><th>ชั้น</th><th>ตรวจอะไร</th><th>เหตุผล</th></tr></thead><tbody><tr><td>Flutter</td><td>จำนวน, length, ชนิดเบื้องต้น</td><td>ตอบเร็ว/ประหยัดเน็ต</td></tr><tr><td>Gateway/.NET</td><td>request limit, auth</td><td>กัน resource abuse</td></tr><tr><td>Application</td><td>magic bytes, decode, entity rule</td><td>trust boundary จริง</td></tr></tbody></table></section>
-<section><h2>2. ตรวจขนาดก่อนอ่าน bytes</h2><pre class="code-vs"><code>const maxBytes = 5 * 1024 * 1024;
-final length = await picked.length();
-if (length == 0 || length &gt; maxBytes) {
-  throw const InvalidImage('รูปต้องมีขนาดไม่เกิน 5 MB');
-}</code></pre><p>ฝั่ง server ตั้ง multipart/body limit ด้วยเพื่อ reject ก่อน buffer ไฟล์ใหญ่ และตรวจ <code>IFormFile.Length</code> ซ้ำ</p></section>
-<section><h2>3. Extension/MIME ไม่พอ</h2><p><code>evil.exe</code> เปลี่ยนชื่อเป็น <code>photo.jpg</code> ได้ และ request กำหนด <code>image/jpeg</code> เองได้ อ่าน magic bytes เช่น JPEG <code>FF D8 FF</code> หรือ PNG signature แล้วลอง decode ด้วย image library ที่อัปเดตแพตช์ความปลอดภัย</p></section>
-<section><h2>4. ชื่อไฟล์จากผู้ใช้</h2><pre class="code-vs"><code>var extension = detectedType == ImageType.Jpeg ? ".jpg" : ".png";
-var storedName = $"{Guid.NewGuid():N}{extension}";</code></pre><p>เก็บ original name เป็น display metadata หลัง normalize/จำกัดความยาวเท่านั้น ห้าม combine original name ลง storage path เพราะ path traversal, reserved names และ collision</p></section>
-<section><h2>5. เก็บที่ไหน</h2><p>เก็บนอก executable/static web root หรือ object storage แบบ private แล้วเสิร์ฟผ่าน controlled endpoint/CDN ที่ตั้ง content type, <code>X-Content-Type-Options: nosniff</code> และ authorization ถูกต้อง ไม่อนุญาต SVG/HTML หากไม่ sanitize เพราะเป็น active content</p></section>
-<section><h2>6. Resource safety</h2><p>นอกจาก bytes ให้จำกัด pixel dimensions เพื่อกัน decompression bomb, จำนวน frames ของ animated image, เวลา decode และ concurrency ใช้ streaming scan/temp file ที่มี quota แล้วลบทุก error path พิจารณา malware scan ตาม threat model</p></section>
-<section><h2>7. Authorization และ audit</h2><p>ตรวจว่าผู้ใช้มีสิทธิ์แก้ partId นี้ ไม่ใช่เพียง authenticated บันทึก uploader, time, part, generated object key, hash และ result โดยไม่ log raw image/token การ replace ควรมี audit/version และ cleanup รูปเก่า</p></section>
-<section><h2>8. Adversarial tests</h2><div class="success">ไฟล์ว่าง, เกิน limit, extension ปลอม, MIME ปลอม, polyglot/corrupt image, huge dimensions, animated image, filename <code>../x</code>, Unicode ชนกัน, duplicate upload ID, ไม่มีสิทธิ์ และ disconnect ระหว่าง save</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน <code>image_validation.dart</code> แล้วรันเทสต์ทั้ง 13 ข้อ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.4, 10.7 (การตรวจฟอร์ม), 8.9 (สิทธิ์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตรวจไฟล์ก่อนส่งอย่างมีเหตุผล และรู้ว่าอะไรที่ฝั่งแอปตรวจแล้วยังไม่ปลอดภัย</div>
+
+<section><h2>1. หลักข้อเดียวที่ต้องจำ</h2><div class="note">การตรวจฝั่งแอปคือ<strong>ความสะดวก</strong> การตรวจฝั่งเซิร์ฟเวอร์คือ<strong>ความปลอดภัย</strong> — และทั้งสองอย่างต้องมี</div><pre class="code-vs"><code>/// การตรวจฝั่งแอปคือความสะดวก ไม่ใช่ความปลอดภัย — เซิร์ฟเวอร์ต้องตรวจซ้ำ
+/// เสมอ เพราะใครก็ยิงเข้า endpoint ตรง ๆ ได้โดยไม่ผ่านแอปนี้
+ImageCheck checkImage(PickedImage image, {ImagePolicy policy = const ImagePolicy()})</code></pre><table><thead><tr><th>ฝั่งแอปตรวจเพื่อ</th><th>ฝั่งเซิร์ฟเวอร์ตรวจเพื่อ</th></tr></thead><tbody>
+<tr><td>ไม่ให้ผู้ใช้เสียเวลารอส่งไฟล์ที่จะถูกปฏิเสธ</td><td>ไม่ให้ข้อมูลเสียเข้าระบบ</td></tr>
+<tr><td>ไม่ให้เสียเน็ตไปเปล่า ๆ</td><td>ไม่ให้ถูกโจมตี</td></tr>
+<tr><td>บอกทางแก้ทันทีตอนที่ผู้ใช้ยังอยู่ตรงนั้น</td><td>รักษาความจริงของข้อมูล</td></tr>
+</tbody></table><p>เป็นหลักเดียวกับ 9.1 แบบฝึกหัดข้อ 4 ที่ว่า “ถ้าสองที่ไม่ตรงกัน เซิร์ฟเวอร์ถูกเสมอ”</p></section>
+
+<section><h2>2. สิ่งที่ตรวจได้ฝั่งแอป</h2><pre class="code-vs"><code>class ImagePolicy {
+  const ImagePolicy({
+    this.maxBytes = 5 * 1024 * 1024,
+    this.minBytes = 5 * 1024,
+    this.allowedMimeTypes = const {'image/jpeg', 'image/png', 'image/webp'},
+    this.minWidth = 480,
+    this.minHeight = 480,
+  });
+}</code></pre><table><thead><tr><th>ตรวจ</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td>ชนิดไฟล์</td><td>ผู้ใช้เลือกไฟล์ที่ไม่ใช่รูป</td></tr>
+<tr><td>ขนาดสูงสุด</td><td>รูปที่จะถูกปฏิเสธด้วย 413</td></tr>
+<tr><td>ขนาดต่ำสุด</td><td>ไฟล์เสียหรือถ่ายพลาด</td></tr>
+<tr><td>ขนาดพิกเซล</td><td>รูปที่เล็กจนอ่านฉลากไม่ออก</td></tr>
+<tr><td>ลายเซ็นในไฟล์</td><td>ไฟล์ที่เปลี่ยนนามสกุลมาหลอก</td></tr>
+</tbody></table><div class="note"><code>maxBytes</code> ต้อง<strong>ตรงกับที่เซิร์ฟเวอร์ตั้งไว้</strong> — ถ้าแอปยอมให้ 5 MB แต่เซิร์ฟเวอร์รับแค่ 2 MB ผู้ใช้จะเสียเวลาอัปโหลดสามสิบวินาทีแล้วถูกปฏิเสธ ซึ่งแย่กว่าการถูกห้ามตั้งแต่ต้น</div></section>
+
+<section><h2>3. ลายเซ็นในไฟล์</h2><p>ทุกรูปแบบไฟล์มีไบต์เฉพาะที่ต้นไฟล์ เรียกว่า magic number</p><pre class="code-vs"><code>/// ตรวจว่าไบต์ต้นไฟล์ตรงกับชนิดที่อ้างไหม
+bool _looksLike(Uint8List bytes, String mimeType) {
+  if (bytes.length &lt; 12) return false;
+
+  return switch (mimeType) {
+    // JPEG ขึ้นต้นด้วย FF D8 FF เสมอ
+    'image/jpeg' =&gt; bytes[0] == 0xFF &amp;&amp; bytes[1] == 0xD8 &amp;&amp; bytes[2] == 0xFF,
+    // PNG ขึ้นต้นด้วย 89 P N G
+    'image/png' =&gt;
+      bytes[0] == 0x89 &amp;&amp; bytes[1] == 0x50 &amp;&amp; bytes[2] == 0x4E &amp;&amp; bytes[3] == 0x47,
+    // WebP คือ RIFF....WEBP
+    'image/webp' =&gt; ...,
+    _ =&gt; false,
+  };
+}</code></pre><table><thead><tr><th>สิ่งที่โกหกได้</th><th>สิ่งที่โกหกยากกว่า</th></tr></thead><tbody>
+<tr><td>นามสกุลในชื่อไฟล์</td><td>ไบต์ต้นไฟล์</td></tr>
+<tr><td><code>mimeType</code> ที่ระบบบอกมา</td><td>—</td></tr>
+</tbody></table><p>สังเกตคำว่า “ยากกว่า” ไม่ใช่ “ไม่ได้” — ไฟล์ที่ขึ้นต้นด้วยลายเซ็น JPEG แล้วตามด้วยอะไรก็ได้ ก็ยังผ่านการตรวจนี้ ซึ่งเป็นเหตุผลที่เซิร์ฟเวอร์ต้องตรวจจริงจังกว่านี้</p><pre class="code-vs"><code>test('เนื้อไฟล์ไม่ตรงกับชนิดที่อ้าง ถูกจับได้', () {
+  // ไฟล์ PNG ที่ถูกเปลี่ยนนามสกุลและ mimeType เป็น jpeg
+  final result = checkImage(image(bytes: pngBytes(), mimeType: 'image/jpeg'));
+  expect(result, isA&lt;ImageRejected&gt;());
+  expect((result as ImageRejected).message, contains('เนื้อไฟล์'));
+});</code></pre></section>
+
+<section><h2>4. ห้ามกับเตือน</h2><pre class="code-vs"><code>sealed class ImageCheck { }
+class ImageAccepted extends ImageCheck { }
+class ImageRejected extends ImageCheck { final String message; }
+
+/// แยกจาก [ImageRejected] เพราะการห้ามกับการเตือนพาผู้ใช้ไปคนละทาง —
+/// รูปที่เบลอนิดหน่อยยังใช้เป็นหลักฐานได้ ถ้าเขายืนยันว่านั่นคือของจริง
+class ImageWarning extends ImageCheck { final String message; }</code></pre><table><thead><tr><th>กรณี</th><th>ห้ามหรือเตือน</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ไม่ใช่ไฟล์รูป</td><td>ห้าม</td><td>เซิร์ฟเวอร์รับไม่ได้แน่นอน</td></tr>
+<tr><td>ใหญ่เกินขีด</td><td>ห้าม</td><td>จะได้ 413 แน่นอน</td></tr>
+<tr><td>เนื้อไม่ตรงชนิด</td><td>ห้าม</td><td>ผิดแน่นอน</td></tr>
+<tr><td>ความละเอียดต่ำ</td><td><strong>เตือน</strong></td><td>ยังใช้ได้ ถ้าผู้ใช้ยืนยันว่านั่นคือของจริง</td></tr>
+</tbody></table><p>หลักเดียวกับ 10.7 — <strong>ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่น่าสงสัยให้เตือนแล้วปล่อยให้ผู้ใช้ตัดสิน</strong></p><pre class="code-vs"><code>test('รูปเล็กกว่าที่แนะนำ ได้คำเตือน ไม่ใช่ถูกห้าม', () {
+  // ห้ามเฉพาะสิ่งที่ผิดแน่นอน รูปเบลอยังใช้เป็นหลักฐานได้ถ้าผู้ใช้ยืนยัน
+  final result = checkImage(image(width: 200, height: 200));
+  expect(result, isA&lt;ImageWarning&gt;());
+});</code></pre><p>ในคลัง กล้อง PDA บางรุ่นถ่ายได้แค่ 640×480 — การห้ามจะทำให้เครื่องเหล่านั้นใช้ฟีเจอร์นี้ไม่ได้เลย</p></section>
+
+<section><h2>5. ข้อความที่บอกทางแก้</h2><pre class="code-vs"><code>return ImageRejected(
+  'ไฟล์ใหญ่ ${image.sizeMb.toStringAsFixed(1)} MB '
+  'เกินที่รับได้ ${policy.maxMb.toStringAsFixed(0)} MB — ลองถ่ายใหม่ที่ความละเอียดต่ำลง',
+);</code></pre><table><thead><tr><th>ข้อความที่ไม่ช่วย</th><th>ข้อความที่ช่วย</th></tr></thead><tbody>
+<tr><td>ไฟล์ใหญ่เกินไป</td><td>ไฟล์ใหญ่ 8.0 MB เกินที่รับได้ 5 MB — ลองถ่ายใหม่ที่ความละเอียดต่ำลง</td></tr>
+<tr><td>รูปแบบไม่ถูกต้อง</td><td>รองรับเฉพาะไฟล์ JPG, PNG, WebP แต่ไฟล์นี้เป็น HEIC</td></tr>
+</tbody></table><p>เกณฑ์เดียวกับ 10.7 §2 — <strong>อ่านแล้วรู้ไหมว่าต้องทำอะไรต่อ</strong></p><pre class="code-vs"><code>test('ไฟล์ใหญ่เกินถูกปฏิเสธ พร้อมบอกขนาดจริง', () {
+  final result = checkImage(image(bytes: jpegBytes(size: 8 * 1024 * 1024)));
+  // บอกทั้งขนาดที่ได้และขนาดที่รับได้ ผู้ใช้จะได้รู้ว่าต้องลดแค่ไหน
+  expect((result as ImageRejected).message, contains('8.0 MB'));
+  expect(result.message, contains('5 MB'));
+});</code></pre><p>เรื่อง HEIC เป็นกรณีจริงที่เจอบ่อย — iPhone ถ่ายเป็น HEIC โดยปริยาย และผู้ใช้ไม่มีทางรู้ว่าไฟล์ที่ตัวเองเลือกคือรูปแบบอะไร ข้อความที่บอกชื่อรูปแบบทำให้เขาไปหาวิธีเปลี่ยนได้</p></section>
+
+<section><h2>6. ชื่อไฟล์คือข้อมูลที่ไม่น่าเชื่อถือ</h2><pre class="code-vs"><code>/// อย่าเชื่อชื่อที่ได้จากอุปกรณ์โดยตรง — ผู้ใช้ตั้งชื่อไฟล์เป็นอะไรก็ได้
+/// รวมถึงชื่อที่มี `../` ซึ่งฝั่งเซิร์ฟเวอร์ที่เขียนไม่ระวังจะเขียนไฟล์
+/// ออกนอกโฟลเดอร์ที่ตั้งใจ
+final String fileName;</code></pre><pre class="code-vs"><code>String safeFileName(String raw, {required String extension}) {
+  final base = raw.split(RegExp(r'[/\\]')).last;          // ตัดเส้นทางทิ้ง
+  final withoutExt = base.contains('.')
+      ? base.substring(0, base.lastIndexOf('.'))
+      : base;
+  final cleaned = withoutExt.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  final trimmed = cleaned.isEmpty ? 'image' : cleaned;
+  final limited = trimmed.length &gt; 60 ? trimmed.substring(0, 60) : trimmed;
+  return '$limited.$extension';
+}</code></pre><table><thead><tr><th>ชื่อที่ได้รับ</th><th>ผลลัพธ์</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td><code>../../etc/passwd</code></td><td><code>passwd.jpg</code></td><td>เขียนไฟล์ออกนอกโฟลเดอร์</td></tr>
+<tr><td><code>C:\Users\x\photo.jpg</code></td><td><code>photo.jpg</code></td><td>เส้นทางของ Windows</td></tr>
+<tr><td><code>รูป สินค้า#1.jpg</code></td><td><code>____________1.jpg</code></td><td>อักขระที่บางระบบไฟล์ไม่รับ</td></tr>
+<tr><td><code>malware.exe</code> ที่เนื้อเป็น PNG</td><td><code>malware.png</code></td><td>นามสกุลที่ไม่ตรงเนื้อ</td></tr>
+<tr><td>ชื่อยาว 200 ตัว</td><td>ตัดเหลือ 60</td><td>ขีดจำกัดของระบบไฟล์</td></tr>
+</tbody></table><div class="note">แถวสุดท้ายในตารางแรกสำคัญ — <strong>นามสกุลมาจาก <code>mimeType</code> ที่ตรวจเนื้อไฟล์แล้ว ไม่ใช่จากชื่อเดิม</strong> ทำให้ไฟล์ที่พยายามหลอกด้วยนามสกุล ถูกเปลี่ยนเป็นนามสกุลที่ตรงกับเนื้อจริง</div><p>แต่ต้องย้ำอีกครั้ง — <strong>นี่คือการช่วยฝั่งเซิร์ฟเวอร์ ไม่ใช่การป้องกัน</strong> เพราะใครก็ยิงคำขอที่มีชื่อไฟล์เป็นอะไรก็ได้เข้า endpoint ตรง ๆ โดยไม่ผ่านแอปนี้</p></section>
+
+<section><h2>7. สิ่งที่ฝั่งเซิร์ฟเวอร์ต้องทำ</h2><table><thead><tr><th>ตรวจ</th><th>ทำไมแอปทำแทนไม่ได้</th></tr></thead><tbody>
+<tr><td>ขนาดและชนิดซ้ำ</td><td>คำขออาจไม่ได้มาจากแอปนี้</td></tr>
+<tr><td>ตั้งชื่อไฟล์ใหม่เองทั้งหมด</td><td>ชื่อที่แอปส่งมาเชื่อไม่ได้</td></tr>
+<tr><td>เก็บนอก web root</td><td>ไม่งั้นไฟล์ที่อัปโหลดอาจถูกเรียกให้ทำงาน</td></tr>
+<tr><td>ตรวจว่าผู้ใช้มีสิทธิ์กับสินค้าตัวนั้น</td><td>แอปซ่อนปุ่มได้ แต่นั่นไม่ใช่การป้องกัน (8.9)</td></tr>
+<tr><td>จำกัดจำนวนต่อผู้ใช้ต่อช่วงเวลา</td><td>กันการยิงถล่ม</td></tr>
+</tbody></table><p>รายละเอียดฝั่ง .NET อยู่ใน <a href="https://github.com/warayutb/zero-to-senior-dotnet8-course">zero-to-senior-dotnet8-course</a> — สิ่งที่ฝั่งแอปต้องทำคือ<strong>ถามให้แน่ใจว่าทีมหลังบ้านทำครบ</strong> ไม่ใช่สมมติว่าทำแล้ว</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ตรวจผ่านฝั่งแอปแต่ถูกปฏิเสธที่เซิร์ฟเวอร์</td><td>ขีดจำกัดสองฝั่งไม่ตรงกัน</td><td>ถามค่าจริงแล้วตั้งให้ตรง</td></tr>
+<tr><td>ผู้ใช้ iPhone ใช้ฟีเจอร์ไม่ได้</td><td>HEIC ไม่อยู่ในรายการที่รองรับ</td><td>รองรับ หรือบอกวิธีเปลี่ยนตั้งค่ากล้อง</td></tr>
+<tr><td>เครื่องกล้องความละเอียดต่ำใช้ไม่ได้</td><td>ห้ามแทนที่จะเตือน</td><td>แยกห้ามกับเตือน</td></tr>
+<tr><td>ไฟล์ที่ไม่ใช่รูปหลุดเข้าระบบ</td><td>เชื่อนามสกุลอย่างเดียว</td><td>ตรวจลายเซ็นในไฟล์</td></tr>
+<tr><td>คิดว่าตรวจฝั่งแอปแล้วปลอดภัย</td><td>เข้าใจผิดเรื่องบทบาท</td><td>เซิร์ฟเวอร์ต้องตรวจซ้ำเสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมพบว่ามีคนอัปโหลดไฟล์ PDF เข้ามาในช่องที่ควรเป็นรูปสินค้า ผ่านการยิง API ตรง ๆ</p><ol><li>ฝั่งแอปควรทำอะไรเพิ่ม</li><li>ควรบอกทีมหลังบ้านอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่ต้องทำอะไรเพิ่ม</strong> และนี่คือคำตอบที่สำคัญที่สุดของบทนี้</p><p>คนที่ยิง API ตรง ๆ ไม่ได้ผ่านแอปเลย การเพิ่มการตรวจฝั่งแอปจึงไม่มีผลกับเขาแม้แต่น้อย — เหมือนกับที่ 8.9 สรุปว่าการซ่อนปุ่มตาม role ไม่ใช่การป้องกัน</p><p>สิ่งที่ควรตรวจสอบคือ<strong>การตรวจที่มีอยู่ตรงกับที่เซิร์ฟเวอร์ต้องการไหม</strong> เพราะถ้าเซิร์ฟเวอร์เพิ่มการตรวจใหม่ แอปควรตรวจแบบเดียวกันเพื่อไม่ให้ผู้ใช้เสียเวลา</p><p><strong>2.</strong> บอกด้วยข้อเท็จจริงและเสนอสิ่งที่ตรวจสอบได้</p><table><thead><tr><th>บอกว่า</th><th>ไม่ใช่บอกว่า</th></tr></thead><tbody>
+<tr><td>“endpoint นี้รับไฟล์ที่ไม่ใช่รูปได้ ผมทดสอบด้วย curl แล้วผ่าน”</td><td>“ฝั่งหลังบ้านตรวจไม่ดี”</td></tr>
+<tr><td>“ฝั่งแอปตรวจอยู่แล้ว แต่ตรวจไม่ได้ถ้าไม่ผ่านแอป”</td><td>“ทำไมไม่ตรวจ”</td></tr>
+</tbody></table><p>แล้วเสนอรายการที่ชัดเจน</p><pre class="code-vs"><code># สิ่งที่ควรตรวจฝั่งเซิร์ฟเวอร์ พร้อมสิ่งที่ฝั่งแอปตรวจอยู่แล้ว
+- ลายเซ็นในไฟล์ (แอปตรวจ FF D8 FF สำหรับ JPEG)
+- ขนาดสูงสุด (แอปตั้งไว้ 5 MB — ยืนยันว่าตรงกับฝั่งเซิร์ฟเวอร์ไหม)
+- ตั้งชื่อไฟล์ใหม่ ไม่ใช้ชื่อที่แอปส่งมา
+- เก็บนอก web root
+- ตรวจสิทธิ์ว่าผู้ใช้แก้สินค้าตัวนั้นได้จริง</code></pre><p><strong>สิ่งที่ฝั่งแอปทำได้และมีค่ามาก</strong> คือเขียนเทสต์ที่ยิงเข้าเซิร์ฟเวอร์จริงด้วยไฟล์ที่ไม่ควรผ่าน แล้วยืนยันว่าถูกปฏิเสธ (Part 14)</p><pre class="code-vs"><code>test('เซิร์ฟเวอร์ต้องปฏิเสธไฟล์ที่ไม่ใช่รูป', () async {
+  final response = await uploadRaw(pdfBytes, filename: 'doc.jpg');
+  expect(response.statusCode, 400);
+});</code></pre><p>เทสต์แบบนี้เป็นของทั้งทีม ไม่ใช่ของฝั่งใดฝั่งหนึ่ง และทำให้ข้อตกลงเรื่องความปลอดภัยกลายเป็นสิ่งที่ตรวจได้อัตโนมัติ แทนที่จะเป็นสิ่งที่ต้องเชื่อกัน</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ฝั่งแอปตรวจเพื่อความสะดวก เซิร์ฟเวอร์ตรวจเพื่อความปลอดภัย</li><li>ขีดจำกัดสองฝั่งต้องตรงกัน ไม่งั้นผู้ใช้เสียเวลาเปล่า</li><li>ตรวจลายเซ็นในไฟล์ เพราะนามสกุลและ mimeType โกหกได้</li><li>ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่น่าสงสัยให้เตือน</li><li>ข้อความต้องบอกทั้งค่าที่ได้และค่าที่รับได้</li><li>ชื่อไฟล์จากอุปกรณ์เชื่อไม่ได้ และการทำให้ปลอดภัยฝั่งแอปคือการช่วย ไม่ใช่การป้องกัน</li></ul></div><p><strong>บทหน้า:</strong> ประกอบทั้งหมดเป็นหน้าจอถ่ายรูปหลักฐานที่ใช้งานได้จริง</p></section>

@@ -4,26 +4,130 @@
 <title>ImagePicker &amp; Permissions</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-01 · Files &amp; Platform</span><h1>ImagePicker &amp; Permissions</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Flow ใน wmsapp</a></li><li><a href="#section-2">XFile และการยกเลิก</a></li><li><a href="#section-3">Permission ตาม platform</a></li><li><a href="#section-4">Denied ไม่เท่ากับ permanently denied</a></li><li><a href="#section-5">Android activity ถูกทำลาย</a></li><li><a href="#section-6">State ที่อ่านง่าย</a></li><li><a href="#section-7">UX และ lifecycle</a></li><li><a href="#section-8">Checklist</a></li></ol></nav>
-<div class="note"><strong>เป้าหมาย:</strong> เลือกรูปจากกล้องหรือคลังภาพอย่างปลอดภัย เข้าใจว่า <code>pickImage()</code> อาจคืน <code>null</code> และ permission เป็นสถานะที่เปลี่ยนได้ ไม่ใช่ขั้นตอนที่ขอครั้งเดียวแล้วจบ</div>
-<section id="section-1"><h2>1. Flow ใน wmsapp</h2><p><code>part_image_screen.dart</code> เปิด bottom sheet ให้เลือก <code>ImageSource.camera</code> หรือ <code>gallery</code> แล้วเรียก <code>ImagePicker.pickImage</code> พร้อมลดรูปเป็น 1024×1024 และ quality 85 ก่อนอัปโหลด นี่เป็นจุดเริ่มที่ดีเพราะลด bandwidth ตั้งแต่ต้นทาง</p></section>
-<section id="section-2"><h2>2. XFile และการยกเลิก</h2><pre class="code-vs"><code>final XFile? picked = await picker.pickImage(
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่ Part นี้แก้</a></li><li><a href="#section-2">แพ็กเกจและการตั้งค่า</a></li><li><a href="#section-3">ถามที่มาก่อน</a></li><li><a href="#section-4">ย่อตั้งแต่ตอนเลือก</a></li><li><a href="#section-5">ผู้ใช้ปฏิเสธสิทธิ์</a></li><li><a href="#section-6">ห่อไว้หลัง interface</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน <code>part_image_screen.dart</code> ของจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 5 (bottom sheet), Part 9 (store)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ขอรูปจากผู้ใช้ ขอสิทธิ์ให้ถูกจังหวะ และรับมือเมื่อผู้ใช้ปฏิเสธ</div>
+
+<section id="section-1"><h2>1. ปัญหาที่ Part นี้แก้</h2><p>ในคลังมีหลายเรื่องที่ข้อความอย่างเดียวไม่พอ</p><table><thead><tr><th>งาน</th><th>ทำไมต้องมีรูป</th></tr></thead><tbody>
+<tr><td>รับของแล้วพบว่ากล่องบุบ</td><td>เป็นหลักฐานตอนเคลมกับผู้ขาย</td></tr>
+<tr><td>สินค้าไม่มีรูปในระบบ</td><td>คนหยิบของต้องรู้ว่าหน้าตาเป็นอย่างไร</td></tr>
+<tr><td>ของวางผิดตำแหน่ง</td><td>อธิบายด้วยคำพูดยากกว่าถ่ายรูป</td></tr>
+</tbody></table><p><code>wmsapp</code> มีฟีเจอร์นี้อยู่แล้วที่ <code>lib/screens/supervisor/part_image_screen.dart</code> ซึ่งจะเป็นตัวอย่างหลักของ Part นี้</p></section>
+
+<section id="section-2"><h2>2. แพ็กเกจและการตั้งค่า</h2><pre class="code-vs"><code>dependencies:
+  image_picker: ^1.2.1</code></pre><p>บน Android ต้องประกาศสิทธิ์ในไฟล์ manifest</p><pre class="code-vs"><code>&lt;!-- android/app/src/main/AndroidManifest.xml --&gt;
+&lt;uses-permission android:name="android.permission.CAMERA" /&gt;</code></pre><table><thead><tr><th>สิ่งที่ต้องรู้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>การเลือกจากแกลเลอรีไม่ต้องขอสิทธิ์แล้ว</td><td>Android 13 ขึ้นไปใช้ตัวเลือกรูปของระบบ ซึ่งผู้ใช้เลือกเองว่าจะให้ไฟล์ไหน</td></tr>
+<tr><td>กล้องยังต้องขอ</td><td>ถ้าประกาศ <code>CAMERA</code> ไว้ ระบบจะถามตอนใช้ครั้งแรก</td></tr>
+<tr><td>iOS ต้องเขียนเหตุผล</td><td><code>NSCameraUsageDescription</code> ใน <code>Info.plist</code> — ถ้าไม่มี แอปจะปิดตัวเองทันทีที่เปิดกล้อง</td></tr>
+</tbody></table><div class="note">ข้อความเหตุผลบน iOS ผู้ใช้อ่านจริง — เขียนว่า “เพื่อถ่ายรูปหลักฐานการรับของ” ดีกว่า “แอปต้องการใช้กล้อง” เพราะข้อความที่บอกประโยชน์ทำให้คนกดอนุญาตมากกว่า</div></section>
+
+<section id="section-3"><h2>3. ถามที่มาก่อน</h2><pre class="code-vs"><code>final source = await showModalBottomSheet&lt;ImageSource&gt;(
+  context: context,
+  builder: (_) =&gt; SafeArea(
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          leading: Icon(MdiIcons.camera),
+          title: const Text('ถ่ายรูป'),
+          onTap: () =&gt; Navigator.pop(context, ImageSource.camera),
+        ),
+        ListTile(
+          leading: Icon(MdiIcons.imageMultipleOutline),
+          title: const Text('เลือกจากแกลเลอรี'),
+          onTap: () =&gt; Navigator.pop(context, ImageSource.gallery),
+        ),
+      ],
+    ),
+  ),
+);
+
+if (source == null) return;</code></pre><p>สามอย่างที่เขียนถูกในโค้ดนี้</p><table><thead><tr><th>รายละเอียด</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td><code>SafeArea</code></td><td>บนเครื่องที่มีแถบนำทางด้านล่าง ตัวเลือกล่างสุดจะถูกบัง</td></tr>
+<tr><td><code>mainAxisSize: MainAxisSize.min</code></td><td>ไม่งั้น sheet จะสูงเต็มจอ</td></tr>
+<tr><td><code>if (source == null) return;</code></td><td>ผู้ใช้ปัดปิดได้ ซึ่งไม่ใช่ความผิดพลาด</td></tr>
+</tbody></table><p>บน PDA มีเหตุผลเพิ่มที่จะให้เลือกทั้งสองทาง — เครื่องบางรุ่นกล้องคุณภาพต่ำมาก ผู้ใช้บางคนจึงถ่ายด้วยโทรศัพท์ตัวเองแล้วส่งเข้าแกลเลอรี</p></section>
+
+<section id="section-4"><h2>4. ย่อตั้งแต่ตอนเลือก</h2><pre class="code-vs"><code>final picked = await _picker.pickImage(
   source: source,
   maxWidth: 1024,
   maxHeight: 1024,
   imageQuality: 85,
 );
-if (picked == null) return; // ผู้ใช้กดยกเลิก ไม่ใช่ error</code></pre></section>
-<section id="section-3"><h2>3. Permission ตาม platform</h2><p>Android/iOS มีรายละเอียดต่างกันตามเวอร์ชันและ source ที่ใช้ กำหนดข้อความ usage description ใน iOS และ permission ที่จำเป็นใน Android manifest ตามเอกสารของ plugin เวอร์ชันที่ล็อกไว้ อย่าขอ permission ทั้งหมดตอนเปิดแอป—ขอเมื่อผู้ใช้กดฟีเจอร์นั้นเพื่อให้เหตุผลชัดเจน</p></section>
-<section id="section-4"><h2>4. Denied ไม่เท่ากับ permanently denied</h2><p>เมื่อถูกปฏิเสธครั้งแรกให้บอกว่าฟีเจอร์ใดใช้ไม่ได้และอนุญาตให้ลองใหม่ แต่หากระบบไม่แสดง prompt อีกแล้ว ให้เสนอปุ่มเปิด Settings พร้อมทางเลือกกลับหน้าก่อนหน้า ห้ามวนเรียก permission dialog อัตโนมัติ</p></section>
-<section id="section-5"><h2>5. Android activity ถูกทำลาย</h2><p>ระหว่างเปิด camera ระบบอาจ kill activity เพราะหน่วยความจำต่ำ เมื่อกลับมา future เดิมอาจหาย แอป production ควรเรียก <code>ImagePicker.retrieveLostData()</code> ตอนเริ่ม screen/app และนำ <code>XFile</code> ที่กู้ได้กลับเข้าสู่ preview โดยไม่อัปโหลดเองทันที</p></section>
-<section id="section-6"><h2>6. State ที่อ่านง่าย</h2><pre class="code-vs"><code>sealed class PickState {}
-class PickIdle extends PickState {}
-class PickPreview extends PickState { final XFile file; }
-class PickFailure extends PickState { final String message; }
+if (picked == null) return;</code></pre><p>สามพารามิเตอร์นี้ทำงานสำคัญที่สุดในไฟล์ทั้งไฟล์</p><table><thead><tr><th> </th><th>ไม่ย่อ</th><th>ย่อที่ 1024 คุณภาพ 85</th></tr></thead><tbody>
+<tr><td>ขนาดรูปจากกล้อง PDA</td><td>4000×3000</td><td>1024×768</td></tr>
+<tr><td>ขนาดไฟล์</td><td>ราว 4–8 MB</td><td>ราว 150–400 KB</td></tr>
+<tr><td>เวลาอัปโหลดบน Wi-Fi คลัง</td><td>20–60 วินาที</td><td>1–3 วินาที</td></tr>
+<tr><td>หน่วยความจำตอนแสดงตัวอย่าง</td><td>48 MB</td><td>3 MB</td></tr>
+</tbody></table><p>การย่อ<strong>ก่อน</strong>อัปโหลดคุ้มกว่าการย่อฝั่งเซิร์ฟเวอร์มาก เพราะไบต์ที่ไม่ต้องส่งคือไบต์ที่ประหยัดทั้งเวลา แบต และค่าเน็ต</p><div class="note"><code>imageQuality</code> มีผลเฉพาะกับ JPEG — ค่า 85 เป็นจุดที่คนส่วนใหญ่มองไม่ออกว่าถูกบีบอัด แต่ไฟล์เล็กลงราวครึ่งหนึ่งเทียบกับ 100</div><p>คำถามที่ต้องตอบก่อนตั้งค่า คือ <strong>รูปนี้เอาไปทำอะไร</strong></p><table><thead><tr><th>ใช้ทำ</th><th>ขนาดที่พอ</th></tr></thead><tbody>
+<tr><td>รูปประกอบในลิสต์</td><td>512</td></tr>
+<tr><td>ให้คนดูว่าของหน้าตาอย่างไร</td><td>1024</td></tr>
+<tr><td>หลักฐานที่ต้องอ่านฉลากหรือหมายเลขซีเรียล</td><td>2048 ขึ้นไป และอย่าลดคุณภาพ</td></tr>
+</tbody></table></section>
 
-// picking และ uploading ควรเป็นคนละ state/operation</code></pre><p>แยกการเลือกออกจากการอัปโหลด ผู้ใช้จึงเปลี่ยนรูป ตรวจ preview หรือยกเลิกได้ก่อนใช้ network</p></section>
-<section id="section-7"><h2>7. UX และ lifecycle</h2><p>กันการกดซ้ำระหว่าง picker เปิดอยู่, ตรวจ <code>mounted</code> ก่อนใช้ <code>context</code> หลัง <code>await</code>, และอย่าบล็อกทั้งหน้าขณะเพียงเลือกรูป ปุ่มอัปโหลดควร disabled เฉพาะ operation ที่ชนกัน</p></section>
-<section id="section-8"><h2>8. Checklist</h2><div class="success">ทดสอบ camera, gallery, cancel, deny, deny ถาวร, activity recreation, รูปใหญ่มาก, หมุนจอ และการกลับจาก background บนอุปกรณ์จริงอย่างน้อย Android รุ่นที่ใช้งานในคลัง</div></section>
+<section id="section-5"><h2>5. ผู้ใช้ปฏิเสธสิทธิ์</h2><p>นี่คือกรณีที่โค้ดจริงยังไม่ได้จัดการ และเป็นกรณีที่เกิดจริงบน PDA ที่เพิ่งตั้งเครื่องใหม่</p><pre class="code-vs"><code>/// ผู้ใช้ปฏิเสธไม่ให้สิทธิ์
+///
+/// แยกเป็นชนิดของตัวเองเพราะต้องจัดการต่างจากความผิดพลาดอื่น — ลองใหม่
+/// เฉย ๆ ไม่ช่วย ต้องพาผู้ใช้ไปหน้าตั้งค่าของเครื่อง
+class PermissionDeniedException implements Exception { ... }</code></pre><pre class="code-vs"><code>try {
+  picked = await picker.pick(source);
+} on PermissionDeniedException {
+  _stage = UploadStage.idle;
+  // ข้อความบอกทางแก้ ไม่ใช่แค่บอกว่าถูกปฏิเสธ — ลองใหม่ในแอปไม่ช่วย
+  // ต้องไปเปิดสิทธิ์ในหน้าตั้งค่าของเครื่อง
+  _message = source == PickSource.camera
+      ? 'แอปยังไม่ได้รับอนุญาตให้ใช้กล้อง เปิดสิทธิ์ในหน้าตั้งค่าของเครื่องก่อน'
+      : 'แอปยังไม่ได้รับอนุญาตให้เข้าถึงรูป เปิดสิทธิ์ในหน้าตั้งค่าของเครื่องก่อน';
+  notifyListeners();
+  return;
+}</code></pre><p>ความต่างระหว่างการปฏิเสธสองแบบ</p><table><thead><tr><th>แบบ</th><th>เกิดอะไรถ้าขอใหม่</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ปฏิเสธครั้งแรก</td><td>ระบบถามอีกครั้ง</td><td>ขอใหม่ได้ แต่ควรอธิบายก่อนว่าทำไมต้องใช้</td></tr>
+<tr><td>ปฏิเสธถาวร (กด “ไม่ถามอีก”)</td><td>ระบบไม่ถามเลย คืนค่าปฏิเสธทันที</td><td>พาไปหน้าตั้งค่า</td></tr>
+</tbody></table><p>ถ้าไม่แยกสองกรณีนี้ ผู้ใช้ที่ปฏิเสธถาวรจะกดปุ่มถ่ายรูปแล้วไม่มีอะไรเกิดขึ้น ซ้ำแล้วซ้ำเล่า โดยไม่มีทางรู้ว่าทำไม</p><pre class="code-vs"><code>// เมื่อรู้ว่าปฏิเสธถาวร ให้ปุ่มที่พาไปได้จริง
+FilledButton(
+  onPressed: openAppSettings,   // จากแพ็กเกจ permission_handler
+  child: const Text('ไปหน้าตั้งค่า'),
+)</code></pre></section>
+
+<section id="section-6"><h2>6. ห่อไว้หลัง interface</h2><pre class="code-vs"><code>abstract interface class ImagePickerPort {
+  /// คืน null เมื่อผู้ใช้กดยกเลิก ซึ่งไม่ใช่ความผิดพลาด
+  Future&lt;PickedImage?&gt; pick(PickSource source);
+}</code></pre><p>เหตุผลเดียวกับ Part 12 — ปลั๊กอินที่คุยกับระบบปฏิบัติการ ทดสอบไม่ได้ถ้าไม่ห่อ</p><table><thead><tr><th>สิ่งที่ทดสอบได้หลังห่อ</th></tr></thead><tbody>
+<tr><td>ผู้ใช้กดยกเลิก</td></tr>
+<tr><td>ผู้ใช้ไม่ให้สิทธิ์</td></tr>
+<tr><td>ได้ไฟล์ที่ใหญ่เกิน</td></tr>
+<tr><td>ได้ไฟล์ที่เนื้อไม่ตรงกับชนิดที่อ้าง</td></tr>
+</tbody></table><p>ทั้งสี่กรณีเกิดจริงบนเครื่องจริง และไม่มีกรณีไหนทดสอบด้วยมือได้อย่างน่าเชื่อถือ</p><pre class="code-vs"><code>test('ไม่ได้รับสิทธิ์ ต้องบอกทางแก้ ไม่ใช่แค่บอกว่าถูกปฏิเสธ', () async {
+  picker.denyPermission = true;
+
+  await store.pick(PickSource.camera);
+
+  expect(store.stage, UploadStage.idle);
+  expect(store.message, contains('ตั้งค่า'));
+  expect(store.message, contains('กล้อง'));
+});</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปปิดตัวเองตอนเปิดกล้องบน iOS</td><td>ไม่มี <code>NSCameraUsageDescription</code></td><td>เพิ่มใน <code>Info.plist</code> พร้อมเหตุผลจริง</td></tr>
+<tr><td>กดถ่ายรูปแล้วไม่มีอะไรเกิดขึ้น</td><td>ปฏิเสธสิทธิ์ถาวร</td><td>ตรวจแล้วพาไปหน้าตั้งค่า</td></tr>
+<tr><td>อัปโหลดนานมาก</td><td>ไม่ได้ย่อตอนเลือก</td><td>ตั้ง <code>maxWidth</code> และ <code>imageQuality</code></td></tr>
+<tr><td>แอปค้างตอนแสดงตัวอย่าง</td><td>รูปเต็มความละเอียด</td><td>ย่อตั้งแต่ต้นทาง (13.7)</td></tr>
+<tr><td>ทดสอบฟีเจอร์นี้ไม่ได้เลย</td><td>เรียกปลั๊กอินตรงจากในจอ</td><td>ห่อด้วย interface</td></tr>
+<tr><td>ผู้ใช้กดยกเลิกแล้วเห็นข้อความผิดพลาด</td><td>ถือว่า null คือความล้มเหลว</td><td>แยกการยกเลิกออกจากความผิดพลาด</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>หัวหน้าขอให้เพิ่มฟีเจอร์ “ถ่ายรูปหลักฐานตอนรับของ” โดยบังคับให้ถ่ายอย่างน้อยหนึ่งรูปก่อนยืนยันการรับ</p><ol><li>ควรบังคับไหม</li><li>ถ้าบังคับ ต้องจัดการอะไรบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ต้องถามก่อนว่าบังคับเพื่ออะไร</p><table><thead><tr><th>เหตุผลที่อ้าง</th><th>การบังคับแก้ปัญหาไหม</th></tr></thead><tbody>
+<tr><td>“จะได้มีหลักฐานตอนเคลม”</td><td>ไม่ — พนักงานจะถ่ายพื้นหรือถ่ายเพดานเพื่อผ่านด่าน</td></tr>
+<tr><td>“ของบุบแล้วไม่มีใครถ่ายไว้”</td><td>บังคับเฉพาะตอนที่ผู้ใช้ระบุว่าของมีปัญหา — ตรงกว่ามาก</td></tr>
+</tbody></table><p>การบังคับทุกครั้งจะได้รูปที่ไร้ประโยชน์เก็บสะสมเป็นแสนรูป ซึ่งกินพื้นที่และทำให้รูปที่มีประโยชน์จริงหายไปในกอง</p><p><strong>ข้อเสนอที่ดีกว่า:</strong> บังคับเฉพาะเมื่อผู้ใช้เลือกว่า “ของมีปัญหา” และทำให้การถ่ายรูปตอนปกติง่ายมากจนคนอยากถ่ายเอง</p><p><strong>2.</strong> ถ้าหัวหน้ายืนยันว่าต้องบังคับ ต้องจัดการห้าอย่าง</p><table><thead><tr><th>กรณี</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ไม่ให้สิทธิ์กล้อง</td><td>ต้องมีทางออก ไม่งั้นเขาทำงานไม่ได้เลยทั้งกะ</td></tr>
+<tr><td>กล้องเสีย</td><td>เหมือนกัน — ต้องมีทางข้ามพร้อมบันทึกเหตุผล</td></tr>
+<tr><td>อัปโหลดไม่ผ่านเพราะเน็ตหลุด</td><td>ห้ามบล็อกการรับของ ให้เก็บรูปไว้ส่งทีหลัง</td></tr>
+<tr><td>ถ่ายแล้วแบตหมด</td><td>รูปที่ถ่ายไปแล้วต้องไม่หาย</td></tr>
+<tr><td>ผู้ใช้ถ่ายผิด</td><td>ต้องถ่ายใหม่ได้ก่อนยืนยัน</td></tr>
+</tbody></table><p>แถวที่สามสำคัญที่สุดและเป็นหลักที่ใช้ได้ทั่วไป — <strong>อย่าให้ฟีเจอร์เสริมบล็อกงานหลัก</strong> การรับของเข้าคลังคือสิ่งที่ธุรกิจต้องการ ส่วนรูปคือของแถมที่มีประโยชน์ ถ้ารูปส่งไม่ได้แล้วรับของไม่ได้ด้วย แสดงว่าเราทำให้ระบบเปราะกว่าเดิมเพื่อฟีเจอร์ที่ตั้งใจจะช่วย</p><p>ทางที่ถูกคือเก็บรูปไว้ในเครื่องแล้วส่งเมื่อเน็ตกลับมา ซึ่งเป็นงานของ Part 29 — และถ้ายังทำไม่ได้ในรุ่นนี้ ให้ยอมรับว่ารูปบางรูปจะหาย ดีกว่าให้ของค้างอยู่หน้าท่ารับ</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ย่อรูปตั้งแต่ตอนเลือก ประหยัดทั้งเวลา แบต และหน่วยความจำ</li><li>ขนาดที่เลือกขึ้นกับว่ารูปนั้นเอาไปทำอะไร</li><li>การกดยกเลิกไม่ใช่ความผิดพลาด</li><li>การปฏิเสธสิทธิ์ถาวรต้องพาไปหน้าตั้งค่า ไม่ใช่ให้กดใหม่</li><li>ห่อปลั๊กอินไว้หลัง interface ไม่งั้นทดสอบสี่กรณีสำคัญไม่ได้เลย</li><li>อย่าให้ฟีเจอร์เสริมบล็อกงานหลัก</li></ul></div><p><strong>บทหน้า:</strong> รูปที่ได้มา เก็บเป็นอะไรถึงจะใช้ได้ทุกแพลตฟอร์ม</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

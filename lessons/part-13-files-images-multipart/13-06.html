@@ -4,40 +4,146 @@
 <title>Thumbnail with FutureBuilder</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-06 · Files &amp; Platform</span><h1>Thumbnail with FutureBuilder</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่พบบ่อย</a></li><li><a href="#section-2">เก็บ Future ใน State</a></li><li><a href="#section-3">ครบทุก snapshot state</a></li><li><a href="#section-4">FutureBuilder ไม่จำเป็นเสมอ</a></li><li><a href="#section-5">List identity</a></li><li><a href="#section-6">Retry เฉพาะที่</a></li><li><a href="#section-7">ป้องกัน stale result</a></li><li><a href="#section-8">Widget tests</a></li></ol></nav>
-<div class="note"><strong>FutureBuilder ไม่ได้ cache Future:</strong> ถ้าสร้าง future ใหม่ใน <code>build()</code> ทุก rebuild จะเริ่ม resolve URL หรือโหลด metadata ซ้ำ และอาจกระพริบกลับไป loading</div>
-<section id="section-1"><h2>1. ปัญหาที่พบบ่อย</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
-  future: api.getImageFullUrl(relativePath), // สร้างทุก build
-  builder: ...,
-)</code></pre><p>parent rebuild จาก search, theme หรือ progress ก็เรียก async งานเดิมอีกครั้ง แม้ network image จะ cache bytes ได้ แต่ future และ state transition ยังเกิดซ้ำ</p></section>
-<section id="section-2"><h2>2. เก็บ Future ใน State</h2><pre class="code-vs"><code>late Future&lt;Uri&gt; _imageUri;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โค้ดจริง</a></li><li><a href="#section-2">ทำไม</a></li><li><a href="#section-3">ผลที่ตามมานอกจากกะพริบ</a></li><li><a href="#section-4">ทางแก้ เรียงจากดีที่สุด</a></li><li><a href="#section-5">กฎที่จำง่าย</a></li><li><a href="#section-6">เมื่อไหร่ FutureBuilder ถึงเหมาะจริง</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: หากับดัก <code>FutureBuilder</code> ในโค้ดจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.5, Part 4 (async ใน UI)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ <code>FutureBuilder</code> ให้ถูก และมองออกทันทีเมื่อเห็นการใช้ผิด</div>
 
-@override
-void initState() {
-  super.initState();
-  _imageUri = repository.resolveImage(widget.relativePath);
-}
+<section id="section-1"><h2>1. โค้ดจริง</h2><pre class="code-vs"><code>// wmsapp/lib/screens/supervisor/part_image_screen.dart
+Widget _buildPartCard(Map&lt;String, dynamic&gt; part) {
+  final imageUrl = part['imageUrl'] as String?;
+  final hasImg = imageUrl != null &amp;&amp; imageUrl.isNotEmpty;
 
-@override
-void didUpdateWidget(covariant PartThumbnail old) {
-  super.didUpdateWidget(old);
-  if (old.relativePath != widget.relativePath) {
-    _imageUri = repository.resolveImage(widget.relativePath);
+  return Card(
+    child: Row(
+      children: [
+        ClipRRect(
+          child: Container(
+            width: 56,
+            height: 56,
+            child: hasImg
+                ? FutureBuilder&lt;String&gt;(
+                    future: _api.getImageFullUrl(imageUrl),   // ← ตรงนี้
+                    builder: (_, snap) {
+                      if (!snap.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      return Image.network(snap.data!, fit: BoxFit.cover, ...);
+                    },
+                  )
+                : Icon(MdiIcons.imageOff),
+          ),
+        ),
+        ...</code></pre><p>โค้ดนี้ทำงานถูกต้องและแสดงรูปได้ แต่มีปัญหาที่ผู้ใช้เห็นได้ — <strong>วงหมุนกะพริบทุกครั้งที่เลื่อนลิสต์และทุกครั้งที่พิมพ์ในช่องค้นหา</strong></p></section>
+
+<section id="section-2"><h2>2. ทำไม</h2><div class="note"><strong><code>FutureBuilder</code> เริ่มงานใหม่ทุกครั้งที่ได้รับ <code>Future</code> ตัวใหม่</strong> และการเรียกฟังก์ชัน async ใน <code>build</code> สร้าง <code>Future</code> ตัวใหม่ทุกครั้งเสมอ</div><pre class="code-vs"><code>_buildPartCard(...) ถูกเรียก
+  → getImageFullUrl(imageUrl) ทำงาน → ได้ Future ตัวใหม่
+    → FutureBuilder เห็นว่า future ไม่ใช่ตัวเดิม
+      → รีเซ็ตกลับไปที่ ConnectionState.waiting
+        → snap.hasData เป็น false
+          → แสดงวงหมุน
+            → Future เสร็จ → แสดงรูป</code></pre><p>แล้ว <code>_buildPartCard</code> ถูกเรียกบ่อยแค่ไหน</p><table><thead><tr><th>เมื่อไหร่</th><th>ความถี่</th></tr></thead><tbody>
+<tr><td>เลื่อนลิสต์</td><td><code>ListView.builder</code> สร้างการ์ดใหม่เมื่อเลื่อนเข้ามาในจอ</td></tr>
+<tr><td>พิมพ์ในช่องค้นหา</td><td><code>_filterParts</code> เรียก <code>setState</code> ทุกตัวอักษร → การ์ดทุกใบวาดใหม่</td></tr>
+<tr><td>อัปโหลดเสร็จ</td><td><code>setState</code> → วาดใหม่ทั้งลิสต์</td></tr>
+</tbody></table><p>แถวที่สองแรงที่สุด — ผู้ใช้พิมพ์รหัสสินค้าหกตัว รูปทุกใบในจอจะกะพริบหกครั้ง</p></section>
+
+<section id="section-3"><h2>3. ผลที่ตามมานอกจากกะพริบ</h2><table><thead><tr><th>ผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>งานซ้ำ</td><td><code>_resolveBase()</code> ถูกเรียกซ้ำ แม้จะมีแคชอยู่ก็ยังเสียเวลาเข้า Future</td></tr>
+<tr><td><code>Image.network</code> ถูกสร้างใหม่</td><td>โชคดีที่ Flutter มีแคชรูป จึงไม่ได้โหลดใหม่จากเน็ต แต่ยังต้องประกอบ widget ใหม่</td></tr>
+<tr><td>วัดประสิทธิภาพยาก</td><td>เวลาที่หายไปกระจายอยู่ในทุกเฟรม ไม่ใช่ก้อนเดียวที่เห็นชัด</td></tr>
+</tbody></table><div class="note">อาการนี้อยู่รอดในโค้ดได้นานเพราะ<strong>ไม่มีอะไรผิด</strong> — รูปขึ้นถูก ข้อมูลถูก ไม่มีข้อผิดพลาด มีแค่การกะพริบที่คนเขียนโค้ดบนคอมที่เร็วอาจไม่ทันสังเกต แต่บน PDA ที่ช้ากว่า มันเห็นชัด</div></section>
+
+<section id="section-4"><h2>4. ทางแก้ เรียงจากดีที่สุด</h2><p><strong>ทางที่หนึ่ง — ทำให้ไม่ต้องใช้ <code>FutureBuilder</code> เลย</strong></p><pre class="code-vs"><code>// base URL อ่านได้แบบ sync หลังโหลดเสร็จตอนเปิดแอป (13.5)
+String imageUrl(String relativePath) =&gt;
+    Uri.parse(AppConfig.apiBaseUrl).resolve(relativePath).toString();
+
+// ในจอ
+Image.network(imageUrl(part.imageUrl), fit: BoxFit.cover)</code></pre><p>ดีที่สุดเพราะกำจัดปัญหาที่ต้นเหตุ — ไม่มี <code>Future</code> ก็ไม่มีอะไรให้รีเซ็ต และโค้ดสั้นลงมาก</p><p><strong>ทางที่สอง — เก็บ <code>Future</code> ไว้ อย่าสร้างใหม่</strong></p><pre class="code-vs"><code>class _PartCardState extends State&lt;PartCard&gt; {
+  late Future&lt;String&gt; _urlFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _urlFuture = widget.api.getImageFullUrl(widget.imageUrl);   // ครั้งเดียว
   }
-}</code></pre></section>
-<section id="section-3"><h2>3. ครบทุก snapshot state</h2><pre class="code-vs"><code>if (snapshot.connectionState != ConnectionState.done) {
-  return const ThumbnailSkeleton();
-}
-if (snapshot.hasError) return const BrokenThumbnail();
-final uri = snapshot.data;
-if (uri == null) return const EmptyThumbnail();
-return Image.network(uri.toString(), fit: BoxFit.cover);</code></pre></section>
-<section id="section-4"><h2>4. FutureBuilder ไม่จำเป็นเสมอ</h2><p>หากการ resolve เป็น pure synchronous operation ให้คืน <code>Uri</code> ทันที ไม่ต้องสร้าง Future ถ้า base URL มาจาก settings async ให้ load settings ครั้งเดียวใน repository/store แล้วส่ง media base ลงมา ลด nested async widget</p></section>
-<section id="section-5"><h2>5. List identity</h2><p>thumbnail ใน list ควรมี <code>ValueKey(partId)</code> เพื่อไม่ให้ State ของแถวหนึ่งย้ายไปอีกแถวหลัง filter/reorder และ image cache key ต้องรวม URL/version จริง ไม่ใช่เพียงตำแหน่ง index</p></section>
-<section id="section-6"><h2>6. Retry เฉพาะที่</h2><pre class="code-vs"><code>void retry() => setState(() {
-  _imageUri = widget.repository.resolveImage(widget.relativePath);
-});</code></pre><p>แสดง retry ที่ thumbnail โดยไม่ reload ทั้งรายการ แยก error resolve URL ออกจาก error ดาวน์โหลดรูป เพื่อให้ log และข้อความตรงสาเหตุ</p></section>
-<section id="section-7"><h2>7. ป้องกัน stale result</h2><p><code>FutureBuilder</code> จับกับ future ล่าสุด แต่หากเราเขียน callback/setState เองต้องใช้ request generation หรือเปรียบเทียบ partId/path ก่อน apply ผล เพื่อไม่ให้รูปของ query เก่าทับรายการใหม่หลังผู้ใช้ค้นหาเร็ว</p></section>
-<section id="section-8"><h2>8. Widget tests</h2><div class="success">ทดสอบ loading → image, empty, malformed URL, resolve failure, network error, retry, เปลี่ยน relativePath และ parent rebuild หลายครั้ง โดย assert ว่า repository ถูกเรียกครั้งเดียวต่อ path</div></section>
+
+  @override
+  void didUpdateWidget(PartCard old) {
+    super.didUpdateWidget(old);
+    // สร้างใหม่เฉพาะเมื่อรูปเปลี่ยนจริง
+    if (old.imageUrl != widget.imageUrl) {
+      _urlFuture = widget.api.getImageFullUrl(widget.imageUrl);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) =&gt;
+      FutureBuilder&lt;String&gt;(future: _urlFuture, builder: ...);
+}</code></pre><p>ใช้เมื่อ <code>Future</code> นั้นเลี่ยงไม่ได้จริง — สังเกตว่าต้องมี <code>didUpdateWidget</code> ด้วย ไม่งั้นการ์ดที่ถูกใช้ซ้ำใน <code>ListView</code> จะแสดงรูปของสินค้าตัวเก่า</p><p><strong>ทางที่สาม — แคชผลลัพธ์</strong></p><pre class="code-vs"><code>final _urlCache = &lt;String, String&gt;{};
+
+String? cachedUrl(String path) =&gt; _urlCache[path];</code></pre><p>ช่วยได้ แต่ไม่ได้แก้การกะพริบ เพราะ <code>FutureBuilder</code> ยังรีเซ็ตอยู่ดี — ต้องทำคู่กับทางที่สอง</p></section>
+
+<section id="section-5"><h2>5. กฎที่จำง่าย</h2><div class="note"><strong>อย่าเรียกฟังก์ชัน async ใน <code>build</code></strong> — ถ้าเห็น <code>future:</code> ตามด้วยการเรียกฟังก์ชัน ให้สงสัยไว้ก่อน</div><table><thead><tr><th>เขียนแบบนี้ = ผิด</th><th>เขียนแบบนี้ = ถูก</th></tr></thead><tbody>
+<tr><td><code>future: api.load()</code></td><td><code>future: _loadFuture</code></td></tr>
+<tr><td><code>future: Future.delayed(...)</code></td><td>เก็บใน <code>initState</code></td></tr>
+<tr><td><code>stream: repository.watch()</code></td><td><code>stream: _stream</code></td></tr>
+</tbody></table><p>กฎเดียวกันใช้กับ <code>StreamBuilder</code> ทุกประการ และผลของการทำผิดหนักกว่า — <code>Stream</code> ตัวใหม่ทุกเฟรมแปลว่าสมัครใหม่และยกเลิกของเก่าทุกเฟรม ซึ่งอาจเปิดการเชื่อมต่อใหม่ทุกครั้ง</p></section>
+
+<section id="section-6"><h2>6. เมื่อไหร่ <code>FutureBuilder</code> ถึงเหมาะจริง</h2><table><thead><tr><th>เหมาะ</th><th>ไม่เหมาะ</th></tr></thead><tbody>
+<tr><td>งาน async ที่ทำครั้งเดียวตอนเปิดจอ</td><td>งานที่ผูกกับข้อมูลในลิสต์ที่วาดซ้ำบ่อย</td></tr>
+<tr><td>ผลลัพธ์ไม่เปลี่ยนหลังได้มาแล้ว</td><td>ข้อมูลที่ต้องโหลดใหม่ตามการกระทำของผู้ใช้</td></tr>
+<tr><td>ไม่มีสถานะอื่นที่ต้องจัดการ</td><td>มีการโหลดใหม่ ลองใหม่ หรือแก้ไข</td></tr>
+</tbody></table><p>สำหรับกรณีที่ไม่เหมาะ ให้ใช้ store ที่ Part 9 สอน</p><pre class="code-vs"><code>ListenableBuilder(
+  listenable: store,
+  builder: (context, _) {
+    if (store.loading) return const CircularProgressIndicator();
+    if (store.error case final error?) return ErrorView(error);
+    return PartList(parts: store.parts);
+  },
+)</code></pre><table><thead><tr><th>ได้อะไรเพิ่มจาก store</th></tr></thead><tbody>
+<tr><td>โหลดใหม่ได้โดยไม่ต้องสร้าง widget ใหม่</td></tr>
+<tr><td>หลายจอเห็นข้อมูลชุดเดียวกัน (9.9)</td></tr>
+<tr><td>ทดสอบได้โดยไม่ต้องสร้าง widget (9.7)</td></tr>
+<tr><td>จัดการสถานะกำลังโหลดกับข้อมูลเก่าพร้อมกันได้</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>วงหมุนกะพริบตอนเลื่อนลิสต์</td><td>สร้าง <code>Future</code> ใน <code>build</code></td><td>เก็บไว้ หรือทำให้เป็น sync</td></tr>
+<tr><td>การ์ดแสดงรูปของรายการอื่น</td><td>เก็บ <code>Future</code> แต่ลืม <code>didUpdateWidget</code></td><td>สร้างใหม่เมื่อข้อมูลเปลี่ยน</td></tr>
+<tr><td>คำขอถูกยิงซ้ำหลายรอบ</td><td>เหมือนข้อแรก แต่ฟังก์ชันยิงเน็ตจริง</td><td>ย้ายไป store</td></tr>
+<tr><td><code>snapshot.data</code> เป็น null ตอนมีข้อผิดพลาด</td><td>ไม่ได้เช็ค <code>hasError</code></td><td>เช็คทั้งสามสถานะ</td></tr>
+<tr><td>โหลดใหม่ไม่ได้</td><td><code>FutureBuilder</code> ไม่มีทางสั่งให้ทำซ้ำ</td><td>ใช้ store</td></tr>
+</tbody></table><p>แถวสุดท้ายคือข้อจำกัดพื้นฐาน — <code>FutureBuilder</code> ไม่มี API สำหรับ “ทำใหม่” วิธีเดียวคือใส่ <code>Future</code> ตัวใหม่เข้าไป ซึ่งต้องมี <code>setState</code> อยู่ดี</p></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>อ่านโค้ดนี้แล้วบอกว่ามีปัญหาอะไร</p><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  return StreamBuilder&lt;List&lt;WmsTask&gt;&gt;(
+    stream: repository.watchOpenTasks(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const CircularProgressIndicator();
+      return TaskList(tasks: snapshot.data!);
+    },
+  );
+}</code></pre><details><summary>แนวคำตอบ</summary><p>ปัญหาเดียวกับ <code>FutureBuilder</code> แต่หนักกว่า</p><table><thead><tr><th>ปัญหา</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>watchOpenTasks()</code> สร้าง stream ใหม่ทุกเฟรม</td><td>สมัครใหม่และยกเลิกของเก่าทุกเฟรม</td></tr>
+<tr><td>ถ้า stream นั้นเปิดการเชื่อมต่อ</td><td>ต่อและตัดทุกเฟรม — อาจถึงหกสิบครั้งต่อวินาที</td></tr>
+<tr><td>วงหมุนกลับมาทุกเฟรม</td><td>หน้าจอไม่มีทางแสดงข้อมูลได้เลย เพราะ <code>hasData</code> เป็น false ตลอด</td></tr>
+</tbody></table><p>ข้อสุดท้ายทำให้บั๊กนี้เห็นชัดกว่ากรณี <code>FutureBuilder</code> — หน้าจอจะค้างที่วงหมุนตลอดกาล ซึ่งอย่างน้อยก็ทำให้เจอเร็ว</p><p><strong>แก้แบบเร็ว</strong></p><pre class="code-vs"><code>late final _stream = repository.watchOpenTasks();   // สร้างครั้งเดียว
+
+@override
+Widget build(BuildContext context) =&gt; StreamBuilder(stream: _stream, ...);</code></pre><p><strong>แก้แบบที่ควรทำ</strong> — ย้ายไป store ตามที่ Part 12 ทำ</p><pre class="code-vs"><code>class LiveTaskStore extends ChangeNotifier {
+  Future&lt;void&gt; start() async {
+    _eventSub = client.events.listen(_onEvent);   // สมัครที่เดียว
+    ...
+  }
+
+  @override
+  void dispose() {
+    _eventSub?.cancel();      // และยกเลิกที่เดียว (12.8)
+    super.dispose();
+  }
+}</code></pre><p><strong>ข้อสังเกตที่สำคัญกว่าตัวโค้ด:</strong> ทั้ง <code>FutureBuilder</code> และ <code>StreamBuilder</code> ดูเหมือนเป็นทางลัดที่ทำให้ไม่ต้องมี store แต่จริง ๆ แล้วมันแค่<strong>ย้ายการจัดการวงจรชีวิตไปไว้ในที่ที่ควบคุมยากกว่า</strong> — ใน <code>build</code> ที่ถูกเรียกเมื่อไหร่ก็ได้และกี่ครั้งก็ได้</p><p>ใช้มันกับงานที่ทำครั้งเดียวและจบ ส่วนงานที่มีวงจรชีวิต ให้มีคนถือชัดเจน</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>FutureBuilder</code> รีเซ็ตทุกครั้งที่ได้ <code>Future</code> ตัวใหม่</li><li>เรียกฟังก์ชัน async ใน <code>build</code> สร้างตัวใหม่ทุกครั้ง</li><li>ทางที่ดีที่สุดคือทำให้ไม่ต้องมี <code>Future</code> ตั้งแต่แรก</li><li>ถ้าเลี่ยงไม่ได้ ให้เก็บไว้ พร้อม <code>didUpdateWidget</code></li><li>กฎเดียวกันใช้กับ <code>StreamBuilder</code> และผลหนักกว่า</li><li>งานที่มีวงจรชีวิต ให้ store ถือ</li></ul></div><p><strong>บทหน้า:</strong> รูปกินหน่วยความจำมากกว่าที่คิด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,36 +1,96 @@
-<div class="note"><strong>หนึ่ง request หนึ่ง intent:</strong> fields อธิบายว่าไฟล์เป็นของ entity ใด ส่วน file คือ payload ทั้งสองส่วนต้องผ่าน authorization และ validation ร่วมกัน</div>
-<section><h2>1. Contract ของ Part image</h2><pre class="code-vs"><code>POST /api/upload/part-image
-Content-Type: multipart/form-data
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เพิ่มช่องข้อมูลแล้วดูว่า body เปลี่ยนอย่างไร</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.3, 7.13 (<code>Idempotency-Key</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ส่งข้อมูลประกอบไปกับไฟล์ และรู้ว่าอะไรควรอยู่ใน header กับอะไรควรอยู่ในช่อง</div>
 
-partId = P-1001
-file   = warehouse-part.jpg</code></pre><p>wmsapp ส่ง <code>fields: {'partId': partId}</code> และ file part ชื่อ <code>file</code> ถ้าฝั่ง .NET เปลี่ยนชื่อ parameter ต้อง version contract หรือแก้ client พร้อมกัน</p></section>
-<section><h2>2. ฝั่ง Flutter</h2><pre class="code-vs"><code>request.fields.addAll({
-  'partId': partId.trim(),
-  'uploadId': uploadId,
+<section><h2>1. ไฟล์อย่างเดียวไม่พอ</h2><p>เซิร์ฟเวอร์ที่ได้รับไฟล์รูปมาเปล่า ๆ ทำอะไรไม่ได้เลย มันต้องรู้ว่า</p><table><thead><tr><th>คำถาม</th><th>ตอบด้วย</th></tr></thead><tbody>
+<tr><td>รูปนี้ของสินค้าตัวไหน</td><td>ช่อง <code>partId</code></td></tr>
+<tr><td>ใครถ่าย</td><td>token ใน header</td></tr>
+<tr><td>ถ่ายจากเครื่องไหน</td><td>ช่อง <code>station</code></td></tr>
+<tr><td>เป็นคำสั่งเดิมที่ส่งซ้ำหรือคำสั่งใหม่</td><td><code>Idempotency-Key</code> ใน header</td></tr>
+</tbody></table><p>สองแถวบนอยู่ในช่อง สองแถวล่างอยู่ใน header และเส้นแบ่งนี้มีเหตุผล</p></section>
+
+<section><h2>2. ช่องหรือ header</h2><table><thead><tr><th>ใส่ใน header เมื่อ</th><th>ใส่ในช่องเมื่อ</th></tr></thead><tbody>
+<tr><td>เป็นเรื่องของ<strong>คำขอ</strong> ไม่ใช่เรื่องของข้อมูล</td><td>เป็นเรื่องของ<strong>ข้อมูล</strong>ที่จะถูกบันทึก</td></tr>
+<tr><td>ใช้เหมือนกันทุก endpoint</td><td>ต่างกันตาม endpoint</td></tr>
+<tr><td>ตัวกลางในเครือข่ายอาจต้องอ่าน</td><td>เฉพาะแอปปลายทางเท่านั้นที่สนใจ</td></tr>
+<tr><td>ตัวอย่าง: token, รหัสคำสั่ง, ภาษา</td><td>ตัวอย่าง: รหัสสินค้า จำนวน หมายเหตุ</td></tr>
+</tbody></table><pre class="code-vs"><code>..headers.addAll({
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+  // ส่งซ้ำเพราะเน็ตหลุด ต้องไม่ได้รูปสองใบ (7.13)
+  'Idempotency-Key': commandId,
+})
+..fields.addAll(fields)      // partId, station, note</code></pre><div class="note">ข้อควรระวังของ header — <strong>ค่าต้องเป็น ASCII เท่านั้น</strong> ถ้าใส่ข้อความไทยลงไปจะได้ข้อผิดพลาดตอนส่ง หมายเหตุที่ผู้ใช้พิมพ์จึงต้องอยู่ในช่องเสมอ</div></section>
+
+<section><h2>3. รหัสคำสั่งกับการอัปโหลด</h2><p>7.13 อธิบายว่าคำสั่งที่ไม่รู้ผลต้องมีรหัสกำกับ การอัปโหลดเป็นกรณีที่ชัดเจนที่สุด</p><pre class="code-vs"><code>ผู้ใช้กดส่ง → ส่งไป 80% → เน็ตหลุด
+  → ไม่รู้ว่าเซิร์ฟเวอร์ได้ครบหรือยัง
+    → กดส่งซ้ำ
+      → ถ้าไม่มีรหัส เซิร์ฟเวอร์อาจเก็บรูปสองใบ</code></pre><p>รูปซ้ำไม่ได้ทำให้ข้อมูลผิด แต่ทำให้พื้นที่เก็บโตเรื่อย ๆ และทำให้หน้าจอที่แสดงรูปของสินค้ามีรูปเดียวกันซ้อนกันหลายใบ</p><p>กฎที่สำคัญที่สุดคือ <strong>รหัสต้องเป็นของรอบนั้น ไม่ใช่ของครั้งนั้น</strong></p><pre class="code-vs"><code>/// รหัสคำสั่งของรอบนี้ สร้างครั้งเดียวตอนเลือกรูป
+///
+/// **ไม่สร้างใหม่ตอนลองใหม่** — การส่งซ้ำไฟล์เดิมต้องใช้รหัสเดิม
+/// ไม่งั้นเซิร์ฟเวอร์จะเก็บรูปสองใบ
+String? _commandId;</code></pre><pre class="code-vs"><code>test('ส่งซ้ำหลังล้มเหลว ต้องใช้รหัสคำสั่งเดิม', () async {
+  await store.pick(PickSource.camera);
+  await store.upload(path: '/upload');       // ล้มเหลว
+  await store.upload(path: '/upload');       // ลองใหม่
+
+  // รหัสเดิมทั้งสองครั้ง ไม่งั้นเซิร์ฟเวอร์จะเก็บรูปสองใบ
+  expect(commandIds[0], commandIds[1]);
 });
-request.files.add(await http.MultipartFile.fromPath(
-  'file', image.path, filename: image.name,
-));</code></pre><p>แปลงค่าที่ไม่ใช่ string อย่าง timestamp/number ให้เป็นรูปแบบ invariant ที่ตกลงกัน ไม่ส่ง JSON string ซ้อนใน field ถ้า model ซับซ้อนโดยไม่มี schema ชัดเจน</p></section>
-<section><h2>3. Binding ใน Minimal API</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
-    HttpRequest request,
-    CancellationToken ct) =&gt; {
-  var form = await request.ReadFormAsync(ct);
-  string partId = form["partId"].ToString();
-  IFormFile? file = form.Files.GetFile("file");
-  // validate + authorize + save
-});</code></pre></section>
-<section><h2>4. Binding model</h2><pre class="code-vs"><code>public sealed class PartImageForm {
-  public required string PartId { get; init; }
-  public required IFormFile File { get; init; }
-}
 
-// Controller: ([FromForm] PartImageForm form, CancellationToken ct)</code></pre><p>เลือก style ให้เข้ากับ backend แต่ต้องทดสอบชื่อ fields แบบ case/format ที่ client ส่งจริง</p></section>
-<section><h2>5. Validation แบบ atomic</h2><p>ตรวจ partId ว่ามีจริงและผู้ใช้มีสิทธิ์, ตรวจ file, บันทึกไฟล์ แล้วอัปเดต metadata ในลำดับที่ recover ได้ หากบันทึก DB ล้มหลังเขียน disk ต้องลบ orphan หรือมี cleanup job; ถ้าเก็บ object storage ควรใช้ staging key แล้ว promote</p></section>
-<section><h2>6. หลายไฟล์</h2><p>ถ้ารองรับหลายภาพ ให้ตกลงชื่อ <code>files</code> ซ้ำหลาย part และจำกัดทั้งจำนวนไฟล์, ขนาดต่อไฟล์ และขนาดรวม อย่าส่ง request ใหญ่มหาศาลเพราะผู้ใช้อาจเสีย network ทั้งก้อนเมื่อไฟล์เดียวผิด</p></section>
-<section><h2>7. Error ที่ actionable</h2><pre class="code-vs"><code>{
-  "type": ".../invalid-upload",
-  "title": "Image rejected",
-  "status": 400,
-  "errors": { "file": ["Maximum size is 5 MB"] }
-}</code></pre><p>UI map field error มาที่ preview/ปุ่มเลือกใหม่ ส่วน 401/403 ต้องแยกจาก validation และ 409 ใช้เมื่อ state ของ part ขัดแย้ง</p></section>
-<section><h2>8. แบบฝึกหัด</h2><p>หาก part ถูกลบหลังผู้ใช้เลือกรูปแต่ก่อนอัปโหลด server ควรตอบอะไร?</p><details><summary>แนวคำตอบ</summary><p>ตอบ 404 หากไม่เปิดเผย entity หรือ 409 หาก client รู้จัก part อยู่แล้ว พร้อมไม่เก็บไฟล์ orphan และให้ UI refresh รายการ</p></details></section>
+test('เลือกรูปใหม่ ต้องได้รหัสคำสั่งใหม่', () async {
+  ...
+  expect(commandIds[0], isNot(commandIds[1]));
+});</code></pre><p>สองเทสต์นี้ต้องมีคู่กัน — ข้อแรกอย่างเดียวจะผ่านได้ด้วยการใช้รหัสคงที่ตลอดกาล ซึ่งจะทำให้รูปใบที่สองไม่ถูกเก็บเลย</p></section>
+
+<section><h2>4. ค่าที่ควรส่งไปด้วยเสมอ</h2><table><thead><tr><th>ค่า</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>รหัสของสิ่งที่รูปนี้เกี่ยวข้อง</td><td>ไม่มีก็เก็บไม่ได้</td></tr>
+<tr><td>เวลาที่ถ่าย</td><td>เวลาที่เซิร์ฟเวอร์ได้รับอาจช้ากว่าหลายชั่วโมงถ้าเก็บไว้ส่งทีหลัง</td></tr>
+<tr><td>รหัสเครื่องหรือชื่อสถานี</td><td>ตามหาต้นตอเมื่อรูปมีปัญหา</td></tr>
+<tr><td>ชนิดของรูป</td><td>“หลักฐานความเสียหาย” ต่างจาก “รูปประกอบสินค้า”</td></tr>
+</tbody></table><p>แถวที่สองสำคัญและมักถูกลืม — ถ้าไม่ส่งเวลาที่ถ่ายไปด้วย เซิร์ฟเวอร์จะบันทึกเวลาที่ได้รับ ซึ่งผิดทันทีที่มีฟีเจอร์เก็บไว้ส่งทีหลัง (Part 29)</p><pre class="code-vs"><code>fields: {
+  'partId': part.id,
+  'station': settings.stationName,
+  'capturedAt': capturedAt.toUtc().toIso8601String(),   // UTC เสมอ (6.9)
+  'kind': 'damage',
+},</code></pre></section>
+
+<section><h2>5. ชื่อไฟล์ก็เป็นข้อมูลที่ส่งไป</h2><pre class="code-vs"><code>http.MultipartFile.fromBytes(
+  'file',
+  image.bytes,
+  filename: safeFileName(image.fileName, extension: image.extension),
+)</code></pre><p>ชื่อไฟล์ที่ได้จากอุปกรณ์<strong>เชื่อไม่ได้</strong> และ 13.9 จะพูดถึงเหตุผลเต็ม ๆ ตอนนี้แค่รู้ว่าต้องทำให้ปลอดภัยก่อนส่ง</p><pre class="code-vs"><code>test('ชื่อไฟล์ที่ส่งไปถูกทำให้ปลอดภัยแล้ว', () async {
+  await client.uploadImage(
+    path: '/upload',
+    image: image(fileName: '../../evil.jpg'),
+    commandId: 'cmd-1',
+  );
+
+  expect(body, isNot(contains('..')));
+  expect(body, contains('evil.jpg'));
+});</code></pre><p>อีกทางที่ปลอดภัยกว่าคือ<strong>ไม่ส่งชื่อเดิมเลย</strong> แล้วตั้งชื่อจากข้อมูลที่เรารู้แน่</p><pre class="code-vs"><code>filename: '${part.id}-$commandId.${image.extension}',</code></pre><table><thead><tr><th>ส่งชื่อเดิม</th><th>ตั้งชื่อใหม่</th></tr></thead><tbody>
+<tr><td>ผู้ใช้จำได้ว่าไฟล์ไหนคือไฟล์ไหน</td><td>ชื่อสื่อความหมายกับระบบมากกว่า</td></tr>
+<tr><td>ต้องทำให้ปลอดภัยก่อน</td><td>ปลอดภัยโดยธรรมชาติ</td></tr>
+</tbody></table><p>สำหรับรูปที่ถ่ายจากกล้อง ชื่อเดิมคือ <code>IMG_0001.jpg</code> ซึ่งไม่มีความหมายอยู่แล้ว การตั้งชื่อใหม่จึงชนะชัดเจน — ส่วนไฟล์ที่ผู้ใช้เลือกจากเอกสารที่ตั้งชื่อเอง เก็บชื่อเดิมไว้มีประโยชน์</p></section>
+
+<section><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ส่งไม่ได้เมื่อหมายเหตุเป็นภาษาไทย</td><td>ใส่ค่าไทยใน header</td><td>ย้ายไปเป็นช่อง</td></tr>
+<tr><td>ได้รูปซ้ำในระบบ</td><td>สร้างรหัสคำสั่งใหม่ทุกครั้งที่กดส่ง</td><td>สร้างตอนเลือกรูป ไม่ใช่ตอนส่ง</td></tr>
+<tr><td>รูปใบที่สองไม่ถูกเก็บ</td><td>ใช้รหัสคงที่</td><td>สร้างใหม่เมื่อเลือกรูปใหม่</td></tr>
+<tr><td>เวลาในระบบผิด</td><td>ใช้เวลาที่เซิร์ฟเวอร์ได้รับ</td><td>ส่งเวลาที่ถ่ายไปด้วย</td></tr>
+<tr><td>เซิร์ฟเวอร์บอกว่าขาดช่อง</td><td>สะกดชื่อช่องไม่ตรง</td><td>เขียนเทสต์ตรวจ body</td></tr>
+</tbody></table></section>
+
+<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ถ่ายรูปตอนอยู่ในห้องเย็นที่ไม่มีสัญญาณ แล้วเดินออกมาส่งข้างนอกสิบนาทีต่อมา</p><ol><li>ข้อมูลอะไรที่จะผิดถ้าไม่ระวัง</li><li>ต้องส่งอะไรเพิ่ม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สามอย่าง</p><table><thead><tr><th>ข้อมูล</th><th>ถ้าไม่ระวังจะเป็น</th><th>ที่ถูกคือ</th></tr></thead><tbody>
+<tr><td>เวลา</td><td>เวลาที่เซิร์ฟเวอร์ได้รับ</td><td>เวลาที่กดถ่าย</td></tr>
+<tr><td>ตำแหน่ง</td><td>ที่ที่ยืนตอนส่ง</td><td>ที่ที่ถ่าย</td></tr>
+<tr><td>ผู้ถ่าย</td><td>คนที่ล็อกอินอยู่ตอนส่ง</td><td>คนที่ถ่าย</td></tr>
+</tbody></table><p>แถวสุดท้ายเกิดจริงบน PDA ที่เปลี่ยนมือทุกกะ — ถ่ายไว้ตอนกะเช้า ส่งตอนกะบ่ายที่เป็นคนละคน แล้วรูปจะถูกบันทึกว่าเป็นของคนที่ไม่ได้ถ่าย ซึ่งเป็นปัญหาทันทีถ้ารูปนั้นเป็นหลักฐานประกอบการเคลม</p><p><strong>2.</strong> ส่งบริบทของ<strong>ตอนถ่าย</strong>ไปด้วย ไม่ใช่ให้เซิร์ฟเวอร์เดาจากตอนได้รับ</p><pre class="code-vs"><code>fields: {
+  'partId': part.id,
+  'capturedAt': capturedAt.toUtc().toIso8601String(),
+  'capturedBy': capturedByUsername,     // เก็บไว้ตอนถ่าย ไม่ใช่อ่านตอนส่ง
+  'station': stationAtCapture,
+},</code></pre><p>แต่มีเรื่องที่ต้องคิดต่อ — <strong>ข้อมูลที่แอปส่งมา เซิร์ฟเวอร์เชื่อได้แค่ไหน</strong></p><table><thead><tr><th>ค่า</th><th>เซิร์ฟเวอร์ควรเชื่อไหม</th></tr></thead><tbody>
+<tr><td><code>capturedAt</code></td><td>เชื่อได้พอสมควร แต่ควรบันทึกเวลาที่ได้รับไว้คู่กัน เพราะนาฬิกาเครื่องอาจเพี้ยน (8.3)</td></tr>
+<tr><td><code>capturedBy</code></td><td><strong>ไม่ควรเชื่อเป็นตัวยืนยันตัวตน</strong> — ใครก็ส่งชื่อใครก็ได้ ให้ถือเป็นข้อมูลประกอบ ส่วนตัวตนจริงมาจาก token (8.9)</td></tr>
+</tbody></table><p>ทางที่ถูกคือเก็บทั้งสองอย่าง — สิ่งที่แอปอ้าง กับสิ่งที่เซิร์ฟเวอร์รู้ — แล้วถ้าไม่ตรงกัน ให้บันทึกไว้ให้คนตรวจสอบได้ ไม่ใช่ทิ้งอย่างใดอย่างหนึ่ง</p><p>ซึ่งเป็นหลักเดียวกับที่ 13.9 จะสรุปเรื่องการตรวจ — <strong>ฝั่งแอปตรวจเพื่อความสะดวก เซิร์ฟเวอร์ตรวจเพื่อความจริง</strong></p></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li>header สำหรับเรื่องของคำขอ ช่องสำหรับเรื่องของข้อมูล</li><li>header รับ ASCII เท่านั้น ข้อความไทยต้องอยู่ในช่อง</li><li>รหัสคำสั่งสร้างตอนเลือกรูป และใช้เดิมตลอดการลองใหม่</li><li>ส่งเวลาที่ถ่ายไปด้วย ไม่ใช่ให้เซิร์ฟเวอร์ใช้เวลาที่ได้รับ</li><li>ตั้งชื่อไฟล์ใหม่จากข้อมูลที่เรารู้แน่ ปลอดภัยกว่าส่งชื่อเดิม</li></ul></div><p><strong>บทหน้า:</strong> เซิร์ฟเวอร์ตอบที่อยู่ไฟล์กลับมา แล้วเราเก็บอย่างไร</p></section>

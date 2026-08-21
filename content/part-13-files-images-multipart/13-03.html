@@ -1,25 +1,113 @@
-<div class="note"><strong>Multipart ไม่ใช่ JSON:</strong> request มี boundary แบ่งแต่ละ part ซึ่ง client library ต้องเป็นผู้สร้าง ห้ามกำหนด <code>Content-Type: multipart/form-data</code> เองโดยไม่มี boundary</div>
-<section><h2>1. โครงสร้าง request</h2><p><code>multipart/form-data</code> รวม text fields และ binary file ใน HTTP request เดียว แต่ละ part มีชื่อ เช่น <code>partId</code> และ <code>file</code> ชื่อเหล่านี้คือ API contract และต้องตรงกับ parameter ฝั่ง .NET</p></section>
-<section><h2>2. MultipartRequest ใน wmsapp</h2><pre class="code-vs"><code>final request = http.MultipartRequest('POST', uri);
-request.fields.addAll(fields);
-request.files.add(
-  await http.MultipartFile.fromPath('file', file.path),
-);
-final streamed = await request.send()
-    .timeout(const Duration(seconds: 30));</code></pre></section>
-<section><h2>3. Header ที่ควรเพิ่ม</h2><p>เพิ่ม <code>Authorization: Bearer ...</code>, correlation ID และ accept header ผ่าน <code>request.headers</code> แต่ปล่อยให้ <code>MultipartRequest</code> สร้าง content type/boundary ห้าม log token, raw bytes หรือ path ส่วนตัวของผู้ใช้</p></section>
-<section><h2>4. ระบุ filename และ media type</h2><pre class="code-vs"><code>final part = http.MultipartFile.fromBytes(
-  'file',
-  bytes,
-  filename: safeDisplayName,
-  contentType: MediaType('image', 'jpeg'),
-);
-request.files.add(part);</code></pre><p>media type จาก client เป็น hint เท่านั้น server ยังต้องตรวจ signature จริง และไม่ใช้ filename นี้เป็นชื่อไฟล์บน disk</p></section>
-<section><h2>5. send คืน streamed response</h2><pre class="code-vs"><code>final streamed = await request.send();
-final response = await http.Response.fromStream(streamed);
-if (response.statusCode &lt; 200 || response.statusCode &gt;= 300) {
-  throw UploadException.fromResponse(response);
-}</code></pre><p>ต้อง consume response body เพื่อคืน connection ให้ pool และแปล ProblemDetails เป็น error ที่ UI เข้าใจได้</p></section>
-<section><h2>6. Retry อย่างระวัง</h2><p>upload POST อาจสำเร็จที่ server แต่ response ขาดระหว่างทาง การ retry แบบทันทีจึงสร้างไฟล์ซ้ำได้ ส่ง <code>Idempotency-Key</code>/<code>uploadId</code> และให้ server คืนผลเดิมเมื่อ key ซ้ำ หรือทำ endpoint แบบ replace ต่อ part ที่ชัดเจน</p></section>
-<section><h2>7. Client lifetime</h2><p>inject <code>http.Client</code> เพื่อ reuse connection และทดสอบได้ อย่าสร้าง client ใหม่ทุก upload โดยไม่ close ใน production ส่วนการยกเลิกต้องปิด request/subscription เฉพาะงาน ไม่ควรปิด shared client แล้วทำให้ request อื่นล้ม</p></section>
-<section><h2>8. Contract test</h2><div class="success">ยืนยัน method/path, header auth, field name, file part name, filename, content type, status 2xx, ProblemDetails และ duplicate upload ID โดยไม่ assert boundary string ที่ library สุ่มขึ้นมา</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน body ของ multipart จริงในเทสต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.2, Part 7 (HTTP)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ส่งไฟล์ด้วย multipart ให้ถูก และรู้ว่าอะไรที่ห้ามแตะ</div>
+
+<section><h2>1. ทำไมไฟล์ส่งเป็น JSON ไม่ได้</h2><p>คำขอ JSON ที่ใช้มาทั้งคอร์ส เป็นข้อความล้วน</p><pre class="code-vs"><code>Content-Type: application/json
+
+{"partId": "P-100", "quantity": 5}</code></pre><p>แต่ไฟล์รูปเป็นไบต์ดิบที่ไม่ใช่ข้อความ ทางเลือกมีสองทาง</p><table><thead><tr><th>ทาง</th><th>วิธี</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>แปลงเป็นข้อความ (base64)</td><td>ใส่ในฟิลด์ JSON ธรรมดา</td><td>ขนาดโตขึ้น 33% และต้องอ่านทั้งไฟล์เข้าหน่วยความจำสองรอบ</td></tr>
+<tr><td><strong>multipart</strong></td><td>ส่งไบต์ดิบพร้อมข้อมูลอื่นในคำขอเดียว</td><td>โครงคำขอซับซ้อนกว่า</td></tr>
+</tbody></table><div class="note">base64 ใช้ได้กับไฟล์เล็กมาก เช่นลายเซ็นที่วาดบนหน้าจอ แต่กับรูปถ่าย การโตขึ้นหนึ่งในสามแปลว่ารูป 300 KB กลายเป็น 400 KB ซึ่งเสียเปล่าทุกครั้ง</div></section>
+
+<section><h2>2. multipart หน้าตาเป็นอย่างไร</h2><pre class="code-vs"><code>POST /api/WMS/mobile_upload HTTP/1.1
+Content-Type: multipart/form-data; boundary=dart-http-boundary-Xk7Qm
+
+--dart-http-boundary-Xk7Qm
+content-disposition: form-data; name="partId"
+
+P-100
+--dart-http-boundary-Xk7Qm
+content-disposition: form-data; name="station"
+
+PDA
+--dart-http-boundary-Xk7Qm
+content-disposition: form-data; name="file"; filename="IMG_0001.jpg"
+content-type: application/octet-stream
+
+...ไบต์ดิบของรูป...
+--dart-http-boundary-Xk7Qm--</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>boundary</code></td><td>ข้อความสุ่มที่ใช้คั่นแต่ละส่วน ต้องไม่ปรากฏในเนื้อข้อมูลเลย</td></tr>
+<tr><td><code>name="partId"</code></td><td>ชื่อช่องที่ฝั่งเซิร์ฟเวอร์ใช้อ่าน</td></tr>
+<tr><td><code>filename="..."</code></td><td>บอกว่าส่วนนี้เป็นไฟล์ ไม่ใช่ค่าข้อความ</td></tr>
+<tr><td>บรรทัดว่าง</td><td>คั่นระหว่างส่วนหัวกับเนื้อหา</td></tr>
+<tr><td><code>--boundary--</code> ปิดท้าย</td><td>บอกว่าจบแล้ว ขาดไม่ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. กฎเหล็กข้อเดียว</h2><div class="note"><strong>ห้ามตั้ง <code>Content-Type</code> เอง</strong></div><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+request.headers['Content-Type'] = 'multipart/form-data';   // ← ไม่มี boundary</code></pre><p>ถ้าตั้งเอง จะทับ boundary ที่ <code>MultipartRequest</code> สุ่มมา แล้วเซิร์ฟเวอร์จะแยกส่วนไม่ออก ผลคือ 400 ที่บอกว่า “ไม่พบไฟล์” ทั้งที่เราส่งไปแล้ว</p><pre class="code-vs"><code>..headers.addAll({
+  // ห้ามตั้ง Content-Type เอง — MultipartRequest ต้องใส่ boundary
+  // ที่มันสุ่มมาเอง ถ้าเราทับ เซิร์ฟเวอร์จะแยกส่วนของไฟล์ไม่ออก
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+  'Idempotency-Key': commandId,
+})</code></pre><p>กับดักนี้เกิดง่ายเมื่อคัดลอกโค้ดตั้ง header มาจากคำขอ JSON ปกติ ซึ่งมี <code>Content-Type: application/json</code> อยู่แล้ว</p><pre class="code-vs"><code>test('ส่งเป็น multipart พร้อมช่องและไฟล์', () async {
+  ...
+  // boundary ถูกสร้างโดย MultipartRequest ห้ามตั้ง Content-Type เอง
+  expect(contentType, contains('multipart/form-data'));
+  expect(contentType, contains('boundary='));
+});</code></pre></section>
+
+<section><h2>4. โค้ดที่ส่งจริง</h2><pre class="code-vs"><code>final request = http.MultipartRequest('POST', Uri.parse('$baseUrl$path'))
+  ..headers.addAll({ ... })
+  ..fields.addAll(fields)
+  ..files.add(
+    http.MultipartFile.fromBytes(
+      'file',
+      image.bytes,
+      filename: safeFileName(image.fileName, extension: image.extension),
+    ),
+  );
+
+final streamed = await _client.send(request);
+final response = await http.Response.fromStream(streamed);</code></pre><table><thead><tr><th>บรรทัด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>send()</code> ไม่ใช่ <code>post()</code></td><td><code>MultipartRequest</code> เป็น <code>BaseRequest</code> ไม่ใช่ <code>Request</code> ธรรมดา</td></tr>
+<tr><td>ได้ <code>StreamedResponse</code></td><td>คำตอบมาเป็น stream ต้องรวบเป็น <code>Response</code> ก่อนอ่าน</td></tr>
+<tr><td><code>fromBytes</code> ไม่ใช่ <code>fromPath</code></td><td>ทำงานได้ทุกแพลตฟอร์ม (13.2)</td></tr>
+</tbody></table><p>โค้ดจริงของ <code>wmsapp</code> ใช้ <code>fromPath</code> ซึ่งเป็นทางที่สั้นกว่าถ้าลงเฉพาะมือถือ</p><pre class="code-vs"><code>request.files.add(await http.MultipartFile.fromPath('file', file.path));</code></pre><p>สังเกต <code>await</code> — <code>fromPath</code> ต้องอ่านขนาดไฟล์ก่อน จึงเป็น async ส่วน <code>fromBytes</code> รู้ขนาดอยู่แล้วจึงไม่ต้อง</p></section>
+
+<section><h2>5. อ่าน multipart ในเทสต์</h2><p>ตอนเขียนเทสต์แรกจะเจอข้อผิดพลาดนี้</p><pre class="code-vs"><code>FormatException: Invalid UTF-8 byte (at offset 445)</code></pre><p>เพราะ <code>request.body</code> พยายามถอดรหัสทั้งก้อนเป็น UTF-8 แต่ในนั้นมีไบต์ดิบของรูปปนอยู่ ซึ่งไม่ใช่ข้อความ</p><pre class="code-vs"><code>/// อ่าน body ของ multipart เป็นข้อความ
+///
+/// ใช้ latin1 ไม่ใช่ utf8 เพราะ body มีไบต์ดิบของรูปปนอยู่ ซึ่งไม่ใช่ UTF-8
+/// ที่ถูกต้อง — `request.body` จะโยน FormatException ทันที
+/// latin1 แปลงทีละไบต์เป็นตัวอักษร จึงค้นข้อความ ASCII ในนั้นได้
+String multipartText(http.Request request) =&gt; latin1.decode(request.bodyBytes);</code></pre><p>latin1 แปลงทุกไบต์ตั้งแต่ 0 ถึง 255 เป็นตัวอักษรได้เสมอ จึงไม่มีทางโยน — เหมาะกับการค้นหาข้อความ ASCII ในก้อนที่มีไบต์ดิบปน</p><pre class="code-vs"><code>expect(body, contains('name="partId"'));
+expect(body, contains('P-100'));
+expect(body, contains('name="file"'));
+expect(body, contains('filename='));</code></pre><div class="note">เทสต์แบบนี้มีค่ามาก เพราะมันตรวจสิ่งที่<strong>เซิร์ฟเวอร์จะเห็นจริง</strong> ไม่ใช่แค่ว่าโค้ดของเราไม่โยน — และจับกรณีที่ชื่อช่องผิดได้ก่อนถึงมือใคร</div></section>
+
+<section><h2>6. ฝั่ง .NET รับอย่างไร</h2><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+[HttpPost("mobile_upload")]
+public async Task&lt;IActionResult&gt; Upload(
+    [FromForm] string partId,
+    [FromForm] IFormFile file)
+{
+    ...
+    return Ok(new { url = $"/uploads/{savedName}" });
+}</code></pre><table><thead><tr><th>ฝั่งแอป</th><th>ฝั่ง .NET</th></tr></thead><tbody>
+<tr><td><code>fields['partId']</code></td><td><code>[FromForm] string partId</code></td></tr>
+<tr><td><code>MultipartFile('file', ...)</code></td><td><code>[FromForm] IFormFile file</code></td></tr>
+</tbody></table><p><strong>ชื่อต้องตรงกันเป๊ะ ๆ รวมถึงตัวพิมพ์ใหญ่เล็ก</strong> — และนี่คือสิ่งที่ต้องตกลงกันก่อนเขียน เหมือนกับสัญญาของ hub ใน 12.2</p><pre class="code-vs"><code>// ชื่อช่องต้องตรงกับที่ฝั่ง .NET ตั้งไว้เป๊ะ ๆ ไม่งั้นจะได้
+// 400 ที่บอกแค่ว่า "file is required" โดยที่เราส่งไฟล์ไปแล้ว
+'file',</code></pre><p>อีกเรื่องที่ต้องถามฝั่งเซิร์ฟเวอร์คือ <strong>ขนาดสูงสุดที่รับได้</strong> เพราะ ASP.NET มีค่าจำกัดของตัวเองที่ปริยายอยู่ที่ราว 28 MB และ reverse proxy ข้างหน้าอาจตั้งต่ำกว่านั้นอีก</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>400 บอกว่าไม่พบไฟล์ ทั้งที่ส่งไปแล้ว</td><td>ตั้ง <code>Content-Type</code> เองทับ boundary</td><td>อย่าตั้ง</td></tr>
+<tr><td>เซิร์ฟเวอร์อ่านช่องไม่เจอ</td><td>ชื่อช่องไม่ตรง</td><td>ตกลงชื่อกับฝั่ง .NET แล้วเขียนเทสต์คุมไว้</td></tr>
+<tr><td>เทสต์โยน <code>Invalid UTF-8 byte</code></td><td>อ่าน <code>request.body</code></td><td>ใช้ latin1 กับ <code>bodyBytes</code></td></tr>
+<tr><td>413 Payload Too Large</td><td>เกินขีดของเซิร์ฟเวอร์หรือ proxy</td><td>ย่อรูป และถามขีดจริงจากทีมหลังบ้าน</td></tr>
+<tr><td>อัปโหลดสำเร็จแต่ไฟล์เสีย</td><td>ส่งไบต์ที่ถูกแปลงเป็นข้อความไปแล้ว</td><td>ส่ง <code>Uint8List</code> ตรง ๆ อย่าแปลง</td></tr>
+<tr><td>ใช้ <code>post()</code> แล้วคอมไพล์ไม่ผ่าน</td><td><code>MultipartRequest</code> ต้องใช้ <code>send()</code></td><td>เปลี่ยนเป็น <code>send()</code></td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมหลังบ้านจะทำ endpoint ใหม่ที่รับรูปได้หลายใบพร้อมกัน สำหรับการรับของที่ต้องถ่ายหลายมุม</p><ol><li>ฝั่งแอปต้องเปลี่ยนอะไร</li><li>ควรส่งหลายใบในคำขอเดียว หรือส่งทีละใบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> multipart รองรับหลายไฟล์อยู่แล้ว เพิ่มเข้า <code>files</code> หลายตัวได้</p><pre class="code-vs"><code>for (final image in images) {
+  request.files.add(http.MultipartFile.fromBytes(
+    'files',                     // ชื่อเดียวกันทุกใบ
+    image.bytes,
+    filename: safeFileName(image.fileName, extension: image.extension),
+  ));
+}</code></pre><p>ฝั่ง .NET รับด้วย <code>[FromForm] List&lt;IFormFile&gt; files</code> — สังเกตว่าชื่อช่องเป็นพหูพจน์และซ้ำกันทุกใบ ซึ่งเป็นข้อตกลงที่ต้องคุยกันให้ชัด เพราะบางระบบคาดหวัง <code>files[0]</code>, <code>files[1]</code> แทน</p><p><strong>2.</strong> เทียบสองทาง</p><table><thead><tr><th> </th><th>คำขอเดียวหลายใบ</th><th>ทีละใบ</th></tr></thead><tbody>
+<tr><td>ล้มเหลวกลางทาง</td><td>เสียทั้งชุด ต้องส่งใหม่หมด</td><td>เสียเฉพาะใบนั้น</td></tr>
+<tr><td>ความคืบหน้า</td><td>บอกได้แค่รวม</td><td>บอกได้ว่าใบไหนเสร็จแล้ว</td></tr>
+<tr><td>จำนวนคำขอ</td><td>หนึ่ง</td><td>เท่าจำนวนใบ</td></tr>
+<tr><td>ความสอดคล้องฝั่งเซิร์ฟเวอร์</td><td>บันทึกพร้อมกันได้ในธุรกรรมเดียว</td><td>อาจได้บางใบ ต้องมีวิธีจัดการ</td></tr>
+</tbody></table><p><strong>บน PDA ในคลัง ทีละใบชนะ</strong> เพราะแถวแรกคือสิ่งที่เกิดบ่อยที่สุด — เน็ตหลุดกลางทางแล้วต้องส่งรูปห้าใบใหม่ทั้งหมด เสียเวลาและเสียใจ ส่วนการส่งทีละใบ ใบที่ผ่านไปแล้วก็ผ่านเลย</p><p>ที่ต้องจัดการเพิ่มคือแถวสุดท้าย — ถ้าส่งได้สามจากห้าใบแล้วผู้ใช้ปิดแอป เซิร์ฟเวอร์จะมีรูปสามใบที่ไม่ครบชุด ทางแก้คือให้ทุกใบผูกกับรหัสการรับของเดียวกัน แล้วให้ฝั่งเซิร์ฟเวอร์ถือว่าชุดนั้นสมบูรณ์เมื่อผู้ใช้กดยืนยันการรับ ไม่ใช่เมื่อรูปครบ</p><p>ซึ่งกลับไปที่หลักใน 13.1 — <strong>อย่าให้รูปบล็อกงานหลัก</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>multipart ส่งไบต์ดิบพร้อมข้อมูลอื่นในคำขอเดียว โดยไม่โตขึ้นเหมือน base64</li><li>ห้ามตั้ง <code>Content-Type</code> เอง เพราะจะทับ boundary</li><li>ใช้ <code>send()</code> ไม่ใช่ <code>post()</code></li><li>ชื่อช่องต้องตรงกับฝั่ง .NET เป๊ะ ๆ</li><li>เทสต์อ่าน body ด้วย latin1 เพื่อตรวจสิ่งที่เซิร์ฟเวอร์จะเห็นจริง</li><li>หลายใบให้ส่งทีละใบ เพราะเน็ตหลุดกลางทางเป็นเรื่องปกติ</li></ul></div><p><strong>บทหน้า:</strong> ข้อมูลอื่นที่ต้องส่งไปกับไฟล์</p></section>

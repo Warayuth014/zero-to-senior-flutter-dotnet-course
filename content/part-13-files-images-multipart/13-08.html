@@ -1,22 +1,133 @@
-<div class="note"><strong>Timeout ไม่ได้พิสูจน์ว่า upload ล้ม:</strong> server อาจบันทึกสำเร็จแล้วแต่ response กลับไม่ถึง client จึงต้องออกแบบ retry/idempotency และ reconcile ผลจาก server</div>
-<section><h2>1. State ของ upload</h2><pre class="code-vs"><code>sealed class UploadState {}
-class UploadIdle extends UploadState {}
-class UploadRunning extends UploadState { final double? progress; }
-class UploadSucceeded extends UploadState { final PartImage image; }
-class UploadFailed extends UploadState { final UploadFailure failure; }</code></pre><p>progress เป็น null ได้เมื่อ content length ไม่ทราบ และ failure ควรแยก cancelled, timeout, offline, rejected, unauthorized และ server error</p></section>
-<section><h2>2. Timeout เป็นหลายช่วง</h2><p>connect timeout, send timeout และ response timeout มีความหมายต่างกัน <code>request.send().timeout(30s)</code> ครอบเวลารอ future แต่ไม่ได้อธิบายผู้ใช้ว่า byte ถูกส่งไปเท่าไร ตั้งค่าตามขนาดสูงสุดและ network จริงของคลัง ไม่ใช้เลขเดียวกับ GET ทุกชนิด</p></section>
-<section><h2>3. นับ progress จาก stream</h2><pre class="code-vs"><code>Stream&lt;List&lt;int&gt;&gt; countBytes(
-  Stream&lt;List&lt;int&gt;&gt; source, int total, void Function(double) onProgress,
-) async* {
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่านโค้ดที่นับไบต์แล้วรันเทสต์ความคืบหน้า</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.3, 7.10 (คำสั่งที่ไม่รู้ผล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แสดงความคืบหน้าของการอัปโหลด และจัดการความล้มเหลวโดยไม่ทำให้ได้ไฟล์ซ้ำ</div>
+
+<section><h2>1. ทำไมต้องมีความคืบหน้า</h2><p>คำขอ JSON ปกติเสร็จใน 200 มิลลิวินาที วงหมุนธรรมดาก็พอ แต่การอัปโหลดรูปบนเน็ตคลังใช้เวลา 3–30 วินาที</p><table><thead><tr><th>ไม่มีความคืบหน้า</th><th>มี</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ไม่รู้ว่าค้างหรือกำลังทำงาน</td><td>เห็นว่าขยับ</td></tr>
+<tr><td>กดซ้ำเพราะคิดว่าไม่ติด</td><td>รอ</td></tr>
+<tr><td>ปิดแอปกลางคัน</td><td>รู้ว่าเหลืออีกนิดเดียว</td></tr>
+</tbody></table><div class="note">แถวที่สองคือความเสียหายจริง — ผู้ใช้ที่กดซ้ำระหว่างที่ยังส่งอยู่ อาจได้รูปซ้ำถ้าไม่มีรหัสคำสั่ง (13.4) และเสียเน็ตไปเปล่าแน่นอน</div></section>
+
+<section><h2>2. <code>MultipartRequest</code> ไม่บอกความคืบหน้า</h2><p>ต้องนับเอง โดยห่อ stream ของคำขอไว้</p><pre class="code-vs"><code>/// `MultipartRequest` ไม่มีการรายงานความคืบหน้าให้ จึงต้องห่อ stream ของ
+/// ตัวมันเองแล้วนับไบต์ที่ไหลผ่าน
+Future&lt;http.StreamedResponse?&gt; _send(
+  http.MultipartRequest request, {
+  void Function(int sent, int total)? onProgress,
+  Future&lt;void&gt;? cancel,
+}) async {
+  final total = request.contentLength;
   var sent = 0;
-  await for (final chunk in source) {
-    sent += chunk.length;
-    onProgress(sent / total);
-    yield chunk;
+
+  final counted = request.finalize().transform(
+    StreamTransformer&lt;List&lt;int&gt;, List&lt;int&gt;&gt;.fromHandlers(
+      handleData: (chunk, sink) {
+        sent += chunk.length;
+        onProgress?.call(sent, total);
+        sink.add(chunk);        // ส่งต่อไปตามเดิม
+      },
+    ),
+  );
+  ...
+}</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>request.finalize()</code></td><td>ปิดคำขอแล้วคืน stream ของไบต์ที่จะส่ง</td></tr>
+<tr><td><code>request.contentLength</code></td><td>ขนาดรวม รู้ล่วงหน้าเพราะไฟล์อยู่ในหน่วยความจำแล้ว</td></tr>
+<tr><td><code>StreamTransformer</code></td><td>ให้เรานับได้ระหว่างที่ข้อมูลไหลผ่าน โดยไม่เปลี่ยนข้อมูล</td></tr>
+<tr><td><code>sink.add(chunk)</code></td><td><strong>ต้องส่งต่อ</strong> ไม่งั้นข้อมูลจะหายไปเฉย ๆ</td></tr>
+</tbody></table><div class="note"><code>finalize()</code> เรียกได้ครั้งเดียว — เรียกซ้ำจะได้ <code>StateError: Can't finalize a finalized Request</code> ซึ่งเป็นเหตุผลที่การลองใหม่ต้องสร้าง <code>MultipartRequest</code> ตัวใหม่ ไม่ใช่ส่งตัวเดิมซ้ำ</div></section>
+
+<section><h2>3. ความคืบหน้าที่บอกความจริงแค่ครึ่งเดียว</h2><p>สิ่งที่นับได้คือ “ไบต์ที่เขียนลง socket แล้ว” ซึ่งไม่เท่ากับ “เซิร์ฟเวอร์ได้รับแล้ว”</p><pre class="code-vs"><code>100% บนหน้าจอ  =  ส่งครบแล้ว
+                   ยังไม่รู้ว่าเซิร์ฟเวอร์รับครบไหม
+                   ยังไม่รู้ว่าเซิร์ฟเวอร์บันทึกสำเร็จไหม</code></pre><p>ผลคือหลังจากถึง 100% ผู้ใช้ยังต้องรออีกพักหนึ่งกว่าจะได้คำตอบ ซึ่งดูเหมือนค้าง</p><table><thead><tr><th>ทางแก้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>เปลี่ยนข้อความตอนถึง 100%</td><td>“กำลังบันทึก…” แทนที่จะแสดง 100% ค้างไว้</td></tr>
+<tr><td>ให้แถบเปลี่ยนเป็นแบบไม่มีที่สิ้นสุด</td><td>สื่อว่ายังทำงานอยู่แต่ไม่รู้ว่านานแค่ไหน</td></tr>
+<tr><td>หยุดที่ 95%</td><td><strong>อย่าทำ</strong> — เป็นการโกหก และผู้ใช้จะเรียนรู้ว่าตัวเลขเชื่อไม่ได้</td></tr>
+</tbody></table><pre class="code-vs"><code>Text(
+  store.progress == 1.0
+      ? 'กำลังบันทึกที่เซิร์ฟเวอร์…'
+      : 'กำลังส่ง ${(store.progress! * 100).round()}%',
+)</code></pre></section>
+
+<section><h2>4. ยกเลิกระหว่างส่ง</h2><pre class="code-vs"><code>handleData: (chunk, sink) {
+  if (cancelled) {
+    sink.close();      // ปิด stream กลางคัน คำขอจะจบลง
+    return;
   }
-}</code></pre><p>HTTP package พื้นฐานอาจต้องสร้าง streamed request/adapter เพื่อเห็น upload progress เลือก library ตามความจำเป็นและห่อไว้หลัง interface</p></section>
-<section><h2>4. Throttle UI update</h2><p>อย่า <code>notifyListeners()</code> ทุก chunk; อัปเดตเมื่อเพิ่มอย่างน้อย 1% หรือทุก 100–200 ms ลด rebuild และให้ screen subscribe เฉพาะ upload item นั้น progress 100% หมายถึงส่ง bytes ครบ ยังต้องรอ server validate/save</p></section>
-<section><h2>5. Cancellation</h2><p>ปุ่ม Cancel ต้องยกเลิก stream/request จริง ไม่ใช่แค่ซ่อน spinner หลัง cancel ห้ามแสดง success จาก future เก่า ใช้ operation token/generation และให้ .NET รับ <code>CancellationToken</code> แต่ยังต้อง cleanup temp file เมื่อ client disconnect</p></section>
-<section><h2>6. Retry policy</h2><p>retry อัตโนมัติเฉพาะ error ชั่วคราวและเมื่อมี upload ID ที่ server dedupe ได้; 400/401/403/413/415 ไม่ retry แบบเดิม ส่วน timeout หลังส่งครบให้ query สถานะด้วย upload ID ก่อนส่งไฟล์ใหม่</p></section>
-<section><h2>7. UX บน network แย่</h2><p>แสดงชื่อ part, thumbnail, bytes/เปอร์เซ็นต์, ปุ่ม cancel/retry และเก็บหน้าจอใช้งานส่วนอื่นได้ตาม business rule หากออกจากหน้า ให้ store/repository เป็น owner งาน ไม่ให้ widget dispose แล้วงานกลายเป็น zombie</p></section>
-<section><h2>8. Tests</h2><div class="success">จำลอง progress chunks, timeout ก่อนส่ง/หลังส่งครบ, cancel กลางทาง, offline, 413, token หมดอายุ, response เสียรูป, retry key ซ้ำ และ widget ถูก dispose โดยต้องไม่มี setState-after-dispose หรือ success หลอก</div></section>
+  ...
+}</code></pre><pre class="code-vs"><code>void cancel() {
+  if (_stage != UploadStage.uploading) return;
+  _cancel?.complete();
+}</code></pre><p>สิ่งที่ต้องเข้าใจคือ <strong>การยกเลิกไม่รับประกันว่าเซิร์ฟเวอร์ไม่ได้รับ</strong> — ถ้าปิดตอนส่งไป 99% เซิร์ฟเวอร์อาจได้ครบพอดีและบันทึกไปแล้ว</p><p>ผลตามมาสองข้อ</p><table><thead><tr><th>ข้อ</th><th>ทำอย่างไร</th></tr></thead><tbody>
+<tr><td>อย่าบอกผู้ใช้ว่า “ยกเลิกแล้ว ไฟล์ไม่ถูกส่ง”</td><td>บอกว่า “หยุดส่งแล้ว” และให้เขาตรวจได้</td></tr>
+<tr><td>รหัสคำสั่งยังต้องเดิม</td><td>ถ้าเขาส่งใหม่ จะได้ไม่มีสองใบ</td></tr>
+</tbody></table><p>lab จึงกลับไปที่สถานะ <code>ready</code> ไม่ใช่ล้าง ทำให้กดส่งใหม่ได้ทันทีด้วยรหัสเดิม</p><pre class="code-vs"><code>case UploadCancelled():
+  _stage = UploadStage.ready;
+  _message = null;</code></pre></section>
+
+<section><h2>5. ความล้มเหลวสี่แบบ ต่างกันสี่ทาง</h2><pre class="code-vs"><code>sealed class UploadOutcome { }
+class UploadSucceeded extends UploadOutcome { final String url; }
+class UploadRejected extends UploadOutcome { final String message; }
+class UploadFailed extends UploadOutcome { ... final bool outcomeUnknown; }
+class UploadCancelled extends UploadOutcome { }</code></pre><table><thead><tr><th>ผล</th><th>ผู้ใช้ต้องทำอะไร</th><th>สถานะที่ store ตั้ง</th></tr></thead><tbody>
+<tr><td>สำเร็จ</td><td>ไม่ต้องทำอะไร</td><td><code>done</code></td></tr>
+<tr><td>เซิร์ฟเวอร์ปฏิเสธ (413, 400)</td><td><strong>เลือกรูปใหม่</strong> — กดส่งซ้ำไม่ช่วย</td><td><code>idle</code> พร้อมล้างรูป</td></tr>
+<tr><td>ล้มเหลวชั่วคราว</td><td>กดส่งซ้ำได้เลย</td><td><code>failed</code> เก็บรูปไว้</td></tr>
+<tr><td>ยกเลิก</td><td>กดส่งใหม่ได้</td><td><code>ready</code></td></tr>
+</tbody></table><p>แถวที่สองคือจุดที่ต่างจากความล้มเหลวทั่วไป และเป็นสิ่งที่ทำผิดกันบ่อย</p><pre class="code-vs"><code>case UploadRejected(:final message):
+  // ผู้ใช้แก้ได้ แต่ต้องเลือกรูปใหม่ ไม่ใช่กดส่งซ้ำ
+  _stage = UploadStage.idle;
+  _image = null;
+  _message = message;</code></pre><p>ถ้าไม่ล้างรูปทิ้ง ผู้ใช้จะเห็นปุ่ม “ลองใหม่” แล้วกดซ้ำ ๆ กับรูปที่เซิร์ฟเวอร์ปฏิเสธไปแล้ว ได้ผลเดิมทุกครั้ง</p></section>
+
+<section><h2>6. การอัปโหลดที่ไม่รู้ผล</h2><pre class="code-vs"><code>} on http.ClientException {
+  return const UploadFailed(
+    ApiFailureKind.network,
+    'การเชื่อมต่อขาดระหว่างอัปโหลด',
+    outcomeUnknown: true,
+  );
+}</code></pre><p>ทุกความล้มเหลวของการอัปโหลดที่เกิดจากเครือข่าย เป็นกรณีที่ไม่รู้ผล<strong>เสมอ</strong> — ต่างจาก GET ที่รู้แน่ว่าไม่มีอะไรเกิดขึ้น (7.10)</p><pre class="code-vs"><code>case UploadFailed(:final message, :final outcomeUnknown):
+  _stage = UploadStage.failed;
+  _message = outcomeUnknown
+      ? '$message — ตรวจว่ารูปขึ้นแล้วหรือยังก่อนส่งซ้ำ'
+      : message;</code></pre><p>ข้อความนี้อาจดูน่ารำคาญ แต่มันตรงกับความจริง และมีทางทำให้ดีขึ้นได้</p><table><thead><tr><th>ทำได้</th><th>ผล</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลใหม่แล้วดูว่ามีรูปหรือยัง</td><td>ตอบได้แน่นอน ไม่ต้องให้ผู้ใช้เดา</td></tr>
+<tr><td>ส่งซ้ำด้วยรหัสเดิม</td><td>ปลอดภัยเพราะเซิร์ฟเวอร์จะไม่เก็บซ้ำ</td></tr>
+</tbody></table><p>ทางที่สองคือเหตุผลที่ <code>Idempotency-Key</code> คุ้มค่ามากในฟีเจอร์นี้ — เมื่อมีรหัสแล้ว ผู้ใช้กดส่งซ้ำได้อย่างสบายใจ และข้อความเตือนก็เปลี่ยนเป็นแค่ “ส่งไม่สำเร็จ ลองใหม่” ได้</p></section>
+
+<section><h2>7. กันการกดซ้ำระหว่างส่ง</h2><pre class="code-vs"><code>if (image == null || commandId == null || _stage == UploadStage.uploading) {
+  return;
+}</code></pre><pre class="code-vs"><code>test('กดส่งซ้ำระหว่างที่กำลังส่ง ต้องไม่ยิงซ้ำ', () async {
+  await store.pick(PickSource.camera);
+  final first = store.upload(path: '/upload');
+  final second = store.upload(path: '/upload');
+  await Future.wait([first, second]);
+
+  expect(uploadCalls, 1);
+});</code></pre><p>หลักเดียวกับ 4.9 แต่สำคัญกว่าเพราะการอัปโหลดใช้เวลานาน — โอกาสที่ผู้ใช้จะกดซ้ำจึงสูงกว่ามาก</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ข้อมูลที่ส่งไปหายบางส่วน</td><td>ลืม <code>sink.add(chunk)</code> ในตัวนับ</td><td>ส่งต่อทุกก้อน</td></tr>
+<tr><td><code>Can't finalize a finalized Request</code></td><td>ส่ง <code>MultipartRequest</code> ตัวเดิมซ้ำ</td><td>สร้างใหม่ทุกครั้ง</td></tr>
+<tr><td>ค้างที่ 100% นาน</td><td>ยังรอเซิร์ฟเวอร์บันทึก</td><td>เปลี่ยนข้อความตอนถึง 100%</td></tr>
+<tr><td>ผู้ใช้กดลองใหม่กับรูปที่ถูกปฏิเสธ</td><td>ไม่ได้ล้างรูปทิ้ง</td><td>แยก <code>Rejected</code> ออกจาก <code>Failed</code></td></tr>
+<tr><td>ได้รูปซ้ำในระบบ</td><td>กดซ้ำได้ระหว่างส่ง หรือรหัสคำสั่งเปลี่ยน</td><td>กันกดซ้ำ และใช้รหัสเดิมตอนลองใหม่</td></tr>
+<tr><td>ยกเลิกแล้วบอกว่าไฟล์ไม่ถูกส่ง</td><td>เข้าใจผิดว่าการยกเลิกรับประกันได้</td><td>บอกว่า “หยุดส่งแล้ว” และให้ตรวจได้</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ผู้ใช้ถ่ายรูปแล้วกดส่ง ระหว่างที่ส่งอยู่เขากดปุ่มย้อนกลับออกจากจอ</p><ol><li>ควรเกิดอะไรขึ้น</li><li>ต้องระวังอะไรในโค้ด</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> มีสามทางเลือกที่ต่างกันมาก</p><table><thead><tr><th>ทาง</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ยกเลิกการส่ง</td><td>รูปนี้เป็นของจอนี้เท่านั้น และผู้ใช้ตั้งใจทิ้ง</td><td></td></tr>
+<tr><td>เตือนก่อนออก</td><td>ผู้ใช้อาจกดพลาด และการส่งใกล้เสร็จแล้ว</td><td></td></tr>
+<tr><td>ส่งต่อในพื้นหลัง</td><td>รูปเป็นส่วนหนึ่งของงานที่ใหญ่กว่าจอนี้</td><td></td></tr>
+</tbody></table><p>สำหรับงานคลัง ทางที่สามมักถูกที่สุด — ผู้ใช้ถ่ายรูปหลักฐานแล้วต้องรีบไปทำงานต่อ การบังคับให้ยืนรอหน้าจอสามสิบวินาทีคือการเสียเวลาที่ไม่จำเป็น</p><p>แต่ต้องมีที่ให้เห็นว่ายังส่งไม่เสร็จ เช่นแถบเล็ก ๆ บนหัวจอ ไม่งั้นผู้ใช้จะไม่มีทางรู้ว่าอะไรล้มเหลว</p><p><strong>2.</strong> สิ่งที่ต้องระวัง ขึ้นกับทางที่เลือก</p><p><strong>ถ้ายกเลิก</strong> — <code>dispose</code> ต้องยกเลิกจริง ไม่ใช่แค่ทิ้ง store</p><pre class="code-vs"><code>@override
+void dispose() {
+  // ยกเลิกการอัปโหลดที่ค้างอยู่ ไม่ให้ callback มาถึง store ที่ถูกทิ้งแล้ว
+  if (_cancel case final completer? when !completer.isCompleted) {
+    completer.complete();
+  }
+  super.dispose();
+}</code></pre><p>ถ้าลืม จะได้ <code>A ChangeNotifier was used after being disposed</code> ตอน <code>onProgress</code> ถูกเรียก (12.8)</p><p><strong>ถ้าส่งต่อในพื้นหลัง</strong> — store ต้องไม่ผูกกับจอ</p><table><thead><tr><th>ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ย้าย store ขึ้นไปที่ shell</td><td>จอถูกทิ้งแล้ว store ต้องยังอยู่ (9.8)</td></tr>
+<tr><td>อย่าให้ store แตะ <code>BuildContext</code></td><td>จอนั้นไม่มีอยู่แล้ว (9.7)</td></tr>
+<tr><td>มีที่แสดงผลรวมของงานที่ค้าง</td><td>ผู้ใช้ต้องรู้ว่าอะไรสำเร็จอะไรไม่</td></tr>
+<tr><td>ล้างเมื่อออกจากระบบ</td><td>รูปของคนก่อนต้องไม่ถูกส่งในชื่อคนใหม่ (8.8)</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นข้อที่คิดไม่ถึงและสำคัญ — งานที่ค้างอยู่ในคิวตอนกะเปลี่ยน จะถูกส่งด้วย token ของคนใหม่ถ้าไม่ระวัง ซึ่งทำให้ข้อมูลผู้ถ่ายผิด (13.4 แบบฝึกหัด)</p><p>วิธีที่ปลอดภัยที่สุดคือ<strong>ล้างคิวตอนออกจากระบบ พร้อมบอกผู้ใช้ว่ามีอะไรค้างอยู่กี่รายการ</strong> ให้เขาตัดสินใจว่าจะรอส่งให้เสร็จก่อนหรือไม่</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ต้องนับไบต์เอง โดยห่อ stream ของคำขอ และอย่าลืมส่งต่อข้อมูล</li><li>100% แปลว่าส่งครบ ไม่ได้แปลว่าเซิร์ฟเวอร์บันทึกแล้ว</li><li>การยกเลิกไม่รับประกันว่าเซิร์ฟเวอร์ไม่ได้รับ</li><li>แยกการถูกปฏิเสธออกจากความล้มเหลวชั่วคราว เพราะพาไปคนละทาง</li><li>ความล้มเหลวจากเครือข่ายตอนอัปโหลด เป็นกรณีไม่รู้ผลเสมอ</li><li>รหัสคำสั่งทำให้การกดส่งซ้ำปลอดภัย</li></ul></div><p><strong>บทหน้า:</strong> ตรวจไฟล์ก่อนส่ง และเส้นแบ่งระหว่างความสะดวกกับความปลอดภัย</p></section>

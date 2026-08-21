@@ -4,34 +4,107 @@
 <title>Uploaded File URL</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-05 · Files &amp; Platform</span><h1>Uploaded File URL</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โค้ดจริงและข้อจำกัด</a></li><li><a href="#section-2">Response DTO</a></li><li><a href="#section-3">Resolve ด้วย Uri</a></li><li><a href="#section-4">Trust boundary</a></li><li><a href="#section-5">Cache busting</a></li><li><a href="#section-6">NetworkImage error</a></li><li><a href="#section-7">Authenticated media</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>URL ใน response คือข้อมูลที่ต้องออกแบบ:</strong> อย่าต่อ string ด้วยการลบ <code>/api</code> อย่างเดียว เพราะ base path, reverse proxy, CDN และ tenant path เปลี่ยนได้</div>
-<section id="section-1"><h2>1. โค้ดจริงและข้อจำกัด</h2><pre class="code-vs"><code>final base = await ApiService._resolveBase();
-final serverBase = base.replaceAll('/api', '');
-return '$serverBase$relativePath';</code></pre><p>ใช้ได้เมื่อ base ลงท้าย <code>/api</code> เสมอ แต่ <code>replaceAll</code> อาจลบคำว่า api ตำแหน่งอื่น และการต่อ string ทำ slash หาย/ซ้ำหรือ encode path ผิดได้</p></section>
-<section id="section-2"><h2>2. Response DTO</h2><pre class="code-vs"><code>{
-  "imageUrl": "/media/parts/8f0c.jpg",
-  "contentType": "image/jpeg",
-  "width": 1024,
-  "height": 768,
-  "etag": "\"a1b2\""
-}</code></pre><p>คืน public URL หรือ stable media ID ไม่คืน physical disk path เช่น <code>C:\uploads\...</code></p></section>
-<section id="section-3"><h2>3. Resolve ด้วย Uri</h2><pre class="code-vs"><code>Uri resolveMedia(Uri apiBase, String value) {
-  final candidate = Uri.parse(value);
-  if (candidate.hasScheme) return validateMediaOrigin(candidate);
-  final origin = apiBase.replace(path: '/', query: null, fragment: null);
-  return origin.resolveUri(candidate);
-}</code></pre><p>หากระบบอยู่ใต้ path เช่น <code>/wms/</code> ให้ server คืน absolute public URL หรือ client config media base โดยตรง ไม่เดาจาก API path</p></section>
-<section id="section-4"><h2>4. Trust boundary</h2><p>ถ้า response คืน absolute URL ให้ allowlist scheme <code>https</code> และ host ที่ไว้ใจได้ ป้องกัน UI โหลดรูปจาก host แปลก, ส่ง auth header ผิด origin หรือเปิดช่อง tracking ห้ามนำ URL จาก server ไปอ่านเป็น local file path</p></section>
-<section id="section-5"><h2>5. Cache busting</h2><p>ถ้า replace รูปที่ URL เดิม cache อาจยังแสดงรูปเก่า ใช้ content-addressed filename, version query เช่น <code>?v=etag</code> หรือ HTTP ETag/Cache-Control ที่ถูกต้อง วิธีสร้างชื่อใหม่ทุก version ง่ายและปลอดภัยกว่าการ disable cache ทั้งหมด</p></section>
-<section id="section-6"><h2>6. NetworkImage error</h2><pre class="code-vs"><code>Image.network(
-  imageUri.toString(),
-  fit: BoxFit.cover,
-  errorBuilder: (_, error, __) =&gt; const Icon(Icons.broken_image),
-  loadingBuilder: (_, child, progress) =&gt;
-      progress == null ? child : const CircularProgressIndicator(),
-)</code></pre></section>
-<section id="section-7"><h2>7. Authenticated media</h2><p>หาก endpoint รูปต้องใช้ JWT, <code>Image.network</code> รองรับ headers บางกรณีแต่ cache/key ต้องระวัง token rotation ทางเลือกคือ signed URL อายุสั้นหรือ image provider/client ที่ inject auth และไม่บันทึก token ใน URL/log</p></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">ทดสอบ relative path มี/ไม่มี slash, base มี subpath, URL encoded Unicode/space, absolute trusted/untrusted host, HTTP ถูกปฏิเสธใน production และ URL version เปลี่ยนหลัง replace รูป</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เซิร์ฟเวอร์คืนอะไรมา</a></li><li><a href="#section-2">รับได้หลายชื่อคีย์</a></li><li><a href="#section-3">200 ที่ไม่บอกที่อยู่</a></li><li><a href="#section-4">ประกอบ URL เต็มตอนจะแสดง</a></li><li><a href="#section-5">ทำให้เป็น sync ได้ด้วยงานจาก Part 10</a></li><li><a href="#section-6">เก็บที่ไหน</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน <code>getImageFullUrl</code> ของจริงแล้วหาจุดเปราะ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.4, Part 10 (การตั้งค่าเซิร์ฟเวอร์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บที่อยู่ไฟล์ที่เซิร์ฟเวอร์คืนมาให้ถูก และประกอบ URL เต็มโดยไม่พังตอนสลับเซิร์ฟเวอร์</div>
+
+<section id="section-1"><h2>1. เซิร์ฟเวอร์คืนอะไรมา</h2><pre class="code-vs"><code>200 OK
+{"url": "/uploads/parts/P-100-20260821.jpg"}</code></pre><p>สิ่งที่ได้คือ<strong>เส้นทางสัมพัทธ์</strong> ไม่ใช่ URL เต็ม ซึ่งเป็นการออกแบบที่ถูกต้อง</p><table><thead><tr><th> </th><th>เก็บเส้นทางสัมพัทธ์</th><th>เก็บ URL เต็ม</th></tr></thead><tbody>
+<tr><td>ย้ายเซิร์ฟเวอร์</td><td>รูปยังใช้ได้</td><td>รูปทั้งหมดเสีย</td></tr>
+<tr><td>ผู้ใช้สลับ profile (10.6)</td><td>ชี้ตามเซิร์ฟเวอร์ที่ใช้อยู่</td><td>ชี้ไปเครื่องเก่า</td></tr>
+<tr><td>เปลี่ยนจาก HTTP เป็น HTTPS</td><td>ไม่ต้องแก้ข้อมูล</td><td>ต้องแก้ทุกแถวในฐานข้อมูล</td></tr>
+<tr><td>อยู่หลัง reverse proxy</td><td>ถูกต้องอัตโนมัติ</td><td>ต้องรู้ที่อยู่ภายนอกตั้งแต่ตอนบันทึก</td></tr>
+</tbody></table><pre class="code-vs"><code>/// เส้นทางที่เซิร์ฟเวอร์คืนมา อาจเป็นเส้นทางสัมพัทธ์ เช่น `/uploads/a.jpg`
+///
+/// เก็บตามที่ได้รับ ไม่ต่อ base URL ให้ตรงนี้ — เพราะ base URL เปลี่ยนได้
+/// เมื่อผู้ใช้สลับเซิร์ฟเวอร์ (10.6) ถ้าเก็บ URL เต็มไว้ วันที่สลับแล้ว
+/// รูปจะชี้ไปเครื่องเก่า
+final String url;</code></pre></section>
+
+<section id="section-2"><h2>2. รับได้หลายชื่อคีย์</h2><p>ทีมหลังบ้านแต่ละคนตั้งชื่อคีย์ไม่เหมือนกัน และมักไม่ตรงกันระหว่าง endpoint</p><pre class="code-vs"><code>String? _readUrl(String body) {
+  final json = _tryDecode(body);
+  if (json == null) return null;
+  for (final key in ['url', 'imageUrl', 'path', 'location']) {
+    final value = json[key];
+    if (value is String &amp;&amp; value.trim().isNotEmpty) return value.trim();
+  }
+  return null;
+}</code></pre><p>เป็นการผ่อนปรนแบบเดียวกับ 6.6 ที่รองรับทั้ง camelCase และ PascalCase — และมีข้อควรระวังเดียวกัน คือ<strong>เป็นทางผ่าน ไม่ใช่ปลายทาง</strong> ควรตกลงชื่อเดียวกับทีมหลังบ้านให้ได้</p><pre class="code-vs"><code>test('อ่านที่อยู่ไฟล์จากชื่อคีย์ที่เซิร์ฟเวอร์อาจใช้', () async {
+  for (final key in ['url', 'imageUrl', 'path', 'location']) {
+    ...
+    expect(outcome, isA&lt;UploadSucceeded&gt;(), reason: 'คีย์ $key');
+  }
+});</code></pre></section>
+
+<section id="section-3"><h2>3. 200 ที่ไม่บอกที่อยู่</h2><pre class="code-vs"><code>if (code &gt;= 200 &amp;&amp; code &lt; 300) {
+  final url = _readUrl(response.body);
+  if (url == null) {
+    // ตอบ 200 แต่ไม่บอกที่อยู่ไฟล์ — เราเก็บอะไรไว้แสดงไม่ได้เลย
+    return const UploadFailed(
+      ApiFailureKind.contract,
+      'เซิร์ฟเวอร์รับไฟล์แล้วแต่ไม่ได้บอกที่อยู่',
+    );
+  }
+  return UploadSucceeded(url);
+}</code></pre><p>เป็นกรณีที่น่าอึดอัด — เซิร์ฟเวอร์<strong>รับไฟล์ไปแล้วจริง</strong> แต่แอปใช้ประโยชน์ไม่ได้ ถือว่าสำเร็จก็ไม่ได้เพราะไม่มีอะไรจะเก็บ ถือว่าล้มเหลวก็ไม่ตรงเพราะไฟล์ขึ้นไปแล้ว</p><table><thead><tr><th>ทางเลือก</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ถือว่าสำเร็จ แล้วเก็บ null</td><td>หน้าจอจะแสดงว่ามีรูปแต่โหลดไม่ขึ้น ผู้ใช้จะกดส่งใหม่เรื่อย ๆ</td></tr>
+<tr><td><strong>ถือว่าผิดสัญญา</strong></td><td>ทีมเห็นปัญหาและแก้ได้ ส่วนผู้ใช้เห็นข้อความที่ตรงกับความจริง</td></tr>
+<tr><td>โหลดข้อมูลใหม่แล้วดูว่ามีรูปไหม</td><td>ถูกที่สุด แต่ต้องมี endpoint ที่ตอบได้</td></tr>
+</tbody></table><p>lab เลือกทางที่สอง เพราะเป็นสัญญาที่ถูกละเมิดและมีคนแก้ได้ ตามหลักใน 9.13 — แต่ถ้าเกิดบ่อย ทางที่สามคือคำตอบที่ดีกว่า</p></section>
+
+<section id="section-4"><h2>4. ประกอบ URL เต็มตอนจะแสดง</h2><pre class="code-vs"><code>// wmsapp
+Future&lt;String&gt; getImageFullUrl(String relativePath) async {
+  final base = await ApiService._resolveBase();
+  final serverBase = base.replaceAll('/api', '');
+  return '$serverBase$relativePath';
+}</code></pre><p>ทำงานได้ แต่มีสองจุดที่เปราะ</p><table><thead><tr><th>จุด</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td><code>replaceAll('/api', '')</code></td><td>แทนที่<strong>ทุกที่</strong>ที่เจอ ไม่ใช่แค่ท้าย — ถ้าเซิร์ฟเวอร์อยู่ที่ <code>http://api-server/api</code> จะได้ <code>http://-server</code></td></tr>
+<tr><td>เป็น <code>async</code></td><td>ทำให้ต้องใช้ <code>FutureBuilder</code> ตอนแสดง ซึ่งเปิดกับดักที่ 13.6 จะพูดถึง</td></tr>
+</tbody></table><p>ทางที่ปลอดภัยกว่าคือใช้ <code>Uri</code> แทนการจัดการสตริง</p><pre class="code-vs"><code>String imageUrl(String relativePath) {
+  // resolve จัดการทับซ้อนและเส้นทางสัมพัทธ์ให้ถูกตามมาตรฐาน
+  return Uri.parse(AppConfig.apiBaseUrl).resolve(relativePath).toString();
+}</code></pre><table><thead><tr><th>ค่าที่ได้รับ</th><th><code>resolve</code> ให้ผลเป็น</th></tr></thead><tbody>
+<tr><td><code>/uploads/a.jpg</code></td><td><code>http://host:6191/uploads/a.jpg</code></td></tr>
+<tr><td><code>uploads/a.jpg</code></td><td>ต่อจากเส้นทางปัจจุบัน</td></tr>
+<tr><td><code>http://cdn.example/a.jpg</code></td><td>ใช้ตามที่ให้มาเลย เพราะเป็น URL เต็มอยู่แล้ว</td></tr>
+</tbody></table><p>แถวสุดท้ายมีค่ามาก — วันที่ทีมย้ายรูปไปเก็บที่อื่น เซิร์ฟเวอร์จะเริ่มคืน URL เต็มมา และโค้ดนี้จะยังทำงานถูกโดยไม่ต้องแก้</p></section>
+
+<section id="section-5"><h2>5. ทำให้เป็น sync ได้ด้วยงานจาก Part 10</h2><p>เหตุผลที่ <code>getImageFullUrl</code> เป็น <code>async</code> คือ <code>_resolveBase()</code> ต้องลองต่อ socket (10.2) แต่ <code>wms_absolute_mobile</code> แก้ปัญหานี้ไปแล้ว</p><pre class="code-vs"><code>/// `ApiClient` calls this getter on every request rather than caching it, so
+/// switching profiles redirects the whole app immediately
+static String get apiBaseUrl =&gt;
+    resolveBaseUrl(ConnectionController.instance.activeBaseUrl);</code></pre><p>เป็น getter ธรรมดา ไม่ใช่ <code>Future</code> เพราะค่าถูกโหลดเสร็จตั้งแต่ก่อน <code>runApp</code> แล้ว (11.13)</p><table><thead><tr><th>ได้อะไรจากการเป็น sync</th></tr></thead><tbody>
+<tr><td>ไม่ต้องใช้ <code>FutureBuilder</code> ตอนแสดงรูป</td></tr>
+<tr><td>ไม่มีกระพริบตอนวาดใหม่ (13.6)</td></tr>
+<tr><td>ยังสลับเซิร์ฟเวอร์ได้ทันที เพราะอ่านค่าใหม่ทุกครั้งที่เรียก</td></tr>
+</tbody></table><div class="note">นี่คือตัวอย่างที่ชัดว่าการตัดสินใจใน Part หนึ่งไปแก้ปัญหาในอีก Part หนึ่ง — การทำให้ base URL อ่านได้แบบ sync ตอนออกแบบระบบ profile ทำให้การแสดงรูปง่ายขึ้นโดยไม่ได้ตั้งใจ</div></section>
+
+<section id="section-6"><h2>6. เก็บที่ไหน</h2><table><thead><tr><th>เก็บที่</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>ฐานข้อมูลฝั่งเซิร์ฟเวอร์</td><td>ที่ที่ถูกต้อง — รูปเป็นของข้อมูล ไม่ใช่ของเครื่อง</td></tr>
+<tr><td>store ในหน่วยความจำ</td><td>ระหว่างที่ยังอยู่ในจอนั้น</td></tr>
+<tr><td>ที่เก็บในเครื่อง</td><td>เฉพาะตอนที่ยังส่งไม่ได้ (Part 29)</td></tr>
+</tbody></table><p>สิ่งที่ต้องระวังคือ <strong>อย่าเก็บที่อยู่รูปไว้ในเครื่องเป็นแหล่งความจริง</strong> — เมื่อผู้ใช้คนถัดไปมาใช้เครื่องเดียวกัน เขาควรเห็นสิ่งที่เซิร์ฟเวอร์บอก ไม่ใช่สิ่งที่ค้างอยู่จากคนก่อน (8.8)</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สลับเซิร์ฟเวอร์แล้วรูปหาย</td><td>เก็บ URL เต็ม</td><td>เก็บเส้นทางสัมพัทธ์</td></tr>
+<tr><td>URL มีทับซ้อน</td><td>ต่อสตริงเอง</td><td>ใช้ <code>Uri.resolve</code></td></tr>
+<tr><td>host หายไปบางส่วน</td><td><code>replaceAll</code> แทนที่ทุกที่ที่เจอ</td><td>ตัดเฉพาะท้าย หรือใช้ <code>Uri</code></td></tr>
+<tr><td>อัปโหลดสำเร็จแต่รูปไม่ขึ้น</td><td>เซิร์ฟเวอร์ไม่ได้คืนที่อยู่</td><td>ถือว่าผิดสัญญา อย่าเก็บ null</td></tr>
+<tr><td>ผู้ใช้คนใหม่เห็นรูปของคนก่อน</td><td>เก็บที่อยู่ไว้ในเครื่อง</td><td>ล้างพร้อมออกจากระบบ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>รูปในระบบเป็นข้อมูลที่ไม่ควรให้คนนอกเห็น แต่ตอนนี้ใครก็เปิด <code>http://server/uploads/P-100.jpg</code> ได้ถ้ารู้ที่อยู่</p><ol><li>เป็นปัญหาไหม</li><li>จะแก้อย่างไร และกระทบฝั่งแอปอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ขึ้นกับว่าที่อยู่เดาได้ง่ายแค่ไหน และเนื้อหาอ่อนไหวแค่ไหน</p><table><thead><tr><th>สถานการณ์</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>ชื่อไฟล์เดาได้ เช่น <code>P-100.jpg</code></td><td>สูง — ไล่รหัสสินค้าก็ได้รูปทั้งคลัง</td></tr>
+<tr><td>ชื่อไฟล์สุ่มยาว</td><td>ต่ำลง แต่ยังไม่ใช่การป้องกัน</td></tr>
+<tr><td>รูปสินค้าทั่วไป</td><td>ไม่ค่อยอ่อนไหว</td></tr>
+<tr><td>รูปหลักฐานความเสียหายที่มีเอกสารติดมา</td><td>อ่อนไหวมาก</td></tr>
+</tbody></table><p>สังเกตว่าชื่อไฟล์สุ่มไม่ใช่การป้องกัน แต่เป็นการทำให้เดายาก — ซึ่งพอสำหรับบางกรณีแต่ไม่ใช่ทุกกรณี หลักเดียวกับ 8.9 ที่ว่าการซ่อนไม่เท่ากับการป้องกัน</p><p><strong>2.</strong> สองทางหลัก</p><table><thead><tr><th>ทาง</th><th>ฝั่งแอปต้องทำอะไร</th></tr></thead><tbody>
+<tr><td>เสิร์ฟรูปผ่าน endpoint ที่ตรวจ token</td><td>ต้องส่ง token ไปกับคำขอรูปด้วย ซึ่ง <code>Image.network</code> ธรรมดาทำไม่ได้</td></tr>
+<tr><td>ให้ URL ที่มีอายุจำกัด</td><td>ต้องขอ URL ใหม่เมื่อหมดอายุ</td></tr>
+</tbody></table><p>ทางแรกทำได้ด้วยการส่ง header</p><pre class="code-vs"><code>Image.network(
+  url,
+  headers: {'Authorization': 'Bearer ${session.token}'},
+)</code></pre><p>แต่มีข้อจำกัดที่ต้องรู้ — <strong>บนเว็บ <code>headers</code> ของ <code>Image.network</code> ไม่ทำงาน</strong> เพราะเบราว์เซอร์โหลดรูปผ่านแท็ก img ที่แนบ header เองไม่ได้ ถ้าต้องรองรับเว็บด้วย ต้องโหลดเป็นไบต์เองแล้วใช้ <code>Image.memory</code></p><p>ทางที่สองหลีกเลี่ยงปัญหานี้ทั้งหมด และเป็นทางที่ระบบเก็บไฟล์บนคลาวด์ใช้กัน — เซิร์ฟเวอร์คืน URL ที่มีลายเซ็นและหมดอายุใน 15 นาที ฝั่งแอปใช้ <code>Image.network</code> ธรรมดาได้เลย</p><p><strong>สิ่งที่ควรทำก่อนทั้งสองทาง:</strong> ถามว่ารูปเหล่านี้อ่อนไหวจริงไหม เพราะถ้าเป็นรูปสินค้าทั่วไปที่ลูกค้าเห็นได้อยู่แล้วในเว็บขายของ การลงแรงป้องกันคือการจ่ายโดยไม่ได้อะไร — และแรงนั้นเอาไปทำเรื่องที่สำคัญกว่าได้</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>เก็บเส้นทางสัมพัทธ์ที่เซิร์ฟเวอร์คืนมา ไม่ใช่ URL เต็ม</li><li>ประกอบ URL ตอนจะแสดง ด้วย <code>Uri.resolve</code> ไม่ใช่ต่อสตริง</li><li>200 ที่ไม่บอกที่อยู่ ถือว่าผิดสัญญา อย่าเก็บ null</li><li>base URL ที่อ่านได้แบบ sync ทำให้การแสดงรูปง่ายขึ้นมาก</li><li>ชื่อไฟล์ที่เดายากไม่ใช่การป้องกัน</li></ul></div><p><strong>บทหน้า:</strong> แสดงรูปย่อในลิสต์ และกับดักที่อยู่ในโค้ดจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

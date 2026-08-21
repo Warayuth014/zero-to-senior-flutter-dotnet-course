@@ -4,46 +4,128 @@
 <title>Lab: Image Upload</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-10 · Files &amp; Platform</span><h1>Lab: Image Upload</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Acceptance criteria</a></li><li><a href="#section-2">Flutter contract</a></li><li><a href="#section-3">Picker + preview</a></li><li><a href="#section-4">.NET endpoint</a></li><li><a href="#section-5">Response model</a></li><li><a href="#section-6">State transition</a></li><li><a href="#section-7">Test plan</a></li><li><a href="#section-8">Definition of Done</a></li></ol></nav>
-<div class="note"><strong>Lab ปลาย Part:</strong> ทำ flow เลือก → preview → validate → upload → แสดง URL ใหม่ โดยยึด <code>part_image_screen.dart</code>, <code>upload_api.dart</code> และ <code>ApiService._uploadFile</code> ของ wmsapp แล้วปรับ contract ให้ production-safe</div>
-<section id="section-1"><h2>1. Acceptance criteria</h2><ol><li>เลือก camera/gallery และ cancel ได้</li><li>preview ไม่ decode เกินขนาดจอ</li><li>รับเฉพาะ JPEG/PNG ไม่เกิน 5 MB</li><li>ส่ง <code>partId</code>, <code>uploadId</code> และ <code>file</code></li><li>progress/cancel/error แยกสถานะ</li><li>response URL แสดงรูปใหม่และไม่เกิด duplicate เมื่อ retry</li></ol></section>
-<section id="section-2"><h2>2. Flutter contract</h2><pre class="code-vs"><code>abstract interface class PartImageRepository {
-  Future&lt;PartImage&gt; upload({
-    required String partId,
-    required XFile file,
-    required String uploadId,
-    required void Function(double value) onProgress,
-    required CancelToken cancelToken,
-  });
-}</code></pre><p>screen ไม่รู้ multipart/URL/token และ repository แปล transport error เป็น domain failure</p></section>
-<section id="section-3"><h2>3. Picker + preview</h2><pre class="code-vs"><code>final picked = await picker.pickImage(
-  source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 85,
-);
-if (picked == null || !mounted) return;
-final candidate = await validator.validate(picked);
-setState(() =&gt; _candidate = candidate);</code></pre><p>ยังไม่อัปโหลดจนผู้ใช้กดยืนยัน และ restore lost data บน Android ผ่าน flow validation เดียวกัน</p></section>
-<section id="section-4"><h2>4. .NET endpoint</h2><pre class="code-vs"><code>app.MapPost("/api/upload/part-image", async (
-  HttpRequest request, IPartImageService service, ClaimsPrincipal user,
-  CancellationToken ct) =&gt; {
-    var form = await request.ReadFormAsync(ct);
-    var file = form.Files.GetFile("file");
-    var result = await service.SaveAsync(
-      user, form["partId"]!, form["uploadId"]!, file, ct);
-    return Results.Created(result.ImageUrl, result);
-}).RequireAuthorization();</code></pre><p>service ต้องตรวจ null/length/signature/dimensions/permission และสร้าง filename เอง; endpoint จำกัด request body ก่อนอ่าน form</p></section>
-<section id="section-5"><h2>5. Response model</h2><pre class="code-vs"><code>public sealed record PartImageResponse(
-  string PartId,
-  string ImageUrl,
-  string ContentType,
-  long Size,
-  string ETag);
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บทนี้ทำอะไร</a></li><li><a href="#section-2">แผนที่ของ lab</a></li><li><a href="#section-3">เส้นทางทั้งหมดในภาพเดียว</a></li><li><a href="#section-4">โจทย์</a></li><li><a href="#section-5">เกณฑ์ที่ต้องผ่าน</a></li><li><a href="#section-6">คำใบ้สำหรับข้อที่ยาก</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</a></li><li><a href="#section-8">แบบทดสอบตัวเองก่อนจบ Part 13</a></li><li><a href="#section-9">สรุปท้าย Part 13</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: ประกอบหน้าจอถ่ายรูปหลักฐานให้ครบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.1–13.9 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำฟีเจอร์ถ่ายรูปและอัปโหลดที่ใช้งานได้จริงบน PDA ที่เน็ตไม่ดี</div>
 
-// Flutter parse เป็น typed DTO และ resolve URL ผ่าน MediaUrlPolicy</code></pre></section>
-<section id="section-6"><h2>6. State transition</h2><pre class="code-vs"><code>idle → picking → preview → uploading(progress)
-                       ↘ cancelled → preview
-                       ↘ rejected  → preview + field error
-                       ↘ success   → refresh/replace image version</code></pre><p>ใช้ operation ID ป้องกัน response งานเก่าทับงานใหม่ และหลัง timeout ให้ reconcile ด้วย uploadId ก่อน retry</p></section>
-<section id="section-7"><h2>7. Test plan</h2><p>Flutter unit test validator/repository mapping, widget test cancel-preview-progress-retry, .NET integration test multipart จริงผ่าน <code>WebApplicationFactory</code>, authorization/limits/signature/idempotency และ end-to-end บน device ผ่าน Wi‑Fi/HTTPS ของสภาพแวดล้อมจริง</p></section>
-<section id="section-8"><h2>8. Definition of Done</h2><div class="success">ไม่ใช่เพียง “รูปขึ้น”: ไม่มี token/path หลุด log, ไม่ไว้ใจ filename/MIME, ไม่เกิด orphan/duplicate, cancel หยุดงานจริง, รูปใหม่ไม่ติด cache เก่า, memory ไม่พุ่งบน PDA และ error ทุกแบบมีทางให้ผู้ใช้แก้ต่อได้</div></section>
+<section id="section-1"><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>upload_lab/</code> ทั้งหมด พร้อมรู้ว่าแต่ละส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ต่อยอดเป็นหน้าจอเต็มตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 14</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>picked_image.dart</code></td><td>โมเดลที่เก็บไบต์ + interface ของตัวเลือกรูป</td><td>13.1, 13.2</td></tr>
+<tr><td><code>image_validation.dart</code></td><td>ตรวจก่อนส่ง + ทำชื่อไฟล์ให้ปลอดภัย</td><td>13.9</td></tr>
+<tr><td><code>upload_client.dart</code></td><td>multipart + ความคืบหน้า + การยกเลิก</td><td>13.3, 13.4, 13.5, 13.8</td></tr>
+<tr><td><code>upload_store.dart</code></td><td>รวมทั้งกระบวนการ</td><td>13.1, 13.8</td></tr>
+<tr><td><code>test/upload_test.dart</code></td><td>เทสต์ 35 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/upload_test.dart</code></pre></section>
+
+<section id="section-3"><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>ผู้ใช้กดปุ่มถ่ายรูป
+  └─ เลือกที่มา (กล้อง / แกลเลอรี)                    ← 13.1
+       └─ picker.pick(source)
+            ├─ ไม่ได้สิทธิ์   → บอกให้ไปหน้าตั้งค่า      ← 13.1
+            ├─ กดยกเลิก      → เงียบ ไม่ใช่ความผิดพลาด
+            └─ ได้รูป (ย่อแล้ว 1024, คุณภาพ 85)
+                 └─ checkImage()                       ← 13.9
+                      ├─ ผิดแน่นอน → ปฏิเสธ พร้อมทางแก้
+                      ├─ น่าสงสัย  → เตือน แต่ส่งได้
+                      └─ ผ่าน      → สร้างรหัสคำสั่ง     ← 13.4
+
+ผู้ใช้กดส่ง
+  └─ MultipartRequest                                  ← 13.3
+       ├─ fields: partId, station, capturedAt          ← 13.4
+       ├─ headers: token, Idempotency-Key              ← 13.4
+       ├─ file: ไบต์ + ชื่อที่ทำให้ปลอดภัยแล้ว           ← 13.9
+       └─ นับไบต์ระหว่างส่ง → onProgress                ← 13.8
+            ├─ สำเร็จ  → เก็บเส้นทางสัมพัทธ์             ← 13.5
+            ├─ ปฏิเสธ  → ล้างรูป ให้เลือกใหม่            ← 13.8
+            ├─ ล้มเหลว → เก็บรูปไว้ ส่งซ้ำด้วยรหัสเดิม
+            └─ ยกเลิก  → กลับไปพร้อมส่ง
+
+แสดงรูป
+  └─ Uri.resolve(baseUrl, relativePath)                ← 13.5
+       └─ Image.network(url, cacheWidth: ...)          ← 13.7</code></pre></section>
+
+<section id="section-4"><h2>4. โจทย์</h2><p>ทำหน้าจอ “ถ่ายรูปหลักฐานการรับของ” ในโฟลเดอร์ <code>lib/upload_lab/ui/</code></p><table><thead><tr><th>ส่วน</th><th>ต้องมี</th></tr></thead><tbody>
+<tr><td>ปุ่มถ่ายรูป</td><td>เลือกที่มาได้ และกดโดนแม้ใส่ถุงมือ (11.1)</td></tr>
+<tr><td>ตัวอย่างรูป</td><td>พร้อมขนาดไฟล์ และปุ่มถ่ายใหม่</td></tr>
+<tr><td>แถบความคืบหน้า</td><td>เปลี่ยนข้อความเมื่อถึง 100%</td></tr>
+<tr><td>ปุ่มยกเลิก</td><td>ระหว่างที่กำลังส่ง</td></tr>
+<tr><td>รายการรูปที่ส่งแล้ว</td><td>รูปย่อพร้อมเวลาที่ถ่าย</td></tr>
+</tbody></table><p>และเขียน <code>RealImagePicker</code> ที่ implement <code>ImagePickerPort</code> โดยห่อ <code>image_picker</code> จริง</p></section>
+
+<section id="section-5"><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ย่อรูปตั้งแต่ตอนเลือก ไม่ใช่ตอนส่ง</td><td>13.1</td></tr>
+<tr><td>2</td><td>ผู้ใช้กดยกเลิกแล้วไม่เห็นข้อความผิดพลาด</td><td>13.1</td></tr>
+<tr><td>3</td><td>ไม่ได้สิทธิ์แล้วมีปุ่มพาไปหน้าตั้งค่า</td><td>13.1</td></tr>
+<tr><td>4</td><td>ไม่มี <code>import 'dart:io'</code> ในโค้ดที่ใช้ร่วม</td><td>13.2</td></tr>
+<tr><td>5</td><td>ไม่ตั้ง <code>Content-Type</code> เอง พร้อมเทสต์ที่ตรวจ boundary</td><td>13.3</td></tr>
+<tr><td>6</td><td>เทสต์อ่าน body แล้วยืนยันว่ามีทุกช่องที่ตกลงไว้</td><td>13.3</td></tr>
+<tr><td>7</td><td>ส่งเวลาที่ถ่ายไปด้วย ไม่ใช่ให้เซิร์ฟเวอร์ใช้เวลาที่ได้รับ</td><td>13.4</td></tr>
+<tr><td>8</td><td>รหัสคำสั่งเดิมตอนลองใหม่ และใหม่เมื่อเลือกรูปใหม่</td><td>13.4</td></tr>
+<tr><td>9</td><td>เก็บเส้นทางสัมพัทธ์ และประกอบ URL ด้วย <code>Uri.resolve</code></td><td>13.5</td></tr>
+<tr><td>10</td><td>ไม่มี <code>FutureBuilder</code> ที่สร้าง <code>Future</code> ใน <code>build</code></td><td>13.6</td></tr>
+<tr><td>11</td><td>รูปย่อทุกใบมี <code>cacheWidth</code> ที่คูณ <code>devicePixelRatio</code> แล้ว</td><td>13.7</td></tr>
+<tr><td>12</td><td>ความคืบหน้าไม่ถอยหลัง และเปลี่ยนข้อความที่ 100%</td><td>13.8</td></tr>
+<tr><td>13</td><td>กดส่งซ้ำระหว่างส่งต้องไม่ยิงซ้ำ</td><td>13.8</td></tr>
+<tr><td>14</td><td>ถูกปฏิเสธแล้วล้างรูป ส่วนล้มเหลวชั่วคราวเก็บรูปไว้</td><td>13.8</td></tr>
+<tr><td>15</td><td>เน็ตขาดแล้วบอกว่าไม่รู้ผล</td><td>13.8</td></tr>
+<tr><td>16</td><td>ตรวจชนิด ขนาด และลายเซ็นในไฟล์</td><td>13.9</td></tr>
+<tr><td>17</td><td>ห้ามกับเตือนแยกกัน</td><td>13.9</td></tr>
+<tr><td>18</td><td>ชื่อไฟล์ถูกทำให้ปลอดภัยก่อนส่ง</td><td>13.9</td></tr>
+<tr><td>19</td><td>ออกจากจอระหว่างส่ง ต้องไม่เกิด <code>ChangeNotifier used after disposed</code></td><td>13.8, 12.8</td></tr>
+<tr><td>20</td><td>ล้างแคชรูปตอนออกจากระบบ</td><td>13.7, 8.8</td></tr>
+</tbody></table><p>เกณฑ์ 10, 11 และ 19 เป็นสามข้อที่ทดสอบด้วยมือแล้วไม่มีทางเจอ</p></section>
+
+<section id="section-6"><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 10 — ตรวจว่าไม่มี <code>Future</code> ใน <code>build</code></strong></p><pre class="code-vs"><code># หาอย่างหยาบก่อน แล้วอ่านทีละที่
+grep -rn "future:" lib --include=*.dart | grep -v "_.*Future"</code></pre><p>ถ้าหลัง <code>future:</code> เป็นการเรียกฟังก์ชัน ให้สงสัยไว้ก่อน</p><p><strong>เกณฑ์ 11 — รูปย่อ</strong></p><pre class="code-vs"><code>final ratio = MediaQuery.devicePixelRatioOf(context);
+
+Image.network(
+  imageUrl(item.path),
+  width: 56,
+  height: 56,
+  cacheWidth: (56 * ratio).round(),
+  fit: BoxFit.cover,
+  errorBuilder: (_, _, _) =&gt; const Icon(Icons.broken_image),
+)</code></pre><p><strong>เกณฑ์ 19 — ออกจากจอระหว่างส่ง</strong></p><pre class="code-vs"><code>testWidgets('ออกจากจอระหว่างอัปโหลด ต้องไม่พัง', (tester) async {
+  await tester.pumpWidget(app);
+  await tester.tap(find.byKey(const Key('pick-camera')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('upload')));
+  await tester.pump();                        // เริ่มส่งแล้ว ยังไม่เสร็จ
+
+  await tester.pumpWidget(const SizedBox());  // ทิ้งจอ
+  await tester.pumpAndSettle();
+
+  expect(tester.takeException(), isNull);
+});</code></pre><p><strong>เกณฑ์ 12 — ข้อความที่ 100%</strong></p><pre class="code-vs"><code>Text(
+  store.progress == 1.0
+      ? context.t(AppText.saving)        // "กำลังบันทึกที่เซิร์ฟเวอร์…"
+      : context.t1(AppText.sending, (store.progress! * 100).round()),
+)</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์โยน <code>Invalid UTF-8 byte</code></td><td>อ่าน <code>request.body</code></td><td><code>latin1.decode(request.bodyBytes)</code></td></tr>
+<tr><td>400 บอกว่าไม่พบไฟล์</td><td>ตั้ง <code>Content-Type</code> เอง</td><td>อย่าตั้ง</td></tr>
+<tr><td><code>Can't finalize a finalized Request</code></td><td>ส่งคำขอตัวเดิมซ้ำ</td><td>สร้างใหม่ทุกครั้ง</td></tr>
+<tr><td>วงหมุนกะพริบตอนเลื่อนลิสต์</td><td><code>Future</code> ใน <code>build</code></td><td>ทำให้ base URL เป็น sync</td></tr>
+<tr><td>แอปปิดเองตอนเลื่อนลิสต์รูป</td><td>ไม่มี <code>cacheWidth</code></td><td>ใส่ทุกที่ที่แสดงรูป</td></tr>
+<tr><td>ได้รูปซ้ำในระบบ</td><td>รหัสคำสั่งเปลี่ยนตอนลองใหม่</td><td>สร้างตอนเลือกรูป</td></tr>
+<tr><td>ทดสอบการไม่ได้สิทธิ์ไม่ได้</td><td>เรียก <code>ImagePicker</code> ตรง ๆ</td><td>ห่อด้วย interface</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบทดสอบตัวเองก่อนจบ Part 13</h2><ol><li>ทำไมต้องย่อรูปตั้งแต่ตอนเลือก ไม่ใช่ตอนส่ง (13.1)</li><li>การปฏิเสธสิทธิ์สองแบบต่างกันอย่างไร (13.1)</li><li>ทำไมเก็บไบต์ดีกว่าเก็บที่อยู่ไฟล์ และเมื่อไหร่ที่ไม่ใช่ (13.2)</li><li>ทำไม <code>dart:io</code> ใช้บนเว็บไม่ได้ และเลี่ยงอย่างไร (13.2)</li><li>ทำไม base64 ไม่เหมาะกับรูปถ่าย (13.3)</li><li>ทำไมห้ามตั้ง <code>Content-Type</code> เอง (13.3)</li><li>ทำไมต้องใช้ <code>send()</code> ไม่ใช่ <code>post()</code> (13.3)</li><li>อะไรควรอยู่ใน header อะไรควรอยู่ในช่อง (13.4)</li><li>รหัสคำสั่งควรสร้างตอนไหน (13.4)</li><li>ทำไมต้องส่งเวลาที่ถ่ายไปด้วย (13.4)</li><li>ทำไมเก็บเส้นทางสัมพัทธ์ ไม่ใช่ URL เต็ม (13.5)</li><li><code>Uri.resolve</code> ดีกว่าต่อสตริงอย่างไร (13.5)</li><li>200 ที่ไม่บอกที่อยู่ไฟล์ ควรถือว่าอะไร (13.5)</li><li>ทำไม <code>FutureBuilder</code> ถึงกะพริบ (13.6)</li><li>เก็บ <code>Future</code> ไว้แล้วยังต้องทำอะไรอีก (13.6)</li><li>หน่วยความจำที่รูปกิน คำนวณอย่างไร (13.7)</li><li>ทำไมต้องคูณ <code>devicePixelRatio</code> ใน <code>cacheWidth</code> (13.7)</li><li>แคชรูปของ Flutter อยู่ที่ไหนและนานแค่ไหน (13.7)</li><li>ทำไม 100% ไม่ได้แปลว่าเสร็จ (13.8)</li><li>การถูกปฏิเสธต่างจากความล้มเหลวชั่วคราวอย่างไร (13.8)</li><li>ทำไมการยกเลิกไม่รับประกันว่าเซิร์ฟเวอร์ไม่ได้รับ (13.8)</li><li>ฝั่งแอปตรวจเพื่ออะไร ฝั่งเซิร์ฟเวอร์ตรวจเพื่ออะไร (13.9)</li><li>ทำไมต้องตรวจลายเซ็นในไฟล์ (13.9)</li><li>เมื่อไหร่ควรห้าม เมื่อไหร่ควรเตือน (13.9)</li></ol></section>
+
+<section id="section-9"><h2>9. สรุปท้าย Part 13</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>ขอรูปจากผู้ใช้และย่อตั้งแต่ต้นทาง</li><li>จัดการการยกเลิกและการปฏิเสธสิทธิ์ให้ต่างกัน</li><li>เก็บไฟล์ในรูปแบบที่ทำงานได้ทุกแพลตฟอร์มและทดสอบง่าย</li><li>ส่ง multipart ไป .NET พร้อมช่องข้อมูลและ header ที่ถูกที่</li><li>กันไฟล์ซ้ำด้วยรหัสคำสั่งที่ผูกกับรอบ ไม่ใช่กับครั้ง</li><li>เก็บที่อยู่ไฟล์ให้รอดตอนสลับเซิร์ฟเวอร์</li><li>มองออกว่า <code>FutureBuilder</code> ถูกใช้ผิดตรงไหน</li><li>แสดงรูปหลายใบโดยแอปไม่ถูกระบบปิด</li><li>รายงานความคืบหน้าและยกเลิกได้ระหว่างส่ง</li><li>ตรวจไฟล์ก่อนส่งโดยรู้ว่าอะไรคือความสะดวก อะไรคือความปลอดภัย</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>เก็บรูปไว้ในเครื่องแล้วส่งเมื่อเน็ตกลับมา</td><td>Part 29</td></tr>
+<tr><td>ทดสอบการอัปโหลดกับเซิร์ฟเวอร์จริง</td><td>Part 14</td></tr>
+<tr><td>วัดหน่วยความจำจริงบนเครื่อง</td><td>Part 14</td></tr>
+<tr><td>ลดขนาดแอปและไฟล์ที่ติดไปด้วย</td><td>Part 15</td></tr>
+<tr><td>อ่านฟีเจอร์อัปโหลดจริงของ <code>wmsapp</code></td><td>Part 19</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 14 ว่าด้วยการทดสอบ การหาสาเหตุของบั๊ก และการวัดประสิทธิภาพ — ซึ่งจะรวบเทคนิคที่ใช้กระจายอยู่ทั้งเจ็ด Part ที่ผ่านมาให้เป็นระบบ และสอนวิธีทดสอบกับเซิร์ฟเวอร์จริงที่หลาย Part ค้างไว้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

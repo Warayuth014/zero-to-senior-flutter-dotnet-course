@@ -4,34 +4,105 @@
 <title>File on Mobile &amp; Web</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">13-02 · Files &amp; Platform</span><h1>File on Mobile &amp; Web</h1><p>Part 13: Files &amp; Upload</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">XFile เป็น boundary ที่ดีกว่า</a></li><li><a href="#section-2">ปัญหาในโค้ดจริง</a></li><li><a href="#section-3">Portable value object</a></li><li><a href="#section-4">Bytes กับ stream</a></li><li><a href="#section-5">kIsWeb ใช้เมื่อไร</a></li><li><a href="#section-6">Conditional import</a></li><li><a href="#section-7">อย่าเก็บ path เป็นข้อมูลถาวร</a></li><li><a href="#section-8">แบบฝึกหัด</a></li></ol></nav>
-<div class="note"><strong>กฎสำคัญ:</strong> <code>dart:io File</code> ใช้ได้กับ mobile/desktop แต่ import นี้ทำให้ Flutter Web compile ไม่ผ่านได้ แม้ branch ที่เรียกจะถูกครอบด้วย <code>kIsWeb</code> ก็ตาม</div>
-<section id="section-1"><h2>1. XFile เป็น boundary ที่ดีกว่า</h2><p><code>image_picker</code> คืน <code>XFile</code> ซึ่งอ่านชื่อ, path, length และ bytes ได้ข้าม platform ให้ UI และ repository รับ <code>XFile</code> หรือ type ของเราเอง แล้วค่อยแปลงเป็น multipart ใน data source</p></section>
-<section id="section-2"><h2>2. ปัญหาในโค้ดจริง</h2><pre class="code-vs"><code>// wmsapp ปัจจุบัน
-required File imageFile;
-File(picked.path);
-MultipartFile.fromPath('file', imageFile.path);</code></pre><p>เหมาะกับ Android/iOS ที่แอปนี้ใช้งาน แต่หากจะรองรับ Web ต้องไม่ให้ shared file import <code>dart:io</code> และไม่ควรสมมติว่า browser มี filesystem path ที่ server/client อ่านตรงกันได้</p></section>
-<section id="section-3"><h2>3. Portable value object</h2><pre class="code-vs"><code>class UploadAsset {
-  final String name;
-  final int length;
-  final Future&lt;List&lt;int&gt;&gt; Function() readBytes;
-  const UploadAsset(this.name, this.length, this.readBytes);
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหา</a></li><li><a href="#section-2">ทางที่ทำงานได้ทุกที่</a></li><li><a href="#section-3">ราคาของการเก็บเป็นไบต์</a></li><li><a href="#section-4">แล้วถ้าต้องรองรับทั้งสองแบบ</a></li><li><a href="#section-5">แยกโค้ดตามแพลตฟอร์มเมื่อจำเป็นจริง</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เทียบ <code>File</code> กับ <code>Uint8List</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 13.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกวิธีเก็บไฟล์ที่ทำงานได้ทั้งบนมือถือและบนเว็บ</div>
+
+<section id="section-1"><h2>1. ปัญหา</h2><pre class="code-vs"><code>import 'dart:io';
+
+final result = await _api.uploadPartImage(
+  partId: part['partId'],
+  imageFile: File(picked.path),      // ← บรรทัดนี้
+);</code></pre><p>โค้ดนี้ทำงานได้ดีบน Android และ iOS แต่<strong>คอมไพล์ไม่ผ่านบนเว็บ</strong> เพราะ <code>dart:io</code> ไม่มีอยู่บนแพลตฟอร์มนั้น</p><table><thead><tr><th>แพลตฟอร์ม</th><th><code>File</code></th><th><code>picked.path</code></th></tr></thead><tbody>
+<tr><td>Android / iOS</td><td>ใช้ได้</td><td>ที่อยู่จริงในระบบไฟล์</td></tr>
+<tr><td>Windows / macOS / Linux</td><td>ใช้ได้</td><td>ที่อยู่จริง</td></tr>
+<tr><td>Web</td><td><strong>ไม่มี</strong></td><td>เป็น blob URL ที่เปิดด้วย <code>File</code> ไม่ได้</td></tr>
+</tbody></table><div class="note">ถ้าโปรเจกต์ลงเฉพาะ PDA Android อย่างเดียว การใช้ <code>File</code> ก็ไม่ผิด — แต่ต้องรู้ตัวว่านี่คือการตัดสินใจ ไม่ใช่ค่าปริยาย และวันที่มีคนอยากรันบน Chrome เพื่อทดสอบ จะติดตรงนี้</div></section>
+
+<section id="section-2"><h2>2. ทางที่ทำงานได้ทุกที่</h2><pre class="code-vs"><code>/// เก็บเป็น**ไบต์** ไม่ใช่ที่อยู่ไฟล์ เพราะบนเว็บไม่มีระบบไฟล์ให้อ่าน
+/// และ `dart:io` ใช้ไม่ได้เลย — โมเดลที่พูดถึงไบต์ทำงานได้ทุกแพลตฟอร์ม
+class PickedImage {
+  final Uint8List bytes;
+  final String fileName;
+  final String mimeType;
+  final int? width;
+  final int? height;
+}</code></pre><p><code>image_picker</code> คืน <code>XFile</code> ซึ่งออกแบบมาเพื่อเรื่องนี้โดยเฉพาะ</p><pre class="code-vs"><code>final picked = await ImagePicker().pickImage(source: source, ...);
+if (picked == null) return null;
+
+return PickedImage(
+  bytes: await picked.readAsBytes(),   // ← ใช้ได้ทุกแพลตฟอร์ม
+  fileName: picked.name,
+  mimeType: picked.mimeType ?? 'image/jpeg',
+);</code></pre><table><thead><tr><th><code>XFile</code></th><th>บนมือถือ</th><th>บนเว็บ</th></tr></thead><tbody>
+<tr><td><code>.path</code></td><td>ที่อยู่จริง</td><td>blob URL ที่ใช้กับ <code>File</code> ไม่ได้</td></tr>
+<tr><td><code>.readAsBytes()</code></td><td>อ่านไฟล์</td><td>อ่านจาก blob</td></tr>
+<tr><td><code>.name</code></td><td>ชื่อไฟล์</td><td>ชื่อไฟล์</td></tr>
+<tr><td><code>.mimeType</code></td><td>อาจเป็น null</td><td>มักมีค่า</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. ราคาของการเก็บเป็นไบต์</h2><table><thead><tr><th> </th><th>เก็บที่อยู่ไฟล์</th><th>เก็บไบต์</th></tr></thead><tbody>
+<tr><td>หน่วยความจำ</td><td>ไม่กิน จนกว่าจะอ่าน</td><td>กินเท่าขนาดไฟล์ตลอดเวลาที่ถืออยู่</td></tr>
+<tr><td>ทำงานบนเว็บ</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>ส่งหลายไฟล์พร้อมกัน</td><td>ไม่กินเพิ่ม</td><td>กินรวมกันทั้งหมด</td></tr>
+<tr><td>ทดสอบ</td><td>ต้องมีไฟล์จริง</td><td>สร้าง <code>Uint8List</code> ในเทสต์ได้เลย</td></tr>
+</tbody></table><p>แถวแรกกับแถวสามคือราคาจริง — รูปที่ย่อแล้วราว 300 KB ไม่มีปัญหา แต่ถ้าถ่ายสิบใบแล้วถือไว้พร้อมกันคือ 3 MB ซึ่งยังไหว ส่วนวิดีโอ 50 MB คือคนละเรื่อง</p><table><thead><tr><th>ประเภทไฟล์</th><th>ควรเก็บเป็น</th></tr></thead><tbody>
+<tr><td>รูปที่ย่อแล้ว</td><td>ไบต์ — ง่ายและปลอดภัย</td></tr>
+<tr><td>รูปเต็มความละเอียดหลายใบ</td><td>ที่อยู่ไฟล์ อ่านตอนจะส่ง</td></tr>
+<tr><td>วิดีโอหรือไฟล์ใหญ่</td><td>ที่อยู่ไฟล์เสมอ และส่งแบบ stream</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — การอ่านวิดีโอ 200 MB เข้าหน่วยความจำจะทำให้แอปถูกระบบปิดทันทีบน PDA ที่แรมน้อย</p></section>
+
+<section id="section-4"><h2>4. แล้วถ้าต้องรองรับทั้งสองแบบ</h2><pre class="code-vs"><code>sealed class UploadPayload {
+  const UploadPayload();
 }
 
-final asset = UploadAsset(
-  picked.name,
-  await picked.length(),
-  picked.readAsBytes,
-);</code></pre></section>
-<section id="section-4"><h2>4. Bytes กับ stream</h2><p><code>readAsBytes()</code> สะดวกและ web-safe แต่โหลดทั้งไฟล์เข้าหน่วยความจำ ไฟล์ที่จำกัดไว้ไม่กี่ MB ใช้ได้ ส่วนไฟล์ใหญ่ควรเปิด stream และสร้าง multipart จาก stream เพื่อไม่ให้เกิด memory spike</p></section>
-<section id="section-5"><h2>5. kIsWeb ใช้เมื่อไร</h2><pre class="code-vs"><code>if (kIsWeb) {
-  return Image.memory(await picked.readAsBytes());
+/// ไฟล์เล็ก อ่านเข้าหน่วยความจำแล้ว
+class BytesPayload extends UploadPayload {
+  const BytesPayload(this.bytes);
+  final Uint8List bytes;
 }
-return Image.file(File(picked.path));</code></pre><p>ตัวอย่างนี้ยังต้องอยู่ในไฟล์ที่ไม่ถูก compile สำหรับ web หรือแยกด้วย conditional import เพราะ parser ยังเห็น <code>dart:io</code> วิธีง่ายที่สุดคือใช้ <code>Image.memory</code>/<code>Image.network</code> ที่ portable หรือสร้าง adapter แยก platform</p></section>
-<section id="section-6"><h2>6. Conditional import</h2><pre class="code-vs"><code>import 'preview_stub.dart'
-  if (dart.library.io) 'preview_io.dart'
-  if (dart.library.html) 'preview_web.dart';</code></pre><p>ให้แต่ละ implementation รู้เรื่อง platform ของตน ส่วน screen เรียก interface เดียว ทำให้ test ด้วย fake ได้และไม่กระจาย <code>kIsWeb</code> ทั่ว codebase</p></section>
-<section id="section-7"><h2>7. อย่าเก็บ path เป็นข้อมูลถาวร</h2><p>path จาก picker อาจเป็น temporary file และหายหลังระบบล้าง cache หากต้อง retry ภายหลังให้ copy เข้า app documents/cache ที่มี lifecycle ชัดเจน หรือเก็บ bytes ที่เข้ารหัส พร้อม metadata และ cleanup policy</p></section>
-<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เปลี่ยน signature ของ <code>uploadPartImage</code> จาก <code>File</code> เป็น <code>XFile</code> หรือ <code>UploadAsset</code> แล้วอธิบายว่าจะใช้ <code>fromPath</code>, <code>fromBytes</code> หรือ stream ในแต่ละ platform</p><details><summary>แนวคำตอบ</summary><p>mobile ใช้ fromPath เพื่อ stream จาก disk, web ใช้ bytes/stream จาก picker และทั้งคู่ต้องตรวจ length ก่อนสร้าง request</p></details></section>
+
+/// ไฟล์ใหญ่ อ่านตอนส่งเป็น stream — ใช้ได้เฉพาะแพลตฟอร์มที่มีระบบไฟล์
+class FilePayload extends UploadPayload {
+  const FilePayload(this.path, this.length);
+  final String path;
+  final int length;
+}</code></pre><pre class="code-vs"><code>final file = switch (payload) {
+  BytesPayload(:final bytes) =&gt;
+      http.MultipartFile.fromBytes('file', bytes, filename: name),
+  FilePayload(:final path, :final length) =&gt;
+      http.MultipartFile('file', File(path).openRead(), length, filename: name),
+};</code></pre><p>แต่<strong>อย่าเพิ่งทำ</strong>ถ้ายังไม่มีไฟล์ใหญ่ในระบบ — lab เลือกทางไบต์อย่างเดียวเพราะรูปที่ย่อแล้วเล็กพอ ตามหลักใน 9.12</p></section>
+
+<section id="section-5"><h2>5. แยกโค้ดตามแพลตฟอร์มเมื่อจำเป็นจริง</h2><p>ถ้าต้องใช้ <code>dart:io</code> จริงในบางที่ Dart มีวิธีแยกให้</p><pre class="code-vs"><code>// file_saver.dart — ไฟล์ที่คนอื่น import
+export 'file_saver_stub.dart'
+    if (dart.library.io) 'file_saver_io.dart'
+    if (dart.library.js_interop) 'file_saver_web.dart';</code></pre><table><thead><tr><th>ไฟล์</th><th>ถูกเลือกเมื่อ</th></tr></thead><tbody>
+<tr><td><code>file_saver_io.dart</code></td><td>มี <code>dart:io</code> — มือถือและเดสก์ท็อป</td></tr>
+<tr><td><code>file_saver_web.dart</code></td><td>คอมไพล์เป็น JavaScript</td></tr>
+<tr><td><code>file_saver_stub.dart</code></td><td>ที่เหลือ — โยนบอกว่าไม่รองรับ</td></tr>
+</tbody></table><p>ทั้งสามไฟล์ต้องมี API หน้าตาเหมือนกันเป๊ะ ไม่งั้นจะคอมไพล์ไม่ผ่านบนบางแพลตฟอร์มเท่านั้น ซึ่งเป็นข้อผิดพลาดที่หาเจอตอน build ครั้งสุดท้าย</p><div class="note">วิธีนี้มีราคาสูงกว่าที่คิด — ต้องดูแลสามไฟล์ ทดสอบสามแพลตฟอร์ม และ IDE ช่วยได้ไม่เต็มที่ ใช้เมื่อไม่มีทางอื่นจริง ๆ ส่วนกรณีรูปภาพ การเก็บเป็นไบต์แก้ปัญหาได้โดยไม่ต้องแยกเลย</div></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>คอมไพล์ไม่ผ่านบนเว็บ</td><td><code>import 'dart:io'</code></td><td>เก็บเป็นไบต์ หรือแยกโค้ดตามแพลตฟอร์ม</td></tr>
+<tr><td>ไฟล์หายก่อนอัปโหลด</td><td>ระบบล้างโฟลเดอร์ชั่วคราวหลังเลือกรูป</td><td>อ่านไบต์ทันทีที่ได้ อย่ารอ</td></tr>
+<tr><td>แอปถูกระบบปิด</td><td>อ่านไฟล์ใหญ่เข้าหน่วยความจำ</td><td>ส่งเป็น stream จากที่อยู่ไฟล์</td></tr>
+<tr><td>เทสต์ต้องมีไฟล์จริงในเครื่อง</td><td>โมเดลพูดถึงที่อยู่ไฟล์</td><td>โมเดลพูดถึงไบต์</td></tr>
+<tr><td><code>mimeType</code> เป็น null</td><td>บางแพลตฟอร์มไม่ได้ให้มา</td><td>เดาจากนามสกุล แล้วตรวจจากเนื้อไฟล์ (13.9)</td></tr>
+</tbody></table><p>แถวที่สองเกิดจริงและหายาก — ระบบปฏิบัติการล้างโฟลเดอร์ชั่วคราวได้ทุกเมื่อ ไฟล์ที่ <code>pickImage</code> คืนมาจึงไม่รับประกันว่าจะอยู่จนถึงตอนที่กดส่ง โดยเฉพาะถ้าผู้ใช้เลือกรูปแล้วสลับไปแอปอื่นสักพัก</p></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทีมอยากให้ทดสอบแอปบน Chrome ได้ เพื่อให้คนที่ไม่มี PDA ช่วยทดสอบได้ด้วย ตอนนี้ฟีเจอร์อัปโหลดใช้ <code>File</code> อยู่</p><ol><li>ต้องแก้อะไรบ้าง</li><li>มีอะไรที่จะยังใช้ไม่ได้บนเว็บอยู่ดี</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> จุดที่ต้องแก้</p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td>ตัวห่อ picker</td><td>คืน <code>PickedImage</code> ที่มีไบต์ แทน <code>File</code></td></tr>
+<tr><td><code>_uploadFile</code></td><td><code>MultipartFile.fromBytes</code> แทน <code>fromPath</code></td></tr>
+<tr><td>จอที่แสดงตัวอย่าง</td><td><code>Image.memory(bytes)</code> แทน <code>Image.file(file)</code></td></tr>
+<tr><td><code>import 'dart:io'</code> ทุกที่</td><td>ลบออก</td></tr>
+</tbody></table><p>งานไม่มากเพราะการเปลี่ยนจาก path เป็น bytes เป็นการเปลี่ยนที่ขอบเดียว — และหลังจากนั้นโค้ดจะทดสอบง่ายขึ้นด้วย</p><p><strong>2.</strong> สิ่งที่ยังใช้ไม่ได้บนเว็บ และต้องบอกทีมล่วงหน้า</p><table><thead><tr><th>ฟีเจอร์</th><th>สถานะบนเว็บ</th></tr></thead><tbody>
+<tr><td>เครื่องสแกนบาร์โค้ดของ PDA</td><td>ไม่มี — เป็นฮาร์ดแวร์ของเครื่อง</td></tr>
+<tr><td>กล้อง</td><td>ใช้ได้ แต่ต้องเป็น HTTPS หรือ localhost</td></tr>
+<tr><td>การเก็บข้อมูลลงเครื่อง</td><td>ใช้ได้ แต่เก็บใน browser storage ซึ่งผู้ใช้ล้างได้</td></tr>
+<tr><td>การเรียก API ข้ามโดเมน</td><td>ติด CORS — เซิร์ฟเวอร์ต้องอนุญาต</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเรื่องที่มักทำให้เสียเวลาครึ่งวันโดยไม่คาดคิด — บนมือถือไม่มีเรื่อง CORS เลย แต่บนเว็บ เบราว์เซอร์จะบล็อกคำขอทั้งหมดจนกว่าฝั่ง .NET จะเพิ่มการอนุญาต</p><p><strong>คำถามที่ควรถามก่อนลงมือ:</strong> เป้าหมายจริงคือ “ให้คนที่ไม่มี PDA ช่วยทดสอบ” ซึ่งอาจแก้ได้ด้วยการรัน Android emulator บนคอมของเขา ซึ่งได้ผลที่ตรงกับของจริงมากกว่า และไม่ต้องแก้โค้ดเลย</p><p>ถ้าเป้าหมายคือ “อยากให้แอปนี้ใช้บนเว็บได้จริง” นั่นเป็นคนละเรื่องและต้องคุยกันอีกแบบ — เพราะ PDA กับเบราว์เซอร์มีวิธีทำงานต่างกันมาก ตามที่ Part 2 พูดถึงเรื่องการออกแบบสำหรับการสแกน</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li><code>dart:io</code> ไม่มีบนเว็บ การใช้ <code>File</code> คือการตัดสินใจ ไม่ใช่ค่าปริยาย</li><li>เก็บเป็นไบต์ทำงานได้ทุกแพลตฟอร์มและทดสอบง่าย</li><li>แลกด้วยหน่วยความจำ ซึ่งไม่มีปัญหากับรูปที่ย่อแล้ว แต่มีกับไฟล์ใหญ่</li><li>ไฟล์ชั่วคราวหายได้ อ่านไบต์ทันทีที่ได้มา</li><li>แยกโค้ดตามแพลตฟอร์มมีราคา ใช้เมื่อไม่มีทางอื่น</li></ul></div><p><strong>บทหน้า:</strong> ส่งไฟล์ไปเซิร์ฟเวอร์ .NET ด้วย multipart</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
