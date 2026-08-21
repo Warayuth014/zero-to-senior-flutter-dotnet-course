@@ -1,11 +1,94 @@
-<div class="note"><strong>Active profileคือ SSOTของ runtime server:</strong> เปลี่ยนผ่าน controller actionเดียวเพื่อจัดการ auth session, caches, requestsและ health statusพร้อมกัน</div>
-<section><h2>1. Derived active</h2><pre class="code-vs"><code>ConnectionProfile? get active =&gt;
-  _profiles.where((p) =&gt; p.id == _activeId).firstOrNull;
-String? get activeBaseUrl =&gt; active?.baseUrl;</code></pre><p>อย่าเก็บ active objectแยกจาก listเพราะ editsอาจไม่ sync</p></section>
-<section><h2>2. Select transaction</h2><ol><li>ตรวจ profileยังอยู่</li><li>confirm unsent work/session impact</li><li>เพิ่ม runtime generationและหยุด requests</li><li>persist activeId</li><li>ล้าง session/cacheตาม realm policy</li><li>notifyและ probe serverใหม่</li></ol></section>
-<section><h2>3. Pinned build</h2><p>ถ้า dart-define pin server active profileอาจเป็นเพียงข้อมูล displayหรือควรถูก disable ห้าม UIอ้าง selected profileเป็น serverจริงเมื่อ resolverใช้ override</p></section>
-<section><h2>4. Delete active</h2><p>ต้องเลือก fallback/บังคับผู้ใช้เลือกก่อน deleteและ clear sessionถ้า realmเปลี่ยน ไม่ปล่อย ApiClientใช้ cached URLเก่าหลัง profileหาย</p></section>
-<section><h2>5. Edit active endpoint</h2><p>แก้ nameอย่างเดียวไม่จำเป็น logout แต่แก้ protocol/host/port/basePathถือเป็น endpoint/realm changeตาม policyและต้อง re-probe</p></section>
-<section><h2>6. Concurrent request</h2><p>responseจาก generationเก่าต้องถูก ignoreและ clientใหม่อ่าน URLตอนส่ง ไม่ cache base URLตลอด processโดยไม่มี reset hook</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>เลือก UATขณะ receiving submitกำลังรอ responseควรทำอย่างไร?</p><details><summary>แนวคำตอบ</summary><p>block/confirm switchและ reconcile commandก่อน; หาก switchให้ invalidate generationและไม่ apply response productionเข้า UAT state</p></details></section>
-<section><h2>8. Invariant</h2><div class="success">header dot, health probe, ApiClientและsettings previewต้องบอก active resolved URLเดียวกันทุกเวลา</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่าน <code>profile_store.dart</code> แล้วไล่กฎทีละข้อ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.5, 9.7 (store), 8.11 (session ผูกกับเซิร์ฟเวอร์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> จัดการ “ตัวที่ใช้งานอยู่” ให้มีหนึ่งตัวเสมอ และรู้ว่าการสลับกระทบอะไรบ้าง</div>
+
+<section><h2>1. กฎสามข้อที่ต้องเป็นจริงตลอดเวลา</h2><table><thead><tr><th>กฎ</th><th>ถ้าละเมิดจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td>มี profile อย่างน้อยหนึ่งตัวเสมอ</td><td>ไม่มีที่อยู่ให้ยิง และไม่มีทางพิมพ์ตัวใหม่เข้าไป</td></tr>
+<tr><td>มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ</td><td>คำขอไม่รู้จะไปไหน</td></tr>
+<tr><td>ตัวที่ใช้งานอยู่ต้องมีอยู่ในรายการจริง</td><td><code>activeBaseUrl</code> เป็น null ทั้งที่มีรายการอยู่</td></tr>
+</tbody></table><p>กฎแบบนี้เรียกว่า <strong>invariant</strong> — สิ่งที่ต้องจริงก่อนและหลังทุกการกระทำ วิธีที่ดีที่สุดคือทำให้ละเมิดไม่ได้ ไม่ใช่ตรวจทีหลัง</p></section>
+
+<section><h2>2. กฎข้อที่หนึ่ง: มีอย่างน้อยหนึ่งตัว</h2><p>บังคับที่สองจุด — ตอนเปิดแอปครั้งแรก และตอนลบ</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  ...
+  if (_profiles.isEmpty) {
+    final seed = seedProfile(id: _createId());
+    _profiles.add(seed);
+    _activeId = seed.id;
+    await _persist();          // บันทึกด้วย ไม่ใช่แค่สร้างในหน่วยความจำ
+  }
+  _loaded = true;
+  notifyListeners();
+}</code></pre><pre class="code-vs"><code>Future&lt;bool&gt; remove(String id, {String? nextActiveId}) async {
+  if (_profiles.length &lt;= 1) return false;      // ลบตัวสุดท้ายไม่ได้
+  ...
+}</code></pre><p>บรรทัด <code>await _persist()</code> ในตัวแรกสำคัญ ถ้าลืม จะสร้าง profile ใหม่ทุกครั้งที่เปิดแอป และ id ที่ผู้ใช้เห็นจะเปลี่ยนไปเรื่อย ๆ เทสต์จับข้อนี้ไว้</p><pre class="code-vs"><code>test('profile เริ่มต้นถูกบันทึกลงเครื่องด้วย ไม่ใช่สร้างใหม่ทุกครั้ง', () async {
+  await newStore().load();
+
+  final second = ProfileStore(storage, createId: () =&gt; 'ไม่ควรถูกเรียก');
+  await second.load();
+  expect(second.profiles.single.id, 'p1');
+});</code></pre><div class="note">เทคนิคที่ใช้ในเทสต์นี้: ตั้งค่า <code>createId</code> ให้คืนข้อความที่ทำให้เทสต์ล้มเหลวอย่างชัดเจนถ้าถูกเรียก — ตรวจว่า “ต้องไม่เกิดขึ้น” ได้โดยไม่ต้องนับจำนวนครั้ง</div></section>
+
+<section><h2>3. กฎข้อที่สาม: ตัวที่ใช้งานอยู่ต้องมีจริง</h2><pre class="code-vs"><code>Future&lt;void&gt; activate(String id) async {
+  if (_profiles.every((p) =&gt; p.id != id)) return;   // ไม่มี ก็ไม่เปลี่ยน
+  _activeId = id;
+  ...
+}</code></pre><pre class="code-vs"><code>Future&lt;bool&gt; remove(String id, {String? nextActiveId}) async {
+  ...
+  _profiles.removeAt(index);
+  if (_activeId == id) {
+    final replacement = nextActiveId ?? _profiles.first.id;
+    _activeId = _profiles.any((p) =&gt; p.id == replacement)
+        ? replacement
+        : _profiles.first.id;                  // แม้คนเรียกส่ง id มั่ว ก็ยังปลอดภัย
+  }
+  ...
+}</code></pre><p><code>nextActiveId</code> เป็นพารามิเตอร์เพราะ<strong>การเลือกว่าจะไปใช้ตัวไหนต่อ ควรเป็นของผู้ใช้</strong> ไม่ใช่ให้แอปเลือกให้ แต่ถ้าคนเรียกไม่ส่งมา หรือส่งมาผิด store ก็ยังต้องรักษากฎไว้ได้เอง</p></section>
+
+<section><h2>4. บันทึก ≠ สลับ</h2><pre class="code-vs"><code>/// เพิ่ม profile ใหม่ โดย**ไม่**เปลี่ยนตัวที่ใช้งานอยู่
+///
+/// บันทึกกับสลับเป็นคนละการกระทำโดยตั้งใจ — คนที่จดที่อยู่เครื่องทดสอบไว้
+/// ตอนบ่าย ไม่ได้อยากให้ PDA เปลี่ยนไปยิงเครื่องทดสอบทันที
+Future&lt;ServerProfile&gt; saveAsNew(ServerProfile draft) async { ... }</code></pre><p>นี่เป็นการตัดสินใจด้าน UX ที่สะท้อนอยู่ใน API ของ store ผลของการเลือกอีกทางคือ</p><table><thead><tr><th>ถ้าบันทึกแล้วสลับให้เลย</th><th>ผลจริงที่หน้างาน</th></tr></thead><tbody>
+<tr><td>ผู้ใช้จดที่อยู่ไว้เฉย ๆ</td><td>PDA ย้ายไปยิงเครื่องทดสอบทันที งานที่ทำอยู่พัง</td></tr>
+<tr><td>ผู้ใช้แก้ typo ในชื่อ profile ที่ไม่ได้ใช้</td><td>สลับไปเครื่องนั้นโดยไม่ตั้งใจ</td></tr>
+<tr><td>ผู้ใช้ต้องการสลับจริง ๆ</td><td>ทำได้ในคลิกเดียว</td></tr>
+</tbody></table><p>สองแถวแรกแพงกว่าความสะดวกที่ได้ในแถวที่สาม จึงแยกเป็นสองปุ่ม</p></section>
+
+<section><h2>5. สลับแล้วเกิดอะไรขึ้นบ้าง</h2><pre class="code-vs"><code>Future&lt;void&gt; activate(String id) async {
+  if (_profiles.every((p) =&gt; p.id != id)) return;
+  _activeId = id;
+  _status = ServerStatus.unknown;      // ← สำคัญ
+  _lastResult = null;
+  await _persist();
+  notifyListeners();
+}</code></pre><p>การล้างสถานะสำคัญกว่าที่ดู ถ้าไม่ล้าง จุดสีเขียวที่ค้างอยู่จะบอกผู้ใช้ว่า “เชื่อมต่อได้” ทั้งที่นั่นเป็นผลของการตรวจ<strong>เซิร์ฟเวอร์ตัวเก่า</strong> เทสต์บังคับข้อนี้</p><pre class="code-vs"><code>test('สลับแล้วต้องลืมผลตรวจของเครื่องเก่า', () async {
+  ...ตรวจจนได้ connected...
+  await store.activate(saved.id);
+
+  expect(store.status, ServerStatus.unknown);
+  expect(store.lastResult, isNull);
+});</code></pre><p>แล้วสิ่งที่<strong>ไม่</strong>เกิดขึ้นล่ะ — ไม่มีการสร้าง <code>ApiClient</code> ใหม่</p><pre class="code-vs"><code>static String get apiBaseUrl =&gt;
+    resolveBaseUrl(ConnectionController.instance.activeBaseUrl);</code></pre><p>ApiClient อ่าน base URL ใหม่ทุกครั้งที่ยิง ไม่ได้เก็บไว้ตอนสร้าง ผลคือการสลับมีผลทันทีทั้งแอป และ token ที่ติดอยู่กับ client ตัวเดิมก็ไม่หาย</p></section>
+
+<section><h2>6. แต่ token ที่ไม่หาย ก็ใช้กับเซิร์ฟเวอร์ใหม่ไม่ได้</h2><p>นี่คือจุดที่ Part 10 ต่อกับ Part 8 พอดี</p><pre class="code-vs"><code>สลับ profile
+  → ApiClient ยิงไปเซิร์ฟเวอร์ใหม่ พร้อม token เก่าที่ยังติดอยู่
+    → เซิร์ฟเวอร์ใหม่ไม่รู้จัก token นี้ ตอบ 401
+      → SessionStore.handleUnauthorized() (8.7)
+        → ออกจากระบบ พร้อมเหตุผล serverChanged (8.11)</code></pre><p>ทำงานถูกต้อง แต่ผู้ใช้ต้องรอให้คำขอแรกล้มเหลวก่อน ทางที่ดีกว่าคือให้ <code>SessionStore</code> ตรวจตั้งแต่ตอนสลับ</p><pre class="code-vs"><code>if (stored.serverId != currentServerId) {
+  await _clearTo(AuthStatus.signedOut, reason: SignOutReason.serverChanged);
+  return;
+}</code></pre><p>สิ่งที่ต้องระวังคืออย่าให้ <code>ProfileStore</code> เรียก <code>SessionStore</code> โดยตรง ไม่งั้นจะได้การพึ่งพาที่วนกลับตามที่ 9.15 เตือนไว้ ให้ shell ที่ถือทั้งสองตัวเป็นคนต่อ</p><pre class="code-vs"><code>profileStore.addListener(() {
+  sessionStore.handleServerChanged(profileStore.active?.id);
+});</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>สลับแล้วบางส่วนของแอปยังยิงที่เก่า</td><td>เก็บ base URL ไว้ตอนสร้าง client</td><td>อ่านใหม่ทุกครั้งที่ยิง</td></tr>
+<tr><td>จุดสถานะเขียวทั้งที่ยังไม่ได้ตรวจเครื่องใหม่</td><td>ไม่ล้างสถานะตอนสลับ</td><td>ตั้งเป็น <code>unknown</code></td></tr>
+<tr><td>ลบ profile แล้วแอปยิงไม่ได้เลย</td><td>ลบตัวที่ใช้งานอยู่โดยไม่มีตัวแทน</td><td>บังคับให้มีตัวแทนเสมอ</td></tr>
+<tr><td>บันทึกที่อยู่ใหม่แล้วงานที่ทำอยู่พัง</td><td>บันทึกแล้วสลับให้อัตโนมัติ</td><td>แยกเป็นสองการกระทำ</td></tr>
+<tr><td>สลับแล้วยังเห็นข้อมูลของเซิร์ฟเวอร์เก่า</td><td>store ของฟีเจอร์อื่นไม่ได้ล้าง</td><td>ล้างพร้อมออกจากระบบ (8.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้กำลังนับสต๊อกค้างอยู่ครึ่งทาง แล้วเปิดหน้าตั้งค่าไปสลับ profile</p><ol><li>ควรให้สลับได้ไหม</li><li>ถ้าให้สลับ ต้องทำอะไรกับงานที่ค้างอยู่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ควรให้สลับได้ แต่ต้องเตือน</strong> การห้ามสลับตอนมีงานค้างฟังดูปลอดภัย แต่จะทำให้ผู้ใช้ที่สลับผิดเครื่องตั้งแต่แรกติดกับ — เขาจะนับต่อไม่ได้ (เพราะเป็นเครื่องผิด) และสลับก็ไม่ได้ (เพราะมีงานค้าง)</p><p><strong>2.</strong> สามอย่างตามลำดับ</p><ul><li><strong>เตือนก่อน</strong> ว่างานที่ค้างอยู่จะหาย พร้อมบอกว่าค้างอยู่กี่รายการ — ตัวเลขทำให้ผู้ใช้ตัดสินใจได้จริง ต่างจากคำเตือนลอย ๆ</li><li><strong>ล้างให้หมด</strong> ถ้ายืนยัน — รายการที่นับไปแล้วเป็นของเซิร์ฟเวอร์เก่า เอามาใช้กับเครื่องใหม่ไม่ได้ นี่คือเหตุผลเดียวกับที่ 8.8 ล้าง store ทั้งหมดตอนออกจากระบบ</li><li><strong>อย่าพยายามย้ายงานข้ามเซิร์ฟเวอร์</strong> — รหัสพาเลทและรหัสสินค้าอาจซ้ำกันโดยบังเอิญระหว่างสองระบบ การย้ายไปจะเขียนข้อมูลผิดที่แบบที่ตามแก้ยากมาก</li></ul><p>ถ้าอยากทำให้ดีกว่านั้น: ให้เก็บงานที่ค้างไว้ผูกกับ <code>serverId</code> แล้วเมื่อสลับกลับมาที่เดิม ค่อยเสนอให้ทำต่อ — แต่เป็นงานของ Part 29 ไม่ใช่ของบทนี้</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>เขียนกฎที่ต้องจริงเสมอออกมาก่อน แล้วทำให้ละเมิดไม่ได้</li><li>บันทึกกับสลับเป็นคนละการกระทำ</li><li>สลับแล้วต้องล้างผลตรวจของเครื่องเก่า</li><li>อ่าน base URL ใหม่ทุกครั้งที่ยิง ไม่ใช่เก็บไว้ตอนสร้าง client</li><li>สลับเซิร์ฟเวอร์กระทบ session ให้ shell เป็นคนต่อสองอย่างเข้าด้วยกัน</li></ul></div><p><strong>บทหน้า:</strong> ฟอร์มที่บอกผู้ใช้ว่าค่าที่พิมพ์ควรไปอยู่ตรงไหน</p></section>

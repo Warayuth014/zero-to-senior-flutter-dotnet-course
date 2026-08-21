@@ -4,21 +4,135 @@
 <title>Lab: Connection Profiles</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-13 · Flutter + .NET</span><h1>Lab: Connection Profiles</h1><p>Part 10: Settings &amp; Connectivity</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Acceptance criteria</a></li><li><a href="#section-2">Core files</a></li><li><a href="#section-3">Unit fixtures</a></li><li><a href="#section-4">Controller tests</a></li><li><a href="#section-5">Widget flow</a></li><li><a href="#section-6">Device verification</a></li><li><a href="#section-7">Failure drill</a></li><li><a href="#section-8">Exit test</a></li></ol></nav>
-<div class="note"><strong>Lab ปิด Part 10:</strong> สร้าง Profile editor + ConnectionController + payload-aware probe ที่รองรับหลาย server, base path, persistence, unsaved guardและ shell status</div>
-<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>CRUD profilesและ active ID persistเป็น versioned JSON</li><li>dart-define overrideมี precedenceและ UIชัด</li><li>validation/normalizationมี unit tests</li><li>Test draftไม่ mutate active</li><li>probe reject HTML 200/wrong service</li><li>switch serverจัดการ session/generation</li><li>shell statusมี unknown/checking/online/offline/stale</li></ul></section>
-<section id="section-2"><h2>2. Core files</h2><pre class="code-vs"><code>core/connection/
-  connection_profile.dart
-  connection_document.dart
-  connection_repository.dart
-  connection_controller.dart
-  connection_probe.dart
-features/settings/connection_settings_sheet.dart</code></pre></section>
-<section id="section-3"><h2>3. Unit fixtures</h2><p>สร้าง profile DEV/UAT/PROD, legacy document, corrupted entry, health JSONจริง, HTML Blazor fallback, 404 ProblemDetailsและ timeout exceptionโดยไม่เปิด network</p></section>
-<section id="section-4"><h2>4. Controller tests</h2><p>load/migrate/seed, save new/edit/delete active, write failure, select generation, overlapping probesและ assert request/probeใช้ resolved URLเดียวกัน</p></section>
-<section id="section-5"><h2>5. Widget flow</h2><ol><li>เปิด sheetเลือก profile</li><li>แก้ host/pathและเห็น preview</li><li>Test draftด้วย fake probe</li><li>Backแสดง unsaved guard</li><li>Save & Use confirm realm switch</li><li>shellเปลี่ยน label/status</li></ol></section>
-<section id="section-6"><h2>6. Device verification</h2><p>ทดสอบ Windows localhost, Android emulator <code>10.0.2.2</code> และ PDAผ่าน LAN IP/HTTPS ตรวจ firewall/TLSโดยไม่ใส่ bypassถาวร</p></section>
-<section id="section-7"><h2>7. Failure drill</h2><p>จำลอง serverดับ, IPผิด, portผิด, base pathผิดแต่ Blazorตอบ 200, certificateผิดและ preferencesเสีย แล้วตรวจว่าข้อความบอกสาเหตุ/ทางแก้ไม่เหมารวม</p></section>
-<section id="section-8"><h2>8. Exit test</h2><div class="success">เมื่อจบต้องอธิบายและพิสูจน์ได้ว่า configใดชนะ, URLถูก normalize, profile/sessionผูกกัน, probeตรวจ WMSจริงและ operatorเปลี่ยน environmentได้โดยไม่ยิง request/tokenผิด server</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บทนี้ทำอะไร</a></li><li><a href="#section-2">แผนที่ของ lab</a></li><li><a href="#section-3">เส้นทางทั้งหมดในภาพเดียว</a></li><li><a href="#section-4">โจทย์</a></li><li><a href="#section-5">เกณฑ์ที่ต้องผ่าน</a></li><li><a href="#section-6">คำใบ้สำหรับข้อที่ยาก</a></li><li><a href="#section-7">เทสต์ที่ต้องเขียนเพิ่ม</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</a></li><li><a href="#section-9">แบบทดสอบตัวเองก่อนจบ Part 10</a></li><li><a href="#section-10">สรุปท้าย Part 10</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: สร้างหน้าตั้งค่าที่ใช้งานได้จริงทั้งหน้า</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.1–10.12 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำหน้าตั้งค่าที่ผู้ปฏิบัติงานใช้เองได้ โดยไม่ต้องมีทีมพัฒนาอยู่ด้วย</div>
+
+<section id="section-1"><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>settings_lab/</code> ทั้งหมด พร้อมรู้ว่าแต่ละส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>สร้างหน้าตั้งค่าตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 11</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>server_profile.dart</code></td><td>โมเดล + <code>normalizeBasePath</code> + <code>baseUrl</code></td><td>10.3, 10.4</td></tr>
+<tr><td><code>profile_draft.dart</code></td><td>สิ่งที่กำลังพิมพ์ + <code>isDirtyFrom</code></td><td>10.11</td></tr>
+<tr><td><code>profile_validation.dart</code></td><td>ตรวจรายช่อง</td><td>10.7</td></tr>
+<tr><td><code>profile_snapshot.dart</code></td><td>เข้ารหัส/ถอดรหัสทั้งชุด</td><td>10.5</td></tr>
+<tr><td><code>health_probe.dart</code></td><td>ตรวจว่าเป็น WMS จริง</td><td>10.9, 10.10</td></tr>
+<tr><td><code>profile_store.dart</code></td><td>เจ้าของทั้งหมด + สถานะ</td><td>10.6, 10.8, 10.12</td></tr>
+<tr><td><code>test/settings_test.dart</code></td><td>เทสต์ 41 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/settings_test.dart</code></pre></section>
+
+<section id="section-3"><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>เปิดแอป
+  └─ ProfileStore.load()                              ← 10.6
+       ├─ ไม่มีของเก่า → สร้างตัวเริ่มต้น + บันทึก
+       ├─ มีของเก่า    → อ่านกลับ ทิ้งแถวที่เสีย        ← 10.5
+       └─ resolveBaseUrl(activeBaseUrl)               ← 10.2
+            └─ --dart-define ชนะทุกอย่าง
+
+ผู้ใช้เปิดหน้าตั้งค่า
+  ├─ เห็นรายการ + ตัวที่ใช้อยู่ + จุดสถานะ              ← 10.12
+  ├─ กด "เพิ่ม" → ProfileDraft ใหม่                    ← 10.11
+  │    ├─ พิมพ์ → validateDraft ทุกครั้งที่เปลี่ยน       ← 10.7
+  │    ├─ กด "ทดสอบ" → probeServer(baseUrl ของร่าง)    ← 10.9
+  │    ├─ กด "บันทึก" → toProfile → saveAsNew          ← 10.6
+  │    └─ กดปิดทั้งที่ยังไม่บันทึก → เตือน               ← 10.11
+  ├─ กด "ใช้ตัวนี้" → activate → ล้างสถานะ             ← 10.6
+  │    └─ session ที่ผูกกับเซิร์ฟเวอร์เก่าถูกล้าง        ← 8.11
+  └─ กด "ลบ" → remove (ตัวสุดท้ายลบไม่ได้)             ← 10.6
+
+กลับมาจากพื้นหลัง
+  └─ refreshStatus()                                  ← 10.8</code></pre></section>
+
+<section id="section-4"><h2>4. โจทย์</h2><p>สร้างหน้าตั้งค่าเซิร์ฟเวอร์ให้ครบ ในโฟลเดอร์ <code>lib/settings_lab/ui/</code></p><table><thead><tr><th>หน้าจอ</th><th>ต้องมี</th></tr></thead><tbody>
+<tr><td>รายการ</td><td>ชื่อ, ที่อยู่, ป้ายว่าตัวไหนใช้อยู่, ปุ่มใช้ตัวนี้/แก้ไข/ลบ, ปุ่มเพิ่ม</td></tr>
+<tr><td>ฟอร์ม</td><td>ห้าช่องพร้อมข้อความผิดพลาดใต้ช่อง, ปุ่มทดสอบ, ปุ่มบันทึก, ปุ่มบันทึกเป็นตัวใหม่</td></tr>
+<tr><td>หัวจอ</td><td>จุดสถานะ + ชื่อ profile ที่ใช้อยู่</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>เปิดแอปครั้งแรกมี profile ให้ใช้ทันที และบันทึกไว้ ไม่สร้างใหม่ทุกครั้ง</td><td>10.6</td></tr>
+<tr><td>2</td><td>ข้อมูลที่เก็บไว้เสียหนึ่งแถว ต้องยังใช้แถวที่เหลือได้</td><td>10.5</td></tr>
+<tr><td>3</td><td>มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ ไม่ว่าจะทำอะไรกับรายการ</td><td>10.6</td></tr>
+<tr><td>4</td><td>บันทึกไม่ทำให้สลับ และสลับเป็นปุ่มแยก</td><td>10.6</td></tr>
+<tr><td>5</td><td>สลับแล้วสถานะการเชื่อมต่อของเครื่องเก่าต้องถูกล้าง</td><td>10.6</td></tr>
+<tr><td>6</td><td>ลบตัวสุดท้ายไม่ได้ และลบตัวที่ใช้อยู่ต้องมีตัวแทน</td><td>10.6</td></tr>
+<tr><td>7</td><td>ข้อความผิดพลาดแสดงใต้ช่องที่ผิด ไม่ใช่กองรวมกัน</td><td>10.7</td></tr>
+<tr><td>8</td><td>ทุกข้อความบอกว่าค่านั้นควรไปอยู่ที่ไหน</td><td>10.7</td></tr>
+<tr><td>9</td><td>เปิดฟอร์มเปล่ามาต้องไม่เห็นสีแดงจนกว่าจะแตะช่องหรือกดบันทึก</td><td>10.7</td></tr>
+<tr><td>10</td><td>ปุ่มทดสอบใช้ที่อยู่ในฟอร์ม ไม่ใช่ที่อยู่ที่ใช้งานอยู่</td><td>10.9</td></tr>
+<tr><td>11</td><td>เซิร์ฟเวอร์ที่ตอบ 200 พร้อม HTML ต้องขึ้นว่าไม่สำเร็จ พร้อมชี้ไปที่ Base Path</td><td>10.10</td></tr>
+<tr><td>12</td><td>ใส่ <code>/api</code> ใน Base Path ต้องถูกดักพร้อมอธิบายว่าจะเกิดอะไร</td><td>10.10</td></tr>
+<tr><td>13</td><td>กดปิดทั้งที่แก้ไปแล้ว ต้องเตือนด้วยปุ่มที่เขียนเป็นการกระทำ</td><td>10.11</td></tr>
+<tr><td>14</td><td>เปิดฟอร์มแล้วปิดทันทีโดยไม่แก้อะไร ต้องไม่เตือน</td><td>10.11</td></tr>
+<tr><td>15</td><td>จุดสถานะแสดงชื่อ profile ด้วย ไม่ใช่แค่สี</td><td>10.12</td></tr>
+<tr><td>16</td><td>ปุ่มทำงานทุกปุ่มกดได้เสมอ ไม่ว่าสถานะจะเป็นอะไร</td><td>10.12</td></tr>
+<tr><td>17</td><td>ระหว่างตรวจต้องเห็นว่ากำลังตรวจอยู่</td><td>10.8</td></tr>
+<tr><td>18</td><td>ตรวจตอนเปิดจอและตอนกลับจากพื้นหลัง ไม่มีตัวจับเวลาวนตลอด</td><td>10.8</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 9 — ไม่แดงจนกว่าจะแตะ</strong></p><pre class="code-vs"><code>final _touched = &lt;String&gt;{};
+var _submitted = false;
+
+String? errorFor(String field, String? message) =&gt;
+    _touched.contains(field) || _submitted ? message : null;
+
+TextField(
+  onTap: () =&gt; setState(() =&gt; _touched.add('host')),
+  decoration: InputDecoration(errorText: errorFor('host', validation.host)),
+)</code></pre><p><strong>เกณฑ์ 10 — ทดสอบที่อยู่ในฟอร์ม</strong></p><p>ต้องประกอบ URL จากร่างเอง โดยไม่ผ่าน <code>toProfile</code> เพราะร่างอาจยังไม่ผ่านการตรวจ</p><pre class="code-vs"><code>Future&lt;void&gt; _test() async {
+  final validation = validateDraft(_draft);
+  if (!validation.isValid) {
+    setState(() =&gt; _submitted = true);   // โชว์ข้อความก่อน แล้วไม่ต้องยิง
+    return;
+  }
+  final candidate = _draft.toProfile(id: 'ชั่วคราว');
+  setState(() =&gt; _testing = true);
+  final result = await probeServer(baseUrl: candidate.baseUrl);
+  if (!mounted) return;
+  setState(() { _testing = false; _testResult = result; });
+}</code></pre><p><strong>เกณฑ์ 5 และ session</strong></p><p>อย่าให้ <code>ProfileStore</code> เรียก <code>SessionStore</code> เอง ให้ shell ที่ถือทั้งสองตัวเป็นคนต่อ ตามที่ 10.6 §6 อธิบาย ไม่งั้นจะได้การพึ่งพาที่วนกลับ</p></section>
+
+<section id="section-7"><h2>7. เทสต์ที่ต้องเขียนเพิ่ม</h2><p>เทสต์ 41 ข้อที่มีอยู่ครอบคลุมชั้นล่างแล้ว สิ่งที่ต้องเขียนเองคือเทสต์ของหน้าจอ อย่างน้อย 6 ข้อ</p><pre class="code-vs"><code>testWidgets('เปิดฟอร์มเปล่าแล้วปิดทันที ต้องไม่เตือน', (tester) async {
+  await tester.pumpWidget(app);
+  await tester.tap(find.byKey(const Key('add-profile')));
+  await tester.pumpAndSettle();
+
+  await tester.pageBack();
+  await tester.pumpAndSettle();
+
+  expect(find.byType(AlertDialog), findsNothing);
+  expect(find.byKey(const Key('profile-list')), findsOneWidget);
+});</code></pre><pre class="code-vs"><code>testWidgets('ปุ่มทดสอบใช้ที่อยู่ในฟอร์ม ไม่ใช่ที่อยู่ที่ใช้งานอยู่', (tester) async {
+  Uri? probed;
+  // ...ตั้ง profile ที่ใช้งานอยู่เป็น 10.0.0.1 แล้วพิมพ์ 10.0.0.99 ในฟอร์ม...
+
+  await tester.tap(find.byKey(const Key('test-connection')));
+  await tester.pumpAndSettle();
+
+  expect(probed!.host, '10.0.0.99');
+});</code></pre></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>พิมพ์ในฟอร์มแล้วค่าไม่เข้าร่าง</td><td>ใช้ <code>TextEditingController</code> แต่ไม่ได้เขียนกลับ</td><td><code>onChanged</code> อัปเดตร่างทุกครั้ง</td></tr>
+<tr><td>เตือนหลังบันทึกสำเร็จ</td><td>ไม่ได้อัปเดตตัวที่ใช้เทียบ</td><td>ตั้ง <code>_saved</code> เป็นตัวที่เพิ่งบันทึก</td></tr>
+<tr><td>ปุ่มทดสอบยิงที่อยู่เก่า</td><td>ใช้ <code>store.activeBaseUrl</code></td><td>ประกอบจากร่าง</td></tr>
+<tr><td>รายการไม่อัปเดตหลังบันทึก</td><td>ไม่ได้ฟัง store</td><td><code>ListenableBuilder</code></td></tr>
+<tr><td>เทสต์ widget ล้มเพราะ plugin ไม่มี</td><td>ใช้ที่เก็บจริง</td><td>ใส่ <code>InMemorySettingsStorage</code></td></tr>
+<tr><td>สลับแล้วยังเห็นข้อมูลของเซิร์ฟเวอร์เก่า</td><td>store ของฟีเจอร์อื่นไม่ได้ล้าง</td><td>ล้างพร้อมกัน (8.8)</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบทดสอบตัวเองก่อนจบ Part 10</h2><ol><li>ค่าตั้งค่ามาจากสามชั้นไหนบ้าง (10.1)</li><li>ใช้เกณฑ์อะไรตัดสินว่าค่าไหนควรให้ผู้ใช้แก้ (10.1)</li><li>ทำไม <code>String.fromEnvironment</code> ต้องอยู่ใน <code>const</code> (10.2)</li><li>ทำไมลำดับความสำคัญของค่าต้องตัดสินที่เดียว (10.2)</li><li><code>normalizeBasePath('/')</code> ต้องคืนอะไร และทำไม (10.3)</li><li>เมื่อไหร่ควร normalize และเมื่อไหร่ควรตรวจแล้วบอก (10.3)</li><li>ทำไม profile ต้องมี <code>id</code> แยกจากชื่อและที่อยู่ (10.4)</li><li>ทำไมห้ามเอา <code>environment</code> ไปเปลี่ยนพฤติกรรมของแอป (10.4)</li><li>ทำไมข้อมูลบนเครื่องนี้ถึงทิ้งแถวเสียได้ ต่างจากข้อมูลจากเซิร์ฟเวอร์ (10.5)</li><li>ทำไม <code>activeId</code> ถึงเก็บเป็นธงบนแถว (10.5)</li><li>ทำไมบันทึกกับสลับต้องเป็นคนละการกระทำ (10.6)</li><li>สลับ profile แล้วต้องล้างอะไรบ้าง (10.6, 8.11)</li><li>ข้อความผิดพลาดที่ดีต่างจากที่ไม่ดีอย่างไร (10.7)</li><li>ทำไมต้องตรวจจากร่าง ไม่ใช่จากโมเดล (10.7, 10.11)</li><li>ทำไมไม่ควรตรวจการเชื่อมต่อด้วยตัวจับเวลา (10.8)</li><li>ทำไมต้องมีสถานะ <code>unknown</code> (10.8)</li><li>ทำไมรหัสตอบกลับ 200 ถึงไม่พอ (10.9, 10.10)</li><li>health endpoint ไม่ควรมีอะไรอยู่ในนั้น (10.9)</li><li>ทำไม probe ถึงไม่ใช้ <code>ApiClient</code> (10.9)</li><li>ทำไมร่างเปล่าถึงไม่ควรนับว่าแก้แล้ว (10.11)</li><li>สถานะเครือข่ายยืนยันอะไรได้และไม่ได้ (10.12)</li><li>ทำไมไม่ควรปิดปุ่มเมื่อออฟไลน์ (10.12)</li></ol></section>
+
+<section id="section-10"><h2>10. สรุปท้าย Part 10</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>แยกได้ว่าค่าตั้งค่าไหนอยู่ชั้นไหน และค่าไหนควรให้ผู้ใช้แก้</li><li>ใช้ <code>--dart-define</code> และรวมลำดับความสำคัญไว้ที่เดียว</li><li>แปลงค่าที่ผู้ใช้พิมพ์ให้เหลือรูปแบบเดียวที่ขอบ</li><li>เก็บหลาย profile ลงเครื่องโดยแถวเสียไม่ทำลายที่เหลือ</li><li>รักษากฎ “มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ” ในทุกเส้นทาง</li><li>ตรวจฟอร์มรายช่อง พร้อมข้อความที่บอกว่าต้องทำอะไรต่อ</li><li>ตรวจการเชื่อมต่อโดยอ่านเนื้อหา ไม่ใช่แค่รหัสตอบกลับ</li><li>รู้จักกับดัก “200 ที่ไม่ใช่ของเรา” และดักไว้สองชั้น</li><li>เตือนก่อนทิ้งงานที่ผู้ใช้กรอกค้างไว้</li><li>แสดงสถานะเครือข่ายโดยไม่ขวางการทำงานและไม่หลอกผู้ใช้</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>เก็บงานที่ค้างไว้แล้วส่งเมื่อเน็ตกลับมา</td><td>Part 29</td></tr>
+<tr><td>ที่เก็บที่ปลอดภัยสำหรับข้อมูลอ่อนไหว</td><td>Part 12</td></tr>
+<tr><td>SignalR ที่ต้องต่อใหม่เมื่อสลับ profile</td><td>Part 12</td></tr>
+<tr><td>ตรวจสอบกับเซิร์ฟเวอร์จริงหลายตัว</td><td>Part 14</td></tr>
+<tr><td>อ่านหน้าตั้งค่าจริงของ <code>wms_absolute_mobile</code></td><td>Part 20</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 11 ว่าด้วยหน้าตาและภาษา — ธีมที่อ่านออกใต้แสงจ้าในคลัง ข้อความสองภาษา และการจัดการไฟล์ประกอบ ซึ่งเป็นเรื่องที่ดูเหมือนผิวเผินแต่กระทบผู้ใช้ทุกวินาทีที่ถือเครื่อง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

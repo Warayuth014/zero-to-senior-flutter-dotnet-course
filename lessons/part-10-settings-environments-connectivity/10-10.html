@@ -4,19 +4,73 @@
 <title>Blazor Fallback Trap</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-10 · Flutter + .NET</span><h1>Blazor Fallback Trap</h1><p>Part 10: Settings &amp; Connectivity</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Scenario</a></li><li><a href="#section-2">Why it happens</a></li><li><a href="#section-3">Defensive probe</a></li><li><a href="#section-4">API routing order</a></li><li><a href="#section-5">Error message</a></li><li><a href="#section-6">Security angle</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Regression test</a></li></ol></nav>
-<div class="note"><strong>Blazor fallback trap:</strong> SPA hostอาจตอบ <code>index.html</code> พร้อม 200ให้ pathที่ไม่มี route ดังนั้น typoใน API/base pathดูเหมือน server healthyถ้าตรวจแต่ status</div>
-<section id="section-1"><h2>1. Scenario</h2><pre class="code-vs"><code>GET /wrong-prefix/api/WMS/mobile_health
-HTTP/1.1 200 OK
-Content-Type: text/html
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เรื่องที่เกิดขึ้นจริง</a></li><li><a href="#section-2">เกิดอะไรขึ้น</a></li><li><a href="#section-3">ทำไมถึงหลอกได้แนบเนียน</a></li><li><a href="#section-4">เทสต์ที่บังคับไว้</a></li><li><a href="#section-5">กันไว้สองชั้น</a></li><li><a href="#section-6">กับดักเดียวกันในที่อื่น</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: จำลองกับดักแล้วดูว่าเทสต์จับได้อย่างไร</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.9<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้จักกับดักชนิด “200 ที่ไม่ใช่ของเรา” และหาเจอในระบบอื่นได้ด้วย</div>
 
-&lt;!doctype html&gt;&lt;html&gt;...Blazor app...&lt;/html&gt;</code></pre></section>
-<section id="section-2"><h2>2. Why it happens</h2><p>Fallback routeส่ง host pageให้ client-side routing จัดการ เหมาะ browser navigationแต่ API probeที่ไม่ตรวจ contentเข้าใจผิด</p></section>
-<section id="section-3"><h2>3. Defensive probe</h2><p>ต้องตรวจ expected content-type, JSON decode, top-level mapและ exact service marker ถ้า HTMLให้ wrongService/basePath ไม่ใช่ generic malformed JSON</p></section>
-<section id="section-4"><h2>4. API routing order</h2><p>ฝั่ง .NET map API/healthก่อน fallbackและอาจแยก API host/domainเพื่อ ambiguityน้อย แต่ clientยังต้องตรวจ payloadเพราะ proxy/captive portalตอบ HTMLได้</p></section>
-<section id="section-5"><h2>5. Error message</h2><p>บอกว่า “serverตอบแต่ไม่ใช่ WMS API—ตรวจ Base Path” ต่างจาก “ติดต่อไม่ได้” เพราะ networkและhostทำงานแล้ว ผู้ใช้ควรแก้ pathไม่ใช่ Wi-Fi</p></section>
-<section id="section-6"><h2>6. Security angle</h2><p>อย่า log HTML bodyทั้งหน้า อาจมี config/script metadata ให้เก็บ status, content-type, lengthและ safe prefixที่ truncate/redact</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>status 404 JSON ProblemDetailsกับ 200 HTMLควรจัดกลุ่มเหมือนกันไหม?</p><details><summary>แนวคำตอบ</summary><p>ทั้งคู่อาจบอก route/base pathผิดแต่ evidenceต่าง: 404 API response vs fallback host page จึงเก็บ typed resultแยกเพื่อ diagnostics</p></details></section>
-<section id="section-8"><h2>8. Regression test</h2><div class="success">MockClientคืน HTML 200แล้ว assert <code>ok == false</code>, messageชี้ base pathและ status dotไม่เปลี่ยน online</div></section>
+<section id="section-1"><h2>1. เรื่องที่เกิดขึ้นจริง</h2><p>ผู้ใช้ตั้งค่า profile ใหม่สำหรับเซิร์ฟเวอร์ที่อยู่หลัง reverse proxy</p><pre class="code-vs"><code>Protocol: HTTPS
+Host: wms.company.com
+Port: 443
+Base Path: /api          ← ตรงนี้
+</code></pre><p>กด “ทดสอบการเชื่อมต่อ” แล้วขึ้นว่า <strong>เชื่อมต่อสำเร็จ · 84 ms</strong> จุดกลายเป็นสีเขียว ผู้ใช้กดบันทึกแล้วสลับไปใช้</p><p>จากนั้นทุกอย่างในแอปพัง ทุกหน้าจอขึ้นว่าโหลดไม่สำเร็จ</p></section>
+
+<section id="section-2"><h2>2. เกิดอะไรขึ้น</h2><p>เซิร์ฟเวอร์ WMS ฝั่ง .NET เป็นเว็บ Blazor ที่ตั้งค่าไว้แบบนี้</p><pre class="code-vs"><code>// Program.cs ฝั่ง .NET
+app.MapControllers();
+app.MapBlazorHub();
+app.MapFallbackToPage("/_Host");    // ← ต้นเหตุ</code></pre><div class="note"><code>MapFallbackToPage</code> บอกว่า “เส้นทางไหนที่ไม่ตรงกับอะไรเลย ให้ตอบหน้าเว็บหลักไป” มีไว้เพื่อให้เว็บที่ทำงานฝั่งเบราว์เซอร์ refresh หน้าใดก็ได้แล้วยังใช้ได้</div><p>ผลคือเซิร์ฟเวอร์นี้ <strong>ตอบ 200 ให้กับทุกเส้นทางที่ไม่รู้จัก</strong></p><table><thead><tr><th>ยิงไปที่</th><th>ได้</th></tr></thead><tbody>
+<tr><td><code>/api/WMS/mobile_health</code></td><td>200 + JSON ที่ถูกต้อง</td></tr>
+<tr><td><code>/api/api/WMS/mobile_health</code></td><td><strong>200 + HTML ของหน้าเว็บ</strong></td></tr>
+<tr><td><code>/อะไรก็ได้ที่ไม่มีจริง</code></td><td><strong>200 + HTML ของหน้าเว็บ</strong></td></tr>
+</tbody></table><p>Base Path ที่ใส่ <code>/api</code> ทำให้ทุกคำขอกลายเป็น <code>/api/api/WMS/...</code> ซึ่งไม่ตรงกับ controller ไหน จึงตกไปที่หน้าเว็บ และได้ 200 กลับมาทุกครั้ง</p></section>
+
+<section id="section-3"><h2>3. ทำไมถึงหลอกได้แนบเนียน</h2><table><thead><tr><th>สิ่งที่ตรวจ</th><th>ผลที่ได้</th><th>ดูเหมือน</th></tr></thead><tbody>
+<tr><td>ต่อ socket ได้ไหม</td><td>ได้</td><td>ปกติ</td></tr>
+<tr><td>DNS แปลชื่อได้ไหม</td><td>ได้</td><td>ปกติ</td></tr>
+<tr><td>ใบรับรอง HTTPS ผ่านไหม</td><td>ผ่าน</td><td>ปกติ</td></tr>
+<tr><td>รหัสตอบกลับ</td><td>200</td><td>ปกติ</td></tr>
+<tr><td>เวลาตอบ</td><td>84 ms</td><td>เร็วดี</td></tr>
+<tr><td>เนื้อหา</td><td><code>&lt;!DOCTYPE html&gt;...</code></td><td><strong>ผิด</strong></td></tr>
+</tbody></table><p>ห้าข้อแรกผ่านหมด เพราะมันผ่านจริง — เซิร์ฟเวอร์ตัวนั้นมีอยู่จริงและทำงานปกติ สิ่งที่ผิดคือเส้นทาง ซึ่งเป็นสิ่งเดียวที่ต้องอ่านเนื้อหาถึงจะรู้</p></section>
+
+<section id="section-4"><h2>4. เทสต์ที่บังคับไว้</h2><pre class="code-vs"><code>test('200 พร้อม HTML ของหน้าเว็บ ต้องไม่ถือว่าสำเร็จ', () async {
+  // กับดัก Blazor: MapFallbackToPage ตอบ 200 ให้ทุกเส้นทางที่ไม่รู้จัก
+  // ถ้าเชื่อแค่รหัสตอบกลับ Base Path ที่ผิดจะดูเหมือนใช้ได้
+  final result = await probeServer(
+    baseUrl: 'http://10.0.0.1:6191',
+    client: respond('&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;WMS&lt;/body&gt;&lt;/html&gt;', 200),
+  );
+  expect(result.ok, isFalse);
+  expect(result.statusCode, 200);          // ← ยืนยันว่ามันตอบ 200 จริง
+  expect(result.message, contains('Base Path'));
+});</code></pre><p>บรรทัด <code>expect(result.statusCode, 200)</code> มีไว้เพื่อบอกคนอ่านว่า <strong>นี่ไม่ใช่กรณีที่เซิร์ฟเวอร์ล่ม</strong> — ถ้าไม่มีบรรทัดนี้ คนที่มาอ่านเทสต์ทีหลังอาจคิดว่าเป็นเทสต์ซ้ำกับกรณีต่อไม่ติด</p></section>
+
+<section id="section-5"><h2>5. กันไว้สองชั้น</h2><p>ชั้นแรกคือดักตั้งแต่ในฟอร์ม ไม่ให้ใส่ <code>/api</code> ได้เลย</p><pre class="code-vs"><code>if (normalizeBasePath(raw).toLowerCase().startsWith('/api')) {
+  return 'ปล่อยว่างไว้ — แอปเติม /api ให้เองอยู่แล้ว '
+      'ถ้าใส่ตรงนี้จะกลายเป็น /api/.../api/... แล้วยิงไม่เข้าสักเส้น';
+}</code></pre><p>ข้อความนี้ยาวกว่าข้อความผิดพลาดทั่วไปมาก และตั้งใจ เพราะผู้ใช้ที่ใส่ <code>/api</code> ลงไปไม่ได้ทำผิดโดยไม่มีเหตุผล — ช่องนี้<strong>หน้าตาเหมือนที่ที่ API root ควรอยู่</strong> ถ้าบอกแค่ว่า “ห้ามใส่ /api” เขาจะสงสัยว่าแล้วต้องใส่ที่ไหน</p><p>ชั้นที่สองคือการตรวจเนื้อหาใน probe ซึ่งจับกรณีที่ชั้นแรกดักไม่ได้ เช่นเส้นทางที่ผิดด้วยเหตุอื่น หรือ proxy ที่กำหนดค่าผิด</p><p>สังเกตว่าเทสต์บังคับให้ดักได้ทุกรูปแบบที่พิมพ์</p><pre class="code-vs"><code>for (final raw in ['api', '/api', 'api/', '/API/wms']) {
+  expect(validateDraft(draft(basePath: raw)).basePath, isNotNull);
+}</code></pre><p><code>/API/wms</code> อยู่ในรายการเพราะ URL บางส่วนไม่สนตัวพิมพ์ใหญ่เล็ก และผู้ใช้ที่พิมพ์ตัวใหญ่ก็ตั้งใจอย่างเดียวกัน</p></section>
+
+<section id="section-6"><h2>6. กับดักเดียวกันในที่อื่น</h2><p>รูปแบบนี้ไม่ได้มีแค่ Blazor ให้ระวังเมื่อเจอ</p><table><thead><tr><th>ระบบ</th><th>ตอบ 200 ให้เส้นทางที่ไม่รู้จัก เพราะ</th></tr></thead><tbody>
+<tr><td>SPA ทุกชนิด (React, Angular, Vue)</td><td>ต้องให้ refresh หน้าไหนก็ได้</td></tr>
+<tr><td>Wi-Fi สาธารณะ</td><td>ดักทุกคำขอไปหน้าล็อกอิน</td></tr>
+<tr><td>ISP บางราย</td><td>ดัก DNS ที่หาไม่เจอไปหน้าค้นหา</td></tr>
+<tr><td>reverse proxy ที่ตั้งค่าผิด</td><td>ตกไปที่ default server block</td></tr>
+<tr><td>CDN</td><td>ตอบหน้า error ของตัวเองด้วย 200</td></tr>
+</tbody></table><div class="note"><strong>กฎที่ใช้ได้ทั่วไป:</strong> เมื่อจะตรวจว่า “ต่อกับสิ่งที่ต้องการได้ไหม” ต้องมีอะไรบางอย่างในคำตอบที่<strong>เฉพาะเจาะจงกับระบบของเรา</strong> ไม่ใช่แค่รหัสตอบกลับ</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทดสอบผ่านแต่ใช้จริงไม่ได้</td><td>เชื่อรหัสตอบกลับ</td><td>ตรวจเนื้อหา</td></tr>
+<tr><td><code>jsonDecode</code> โยนตอนได้ HTML</td><td>ไม่ได้ครอบ try</td><td>ครอบแล้วคืน false</td></tr>
+<tr><td>ตรวจแค่ว่ามีคำว่า WMS ในเนื้อหา</td><td>หน้าเว็บก็มีคำว่า WMS</td><td>ตรวจโครงสร้าง JSON</td></tr>
+<tr><td>ผู้ใช้ใส่ <code>/api</code> ซ้ำแล้วซ้ำอีก</td><td>ข้อความบอกแค่ว่าห้าม</td><td>บอกว่าทำไมและจะเกิดอะไร</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมจะเพิ่มการตรวจว่ารุ่นของเซิร์ฟเวอร์ใช้กับ PDA รุ่นนี้ได้ไหม โดยอ่าน <code>version</code> จาก health payload</p><ol><li>ถ้าเซิร์ฟเวอร์เก่ากว่าที่รองรับ ควรทำอย่างไร</li><li>ถ้า health payload ไม่มี <code>version</code> เลย ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ขึ้นกับว่าเข้ากันไม่ได้แค่ไหน และควรแยกเป็นสองระดับ</p><table><thead><tr><th>ระดับ</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>เก่ากว่าที่รองรับ แต่ยังใช้ได้บางส่วน</td><td>เตือน แล้วให้ใช้ต่อได้ — ผู้ใช้ที่หน้างานต้องทำงานให้เสร็จ</td></tr>
+<tr><td>เก่าจนสัญญาไม่ตรงกันเลย</td><td>ห้ามใช้ พร้อมบอกรุ่นที่ต้องการ — ถ้าปล่อยไป จะได้ ContractException ทุกจอ ซึ่งผู้ใช้เข้าใจน้อยกว่า</td></tr>
+</tbody></table><p>สิ่งที่ต้องมีคู่กันคือ<strong>ข้อความที่บอกทั้งรุ่นที่เจอและรุ่นที่ต้องการ</strong> เพราะคนที่แก้ปัญหานี้ได้คือทีมไอที ไม่ใช่ผู้ใช้ และเขาต้องเอาข้อความนี้ไปบอกต่อ</p><p><strong>2.</strong> ต้องยอมให้ไม่มี และถือว่าเป็นรุ่นเก่าที่สุดที่ยังรองรับ เหตุผลคือ<strong>เซิร์ฟเวอร์ที่ยังไม่ได้อัปเดตคือเซิร์ฟเวอร์ที่ไม่มีฟิลด์นี้พอดี</strong> ถ้าบังคับให้ต้องมี ก็จะกันเซิร์ฟเวอร์รุ่นเก่าออกทั้งหมดตั้งแต่วันแรกที่ปล่อยฟีเจอร์นี้ ซึ่งเป็นสิ่งที่ตรงข้ามกับที่ต้องการ</p><p>นี่เป็นข้อยกเว้นของกฎใน 6.5 ที่ว่าฟิลด์ที่ขาดต้องโยน และเหตุผลชัดเจนคือ <strong>ฟิลด์นี้มีไว้ตรวจความเข้ากันได้ การไม่มีมันจึงเป็นข้อมูลอย่างหนึ่ง ไม่ใช่ความผิดพลาด</strong></p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>200 แปลว่ามีคนตอบ ไม่ได้แปลว่าคนที่เราต้องการตอบ</li><li><code>MapFallbackToPage</code> และ SPA ทุกชนิดทำให้ทุกเส้นทางตอบ 200</li><li>ต้องมีอะไรในคำตอบที่เฉพาะเจาะจงกับระบบของเรา</li><li>ดักสองชั้น คือที่ฟอร์ม และที่การตรวจ</li><li>ข้อความผิดพลาดของกับดักที่หน้าตาสมเหตุสมผล ต้องอธิบายว่าทำไม</li></ul></div><p><strong>บทหน้า:</strong> ผู้ใช้กรอกฟอร์มไปครึ่งทางแล้วกดปิด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

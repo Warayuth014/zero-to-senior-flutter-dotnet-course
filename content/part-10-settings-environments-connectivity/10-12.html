@@ -1,9 +1,79 @@
-<div class="note"><strong>Shell network status เป็น observed state—not guarantee:</strong> แสดงผล probeล่าสุดและเวลา ไม่สรุปว่าทุก requestถัดไปสำเร็จ</div>
-<section><h2>1. States</h2><ul><li>unknown: ยังไม่ตรวจ</li><li>checking: กำลัง probe</li><li>online: WMS markerถูก ณ เวลาหนึ่ง</li><li>offline: typed failureพร้อม message</li><li>stale: ผลเก่าเกิน threshold</li></ul></section>
-<section><h2>2. UI</h2><p>ใช้ dot+icon+text/tooltip เช่น “WMS online · 12s ago” และ tapเปิดรายละเอียด server resolved URL, environment, latency, versionและปุ่ม retry</p></section>
-<section><h2>3. Refresh triggers</h2><p>startupหลัง profiles load, app resume, active profile change, user retryและ periodic intervalที่เหมาะสม หยุด timerเมื่อ disposed/backgroundตาม policy</p></section>
-<section><h2>4. Avoid probe storms</h2><p>single-flight/debounce refreshและไม่ให้ทุก widgetสร้าง timerเอง Shell/controllerเป็น ownerเดียว ใช้ backoffเมื่อ offlineเพื่อไม่เพิ่ม load/battery</p></section>
-<section><h2>5. Request feedback</h2><p>ApiClient failureอาจ mark status suspect/offlineและ schedule probe แต่ 400/403ไม่ใช่ connectivity failure; success requestอาจ update last-seenโดยไม่แทน identity probeทั้งหมด</p></section>
-<section><h2>6. Active parity</h2><p>Status cardต้องแสดง resolved URLจริงรวม dart-define override ไม่ใช่ selected profileที่ถูก override และเมื่อ switchให้ phaseกลับ unknown/checkingทันที</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>dotเขียวจาก 5 นาทีที่แล้วแต่ requestล่าสุด timeoutควรทำอะไร?</p><details><summary>เฉลย</summary><p>mark stale/suspectหรือ offlineตาม policyและ probeใหม่ แสดง timestampเพื่อไม่ทำให้ operatorเชื่อว่า greenเป็น guaranteeปัจจุบัน</p></details></section>
-<section><h2>8. Tests</h2><div class="success">state rendering, stale timeด้วย fake clock, resume, timer dispose, profile switch, overlapping refreshและ non-network API errorไม่ทำ dotแดง</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ออกแบบสิ่งที่ผู้ใช้เห็นเมื่อเน็ตหาย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.8, 10.9, Part 7 (ชนิดความล้มเหลว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แสดงสถานะเครือข่ายให้มีประโยชน์จริง โดยไม่หลอกผู้ใช้และไม่ขวางการทำงาน</div>
+
+<section><h2>1. ผู้ใช้ต้องการรู้อะไรจริง ๆ</h2><p>เวลามีปัญหา ผู้ปฏิบัติงานในคลังถามคำถามเดียว</p><div class="note"><strong>“เครื่องฉันมีปัญหา หรือระบบมีปัญหา”</strong></div><p>เพราะคำตอบสองอย่างนี้พาไปคนละทาง</p><table><thead><tr><th>คำตอบ</th><th>เขาทำอะไรต่อ</th></tr></thead><tbody>
+<tr><td>เครื่องนี้ไม่มีสัญญาณ</td><td>เดินไปที่ที่มีสัญญาณ แล้วทำต่อ</td></tr>
+<tr><td>เซิร์ฟเวอร์ไม่ตอบ</td><td>โทรแจ้งไอที แล้วรอ หรือใช้กระดาษไปก่อน</td></tr>
+</tbody></table><p>จุดสถานะที่ดีต้องช่วยแยกสองอย่างนี้ให้ได้ ถ้าแยกไม่ได้ ผู้ใช้จะเสียเวลาเดินหาสัญญาณทั้งที่เซิร์ฟเวอร์ล่ม</p></section>
+
+<section><h2>2. สองระดับที่ต่างกัน</h2><table><thead><tr><th> </th><th>มีสัญญาณเน็ตไหม</th><th>เซิร์ฟเวอร์ตอบไหม</th></tr></thead><tbody>
+<tr><td>รู้ได้จาก</td><td>ระบบปฏิบัติการ (<code>connectivity_plus</code>)</td><td>ยิงคำขอจริง</td></tr>
+<tr><td>รู้ได้เร็วแค่ไหน</td><td>ทันที</td><td>ต้องรอคำตอบ</td></tr>
+<tr><td>บอกอะไรได้</td><td>“ไม่ต้องลองก็รู้ว่าไม่ได้”</td><td>“ลองแล้วได้/ไม่ได้”</td></tr>
+<tr><td>บอกอะไรไม่ได้</td><td>ต่อ Wi-Fi อยู่ แต่ Wi-Fi นั้นไปไม่ถึงเซิร์ฟเวอร์</td><td>—</td></tr>
+</tbody></table><div class="note">แถวสุดท้ายคือกับดัก — <strong>“มีสัญญาณ” ไม่ได้แปลว่า “ใช้งานได้”</strong> ในคลังที่มี Wi-Fi หลายวง PDA อาจเกาะวงที่แรงกว่าแต่ไปไม่ถึงเซิร์ฟเวอร์ ระบบปฏิบัติการจะรายงานว่าเชื่อมต่ออยู่</div><p>ผลคือ <strong>สถานะเครือข่ายใช้ยืนยันว่าใช้ไม่ได้ ไม่ใช่ยืนยันว่าใช้ได้</strong></p></section>
+
+<section><h2>3. ใช้สถานะเครือข่ายอย่างไรให้ถูก</h2><table><thead><tr><th>ใช้ทำ</th><th>อย่าใช้ทำ</th></tr></thead><tbody>
+<tr><td>อธิบายความล้มเหลวที่เกิดแล้ว ให้ชัดขึ้น</td><td>ปิดปุ่มไว้ล่วงหน้า</td></tr>
+<tr><td>เลือกข้อความที่ตรงกว่า</td><td>ข้ามการยิงคำขอ</td></tr>
+<tr><td>ลองใหม่อัตโนมัติเมื่อสัญญาณกลับมา</td><td>ตัดสินว่าคำขอจะสำเร็จหรือไม่</td></tr>
+</tbody></table><pre class="code-vs"><code>// ยิงเสมอ แล้วใช้สถานะเครือข่ายอธิบายผลที่ได้
+} on ApiException catch (error) {
+  if (error.kind == ApiFailureKind.network) {
+    _failure = hasNoNetwork
+        ? const Failure('เครื่องนี้ไม่มีสัญญาณ ลองเดินไปที่ที่สัญญาณดีกว่า')
+        : const Failure('มีสัญญาณ แต่ติดต่อเซิร์ฟเวอร์ไม่ได้ แจ้งไอทีถ้ายังไม่หาย');
+  }
+}</code></pre><p>ข้อความสองอันนี้พาผู้ใช้ไปคนละทาง และนั่นคือทั้งหมดที่จุดสถานะควรทำ</p></section>
+
+<section><h2>4. ทำไมห้ามปิดปุ่ม</h2><p>การปิดปุ่มเมื่อ “ออฟไลน์” ดูเหมือนช่วยผู้ใช้ แต่สร้างปัญหาสามข้อ</p><table><thead><tr><th>ปัญหา</th><th>รูปธรรม</th></tr></thead><tbody>
+<tr><td>รายงานผิดพลาดได้</td><td>ระบบปฏิบัติการบอกว่าไม่มีเน็ตทั้งที่มี ผู้ใช้ทำงานไม่ได้ทั้งที่ทำได้</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่าทำไมกดไม่ได้</td><td>ปุ่มจางคือความลึกลับ ต่างจากข้อความผิดพลาดที่อธิบาย</td></tr>
+<tr><td>ต้องมีโค้ดจัดการความล้มเหลวอยู่ดี</td><td>สัญญาณอาจหายระหว่างที่คำขอกำลังเดินทาง — เขียนโค้ดสองชุดเพื่อป้องกันเรื่องเดียว</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเหตุผลทางวิศวกรรมล้วน ๆ — โค้ดที่ปิดปุ่มไม่ได้แทนที่โค้ดจัดการความล้มเหลว มันแค่<strong>เพิ่ม</strong>เข้ามาอีกชุด</p></section>
+
+<section><h2>5. จุดสถานะที่แสดงข้อมูลครบ</h2><pre class="code-vs"><code>ListenableBuilder(
+  listenable: store,
+  builder: (context, _) =&gt; Tooltip(
+    message: store.lastResult?.message ?? 'ยังไม่ได้ตรวจ',
+    child: Row(
+      children: [
+        _StatusDot(status: store.status),
+        const SizedBox(width: 6),
+        // ชื่อ profile ไม่ใช่ IP — IP ยาวเกินและผู้ใช้จำชื่อได้ดีกว่า (10.4)
+        Text(store.active?.name ?? ''),
+      ],
+    ),
+  ),
+)</code></pre><table><thead><tr><th>ส่วน</th><th>ตอบคำถามว่า</th></tr></thead><tbody>
+<tr><td>สีของจุด</td><td>ตรวจครั้งล่าสุดผลเป็นอย่างไร</td></tr>
+<tr><td>ชื่อ profile</td><td>ตอนนี้ต่อกับเครื่องไหน</td></tr>
+<tr><td>ข้อความเมื่อกดค้าง</td><td>ล้มเหลวเพราะอะไร</td></tr>
+</tbody></table><p>ข้อที่สองสำคัญและมักถูกลืม — ปัญหาที่พบบ่อยที่สุดในการใช้งานจริงไม่ใช่ “ต่อไม่ได้” แต่คือ <strong>“ต่อผิดเครื่องโดยไม่รู้ตัว”</strong> ซึ่งจุดสีเขียวอย่างเดียวช่วยอะไรไม่ได้เลย</p></section>
+
+<section><h2>6. เมื่อสัญญาณกลับมา</h2><pre class="code-vs"><code>// ฟังการเปลี่ยนแปลงของเครือข่าย แล้วตรวจซ้ำเมื่อกลับมา
+_subscription = Connectivity().onConnectivityChanged.listen((result) {
+  final online = !result.contains(ConnectivityResult.none);
+  if (online &amp;&amp; !_wasOnline) {
+    unawaited(store.refreshStatus());
+  }
+  _wasOnline = online;
+});</code></pre><table><thead><tr><th>ทำ</th><th>อย่าทำ</th></tr></thead><tbody>
+<tr><td>ตรวจสถานะซ้ำ</td><td>ยิงคำสั่งที่ค้างอยู่ซ้ำอัตโนมัติ</td></tr>
+<tr><td>โหลดข้อมูลที่แสดงอยู่ใหม่</td><td>ส่งคำสั่งที่ผลไม่แน่นอนซ้ำ</td></tr>
+</tbody></table><p>ฝั่งขวาคือกฎเดิมจาก 7.10 — คำสั่งที่<strong>ไม่รู้ผล</strong>ห้ามส่งซ้ำเอง ต้องให้ผู้ใช้ตัดสินหลังเห็นสถานะจริง เพราะการรับของเข้าคลังซ้ำสองครั้งแก้ยากกว่าการรับช้าไปหนึ่งนาที</p><p>อย่าลืมยกเลิก subscription ใน <code>dispose</code> ตามกฎใน 4.11</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ทำงานไม่ได้ทั้งที่เน็ตปกติ</td><td>เชื่อ <code>connectivity</code> แล้วปิดปุ่ม</td><td>ยิงเสมอ</td></tr>
+<tr><td>จุดเขียวแต่ต่อผิดเครื่อง</td><td>ไม่ได้แสดงชื่อ profile</td><td>แสดงชื่อคู่กับจุด</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่าล้มเหลวเพราะอะไร</td><td>จุดสีอย่างเดียวไม่มีรายละเอียด</td><td>เก็บและแสดงข้อความล่าสุด</td></tr>
+<tr><td>สัญญาณกลับมาแล้วยิงคำสั่งซ้ำเอง</td><td>ลองใหม่อัตโนมัติกับคำสั่งที่ไม่รู้ผล</td><td>ลองใหม่เฉพาะการอ่าน</td></tr>
+<tr><td>แอปช้าลงหลังใช้ไปนาน</td><td>ไม่ได้ยกเลิก subscription</td><td>ยกเลิกใน <code>dispose</code></td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้าคลังขอสองอย่าง</p><ol><li>“ถ้าเน็ตหลุด ให้ขึ้นแถบแดงเต็มจอว่าใช้งานไม่ได้”</li><li>“ให้เก็บงานที่ทำค้างไว้แล้วส่งเองตอนเน็ตกลับมา”</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. อย่าทำตามตรงตัว</strong> เพราะแถบแดงเต็มจอตั้งอยู่บนข้อมูลที่เชื่อไม่ได้ (§2) ผู้ใช้ที่เห็นแถบแดงทั้งที่ทำงานได้จะเรียนรู้ที่จะไม่สนใจมัน แล้ววันที่มันถูกจริงก็จะไม่มีใครสนใจเหมือนกัน</p><p>สิ่งที่ตอบความต้องการจริงคือ “ผู้ใช้ไม่รู้ตัวว่าออฟไลน์แล้วทำงานเสียเปล่า” ซึ่งแก้ได้ด้วย</p><ul><li>แถบบางที่หัวจอเมื่อ<strong>คำขอจริงล้มเหลว</strong> ไม่ใช่เมื่อระบบปฏิบัติการบอกว่าไม่มีเน็ต</li><li>ข้อความบอกว่าล้มเหลวเมื่อไหร่ เช่น “ติดต่อเซิร์ฟเวอร์ไม่ได้ตั้งแต่ 14:32”</li><li>ปุ่มลองใหม่ที่กดได้ทันที</li></ul><p><strong>2. ทำได้ แต่ต้องแยกสองอย่าง</strong></p><table><thead><tr><th>ทำได้ปลอดภัย</th><th>อันตราย</th></tr></thead><tbody>
+<tr><td>เก็บ<strong>ร่าง</strong>ที่ผู้ใช้กรอกไว้ ไม่ให้หาย</td><td>ส่งคำสั่งเองเมื่อเน็ตกลับมา</td></tr>
+<tr><td>เตือนว่ามีงานค้างรอส่ง</td><td>ส่งโดยผู้ใช้ไม่เห็น</td></tr>
+</tbody></table><p>เหตุผลที่ฝั่งขวาอันตราย: ระหว่างที่ออฟไลน์อยู่ครึ่งชั่วโมง สถานะของจริงในคลังอาจเปลี่ยนไปแล้ว — พาเลทที่จะรับเข้าอาจถูกคนอื่นรับไปแล้ว การส่งคำสั่งเก่าโดยไม่ตรวจสอบจะเขียนข้อมูลผิด และไม่มีใครรู้ว่าเกิดขึ้นเมื่อไหร่</p><p>ทางที่ปลอดภัยคือเก็บร่างไว้ แล้วเมื่อเน็ตกลับมา ให้แสดงว่า “มีงานค้าง 3 รายการ” พร้อมปุ่มให้ผู้ใช้ตรวจแล้วส่งเอง ซึ่งเป็นหัวข้อเต็ม ๆ ของ Part 29</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ผู้ใช้อยากรู้แค่ว่า “เครื่องฉันหรือระบบ” — ออกแบบให้ตอบคำถามนั้น</li><li>สถานะเครือข่ายยืนยันได้ว่าใช้ไม่ได้ แต่ยืนยันไม่ได้ว่าใช้ได้</li><li>ยิงคำขอเสมอ ใช้สถานะอธิบายผล ไม่ใช่ขวางไว้ก่อน</li><li>แสดงชื่อ profile คู่กับจุดสี เพราะ “ต่อผิดเครื่อง” เจอบ่อยกว่า “ต่อไม่ได้”</li><li>สัญญาณกลับมาให้โหลดข้อมูลใหม่ ไม่ใช่ส่งคำสั่งซ้ำ</li></ul></div><p><strong>บทหน้า:</strong> ประกอบทั้งหมดเป็นหน้าตั้งค่าที่ใช้งานได้จริง</p></section>

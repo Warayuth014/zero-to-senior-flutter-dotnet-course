@@ -1,18 +1,64 @@
-<div class="note"><strong>ConnectionProfile เป็น immutable value:</strong> รวม server identityที่ผู้ใช้ตั้งชื่อ, environment, protocol, host, portและ base path พร้อม JSON/versioning</div>
-<section><h2>1. Model</h2><pre class="code-vs"><code>class ConnectionProfile {
-  const ConnectionProfile({required this.id, required this.name,
-    required this.environment, required this.protocol,
-    required this.host, required this.port, this.basePath = ''});
-  final String id, name, host, basePath;
-  final ConnectionEnvironment environment;
-  final ConnectionProtocol protocol;
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน <code>server_profile.dart</code> ทั้งไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.3, Part 6 (โมเดล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบโมเดลของการตั้งค่าที่มีทั้ง id, ชื่อที่คนอ่าน และค่าที่เครื่องใช้</div>
+
+<section><h2>1. profile คืออะไร</h2><div class="note"><strong>Connection profile</strong> คือที่อยู่เซิร์ฟเวอร์หนึ่งชุดที่ผู้ใช้บันทึกไว้ พร้อมชื่อที่ตัวเองตั้ง</div><p>ผู้ปฏิบัติงานเก็บไว้หลายชุด เช่น</p><table><thead><tr><th>ชื่อที่ตั้ง</th><th>ที่อยู่</th><th>ใช้ตอน</th></tr></thead><tbody>
+<tr><td>คลังหลัก</td><td><code>http://192.168.1.194:6191</code></td><td>ทำงานปกติ</td></tr>
+<tr><td>เครื่องทดสอบ</td><td><code>http://192.168.1.50:6191</code></td><td>ทดสอบฟีเจอร์ใหม่</td></tr>
+<tr><td>สาขาลาดกระบัง</td><td><code>https://wms-lk.company.com:443/wms</code></td><td>ไปช่วยงานสาขา</td></tr>
+</tbody></table><p>สิ่งที่ต้องสังเกตคือ <strong>ชื่อสำคัญพอ ๆ กับที่อยู่</strong> ผู้ใช้จำ <code>192.168.1.194</code> กับ <code>192.168.1.50</code> สลับกันได้ง่ายมาก แต่จำ “คลังหลัก” กับ “เครื่องทดสอบ” ไม่มีวันสลับ</p></section>
+
+<section><h2>2. ฟิลด์ทั้งหมดและเหตุผล</h2><pre class="code-vs"><code>class ServerProfile {
+  final String id;                     // ตัวระบุที่ไม่เปลี่ยน
+  final String name;                   // ชื่อที่ผู้ใช้ตั้ง
+  final ServerEnvironment environment; // ป้ายกำกับ
+  final ServerProtocol protocol;       // http หรือ https
+  final String host;
   final int port;
-  String get baseUrl =&gt; /* normalized Uri */;
-}</code></pre></section>
-<section><h2>2. Stable ID</h2><p>ใช้ UUID/created IDเป็น identity ไม่ใช้ nameหรือ URL เพราะแก้ชื่อ/hostได้ Active selectionอ้าง IDและ duplicate-nameเป็น validation/UXคนละเรื่อง</p></section>
-<section><h2>3. Environment metadata</h2><p>development/staging/productionช่วยสี/label/default protocolแต่ไม่ควรเปลี่ยน URLแบบแอบแฝงและไม่ใช้แทน verified server realm</p></section>
-<section><h2>4. copyWith</h2><p>edit draftด้วย immutable copyและรักษา ID/createdAt แยก save-as-newที่ออก IDใหม่จาก save-editsชัดเจน ป้องกันแก้ objectใน listโดยตรง</p></section>
-<section><h2>5. JSON boundary</h2><p><code>fromJson(Object?)</code> ตรวจ required fields, port range, enum fallbackและ normalize legacy host ห้าม throwจน controller loadทั้งรายการล้มเพราะ profileเสียหนึ่งตัว</p></section>
-<section><h2>6. Equality</h2><p>เปรียบเทียบ normalized semantic fieldsสำหรับ dirty/duplicate endpointแต่ identityใช้ ID ไม่ให้ slashต่างกันถือเป็น serverคนละตัวโดยบังเอิญ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>save profileเดิมเป็นชื่อ “Warehouse UAT copy” ควรคง IDไหม?</p><details><summary>เฉลย</summary><p>ถ้า Save As Newต้อง IDใหม่; ถ้า rename/edit profileเดิมคง IDเพื่อ active referenceไม่หาย</p></details></section>
-<section><h2>8. Invariants</h2><div class="success">name/hostไม่ว่าง, port valid, path normalized, protocol enum, ID stableและ baseUrlสร้างจาก fieldsเพียงจุดเดียว</div></section>
+  final String basePath;               // เก็บดิบตามที่พิมพ์ (10.3)
+}</code></pre><table><thead><tr><th>ฟิลด์</th><th>ทำไมต้องมี</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td>ชื่อกับที่อยู่เปลี่ยนได้ทั้งคู่ ต้องมีอะไรที่ไม่เปลี่ยนไว้อ้างอิงว่า “ตัวที่ใช้อยู่คือตัวนี้”</td></tr>
+<tr><td><code>name</code></td><td>ผู้ใช้แยกออกในรายการ</td></tr>
+<tr><td><code>environment</code></td><td>ป้ายกำกับล้วน ๆ ไม่มีผลต่อการทำงาน</td></tr>
+<tr><td><code>protocol</code></td><td>เป็น enum เพื่อให้มีแค่สองค่า (10.1)</td></tr>
+<tr><td><code>host</code>, <code>port</code></td><td>แยกช่องเพื่อตรวจได้ทีละอย่าง</td></tr>
+<tr><td><code>basePath</code></td><td>สำหรับเซิร์ฟเวอร์ที่อยู่หลัง reverse proxy</td></tr>
+</tbody></table></section>
+
+<section><h2>3. ทำไม <code>environment</code> ถึงไม่มีผลอะไรเลย</h2><pre class="code-vs"><code>/// ป้ายกำกับที่ผู้ใช้เลือกเอง ไม่มีผลต่อการทำงาน
+///
+/// มีไว้ให้แยกออกว่าอันไหนคืออันไหนในรายการ และใช้ตั้งค่าเริ่มต้นของพอร์ต
+/// ตอนสร้างใหม่เท่านั้น
+enum ServerEnvironment { production, development, custom }</code></pre><p>สิ่งที่ยั่วใจคือการเขียนแบบนี้</p><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+if (profile.environment == ServerEnvironment.production) {
+  enableStrictValidation();
+  disableDebugLogging();
+  useShortTimeout();
+}</code></pre><p>ปัญหาคือมันทำให้ป้ายกำกับที่ผู้ใช้เลือกเล่น ๆ กลายเป็นสวิตช์ที่เปลี่ยนพฤติกรรมของแอป ผู้ใช้ที่ตั้งชื่อ profile ของเครื่องทดสอบว่า production เพราะ “มันคือ production ของแผนกเรา” จะได้พฤติกรรมที่ไม่คาดคิด และไม่มีทางเดาได้เลยว่าทำไม</p><div class="note"><strong>หลัก:</strong> ค่าที่ผู้ใช้เลือกเพื่อความสะดวกของตัวเอง อย่าเอาไปตัดสินใจแทนโปรแกรม ถ้าต้องการโหมดจริง ๆ ให้ตัดสินจาก <code>kReleaseMode</code> หรือ <code>--dart-define</code> ที่ผู้ใช้แตะไม่ได้</div></section>
+
+<section><h2>4. getter เดียวที่ประกอบทุกอย่าง</h2><pre class="code-vs"><code>String get baseUrl =&gt;
+    '${protocol.name}://$host:$port${normalizeBasePath(basePath)}';</code></pre><p>ทั้งแอปมีที่เดียวที่ประกอบ URL ผลคือ</p><ul><li>เปลี่ยนรูปแบบการประกอบ แก้ที่เดียว</li><li>ไม่มีใครลืมเรียก <code>normalizeBasePath</code></li><li>ทดสอบด้วยเทสต์สามบรรทัดครอบคลุมทุกกรณี</li></ul><pre class="code-vs"><code>expect(profile('p1').baseUrl, 'http://192.168.1.194:6191');
+expect(
+  profile('p1', protocol: ServerProtocol.https, basePath: 'wms').baseUrl,
+  'https://192.168.1.194:6191/wms',
+);</code></pre></section>
+
+<section><h2>5. <code>id</code> ที่ไม่ต้องพึ่ง package</h2><pre class="code-vs"><code>String newProfileId() =&gt; 'p${DateTime.now().microsecondsSinceEpoch}';</code></pre><p>ไม่ได้ใช้ uuid เพราะ id นี้ต้องไม่ซ้ำ<strong>เฉพาะในรายการบนเครื่องนี้</strong>เท่านั้น ไม่ได้ส่งไปเซิร์ฟเวอร์และไม่ได้เทียบกับเครื่องอื่น เวลาระดับไมโครวินาทีจึงพอ</p><p>ใน lab ค่านี้รับเข้ามาทาง constructor พร้อมค่าเริ่มต้น ตามรูปแบบใน 9.8</p><pre class="code-vs"><code>ProfileStore(this.storage, {String Function()? createId})
+  : _createId = createId ?? (() =&gt; 'p${DateTime.now().microsecondsSinceEpoch}');</code></pre><p>เทสต์จึงส่ง <code>() =&gt; 'p${++counter}'</code> เข้าไปแล้วเขียน <code>expect(profile.id, 'p1')</code> ได้ตรง ๆ แทนที่จะต้องเดาเลขเวลา</p></section>
+
+<section><h2>6. <code>copyWith</code> และกับดักเดิม</h2><pre class="code-vs"><code>ServerProfile copyWith({String? name, String? host, int? port, ...}) =&gt;
+    ServerProfile(
+      name: name ?? this.name,
+      host: host ?? this.host,
+      ...
+    );</code></pre><p>รูปแบบเดียวกับ 6.12 และมีกับดักเดียวกัน คือ <strong>ส่ง null เข้าไปเพื่อล้างค่าไม่ได้</strong> — <code>copyWith(basePath: null)</code> จะได้ค่าเดิม ไม่ใช่ค่าว่าง</p><p>ที่นี่ไม่เป็นปัญหาเพราะไม่มีฟิลด์ไหนเป็น nullable การล้าง <code>basePath</code> ทำด้วย <code>copyWith(basePath: '')</code> ซึ่งชัดเจนกว่าอยู่แล้ว</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แก้ที่อยู่แล้วตัวที่ใช้งานอยู่หลุด</td><td>ใช้ที่อยู่หรือชื่อเป็นตัวระบุ</td><td>มี <code>id</code> แยกที่ไม่เปลี่ยน</td></tr>
+<tr><td>ผู้ใช้เห็นรายการที่แยกไม่ออกว่าอันไหนคืออันไหน</td><td>ไม่มีชื่อ หรือชื่อว่าง</td><td>บังคับให้ตั้งชื่อ และใช้ host แทนถ้าไม่มี</td></tr>
+<tr><td>พฤติกรรมแอปเปลี่ยนตามป้ายที่ผู้ใช้เลือก</td><td>เอา <code>environment</code> ไปตัดสินใจ</td><td>ใช้ <code>kReleaseMode</code> หรือค่าตอน build</td></tr>
+<tr><td>URL ประกอบไม่เหมือนกันในแต่ละที่</td><td>ประกอบเองหลายที่</td><td>มี getter เดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้าขอเพิ่มสองอย่างใน profile</p><ol><li>ช่องหมายเหตุให้จดว่าเซิร์ฟเวอร์นี้คือเครื่องไหน ตั้งอยู่ที่ไหน</li><li>ชื่อผู้ใช้กับรหัสผ่านที่ผูกกับเซิร์ฟเวอร์นั้น เพื่อจะได้ไม่ต้องพิมพ์ทุกครั้งตอนสลับ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. เพิ่มได้</strong> เป็น <code>String note</code> ที่มีค่าเริ่มต้นเป็นค่าว่าง ไม่ต้องตรวจอะไร เพราะเป็นข้อความอิสระที่ไม่มีผลต่อการทำงาน จุดที่ต้องคิดคือถ้าเป็น <code>String?</code> จะได้สองสถานะที่ความหมายเหมือนกัน (null กับ <code>''</code>) ให้เลือกอย่างเดียวคือค่าว่าง</p><p><strong>2. ไม่</strong> ด้วยเหตุผลที่ 8.1 และ 8.10 วางไว้แล้ว</p><ul><li>รหัสผ่านไม่ควรถูกเก็บที่ไหนเลย ไม่ว่าจะเข้ารหัสหรือไม่ — สิ่งที่เก็บได้คือ token ที่หมดอายุได้และเพิกถอนได้</li><li>ไฟล์ profile นี้ถูกเก็บแบบธรรมดาเพราะเนื้อหาไม่อ่อนไหว การใส่รหัสผ่านเข้าไปทำให้ต้องยกทั้งไฟล์ไปที่เก็บที่ปลอดภัย ซึ่งช้ากว่าและซับซ้อนกว่า</li><li>PDA เป็นเครื่องที่เปลี่ยนมือ (8.11) รหัสผ่านที่ค้างอยู่แปลว่าคนถัดไปเข้าระบบด้วยชื่อคนก่อนได้</li></ul><p><strong>สิ่งที่ตอบความต้องการจริงได้:</strong> หัวหน้าไม่ได้อยากเก็บรหัสผ่าน เขาอยากไม่ต้องพิมพ์ซ้ำ ซึ่งแก้ได้ด้วยการเก็บ<strong>ชื่อผู้ใช้</strong>ไว้กรอกให้อัตโนมัติ (ไม่ใช่ความลับ) และเก็บ session ต่อ profile ตามที่ 8.11 ออกแบบไว้ — สลับกลับมาที่เครื่องเดิมแล้วยังไม่หมดอายุ ก็ไม่ต้องล็อกอินใหม่</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>profile ต้องมี id ที่ไม่เปลี่ยน แยกจากชื่อและที่อยู่ที่เปลี่ยนได้</li><li>ชื่อที่ผู้ใช้ตั้งสำคัญพอ ๆ กับที่อยู่ เพราะเขาใช้ชื่อในการตัดสินใจ</li><li>ป้ายกำกับที่ผู้ใช้เลือก ห้ามเอาไปเปลี่ยนพฤติกรรมของโปรแกรม</li><li>ประกอบ URL ที่ getter เดียว</li></ul></div><p><strong>บทหน้า:</strong> เก็บหลาย profile ลงเครื่องอย่างไรให้แถวเสียหนึ่งแถวไม่ทำลายที่เหลือ</p></section>

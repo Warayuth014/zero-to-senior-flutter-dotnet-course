@@ -1,9 +1,73 @@
-<div class="note"><strong>Validate สองระดับ:</strong> syntaxก่อนบันทึกและ connectivity/identityด้วย probe การ probeไม่แทน validationและ server offlineไม่จำเป็นต้องห้าม saveเสมอไป</div>
-<section><h2>1. Raw form validation</h2><p>validate name, host, port text, protocolและ base pathก่อนสร้าง model เพราะ portยังอาจเป็น stringที่ parseไม่ได้ จึงแยก <code>ConnectionValidation</code> จาก Profile</p></section>
-<section><h2>2. Host rules</h2><ul><li>ไม่ว่าง/ไม่มี whitespace</li><li>ถ้า formแยก fieldห้ามมี scheme/path/port</li><li>รองรับ IP/DNSตาม product</li><li>reject credentials <code>user@host</code>, queryและfragment</li></ul></section>
-<section><h2>3. Port/path rules</h2><p>port 1–65535; base pathว่างหรือขึ้นต้น slashหลัง normalizeและห้าม <code>..</code>, query, fragmentหรือ API prefixที่ appเติมเอง</p></section>
-<section><h2>4. Save vs Test</h2><p>ปุ่ม Testใช้ draft URLโดยไม่เปลี่ยน active/persist ส่วน Saveอาจยอม offline profileพร้อม warningตาม operational need; Save & Useต้อง confirmหาก probeไม่ผ่าน</p></section>
-<section><h2>5. TLS</h2><p>HTTPS URL syntaxถูกไม่ได้แปล certificate trusted Probeต้องรายงาน TLS/certificateต่างจาก unreachable อย่าเพิ่ม global bypass certificateเพื่อให้ผ่าน</p></section>
-<section><h2>6. Duplicate names</h2><p>case-insensitive trim compareและเสนอ overwrite/save-copy/cancelโดยรักษา ID semantics ห้าม replace profileผิดตัวด้วย name collisionเงียบ ๆ</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ใส่ host <code>http://10.0.0.5:5000/api</code> ในช่อง host ควร auto-splitไหม?</p><details><summary>แนวคำตอบ</summary><p>สำหรับ formแยก fieldควรแจ้ง actionable errorหรือนำเข้าอย่าง explicitพร้อม preview ไม่แก้เงียบจน base path/API prefixผิด</p></details></section>
-<section><h2>8. Test table</h2><div class="success">empty, schemeปน, slash/space, IPv4/DNS/IPv6, portขอบเขต, base path traversal, duplicate nameและ offline-but-save policy</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่าน <code>profile_validation.dart</code> แล้วเทียบกับของจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.3, 10.4, Part 3 (ฟอร์ม)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนการตรวจฟอร์มที่บอกผู้ใช้ว่าต้องทำอะไรต่อ ไม่ใช่แค่บอกว่าผิด</div>
+
+<section><h2>1. ผู้ใช้ไม่ได้พิมพ์ผิด เขาพิมพ์ในช่องผิด</h2><p>ลองดูสิ่งที่ผู้ใช้พิมพ์ลงช่อง host จริง ๆ</p><table><thead><tr><th>พิมพ์</th><th>เขาคิดว่า</th><th>ที่ถูกคือ</th></tr></thead><tbody>
+<tr><td><code>http://192.168.1.194</code></td><td>คัดลอกจากเบราว์เซอร์มาทั้งอัน</td><td>เอา <code>http://</code> ออก ไปเลือกที่ช่อง Protocol</td></tr>
+<tr><td><code>192.168.1.194:6191</code></td><td>ที่อยู่เต็มคือแบบนี้</td><td>พอร์ตไปช่อง Port</td></tr>
+<tr><td><code>192.168.1.194/wms</code></td><td>เส้นทางเป็นส่วนหนึ่งของที่อยู่</td><td>เส้นทางไปช่อง Base Path</td></tr>
+</tbody></table><p>ทั้งสามกรณี <strong>ผู้ใช้เข้าใจถูกว่าที่อยู่เซิร์ฟเวอร์คืออะไร</strong> เขาแค่ไม่รู้ว่าฟอร์มนี้แยกเป็นสี่ช่อง ข้อความว่า “รูปแบบไม่ถูกต้อง” จึงไม่ช่วยอะไรเลย</p></section>
+
+<section><h2>2. ข้อความที่ดีบอกว่าค่าควรไปอยู่ที่ไหน</h2><pre class="code-vs"><code>String? _validateHost(String raw) {
+  final host = raw.trim();
+  if (host.isEmpty) return 'ใส่ IP หรือชื่อเครื่อง';
+  if (host.contains('://') || host.toLowerCase().startsWith('http')) {
+    return 'ใส่เฉพาะที่อยู่ ไม่ต้องมี http:// (เลือกที่ช่อง Protocol)';
+  }
+  if (host.contains('/')) return 'เส้นทางให้ใส่ที่ช่อง Base Path';
+  if (host.contains(':')) return 'พอร์ตให้ใส่ที่ช่อง Port';
+  if (host.contains(' ')) return 'ห้ามมีช่องว่าง';
+  return null;
+}</code></pre><table><thead><tr><th>ข้อความที่ไม่ช่วย</th><th>ข้อความที่ช่วย</th></tr></thead><tbody>
+<tr><td>รูปแบบไม่ถูกต้อง</td><td>พอร์ตให้ใส่ที่ช่อง Port</td></tr>
+<tr><td>Invalid host</td><td>ใส่เฉพาะที่อยู่ ไม่ต้องมี http://</td></tr>
+<tr><td>กรุณากรอกให้ถูกต้อง</td><td>เส้นทางให้ใส่ที่ช่อง Base Path</td></tr>
+</tbody></table><div class="note"><strong>เกณฑ์ที่ใช้ตรวจข้อความของตัวเอง:</strong> อ่านแล้วรู้ไหมว่าต้องกดตรงไหนต่อ ถ้าไม่รู้ แปลว่ายังเขียนไม่เสร็จ</div></section>
+
+<section><h2>3. ลำดับของการตรวจมีความหมาย</h2><p>ค่า <code>http://192.168.1.194:6191/wms</code> ผิดทั้งสามข้อ แต่ผู้ใช้ควรเห็นข้อความเดียว และควรเป็นข้อความที่ทำให้เขาไปได้ไกลที่สุด</p><p>ลำดับในโค้ดคือ ว่าง → มี scheme → มีทับ → มีโคลอน → มีช่องว่าง เรียงจาก “ผิดชัดที่สุด” ไปหา “ผิดที่เจอน้อยที่สุด” — ผู้ใช้แก้ทีละอย่าง แล้วข้อความจะเปลี่ยนไปเรื่อย ๆ จนหมด</p><p>ทางเลือกอีกทางคือแสดงทุกข้อพร้อมกัน ซึ่งดูเหมือนช่วยมากกว่า แต่กลับทำให้ผู้ใช้ที่พิมพ์ค่าเดียวเห็นข้อความสามบรรทัดจนสับสนว่าตกลงผิดกี่เรื่อง</p></section>
+
+<section><h2>4. ผลลัพธ์แยกรายช่อง</h2><pre class="code-vs"><code>class ProfileValidation {
+  const ProfileValidation({this.name, this.host, this.port, this.basePath});
+
+  final String? name;
+  final String? host;
+  final String? port;
+  final String? basePath;
+
+  bool get isValid =&gt;
+      name == null &amp;&amp; host == null &amp;&amp; port == null &amp;&amp; basePath == null;
+}</code></pre><p>ไม่ใช่ <code>List&lt;String&gt;</code> เพราะข้อความกองเดียวบังคับให้ผู้ใช้เดาว่าบรรทัดไหนหมายถึงช่องไหน พอแยกรายช่องแล้ว UI แสดงใต้ช่องที่ผิดได้ตรงตัว</p><pre class="code-vs"><code>TextField(
+  decoration: InputDecoration(
+    labelText: 'Host',
+    errorText: validation.host,     // null = ไม่มีข้อความ ไม่ต้อง if
+  ),
+)</code></pre><p>สังเกตว่า <code>errorText</code> รับ <code>String?</code> อยู่แล้ว การออกแบบให้เป็น nullable ต่อกับ Flutter ได้พอดีโดยไม่ต้องเขียนเงื่อนไข</p></section>
+
+<section><h2>5. ตรวจตอนไหน</h2><table><thead><tr><th>ตอน</th><th>เหมาะกับ</th><th>ไม่เหมาะกับ</th></tr></thead><tbody>
+<tr><td>ทุกตัวอักษรที่พิมพ์</td><td>ความยาวรหัสผ่าน</td><td>ช่องที่ยังพิมพ์ไม่เสร็จก็ผิดอยู่แล้ว เช่นพิมพ์ <code>1</code> ในช่องพอร์ต</td></tr>
+<tr><td>ตอนออกจากช่อง</td><td>ส่วนใหญ่</td><td>ผู้ใช้ที่กด Save เลยโดยไม่ออกจากช่อง</td></tr>
+<tr><td>ตอนกดบันทึก</td><td>การตรวจข้ามช่อง</td><td>ผู้ใช้ต้องกดก่อนถึงจะรู้ว่าผิด</td></tr>
+</tbody></table><p>ที่ใช้ได้จริงคือผสม — ตรวจตอนออกจากช่องสำหรับช่องที่เคยแตะแล้ว และตรวจทุกช่องตอนกดบันทึก</p><pre class="code-vs"><code>// เก็บว่าช่องไหนเคยถูกแตะแล้ว
+final _touched = &lt;String&gt;{};
+
+String? errorFor(String field, String? message) =&gt;
+    _touched.contains(field) || _submitted ? message : null;</code></pre><p>ผลคือผู้ใช้ที่เพิ่งเปิดฟอร์มเปล่าไม่เห็นข้อความสีแดงเต็มจอตั้งแต่ยังไม่ได้พิมพ์อะไร</p></section>
+
+<section><h2>6. ตรวจข้อความดิบ ไม่ใช่โมเดล</h2><pre class="code-vs"><code>ProfileValidation validateDraft(ProfileDraft draft) { ... }</code></pre><p>รับ <code>ProfileDraft</code> ที่มี <code>port</code> เป็น <code>String</code> ไม่ใช่ <code>ServerProfile</code> ที่มี <code>port</code> เป็น <code>int</code> เพราะระหว่างพิมพ์ ค่ายังแปลงไม่ได้</p><pre class="code-vs"><code>test('พอร์ตที่ยังพิมพ์ไม่เสร็จ ต้องไม่ทำให้พังทั้งฟอร์ม', () {
+  expect(validateDraft(draft(port: '')).port, isNotNull);
+  expect(validateDraft(draft(port: '61')).port, isNull);
+});</code></pre><p><code>'61'</code> ผ่านเพราะเป็นพอร์ตที่ใช้ได้จริง แม้ผู้ใช้ตั้งใจจะพิมพ์ <code>6191</code> ก็ตาม — การตรวจตัดสินจากค่าที่มี ไม่ใช่จากการเดาว่าเขาจะพิมพ์อะไรต่อ</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปิดฟอร์มมาเห็นสีแดงเต็มจอ</td><td>ตรวจตั้งแต่ยังไม่พิมพ์</td><td>เก็บว่าช่องไหนเคยถูกแตะ</td></tr>
+<tr><td>ข้อความผิดพลาดไม่บอกว่าต้องทำอะไร</td><td>เขียนว่า “รูปแบบไม่ถูกต้อง”</td><td>บอกว่าค่านั้นควรไปอยู่ที่ไหน</td></tr>
+<tr><td>ผู้ใช้แก้แล้วข้อความไม่หาย</td><td>ตรวจแค่ตอนกดบันทึก</td><td>ตรวจใหม่ทุกครั้งที่ค่าเปลี่ยน</td></tr>
+<tr><td>ตรวจผ่านแล้วยังพังตอนบันทึก</td><td>ตรวจกับค่าที่แปลงแล้ว ไม่ใช่ค่าดิบ</td><td>ตรวจจากร่าง</td></tr>
+<tr><td>แก้ให้ผู้ใช้เองเงียบ ๆ</td><td>คิดว่าเป็นความสะดวก</td><td>บอก ไม่ใช่แก้ให้ (10.3)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>มีรายงานจากหน้างานสามเรื่อง</p><ol><li>ผู้ใช้พิมพ์ <code>localhost</code> ในช่อง host บน PDA แล้วต่อไม่ติด</li><li>ผู้ใช้ตั้งชื่อ profile ว่า <code>192.168.1.194</code> แล้วบอกว่าแยกไม่ออกว่าอันไหนคืออันไหน</li><li>ผู้ใช้บันทึก profile ที่มีที่อยู่ซ้ำกับตัวที่มีอยู่แล้ว</li></ol><p>แต่ละข้อควรเพิ่มการตรวจไหม</p><details><summary>แนวคำตอบ</summary><p><strong>1. ควรเตือน แต่ไม่ห้าม</strong> — <code>localhost</code> บน PDA หมายถึงตัว PDA เอง ซึ่งไม่มีเซิร์ฟเวอร์อยู่ แต่บนเครื่อง dev มันถูกต้อง และเป็นค่าเริ่มต้นของ lab เอง ทางที่ถูกคือคำเตือนที่บันทึกต่อได้</p><pre class="code-vs"><code>// คำเตือน ไม่ใช่ข้อผิดพลาด — บันทึกได้ แต่บอกให้รู้ตัว
+if (host == 'localhost' || host == '127.0.0.1') {
+  return 'ที่อยู่นี้หมายถึงตัวเครื่องนี้เอง ถ้าเซิร์ฟเวอร์อยู่คนละเครื่อง ให้ใส่ IP ของเครื่องนั้น';
+}</code></pre><p>ต้องแยกชนิดของข้อความเป็น “ผิด” กับ “น่าสงสัย” ซึ่งแปลว่า <code>ProfileValidation</code> ต้องมีมากกว่า <code>String?</code> ต่อช่อง</p><p><strong>2. ไม่ควรห้าม</strong> — ผู้ใช้บางคนอยากตั้งชื่อแบบนั้นจริง ๆ และการห้ามไม่ได้แก้ปัญหาที่แท้จริงคือ “แยกไม่ออก” สิ่งที่แก้ได้จริงคือแสดงทั้งชื่อและที่อยู่ในรายการ แล้วปัญหาหายไปเองโดยไม่ต้องตรวจอะไร</p><p><strong>3. ควรเตือน</strong> เพราะ profile สองตัวที่ชี้ที่เดียวกันมักเกิดจากการกด “บันทึกเป็นตัวใหม่” แทน “บันทึก” แต่ห้ามไม่ได้ เพราะผู้ใช้อาจตั้งใจมีสองชื่อสำหรับเครื่องเดียวกัน เช่น “คลังหลัก” กับ “ทดสอบชั่วคราว” ที่บังเอิญเป็นเครื่องเดียวกันตอนนี้</p><p><strong>รูปแบบที่เห็นทั้งสามข้อ:</strong> คำถามที่ควรถามไม่ใช่ “ค่านี้ผิดไหม” แต่คือ <strong>“ค่านี้ผิดแน่นอน หรือแค่น่าสงสัย”</strong> — ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่เหลือให้เตือนแล้วปล่อยให้ผู้ใช้ตัดสิน เพราะเขารู้หน้างานดีกว่าเรา</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ผู้ใช้ส่วนใหญ่ไม่ได้พิมพ์ผิด เขาพิมพ์ค่าที่ถูกลงช่องผิด</li><li>ข้อความต้องบอกว่าค่านั้นควรไปอยู่ที่ไหน</li><li>แยกผลลัพธ์รายช่อง เพื่อแสดงใต้ช่องที่ผิด</li><li>ตรวจจากข้อความดิบในร่าง ไม่ใช่จากโมเดลที่แปลงแล้ว</li><li>ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่น่าสงสัยให้เตือน</li></ul></div><p><strong>บทหน้า:</strong> ตรวจว่าที่อยู่ที่ผู้ใช้กรอก มีเซิร์ฟเวอร์อยู่จริงไหม</p></section>

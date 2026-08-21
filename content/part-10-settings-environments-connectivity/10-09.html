@@ -1,13 +1,102 @@
-<div class="note"><strong>Health probe ที่ดีพิสูจน์ WMS API identity:</strong> HTTP 200อย่างเดียวบอกเพียงว่ามีบางอย่างตอบ URL ไม่ได้บอกว่า route/server/payloadถูก</div>
-<section><h2>1. Expected payload</h2><pre class="code-vs"><code>{
-  "service": "wms-mobile-api",
-  "status": "healthy",
-  "version": "1.4.2"
-}</code></pre><p>ตรวจ service markerและ statusแบบ typed ไม่เช็กเพียง bodyไม่ว่าง</p></section>
-<section><h2>2. Probe steps</h2><ol><li>parse/validate draft base URL</li><li>สร้าง health URIด้วย base path</li><li>GET anonymousพร้อม timeoutสั้น</li><li>ตรวจ status/content-type</li><li>decode JSONและ marker</li><li>คืน typed result + latency</li></ol></section>
-<section><h2>3. Result taxonomy</h2><p>invalidAddress, timeout, unreachable, tlsFailure, httpFailure, wrongService, unhealthyและ healthy ช่วย settings UIให้คำแนะนำตรงสาเหตุ</p></section>
-<section><h2>4. Request parity</h2><p>Probeต้องใช้ resolverและ base pathเดียวกับ ApiClient ของจริงมีสอง health routeต่างกันตาม backend: <code>/api/health</code> และ <code>/api/WMS/mobile_health</code></p></section>
-<section><h2>5. Anonymous/minimal</h2><p>connection testก่อน loginควร anonymousและไม่เปิด DB details/secret ใช้ readiness dependencyเท่าที่จำเป็นและไม่ queryหนักทุก shell poll</p></section>
-<section><h2>6. Connectivity ≠ internet</h2><p>WMS intranetอาจ onlineทั้งที่ไม่มี internet ตรวจ endpointเป้าหมาย ไม่ใช้ connectivity packageหรือ pingเป็นคำตอบสุดท้าย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ได้ 200 JSON <code>{"status":"ok"}</code> จาก serviceอื่นควรขึ้นเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ถ้าไม่มี expected WMS service marker ให้ wrongServiceและแนะนำตรวจ base path/server</p></details></section>
-<section><h2>8. Contract tests</h2><div class="success">healthy/unhealthy marker, HTML 200, wrong JSON 200, 404/500, timeout/socket/TLS, Thai messageและ base path</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่าน <code>health_probe.dart</code> แล้วรันเทสต์ทั้งหก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.8, Part 7 (ชนิดความล้มเหลว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียน health check ที่บอกได้ว่าปลายทางเป็นเซิร์ฟเวอร์ที่ต้องการจริง และแปลผลให้ผู้ใช้แก้ปัญหาต่อได้</div>
+
+<section><h2>1. health endpoint คืออะไร</h2><div class="note">เส้นทางเล็ก ๆ ที่มีไว้ตอบคำถามเดียวคือ “ยังอยู่ไหม” โดยไม่ต้องเข้าสู่ระบบและไม่แตะฐานข้อมูล</div><pre class="code-vs"><code>GET /api/WMS/mobile_health
+
+200 OK
+{"service": "WMS", "ok": true, "version": "3.1.0"}</code></pre><table><thead><tr><th>คุณสมบัติที่ต้องมี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>เรียกได้โดยไม่ต้องล็อกอิน</td><td>ต้องทดสอบที่อยู่ได้ก่อนมีบัญชี</td></tr>
+<tr><td>เร็วและเบา</td><td>ถ้าเส้นนี้ช้า แปลว่าตรวจแล้วรอนาน</td></tr>
+<tr><td>ตอบข้อมูลที่ระบุตัวเองได้</td><td>เพื่อแยกว่า “ใครตอบ” ไม่ใช่แค่ “มีคนตอบ”</td></tr>
+<tr><td>ไม่บอกข้อมูลภายในมากเกิน</td><td>เส้นทางเปิด ใครก็เรียกได้</td></tr>
+</tbody></table><p>แถวที่สามคือหัวใจของบทนี้ และเป็นสิ่งที่คนมองข้ามบ่อยที่สุด</p></section>
+
+<section><h2>2. ทำไมรหัสตอบกลับไม่พอ</h2><p>วิธีที่คนเขียนกันเป็นแบบนี้</p><pre class="code-vs"><code>// ไม่พอ
+final response = await client.get(uri);
+final ok = response.statusCode &gt;= 200 &amp;&amp; response.statusCode &lt; 300;</code></pre><p>ปัญหาคือ 200 แปลว่า “มีอะไรบางอย่างตอบ” ไม่ได้แปลว่า “สิ่งที่เราต้องการตอบ” สิ่งที่อาจตอบ 200 กลับมาได้</p><table><thead><tr><th>ใครตอบ</th><th>เกิดตอนไหน</th></tr></thead><tbody>
+<tr><td>เว็บหน้าแรกของเซิร์ฟเวอร์เดียวกัน</td><td>Base Path ผิด (10.10)</td></tr>
+<tr><td>Wi-Fi ของโรงแรมหรือสนามบิน</td><td>ยังไม่ได้กดยอมรับเงื่อนไข</td></tr>
+<tr><td>reverse proxy ที่ตอบหน้า error สวย ๆ</td><td>เซิร์ฟเวอร์ปลายทางล่ม</td></tr>
+<tr><td>เซิร์ฟเวอร์อื่นที่บังเอิญอยู่ IP นั้น</td><td>ผู้ใช้พิมพ์ IP ผิดหนึ่งตัว</td></tr>
+</tbody></table><p>ทั้งสี่กรณีผู้ใช้จะเห็นจุดเขียว แล้วสรุปว่าตั้งค่าถูกแล้ว จากนั้นทุกอย่างที่เหลือจะพังโดยไม่มีใครรู้ว่าทำไม</p></section>
+
+<section><h2>3. อ่านเนื้อหา ไม่ใช่แค่รหัส</h2><pre class="code-vs"><code>/// จริงเฉพาะกับ JSON ที่ `mobile_health` ตอบจริง ๆ
+bool isHealthPayload(String body) {
+  try {
+    final json = jsonDecode(body);
+    return json is Map &amp;&amp; json['service'] == 'WMS' &amp;&amp; json['ok'] == true;
+  } catch (_) {
+    return false;   // HTML หรืออะไรก็ตามที่ไม่ใช่คำตอบของเรา
+  }
+}</code></pre><p>ตรวจสามอย่างซ้อนกัน</p><table><thead><tr><th>ตรวจ</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td>แปลงเป็น JSON ได้</td><td>HTML, ข้อความเปล่า, หน้า error</td></tr>
+<tr><td>เป็น object</td><td>JSON ที่เป็น array หรือตัวเลขเดี่ยว</td></tr>
+<tr><td><code>service == 'WMS'</code> และ <code>ok == true</code></td><td>API อื่นที่บังเอิญตอบ JSON</td></tr>
+</tbody></table><p>สังเกต <code>catch (_)</code> ที่กว้างผิดปกติ ตรงนี้ยอมรับได้เพราะเป้าหมายของฟังก์ชันคือตอบว่าจริงหรือเท็จ และทุกความล้มเหลวแปลว่า “ไม่ใช่คำตอบของเรา” เหมือนกันหมด — ต่างจากกรณีใน 9.13 ที่การกลืนข้อผิดพลาดทำให้ข้อมูลหาย</p></section>
+
+<section><h2>4. สามผลลัพธ์ ไม่ใช่สอง</h2><pre class="code-vs"><code>final code = response.statusCode;
+final answered = code &gt;= 200 &amp;&amp; code &lt; 300;
+final isWms = answered &amp;&amp; isHealthPayload(response.body);
+
+return ProbeResult(
+  ok: isWms,
+  statusCode: code,
+  message: isWms
+      ? 'เชื่อมต่อสำเร็จ · ${watch.elapsedMilliseconds} ms'
+      : answered
+      ? 'เซิร์ฟเวอร์ตอบกลับ แต่ไม่ใช่ WMS API — ตรวจ Base Path'
+      : 'ตอบกลับ HTTP $code — ไม่ใช่เซิร์ฟเวอร์ WMS',
+);</code></pre><table><thead><tr><th>สถานการณ์</th><th>ผู้ใช้ต้องทำอะไรต่อ</th></tr></thead><tbody>
+<tr><td>สำเร็จ</td><td>ไม่ต้องทำอะไร</td></tr>
+<tr><td>มีคนตอบ แต่ไม่ใช่ WMS</td><td>ตรวจ Base Path — IP กับพอร์ตน่าจะถูกแล้ว</td></tr>
+<tr><td>ไม่มีใครตอบเลย</td><td>ตรวจ IP และพอร์ต</td></tr>
+</tbody></table><p>สองแถวล่างพา<strong>ไปคนละช่องในฟอร์ม</strong> ซึ่งคือทั้งหมดที่ผู้ใช้ต้องการรู้ ถ้ายุบเป็น “เชื่อมต่อไม่สำเร็จ” อย่างเดียว ผู้ใช้จะไล่แก้ทุกช่องแบบสุ่ม</p></section>
+
+<section><h2>5. แปลความล้มเหลวแต่ละชนิดให้ต่างกัน</h2><pre class="code-vs"><code>on TimeoutException =&gt; 'ไม่ตอบใน ${timeout.inSeconds} วินาที — ตรวจ IP และพอร์ต'
+on HandshakeException =&gt; 'ใบรับรอง HTTPS ไม่ผ่าน — ลองใช้ HTTP หรือแก้ใบรับรอง'
+on SocketException =&gt; 'ติดต่อที่อยู่นี้ไม่ได้ — ตรวจสัญญาณและเครื่องเซิร์ฟเวอร์'</code></pre><p><code>HandshakeException</code> คุ้มค่ามากที่จะแยกออกมา เพราะเซิร์ฟเวอร์ในองค์กรมักใช้ใบรับรองที่เครื่องไม่รู้จัก อาการที่ผู้ใช้เจอคือ “เลือก HTTPS แล้วต่อไม่ติด แต่ HTTP ติด” ซึ่งถ้าไม่บอก ผู้ใช้จะสรุปว่า HTTPS ใช้ไม่ได้และเลิกใช้ไปเลย</p></section>
+
+<section><h2>6. ตรวจก่อนยิง</h2><pre class="code-vs"><code>Uri uri;
+try {
+  uri = Uri.parse('$baseUrl/api/WMS/mobile_health');
+  if (!uri.hasScheme || uri.host.isEmpty) throw const FormatException();
+} on FormatException {
+  if (owned) httpClient.close();
+  return const ProbeResult(ok: false, message: 'ที่อยู่เซิร์ฟเวอร์ไม่ถูกต้อง');
+}</code></pre><p><code>Uri.parse</code> ใจกว้างกว่าที่คิด — <code>Uri.parse('ไม่ใช่ url')</code> ไม่โยน แต่คืน Uri ที่ไม่มี scheme และไม่มี host การเช็คสองอย่างนี้เองจึงจำเป็น</p><pre class="code-vs"><code>test('ที่อยู่ที่แปลงเป็น URL ไม่ได้ ต้องบอกก่อนยิง', () async {
+  var called = false;
+  final result = await probeServer(
+    baseUrl: 'ไม่ใช่ url',
+    client: MockClient((_) async { called = true; return http.Response('{}', 200); }),
+  );
+  expect(result.ok, isFalse);
+  expect(called, isFalse, reason: 'ไม่ควรยิงคำขอเลย');
+});</code></pre></section>
+
+<section><h2>7. ทำไมไม่ใช้ <code>ApiClient</code></h2><pre class="code-vs"><code>/// ใช้ [http.Client] ตรง ๆ ไม่ผ่าน ApiClient โดยตั้งใจ — ApiClient ยิงไปที่
+/// profile ที่ใช้งานอยู่เสมอ แต่ปุ่ม "ทดสอบการเชื่อมต่อ" ต้องลองที่อยู่ที่
+/// พิมพ์อยู่ในฟอร์ม โดยไม่ไปรบกวนที่อยู่ที่ทั้งแอปกำลังใช้</code></pre><p>นี่เป็นข้อยกเว้นของกฎใน 9.1 ที่ว่าทุกอย่างควรผ่านชั้นที่กำหนดไว้ และเหตุผลที่ยกเว้นชัดเจนคือ <strong>สิ่งที่ทดสอบยังไม่ใช่ของที่แอปใช้</strong></p><div class="note">เวลาจะยกเว้นกฎสถาปัตยกรรม ให้เขียนเหตุผลไว้ในโค้ดตรงนั้นเสมอ — คนที่มาเห็นทีหลังจะได้ไม่ “แก้ให้ถูกต้อง” แล้วทำฟีเจอร์พัง</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>จุดเขียวแต่ยิงคำขอไม่เข้า</td><td>เชื่อรหัสตอบกลับอย่างเดียว</td><td>อ่านเนื้อหา</td></tr>
+<tr><td>ทดสอบผ่านแต่ใช้จริงไม่ได้</td><td>ทดสอบคนละที่อยู่กับที่ใช้จริง</td><td>ให้ทั้งสองอย่างมาจากแหล่งเดียว (10.2)</td></tr>
+<tr><td>ปุ่มทดสอบทำให้ทั้งแอปเปลี่ยนเซิร์ฟเวอร์</td><td>ทดสอบโดยเปลี่ยน profile ที่ใช้งานอยู่</td><td>ยิงตรงด้วย client ของตัวเอง</td></tr>
+<tr><td>รอนานมากกว่าจะรู้ผล</td><td>ไม่ได้ตั้ง timeout หรือตั้งนานเกิน</td><td>8 วินาทีก็เกินพอสำหรับเน็ตในองค์กร</td></tr>
+<tr><td>ผู้ใช้บอกว่า HTTPS ใช้ไม่ได้</td><td>ไม่แยก <code>HandshakeException</code></td><td>แยกและบอกทางแก้</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมหลังบ้านเสนอให้ health endpoint ตอบข้อมูลเพิ่ม เพื่อช่วยวินิจฉัย</p><pre class="code-vs"><code>{
+  "service": "WMS",
+  "ok": true,
+  "version": "3.1.0",
+  "database": "Server=10.0.0.5;Database=db_wms_pallet;User Id=sa;...",
+  "pendingTasks": 47,
+  "serverTime": "2026-08-21T09:15:00Z"
+}</code></pre><p>ควรรับข้อมูลไหนบ้าง</p><details><summary>แนวคำตอบ</summary><table><thead><tr><th>ฟิลด์</th><th>รับ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>version</code></td><td>ควร</td><td>ตอบคำถาม “PDA รุ่นนี้ใช้กับเซิร์ฟเวอร์รุ่นนี้ได้ไหม” และเป็นข้อมูลแรกที่ทีมถามเวลามีปัญหา</td></tr>
+<tr><td><code>serverTime</code></td><td>ควร</td><td>เทียบกับเวลาบนเครื่องแล้วเตือนได้เมื่อนาฬิกาเพี้ยน ซึ่งทำให้ token หมดอายุผิดจังหวะ (8.3)</td></tr>
+<tr><td><code>pendingTasks</code></td><td>ไม่</td><td>เป็นข้อมูลธุรกิจ ไม่ใช่ข้อมูลสุขภาพ ทำให้ endpoint ต้องแตะฐานข้อมูล ซึ่งขัดกับข้อกำหนดว่าต้องเบา และวันที่ฐานข้อมูลช้า การตรวจก็จะช้าตาม</td></tr>
+<tr><td><code>database</code></td><td><strong>ห้ามเด็ดขาด</strong></td><td>เป็น connection string ที่มีรหัสผ่าน บนเส้นทางที่เรียกได้โดยไม่ต้องล็อกอิน — ใครก็ตามที่อยู่ในเครือข่ายเดียวกันจะได้สิทธิ์เข้าฐานข้อมูลทันที</td></tr>
+</tbody></table><p>ถ้าอยากรู้ว่าฐานข้อมูลต่อได้ไหมจริง ๆ ให้ตอบเป็น <code>"database": "ok"</code> หรือ <code>"degraded"</code> — บอกสถานะ ไม่บอกรายละเอียด</p><p><strong>หลักที่ใช้ตัดสิน:</strong> health endpoint เปิดให้ทุกคนเรียกได้ ทุกฟิลด์ที่ใส่ลงไปคือข้อมูลที่ยอมให้คนนอกเห็น ถ้าลังเลแม้แต่นิดเดียว อย่าใส่</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>health endpoint ต้องระบุตัวเองได้ ไม่ใช่แค่ตอบ 200</li><li>อ่านเนื้อหาเสมอ เพราะหลายอย่างตอบ 200 ได้</li><li>แยกผลเป็นสามแบบ เพื่อพาผู้ใช้ไปแก้ให้ถูกช่อง</li><li>แยก <code>HandshakeException</code> ออกมา เพราะใบรับรองในองค์กรมีปัญหาบ่อย</li><li>ยกเว้นกฎสถาปัตยกรรมได้ แต่ต้องเขียนเหตุผลไว้ในโค้ด</li><li>อย่าใส่ข้อมูลอ่อนไหวในเส้นทางที่ไม่ต้องล็อกอิน</li></ul></div><p><strong>บทหน้า:</strong> กับดักที่ทำให้ต้องเขียนบทนี้ตั้งแต่แรก</p></section>

@@ -1,18 +1,72 @@
-<div class="note"><strong>Normalize โดยรักษาความหมาย:</strong> protocol, host, port และ reverse-proxy base pathเป็นคนละ field; API prefixไม่ใช่ base path</div>
-<section><h2>1. Anatomy</h2><pre class="code-vs"><code>https://wms.example.com:443/warehouse/api/WMS/tasks
-scheme └──── host ─────┘ port └base path┘└ API path ─┘</code></pre></section>
-<section><h2>2. Base path</h2><pre class="code-vs"><code>String normalizeBasePath(String raw) {
-  final value = raw.trim();
-  if (value.isEmpty || value == '/') return '';
-  return '/${value.split('/').where((p) =&gt; p.isNotEmpty).join('/')}';
-}</code></pre><p>ห้ามให้ผู้ใช้ใส่ <code>/api</code> ถ้า clientเติม prefixเอง</p></section>
-<section><h2>3. Host field</h2><p>ถ้า formแยก protocol/host/port ช่อง hostต้องไม่รับ <code>http://</code>, slash, pathหรือ port ปน รองรับ IPv4, DNSและ IPv6ด้วย parser/designที่ชัด</p></section>
-<section><h2>4. Port</h2><p>ตรวจ 1–65535 และตัดสินว่าจะ omit default 80/443ใน displayหรือเก็บ explicit ทุกครั้ง อย่าใช้ <code>Uri.port</code> โดยไม่เข้าใจ defaultPort behavior</p></section>
-<section><h2>5. Build with Uri</h2><pre class="code-vs"><code>final origin = Uri(
-  scheme: protocol.name, host: host, port: port,
-  path: normalizeBasePath(basePath),
-);
-final health = origin.replace(path: '${origin.path}/api/WMS/mobile_health');</code></pre></section>
-<section><h2>6. Idempotent normalization</h2><p><code>normalize(normalize(x)) == normalize(x)</code> และ outputเดียวกันสำหรับ <code>wms</code>, <code>/wms</code>, <code>/wms/</code> เพื่อ comparison/dirty stateไม่สั่น</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ใส่ base path <code>//warehouse//</code> ต้องได้อะไรและ health URLเป็นอะไร?</p><details><summary>เฉลย</summary><p><code>/warehouse</code> และ <code>scheme://host:port/warehouse/api/WMS/mobile_health</code></p></details></section>
-<section><h2>8. Edge tests</h2><div class="success">empty/root/multiple slash, whitespace, invalid scheme, IPv4/DNS/IPv6, default/custom port, Unicode host policyและ pathที่พยายามใส่ query/fragment</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เขียนและทดสอบ <code>normalizeBasePath</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.2<br><strong>จบบทนี้แล้วจะทำได้:</strong> จัดการค่าที่ผู้ใช้พิมพ์ให้เหลือรูปแบบเดียว และรู้ว่าทำไมต้องทำที่ขอบ</div>
+
+<section><h2>1. ปัญหา</h2><p>ให้ผู้ใช้สิบคนพิมพ์เส้นทางเดียวกันลงช่องเดียวกัน จะได้สิบแบบ</p><pre class="code-vs"><code>wms
+/wms
+wms/
+/wms/
+//wms//
+  /wms
+</code></pre><p>ทุกแบบผู้ใช้ตั้งใจอย่างเดียวกัน แต่ถ้าเอาไปต่อ URL ตรง ๆ จะได้ผลต่างกัน</p><table><thead><tr><th>พิมพ์</th><th>URL ที่ได้</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>/wms</code></td><td><code>http://host:6191/wms/api/WMS/...</code></td><td>ถูก</td></tr>
+<tr><td><code>wms</code></td><td><code>http://host:6191wms/api/WMS/...</code></td><td>พอร์ตเพี้ยน</td></tr>
+<tr><td><code>/wms/</code></td><td><code>http://host:6191/wms//api/WMS/...</code></td><td>บางเซิร์ฟเวอร์ 404 บางตัวไม่</td></tr>
+</tbody></table><p>แถวสุดท้ายอันตรายที่สุดเพราะ<strong>บางครั้งใช้ได้</strong> ทำให้ทดสอบผ่านแล้วไปพังที่หน้างาน</p></section>
+
+<section><h2>2. Normalization คืออะไร</h2><div class="note"><strong>Normalization</strong> คือการแปลงค่าที่มีหลายรูปแบบให้เหลือรูปแบบเดียว ก่อนที่ส่วนอื่นของระบบจะได้เห็น</div><p>หลักคือ <strong>ทำที่ขอบ ทำครั้งเดียว</strong> — จุดที่ค่าเข้ามาจากโลกภายนอก ไม่ใช่ทุกที่ที่เอาค่าไปใช้</p><table><thead><tr><th>ทำที่ขอบ</th><th>ทำทุกที่ที่ใช้</th></tr></thead><tbody>
+<tr><td>เขียนครั้งเดียว ทดสอบครั้งเดียว</td><td>ต้องจำว่าต้องทำ ทุกครั้ง ทุกที่</td></tr>
+<tr><td>ส่วนที่เหลือของระบบเห็นค่ารูปแบบเดียว</td><td>ลืมที่เดียวก็มีบั๊ก</td></tr>
+<tr><td>คนอ่านโค้ดรู้ว่าค่านี้สะอาดแล้ว</td><td>ต้องเดาว่าค่านี้ผ่านการล้างหรือยัง</td></tr>
+</tbody></table></section>
+
+<section><h2>3. โค้ด</h2><pre class="code-vs"><code>String normalizeBasePath(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return '';
+  final collapsed = trimmed
+      .split('/')
+      .where((segment) =&gt; segment.isNotEmpty)
+      .join('/');
+  return collapsed.isEmpty ? '' : '/$collapsed';
+}</code></pre><p>อ่านทีละบรรทัด</p><table><thead><tr><th>บรรทัด</th><th>จัดการอะไร</th></tr></thead><tbody>
+<tr><td><code>trim()</code></td><td>ช่องว่างที่ติดมาจากการคัดลอกวาง</td></tr>
+<tr><td><code>split('/')</code></td><td>ตัดเป็นชิ้น ทับที่ติดกันจะได้ชิ้นว่างคั่น</td></tr>
+<tr><td><code>where(isNotEmpty)</code></td><td>ทิ้งชิ้นว่างทั้งหมด — จัดการทั้งทับนำ ทับปิด และทับซ้อน ในบรรทัดเดียว</td></tr>
+<tr><td><code>join('/')</code></td><td>ต่อกลับด้วยทับเดี่ยว</td></tr>
+<tr><td><code>collapsed.isEmpty ? '' : '/$collapsed'</code></td><td>เติมทับนำ ยกเว้นตอนไม่มีอะไรเหลือ</td></tr>
+</tbody></table></section>
+
+<section><h2>4. บรรทัดสุดท้ายสำคัญกว่าที่คิด</h2><p>ถ้าเขียนแค่ <code>return '/$collapsed';</code> ค่า <code>/</code> หรือ <code>///</code> จะได้ผลเป็น <code>'/'</code> ซึ่งพา URL ไปเป็น</p><pre class="code-vs"><code>http://host:6191//api/WMS/mobile_pallets</code></pre><p>ซึ่งกลับไปสู่ปัญหาเดิมที่ตั้งใจจะแก้ เทสต์บังคับข้อนี้ไว้</p><pre class="code-vs"><code>test('ว่างหรือมีแต่ทับ ต้องได้ข้อความว่าง ไม่ใช่ทับเดี่ยว', () {
+  expect(normalizeBasePath(''), '');
+  expect(normalizeBasePath('   '), '');
+  expect(normalizeBasePath('/'), '');
+  expect(normalizeBasePath('///'), '');
+});</code></pre><div class="note">ฟังก์ชันแปลงค่าทุกตัวควรมีเทสต์ที่ยิงค่าขอบเข้าไป — ค่าว่าง, ช่องว่างล้วน, ตัวคั่นล้วน สามอันนี้เจอบั๊กได้บ่อยที่สุด</div></section>
+
+<section><h2>5. เก็บดิบ แต่ใช้ที่แปลงแล้ว</h2><pre class="code-vs"><code>/// เก็บตามที่ผู้ใช้พิมพ์ ใช้งานผ่าน [baseUrl] หรือ [normalizeBasePath]
+final String basePath;
+
+String get baseUrl =&gt;
+    '${protocol.name}://$host:$port${normalizeBasePath(basePath)}';</code></pre><p>ทำไมไม่แปลงตั้งแต่ตอนบันทึก คำตอบคือ <strong>ผู้ใช้ที่กลับมาแก้ ควรเห็นสิ่งที่ตัวเองพิมพ์</strong> ไม่ใช่สิ่งที่แอปแปลงให้</p><table><thead><tr><th>แปลงตอนบันทึก</th><th>แปลงตอนใช้</th></tr></thead><tbody>
+<tr><td>ผู้ใช้พิมพ์ <code>wms/</code> กลับมาเห็น <code>/wms</code> แล้วสงสัยว่าใครแก้</td><td>เห็นตามที่พิมพ์</td></tr>
+<tr><td>ค่าที่เก็บสะอาดแน่นอน</td><td>ต้องจำว่าต้องเรียกตอนใช้</td></tr>
+</tbody></table><p>ข้อเสียของทางขวาถูกปิดด้วยการมี getter เดียวคือ <code>baseUrl</code> — ไม่มีใครประกอบ URL เองอยู่แล้ว</p></section>
+
+<section><h2>6. สิ่งที่ฟังก์ชันนี้<strong>ไม่</strong>ทำ</h2><p>มันไม่แตะ <code>/api/WMS</code> เพราะนั่นไม่ใช่ค่าของผู้ใช้</p><pre class="code-vs"><code>http://192.168.1.194:6191  /wms      /api/WMS/mobile_pallets
+└──────── โปรไฟล์ ────────┘└ ผู้ใช้ ┘└──────── แอปเติมเอง ────────┘</code></pre><p>แอปเรียกสามรากที่ต่างกัน คือ <code>/api/WMS</code> สำหรับ PDA, <code>/api/data</code> สำหรับข้อมูลกลาง และ <code>/api/Authenticate</code> สำหรับเข้าสู่ระบบ ผู้ใช้ไม่มีทางรู้ว่าเส้นไหนใช้รากไหน จึงต้องไม่เปิดให้แก้ตามหลักใน 10.1</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>URL มีทับซ้อน</td><td>ต่อสตริงตรง ๆ</td><td>ต่อผ่าน getter เดียว</td></tr>
+<tr><td>บางเครื่องใช้ได้ บางเครื่องไม่ได้ ทั้งที่ตั้งค่าเหมือนกัน</td><td>ค่าดิบต่างกันแต่ตั้งใจเหมือนกัน</td><td>normalize ที่ขอบ</td></tr>
+<tr><td>แปลงค่าซ้ำหลายรอบจนเพี้ยน</td><td>เรียก normalize ทั้งตอนบันทึกและตอนใช้</td><td>เลือกที่เดียว</td></tr>
+<tr><td>ผู้ใช้บ่นว่าแอปแก้ค่าที่พิมพ์</td><td>แปลงตอนบันทึกโดยไม่บอก</td><td>เก็บดิบ แปลงตอนใช้</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ช่อง host ก็มีปัญหาเดียวกัน ผู้ใช้พิมพ์มาได้หลายแบบ</p><pre class="code-vs"><code>192.168.1.194
+ 192.168.1.194
+http://192.168.1.194
+192.168.1.194:6191
+192.168.1.194/wms</code></pre><ol><li>ควรเขียน <code>normalizeHost</code> ที่แก้ให้ทุกแบบไหม</li><li>ถ้าไม่ ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่ควร</strong> และนี่คือความต่างสำคัญระหว่างสองช่อง</p><p><code>wms/</code> กับ <code>/wms</code> เป็นค่า<strong>เดียวกัน</strong>ที่พิมพ์คนละแบบ — แปลงให้ได้โดยไม่มีทางเดาผิด</p><p>แต่ <code>192.168.1.194:6191</code> ในช่อง host เป็น<strong>คนละเรื่อง</strong> — ผู้ใช้ใส่พอร์ตผิดช่อง ถ้าแอปแอบตัด <code>:6191</code> ออกไปใส่ให้ในช่องพอร์ต จะเกิดสองปัญหา คือผู้ใช้ไม่รู้ว่าเกิดอะไรขึ้น และถ้าช่องพอร์ตมีค่าอยู่แล้ว จะต้องเลือกว่าอันไหนชนะ ซึ่งเดายังไงก็มีโอกาสผิด</p><p><strong>2.</strong> ตรวจแล้วบอก ไม่ใช่แก้ให้</p><pre class="code-vs"><code>if (host.contains(':')) return 'พอร์ตให้ใส่ที่ช่อง Port';
+if (host.contains('/')) return 'เส้นทางให้ใส่ที่ช่อง Base Path';
+if (host.startsWith('http')) return 'ใส่เฉพาะที่อยู่ ไม่ต้องมี http://';</code></pre><p><strong>เส้นแบ่ง:</strong> normalize ได้เมื่อทุกรูปแบบมีความหมายเดียวกันแน่นอน ถ้าต้องเดาเจตนา ให้ถามผู้ใช้แทน — และ 10.7 จะพูดถึงวิธีถามที่ไม่ทำให้ผู้ใช้รำคาญ</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>แปลงค่าให้เหลือรูปแบบเดียวที่ขอบ ทำครั้งเดียว</li><li><code>split</code> + <code>where(isNotEmpty)</code> + <code>join</code> จัดการทับทุกแบบในบรรทัดเดียว</li><li>อย่าลืมกรณีที่แปลงแล้วไม่เหลืออะไร</li><li>เก็บค่าดิบ แปลงตอนใช้ ผู้ใช้จะได้เห็นสิ่งที่ตัวเองพิมพ์</li><li>normalize เมื่อความหมายเดียวกันแน่นอน ถ้าต้องเดาเจตนา ให้ตรวจแล้วบอกแทน</li></ul></div><p><strong>บทหน้า:</strong> ประกอบทุกช่องเป็นโมเดลเดียว</p></section>

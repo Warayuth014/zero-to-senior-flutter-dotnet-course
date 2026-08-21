@@ -1,15 +1,70 @@
-<div class="note"><strong>Typed preference key:</strong> รวมชื่อ key, type, default, migration และ ownershipไว้จุดเดียว ลด typo/collision และป้องกัน <code>prefs.clear()</code> ลบข้อมูลข้าม feature</div>
-<section><h2>1. Wrapper</h2><pre class="code-vs"><code>final class PreferenceKey&lt;T&gt; {
-  const PreferenceKey(this.name, this.defaultValue);
-  final String name;
-  final T defaultValue;
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: แยกค่าตั้งค่าออกเป็นชนิดที่คอมไพเลอร์ตรวจได้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 6 (โมเดล), Part 8 (เก็บลงเครื่อง), Part 9 (store)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ออกแบบค่าตั้งค่าที่พิมพ์ผิดแล้วคอมไพล์ไม่ผ่าน แทนที่จะพังตอนใช้งาน</div>
+
+<section><h2>1. ปัญหาที่ Part นี้แก้</h2><p>8.11 จบด้วยข้อสรุปว่า session ต้องผูกกับเซิร์ฟเวอร์ที่ออกมัน และทิ้งคำถามไว้ว่า “แล้วผู้ใช้จะเปลี่ยนเซิร์ฟเวอร์ได้อย่างไร” Part นี้ตอบคำถามนั้นทั้ง Part</p><p>ปัญหาจริงในคลังหน้าตาแบบนี้</p><table><thead><tr><th>สถานการณ์</th><th>สิ่งที่ต้องเปลี่ยน</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ย้ายเครื่อง IP เปลี่ยน</td><td>ที่อยู่</td></tr>
+<tr><td>ต้องทดสอบกับเครื่องทดสอบชั่วคราว</td><td>สลับไปมา</td></tr>
+<tr><td>เอา PDA ไปสาขาอื่น</td><td>สลับ แล้วสลับกลับ</td></tr>
+<tr><td>ทีมหลังบ้านย้ายไปอยู่หลัง reverse proxy</td><td>เพิ่มเส้นทางนำหน้า</td></tr>
+</tbody></table><p>ทั้งสี่ข้อต้องแก้ได้<strong>โดยไม่ build แอปใหม่</strong> เพราะการ build ใหม่แล้วเดินไปติดตั้งทีละเครื่องคือครึ่งวัน</p></section>
+
+<section><h2>2. ค่าตั้งค่ามาจากสามที่ ไม่ใช่ที่เดียว</h2><table><thead><tr><th>ที่มา</th><th>ใครเปลี่ยนได้</th><th>เปลี่ยนตอนไหน</th><th>ตัวอย่าง</th></tr></thead><tbody>
+<tr><td>ค่าคงที่ในโค้ด</td><td>ทีมพัฒนา</td><td>ตอนเขียน</td><td>เส้นทาง <code>/api/WMS</code></td></tr>
+<tr><td><code>--dart-define</code></td><td>คนที่ build</td><td>ตอน build</td><td>ตรึงเซิร์ฟเวอร์ของ build นี้</td></tr>
+<tr><td>ค่าที่ผู้ใช้ตั้งเอง</td><td>ผู้ปฏิบัติงาน</td><td>ตอนใช้งาน</td><td>ที่อยู่เซิร์ฟเวอร์</td></tr>
+</tbody></table><p>การแยกให้ชัดว่าค่าไหนอยู่ชั้นไหนคือหัวใจของบทนี้ ตัดสินด้วยคำถามเดียวคือ <strong>“ถ้าผู้ใช้แก้ค่านี้ผิด จะเสียหายแค่ไหน”</strong></p><table><thead><tr><th>ค่า</th><th>ให้แก้ได้ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>IP และพอร์ต</td><td>ได้</td><td>เปลี่ยนบ่อย และผิดแล้วรู้ทันทีเพราะต่อไม่ติด</td></tr>
+<tr><td>เส้นทางนำหน้าของ reverse proxy</td><td>ได้ แต่ต้องดักให้ดี</td><td>ผิดแล้วดูเหมือนใช้ได้ (10.10)</td></tr>
+<tr><td><code>/api/WMS</code></td><td><strong>ไม่</strong></td><td>แอปเรียกสามรากที่ต่างกัน ผู้ใช้ไม่มีทางรู้</td></tr>
+<tr><td>timeout</td><td>ไม่</td><td>ผู้ใช้ไม่มีข้อมูลพอจะตั้งค่านี้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. Typed settings หมายความว่าอะไร</h2><div class="note"><strong>Typed settings</strong> คือการเก็บค่าตั้งค่าเป็นชนิดที่มีความหมาย แทนที่จะเป็น <code>Map&lt;String, dynamic&gt;</code> หรือถุงของ <code>String</code></div><p>เทียบสองแบบ</p><pre class="code-vs"><code>// แบบถุง
+final settings = &lt;String, dynamic&gt;{};
+settings['port'] = '6191';
+final port = settings['prot'];        // พิมพ์ผิด ได้ null คอมไพล์ผ่าน
+final url = 'http://${settings['host']}:${settings['port']}';</code></pre><pre class="code-vs"><code>// แบบมีชนิด
+class ServerProfile {
+  final String host;
+  final int port;
+  String get baseUrl =&gt; '${protocol.name}://$host:$port${normalizeBasePath(basePath)}';
 }
-const localeKey = PreferenceKey&lt;String&gt;('app.v1.locale', 'th');
-const serverPortKey = PreferenceKey&lt;int&gt;('connection.v1.port', 5000);</code></pre></section>
-<section><h2>2. Type-safe access</h2><p>สร้าง SettingsStore/adapter ที่รู้ว่า Stringใช้ <code>getString</code>, intใช้ <code>getInt</code> และแปลง missing/wrong typeเป็น defaultหรือ migration ไม่ให้ทุก widget castเอง</p></section>
-<section><h2>3. Namespace</h2><p>ใช้ prefixตาม feature/schema เช่น <code>connection.v1.profiles</code>, <code>auth.v1...</code> เพื่อค้นหาและ selective deleteได้ หลีกเลี่ยง keyกว้างอย่าง <code>host</code>/<code>status</code></p></section>
-<section><h2>4. Defaults</h2><p>defaultควรอยู่ source of truthเดียวกับ config model ไม่ซ้ำใน form, controllerและApiClient มิฉะนั้น reset/load/first-runให้คนละ port</p></section>
-<section><h2>5. Failure policy</h2><p>SharedPreferences pluginอาจ unavailableใน widget testหรือ writeล้ม ควรแยก persistence failureจาก in-memory settingและตัดสินว่าใช้ชั่วคราวได้หรือ block save</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp/ApiConfigService</code> ใช้ key host/port/protocolและ typed get/setแล้ว ส่วน connection controllerอีกแอปบันทึก JSON envelopeเพื่อรองรับหลาย profile</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>logoutควรเรียก <code>prefs.clear()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ ลบเฉพาะ auth/user-scoped keys; server profiles, themeและlanguageมี ownerคนละส่วนและอาจต้องคงไว้</p></details></section>
-<section><h2>8. Tests</h2><div class="success">missing key, wrong type, default, write failure, migration, selective deleteและ namespaceไม่ชนกัน</div></section>
+
+final url = profile.baseUrl;          // พิมพ์ผิดชื่อฟิลด์ = คอมไพล์ไม่ผ่าน</code></pre><table><thead><tr><th>แบบถุง</th><th>แบบมีชนิด</th></tr></thead><tbody>
+<tr><td>พิมพ์ชื่อคีย์ผิดแล้วเงียบ</td><td>คอมไพเลอร์ฟ้อง</td></tr>
+<tr><td>ทุกที่ที่ใช้ต้องรู้ว่าคีย์ชื่ออะไรและเป็นชนิดไหน</td><td>อ่านจากคลาสได้</td></tr>
+<tr><td>การประกอบ URL กระจายทุกที่ที่ใช้</td><td>อยู่ที่ getter เดียว</td></tr>
+<tr><td>เพิ่มค่าใหม่ไม่มีใครรู้</td><td>เพิ่มฟิลด์ คอมไพเลอร์บอกทุกที่ที่ต้องแก้</td></tr>
+</tbody></table></section>
+
+<section><h2>4. lab ของ Part นี้</h2><p>อยู่ที่ <code>labs/flutter_wms_companion/lib/settings_lab/</code></p><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>server_profile.dart</code></td><td>โมเดล + การแปลงเส้นทาง</td><td>10.3, 10.4</td></tr>
+<tr><td><code>profile_draft.dart</code></td><td>สิ่งที่กำลังพิมพ์ในฟอร์ม</td><td>10.11</td></tr>
+<tr><td><code>profile_validation.dart</code></td><td>ตรวจรายช่อง</td><td>10.7</td></tr>
+<tr><td><code>profile_snapshot.dart</code></td><td>เก็บและอ่านกลับ</td><td>10.5</td></tr>
+<tr><td><code>health_probe.dart</code></td><td>ถามว่าเซิร์ฟเวอร์ตอบไหม</td><td>10.9, 10.10</td></tr>
+<tr><td><code>profile_store.dart</code></td><td>เจ้าของทั้งหมด</td><td>10.6, 10.8, 10.12</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter test --no-pub test/settings_test.dart</code></pre><p>เทสต์ 41 ข้อ และเกือบทั้งหมด<strong>ไม่สร้าง widget เลย</strong> เพราะเนื้อของ Part นี้เป็นฟังก์ชันบริสุทธิ์กับ store ซึ่งเป็นข้อดีที่ต้องสังเกต — งานที่ดูเหมือนเป็นเรื่อง UI ล้วน ๆ ส่วนใหญ่กลับไม่ต้องใช้ UI ในการทดสอบ</p></section>
+
+<section><h2>5. enum แทนข้อความ</h2><pre class="code-vs"><code>enum ServerProtocol {
+  http,
+  https;
+
+  static ServerProtocol parse(String? raw) =&gt;
+      raw?.toLowerCase() == 'https' ? ServerProtocol.https : ServerProtocol.http;
+}</code></pre><p>ถ้าเก็บเป็น <code>String</code> จะมีค่าที่เป็นไปได้ไม่จำกัด — <code>'https'</code>, <code>'HTTPS'</code>, <code>'https://'</code>, <code>'ftp'</code> ล้วนใส่ได้หมด พอเป็น enum เหลือสองค่าเท่านั้น และ <code>switch</code> ที่ครอบคลุมไม่ครบจะคอมไพล์ไม่ผ่าน</p><p>สังเกต <code>parse</code> ที่มีค่าปริยาย — อ่านค่าที่เก็บไว้แล้วไม่รู้จัก ให้ตกไปที่ <code>http</code> ไม่ใช่โยน เพราะไฟล์ที่เราเขียนเองบนเครื่องนี้ ไม่ใช่สัญญากับเซิร์ฟเวอร์ (10.5 จะอธิบายความต่างนี้)</p></section>
+
+<section><h2>6. ค่าเริ่มต้นอยู่ที่เดียว</h2><pre class="code-vs"><code>const String defaultServerHost = 'localhost';
+const int defaultServerPort = 6191;</code></pre><p>ทั้ง profile ตัวแรกที่สร้างตอนเปิดแอปครั้งแรก และค่าสำรองก่อนโหลดเสร็จ อ่านจากสองบรรทัดนี้ ย้ายเครื่อง dev จึงแก้ที่เดียว</p><div class="note">สัญญาณอันตราย: ค้นทั้งโปรเจกต์แล้วเจอเลขพอร์ตเดียวกันโผล่ในสี่ไฟล์ — วันที่เปลี่ยนพอร์ต จะแก้ได้สามที่ แล้วเสียเวลาครึ่งวันกับที่ที่สี่</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปลี่ยนพอร์ตแล้วบางส่วนของแอปยังยิงพอร์ตเก่า</td><td>ค่าถูกคัดลอกไว้หลายที่</td><td>รวมไว้ที่เดียว อ่านผ่าน getter</td></tr>
+<tr><td>ผู้ใช้ตั้งค่าผิดแล้วแอปพังโดยไม่บอกอะไร</td><td>ไม่มีการตรวจ</td><td>ตรวจรายช่องพร้อมบอกว่าควรไปอยู่ที่ไหน (10.7)</td></tr>
+<tr><td>ต้อง build ใหม่ทุกครั้งที่เซิร์ฟเวอร์ย้าย</td><td>ที่อยู่เป็นค่าคงที่ในโค้ด</td><td>ทำเป็น profile ที่ผู้ใช้แก้ได้</td></tr>
+<tr><td>เปิดให้ผู้ใช้แก้ทุกอย่างรวมถึง <code>/api</code></td><td>คิดว่ายืดหยุ่นไว้ก่อนดี</td><td>เปิดเฉพาะค่าที่ผู้ใช้รู้คำตอบ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมเสนอให้เพิ่มค่าตั้งค่าที่ผู้ใช้แก้ได้สี่ตัว ตัดสินทีละตัวว่าควรให้แก้ไหม</p><ol><li>ระยะเวลา timeout ของคำขอ</li><li>ชื่อเครื่อง PDA ที่แสดงบนหัวจอ</li><li>จำนวนรายการต่อหน้าในลิสต์</li><li>เปิด/ปิดเสียงบี๊บตอนสแกน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่</strong> — ผู้ใช้ไม่มีข้อมูลพอจะตัดสิน และค่าที่ตั้งผิดทำให้เกิดปัญหาที่วินิจฉัยยาก เช่นตั้ง 2 วินาทีแล้วคำขอที่ปกติจะเสร็จใน 3 วินาที กลายเป็น timeout ที่ผลไม่แน่นอน (7.10) ถ้าเน็ตในคลังช้าจริง ให้ทีมพัฒนาปรับค่าในโค้ด</p><p><strong>2. ได้</strong> — ผู้ใช้รู้ว่าเครื่องนี้คือเครื่องไหนดีกว่าใคร และตั้งผิดก็แค่ชื่อผิด</p><p><strong>3. ไม่</strong> — เป็นเรื่องของประสิทธิภาพที่ผู้ใช้ไม่ควรต้องคิด ถ้าลิสต์ช้าให้แก้ที่การแบ่งหน้า ไม่ใช่ผลักภาระให้ผู้ใช้</p><p><strong>4. ได้</strong> — เป็นความชอบส่วนตัวและสภาพแวดล้อม คลังที่เสียงดังต้องการเสียง ห้องเย็นที่เงียบอาจไม่ต้องการ</p><p><strong>รูปแบบที่เห็น:</strong> ให้แก้ได้เมื่อ (ก) ผู้ใช้รู้คำตอบดีกว่าเรา และ (ข) ตั้งผิดแล้วเสียหายจำกัดและเห็นได้ทันที ถ้าขาดข้อใดข้อหนึ่ง อย่าเปิด</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ค่าตั้งค่ามาจากสามชั้น คือโค้ด, ตอน build และผู้ใช้</li><li>เปิดให้ผู้ใช้แก้เฉพาะค่าที่เขารู้คำตอบและตั้งผิดแล้วเห็นทันที</li><li>เก็บเป็นชนิดที่มีความหมาย ไม่ใช่ถุงของข้อความ</li><li>ค่าเริ่มต้นอยู่ที่เดียวเสมอ</li></ul></div><p><strong>บทหน้า:</strong> ชั้นกลาง — ค่าที่ตรึงไว้ตอน build และวิธีที่มันชนะทุกอย่าง</p></section>

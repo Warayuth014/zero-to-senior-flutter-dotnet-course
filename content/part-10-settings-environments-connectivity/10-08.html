@@ -1,20 +1,101 @@
-<div class="note"><strong>ConnectionController เป็น lifecycle owner:</strong> โหลด/persist profiles, active selection, resolved statusและ notify UI โดยไม่ import AppConfigย้อนกลับจน dependency cycle</div>
-<section><h2>1. State</h2><pre class="code-vs"><code>enum ConnectionPhase { unknown, checking, online, offline }
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: ตัดสินว่าจะตรวจการเชื่อมต่อตอนไหนบ้าง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.6, 4.11 (ตัวจับเวลาและ dispose)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกจังหวะการตรวจการเชื่อมต่อที่ให้ข้อมูลจริงโดยไม่กินแบต</div>
 
-class ConnectionController extends ChangeNotifier {
-  List&lt;ConnectionProfile&gt; get profiles =&gt; List.unmodifiable(_profiles);
-  ConnectionProfile? get active =&gt; /* by id */;
-  ConnectionTestResult? lastResult;
-}</code></pre></section>
-<section><h2>2. Startup</h2><p><code>load()</code> ต้องเสร็จก่อน requestแรก: decode/migrate/seed → resolve active → notify/ready แล้ว auth restoreจึง bindกับ serverถูกตัว</p></section>
-<section><h2>3. Commands</h2><p>แยก <code>saveAsNew</code>, <code>saveEdits</code>, <code>select</code>, <code>delete</code>, <code>refreshStatus</code> เพื่อ invariants/testsชัด ไม่ expose mutable listหรือ activeId setter</p></section>
-<section><h2>4. Probe generation</h2><pre class="code-vs"><code>final generation = ++_probeGeneration;
-_phase = ConnectionPhase.checking; notifyListeners();
-final result = await probe(resolvedUrl);
-if (generation != _probeGeneration) return;
-lastResult = result; _phase = result.ok ? online : offline;
-notifyListeners();</code></pre></section>
-<section><h2>5. Dependency direction</h2><p>AppConfigอ่าน <code>activeBaseUrl</code> จาก controller/resolver แต่ controllerไม่ import AppConfigเพื่อไม่เกิดวงจร ของจริงเขียน commentกำกับ boundaryนี้ไว้ชัด</p></section>
-<section><h2>6. Client lifetime</h2><p>ApiClientตัวเดียวอาจอยู่ทั้ง sessionแต่ base URL resolveจาก controllerทุก requestหรือถูก invalidateเมื่อ profileเปลี่ยน Bearer tokenต้องถูก clearตาม Part 8 realm policy</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>probe Aเริ่ม แล้วผู้ใช้เลือก Bก่อน Aตอบ status dotควรแสดงอะไร?</p><details><summary>เฉลย</summary><p>เฉพาะผล B; generationของ Aเก่าและถูก ignore ห้าม Aเปลี่ยน statusของ active B</p></details></section>
-<section><h2>8. Tests</h2><div class="success">first-run seed, migration, CRUD, active invariants, persistence failure, overlapping probes, pinned buildและ server switch callbacks</div></section>
+<section><h2>1. คำถาม</h2><p>แอปต้องรู้ว่าเซิร์ฟเวอร์ตอบไหม เพื่อแสดงจุดสถานะบนหัวจอ คำถามคือ <strong>ตรวจตอนไหน</strong></p><p>คำตอบที่นึกออกก่อนคือ “ตรวจทุก 10 วินาที” ซึ่งผิดสำหรับเครื่องที่ถือทั้งวัน</p></section>
+
+<section><h2>2. ทำไมตัวจับเวลาถึงแพงบน PDA</h2><table><thead><tr><th>ทุก 10 วินาที</th><th>ตัวเลขจริงใน 8 ชั่วโมง</th></tr></thead><tbody>
+<tr><td>จำนวนคำขอ</td><td>2,880 ครั้งต่อเครื่องต่อวัน</td></tr>
+<tr><td>PDA 20 เครื่องในคลัง</td><td>57,600 ครั้งต่อวัน</td></tr>
+<tr><td>ประโยชน์ที่ได้</td><td>จุดสีที่ผู้ใช้มองปีละไม่กี่ครั้ง</td></tr>
+</tbody></table><p>ต้นทุนไม่ได้มีแค่คำขอ Wi-Fi ที่ต้องปลุกวิทยุขึ้นมาทุก 10 วินาที กินแบตมากกว่าตัวคำขอเองหลายเท่า และ PDA ที่แบตหมดตอนบ่ายสามคือปัญหาที่ใหญ่กว่าจุดสีที่ไม่อัปเดต</p></section>
+
+<section><h2>3. จังหวะที่ควรตรวจ</h2><p>หลักคือ <strong>ตรวจตอนที่คำตอบทั้งใหม่และกำลังจะถูกมอง</strong></p><table><thead><tr><th>จังหวะ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ตอนเปิดจอหลัก</td><td>ผู้ใช้เพิ่งเข้ามา กำลังจะเริ่มทำงาน</td></tr>
+<tr><td>ตอนกลับมาจากพื้นหลัง</td><td>ระหว่างที่แอปหลับ PDA อาจเดินออกนอกรัศมี Wi-Fi หรือเซิร์ฟเวอร์อาจถูกรีสตาร์ท และไม่มีอะไรบอกแอปเลย</td></tr>
+<tr><td>หลังสลับ profile</td><td>สถานะเดิมเป็นของเครื่องอื่น</td></tr>
+<tr><td>ตอนผู้ใช้กดปุ่มทดสอบ</td><td>เขาถามเอง</td></tr>
+</tbody></table><p>ทั้งสี่จังหวะเป็น <strong>เหตุการณ์</strong> ไม่ใช่ตัวจับเวลา จำนวนครั้งจึงเป็นสิบ ไม่ใช่พัน</p><pre class="code-vs"><code>/// เรียกตอนเปิดจอ ตอนกลับมาจากพื้นหลัง และหลังสลับ profile
+/// **ไม่มีตัวจับเวลาที่วิ่งตลอด** เพราะเครื่องที่ถือทั้งวันไม่ควรเปลืองแบต
+/// และคลื่นวิทยุไปกับจุดสีที่ไม่มีใครมอง
+Future&lt;ServerStatus&gt; refreshStatus({http.Client? client}) async { ... }</code></pre></section>
+
+<section><h2>4. จับจังหวะกลับมาจากพื้นหลัง</h2><pre class="code-vs"><code>class _WarehouseShellState extends State&lt;WarehouseShell&gt;
+    with WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(ConnectionController.instance.refreshStatus());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ConnectionController.instance.refreshStatus());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+}</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>with WidgetsBindingObserver</code></td><td>mixin ที่เปิดให้รับแจ้งเหตุการณ์ระดับแอป</td></tr>
+<tr><td><code>addObserver</code> / <code>removeObserver</code></td><td>สมัครและยกเลิก ต้องมาคู่กันเสมอ ไม่งั้นรั่ว (4.11)</td></tr>
+<tr><td><code>AppLifecycleState.resumed</code></td><td>กลับมาอยู่หน้าจอและรับ input ได้แล้ว</td></tr>
+<tr><td><code>unawaited(...)</code></td><td>บอกชัดว่าตั้งใจไม่รอผล ไม่ใช่ลืมใส่ <code>await</code></td></tr>
+</tbody></table><div class="note"><strong>สถานะอื่นของวงจรชีวิต:</strong> <code>inactive</code> (กำลังจะไป เช่นมีสายเข้า), <code>paused</code> (อยู่พื้นหลัง), <code>detached</code> (ยังรันแต่ไม่มีหน้าจอ), <code>hidden</code> ตรวจเฉพาะ <code>resumed</code> ก็พอสำหรับงานนี้</div></section>
+
+<section><h2>5. สองสถานะที่ต้องประกาศ</h2><pre class="code-vs"><code>Future&lt;ServerStatus&gt; refreshStatus({http.Client? client}) async {
+  ...
+  _status = ServerStatus.checking;
+  notifyListeners();                    // ← ครั้งที่หนึ่ง
+
+  final result = await probeServer(baseUrl: url, client: client);
+  _lastResult = result;
+  _status = result.ok ? ServerStatus.connected : ServerStatus.disconnected;
+  notifyListeners();                    // ← ครั้งที่สอง
+  return _status;
+}</code></pre><p>ถ้าประกาศแค่ครั้งเดียวตอนจบ ผู้ใช้ที่กดปุ่มทดสอบจะเห็นหน้าจอนิ่งอยู่แปดวินาทีแล้วค่อยเปลี่ยน ซึ่งดูเหมือนปุ่มไม่ทำงาน เทสต์บังคับข้อนี้ไว้</p><pre class="code-vs"><code>test('ตรวจแล้วประกาศสองครั้ง คือกำลังตรวจ และผลลัพธ์', () async {
+  final states = &lt;ServerStatus&gt;[];
+  store.addListener(() =&gt; states.add(store.status));
+
+  await store.refreshStatus(client: ...);
+
+  expect(states, [ServerStatus.checking, ServerStatus.connected]);
+});</code></pre><p>เทสต์นี้ตรวจ<strong>ลำดับ</strong>ของสถานะ ไม่ใช่แค่ค่าสุดท้าย ซึ่งเป็นวิธีเดียวที่จะจับได้ว่ามีสถานะระหว่างทางจริง</p></section>
+
+<section><h2>6. สี่สถานะ ไม่ใช่สอง</h2><pre class="code-vs"><code>enum ServerStatus { unknown, checking, connected, disconnected }</code></pre><table><thead><tr><th>สถานะ</th><th>ผู้ใช้เห็น</th><th>หมายความว่า</th></tr></thead><tbody>
+<tr><td><code>unknown</code></td><td>จุดสีเทา</td><td>ยังไม่เคยตรวจ หรือเพิ่งสลับ profile</td></tr>
+<tr><td><code>checking</code></td><td>จุดกะพริบ</td><td>กำลังถามอยู่</td></tr>
+<tr><td><code>connected</code></td><td>จุดเขียว</td><td>ตรวจล่าสุดแล้วตอบ</td></tr>
+<tr><td><code>disconnected</code></td><td>จุดแดง</td><td>ตรวจล่าสุดแล้วไม่ตอบ</td></tr>
+</tbody></table><p><code>unknown</code> จำเป็นด้วยเหตุผลเดียวกับ <code>AuthStatus.unknown</code> ใน 8.6 — ถ้าไม่มี ค่าเริ่มต้นต้องเป็น <code>disconnected</code> ซึ่งทำให้ผู้ใช้เห็นจุดแดงตอนเปิดแอปทุกครั้ง ทั้งที่ยังไม่มีใครถามเลย</p></section>
+
+<section><h2>7. จุดสีบอกอดีต ไม่ใช่ปัจจุบัน</h2><div class="note">จุดเขียวแปลว่า “ตอนที่ตรวจครั้งล่าสุด เซิร์ฟเวอร์ตอบ” ไม่ได้แปลว่า “ตอนนี้ตอบ” — และไม่มีทางทำให้แปลว่าอย่างหลังได้ เพราะกว่าจะรู้ก็ต้องยิงคำขอไปแล้ว</div><p>ผลตามมาที่ต้องออกแบบเผื่อ</p><table><thead><tr><th>อย่า</th><th>ให้</th></tr></thead><tbody>
+<tr><td>ปิดปุ่มทำงานเมื่อจุดเป็นสีแดง</td><td>ให้กดได้ แล้วรายงานผลจริงตอนล้มเหลว</td></tr>
+<tr><td>ข้ามการจัดการข้อผิดพลาดเพราะจุดเขียว</td><td>จัดการทุกครั้งเหมือนไม่มีจุด</td></tr>
+<tr><td>ใช้จุดตัดสินว่าจะยิงคำขอไหม</td><td>ยิงเสมอ ให้คำขอเป็นคนตอบ</td></tr>
+</tbody></table><p>จุดสถานะเป็นเครื่องมือ<strong>วินิจฉัย</strong> ไม่ใช่เครื่องมือ<strong>ควบคุม</strong> — มีไว้ให้ผู้ใช้ที่เจอปัญหาตอบได้ว่า “เน็ตฉันหรือเซิร์ฟเวอร์เขา”</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แบตหมดเร็วผิดปกติ</td><td>ตัวจับเวลาตรวจตลอดเวลา</td><td>ตรวจตามเหตุการณ์</td></tr>
+<tr><td>ตัวจับเวลายังวิ่งหลังปิดจอ</td><td>ไม่ได้ยกเลิกใน <code>dispose</code></td><td>ยกเลิกทุกตัว (4.11)</td></tr>
+<tr><td>กดปุ่มทดสอบแล้วเหมือนไม่มีอะไรเกิดขึ้น</td><td>ไม่ประกาศสถานะ <code>checking</code></td><td>ประกาศสองครั้ง</td></tr>
+<tr><td>จุดแดงตอนเปิดแอปทุกครั้ง</td><td>ไม่มีสถานะ <code>unknown</code></td><td>เริ่มที่ <code>unknown</code></td></tr>
+<tr><td>ผู้ใช้กดปุ่มไม่ได้เพราะจุดแดง</td><td>เอาจุดไปควบคุมปุ่ม</td><td>ให้กดได้เสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หัวหน้าอยากให้จุดสถานะแม่นกว่านี้ เพราะผู้ใช้บ่นว่าจุดเขียวแต่ยิงไม่เข้า</p><ol><li>เพิ่มความถี่เป็นทุก 5 วินาทีจะแก้ได้ไหม</li><li>มีทางอื่นไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่</strong> — ต่อให้ตรวจทุก 1 วินาที ก็ยังมีช่องว่างระหว่างการตรวจกับการยิงจริงอยู่ดี ปัญหาไม่ได้อยู่ที่ความถี่ แต่อยู่ที่ธรรมชาติของการตรวจล่วงหน้า และการเพิ่มความถี่แลกแบตไปกับสิ่งที่แก้ไม่ได้</p><p><strong>2.</strong> ใช้คำขอจริงเป็นตัวอัปเดตสถานะ ซึ่งแม่นที่สุดเพราะมันคือสิ่งที่เกิดขึ้นจริง</p><pre class="code-vs"><code>// ใน ApiClient — ทุกคำขอรายงานผลกลับมา
+try {
+  final response = await _client.get(...);
+  onReachable?.call(true);
+  return _decode(response);
+} on SocketException {
+  onReachable?.call(false);      // รู้ทันทีที่เกิดจริง
+  rethrow;
+}</code></pre><p>ได้สามอย่างพร้อมกัน คือแม่นที่สุด, ไม่มีคำขอเพิ่มแม้แต่ครั้งเดียว และอัปเดตบ่อยพอดีคือทุกครั้งที่ผู้ใช้ทำงาน</p><p>ยังต้องเก็บการตรวจแบบเดิมไว้สำหรับสองกรณีที่คำขอจริงไม่ครอบคลุม คือตอนเปิดแอปก่อนยิงอะไรเลย และตอนกดปุ่มทดสอบที่อยู่ที่<strong>ยังไม่ได้ใช้งาน</strong>ในฟอร์ม</p><p>ข้อคิด: เมื่อการวัดกับสิ่งที่สนใจไม่ตรงกัน อย่าวัดถี่ขึ้น — ให้หาทางวัดสิ่งที่สนใจโดยตรง</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ตรวจตามเหตุการณ์ ไม่ใช่ตามตัวจับเวลา</li><li>เหตุการณ์ที่คุ้มค่าคือ เปิดจอ กลับจากพื้นหลัง สลับ profile และผู้ใช้กดถาม</li><li>ประกาศสถานะ <code>checking</code> ด้วย ไม่ใช่แค่ผลลัพธ์</li><li>ต้องมีสถานะ <code>unknown</code> แยกจาก “ตรวจแล้วไม่ตอบ”</li><li>จุดสถานะเป็นเครื่องมือวินิจฉัย ไม่ใช่เครื่องมือควบคุม</li></ul></div><p><strong>บทหน้า:</strong> ตรวจอย่างไรให้รู้ว่าปลายทางเป็นเซิร์ฟเวอร์ WMS จริง</p></section>

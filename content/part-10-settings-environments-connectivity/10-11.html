@@ -1,10 +1,120 @@
-<div class="note"><strong>Settings sheet ใช้ draft แยก saved state:</strong> พิมพ์/ทดสอบไม่เปลี่ยน active configจนกด Save/Use และปิด sheetต้อง guardข้อมูลที่ยังไม่บันทึก</div>
-<section><h2>1. Draft lifecycle</h2><p>เปิด profile → copyลง controllers/draft → edit/validate/test draft → saveผ่าน controller → update baseline hash → close การ cancelทิ้ง draftโดยไม่ mutate profileใน list</p></section>
-<section><h2>2. Dirty detection</h2><pre class="code-vs"><code>ProfileDraft get draft =&gt; ProfileDraft.fromControllers(...);
-bool get isDirty =&gt; draft.normalized != savedBaseline.normalized;</code></pre><p>เปรียบเทียบ normalized semantic valuesไม่ใช่ textดิบเพื่อ slash/spaceไม่ทำ dirtyปลอม</p></section>
-<section><h2>3. PopScope guard</h2><p>Back, tapนอก modal, drag-downและ close buttonต้องผ่าน confirmเดียวกัน: Discard / Keep editing / Saveหาก valid ห้าม guardเฉพาะ AppBar back</p></section>
-<section><h2>4. Async safety</h2><p>disable Test/Saveซ้ำระหว่าง probe/write, ตรวจ mountedหลัง awaitและใช้ draft generationไม่ให้ผล testเก่าของ URL Aแสดงบน draft B</p></section>
-<section><h2>5. Separate actions</h2><p>Testไม่ save, Saveไม่จำเป็นต้อง activate, Save & Useมี realm/session confirmation และ Save As Newออก IDใหม่ ป้ายปุ่มต้องสื่อผลชัด</p></section>
-<section><h2>6. Accessibility/PDA</h2><p>keyboard type numericสำหรับ port, touch targetsใหญ่, errorใกล้ field, copy resolved URL, show environment color+textและอย่าพึ่งสีอย่างเดียว</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้ Testผ่านแล้วแก้ hostหนึ่งตัวจากนั้นกด Save ควรยังแสดง testedไหม?</p><details><summary>เฉลย</summary><p>ไม่ test resultต้องผูก fingerprint/generationของ draftที่ถูกทดสอบและ resetเมื่อ endpoint fieldsเปลี่ยน</p></details></section>
-<section><h2>8. Widget tests</h2><div class="success">dirty back guard, validation, overlapping tests, save failure, duplicate name resolution, pinned build UIและ controller disposal</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน <code>profile_draft.dart</code> แล้วต่อกับ <code>PopScope</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.7, 5.9 (<code>PopScope</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยก “สิ่งที่กำลังพิมพ์” ออกจาก “สิ่งที่บันทึกแล้ว” และเตือนก่อนทิ้งงานที่ทำค้าง</div>
+
+<section><h2>1. ทำไมต้องมีคลาสแยก</h2><p>ทางที่ง่ายที่สุดคือให้ฟอร์มแก้ <code>ServerProfile</code> ตรง ๆ แต่ทำไม่ได้ด้วยเหตุผลสองข้อ</p><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ค่าระหว่างพิมพ์ยังแปลงไม่ได้</td><td>ผู้ใช้ลบพอร์ตจนหมดเพื่อพิมพ์ใหม่ ระหว่างนั้น <code>port</code> คือ <code>''</code> ซึ่งเป็น <code>int</code> ไม่ได้</td></tr>
+<tr><td>ยังไม่รู้ว่าจะบันทึกไหม</td><td>ถ้าแก้ของจริงตรง ๆ แล้วผู้ใช้กดยกเลิก ต้องหาทางย้อนกลับ</td></tr>
+</tbody></table><p>ทางแก้ที่คนมักเลือกคือทำให้ <code>port</code> เป็น <code>int?</code> ซึ่งย้ายปัญหาไปให้ทุกที่ที่ใช้ profile ต้องเช็ค null ทั้งที่ profile ที่บันทึกแล้ว<strong>มีพอร์ตเสมอ</strong></p><pre class="code-vs"><code>/// แยกจาก [ServerProfile] เพราะระหว่างพิมพ์ ค่ายังเป็นข้อความที่แปลงไม่ได้
+/// ...ถ้าใช้โมเดลจริงเป็นตัวเก็บ จะต้องยอมให้ `port` เป็น `int?` ซึ่งทำให้
+/// ทุกที่ที่ใช้ profile ต้องเช็ค null ทั้งที่ profile ที่บันทึกแล้วมีพอร์ตเสมอ
+class ProfileDraft { ... }</code></pre><div class="note"><strong>หลักที่ใช้ได้ทั่วไป:</strong> เมื่อของชิ้นหนึ่งมีสองสถานะที่กฎไม่เหมือนกัน — “กำลังทำ” กับ “ทำเสร็จแล้ว” — ให้แยกเป็นสองชนิด อย่าทำชนิดเดียวให้หลวมพอที่จะเป็นได้ทั้งสองอย่าง</div></section>
+
+<section><h2>2. หน้าตาของร่าง</h2><pre class="code-vs"><code>class ProfileDraft {
+  final String? id;         // null = สร้างใหม่ ไม่ใช่แก้ของเดิม
+  String name;              // ไม่ใช่ final เพราะฟอร์มแก้ได้
+  String host;
+  String port;              // เป็น String ไม่ใช่ int
+  String basePath;
+
+  bool get isNew =&gt; id == null;
+
+  factory ProfileDraft.from(ServerProfile profile) =&gt; ProfileDraft(...);
+}</code></pre><table><thead><tr><th>ต่างจาก <code>ServerProfile</code></th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ฟิลด์แก้ได้ ไม่ใช่ <code>final</code></td><td>ฟอร์มแก้ทีละช่อง การใช้ <code>copyWith</code> ทุกตัวอักษรจะเปลืองโดยไม่ได้อะไร</td></tr>
+<tr><td><code>port</code> เป็นข้อความ</td><td>รองรับค่าระหว่างพิมพ์</td></tr>
+<tr><td><code>id</code> เป็น nullable</td><td>แยกสร้างใหม่กับแก้ของเดิม</td></tr>
+<tr><td>ไม่มี <code>baseUrl</code></td><td>ร่างที่ยังไม่ผ่านการตรวจ ประกอบ URL ไม่ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. แปลงกลับตอนบันทึก</h2><pre class="code-vs"><code>ServerProfile toProfile({required String id}) {
+  final parsedPort = int.tryParse(port.trim());
+  if (parsedPort == null) {
+    throw StateError('toProfile ถูกเรียกทั้งที่ยังไม่ผ่านการตรวจ: port="$port"');
+  }
+  return ServerProfile(...);
+}</code></pre><p>ทำไมโยน ทั้งที่ Part นี้บอกตลอดว่าอย่าให้แอปพัง คำตอบอยู่ที่<strong>ใครผิด</strong></p><table><thead><tr><th>สถานการณ์</th><th>ใครผิด</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ผู้ใช้พิมพ์พอร์ตผิด</td><td>ไม่มีใครผิด</td><td>แสดงข้อความใต้ช่อง</td></tr>
+<tr><td>ไฟล์ที่เก็บไว้เสีย</td><td>ไม่มีใครแก้ได้</td><td>ทิ้งแถวนั้น</td></tr>
+<tr><td><strong>โค้ดเรียก <code>toProfile</code> โดยไม่ตรวจก่อน</strong></td><td><strong>เรา</strong></td><td><strong>โยนให้ดัง</strong></td></tr>
+</tbody></table><p>ถ้าคืนค่าเงียบ ๆ แทน เช่นใช้พอร์ต 80 เป็นค่าปริยาย ผู้ใช้จะได้ profile ที่มีพอร์ตที่ตัวเองไม่เคยพิมพ์ แล้วสงสัยว่าทำไมต่อไม่ติด — บั๊กของเรากลายเป็นปัญหาของผู้ใช้ ซึ่งเป็นสิ่งที่ต้องหลีกเลี่ยงที่สุด</p></section>
+
+<section><h2>4. รู้ได้อย่างไรว่าแก้ไปแล้ว</h2><pre class="code-vs"><code>bool isDirtyFrom(ServerProfile? saved) {
+  if (saved == null) {
+    // ร่างใหม่ที่ยังไม่พิมพ์อะไรเลย ไม่ถือว่าแก้ — ปิดได้โดยไม่ต้องเตือน
+    return name.trim().isNotEmpty ||
+        host.trim().isNotEmpty ||
+        port.trim().isNotEmpty ||
+        basePath.trim().isNotEmpty;
+  }
+  return name.trim() != saved.name ||
+      environment != saved.environment ||
+      protocol != saved.protocol ||
+      host.trim() != saved.host ||
+      port.trim() != saved.port.toString() ||
+      basePath.trim() != saved.basePath;
+}</code></pre><p>รายละเอียดสามข้อที่มีผลจริง</p><table><thead><tr><th>รายละเอียด</th><th>ถ้าไม่ทำจะเกิด</th></tr></thead><tbody>
+<tr><td>ร่างเปล่าถือว่ายังไม่แก้</td><td>ผู้ใช้กดเปิดหน้าสร้างใหม่ แล้วกดปิดทันที ก็โดนเตือน</td></tr>
+<tr><td>เทียบด้วย <code>trim()</code></td><td>ช่องว่างท้ายบรรทัดที่ผู้ใช้ไม่เห็นทำให้เตือนทั้งที่ไม่ได้แก้</td></tr>
+<tr><td>เทียบทีละช่อง ไม่ใช่เทียบ <code>baseUrl</code></td><td>เปลี่ยนชื่ออย่างเดียวจะไม่นับว่าแก้ แล้วผู้ใช้เสียงานเงียบ ๆ</td></tr>
+</tbody></table><p>เทสต์บังคับทั้งสามข้อ</p><pre class="code-vs"><code>test('เปลี่ยนแค่ชื่อก็นับว่าแก้ ทั้งที่ที่อยู่เท่าเดิม', () {
+  final saved = profile('p1');
+  final edited = ProfileDraft.from(saved)..name = 'Office ชั้น 2';
+  expect(edited.isDirtyFrom(saved), isTrue);
+});
+
+test('เว้นวรรคหัวท้ายไม่นับว่าแก้', () {
+  final saved = profile('p1');
+  final edited = ProfileDraft.from(saved)..host = ' 192.168.1.194 ';
+  expect(edited.isDirtyFrom(saved), isFalse);
+});</code></pre></section>
+
+<section><h2>5. ต่อเข้ากับปุ่มย้อนกลับ</h2><pre class="code-vs"><code>PopScope(
+  canPop: !draft.isDirtyFrom(saved),
+  onPopInvokedWithResult: (didPop, _) async {
+    if (didPop) return;                     // ออกไปแล้ว ไม่ต้องทำอะไร
+    final leave = await showDialog&lt;bool&gt;(
+      context: context,
+      builder: (context) =&gt; AlertDialog(
+        title: const Text('ยังไม่ได้บันทึก'),
+        content: const Text('ออกตอนนี้ค่าที่แก้จะหาย'),
+        actions: [
+          TextButton(
+            onPressed: () =&gt; Navigator.pop(context, false),
+            child: const Text('กลับไปแก้ต่อ'),
+          ),
+          FilledButton(
+            onPressed: () =&gt; Navigator.pop(context, true),
+            child: const Text('ออกโดยไม่บันทึก'),
+          ),
+        ],
+      ),
+    );
+    if (leave == true &amp;&amp; context.mounted) Navigator.pop(context);
+  },
+  child: ...,
+)</code></pre><p>สามจุดที่พลาดกันบ่อย ตามที่ 5.9 อธิบายไว้</p><table><thead><tr><th>จุด</th><th>ถ้าลืม</th></tr></thead><tbody>
+<tr><td><code>if (didPop) return;</code></td><td>ถ้า <code>canPop</code> เป็นจริง หน้าปิดไปแล้ว แล้วยังเปิด dialog ซ้อนบนหน้าที่ไม่มีอยู่</td></tr>
+<tr><td><code>context.mounted</code></td><td>ระหว่างรอ dialog ผู้ใช้อาจออกไปทางอื่นแล้ว</td></tr>
+<tr><td><code>canPop</code> คำนวณสด</td><td>ถ้าคำนวณครั้งเดียวตอนสร้าง จะไม่อัปเดตตามที่พิมพ์</td></tr>
+</tbody></table></section>
+
+<section><h2>6. ข้อความในกล่องเตือนสำคัญกว่าที่คิด</h2><table><thead><tr><th>ข้อความที่ไม่ดี</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>“คุณแน่ใจหรือไม่?” + ปุ่ม ตกลง/ยกเลิก</td><td>“ตกลง” หมายถึงตกลงออก หรือตกลงว่าจะอยู่ต่อ</td></tr>
+<tr><td>“มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก”</td><td>บอกสถานะ แต่ไม่บอกว่าถ้ากดปุ่มไหนจะเกิดอะไร</td></tr>
+</tbody></table><p>ปุ่มควรเขียนเป็น<strong>การกระทำ</strong> ไม่ใช่ ใช่/ไม่ใช่ — “ออกโดยไม่บันทึก” กับ “กลับไปแก้ต่อ” อ่านแล้วรู้ทันทีโดยไม่ต้องอ่านข้อความข้างบน</p><p>และถ้าทำได้ ให้เพิ่มปุ่มที่สามคือ “บันทึกแล้วออก” เพราะนั่นคือสิ่งที่ผู้ใช้ส่วนใหญ่ตั้งใจตั้งแต่แรก</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เตือนทั้งที่เพิ่งเปิดหน้ามา</td><td>ร่างเปล่านับว่าแก้แล้ว</td><td>เทียบกับ null แยกกรณี</td></tr>
+<tr><td>เตือนหลังบันทึกสำเร็จแล้ว</td><td>ไม่ได้อัปเดตตัวที่ใช้เทียบหลังบันทึก</td><td>ตั้ง <code>saved</code> เป็นตัวใหม่ที่เพิ่งบันทึก</td></tr>
+<tr><td>ไม่เตือนเลย</td><td><code>canPop</code> คำนวณครั้งเดียว</td><td>คำนวณใน <code>build</code></td></tr>
+<tr><td>dialog ซ้อนกันสองอัน</td><td>ลืม <code>if (didPop) return;</code></td><td>เช็คก่อนเสมอ</td></tr>
+<tr><td>แก้แล้วกดบันทึก แต่ค่าเก่ายังอยู่</td><td>ฟอร์มเขียนลง controller แต่ไม่ได้เขียนกลับลงร่าง</td><td>อ่านจาก controller ตอนบันทึก หรืออัปเดตร่างทุกครั้งที่เปลี่ยน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แก้ profile ที่<strong>กำลังใช้งานอยู่</strong> เปลี่ยน IP แล้วกดบันทึก</p><ol><li>ควรตรวจการเชื่อมต่อให้อัตโนมัติไหม</li><li>ถ้าที่อยู่ใหม่ต่อไม่ติด ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ควร</strong> เพราะผู้ใช้เพิ่งเปลี่ยนที่อยู่ของเครื่องที่กำลังใช้อยู่ คำตอบทั้งใหม่และกำลังจะถูกมอง ตรงกับเกณฑ์ใน 10.8 พอดี</p><p><strong>2.</strong> ตัวเลือกที่ต้องชั่งน้ำหนัก</p><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ย้อนกลับให้อัตโนมัติ</td><td>ผู้ใช้อาจรู้อยู่แล้วว่าเซิร์ฟเวอร์ยังไม่เปิด และตั้งใจตั้งไว้ล่วงหน้า</td></tr>
+<tr><td>ห้ามบันทึกจนกว่าจะต่อติด</td><td>ตั้งค่าล่วงหน้าไม่ได้เลย และถ้าเน็ตหลุดตอนนั้นก็ทำอะไรไม่ได้</td></tr>
+<tr><td>บันทึกแล้วแสดงว่าต่อไม่ติด</td><td>ผู้ใช้อาจไม่ทันสังเกต</td></tr>
+</tbody></table><p><strong>ทางที่ควรเลือกคือข้อสาม</strong> แต่ทำให้สังเกตยาก — บันทึกไว้ตามที่ผู้ใช้สั่ง แล้วแสดงผลการตรวจแบบที่ต้องรับรู้ พร้อมปุ่ม “ย้อนกลับไปที่อยู่เดิม” ที่กดได้ในคลิกเดียว</p><p>เหตุผลคือ <strong>ผู้ใช้สั่งอะไร ต้องเกิดสิ่งนั้น</strong> — แอปที่ตัดสินใจแทนโดยการย้อนค่าให้ จะทำให้ผู้ใช้ที่รู้ว่าตัวเองทำอะไรอยู่ทำงานไม่ได้ และเขาจะไม่มีทางรู้ด้วยว่าทำไม</p><p>อีกอย่างที่ควรทำคือ<strong>อย่าลบที่อยู่เดิมทิ้ง</strong> ถ้าผู้ใช้แก้ profile ที่ใช้งานอยู่ ให้เสนอทางเลือก “บันทึกเป็นตัวใหม่” ด้วย ผู้ใช้จะได้เก็บที่อยู่เดิมไว้กลับไปใช้ได้ — ซึ่งเป็นเหตุผลที่ <code>saveAsNew</code> กับ <code>saveEdits</code> แยกกันตั้งแต่ 10.6</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>แยก “กำลังพิมพ์” กับ “บันทึกแล้ว” เป็นสองชนิด อย่าทำชนิดเดียวให้หลวม</li><li>ร่างเก็บค่าเป็นข้อความ เพราะระหว่างพิมพ์ยังแปลงไม่ได้</li><li>เรียกแปลงโดยไม่ตรวจก่อนคือบั๊กของเรา ต้องโยนให้ดัง</li><li>เทียบทีละช่องด้วย <code>trim()</code> ไม่ใช่เทียบผลลัพธ์รวม</li><li>ปุ่มในกล่องเตือนต้องเขียนเป็นการกระทำ ไม่ใช่ ใช่/ไม่ใช่</li></ul></div><p><strong>บทหน้า:</strong> จุดสีบนหัวจอ และสิ่งที่มันบอกได้จริง</p></section>

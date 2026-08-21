@@ -4,19 +4,111 @@
 <title>Multiple Profiles</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">10-05 · Flutter + .NET</span><h1>Multiple Profiles</h1><p>Part 10: Settings &amp; Connectivity</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Envelope</a></li><li><a href="#section-2">Encode/decode</a></li><li><a href="#section-3">Atomic-ish write</a></li><li><a href="#section-4">Migration</a></li><li><a href="#section-5">Corruption recovery</a></li><li><a href="#section-6">Duplicate profiles</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>หลาย profileเป็น versioned document:</strong> เก็บ profiles + activeIdร่วมกันอย่างสอดคล้อง ไม่เขียนหลาย preference keysแล้ว crashกลางทางจน activeชี้ของที่ไม่มี</div>
-<section id="section-1"><h2>1. Envelope</h2><pre class="code-vs"><code>{
-  "schemaVersion": 1,
-  "activeId": "prod-01",
-  "profiles": [{"id":"prod-01","name":"Warehouse","host":"10.1.2.3"}]
-}</code></pre></section>
-<section id="section-2"><h2>2. Encode/decode</h2><p>Controller/repository serialize documentจุดเดียวด้วย <code>jsonEncode</code>; decodeเป็น Objectก่อนตรวจ map/listและ skip entryเสียพร้อม telemetry</p></section>
-<section id="section-3"><h2>3. Atomic-ish write</h2><p>SharedPreferencesไม่มี transactionเต็มรูปแบบ ใช้ JSON string keyเดียวช่วยให้ snapshotสอดคล้อง และ update in-memoryหลัง writeสำเร็จหรือตั้ง policy rollbackชัด</p></section>
-<section id="section-4"><h2>4. Migration</h2><p>รองรับ legacy host/port keysโดยอ่านเมื่อ documentใหม่ไม่มี สร้าง seed profile, persist schemaใหม่แล้วลบ legacy keysหลังยืนยัน write ไม่ migrateทุก startupซ้ำ</p></section>
-<section id="section-5"><h2>5. Corruption recovery</h2><p>JSONเสียไม่ควร crash app ให้ backup/log safe metadata, seed defaultและแจ้งผู้ใช้ตามความเหมาะสม ห้ามคืน raw configที่อาจมี internal hostใน crash reportโดยไม่ policy</p></section>
-<section id="section-6"><h2>6. Duplicate profiles</h2><p>ตรวจ duplicate IDเด็ดขาด; duplicate nameให้ resolve/confirm; duplicate normalized endpointอาจเตือนแต่อนุญาตถ้า environment/labelมีเหตุผล</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>profilesโหลดได้ 2 จาก 3 และ activeIdชี้ entryที่เสียควรทำอย่างไร?</p><details><summary>เฉลย</summary><p>เลือก deterministic valid fallbackหรือ seed, persist repaired documentและตั้ง status unknownจน probe ไม่ปล่อย activeเป็น nullแบบ race</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">round-trip, schemaเก่า/ใหม่, malformed document/entry, duplicate ID, active missing, write failureและ migrationครั้งเดียว</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เก็บกี่กุญแจ</a></li><li><a href="#section-2">อ่านกลับอย่างไรเมื่อข้อมูลเสีย</a></li><li><a href="#section-3">โค้ดที่อ่านกลับ</a></li><li><a href="#section-4">typedef ที่คืนสองค่า</a></li><li><a href="#section-5">เลขรุ่นตั้งแต่วันแรก</a></li><li><a href="#section-6">เทสต์ที่ต้องมี</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่านและรันเทสต์ของ <code>profile_snapshot.dart</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 10.4, 8.5 (เก็บ session ลงเครื่อง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บรายการการตั้งค่าลงเครื่องโดยที่ข้อมูลเสียบางส่วนไม่ทำให้เสียทั้งหมด</div>
+
+<section id="section-1"><h2>1. เก็บกี่กุญแจ</h2><p>มีสองอย่างที่ต้องเก็บ คือรายการ profile และ id ของตัวที่ใช้งานอยู่ ทางเลือกแรกที่นึกออกคือแยกกัน</p><pre class="code-vs"><code>// อย่าทำแบบนี้
+await storage.write('profiles', jsonEncode(profiles));
+await storage.write('active_id', activeId);        // ← เขียนไม่สำเร็จตรงนี้ล่ะ?</code></pre><p>ถ้าเขียนสำเร็จแค่บรรทัดแรก จะได้สถานะที่ไม่มีทางเกิดจากการใช้งานปกติ คือมีรายการใหม่แต่ตัวที่ใช้งานอยู่ยังชี้ของเก่าที่อาจถูกลบไปแล้ว</p><p>ทางที่ถูกคือเก็บรวมใต้กุญแจเดียว</p><pre class="code-vs"><code>String encodeProfiles(List&lt;ServerProfile&gt; profiles, String? activeId) =&gt;
+    jsonEncode({
+      'version': profileSchemaVersion,
+      'profiles': [
+        for (final profile in profiles)
+          profile.toJson(isActive: profile.id == activeId),
+      ],
+    });</code></pre><p>สังเกตว่า <code>activeId</code> ไม่ได้เก็บเป็นฟิลด์แยก แต่กลายเป็นธง <code>isActive</code> บนแถว — ผลคือ<strong>ตัวที่ใช้งานอยู่ต้องเป็นแถวที่มีอยู่จริงเสมอ</strong> เพราะธงอยู่บนแถวนั้นเอง</p></section>
+
+<section id="section-2"><h2>2. อ่านกลับอย่างไรเมื่อข้อมูลเสีย</h2><p>นี่คือจุดที่ Part นี้ตัดสินใจ<strong>ต่างจาก Part 6 โดยตั้งใจ</strong> และต้องเข้าใจว่าทำไม</p><table><thead><tr><th> </th><th>ข้อมูลจากเซิร์ฟเวอร์ (Part 6)</th><th>การตั้งค่าบนเครื่องนี้ (Part 10)</th></tr></thead><tbody>
+<tr><td>ใครเขียน</td><td>ทีมหลังบ้าน</td><td>แอปนี้เอง</td></tr>
+<tr><td>ผิดรูปแบบแปลว่า</td><td>สัญญาถูกละเมิด มีคนต้องแก้</td><td>ไฟล์เสีย ผู้ใช้แก้ไม่ได้และไม่ต้องรู้</td></tr>
+<tr><td>ทำอะไรเมื่อผิด</td><td>โยน <code>ContractException</code></td><td>ทิ้งแถวนั้น ใช้ที่เหลือต่อ</td></tr>
+<tr><td>ราคาของการโยน</td><td>ทีมเห็นปัญหาแล้วแก้</td><td>ผู้ใช้เปิดแอปไม่ได้</td></tr>
+</tbody></table><pre class="code-vs"><code>/// คืน null สำหรับแถวที่เชื่อไม่ได้ แทนที่จะโยน
+///
+/// ต่างจากกฎใน Part 6 โดยตั้งใจ — ข้อมูลนี้เราเขียนเองลงเครื่องนี้
+/// ไม่ใช่สัญญากับเซิร์ฟเวอร์ และแถวเสียหนึ่งแถวต้องไม่ทำให้ผู้ใช้
+/// เสีย profile อื่นที่เหลือทั้งหมด
+static ServerProfile? fromJson(Object? raw) { ... }</code></pre><div class="note">กฎที่ใช้ตัดสิน: <strong>โยนเมื่อมีคนแก้ได้ กลืนเมื่อไม่มีใครแก้ได้และการหยุดทำงานแพงกว่า</strong> — และเมื่อกลืน ต้องกลืนให้แคบที่สุด คือทิ้งเฉพาะแถวที่เสีย</div></section>
+
+<section id="section-3"><h2>3. โค้ดที่อ่านกลับ</h2><pre class="code-vs"><code>ProfileSnapshot decodeProfiles(String? raw) {
+  const empty = (profiles: &lt;ServerProfile&gt;[], activeId: null);
+  if (raw == null || raw.trim().isEmpty) return empty;
+
+  Object? decoded;
+  try {
+    decoded = jsonDecode(raw);
+  } on FormatException {
+    return empty;              // ไฟล์เสียทั้งไฟล์ ถือว่าไม่เคยมี
+  }
+  if (decoded is! Map) return empty;
+
+  final rows = decoded['profiles'];
+  if (rows is! List) return empty;
+
+  final profiles = &lt;ServerProfile&gt;[];
+  String? activeId;
+  for (final row in rows) {
+    final profile = ServerProfile.fromJson(row);
+    if (profile == null) continue;                  // ทิ้งเฉพาะแถวที่เสีย
+    profiles.add(profile);
+    if (activeId == null &amp;&amp; row is Map &amp;&amp; row['isActive'] == true) {
+      activeId = profile.id;
+    }
+  }
+
+  if (profiles.isEmpty) return empty;
+  return (profiles: profiles, activeId: activeId ?? profiles.first.id);
+}</code></pre><p>บรรทัดสุดท้ายคือหัวใจ — <code>activeId ?? profiles.first.id</code> ทำให้กฎ “มีตัวที่ใช้งานอยู่หนึ่งตัวเสมอ” เป็นจริงแม้ไฟล์จะถูกแก้ด้วยมือมาก่อน หรือแถวที่เคยเป็นตัวใช้งานถูกทิ้งไปเพราะเสีย</p></section>
+
+<section id="section-4"><h2>4. <code>typedef</code> ที่คืนสองค่า</h2><pre class="code-vs"><code>typedef ProfileSnapshot = ({List&lt;ServerProfile&gt; profiles, String? activeId});</code></pre><p>นี่คือ <strong>record</strong> ของ Dart 3 ที่ตั้งชื่อฟิลด์ได้ ใช้เมื่อฟังก์ชันต้องคืนหลายค่าที่ไปด้วยกัน</p><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>คืน <code>List</code> แล้วให้คนเรียกหา active เอง</td><td>ทุกคนต้องเขียนกฎหาเอง และเขียนไม่เหมือนกัน</td></tr>
+<tr><td>สร้างคลาสใหม่</td><td>ได้ไฟล์เพิ่มเพื่อคืนค่าจากฟังก์ชันเดียว</td></tr>
+<tr><td>คืน record</td><td>เข้าถึงด้วย <code>snapshot.activeId</code> ชื่อชัด ไม่ต้องมีคลาส</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. เลขรุ่นตั้งแต่วันแรก</h2><pre class="code-vs"><code>const int profileSchemaVersion = 1;</code></pre><p>เหตุผลเดียวกับ 8.5 — วันที่ต้องเปลี่ยนโครงข้อมูล ถ้าไม่เคยเก็บเลขรุ่นไว้ จะแยกไม่ออกว่าไฟล์ที่อ่านมาเป็นรุ่นเก่าหรือรุ่นใหม่ที่เสีย ทางเดียวที่เหลือคือทิ้งของผู้ใช้ทั้งหมด</p><p>ตอนนี้ยังไม่มีโค้ดที่อ่านเลขนี้ และนั่นถูกแล้ว — <strong>เขียนลงไปตอนนี้ อ่านตอนที่ต้องใช้</strong> ต้นทุนของการเขียนคือหนึ่งบรรทัด ต้นทุนของการไม่เขียนคือทางเลือกที่หายไปตลอดกาล</p></section>
+
+<section id="section-6"><h2>6. เทสต์ที่ต้องมี</h2><pre class="code-vs"><code>test('แถวเสียหนึ่งแถว ต้องไม่ทำให้เสีย profile อื่นทั้งหมด', () {
+  final raw = jsonEncode({
+    'version': 1,
+    'profiles': [
+      profile('p1').toJson(isActive: true),
+      {'id': 'broken'},                        // ไม่มี host และ port
+      profile('p3').toJson(),
+    ],
+  });
+
+  final snapshot = decodeProfiles(raw);
+  expect(snapshot.profiles.map((p) =&gt; p.id), ['p1', 'p3']);
+  expect(snapshot.activeId, 'p1');
+});</code></pre><pre class="code-vs"><code>test('ข้อมูลเสียทั้งไฟล์ ต้องได้ค่าว่าง ไม่ใช่โยน', () {
+  for (final raw in [null, '', 'ไม่ใช่ JSON', '[]', '{}']) {
+    final snapshot = decodeProfiles(raw);
+    expect(snapshot.profiles, isEmpty, reason: 'ผิดที่ "$raw"');
+  }
+});</code></pre><p>ห้าค่าในลูปนี้คือทุกรูปแบบของ “ไฟล์ที่ไม่ใช่สิ่งที่เราคาด” และแต่ละอันเข้าเส้นทางป้องกันคนละเส้นในฟังก์ชัน</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เปิดแอปแล้วค้างที่หน้าขาว หลังจากอัปเดตแอป</td><td>โครงข้อมูลเปลี่ยนแล้วอ่านของเก่าไม่ได้ แล้วโยน</td><td>อ่านไม่ได้ให้ถือว่าไม่เคยมี</td></tr>
+<tr><td>profile หายทั้งหมดเพราะแถวเดียวเสีย</td><td>ใช้ <code>map().toList()</code> ที่โยนกลางทาง</td><td>วนทีละแถว ทิ้งเฉพาะที่เสีย</td></tr>
+<tr><td>ไม่มีตัวที่ใช้งานอยู่เลย</td><td>เก็บ <code>activeId</code> แยก แล้วชี้ไปที่แถวที่ถูกลบ</td><td>เก็บเป็นธงบนแถว พร้อมค่าสำรอง</td></tr>
+<tr><td>มีตัวที่ใช้งานอยู่สองตัว</td><td>เขียนธงมากกว่าหนึ่งแถว</td><td><code>activeId == null &amp;&amp;</code> ตอนอ่าน — อันแรกชนะ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>รุ่นถัดไปต้องเพิ่มฟิลด์ <code>note</code> ใน profile และเปลี่ยน <code>port</code> จาก <code>int</code> เป็น <code>String</code> เพื่อรองรับพอร์ตที่เป็นชื่อบริการ</p><ol><li>ต้องเพิ่มเลขรุ่นเป็น 2 ไหม</li><li>ผู้ใช้ที่มีข้อมูลรุ่น 1 อยู่แล้ว จะเกิดอะไรขึ้น</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> แยกเป็นสองเรื่อง</p><ul><li><strong>เพิ่ม <code>note</code></strong> ไม่ต้องขึ้นรุ่น เพราะเป็นการเพิ่มฟิลด์ที่มีค่าปริยาย ข้อมูลรุ่น 1 อ่านได้ปกติ จะได้ <code>note</code> เป็นค่าว่าง ซึ่งถูกต้อง</li><li><strong>เปลี่ยนชนิดของ <code>port</code></strong> ต้องขึ้นเป็นรุ่น 2 เพราะความหมายของฟิลด์เดิมเปลี่ยน</li></ul><p><strong>2.</strong> ตอนนี้ <code>fromJson</code> อ่านด้วย <code>int.tryParse(raw['port']?.toString() ?? '')</code> ซึ่งบังเอิญรับได้ทั้งเลขและข้อความที่เป็นเลข แต่จะทิ้งแถวที่พอร์ตเป็น <code>"https"</code> ไป — ผู้ใช้จะเสีย profile นั้นเงียบ ๆ</p><p>ทางที่ถูกคือเขียนตัวแปลงตามรุ่น</p><pre class="code-vs"><code>ProfileSnapshot decodeProfiles(String? raw) {
+  ...
+  final version = decoded['version'];
+  final rows = decoded['profiles'];
+  return switch (version) {
+    1 =&gt; _decodeV1(rows),      // แปลง int เป็น String ให้
+    2 =&gt; _decodeV2(rows),
+    // รุ่นที่ใหม่กว่าที่แอปนี้รู้จัก แปลว่าผู้ใช้เพิ่ง downgrade
+    // อ่านไม่ได้แน่นอน อย่าเดา
+    _ =&gt; (profiles: [], activeId: null),
+  };
+}</code></pre><p>ประเด็นที่ควรจำ: การมีเลขรุ่นไม่ได้แก้ปัญหาให้เอง มันแค่<strong>เปิดทางให้แก้ได้</strong> — ถ้าไม่เคยเขียนเลขไว้ตั้งแต่วันแรก บรรทัด <code>switch</code> นี้เขียนไม่ได้เลย</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>เก็บของที่ต้องตรงกันไว้ใต้กุญแจเดียว เขียนและอ่านพร้อมกัน</li><li>ตัวที่ใช้งานอยู่เก็บเป็นธงบนแถว ไม่ใช่ id แยก</li><li>ข้อมูลของเราเองบนเครื่องนี้ ให้ทิ้งแถวที่เสีย ไม่ใช่โยนทั้งหมด — ต่างจากสัญญากับเซิร์ฟเวอร์</li><li>เขียนเลขรุ่นตั้งแต่วันแรก อ่านตอนที่ต้องใช้</li></ul></div><p><strong>บทหน้า:</strong> ตัวที่ใช้งานอยู่ — ทำไมการบันทึกกับการสลับต้องเป็นคนละการกระทำ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
