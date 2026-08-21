@@ -4,22 +4,130 @@
 <title>HubConnection</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-03 · Realtime</span><h1>HubConnection</h1><p>Part 12: Realtime &amp; SignalR</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Build</a></li><li><a href="#section-2">URL parity</a></li><li><a href="#section-3">Token freshness</a></li><li><a href="#section-4">Handler registration</a></li><li><a href="#section-5">Connection state</a></li><li><a href="#section-6">Error propagation</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>HubConnectionBuilder:</strong> สร้าง URLจาก resolved server/base pathเดียวกับ ApiClient แนบ token provider และ register handlersก่อน startเพื่อไม่พลาด eventแรก</div>
-<section id="section-1"><h2>1. Build</h2><pre class="code-vs"><code>final hubUrl = '$resolvedBaseUrl/hubs/tasks';
-final connection = HubConnectionBuilder()
-    .withUrl(hubUrl /*, options: token transport config */)
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">แพ็กเกจที่ใช้</a></li><li><a href="#section-2">สร้างการเชื่อมต่อ</a></li><li><a href="#section-3">ส่ง token ไปด้วยเมื่อ hub ต้องการ</a></li><li><a href="#section-4">ห่อไว้ไม่ให้รั่วออกไป</a></li><li><a href="#section-5">จาก callback เป็น stream</a></li><li><a href="#section-6">singleton หรือรับเข้ามา</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน <code>signalr_service.dart</code> ของจริงทั้งไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.2, 9.5 (interface)<br><strong>จบบทนี้แล้วจะทำได้:</strong> สร้างการเชื่อมต่อ SignalR และห่อมันไว้ให้ส่วนอื่นของแอปไม่ต้องรู้จัก</div>
+
+<section id="section-1"><h2>1. แพ็กเกจที่ใช้</h2><pre class="code-vs"><code>dependencies:
+  signalr_netcore: ^1.3.7</code></pre><div class="note">ชื่อ <code>signalr_netcore</code> ไม่ใช่ของทีม Microsoft โดยตรง แต่เป็นแพ็กเกจของชุมชนที่ทำตามโปรโตคอลของ SignalR — ต่างจากฝั่ง JavaScript ที่ Microsoft ดูแลเอง จึงควรตรึงรุ่นไว้และทดสอบก่อนอัปเกรด</div></section>
+
+<section id="section-2"><h2>2. สร้างการเชื่อมต่อ</h2><pre class="code-vs"><code>final serverUrl = await ApiService.resolveServerUrl();
+final hubUrl = '$serverUrl/hubs/putaway';
+
+_connection = HubConnectionBuilder()
+    .withUrl(hubUrl)
     .withAutomaticReconnect()
     .build();
 
-connection.on('TaskStatusChanged', onTaskStatusChanged);
-await connection.start();</code></pre></section>
-<section id="section-2"><h2>2. URL parity</h2><p>ห้ามต่อจาก hardcoded hostที่ต่างจาก connection profile/API Hub routeอาจอยู่หลัง reverse-proxy base pathและ server switchต้อง rebuild connection</p></section>
-<section id="section-3"><h2>3. Token freshness</h2><p>ถ้า libraryรองรับ access token factoryให้ดึง tokenล่าสุดตอน connect/reconnect ไม่ capture tokenเก่าใน constructor หลัง logoutต้อง stopก่อน clear/rebuild</p></section>
-<section id="section-4"><h2>4. Handler registration</h2><p>registerชื่อ event exact case/contractก่อน startและเก็บ handler referenceสำหรับ off/removeภายหลัง ห้ามสร้าง anonymous closureใหม่ตอน unsubscribe</p></section>
-<section id="section-5"><h2>5. Connection state</h2><p>expose disconnected/connecting/connected/reconnectingให้ Store/Shellแสดงสถานะและตัดสิน fallback ไม่ให้ screenเดาว่ามี connectionจาก object != null</p></section>
-<section id="section-6"><h2>6. Error propagation</h2><p>อย่า catch connect errorแล้ว logอย่างเดียวจน UIคิดว่า realtimeทำงาน ให้ serviceคืน/notify typed stateและเริ่ม fallback pollingตาม policy</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>profileเปลี่ยนจาก Aเป็น Bแต่ singleton connectionยัง connectedที่ Aควรทำอะไร?</p><details><summary>เฉลย</summary><p>เพิ่ม realm generation, stop A, clear subscriptions/server-scoped state, build URL B, start+resubscribeและ HTTP reconcile ห้ามส่ง token Aไป B</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">resolved hub URL/base path, handlerก่อน start, connect failure state, token redaction, server switchและ duplicate startไม่สร้างสอง connections</div></section>
+_connection!.on('StationDispatched', _onStationDispatched);
+_connection!.on('PalletArrived', _onPalletArrived);
+
+await _connection!.start();</code></pre><table><thead><tr><th>บรรทัด</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>withUrl(hubUrl)</code></td><td>บอกว่า hub อยู่ที่ไหน</td></tr>
+<tr><td><code>withAutomaticReconnect()</code></td><td>ให้ไลบรารีพยายามต่อใหม่เองเมื่อสายหลุด (12.4)</td></tr>
+<tr><td><code>build()</code></td><td>สร้างวัตถุ แต่ยังไม่ต่อ</td></tr>
+<tr><td><code>.on(...)</code></td><td>ลงทะเบียนฟัง — <strong>ต้องทำก่อน <code>start()</code></strong></td></tr>
+<tr><td><code>start()</code></td><td>ต่อจริง</td></tr>
+</tbody></table><p><strong>ลำดับสำคัญ</strong> — ถ้าเรียก <code>start()</code> ก่อนแล้วค่อย <code>.on(...)</code> เหตุการณ์ที่มาถึงในช่วงระหว่างนั้นจะหายไปเงียบ ๆ ซึ่งเป็นช่วงที่อาจมีเหตุการณ์อยู่จริงเพราะเซิร์ฟเวอร์ส่งทันทีที่มีคนต่อเข้ามา</p><p>โค้ดจริงของ <code>wmsapp</code> เรียงถูกต้อง และ lab ใช้หลักเดียวกัน</p><pre class="code-vs"><code>// ฟังก่อนต่อ ไม่ใช่ต่อก่อนฟัง — เหตุการณ์ที่มาถึงระหว่างที่ยังไม่ได้
+// ลงทะเบียนฟัง จะหายไปเงียบ ๆ (12.7)
+_eventSub = client.events.listen(_onEvent);
+_statusSub = client.status.listen(_onStatus);
+
+await client.acquire();</code></pre></section>
+
+<section id="section-3"><h2>3. ส่ง token ไปด้วยเมื่อ hub ต้องการ</h2><pre class="code-vs"><code>_connection = HubConnectionBuilder()
+    .withUrl(
+      hubUrl,
+      options: HttpConnectionOptions(
+        // เป็นฟังก์ชัน ไม่ใช่ค่า เพราะถูกเรียกใหม่ทุกครั้งที่ต่อ —
+        // token ที่หมดอายุระหว่างที่หลุดอยู่ จะได้ตัวใหม่ตอนต่อกลับ
+        accessTokenFactory: () async =&gt; sessionStore.token ?? '',
+      ),
+    )
+    .withAutomaticReconnect()
+    .build();</code></pre><p>คอมเมนต์บรรทัดนั้นคือเหตุผลที่ API ออกแบบเป็นฟังก์ชัน — ถ้าส่งเป็นค่าคงที่ การต่อกลับหลังจากหลุดไปยี่สิบนาทีจะใช้ token ที่หมดอายุแล้ว แล้วได้ 401 โดยไม่มีทางแก้นอกจากปิดแอป</p><p>ต่อกับสิ่งที่ Part 8 วางไว้ — <code>SessionStore</code> เป็นเจ้าของ token ที่เดียว และทุกคนที่ต้องใช้ก็อ่านจากที่นั่นตอนที่จะใช้ ไม่ใช่คัดลอกเก็บไว้</p></section>
+
+<section id="section-4"><h2>4. ห่อไว้ไม่ให้รั่วออกไป</h2><p>ปัญหาของการเรียก <code>HubConnection</code> ตรง ๆ จากในจอ</p><table><thead><tr><th>ปัญหา</th><th>ผล</th></tr></thead><tbody>
+<tr><td>จอต้องรู้จักชนิดของแพ็กเกจภายนอก</td><td>เปลี่ยนแพ็กเกจแล้วต้องแก้ทุกจอ</td></tr>
+<tr><td>เทสต์ต้องสร้าง <code>HubConnection</code> จริง</td><td>ทดสอบการหลุดแทบเป็นไปไม่ได้</td></tr>
+<tr><td>ข้อมูลที่ได้เป็น <code>List&lt;Object?&gt;</code></td><td>ทุกจอต้องแปลงเอง และแปลงไม่เหมือนกัน</td></tr>
+</tbody></table><p>lab จึงประกาศ interface ที่พูดภาษาของแอป ไม่ใช่ภาษาของแพ็กเกจ</p><pre class="code-vs"><code>abstract interface class RealtimeClient {
+  Stream&lt;HubEvent&gt; get events;
+  Stream&lt;RealtimeStatus&gt; get status;
+  RealtimeStatus get currentStatus;
+
+  Future&lt;void&gt; connect();
+  Future&lt;void&gt; disconnect();
+}</code></pre><p>ตัวจริงห่อ <code>HubConnection</code> ไว้ข้างใน ส่วนตัวปลอมในเทสต์ไม่มีอะไรเกี่ยวกับเครือข่ายเลย</p><pre class="code-vs"><code>/// ตัวจริงจะห่อ `HubConnection` ของ `signalr_netcore` แล้วแปลง callback
+/// ของมันมาเป็น stream สองเส้นนี้ ส่วนที่เหลือของแอปไม่ต้องรู้ว่าข้างใน
+/// เป็นอะไร — สลับไปใช้ WebSocket ธรรมดาหรือ MQTT ก็แก้แค่ไฟล์เดียว
+class InMemoryRealtimeClient implements RealtimeClient { ... }</code></pre></section>
+
+<section id="section-5"><h2>5. จาก callback เป็น stream</h2><p>SignalR ให้ callback มา ส่วนแอปเราอยากได้ stream แปลงกันตรงนี้</p><pre class="code-vs"><code>class SignalRRealtimeClient implements RealtimeClient {
+  final _events = StreamController&lt;HubEvent&gt;.broadcast();
+  final _status = StreamController&lt;RealtimeStatus&gt;.broadcast();
+  HubConnection? _connection;
+
+  @override
+  Stream&lt;HubEvent&gt; get events =&gt; _events.stream;
+
+  @override
+  Future&lt;void&gt; connect() async {
+    _connection = HubConnectionBuilder().withUrl(url)
+        .withAutomaticReconnect().build();
+
+    // แปลงทุกชื่อเหตุการณ์เป็น stream เส้นเดียว
+    for (final name in PutawayEvents.all) {
+      _connection!.on(name, (args) =&gt; _events.add(decodeHubEvent(name, args)));
+    }
+
+    await _connection!.start();
+  }
+}</code></pre><table><thead><tr><th>ได้อะไรจากการเป็น stream</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ยกเลิกการฟังได้ด้วยตัวเดียว</td><td><code>subscription.cancel()</code> แทนการจำว่าต้อง remove callback ตัวไหนบ้าง (12.8)</td></tr>
+<tr><td>กรองและแปลงได้</td><td><code>events.where((e) =&gt; e is TaskCompleted)</code></td></tr>
+<tr><td>เข้ากับ <code>StreamBuilder</code></td><td>ต่อเข้า UI ได้ตรง ๆ ถ้าต้องการ</td></tr>
+</tbody></table><div class="note"><code>.broadcast()</code> จำเป็นเพราะมีผู้ฟังหลายคน — stream ธรรมดาใน Dart อนุญาตให้ฟังได้คนเดียว และจะโยน <code>Bad state: Stream has already been listened to</code> ทันทีที่จอที่สองมาฟัง</div></section>
+
+<section id="section-6"><h2>6. singleton หรือรับเข้ามา</h2><pre class="code-vs"><code>// wmsapp — singleton
+class SignalRService {
+  static final SignalRService _instance = SignalRService._internal();
+  factory SignalRService() =&gt; _instance;
+  SignalRService._internal();
+}
+
+// ในจอ
+final _signalR = SignalRService();</code></pre><p>เหตุผลที่ใช้ singleton ตรงนี้แข็งแรงกว่ากรณี <code>ApiService</code> ใน 9.3 เพราะการเชื่อมต่อ<strong>ต้องมีตัวเดียวจริง ๆ</strong> ไม่ใช่แค่ควรมี — สามจอที่เปิดสามการเชื่อมต่อคือการสิ้นเปลืองที่เห็นได้ชัดทั้งฝั่งเครื่องและฝั่งเซิร์ฟเวอร์</p><p>แต่ปัญหาเดิมยังอยู่ คือ<strong>จอหยิบเอง</strong> จึงใส่ตัวปลอมในเทสต์ไม่ได้ lab แยกสองเรื่องนี้ออกจากกัน</p><pre class="code-vs"><code>// มีตัวเดียว — จัดการด้วยตัวนับ
+class SharedRealtimeClient {
+  SharedRealtimeClient(this._inner);
+  final RealtimeClient _inner;
+  int _users = 0;
+}
+
+// แต่ยังส่งเข้ามาได้
+LiveTaskStore({required this.repository, required this.client});</code></pre><p>ผลคือได้ทั้งการเชื่อมต่อเดียวและความสามารถในการทดสอบ ซึ่งเป็นข้อสรุปเดียวกับ 9.8 — <strong>ปัญหาไม่ได้อยู่ที่มีตัวเดียว แต่อยู่ที่หยิบเอง</strong></p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เหตุการณ์แรก ๆ หายไป</td><td>ลงทะเบียนฟังหลัง <code>start()</code></td><td>ฟังก่อนต่อเสมอ</td></tr>
+<tr><td><code>Stream has already been listened to</code></td><td>ใช้ stream ธรรมดา</td><td><code>.broadcast()</code></td></tr>
+<tr><td>ต่อกลับแล้วได้ 401</td><td>ส่ง token เป็นค่าคงที่</td><td>ใช้ <code>accessTokenFactory</code></td></tr>
+<tr><td>เทสต์ต้องมีเซิร์ฟเวอร์จริง</td><td>จอเรียก <code>HubConnection</code> ตรง ๆ</td><td>ห่อด้วย interface</td></tr>
+<tr><td>เปลี่ยนเซิร์ฟเวอร์แล้วยังต่อที่เก่า</td><td>URL ถูกอ่านครั้งเดียวตอนสร้าง</td><td>สร้างการเชื่อมต่อใหม่เมื่อสลับ profile (10.6)</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นจุดที่ Part 10 กับ Part 12 ชนกัน — <code>ApiClient</code> อ่าน base URL ใหม่ทุกคำขอจึงสลับได้ทันที แต่การเชื่อมต่อค้างไม่ได้ทำงานแบบนั้น มันจำ URL ตั้งแต่ตอนต่อ ดังนั้น<strong>สลับ profile แล้วต้องตัดแล้วต่อใหม่</strong></p></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียน <code>SignalRRealtimeClient</code> ที่ implement <code>RealtimeClient</code> ให้สมบูรณ์ โดยห่อ <code>HubConnection</code></p><ol><li>สถานะสี่ตัวใน <code>RealtimeStatus</code> จะมาจากไหน</li><li><code>dispose</code> ต้องทำอะไรบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> <code>signalr_netcore</code> มี callback ให้ผูก</p><pre class="code-vs"><code>_connection!.onclose(({error}) =&gt; _emit(RealtimeStatus.disconnected));
+_connection!.onreconnecting(({error}) =&gt; _emit(RealtimeStatus.reconnecting));
+_connection!.onreconnected(({connectionId}) {
+  _emit(RealtimeStatus.connected);
+  // ต้องเข้ากลุ่มซ้ำที่นี่ — connection ใหม่ไม่ได้อยู่ในกลุ่มเดิม (12.2)
+  unawaited(_connection!.invoke('JoinStation', args: [stationId]));
+});</code></pre><p>ส่วน <code>connecting</code> กับ <code>connected</code> ประกาศเองรอบ ๆ <code>start()</code></p><p><strong>2.</strong> สี่อย่าง และลำดับมีความหมาย</p><pre class="code-vs"><code>Future&lt;void&gt; dispose() async {
+  await _connection?.stop();      // 1. หยุดก่อน ไม่ให้มีเหตุการณ์เข้ามาอีก
+  _connection = null;             // 2. ปล่อยอ้างอิง
+  await _events.close();          // 3. ปิด controller
+  await _status.close();
+}</code></pre><p>ถ้าปิด controller ก่อนหยุดการเชื่อมต่อ เหตุการณ์ที่มาถึงระหว่างนั้นจะทำให้เกิด <code>Bad state: Cannot add event after closing</code> ซึ่งเป็นข้อผิดพลาดที่โผล่แบบสุ่มและหาสาเหตุยากมาก</p><p>สิ่งที่ต้องคิดต่อคือ <strong>ใครเรียก <code>dispose</code></strong> — ถ้าเป็น singleton ที่มีอายุเท่ากับแอป คำตอบอาจเป็น “ไม่มีใคร” ซึ่งยอมรับได้ แต่ต้องรู้ตัว และถ้าวันหนึ่งต้องสลับเซิร์ฟเวอร์ (§7 แถวสุดท้าย) จะต้องมีคนเรียกแล้ว</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ลงทะเบียนฟังก่อน <code>start()</code> เสมอ</li><li>ส่ง token เป็นฟังก์ชัน ไม่ใช่ค่า เพราะถูกเรียกใหม่ทุกครั้งที่ต่อ</li><li>ห่อแพ็กเกจไว้หลัง interface ที่พูดภาษาของแอป</li><li>แปลง callback เป็น stream แล้วยกเลิกการฟังได้ด้วยตัวเดียว</li><li>ใช้ <code>.broadcast()</code> เมื่อมีผู้ฟังหลายคน</li><li>มีการเชื่อมต่อตัวเดียวได้ โดยไม่ต้องให้จอหยิบเอง</li></ul></div><p><strong>บทหน้า:</strong> สิ่งที่เกิดขึ้นเมื่อสายหลุด และช่วงเวลาที่หายไป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

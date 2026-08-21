@@ -4,21 +4,183 @@
 <title>Fallback Polling</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-11 · Realtime</span><h1>Fallback Polling</h1><p>Part 12: Realtime &amp; SignalR</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Poll loop ไม่ overlap</a></li><li><a href="#section-2">Backoff</a></li><li><a href="#section-3">Screen-aware</a></li><li><a href="#section-4">Realtime recovery</a></li><li><a href="#section-5">Manual refresh</a></li><li><a href="#section-6">Staleness</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>Fallback pollingเป็น degraded mode:</strong> เริ่มเมื่อ realtime disconnected/unsynchronized, หยุดเมื่อ reconnect+reconcileสำเร็จ และใช้ backoff/jitterเพื่อไม่ถล่ม server</div>
-<section id="section-1"><h2>1. Poll loop ไม่ overlap</h2><pre class="code-vs"><code>Future&lt;void&gt; pollOnce() async {
-  if (_polling || disposed || !needsFallback) return;
-  _polling = true;
-  try { await refresh(); _attempt = 0; }
-  catch (_) { _attempt++; }
-  finally { _polling = false; scheduleNext(); }
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทำไมต้องมีทางสำรอง</a></li><li><a href="#section-2">สลับอัตโนมัติ</a></li><li><a href="#section-3">กันการเริ่มซ้ำ</a></li><li><a href="#section-4">เทสต์ที่พิสูจน์ทั้งวงจร</a></li><li><a href="#section-5">เลือกช่วงเวลาอย่างไร</a></li><li><a href="#section-6">บอกผู้ใช้ว่ากำลังใช้ทางสำรอง</a></li><li><a href="#section-7">เรื่องที่โปรเจกต์จริงยังไม่ได้ทำ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: รันเทสต์ที่ใช้ <code>fakeAsync</code> เดินเวลา</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.4, 12.10, 4.11 (ตัวจับเวลา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำทางสำรองที่ทำงานเมื่อเรียลไทม์ล้ม และหยุดเองเมื่อมันกลับมา</div>
+
+<section id="section-1"><h2>1. ทำไมต้องมีทางสำรอง</h2><p>12.1 สรุปไว้ว่าเรียลไทม์<strong>หลุดเงียบ</strong> — และนี่คือรายการเต็มของสิ่งที่ทำให้แอปไม่ได้รับเหตุการณ์โดยที่ไม่มีอะไรบอก</p><table><thead><tr><th>สาเหตุ</th><th>สถานะที่แอปเห็น</th></tr></thead><tbody>
+<tr><td>ต่อไม่ติดตั้งแต่แรก</td><td><code>disconnected</code> — รู้</td></tr>
+<tr><td>สายหลุดกลางทาง</td><td><code>reconnecting</code> — รู้</td></tr>
+<tr><td>ลองต่อใหม่จนครบแล้วเลิก</td><td><code>disconnected</code> — รู้</td></tr>
+<tr><td>ต่ออยู่แต่ไม่ได้เข้ากลุ่ม</td><td><code>connected</code> — <strong>ไม่รู้</strong></td></tr>
+<tr><td>ชื่อเหตุการณ์ไม่ตรงกับเซิร์ฟเวอร์</td><td><code>connected</code> — <strong>ไม่รู้</strong></td></tr>
+<tr><td>เหตุการณ์แปลงไม่ได้ทุกอัน</td><td><code>connected</code> — <strong>ไม่รู้</strong></td></tr>
+<tr><td>ตัวกลางในเครือข่ายตัด socket โดยไม่แจ้ง</td><td><code>connected</code> — <strong>ไม่รู้</strong></td></tr>
+</tbody></table><p>สี่แถวล่างคือเหตุผลที่ทางสำรองไม่ควรพึ่งสถานะอย่างเดียว และทำไม 12.10 ถึงแนะนำตาข่ายกันพลาดที่โหลดใหม่เป็นระยะแม้ตอนที่ทุกอย่างดูปกติ</p></section>
+
+<section id="section-2"><h2>2. สลับอัตโนมัติ</h2><pre class="code-vs"><code>void _onStatus(RealtimeStatus value) {
+  final previous = _status;
+  _status = value;
+
+  switch (value) {
+    case RealtimeStatus.connected:
+      _stopPolling();
+      if (previous == RealtimeStatus.reconnecting ||
+          previous == RealtimeStatus.disconnected) {
+        unawaited(load());
+      }
+    case RealtimeStatus.reconnecting:
+    case RealtimeStatus.disconnected:
+      // ระหว่างที่เรียลไทม์ใช้ไม่ได้ ให้ถามซ้ำเป็นระยะแทน
+      _startPolling();
+    case RealtimeStatus.connecting:
+      break;
+  }
+
+  notifyListeners();
+}</code></pre><table><thead><tr><th>สถานะ</th><th>ทำอะไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>connected</code></td><td>หยุดถามซ้ำ + โหลดอุดช่วงที่ขาด</td><td>ไม่จ่ายค่าเครือข่ายสองต่อ</td></tr>
+<tr><td><code>reconnecting</code></td><td>เริ่มถามซ้ำ</td><td>อาจกลับมาใน 2 วินาที หรือไม่กลับมาเลย — ไม่ต้องรอให้รู้</td></tr>
+<tr><td><code>disconnected</code></td><td>เริ่มถามซ้ำ</td><td>ทางเดียวที่เหลือ</td></tr>
+<tr><td><code>connecting</code></td><td>ไม่ทำอะไร</td><td>เป็นสถานะชั่วคราวตอนเริ่ม ซึ่ง <code>start()</code> โหลดให้อยู่แล้ว</td></tr>
+</tbody></table><p>การเริ่มถามซ้ำตั้งแต่ <code>reconnecting</code> เป็นการตัดสินใจที่มีเหตุผล — ถ้ารอจนถึง <code>disconnected</code> จะเสียเวลาไปราว 42 วินาทีตามค่าปริยาย ซึ่งนานเกินไปสำหรับข้อมูลที่ต้องการเรียลไทม์ตั้งแต่แรก</p></section>
+
+<section id="section-3"><h2>3. กันการเริ่มซ้ำ</h2><pre class="code-vs"><code>void _startPolling() {
+  if (_pollTimer != null) return;      // มีอยู่แล้ว ไม่สร้างใหม่
+  _pollTimer = Timer.periodic(pollInterval, (_) =&gt; unawaited(load()));
+}
+
+void _stopPolling() {
+  _pollTimer?.cancel();
+  _pollTimer = null;                   // ตั้งเป็น null ด้วย ไม่ใช่แค่ cancel
+}</code></pre><p>สองบรรทัดนี้สำคัญกว่าที่ดู</p><table><thead><tr><th>ถ้าไม่มี <code>if (_pollTimer != null) return;</code></th><th>สถานะเปลี่ยนจาก reconnecting เป็น disconnected จะสร้างตัวจับเวลาตัวที่สอง ทับตัวแรกที่ยังเดินอยู่ — ยิงคำขอสองเท่า และตัวแรกยกเลิกไม่ได้อีกเลยเพราะไม่มีใครถืออ้างอิงไว้</th></tr></thead><tbody>
+<tr><td>ถ้าไม่ตั้ง <code>_pollTimer = null</code></td><td><code>isPolling</code> จะยังบอกว่ากำลังถามซ้ำอยู่ ทั้งที่ยกเลิกไปแล้ว</td></tr>
+</tbody></table><p>ตัวจับเวลาที่ถูกทับแบบนี้เรียกว่า orphaned timer และเป็นการรั่วชนิดที่หายากที่สุด เพราะไม่มีทางเข้าถึงเพื่อยกเลิกได้อีกเลย — วิธีเดียวที่จะหยุดคือปิดแอป</p></section>
+
+<section id="section-4"><h2>4. เทสต์ที่พิสูจน์ทั้งวงจร</h2><pre class="code-vs"><code>test('หลุดแล้วเริ่มถามซ้ำ ต่อกลับได้แล้วหยุด', () {
+  fakeAsync((async) {
+    repository.result = [task('T-1')];
+    unawaited(store.start());
+    async.flushMicrotasks();
+    expect(store.isPolling, isFalse, reason: 'ต่อได้อยู่ ไม่ต้องถามซ้ำ');
+
+    inner.simulateDrop();
+    async.flushMicrotasks();
+    expect(store.isPolling, isTrue);
+
+    final callsBefore = repository.fetchCalls;
+    async.elapse(const Duration(seconds: 45));
+    expect(repository.fetchCalls, callsBefore + 3);
+
+    inner.simulateReconnected();
+    async.flushMicrotasks();
+    expect(store.isPolling, isFalse);
+
+    // หลังหยุดแล้วต้องไม่มีคำขอเพิ่มจากตัวจับเวลาอีก
+    // (+1 มาจากการโหลดอุดช่วงที่ขาด)
+    final callsAfterReconnect = repository.fetchCalls;
+    async.elapse(const Duration(minutes: 5));
+    expect(repository.fetchCalls, callsAfterReconnect);
+
+    store.dispose();
+    async.flushTimers();
+  });
+});</code></pre><table><thead><tr><th>ส่วน</th><th>พิสูจน์อะไร</th></tr></thead><tbody>
+<tr><td><code>expect(isPolling, isFalse)</code> ตอนแรก</td><td>ไม่จ่ายค่าเครือข่ายสองต่อตอนปกติ</td></tr>
+<tr><td><code>elapse(45s)</code> ได้ 3 ครั้ง</td><td>ถามซ้ำจริงตามช่วงเวลา 15 วินาที</td></tr>
+<tr><td><code>elapse(5 นาที)</code> ไม่เพิ่ม</td><td>หยุดจริง ไม่ใช่แค่ธงเปลี่ยน</td></tr>
+</tbody></table><p>ส่วนสุดท้ายคือส่วนที่จับ orphaned timer ได้ — ถ้ามีตัวจับเวลาตัวที่สองค้างอยู่ ห้านาทีจะทำให้จำนวนคำขอเพิ่มขึ้น 20 ครั้ง</p><div class="note"><code>fakeAsync</code> ทำให้ทดสอบเรื่องเวลาได้จริงในเสี้ยววินาที — ถ้าเขียนด้วย <code>Future.delayed</code> จริง เทสต์นี้จะใช้เวลาเกือบหกนาที ซึ่งไม่มีใครยอมรันใน CI</div></section>
+
+<section id="section-5"><h2>5. เลือกช่วงเวลาอย่างไร</h2><p>ตอนเป็นทางสำรอง เกณฑ์ต่างจากตอนที่ถามซ้ำเป็นวิธีหลัก</p><table><thead><tr><th> </th><th>ถามซ้ำเป็นวิธีหลัก</th><th>ถามซ้ำเป็นทางสำรอง</th></tr></thead><tbody>
+<tr><td>ทำงานนานแค่ไหน</td><td>ตลอดเวลา</td><td>เฉพาะตอนเรียลไทม์ล้ม</td></tr>
+<tr><td>ต้นทุนรวม</td><td>สูงและคงที่</td><td>ต่ำ เพราะเกิดไม่บ่อย</td></tr>
+<tr><td>ควรตั้งเท่าไหร่</td><td>ห่างที่สุดที่ยอมรับได้</td><td>ถี่กว่านั้นได้ เพราะจ่ายไม่นาน</td></tr>
+</tbody></table><p>lab ตั้งไว้ที่ 15 วินาที ซึ่งถี่กว่าที่จะยอมรับได้ถ้าเป็นวิธีหลัก แต่เหมาะสำหรับช่วงที่เรียลไทม์ล้ม</p><pre class="code-vs"><code>/// ความถี่ของการถามซ้ำ เมื่อเรียลไทม์ใช้ไม่ได้
+///
+/// ไม่ได้ใช้ตอนที่เรียลไทม์ทำงานปกติ — การมีทั้งสองอย่างพร้อมกันคือ
+/// การจ่ายค่าเครือข่ายสองต่อเพื่อข้อมูลชุดเดียว
+final Duration pollInterval;</code></pre><p>ถ้าเรียลไทม์ล้มนานมาก อาจถอยห่างขึ้นเรื่อย ๆ แบบเดียวกับ 7.12</p><pre class="code-vs"><code>// ล้มนานแล้ว ลดความถี่ลงเพื่อประหยัดแบต แต่มีเพดาน
+void _scheduleNextPoll() {
+  _pollTimer = Timer(_currentInterval, () {
+    unawaited(load());
+    _currentInterval = Duration(
+      seconds: (_currentInterval.inSeconds * 2).clamp(15, 120),
+    );
+    _scheduleNextPoll();
+  });
 }</code></pre></section>
-<section id="section-2"><h2>2. Backoff</h2><p>successใช้ intervalปกติ เช่น 15s; failureเพิ่ม 2^attemptถึง maxและ jitter ถ้า businessต้อง 5sระบุ SLA/โหลด ไม่ใช้ Timer.periodicยิงซ้อนเมื่อ requestนานกว่า interval</p></section>
-<section id="section-3"><h2>3. Screen-aware</h2><p>pollเฉพาะ dataที่ visible/จำเป็น ลด WarehouseStore timerที่เรียกหลาย endpointพร้อมกันทุกช่วง และ pauseตอน background/logout/server switch</p></section>
-<section id="section-4"><h2>4. Realtime recovery</h2><p>เมื่อ hub reconnectให้หยุด fallbackหลัง HTTP reconcileสำเร็จ ไม่หยุดทันทีที่ socket connectedเพราะ stateอาจยังพลาด events</p></section>
-<section id="section-5"><h2>5. Manual refresh</h2><p>user pull-to-refreshควรร่วม single-flightกับ pollและแสดง feedbackต่างกัน ไม่เปิด requestคู่ที่ responseแข่งกัน</p></section>
-<section id="section-6"><h2>6. Staleness</h2><p>เก็บ lastSuccessfulSyncและแสดง stale/offlineเมื่อเกิน threshold Green realtime dotไม่แทน data freshnessถ้า refresh/parseล้ม</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>poll interval 5sแต่ APIใช้ 8s จะเกิดอะไรกับ Timer.periodic?</p><details><summary>เฉลย</summary><p>request overlapและ response race ใช้ non-overlap self-scheduling/single-flightแล้ว scheduleหลัง requestจบ</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">fake clockตรวจ interval/backoff/jitter cap, no overlap, pause/resume, reconnect reconcileและ timer cancelเมื่อ dispose</div></section>
+
+<section id="section-6"><h2>6. บอกผู้ใช้ว่ากำลังใช้ทางสำรอง</h2><pre class="code-vs"><code>/// กำลังถามซ้ำเป็นระยะอยู่ไหม — ใช้แสดงให้ผู้ใช้รู้ว่าข้อมูลอาจช้า
+bool get isPolling =&gt; _pollTimer != null;</code></pre><table><thead><tr><th>ควรบอก</th><th>ไม่ควรบอก</th></tr></thead><tbody>
+<tr><td>“ข้อมูลอาจช้าถึง 15 วินาที”</td><td>“การเชื่อมต่อเรียลไทม์ล้มเหลว”</td></tr>
+<tr><td>เวลาที่อัปเดตล่าสุด</td><td>ชื่อเทคโนโลยีที่ผู้ใช้ไม่รู้จัก</td></tr>
+<tr><td>ปุ่มโหลดใหม่ทันที</td><td>ปุ่ม “เชื่อมต่อใหม่” ที่ไม่รู้ว่าทำอะไร</td></tr>
+</tbody></table><p>หลักจาก 10.12 ใช้ที่นี่เหมือนกัน — ผู้ใช้ต้องการรู้ว่า<strong>ข้อมูลที่เห็นเชื่อได้แค่ไหน</strong> ไม่ใช่ว่าเทคโนโลยีไหนกำลังทำงานอยู่</p><p>และอย่าขวางการทำงาน — ทางสำรองที่ทำงานอยู่แปลว่าข้อมูลช้า ไม่ได้แปลว่าทำอะไรไม่ได้</p></section>
+
+<section id="section-7"><h2>7. เรื่องที่โปรเจกต์จริงยังไม่ได้ทำ</h2><pre class="code-vs"><code>Future&lt;void&gt; connect() async {
+  ...
+  try {
+    ...
+    await _connection!.start();
+    dev.log('[SignalR] Connected to $hubUrl');
+  } catch (e) {
+    dev.log('[SignalR] Connect error: $e');
+  }
+}</code></pre><p><code>catch</code> บันทึกไว้แล้วจบ — คนเรียกไม่มีทางรู้ว่าล้มเหลว เพราะ <code>connect()</code> คืน <code>Future&lt;void&gt;</code> ที่สำเร็จเสมอ</p><p>ผลที่ตามมาบนเครื่องจริง</p><table><thead><tr><th>ลำดับ</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>PDA อยู่นอกรัศมี Wi-Fi ตอนเปิดจอ</td></tr>
+<tr><td>2</td><td><code>start()</code> โยน ถูกจับและบันทึกลง log ที่ไม่มีใครดู</td></tr>
+<tr><td>3</td><td>จอโหลดสถานะครั้งแรกผ่าน HTTP ได้ (ถ้าเน็ตกลับมาพอดี) หรือไม่ได้</td></tr>
+<tr><td>4</td><td>ไม่มีเหตุการณ์ใด ๆ ตลอดกาล และไม่มีทางสำรอง</td></tr>
+<tr><td>5</td><td>ผู้ใช้เห็นหน้าจอที่ดูปกติทุกอย่าง แต่ตัวเลขไม่เคยเปลี่ยน</td></tr>
+</tbody></table><p>วิธีแก้ที่เล็กที่สุด คือให้ <code>connect()</code> บอกผลกลับไป</p><pre class="code-vs"><code>Future&lt;bool&gt; connect() async {
+  ...
+  try {
+    await _connection!.start();
+    return true;
+  } catch (e) {
+    dev.log('[SignalR] Connect error: $e');
+    return false;      // คนเรียกตัดสินใจเองว่าจะทำอย่างไรต่อ
+  }
+}</code></pre><pre class="code-vs"><code>// ในจอ
+Future&lt;void&gt; _initSignalR() async {
+  final ok = await _signalR.connect();
+  if (!ok &amp;&amp; mounted) _startFallbackPolling();
+}</code></pre><p>เทสต์ใน lab ครอบกรณีนี้ไว้</p><pre class="code-vs"><code>test('ต่อเรียลไทม์ไม่ได้ตั้งแต่แรก ต้องถามซ้ำแทน', () {
+  fakeAsync((async) {
+    inner.failOnConnect = true;
+    ...
+    expect(store.status, RealtimeStatus.disconnected);
+    expect(store.isPolling, isTrue, reason: 'ต้องมีทางสำรอง');
+  });
+});</code></pre></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ยิงคำขอสองเท่า</td><td>ไม่หยุดถามซ้ำตอนต่อกลับได้</td><td>หยุดใน <code>connected</code></td></tr>
+<tr><td>ยิงถี่ขึ้นเรื่อย ๆ จนแอปช้า</td><td>สร้างตัวจับเวลาซ้อนกัน</td><td>ตรวจก่อนสร้าง</td></tr>
+<tr><td>ตัวจับเวลาหยุดไม่ได้</td><td>ทับตัวเก่าจนไม่มีอ้างอิง</td><td>ตรวจก่อนสร้าง และตั้งเป็น null ตอนยกเลิก</td></tr>
+<tr><td>ต่อไม่ติดแล้วเงียบทั้งวัน</td><td>กลืนข้อผิดพลาดตอนต่อ</td><td>คืนผลให้คนเรียกตัดสินใจ</td></tr>
+<tr><td>ผู้ใช้ไม่รู้ว่าข้อมูลช้า</td><td>ไม่มีอะไรบอก</td><td>แสดงเวลาที่อัปเดตล่าสุด</td></tr>
+<tr><td>ถามซ้ำถี่มากทั้งที่ล้มมาสองชั่วโมง</td><td>ช่วงเวลาคงที่</td><td>ถอยห่างขึ้นแบบมีเพดาน</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ทีมพบว่าเรียลไทม์ในคลังหลุดบ่อยมาก จนทางสำรองทำงานเกือบตลอดเวลา</p><ol><li>ควรทำอย่างไร</li><li>จะรู้ได้อย่างไรว่าตัดสินใจถูก</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> อย่าเพิ่งตัดสินใจ — วัดก่อน เพราะ “หลุดบ่อย” เป็นความรู้สึก ไม่ใช่ข้อมูล</p><pre class="code-vs"><code>// เก็บสถิติไว้ก่อนตัดสินใจ
+class RealtimeMetrics {
+  Duration totalConnected = Duration.zero;
+  Duration totalDisconnected = Duration.zero;
+  int dropCount = 0;
+  int eventsReceived = 0;
+  int pollsIssued = 0;
+}</code></pre><p>แล้วดูตัวเลขจริง</p><table><thead><tr><th>ถ้าพบว่า</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ต่ออยู่ได้ 30% ของเวลา</td><td><strong>ถอดเรียลไทม์ทิ้ง</strong> ใช้ถามซ้ำอย่างเดียว — จ่ายความซับซ้อนทั้ง Part นี้เพื่อประโยชน์หนึ่งในสาม ไม่คุ้ม</td></tr>
+<tr><td>ต่ออยู่ได้ 95% แต่หลุดบ่อยเป็นช่วงสั้น ๆ</td><td>เก็บไว้ ปรับ <code>retryDelays</code> ให้ต่อกลับเร็วขึ้น</td></tr>
+<tr><td>หลุดเฉพาะบางพื้นที่ของคลัง</td><td><strong>เป็นปัญหา Wi-Fi ไม่ใช่ปัญหาโค้ด</strong> — ส่งข้อมูลนี้ให้ทีมไอที มีค่ามากกว่าการแก้แอป</td></tr>
+<tr><td>หลุดทุกครั้งที่หน้าจอดับ</td><td>เป็นพฤติกรรมของระบบปฏิบัติการ ต่อใหม่ตอนกลับมา (12.4)</td></tr>
+</tbody></table><p>แถวที่สามมีค่าที่สุด — ข้อมูลว่า “PDA หลุดตรงโซน C ทุกครั้ง” เป็นสิ่งที่ไม่มีใครในทีมไอทีรู้ และแอปเป็นที่เดียวที่วัดได้</p><p><strong>2.</strong> ตัดสินจากสิ่งที่ผู้ใช้ได้รับจริง ไม่ใช่จากความสมบูรณ์ของโค้ด</p><table><thead><tr><th>วัด</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>เวลาเฉลี่ยจากตอนเซิร์ฟเวอร์เปลี่ยน ถึงตอนหน้าจอเปลี่ยน</td><td>ตัวเลขจริงที่ผู้ใช้รู้สึก</td></tr>
+<tr><td>จำนวนคำขอ HTTP ต่อเครื่องต่อวัน</td><td>ต้นทุนที่จ่ายจริง</td></tr>
+<tr><td>สัดส่วนของเหตุการณ์ที่ได้รับ เทียบกับที่เซิร์ฟเวอร์ส่ง</td><td>เรียลไทม์ทำงานจริงแค่ไหน</td></tr>
+</tbody></table><p>ถ้าตัวแรกดีขึ้นน้อยมากเมื่อเทียบกับตอนใช้ถามซ้ำอย่างเดียว แปลว่าเรียลไทม์ไม่ได้ทำงานให้เท่าที่จ่ายไป</p><p><strong>สิ่งที่ยากที่สุดในข้อนี้ไม่ใช่เทคนิค</strong> — คือการยอมถอดของที่ทีมลงแรงสร้างไปแล้ว การมีตัวเลขทำให้การตัดสินใจนั้นเป็นเรื่องของข้อเท็จจริง ไม่ใช่เรื่องของใครถูกใครผิด</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>เรียลไทม์ล้มได้หลายแบบ และสี่แบบในนั้นสถานะยังบอกว่าปกติ</li><li>สลับไปถามซ้ำตั้งแต่ <code>reconnecting</code> ไม่ต้องรอถึง <code>disconnected</code></li><li>ตรวจก่อนสร้างตัวจับเวลา ไม่งั้นจะได้ตัวที่ยกเลิกไม่ได้</li><li>ช่วงเวลาของทางสำรองถี่กว่าวิธีหลักได้ เพราะจ่ายไม่นาน</li><li>บอกผู้ใช้ว่าข้อมูลช้าแค่ไหน ไม่ใช่บอกว่าเทคโนโลยีไหนล้ม</li><li>อย่ากลืนข้อผิดพลาดตอนต่อ — คืนผลให้คนเรียกตัดสินใจ</li></ul></div><p><strong>บทหน้า:</strong> ประกอบทุกอย่างเป็นหน้าจอสถานะงานแบบเรียลไทม์</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

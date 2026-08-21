@@ -4,27 +4,97 @@
 <title>.NET SignalR Hub</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-02 · Realtime</span><h1>.NET SignalR Hub</h1><p>Part 12: Realtime &amp; SignalR</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Hub skeleton</a></li><li><a href="#section-2">Typed contract</a></li><li><a href="#section-3">Broadcast after commit</a></li><li><a href="#section-4">Groups</a></li><li><a href="#section-5">Authentication</a></li><li><a href="#section-6">Scale-out</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Contract rules</a></li></ol></nav>
-<div class="note"><strong>.NET Hub เป็น realtime transport boundary:</strong> endpointทำ business transactionก่อน แล้ว broadcast typed eventหลัง commitให้ group/userที่เกี่ยวข้อง ไม่ให้ clientเรียก hubแทน authorization/domain serviceโดยตรง</div>
-<section id="section-1"><h2>1. Hub skeleton</h2><pre class="code-vs"><code>builder.Services.AddSignalR();
-app.MapHub&lt;TaskHub&gt;("/hubs/tasks");
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">hub คืออะไร</a></li><li><a href="#section-2">เซิร์ฟเวอร์ส่งเหตุการณ์อย่างไร</a></li><li><a href="#section-3">สัญญาที่ต้องตกลงก่อนเขียนโค้ด</a></li><li><a href="#section-4">ป้องกันชื่อผิดด้วยค่าคงที่</a></li><li><a href="#section-5">การส่งต่อกับความน่าเชื่อถือ</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: ตกลงสัญญาของ hub กับทีมหลังบ้าน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.1, Part 7 (การคุยกับ .NET)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านโค้ด hub ฝั่ง .NET พอที่จะรู้ว่าแอปต้องรออะไร และถามคำถามที่ถูกก่อนเริ่มเขียน</div>
 
-public sealed class TaskHub : Hub
+<section id="section-1"><h2>1. hub คืออะไร</h2><div class="note"><strong>Hub</strong> คือคลาสฝั่ง .NET ที่เป็นจุดนัดพบระหว่างเซิร์ฟเวอร์กับ client ที่ต่ออยู่ — เซิร์ฟเวอร์เรียกเมธอดบน client ได้ และ client เรียกเมธอดบนเซิร์ฟเวอร์ได้</div><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET Part 23)
+public class PutawayHub : Hub
 {
-    public Task JoinWarehouse(string warehouseId) =&gt;
-        Groups.AddToGroupAsync(Context.ConnectionId, $"wh:{warehouseId}");
-}</code></pre></section>
-<section id="section-2"><h2>2. Typed contract</h2><pre class="code-vs"><code>public record TaskStatusChanged(
-    string EventId, string TaskId, string Status,
-    long Version, DateTimeOffset OccurredAt);
+    public async Task JoinStation(string stationId)
+        =&gt; await Groups.AddToGroupAsync(Context.ConnectionId, stationId);
+}</code></pre><pre class="code-vs"><code>// Program.cs
+app.MapHub&lt;PutawayHub&gt;("/hubs/putaway");
+app.MapHub&lt;SortingHub&gt;("/hubs/sorting");</code></pre><p>บรรทัด <code>MapHub</code> คือสิ่งที่แอปต้องรู้ — มันบอกว่า hub อยู่ที่ URL ไหน ซึ่งตรงกับที่ <code>wmsapp</code> เขียนไว้</p><pre class="code-vs"><code>final serverUrl = await ApiService.resolveServerUrl();
+final hubUrl = '$serverUrl/hubs/putaway';</code></pre></section>
 
-await hub.Clients.Group($"wh:{warehouseId}")
-    .SendAsync("TaskStatusChanged", message, ct);</code></pre></section>
-<section id="section-3"><h2>3. Broadcast after commit</h2><p>ถ้าส่ง eventก่อน DB commitแล้ว transaction rollback clientจะเห็น stateที่ไม่เคยจริง ใช้ post-commit/outboxเมื่อ reliabilityสำคัญและ eventมาจากหลาย process</p></section>
-<section id="section-4"><h2>4. Groups</h2><p>ส่งเฉพาะ warehouse/user/taskที่เกี่ยวข้องเพื่อลด data leakและtraffic Group membershipต้องตรวจ claims/policy ไม่เชื่อ warehouseIdจาก clientโดยลำพัง</p></section>
-<section id="section-5"><h2>5. Authentication</h2><p>Hubใช้ auth/policiesเหมือน API Access tokenต้องถูกแนบตาม client library/transportและ refresh/reconnect policy ห้ามใส่ tokenใน log</p></section>
-<section id="section-6"><h2>6. Scale-out</h2><p>หลาย .NET instancesต้องมี backplane/serviceเพื่อส่ง eventข้าม instanceและ sticky/transport configตาม hosting architecture ส่วนรายละเอียด backendอ่านต่อในคอร์ส .NET</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>client Aเปลี่ยน taskแล้วควร broadcastจาก controllerหรือหลัง service save?</p><details><summary>เฉลย</summary><p>หลัง transaction commitใน application/integration boundary; ใช้ outboxถ้าต้องรับประกันไม่สูญ eventระหว่าง DB commitกับ publish</p></details></section>
-<section id="section-8"><h2>8. Contract rules</h2><div class="success">event name stable, payload versioned/typed, eventId/entity version/occurredAt, authorization/groupชัด และไม่มี secret/full entityเกินจำเป็น</div></section>
+<section id="section-2"><h2>2. เซิร์ฟเวอร์ส่งเหตุการณ์อย่างไร</h2><pre class="code-vs"><code>// ฝั่ง server (แนวคิด)
+public class PutawayService
+{
+    private readonly IHubContext&lt;PutawayHub&gt; _hub;
+
+    public async Task DispatchAsync(string stationId, string palletCode)
+    {
+        // ...ทำงานจริงในฐานข้อมูล...
+
+        await _hub.Clients.All.SendAsync("StationDispatched", new {
+            stationId,
+            palletCode,
+            version = task.Version,
+        });
+    }
+}</code></pre><table><thead><tr><th>ส่วน</th><th>ความหมายสำหรับฝั่งแอป</th></tr></thead><tbody>
+<tr><td><code>"StationDispatched"</code></td><td>ชื่อที่แอปต้องใช้ตอนลงทะเบียนฟัง ต้องตรงตัวพิมพ์เป๊ะ</td></tr>
+<tr><td>object ที่ส่งไป</td><td>กลายเป็น argument ตัวแรกที่แอปได้รับ</td></tr>
+<tr><td><code>Clients.All</code></td><td>ทุกคนที่ต่ออยู่ได้รับ</td></tr>
+</tbody></table><p>มีอีกหลายแบบที่เลือกผู้รับได้ และแต่ละแบบมีผลกับแอป</p><table><thead><tr><th>เขียนฝั่ง .NET</th><th>ใครได้รับ</th><th>แอปต้องทำอะไรเพิ่ม</th></tr></thead><tbody>
+<tr><td><code>Clients.All</code></td><td>ทุกเครื่อง</td><td>กรองเองว่าเหตุการณ์นี้เกี่ยวกับจอที่เปิดอยู่ไหม</td></tr>
+<tr><td><code>Clients.Group("ST-01")</code></td><td>เฉพาะที่เข้ากลุ่มนั้น</td><td>ต้องเรียก <code>JoinStation</code> ก่อน และเรียกใหม่ทุกครั้งที่ต่อกลับ</td></tr>
+<tr><td><code>Clients.User(userId)</code></td><td>เฉพาะผู้ใช้คนนั้น</td><td>ต้องส่ง token ตอนต่อ</td></tr>
+<tr><td><code>Clients.Caller</code></td><td>เฉพาะคนที่เพิ่งเรียกมา</td><td>ใช้เป็นคำตอบของคำสั่ง</td></tr>
+</tbody></table><div class="note">แถวที่สองมีกับดักที่เจ็บ — <strong>การเข้ากลุ่มผูกกับ connection ไม่ใช่ผูกกับผู้ใช้</strong> เมื่อสายหลุดแล้วต่อใหม่ จะได้ connection ใหม่ที่<strong>ไม่อยู่ในกลุ่มเดิม</strong> ถ้าไม่เข้ากลุ่มซ้ำ จอจะเงียบตลอดกาลโดยที่สถานะบอกว่า “เชื่อมต่ออยู่” (12.4)</div></section>
+
+<section id="section-3"><h2>3. สัญญาที่ต้องตกลงก่อนเขียนโค้ด</h2><p>เหมือน endpoint ของ HTTP เหตุการณ์ก็เป็นสัญญา และต้องตกลงห้าข้อนี้ให้ชัด</p><table><thead><tr><th>ข้อ</th><th>ตัวอย่างคำตอบ</th><th>ถ้าไม่ถามแล้วเกิดอะไร</th></tr></thead><tbody>
+<tr><td>URL ของ hub</td><td><code>/hubs/putaway</code></td><td>ต่อไม่ติดโดยไม่มีข้อความบอก</td></tr>
+<tr><td>ชื่อเหตุการณ์ทั้งหมด</td><td><code>StationDispatched</code>, <code>PalletArrived</code></td><td>ลงทะเบียนผิดชื่อ แล้วไม่มีอะไรเกิดขึ้นเลย — ไม่มีข้อผิดพลาดใด ๆ</td></tr>
+<tr><td>หน้าตาของข้อมูลแต่ละเหตุการณ์</td><td>ชื่อฟิลด์และชนิด</td><td>แปลงไม่ได้ตอนรัน</td></tr>
+<tr><td>ต้องเข้าสู่ระบบไหม</td><td>ต้อง / ไม่ต้อง</td><td>ต่อได้แต่ไม่ได้รับอะไร</td></tr>
+<tr><td>มีกลุ่มไหม</td><td>มี ต้องเรียก <code>JoinStation</code></td><td>เงียบตลอดกาล</td></tr>
+</tbody></table><p>แถวที่สองอันตรายที่สุด และเป็นเรื่องที่ต่างจาก HTTP อย่างชัดเจน</p><pre class="code-vs"><code>// พิมพ์ชื่อผิดตัวเดียว
+_connection!.on('StationDispached', _onStationDispatched);
+//                          ↑ ขาด t
+
+// ผลลัพธ์: คอมไพล์ผ่าน ต่อสำเร็จ สถานะเขียว และไม่มีอะไรเกิดขึ้นตลอดไป</code></pre><div class="note">HTTP ที่ยิงผิด path จะได้ 404 กลับมาทันที แต่<strong>การลงทะเบียนฟังเหตุการณ์ที่ไม่มีอยู่จริง ไม่มีข้อผิดพลาดใด ๆ</strong> — SignalR ไม่รู้ว่าเซิร์ฟเวอร์จะส่งอะไรบ้าง</div></section>
+
+<section id="section-4"><h2>4. ป้องกันชื่อผิดด้วยค่าคงที่</h2><pre class="code-vs"><code>/// ชื่อเหตุการณ์ทั้งหมดของ hub นี้ รวมไว้ที่เดียว
+///
+/// เขียนชื่อเป็นสตริงตรงในที่ที่ใช้ แปลว่าพิมพ์ผิดแล้วไม่มีใครรู้
+class PutawayEvents {
+  const PutawayEvents._();
+
+  static const stationDispatched = 'StationDispatched';
+  static const palletArrived = 'PalletArrived';
+  static const palletReturned = 'PalletReturned';
+  static const labelingCompleted = 'LabelingCompleted';
+
+  /// ใช้ในเทสต์ที่ยิงเหตุการณ์ทุกตัวเพื่อดูว่าแอปรับได้ครบ
+  static const all = [
+    stationDispatched, palletArrived, palletReturned, labelingCompleted,
+  ];
+}</code></pre><p>ยังไม่ได้ป้องกันชื่อที่ไม่ตรงกับฝั่งเซิร์ฟเวอร์ — มันแค่ทำให้ทั้งแอปพิมพ์ผิดพร้อมกัน ซึ่งอย่างน้อยก็หาเจอที่เดียว</p><p>วิธีที่ป้องกันได้จริงมีสองทาง</p><table><thead><tr><th>ทาง</th><th>ได้อะไร</th><th>ต้องมีอะไร</th></tr></thead><tbody>
+<tr><td>เทสต์ที่ยิงเข้า hub จริง</td><td>จับได้ทันทีเมื่อฝั่งเซิร์ฟเวอร์เปลี่ยนชื่อ</td><td>เซิร์ฟเวอร์ทดสอบที่รันได้ใน CI (Part 14)</td></tr>
+<tr><td>ให้เซิร์ฟเวอร์ตอบรายชื่อเหตุการณ์ที่รองรับ</td><td>แอปตรวจเองได้ตอนต่อ</td><td>ทีมหลังบ้านต้องทำ endpoint เพิ่ม</td></tr>
+</tbody></table><p>ทางที่สองน่าสนใจสำหรับระบบที่แอปกับเซิร์ฟเวอร์อัปเดตไม่พร้อมกัน — ต่อยอดจาก health payload ที่ 10.9 ทำไว้แล้ว</p></section>
+
+<section id="section-5"><h2>5. การส่งต่อกับความน่าเชื่อถือ</h2><div class="note"><strong>SignalR ไม่รับประกันว่าข้อความจะถึง</strong> — ถ้า client หลุดตอนที่เซิร์ฟเวอร์ส่ง ข้อความนั้นหายไปเลย ไม่มีการส่งซ้ำ ไม่มีคิวรอ</div><p>ข้อนี้เปลี่ยนวิธีออกแบบทั้งหมด และเป็นที่มาของกฎสำคัญที่สุดใน Part นี้</p><table><thead><tr><th>อย่าออกแบบให้</th><th>ให้ออกแบบให้</th></tr></thead><tbody>
+<tr><td>สถานะของแอปสร้างจากลำดับเหตุการณ์ทั้งหมด</td><td>เหตุการณ์เป็นแค่ตัวบอกว่า “มีอะไรเปลี่ยน”</td></tr>
+<tr><td>พลาดเหตุการณ์เดียวแล้วผิดตลอดไป</td><td>โหลดใหม่ผ่าน HTTP แล้วกลับมาถูกได้เสมอ</td></tr>
+</tbody></table><p>วิธีตรวจว่าออกแบบถูกคือถามคำถามเดียว — <strong>ถ้าปิดแอปแล้วเปิดใหม่ ข้อมูลจะถูกต้องไหม</strong> ถ้าตอบว่าใช่ แปลว่าไม่ได้พึ่งเหตุการณ์เกินไป</p></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ต่อสำเร็จแต่ไม่ได้รับอะไรเลย</td><td>ชื่อเหตุการณ์ผิด หรือยังไม่ได้เข้ากลุ่ม</td><td>ตรวจกับฝั่งเซิร์ฟเวอร์ทีละตัว</td></tr>
+<tr><td>ต่อกลับได้แล้วเงียบ</td><td>connection ใหม่ไม่ได้อยู่ในกลุ่มเดิม</td><td>เข้ากลุ่มซ้ำทุกครั้งที่ต่อ (12.4)</td></tr>
+<tr><td>ได้รับเหตุการณ์ของสถานีอื่น</td><td>เซิร์ฟเวอร์ใช้ <code>Clients.All</code></td><td>กรองฝั่งแอป หรือขอให้เปลี่ยนเป็นกลุ่ม</td></tr>
+<tr><td>401 ตอนต่อ</td><td>hub ต้องการ token แต่ไม่ได้ส่ง</td><td>ส่งผ่าน <code>accessTokenFactory</code> (12.3)</td></tr>
+<tr><td>ข้อมูลผิดหลังใช้ไปนาน</td><td>สร้างสถานะจากเหตุการณ์อย่างเดียว</td><td>โหลดใหม่เป็นระยะ (12.10)</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ทีมหลังบ้านจะทำ hub ใหม่สำหรับงานหยิบของ และถามว่าฝั่งแอปอยากได้เหตุการณ์อะไรบ้าง</p><ol><li>จะขออะไร</li><li>มีอะไรที่ควรบอกเขาว่า “อย่าทำ”</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ขอเหตุการณ์ที่ตอบคำถามว่า “มีอะไรเปลี่ยน” ไม่ใช่ “ข้อมูลทั้งหมดคืออะไร”</p><table><thead><tr><th>ขอ</th><th>ข้อมูลที่ต้องมี</th></tr></thead><tbody>
+<tr><td><code>PickAssigned</code></td><td><code>pickId</code>, <code>assignee</code>, <code>version</code></td></tr>
+<tr><td><code>PickCompleted</code></td><td><code>pickId</code>, <code>version</code></td></tr>
+<tr><td><code>ConveyorFull</code></td><td><code>conveyorNo</code>, <code>count</code></td></tr>
+</tbody></table><p>สิ่งที่ต้องขอให้มีทุกเหตุการณ์คือ <code>version</code> หรือเวลาที่เกิด — เพราะเหตุการณ์ที่มาถึงไม่เรียงลำดับ และถ้าไม่มีตัวเทียบ แอปจะบอกไม่ได้ว่าอันไหนใหม่กว่า (12.10)</p><p><strong>2.</strong> สามอย่างที่ควรบอกว่าอย่าทำ</p><ul><li><strong>อย่าส่งข้อมูลทั้งลิสต์มาในเหตุการณ์</strong> — เหตุการณ์ที่ส่ง 200 รายการมาทุกครั้งที่มีอะไรเปลี่ยน แพงกว่าการถามซ้ำเสียอีก และทำให้ประโยชน์ของเรียลไทม์หายไปหมด</li><li><strong>อย่าใส่ข้อมูลอ่อนไหว</strong> — ถ้า hub ใช้ <code>Clients.All</code> ทุกเครื่องในคลังจะได้รับ รวมถึงเครื่องของคนที่ไม่ควรเห็น (8.9)</li><li><strong>อย่าให้เหตุการณ์เป็นทางเดียวที่จะรู้ผล</strong> — คำสั่งที่ผู้ใช้กดต้องได้คำตอบผ่าน HTTP ด้วย ไม่ใช่รอเหตุการณ์อย่างเดียว เพราะถ้าเหตุการณ์นั้นหายไป ผู้ใช้จะรอตลอดกาลโดยไม่รู้ว่าคำสั่งสำเร็จหรือไม่ (7.10)</li></ul><p>ข้อสุดท้ายเป็นข้อที่ผิดกันบ่อยที่สุดตอนเริ่มใช้เรียลไทม์ใหม่ ๆ เพราะมันดูสวยกว่า — กดปุ่ม แล้วรอให้เหตุการณ์มาอัปเดตหน้าจอ แต่ในความจริง <strong>คำสั่งกับการแจ้งเตือนเป็นคนละเรื่อง</strong> และต้องเชื่อถือได้คนละระดับ</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>hub คือจุดนัดพบ และ <code>MapHub</code> บอกว่ามันอยู่ URL ไหน</li><li>ตกลงห้าข้อก่อนเขียน — URL, ชื่อเหตุการณ์, หน้าตาข้อมูล, การเข้าสู่ระบบ, กลุ่ม</li><li>ชื่อเหตุการณ์ที่ผิด ไม่มีข้อผิดพลาดใด ๆ ให้เห็น</li><li>กลุ่มผูกกับ connection ต่อใหม่แล้วต้องเข้ากลุ่มซ้ำ</li><li>SignalR ไม่รับประกันว่าข้อความจะถึง — ออกแบบให้กลับมาถูกได้เสมอ</li></ul></div><p><strong>บทหน้า:</strong> ฝั่งแอปสร้างการเชื่อมต่ออย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

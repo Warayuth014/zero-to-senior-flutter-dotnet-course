@@ -1,17 +1,107 @@
-<div class="note"><strong>Lab ปิด Part 12:</strong> ทำ Task status realtimeจาก .NET Hubถึง Flutter Store พร้อม typed event, version dedupe, reconnect reconciliationและ fallback pollingที่ไม่ overlap</div>
-<section><h2>1. Acceptance criteria</h2><ul><li>.NET broadcastหลัง commitไป warehouse group</li><li>eventมี eventId/taskId/status/version/occurredAt</li><li>Flutter parse dynamicที่ boundary</li><li>subscription/lease cancelได้และไม่รั่ว</li><li>duplicate/out-of-orderถูก ignore</li><li>reconnectโหลด snapshotก่อน synchronized</li><li>fallback pollingมี backoffและ lifecycle guard</li></ul></section>
-<section><h2>2. Server event</h2><pre class="code-vs"><code>await hub.Clients.Group($"wh:{warehouseId}").SendAsync(
-  "TaskStatusChanged",
-  new TaskStatusChanged(eventId, task.Id, task.Status,
-    task.Version, DateTimeOffset.UtcNow), ct);</code></pre></section>
-<section><h2>3. Flutter reducer</h2><pre class="code-vs"><code>void onRealtime(TaskStatusChanged event) {
-  if (event.sessionGeneration != sessionGeneration) return;
-  final current = state.byId[event.taskId];
-  if (current != null &amp;&amp; event.version &lt;= current.version) return;
-  state = state.apply(event); notifyListeners();
-}</code></pre></section>
-<section><h2>4. Sync algorithm</h2><ol><li>subscribe/register handlers</li><li>connect + join group</li><li>GET task snapshot/version</li><li>replay newer queued events</li><li>mark synchronized/stop fallback</li><li>on disconnect mark stale/start fallback</li></ol></section>
-<section><h2>5. Test matrix</h2><p>valid/malformed event, duplicate/versionย้อน, eventระหว่าง GET, reconnectหลัง 30s, HTTP failขณะ hub connected, logout/server switch, two screens leasesและ dispose event</p></section>
-<section><h2>6. Observability</h2><p>log connection state, reconnect attempt, event name/version, refresh cause, lagจาก occurredAtและ last syncโดย redact token/task payloadที่อ่อนไหว</p></section>
-<section><h2>7. Device drill</h2><p>เปิดสองเครื่องเปลี่ยน task, toggle Wi-Fi, background/resume, restart serverและยิง event burst ตรวจ UIสุดท้ายตรง API snapshotโดยไม่มี duplicate toast/request storm</p></section>
-<section><h2>8. Exit test</h2><div class="success">เมื่อจบต้องเลือก polling/push/hybridได้ อธิบาย reconnectไม่เท่ากับ recover data และพิสูจน์ว่า listener/timerไม่รั่ว, stateไม่ย้อนและ Flutter/.NET realtime contractทนต่อ networkจริง</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: ประกอบหน้าจอสถานะงานแบบเรียลไทม์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.1–12.11 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ทำหน้าจอที่อัปเดตเองได้ ไม่รั่ว และยังถูกต้องเมื่อเรียลไทม์ล้ม</div>
+
+<section><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>realtime_lab/</code> ทั้งหมด พร้อมรู้ว่าแต่ละส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ต่อยอดเป็นหน้าจอเต็มตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 13</td></tr>
+</tbody></table></section>
+
+<section><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>hub_events.dart</code></td><td>เหตุการณ์ที่มีชนิด + ตัวแปลงที่ไม่โยน</td><td>12.5, 12.6</td></tr>
+<tr><td><code>realtime_client.dart</code></td><td>interface + ตัวปลอม + ตัวนับผู้ใช้งาน</td><td>12.3, 12.4, 12.9</td></tr>
+<tr><td><code>live_task.dart</code></td><td>โมเดลที่มีเลขรุ่น</td><td>12.10</td></tr>
+<tr><td><code>live_task_store.dart</code></td><td>รวมสองแหล่ง + ทางสำรอง + การเก็บของ</td><td>12.7, 12.8, 12.10, 12.11</td></tr>
+<tr><td><code>test/realtime_test.dart</code></td><td>เทสต์ 23 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/realtime_test.dart</code></pre></section>
+
+<section><h2>3. เส้นทางทั้งหมดในภาพเดียว</h2><pre class="code-vs"><code>เปิดจอ
+  └─ store.start()
+       ├─ ฟังเหตุการณ์ + ฟังสถานะ                    ← 12.7 (ฟังก่อนต่อ)
+       ├─ client.acquire()                            ← 12.9 (ต่อจริงเฉพาะคนแรก)
+       └─ load()                                      ← โหลดสถานะปัจจุบัน
+
+เหตุการณ์มาถึง
+  └─ decodeHubEvent(name, args)                       ← 12.5 (ไม่โยนไม่ว่ากรณีใด)
+       ├─ รู้จักและถูก  → _applyIfNewer                ← 12.10 (เทียบเลขรุ่น)
+       ├─ ไม่รู้จักชื่อ  → ข้ามไป (เซิร์ฟเวอร์ใหม่กว่า)
+       └─ ข้อมูลผิด    → นับไว้ ไม่ทำให้อะไรพัง
+
+สายหลุด
+  └─ status → reconnecting                            ← 12.4
+       └─ เริ่มถามซ้ำ                                  ← 12.11
+
+ต่อกลับได้
+  └─ status → connected
+       ├─ หยุดถามซ้ำ
+       └─ load() อุดช่วงที่ขาด                         ← 12.4
+
+ปิดจอ
+  └─ store.dispose()                                  ← 12.8
+       ├─ ยกเลิกการฟังทั้งสองเส้น
+       ├─ ยกเลิกตัวจับเวลา
+       └─ client.release()                            ← ตัดจริงเมื่อคนสุดท้ายออก</code></pre></section>
+
+<section><h2>4. โจทย์</h2><p>ทำหน้าจอ “สถานะงานขนย้าย” ให้ครบ ในโฟลเดอร์ <code>lib/realtime_lab/ui/</code></p><table><thead><tr><th>ส่วน</th><th>ต้องมี</th></tr></thead><tbody>
+<tr><td>ลิสต์งาน</td><td>รหัสงาน สถานะ ผู้รับผิดชอบ และเวลาที่อัปเดตล่าสุด</td></tr>
+<tr><td>แถบสถานะการเชื่อมต่อ</td><td>บอกว่าข้อมูลทันสมัยแค่ไหน ไม่ใช่บอกชื่อเทคโนโลยี</td></tr>
+<tr><td>ปุ่มโหลดใหม่</td><td>กดได้เสมอ ไม่ว่าสถานะจะเป็นอะไร</td></tr>
+<tr><td>การแจ้งเตือน</td><td>สั่นหรือส่งเสียงเมื่องานที่ผู้ใช้รับผิดชอบเปลี่ยนสถานะ</td></tr>
+</tbody></table><p>และเขียน <code>SignalRRealtimeClient</code> ที่ implement <code>RealtimeClient</code> โดยห่อ <code>HubConnection</code> จริง</p></section>
+
+<section><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ลงทะเบียนฟังก่อนต่อ พร้อมเทสต์ที่พิสูจน์ว่าเหตุการณ์แรกไม่หาย</td><td>12.7</td></tr>
+<tr><td>2</td><td>ตัวแปลงไม่โยนไม่ว่าจะส่งอะไรเข้ามา</td><td>12.5</td></tr>
+<tr><td>3</td><td>เหตุการณ์ที่ยังไม่รู้จัก ต่างจากเหตุการณ์ที่ข้อมูลผิด</td><td>12.5</td></tr>
+<tr><td>4</td><td>เพิ่มเหตุการณ์ชนิดใหม่แล้วคอมไพเลอร์ชี้ทุกที่ที่ต้องแก้</td><td>12.5, 12.6</td></tr>
+<tr><td>5</td><td>สามจอใช้การเชื่อมต่อเดียว ต่อจริงครั้งเดียว</td><td>12.9</td></tr>
+<tr><td>6</td><td>ปิดจอบนแล้วจอล่างยังได้รับเหตุการณ์</td><td>12.9</td></tr>
+<tr><td>7</td><td>ปล่อยเกินจำนวนแล้วตัวนับไม่ติดลบ</td><td>12.9</td></tr>
+<tr><td>8</td><td>ต่อกลับหลังหลุด ต้องโหลดใหม่หนึ่งครั้ง</td><td>12.4</td></tr>
+<tr><td>9</td><td>เปิดจอครั้งแรกต้องไม่โหลดสองครั้ง</td><td>12.4</td></tr>
+<tr><td>10</td><td>เหตุการณ์รุ่นเก่าที่มาถึงช้า ต้องไม่ทับของใหม่</td><td>12.10</td></tr>
+<tr><td>11</td><td>เหตุการณ์ซ้ำรุ่นเดิม ต้องไม่ทำอะไร</td><td>12.10</td></tr>
+<tr><td>12</td><td>หลุดแล้วถามซ้ำ ต่อกลับแล้วหยุด พิสูจน์ด้วย <code>fakeAsync</code></td><td>12.11</td></tr>
+<tr><td>13</td><td>ต่อไม่ติดตั้งแต่แรก ต้องมีทางสำรอง</td><td>12.11</td></tr>
+<tr><td>14</td><td>ทิ้ง store แล้วตัวจับเวลาหยุด การฟังยกเลิก และการเชื่อมต่อถูกปล่อย</td><td>12.8</td></tr>
+<tr><td>15</td><td>เปิดปิดจอ 20 ครั้งแล้วตัวนับกลับเป็นศูนย์</td><td>12.8</td></tr>
+<tr><td>16</td><td>การแจ้งเตือนไม่ซ้ำเมื่อได้รับเหตุการณ์เดิมสองครั้ง</td><td>12.7</td></tr>
+<tr><td>17</td><td>จอที่ถูก push ทับ ต้องไม่เด้ง dialog</td><td>12.7</td></tr>
+<tr><td>18</td><td>ออกจากระบบแล้วการเชื่อมต่อถูกตัด</td><td>12.9</td></tr>
+</tbody></table><p>เกณฑ์ 15 และ 18 เป็นสองข้อที่ต้องมีเทสต์ เพราะทดสอบด้วยมือไม่มีทางเจอ</p></section>
+
+<section><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 16 — กันการแจ้งเตือนซ้ำ</strong></p><pre class="code-vs"><code>final _lastAlerted = &lt;String, int&gt;{};
+
+void _maybeAlert(String taskId, int version) {
+  if (version &lt;= (_lastAlerted[taskId] ?? -1)) return;
+  _lastAlerted[taskId] = version;
+  HapticFeedback.heavyImpact();
+}</code></pre><p>หลักเดียวกับ <code>Idempotency-Key</code> ใน 7.13 แต่อยู่ฝั่งขาเข้า</p><p><strong>เกณฑ์ 17 — จอที่ถูก push ทับ</strong></p><pre class="code-vs"><code>if (ModalRoute.of(context)?.isCurrent != true) {
+  _pending.add(event);      // เก็บไว้ แสดงตอนกลับมา
+  return;
+}</code></pre><p><strong>เกณฑ์ 18 — ออกจากระบบ</strong></p><p>อย่าเขียนโค้ดจัดการการออกจากระบบ ให้ผูกอายุการเชื่อมต่อไว้กับ shell ที่มีเฉพาะตอนเข้าสู่ระบบแล้ว (12.9 §8) — แล้วเกณฑ์นี้จะผ่านโดยไม่ต้องเขียนอะไรเลย</p><p><strong>เกณฑ์ 1 — พิสูจน์ว่าเหตุการณ์แรกไม่หาย</strong></p><pre class="code-vs"><code>test('เหตุการณ์ที่มาถึงทันทีหลังต่อ ต้องไม่หาย', () async {
+  // ตัวปลอมที่ส่งเหตุการณ์ทันทีที่ connect() ถูกเรียก
+  final client = InMemoryRealtimeClient()..emitOnConnect = true;
+  ...
+});</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ <code>fakeAsync</code> ค้าง</td><td>มีตัวจับเวลาค้างตอนจบ</td><td><code>store.dispose(); async.flushTimers();</code></td></tr>
+<tr><td>เหตุการณ์ไม่ถึง store ในเทสต์</td><td>ลืม <code>await Future.delayed(Duration.zero)</code></td><td>stream ส่งแบบ async ต้องปล่อยให้ microtask ทำงาน</td></tr>
+<tr><td><code>Bad state: Stream has already been listened to</code></td><td>ไม่ได้ใช้ <code>.broadcast()</code></td><td>เปลี่ยนเป็น broadcast</td></tr>
+<tr><td>โหลดสองครั้งตอนเปิดจอ</td><td>ไม่ตรวจสถานะก่อนหน้า</td><td>เทียบ <code>previous</code></td></tr>
+<tr><td>ตัวนับผู้ใช้งานไม่กลับเป็นศูนย์</td><td><code>release()</code> ไม่ถูกเรียกใน <code>dispose</code></td><td>ตรวจว่า <code>dispose</code> ถูกเรียกจริง</td></tr>
+<tr><td>เทสต์ผ่านแต่ของจริงเงียบ</td><td>ชื่อเหตุการณ์ไม่ตรงกับเซิร์ฟเวอร์</td><td>ทดสอบกับ hub จริง (Part 14)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบทดสอบตัวเองก่อนจบ Part 12</h2><ol><li>เกณฑ์อะไรที่ใช้ตัดสินว่าควรใช้เรียลไทม์หรือถามซ้ำ (12.1)</li><li>ทำไมเรียลไทม์ไม่แทนที่ HTTP (12.1, 12.10)</li><li>ห้าข้อที่ต้องตกลงกับทีมหลังบ้านก่อนเขียนคืออะไร (12.2)</li><li>ลงทะเบียนฟังเหตุการณ์ที่ไม่มีอยู่จริง จะเกิดอะไร (12.2)</li><li>กลุ่มของ SignalR ผูกกับอะไร และมีผลอย่างไรตอนต่อกลับ (12.2, 12.4)</li><li>ทำไม <code>accessTokenFactory</code> ต้องเป็นฟังก์ชัน (12.3)</li><li>ทำไมต้องใช้ <code>.broadcast()</code> (12.3)</li><li><code>reconnecting</code> ต่างจาก <code>disconnected</code> อย่างไร (12.4)</li><li><code>withAutomaticReconnect</code> ไม่ทำอะไรให้บ้าง (12.4)</li><li>ทำไมต้องโหลดใหม่ตอนต่อกลับ (12.4)</li><li>ทำไมตัวแปลงเหตุการณ์ห้ามโยน (12.5)</li><li>“ยังไม่รู้จัก” ต่างจาก “ข้อมูลผิด” อย่างไร (12.5)</li><li><code>sealed</code> ช่วยอะไรตอนเพิ่มเหตุการณ์ใหม่ (12.5)</li><li>ทำไมต้อง <code>List.of(...)</code> ก่อนวนรายชื่อ callback (12.6)</li><li>ลงทะเบียนฟังใน <code>build</code> แล้วเกิดอะไร (12.7)</li><li>ทำไมคำตอบของ HTTP อาจเก่ากว่าเหตุการณ์ที่มาก่อน (12.7, 12.10)</li><li>ควรเช็ค <code>mounted</code> ตรงไหนของ callback (12.7)</li><li>อะไรบ้างที่ต้องเก็บใน <code>dispose</code> (12.8)</li><li>ทำไมไม่ควรใส่ธง <code>_disposed</code> (12.8)</li><li>ทำไมตัวนับผู้ใช้งานติดลบแล้วอันตราย (12.9)</li><li>ตัวตัดสินว่าข้อมูลไหนใหม่กว่า ควรมาจากไหน (12.10)</li><li>เขียนทับทั้งชุดกับผสาน ต่างกันอย่างไร (12.10)</li><li>เหตุการณ์ที่บอกให้โหลด ได้อะไรและเสียอะไร (12.10)</li><li>เรียลไทม์ล้มแบบไหนที่สถานะยังบอกว่าปกติ (12.11)</li><li>ทำไมต้องตรวจก่อนสร้างตัวจับเวลา (12.11)</li></ol></section>
+
+<section><h2>9. สรุปท้าย Part 12</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>ตัดสินได้ว่าฟีเจอร์ไหนควรใช้เรียลไทม์ โดยมีเหตุผลที่วัดได้</li><li>อ่านโค้ด hub ฝั่ง .NET พอที่จะตกลงสัญญาได้ถูก</li><li>สร้างการเชื่อมต่อและห่อไว้หลัง interface ที่ทดสอบได้</li><li>จัดการการหลุดและการต่อกลับ รวมถึงช่วงเวลาที่หายไป</li><li>แปลงข้อมูลไร้ชนิดโดยที่ก้อนเสียไม่ทำให้ทั้งวันพัง</li><li>ส่งเหตุการณ์ที่มีชนิดถึงคนที่สนใจ โดยคอมไพเลอร์ช่วยตรวจ</li><li>ลงทะเบียนฟังและเก็บของในจังหวะที่ถูก</li><li>ให้หลายจอใช้การเชื่อมต่อเดียวโดยไม่ตัดผิดจังหวะ</li><li>รวมข้อมูลจากสองแหล่งโดยไม่ให้ของเก่าทับของใหม่</li><li>ทำทางสำรองที่ทำงานเองและหยุดเองได้</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>ทดสอบกับ hub จริงใน CI</td><td>Part 14</td></tr>
+<tr><td>เก็บเหตุการณ์ที่พลาดไว้ในเครื่องแล้วเล่นซ้ำ</td><td>Part 29</td></tr>
+<tr><td>วัดว่าเรียลไทม์ทำงานดีแค่ไหนบนเครื่องจริง</td><td>Part 14</td></tr>
+<tr><td>อ่าน SignalR จริงของ <code>wmsapp</code></td><td>Part 18 และ Part 19</td></tr>
+<tr><td>อ่านการถามซ้ำจริงของ <code>wms_absolute_mobile</code></td><td>Part 21 และ Part 22</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 13 ว่าด้วยไฟล์และรูปภาพ — ถ่ายรูปหลักฐานการรับของ อัปโหลดแบบ multipart และจัดการรูปที่ใหญ่เกินไปบนเครื่องที่แรมน้อย ซึ่งเป็นฟีเจอร์ที่ <code>wmsapp</code> ทำไว้แล้วใน <code>upload_api.dart</code></p></section>

@@ -1,12 +1,111 @@
-<div class="note"><strong>Reconnectคืน transport ไม่คืนข้อมูลที่พลาด:</strong> หลัง reconnectต้อง join groupsใหม่ตาม server behaviorและโหลด snapshot/deltaตั้งแต่ last versionเพื่อ reconcile</div>
-<section><h2>1. State machine</h2><pre class="code-vs"><code>disconnected → connecting → connected
-       ↑            ↓ error      ↓ lost
-       └──── reconnecting ←──────┘
-connected → stopping → disconnected</code></pre></section>
-<section><h2>2. Single-flight connect</h2><p>เก็บ <code>Future&lt;void&gt;? _connecting</code> ให้หลาย screensรอ Futureเดียว ไม่เรียก startพร้อมกันและ ref-countเพิ่มซ้ำจาก retry</p></section>
-<section><h2>3. Automatic reconnect</h2><p>กำหนด delays/backoffตาม libraryและ expose attempt/last error ใช้ jitterเมื่อ devicesจำนวนมาก reconnectหลัง server restart</p></section>
-<section><h2>4. Reconnected hook</h2><ol><li>ตรวจ session/server generation</li><li>join groupsใหม่ถ้าจำเป็น</li><li>HTTP refreshหรือขอ eventsหลัง lastVersion</li><li>ค่อย mark realtime synchronized</li></ol></section>
-<section><h2>5. Manual disconnect</h2><p>logout/server switch/dispose ownerต้องตั้ง intent flagเพื่อไม่ให้ automatic reconnectต่อเอง แยก intentional stopจาก network drop</p></section>
-<section><h2>6. App lifecycle</h2><p>backgroundอาจ suspend socketและ timer เมื่อ resumedอย่าเชื่อ connection stateเก่า ให้ ensureConnected + reconcile และปรับตาม platform/battery policy</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>connection reconnectสำเร็จหลังหลุด 30 วินาที ควรแค่เปลี่ยน dotเขียวไหม?</p><details><summary>เฉลย</summary><p>ไม่ ต้อง resubscribe/rejoinและ refresh snapshotหรือ deltaก่อนจึงถือ synchronized เพราะ eventsระหว่างหลุดอาจหาย</p></details></section>
-<section><h2>8. Chaos tests</h2><div class="success">server down/up, Wi-Fi toggle, tokenหมดอายุ, app background/resume, logoutระหว่าง reconnectและ devicesพร้อมกันโดยไม่มี reconnect storm</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: รันเทสต์การหลุดและการต่อกลับใน lab</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.3, 7.12 (ลองใหม่แบบถอยหลัง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> จัดการการหลุดและการต่อกลับ โดยไม่ปล่อยให้ข้อมูลค้างเก่าเงียบ ๆ</div>
+
+<section><h2>1. การเชื่อมต่อค้างจะหลุด ไม่ใช่ว่าอาจหลุด</h2><table><thead><tr><th>สาเหตุ</th><th>เกิดบ่อยแค่ไหนในคลัง</th></tr></thead><tbody>
+<tr><td>เดินระหว่างจุด Wi-Fi</td><td>ทุกไม่กี่นาที</td></tr>
+<tr><td>เข้าไปในห้องเย็นที่สัญญาณอ่อน</td><td>ทุกกะ</td></tr>
+<tr><td>ระบบพักหน้าจอ แล้วระบบปฏิบัติการตัดเครือข่าย</td><td>ทุกครั้งที่วางเครื่องไว้</td></tr>
+<tr><td>เซิร์ฟเวอร์ถูกรีสตาร์ทตอนอัปเดต</td><td>ทุกสัปดาห์</td></tr>
+<tr><td>ตัวโหลดสมดุลตัดการเชื่อมต่อที่ค้างนานเกิน</td><td>ทุกชั่วโมง ถ้าตั้งค่าไว้แบบนั้น</td></tr>
+</tbody></table><p>ดังนั้นการต่อกลับไม่ใช่กรณีพิเศษที่ต้องเผื่อไว้ แต่เป็น<strong>เส้นทางหลักของการทำงาน</strong></p></section>
+
+<section><h2>2. สี่สถานะ ไม่ใช่สอง</h2><pre class="code-vs"><code>enum RealtimeStatus { disconnected, connecting, connected, reconnecting }</code></pre><table><thead><tr><th>สถานะ</th><th>หมายถึง</th><th>ผู้ใช้ต้องทำอะไร</th></tr></thead><tbody>
+<tr><td><code>connecting</code></td><td>กำลังต่อครั้งแรก</td><td>รอ</td></tr>
+<tr><td><code>connected</code></td><td>ต่ออยู่</td><td>ไม่ต้องทำอะไร</td></tr>
+<tr><td><code>reconnecting</code></td><td>หลุดแล้ว แต่ไลบรารีกำลังพยายามต่อใหม่</td><td>รอ — จะกลับมาเอง</td></tr>
+<tr><td><code>disconnected</code></td><td>เลิกพยายามแล้ว</td><td>ต้องทำอะไรสักอย่าง</td></tr>
+</tbody></table><p>สองสถานะล่างต่างกันมากในสายตาผู้ใช้ แต่มักถูกยุบเป็น “ออฟไลน์” เหมือนกัน ผลคือผู้ใช้เห็นข้อความ “เชื่อมต่อไม่ได้” แล้วไปรีสตาร์ทแอป ทั้งที่อีกสามวินาทีมันจะกลับมาเอง</p></section>
+
+<section><h2>3. <code>withAutomaticReconnect</code> ทำอะไรให้ และไม่ทำอะไร</h2><pre class="code-vs"><code>HubConnectionBuilder().withUrl(hubUrl).withAutomaticReconnect().build();</code></pre><table><thead><tr><th>ทำให้</th><th>ไม่ทำให้</th></tr></thead><tbody>
+<tr><td>ลองต่อใหม่ตามช่วงเวลาที่ถอยห่างขึ้น</td><td>เอาเหตุการณ์ที่พลาดไประหว่างนั้นกลับมา</td></tr>
+<tr><td>ประกาศสถานะ <code>reconnecting</code> และ <code>connected</code></td><td>เข้ากลุ่มเดิมให้อัตโนมัติ</td></tr>
+<tr><td>ยอมแพ้หลังลองครบตามที่ตั้งไว้</td><td>บอกผู้ใช้ว่าเกิดอะไรขึ้น</td></tr>
+</tbody></table><p>ค่าปริยายคือลองที่ 0, 2, 10 และ 30 วินาที แล้วเลิก — รวมประมาณ 42 วินาที ซึ่งสั้นเกินไปสำหรับคลังที่คนเดินเข้าห้องเย็นห้านาที</p><pre class="code-vs"><code>// ตั้งเองได้ — ลองต่อไปเรื่อย ๆ โดยห่างขึ้นแต่มีเพดาน (7.12)
+.withAutomaticReconnect(retryDelays: [0, 2000, 5000, 10000, 30000, 30000])</code></pre><div class="note">มีเพดานเสมอ ไม่ปล่อยให้ห่างขึ้นเรื่อย ๆ ไม่จำกัด — เพราะผู้ใช้ที่เดินกลับเข้ามาในพื้นที่ที่มีสัญญาณ ไม่ควรต้องรอสิบนาทีกว่าจะต่อกลับ</div></section>
+
+<section><h2>4. ช่วงเวลาที่หายไป</h2><p>นี่คือหัวใจของบทนี้</p><pre class="code-vs"><code>10:00:00  ต่ออยู่ ทุกอย่างปกติ
+10:00:05  สายหลุด
+10:00:07  เซิร์ฟเวอร์ส่ง TaskCompleted(T-1)   ← ไม่มีใครรับ หายไปเลย
+10:00:12  เซิร์ฟเวอร์ส่ง TaskDispatched(T-9)  ← หายไปเลย
+10:00:18  ต่อกลับได้ สถานะเป็น connected
+
+ตอนนี้หน้าจอบอกว่า T-1 ยังค้างอยู่ และไม่รู้จัก T-9 เลย
+และไม่มีอะไรบอกว่าข้อมูลผิด</code></pre><p>SignalR ไม่เก็บข้อความไว้ให้ ไม่มีคิว ไม่มีการส่งซ้ำ (12.2 §5) ดังนั้นเมื่อต่อกลับได้ ทางเดียวที่จะกลับมาถูกคือ<strong>ถามใหม่ทั้งชุดผ่าน HTTP</strong></p><pre class="code-vs"><code>case RealtimeStatus.connected:
+  _stopPolling();
+  // ต่อกลับมาได้หลังจากหลุดไป แปลว่าระหว่างนั้นมีเหตุการณ์ที่เรา
+  // ไม่ได้รับ — ไม่มีทางรู้ว่ากี่อัน จึงต้องโหลดใหม่ทั้งชุด
+  if (previous == RealtimeStatus.reconnecting ||
+      previous == RealtimeStatus.disconnected) {
+    unawaited(load());
+  }</code></pre><p>เงื่อนไข <code>previous == ...</code> สำคัญ — การต่อ<strong>ครั้งแรก</strong>ก็เข้าสู่สถานะ <code>connected</code> เหมือนกัน แต่ <code>start()</code> เรียก <code>load()</code> อยู่แล้ว ถ้าไม่ตรวจว่าก่อนหน้านี้เป็นอะไร จะโหลดสองครั้งซ้อนทุกครั้งที่เปิดจอ</p><pre class="code-vs"><code>test('ต่อกลับได้หลังหลุด ต้องโหลดใหม่เพื่ออุดช่วงที่ขาดไป', () async {
+  await store.start();
+  final callsBefore = repository.fetchCalls;
+
+  inner.simulateDrop();
+  await Future&lt;void&gt;.delayed(Duration.zero);
+  // ระหว่างนี้เซิร์ฟเวอร์ส่งเหตุการณ์ไปหลายอันที่เราไม่ได้รับ
+
+  inner.simulateReconnected();
+  await Future&lt;void&gt;.delayed(Duration.zero);
+
+  expect(repository.fetchCalls, callsBefore + 1);
+});</code></pre></section>
+
+<section><h2>5. สิ่งที่โปรเจกต์จริงยังไม่ได้ทำ</h2><p>เปิด <code>signalr_service.dart</code> ของ <code>wmsapp</code> แล้วมองหา <code>onreconnected</code> — ไม่มี</p><pre class="code-vs"><code>_connection = HubConnectionBuilder()
+    .withUrl(hubUrl)
+    .withAutomaticReconnect()
+    .build();
+
+_connection!.on('StationDispatched', _onStationDispatched);
+_connection!.on('PalletArrived', _onPalletArrived);
+_connection!.on('PalletReturned', _onPalletReturned);
+_connection!.on('LabelingCompleted', _onLabelingCompleted);
+
+await _connection!.start();</code></pre><p>ผลที่ตามมาคือ หลังจากสายหลุดแล้วต่อกลับ หน้าจอจะแสดงสถานะของสถานีที่หยุดอยู่ ณ วินาทีที่หลุด และจะไม่มีวันถูกต้องอีกจนกว่าผู้ใช้จะออกจากจอแล้วเข้าใหม่ (ซึ่งเรียก <code>_loadStationStatus()</code> ใหม่)</p><p>โชคดีที่การแก้ไม่ยาก และไม่ต้องแตะจอเลย</p><pre class="code-vs"><code>// ใน SignalRService.connect() หลัง build()
+_connection!.onreconnected(({connectionId}) {
+  for (final cb in List.of(_reconnectedListeners)) {
+    cb();
+  }
+});</code></pre><pre class="code-vs"><code>// ในจอ — เรียกโหลดใหม่แบบเดียวกับตอนเปิดจอ
+_signalR.addReconnectedListener(_loadStationStatus);</code></pre><div class="note">อาการนี้แยกยากมากจาก “ไม่มีอะไรเกิดขึ้นในคลังช่วงนี้” — ซึ่งเป็นเหตุผลที่มันอยู่รอดในโค้ดได้นาน และเป็นตัวอย่างชัดเจนของหลักใน 12.1 ว่า<strong>เรียลไทม์หลุดเงียบ</strong></div></section>
+
+<section><h2>6. อีกอย่างที่หายไปพร้อมการเชื่อมต่อ</h2><p>ถ้า hub ใช้กลุ่ม (12.2 §2) การต่อกลับจะได้ connection ใหม่ที่ไม่อยู่ในกลุ่มเดิม</p><pre class="code-vs"><code>_connection!.onreconnected(({connectionId}) async {
+  // เข้ากลุ่มซ้ำก่อน แล้วค่อยโหลดข้อมูลใหม่
+  await _connection!.invoke('JoinStation', args: [stationId]);
+  _notifyReconnected();
+});</code></pre><p>ลำดับสำคัญ — ถ้าโหลดข้อมูลก่อนเข้ากลุ่ม จะมีช่องว่างเล็ก ๆ ที่เหตุการณ์ยังไม่ถึงเราอีกครั้ง</p></section>
+
+<section><h2>7. แสดงให้ผู้ใช้เห็น</h2><table><thead><tr><th>สถานะ</th><th>ควรแสดง</th><th>ไม่ควรแสดง</th></tr></thead><tbody>
+<tr><td><code>connecting</code></td><td>ไม่ต้องแสดงอะไรถ้าเร็ว</td><td>กล่องโหลดเต็มจอ</td></tr>
+<tr><td><code>connected</code></td><td>จุดเขียวเล็ก ๆ หรือไม่แสดงเลย</td><td>ข้อความ “เชื่อมต่อสำเร็จ” ที่เด้งทุกครั้ง</td></tr>
+<tr><td><code>reconnecting</code></td><td>แถบบางบอกว่ากำลังเชื่อมต่อใหม่</td><td>“เกิดข้อผิดพลาด” — ยังไม่ผิดอะไร</td></tr>
+<tr><td><code>disconnected</code></td><td>บอกว่าข้อมูลอาจไม่ทันสมัย + ปุ่มลองใหม่</td><td>บล็อกไม่ให้ทำงาน (10.12)</td></tr>
+</tbody></table><p>แถวที่สามคือจุดที่ทำผิดกันบ่อย — การขึ้นข้อความผิดพลาดตอน <code>reconnecting</code> ทำให้ผู้ใช้ตกใจกับสิ่งที่กำลังจะหายเองในสามวินาที และเมื่อเห็นบ่อยเข้า เขาจะเลิกสนใจข้อความนั้น รวมถึงตอนที่มันสำคัญจริง</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ข้อมูลค้างเก่าหลังต่อกลับ</td><td>ไม่ได้โหลดใหม่ตอน <code>onreconnected</code></td><td>โหลดใหม่ทั้งชุด</td></tr>
+<tr><td>โหลดสองครั้งตอนเปิดจอ</td><td>ไม่ได้ตรวจสถานะก่อนหน้า</td><td>โหลดเฉพาะเมื่อมาจาก <code>reconnecting</code></td></tr>
+<tr><td>ต่อกลับแล้วเงียบ</td><td>ไม่ได้เข้ากลุ่มซ้ำ</td><td><code>invoke</code> เข้ากลุ่มใน <code>onreconnected</code></td></tr>
+<tr><td>ผู้ใช้เห็นข้อความผิดพลาดบ่อยจนเลิกสนใจ</td><td>ยุบ <code>reconnecting</code> รวมกับ <code>disconnected</code></td><td>แยกสองสถานะ</td></tr>
+<tr><td>เลิกพยายามต่อเร็วเกินไป</td><td>ใช้ค่าปริยาย 42 วินาที</td><td>ตั้ง <code>retryDelays</code> ที่มีเพดาน</td></tr>
+<tr><td>ต่อกลับแล้วได้ 401</td><td>token หมดอายุระหว่างที่หลุด</td><td><code>accessTokenFactory</code> (12.3)</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ผู้ใช้รายงานว่า “เอาเครื่องใส่กระเป๋าไปกินข้าว กลับมาแล้วหน้าจอค้างที่ตัวเลขเดิมทั้งบ่าย”</p><ol><li>เกิดอะไรขึ้น</li><li>จะแก้อย่างไรให้ครบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> น่าจะเป็นสองอย่างซ้อนกัน</p><table><thead><tr><th>ชั้นที่ 1</th><th>ระบบปฏิบัติการตัดเครือข่ายเมื่อแอปอยู่พื้นหลังนาน การเชื่อมต่อจึงหลุด</th></tr></thead><tbody>
+<tr><td>ชั้นที่ 2</td><td>ลองต่อใหม่ครบ 42 วินาทีตามค่าปริยายแล้วเลิก ตอนนั้นแอปยังอยู่ในกระเป๋า</td></tr>
+<tr><td>ชั้นที่ 3</td><td>กลับมาเปิดหน้าจอ — ไม่มีอะไรสั่งให้ต่อใหม่ เพราะไลบรารีเลิกไปแล้ว</td></tr>
+</tbody></table><p><strong>2.</strong> ต้องแก้ทั้งสามชั้น แก้ชั้นเดียวไม่พอ</p><pre class="code-vs"><code>class _ShellState extends State&lt;Shell&gt; with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+
+    // กลับมาแล้ว — ถ้าเลิกพยายามไปแล้ว ให้เริ่มใหม่
+    if (client.currentStatus == RealtimeStatus.disconnected) {
+      unawaited(client.acquire());
+    }
+    // และโหลดข้อมูลใหม่เสมอ ไม่ว่าเรียลไทม์จะเป็นอย่างไร
+    unawaited(store.load());
+  }
+}</code></pre><ul><li><strong>ชั้นที่ 2</strong> ตั้ง <code>retryDelays</code> ที่มีเพดานและยาวกว่าเดิม เพื่อให้กรณีพักสั้น ๆ กลับมาเองได้</li><li><strong>ชั้นที่ 3</strong> ต่อใหม่ตอนกลับมาที่หน้าจอ ซึ่งเป็นหลักเดียวกับ 10.8 — ตรวจตอนที่คำตอบทั้งใหม่และกำลังจะถูกมอง</li><li><strong>ทางสำรอง</strong> ถามซ้ำระหว่างที่ต่อไม่ได้ (12.11) เพื่อให้ข้อมูลไม่ค้างแม้เรียลไทม์จะยังกลับมาไม่ได้</li></ul><p><strong>ข้อคิดที่ใหญ่กว่าโค้ด:</strong> ผู้ใช้บอกว่า “ค้างทั้งบ่าย” ซึ่งแปลว่าเขา<strong>ไม่รู้</strong>ว่าข้อมูลไม่ทันสมัย และนั่นแย่กว่าตัวข้อมูลที่ผิดเสียอีก — ต่อให้แก้ไม่ทันในรุ่นนี้ อย่างน้อยต้องมีป้ายบอกว่า “ข้อมูลล่าสุดเมื่อ 12:30” เพื่อให้เขาตัดสินใจเองได้</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>การหลุดเป็นเส้นทางหลัก ไม่ใช่กรณีพิเศษ</li><li><code>reconnecting</code> ต่างจาก <code>disconnected</code> ในสายตาผู้ใช้</li><li><code>withAutomaticReconnect</code> ต่อกลับให้ แต่ไม่เอาเหตุการณ์ที่หายไปกลับมา</li><li>ต่อกลับแล้วต้องโหลดใหม่ทั้งชุด และเข้ากลุ่มซ้ำถ้ามีกลุ่ม</li><li>ตรวจสถานะก่อนหน้า ไม่งั้นจะโหลดซ้ำตอนเปิดจอ</li><li>ต่อใหม่ตอนแอปกลับมาจากพื้นหลัง</li></ul></div><p><strong>บทหน้า:</strong> แปลงข้อมูลไร้ชนิดที่ hub ส่งมาให้ปลอดภัย</p></section>

@@ -1,10 +1,87 @@
-<div class="note"><strong>Polling กับ pushแก้คนละข้อจำกัด:</strong> pollingเรียบง่ายและคืน snapshot authoritative; SignalRลด latency/requestsแต่ eventอาจขาด ซ้ำ หรือมาผิดลำดับ จึงมักใช้ pushเป็น invalidationแล้ว HTTP reconcile</div>
-<section><h2>1. Polling</h2><p>clientเรียก APIทุก interval ข้อดี debugง่าย, ใช้ HTTP contractเดิม, recoverจาก eventที่พลาด ข้อเสีย latencyสูงสุดเท่า interval, battery/network costและโหลด serverแม้ข้อมูลไม่เปลี่ยน</p></section>
-<section><h2>2. Push realtime</h2><p>serverส่ง eventผ่าน persistent connectionเมื่อข้อมูลเปลี่ยน ข้อดีตอบสนองเร็วและลด empty polls แต่ต้องดู connection lifecycle, reconnect, ordering, duplicatesและ authorization</p></section>
-<section><h2>3. Cost model</h2><pre class="code-vs"><code>poll requests/minute = devices × 60 / intervalSeconds
-500 devices ที่ 5s = 6,000 requests/minute</code></pre><p>ปรับ intervalตามความสดที่ธุรกิจต้องการ ไม่ใช้ 1 วินาทีเพราะ “ดู realtime”</p></section>
-<section><h2>4. Hybrid pattern</h2><p>โหลด snapshotด้วย HTTPตอนเข้า → SignalR eventบอก entity/versionที่เปลี่ยน → patchอย่างปลอดภัยหรือ debounce refresh → periodic slow reconciliationเป็น safety net</p></section>
-<section><h2>5. Source of truth</h2><p>eventเป็น notification/factที่เกิดแล้ว ไม่จำเป็นต้องมี stateเต็ม Server snapshot/versionเป็น authorityเมื่อ reconnectหรือสงสัย divergence</p></section>
-<section><h2>6. ของจริง</h2><p><code>wmsapp</code> ใช้ SignalRกับ Putaway/Sorting ขณะที่ <code>WarehouseStore</code> อีกแอปมี Timer 5 วินาทีโหลดเฉพาะข้อมูลของ screenปัจจุบัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>สถานะ taskต้องเปลี่ยนภายใน 2 วินาทีแต่ networkหลุดเป็นช่วง ควรเลือกอะไร?</p><details><summary>แนวคำตอบ</summary><p>SignalRเพื่อ latency + reconnect snapshot/slow pollingเพื่อความถูกต้อง พร้อมแสดง stale/offline status</p></details></section>
-<section><h2>8. Decision checklist</h2><div class="success">freshness SLA, device count, event rate, battery/network, snapshot endpoint, ordering/versionและ behaviorตอน disconnected</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: คำนวณต้นทุนของทั้งสองแบบด้วยตัวเลขจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 7 (HTTP), Part 9 (store), 10.8 (ตรวจตามเหตุการณ์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินว่าฟีเจอร์หนึ่งควรใช้เรียลไทม์หรือถามซ้ำ โดยมีเหตุผลที่วัดได้</div>
+
+<section><h2>1. ปัญหา</h2><p>ทุกอย่างที่ผ่านมาในคอร์สนี้ ข้อมูลเปลี่ยนเพราะ<strong>ผู้ใช้กดอะไรบางอย่าง</strong> — กดโหลดใหม่ กดยืนยัน สแกนบาร์โค้ด</p><p>แต่ในคลังจริง สิ่งที่เปลี่ยนส่วนใหญ่ไม่ได้เกิดจากคนที่ถือเครื่องอยู่</p><table><thead><tr><th>เกิดอะไรขึ้น</th><th>ใครทำ</th><th>คนถือ PDA ต้องรู้ไหม</th></tr></thead><tbody>
+<tr><td>รถ AGV ส่งพาเลทถึงจุดปลายทางแล้ว</td><td>หุ่นยนต์</td><td>ต้องรู้ทันที</td></tr>
+<tr><td>คนอื่นล็อกพาเลทที่เรากำลังจะหยิบ</td><td>เพื่อนร่วมงาน</td><td>ต้องรู้ก่อนเดินไป</td></tr>
+<tr><td>จุดคัดแยกเต็ม</td><td>สายพาน</td><td>ต้องรู้ก่อนส่งของไปเพิ่ม</td></tr>
+<tr><td>มีงานใหม่เข้าคิว</td><td>ระบบ</td><td>รู้ช้าหน่อยได้</td></tr>
+</tbody></table><p>คำถามของ Part นี้คือ <strong>แอปจะรู้ได้อย่างไร</strong> และมีสองคำตอบ</p></section>
+
+<section><h2>2. สองวิธี</h2><table><thead><tr><th> </th><th>ถามซ้ำเป็นระยะ (polling)</th><th>เรียลไทม์ (SignalR)</th></tr></thead><tbody>
+<tr><td>ใครเริ่ม</td><td>แอปถาม</td><td>เซิร์ฟเวอร์บอก</td></tr>
+<tr><td>ช้าแค่ไหน</td><td>ครึ่งหนึ่งของช่วงเวลาที่ตั้งไว้ โดยเฉลี่ย</td><td>เกือบทันที</td></tr>
+<tr><td>จำนวนคำขอ</td><td>คงที่ ไม่ว่าจะมีอะไรเปลี่ยนหรือไม่</td><td>เท่ากับจำนวนสิ่งที่เปลี่ยนจริง</td></tr>
+<tr><td>ความซับซ้อน</td><td>ตัวจับเวลาหนึ่งตัว</td><td>การเชื่อมต่อค้าง สถานะ การต่อใหม่ การรั่ว</td></tr>
+<tr><td>ทำงานตอนเน็ตกระตุก</td><td>ครั้งที่ล้มเหลวก็แค่รอครั้งหน้า</td><td>ต้องจัดการการหลุดและช่วงที่ขาดหาย</td></tr>
+<tr><td>ทดสอบ</td><td>ง่าย</td><td>ยาก ต้องจำลองการหลุด</td></tr>
+</tbody></table><div class="note"><strong>ข้อที่คนมักลืม:</strong> เรียลไทม์<strong>ไม่ได้</strong>แทนที่ HTTP — มันบอกว่า “มีอะไรเปลี่ยน” แต่ตอนเปิดจอครั้งแรกยังต้องถามว่า “ตอนนี้เป็นอย่างไร” อยู่ดี 12.10 จะพูดเรื่องนี้ทั้งบท</div></section>
+
+<section><h2>3. คิดเป็นตัวเลข</h2><p>สมมติคลังมี PDA 20 เครื่อง ใช้งาน 8 ชั่วโมงต่อวัน</p><table><thead><tr><th>ช่วงเวลาถามซ้ำ</th><th>คำขอต่อเครื่องต่อวัน</th><th>รวม 20 เครื่อง</th><th>ช้าโดยเฉลี่ย</th></tr></thead><tbody>
+<tr><td>1 วินาที</td><td>28,800</td><td>576,000</td><td>0.5 วินาที</td></tr>
+<tr><td>5 วินาที</td><td>5,760</td><td>115,200</td><td>2.5 วินาที</td></tr>
+<tr><td>15 วินาที</td><td>1,920</td><td>38,400</td><td>7.5 วินาที</td></tr>
+<tr><td>60 วินาที</td><td>480</td><td>9,600</td><td>30 วินาที</td></tr>
+</tbody></table><p>สังเกตว่าการทำให้เร็วขึ้นสองเท่า ต้องจ่ายด้วยคำขอสองเท่าเสมอ ส่วนเรียลไทม์ตัดความสัมพันธ์นี้ทิ้ง — เร็วเกือบทันทีโดยที่จำนวนข้อความเท่ากับจำนวนสิ่งที่เปลี่ยนจริง ซึ่งในคลังอาจเป็นแค่ไม่กี่ร้อยครั้งต่อวัน</p><p>แต่ต้องนับต้นทุนอีกด้านด้วย</p><table><thead><tr><th>ต้นทุนของเรียลไทม์</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>การเชื่อมต่อค้างไว้ตลอด</td><td>กินแบตกว่าคำขอเป็นครั้ง ๆ เพราะวิทยุไม่ได้พัก</td></tr>
+<tr><td>เซิร์ฟเวอร์ต้องถือ 20 การเชื่อมต่อไว้</td><td>ใช้หน่วยความจำต่อเนื่อง</td></tr>
+<tr><td>โค้ดที่ต้องเขียนเพิ่ม</td><td>ทั้ง Part นี้คือโค้ดนั้น</td></tr>
+</tbody></table></section>
+
+<section><h2>4. เกณฑ์ตัดสิน</h2><table><thead><tr><th>ใช้เรียลไทม์เมื่อ</th><th>ใช้ถามซ้ำเมื่อ</th></tr></thead><tbody>
+<tr><td>ช้าไปห้าวินาทีแล้วผู้ใช้ทำผิด</td><td>ช้าไปหนึ่งนาทีก็ไม่เป็นไร</td></tr>
+<tr><td>สิ่งที่เปลี่ยนเกิดขึ้นน้อยครั้งแต่สำคัญมาก</td><td>ข้อมูลเปลี่ยนตลอดเวลาอยู่แล้ว</td></tr>
+<tr><td>ผู้ใช้จ้องหน้าจอนั้นรอ</td><td>เปิดดูเป็นครั้งคราว</td></tr>
+<tr><td>มีคนหลายคนแก้ข้อมูลชุดเดียวกัน</td><td>ข้อมูลของใครของมัน</td></tr>
+</tbody></table><p>แถวแรกคือเกณฑ์ที่แม่นที่สุด ลองใช้กับตัวอย่างจริง</p><table><thead><tr><th>ฟีเจอร์</th><th>ช้าไป 5 วินาทีแล้วเกิดอะไร</th><th>ควรใช้</th></tr></thead><tbody>
+<tr><td>จุดคัดแยกเต็ม</td><td>ส่งของไปเพิ่ม ของตกพื้น</td><td>เรียลไทม์</td></tr>
+<tr><td>พาเลทถูกล็อกโดยคนอื่น</td><td>เดินไปถึงแล้วพบว่าหายไป</td><td>เรียลไทม์</td></tr>
+<tr><td>จำนวนงานที่เสร็จวันนี้</td><td>ตัวเลขบนหน้าแรกช้าไปนิดหน่อย</td><td>ถามซ้ำ</td></tr>
+<tr><td>รายการงานค้าง</td><td>เห็นงานใหม่ช้าไปหน่อย</td><td>ถามซ้ำก็พอ</td></tr>
+</tbody></table></section>
+
+<section><h2>5. ของจริง: สองโปรเจกต์เลือกคนละทาง</h2><pre class="code-vs"><code>// wmsapp — เรียลไทม์ สำหรับ putaway และ sorting
+_connection!.on('StationDispatched', _onStationDispatched);
+_connection!.on('PalletArrived', _onPalletArrived);
+_connection!.on('StationFull', _on(_stationFull));</code></pre><pre class="code-vs"><code>// wms_absolute_mobile — ถามซ้ำทุก 5 วินาที
+_taskRefreshTimer = Timer.periodic(
+  const Duration(seconds: 5),
+  (_) =&gt; _refreshTaskStatus(),
+);</code></pre><p>ทั้งคู่สมเหตุสมผลกับสิ่งที่ตัวเองทำ — <code>wmsapp</code> ดูแลจุดคัดแยกที่เต็มแล้วของตกทันที ส่วน <code>wms_absolute_mobile</code> ดูรายการงานที่ช้าไปห้าวินาทีไม่เป็นไร</p><p>และสิ่งที่ <code>wms_absolute_mobile</code> ทำได้ดีคือ<strong>ไม่ได้ถามทุกอย่างทุกครั้ง</strong></p><pre class="code-vs"><code>void _refreshTaskStatus() {
+  if (screen == 'agv' || screen == 'dispatch' || screen == 'tasks') {
+    unawaited(loadTasks());
+  }
+  if (screen == 'agv') unawaited(loadAgvHistory());
+  if (screen == 'tasks') unawaited(loadForkliftHistory());
+  if (screen == 'picking') unawaited(loadPicks());
+}</code></pre><p>ตัวจับเวลาเดินตลอด แต่ยิงคำขอเฉพาะข้อมูลของจอที่ผู้ใช้กำลังดูอยู่ ผู้ใช้ที่อยู่หน้าแรกจึงไม่กินเน็ตเลย — เป็นการลดต้นทุนที่ได้ผลมากโดยเขียนเพิ่มไม่กี่บรรทัด</p><div class="note"><strong>สิ่งที่ยังขาดในโค้ดนั้น:</strong> ตัวจับเวลาเดินต่อแม้แอปอยู่พื้นหลัง — PDA ที่ถูกวางไว้บนโต๊ะโดยแอปยังเปิดอยู่ ยังยิงคำขอทุกห้าวินาทีทั้งวัน ทางแก้คือหยุดตอน <code>paused</code> แบบเดียวกับที่ 10.8 ใช้ <code>WidgetsBindingObserver</code></div></section>
+
+<section><h2>6. ทำทั้งสองอย่าง</h2><p>คำตอบที่ใช้จริงมักไม่ใช่เลือกอย่างใดอย่างหนึ่ง แต่เป็น</p><pre class="code-vs"><code>เรียลไทม์ทำงานอยู่   → ไม่ต้องถามซ้ำเลย
+เรียลไทม์หลุด        → ถามซ้ำแทน
+เรียลไทม์กลับมา      → หยุดถามซ้ำ + โหลดใหม่หนึ่งครั้งเพื่ออุดช่วงที่ขาด</code></pre><p>lab ของ Part นี้ทำแบบนี้ และเทสต์บังคับพฤติกรรมทั้งสามบรรทัดไว้</p><pre class="code-vs"><code>test('หลุดแล้วเริ่มถามซ้ำ ต่อกลับได้แล้วหยุด', () {
+  fakeAsync((async) {
+    ...
+    expect(store.isPolling, isFalse, reason: 'ต่อได้อยู่ ไม่ต้องถามซ้ำ');
+
+    inner.simulateDrop();
+    async.flushMicrotasks();
+    expect(store.isPolling, isTrue);
+    ...
+  });
+});</code></pre><p>เหตุผลที่ต้องมีทางสำรองคือ <strong>เรียลไทม์เป็นสิ่งที่หลุดได้ และมันหลุดเงียบ</strong> — ต่างจาก HTTP ที่ล้มเหลวแล้วรู้ทันทีจากคำตอบที่ไม่มา การเชื่อมต่อที่หลุดจะดูเหมือน “ไม่มีอะไรเกิดขึ้น” ซึ่งแยกไม่ออกจาก “ทุกอย่างปกติ”</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทำเรียลไทม์ทั้งแอปทั้งที่ต้องการแค่จอเดียว</td><td>คิดว่าเรียลไทม์ดีกว่าเสมอ</td><td>ตัดสินทีละฟีเจอร์</td></tr>
+<tr><td>แบตหมดเร็ว</td><td>ถามซ้ำถี่เกินความจำเป็น</td><td>ตั้งช่วงเวลาจากความเสียหายที่เกิดถ้าช้า</td></tr>
+<tr><td>ถามซ้ำทั้งที่ผู้ใช้ไม่ได้ดูจอนั้น</td><td>ตัวจับเวลาไม่รู้ว่าใครดูอะไรอยู่</td><td>ถามเฉพาะของจอปัจจุบัน</td></tr>
+<tr><td>ทำเรียลไทม์แล้วเลิกโหลดผ่าน HTTP</td><td>คิดว่าเหตุการณ์พอ</td><td>ยังต้องโหลดตอนเปิดจอและตอนต่อกลับ (12.10)</td></tr>
+<tr><td>เรียลไทม์หลุดแล้วหน้าจอค้างข้อมูลเก่าเงียบ ๆ</td><td>ไม่มีทางสำรอง</td><td>ถามซ้ำเมื่อหลุด (12.11)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้าขอให้หน้าจอ “งานค้างของฉัน” อัปเดตทันทีเมื่อมีงานใหม่ ตอนนี้ใช้ถามซ้ำทุก 5 วินาที</p><ol><li>ควรเปลี่ยนเป็นเรียลไทม์ไหม</li><li>มีทางอื่นไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ต้องถามก่อนว่า “ทันที” ของหัวหน้าคือเท่าไหร่ และช้าไปแล้วเกิดอะไร</p><table><thead><tr><th>ถ้าคำตอบคือ</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>“พนักงานยืนรออยู่ไม่มีงานทำ”</td><td>เรียลไทม์คุ้ม — เวลาที่เสียคือค่าแรง</td></tr>
+<tr><td>“อยากให้ดูทันสมัย”</td><td>ไม่คุ้ม — จ่ายความซับซ้อนทั้ง Part นี้เพื่อความรู้สึก</td></tr>
+<tr><td>“ห้าวินาทีมันนานไป”</td><td>ลองลดเป็นสองวินาทีก่อน วัดผลจริงแล้วค่อยตัดสิน</td></tr>
+</tbody></table><p><strong>2.</strong> ทางที่มักได้ผลกว่าและถูกกว่า</p><ul><li><strong>ถามทันทีเมื่อผู้ใช้กลับมาที่จอ</strong> — ผู้ใช้ที่เพิ่งปิดงานเสร็จแล้วกลับมาหน้ารายการ จะเห็นของใหม่ทันที ซึ่งเป็นจังหวะที่เขาสนใจจริง (10.8)</li><li><strong>ถามทันทีหลังผู้ใช้ทำอะไรเสร็จ</strong> — ปิดงานแล้วโหลดใหม่เลย ไม่ต้องรอตัวจับเวลา</li><li><strong>ถามถี่ขึ้นเฉพาะตอนที่จอนั้นเปิดอยู่และหน้าจอติด</strong> — เร็วขึ้นโดยไม่เพิ่มต้นทุนตอนที่ไม่มีใครดู</li></ul><p>สามข้อนี้รวมกันมักทำให้ผู้ใช้รู้สึกว่า “ทันที” โดยไม่ต้องมีการเชื่อมต่อค้างเลย เพราะ<strong>ความรู้สึกว่าเร็วมาจากการอัปเดตตรงจังหวะที่ผู้ใช้สนใจ ไม่ได้มาจากการอัปเดตบ่อย</strong></p><p>ถ้าทำครบสามข้อแล้วยังไม่พอ ค่อยไปเรียลไทม์ — และตอนนั้นจะรู้ชัดว่าจ่ายไปเพื่ออะไร</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ถามซ้ำจ่ายคำขอคงที่ เรียลไทม์จ่ายการเชื่อมต่อค้างและความซับซ้อน</li><li>เกณฑ์ที่แม่นที่สุดคือ “ช้าไปห้าวินาทีแล้วเกิดความเสียหายอะไร”</li><li>ถามเฉพาะข้อมูลของจอที่ผู้ใช้ดูอยู่ ลดต้นทุนได้มากโดยเขียนไม่กี่บรรทัด</li><li>เรียลไทม์ไม่แทนที่ HTTP</li><li>เรียลไทม์หลุดเงียบ จึงต้องมีทางสำรองเสมอ</li></ul></div><p><strong>บทหน้า:</strong> ฝั่ง .NET ส่งเหตุการณ์ออกมาอย่างไร</p></section>

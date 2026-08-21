@@ -4,23 +4,91 @@
 <title>Subscribe in initState</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-07 · Realtime</span><h1>Subscribe in initState</h1><p>Part 12: Realtime &amp; SignalR</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Widget pattern</a></li><li><a href="#section-2">Stable callback identity</a></li><li><a href="#section-3">Dependency changes</a></li><li><a href="#section-4">Initial snapshot race</a></li><li><a href="#section-5">Handler responsibility</a></li><li><a href="#section-6">ของจริง</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Widget tests</a></li></ol></nav>
-<div class="note"><strong>Subscribeตาม owner lifetime:</strong> StatefulWidgetลงทะเบียน handler referenceใน <code>initState</code> เมื่อ dependencyคงที่ หรือย้าย subscriptionไป route-scoped Storeเพื่อให้ UIไม่ parse/merge eventเอง</div>
-<section id="section-1"><h2>1. Widget pattern</h2><pre class="code-vs"><code>late final RealtimeSubscription _subscription;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ลงทะเบียนที่ไหน</a></li><li><a href="#section-2">ลำดับที่ถูกต้อง</a></li><li><a href="#section-3">ปัญหาการแข่งกันระหว่างโหลดกับเหตุการณ์</a></li><li><a href="#section-4">mounted ก่อนแตะหน้าจอเสมอ</a></li><li><a href="#section-5">จอที่ไม่ควรฟังตอนไม่ได้แสดงอยู่</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่านลำดับใน <code>initState</code> ของโปรเจกต์จริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.6, 3.12 (วงจรชีวิตของ State)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ลงทะเบียนฟังในจังหวะที่ถูก และรู้ว่าจังหวะไหนทำให้เหตุการณ์หาย</div>
 
-@override
-void initState() {
-  super.initState();
-  _subscription = realtime.subscribe(_onEvent);
-  unawaited(realtime.ensureConnected());
-  unawaited(store.refresh());
-}</code></pre></section>
-<section id="section-2"><h2>2. Stable callback identity</h2><p>method tear-off <code>_onEvent</code> เป็น referenceที่ใช้ยกเลิกได้ หลีกเลี่ยง anonymous closureคนละ instanceใน add/remove</p></section>
-<section id="section-3"><h2>3. Dependency changes</h2><p>ถ้า realtime serviceมาจาก widget/providerและเปลี่ยนได้ ใช้ <code>didUpdateWidget</code> unsubscribeตัวเก่าแล้ว subscribeตัวใหม่ ไม่ addซ้ำทุก build/didChangeDependencies</p></section>
-<section id="section-4"><h2>4. Initial snapshot race</h2><p>register eventก่อน HTTP loadอาจรับ eventระหว่าง snapshot วิธีปลอดภัยคือใช้ version/sequence: load snapshot versionแล้ว applyเฉพาะ eventใหม่หรือ refreshอีกครั้งหลัง connection synchronized</p></section>
-<section id="section-5"><h2>5. Handler responsibility</h2><p>handlerตรวจ relevanceแล้วส่ง intentไป Store เช่น <code>store.onRealtimeEvent(event)</code> ไม่เปิด dialog/navigationหรือ setStateหลาย fieldจาก raw map</p></section>
-<section id="section-6"><h2>6. ของจริง</h2><p>Putaway/Sorting screensใน <code>wmsapp</code> add listenersใน initState, connectและโหลด HTTP snapshot เป็น patternที่ดีแต่ต้องวาง reconciliation/versionเพิ่มเมื่อ production event orderingสำคัญ</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>subscriptionขึ้นกับ warehouseIdที่เปลี่ยนใน routeเดิมควรทำที่ไหน?</p><details><summary>เฉลย</summary><p>didUpdateWidgetหรือ Store action unsubscribe group/handlerเดิม, update generation, joinใหม่และ refresh snapshot</p></details></section>
-<section id="section-8"><h2>8. Widget tests</h2><div class="success">subscribeครั้งเดียว, initial refresh, event relevant/irrelevant, dependency change, eventหลัง unmountและ connect failureไม่ crash</div></section>
+<section id="section-1"><h2>1. ลงทะเบียนที่ไหน</h2><pre class="code-vs"><code>class _PutawayScreenState extends State&lt;PutawayScreen&gt; {
+  @override
+  void initState() {
+    super.initState();
+    _signalR.addStationDispatchedListener(_handleStationDispatched);
+    _signalR.addPalletArrivedListener(_handlePalletArrived);
+    _signalR.addPalletReturnedListener(_handlePalletReturned);
+    _signalR.addLabelingCompletedListener(_handleLabelingCompleted);
+    _initSignalR();
+    _loadStationStatus();
+  }
+}</code></pre><table><thead><tr><th>ที่</th><th>ถูกไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>initState</code></td><td>ถูก</td><td>ถูกเรียกครั้งเดียวตลอดอายุของ State</td></tr>
+<tr><td><code>build</code></td><td><strong>ผิด</strong></td><td>ถูกเรียกหลายครั้ง จะลงทะเบียนซ้ำเรื่อย ๆ</td></tr>
+<tr><td>constructor ของ State</td><td>ผิด</td><td>ยังไม่มี <code>widget</code> ให้อ่าน</td></tr>
+<tr><td><code>didChangeDependencies</code></td><td>ได้ ถ้าต้องใช้ <code>context</code></td><td>แต่ถูกเรียกได้หลายครั้ง ต้องกันซ้ำเอง</td></tr>
+</tbody></table><div class="note">อาการของการลงทะเบียนใน <code>build</code> คือ <strong>เหตุการณ์เดียวถูกจัดการหลายครั้ง</strong> และจำนวนครั้งเพิ่มขึ้นเรื่อย ๆ ตามการวาดใหม่ — จอที่เปิดไว้นาน ๆ จะทำงานช้าลงและอาจเปิด dialog ซ้อนกันสิบอัน</div></section>
+
+<section id="section-2"><h2>2. ลำดับที่ถูกต้อง</h2><pre class="code-vs"><code>_signalR.addStationDispatchedListener(...);   // 1. ลงทะเบียนฟัง
+_initSignalR();                                // 2. ต่อ
+_loadStationStatus();                          // 3. โหลดสถานะปัจจุบัน</code></pre><p>สามบรรทัดนี้เรียงถูกแล้ว และเหตุผลของแต่ละลำดับต่างกัน</p><table><thead><tr><th>ถ้าสลับ 1 กับ 2</th><th>เหตุการณ์ที่มาถึงระหว่างต่อจนถึงตอนลงทะเบียน จะหายไป</th></tr></thead><tbody>
+<tr><td>ถ้าสลับ 2 กับ 3</td><td>ไม่มีผลมาก แต่ 3 ควรมาทีหลังเพื่อให้ข้อมูลใหม่ที่สุดเป็นตัวชนะ</td></tr>
+</tbody></table><p>lab เขียนกฎข้อแรกไว้เป็นคอมเมนต์</p><pre class="code-vs"><code>// ฟังก่อนต่อ ไม่ใช่ต่อก่อนฟัง — เหตุการณ์ที่มาถึงระหว่างที่ยังไม่ได้
+// ลงทะเบียนฟัง จะหายไปเงียบ ๆ
+_eventSub = client.events.listen(_onEvent);
+_statusSub = client.status.listen(_onStatus);
+
+await client.acquire();
+await load();</code></pre></section>
+
+<section id="section-3"><h2>3. ปัญหาการแข่งกันระหว่างโหลดกับเหตุการณ์</h2><p>ลำดับที่ 2 กับ 3 เปิดช่องให้เกิดเรื่องนี้</p><pre class="code-vs"><code>10:00:00.000  ต่อสำเร็จ
+10:00:00.010  เริ่มยิง GET /tasks
+10:00:00.100  เหตุการณ์ TaskCompleted(T-1) มาถึง → ทำเครื่องหมายว่าเสร็จ
+10:00:00.400  GET ตอบกลับ (ข้อมูลถ่ายไว้ตอน 10:00:00.010 — T-1 ยังค้าง)
+              → เขียนทับ → T-1 กลับมาค้างอีก ทั้งที่เสร็จไปแล้ว</code></pre><p>เหตุการณ์มาถึงก่อน แต่ผลของมันถูกลบโดยข้อมูลที่<strong>เก่ากว่า</strong>แต่มาถึงทีหลัง</p><p>นี่คือเหตุผลที่ทุกเหตุการณ์ต้องมีเลขรุ่น และทำไม lab ตรวจก่อนใช้เสมอ</p><pre class="code-vs"><code>if (version &lt;= existing.version) return; // เก่ากว่าหรือซ้ำ ทิ้ง</code></pre><p>เมื่อ <code>load()</code> เขียนทับทั้งชุด มันเขียนด้วยเลขรุ่นที่มากับข้อมูล ถ้าเซิร์ฟเวอร์ทำงานถูกต้อง ข้อมูลที่ถ่ายตอน <code>10:00:00.010</code> จะมีรุ่นเก่ากว่าเหตุการณ์ — แต่การเขียนทับทั้งชุดก็ยังทับอยู่ดี</p><div class="note"><strong>ทางแก้ที่ครบกว่า</strong> คือให้ <code>load()</code> ผสานแทนที่จะเขียนทับ โดยเทียบเลขรุ่นทีละรายการ — แต่ต้องแลกกับความซับซ้อน และต้องตอบให้ได้ว่ารายการที่หายไปจากคำตอบของเซิร์ฟเวอร์ควรถูกลบไหม 12.10 จะพูดถึงการแลกนี้</div></section>
+
+<section id="section-4"><h2>4. <code>mounted</code> ก่อนแตะหน้าจอเสมอ</h2><pre class="code-vs"><code>void _onCounterUpdated(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as int?;
+  if (stationId == null || !mounted) return;
+  ...
+  setState(() =&gt; ...);
+}</code></pre><p>เหตุการณ์มาถึงได้ทุกเมื่อ รวมถึงเสี้ยววินาทีหลังจากผู้ใช้กดย้อนกลับ ถ้าเรียก <code>setState</code> บน State ที่ถูกทิ้งแล้วจะได้</p><pre class="code-vs"><code>setState() called after dispose(): _SortingScreenState#a1b2c(lifecycle state: defunct)</code></pre><p>แต่สังเกตว่านี่เป็น<strong>ทางแก้ชั้นที่สอง</strong> — ชั้นแรกคือยกเลิกการฟังใน <code>dispose</code> ซึ่งทำให้ callback ไม่ถูกเรียกตั้งแต่ต้น (12.8)</p><table><thead><tr><th>ชั้น</th><th>ทำอะไร</th><th>พอไหม</th></tr></thead><tbody>
+<tr><td>ยกเลิกการฟังใน <code>dispose</code></td><td>ไม่ถูกเรียกอีกเลย</td><td>พอ ถ้าทำครบ</td></tr>
+<tr><td>เช็ค <code>mounted</code></td><td>ถูกเรียกแต่ไม่ทำอะไร</td><td>เป็นตาข่ายกันพลาด</td></tr>
+</tbody></table><p>มีทั้งสองชั้นดีที่สุด เพราะชั้นแรกลืมง่ายเมื่อมี listener หลายตัว</p></section>
+
+<section id="section-5"><h2>5. จอที่ไม่ควรฟังตอนไม่ได้แสดงอยู่</h2><p>จอที่ถูก push ทับ ยังมี State อยู่และยังได้รับเหตุการณ์ต่อไป ซึ่งบางครั้งถูก บางครั้งไม่</p><table><thead><tr><th>สถานการณ์</th><th>ควรฟังต่อไหม</th></tr></thead><tbody>
+<tr><td>จอรายการถูก push ทับด้วยจอรายละเอียด</td><td>ควร — กลับมาแล้วข้อมูลจะทันสมัย</td></tr>
+<tr><td>จอที่แสดง dialog เตือนเมื่อมีเหตุการณ์</td><td>ไม่ควร — จะเด้ง dialog ทับจอที่อยู่ข้างบน</td></tr>
+<tr><td>จอที่เล่นเสียงเมื่อมีเหตุการณ์</td><td>ไม่ควร — ผู้ใช้จะได้ยินเสียงโดยไม่เห็นว่ามาจากไหน</td></tr>
+</tbody></table><p>สองแถวล่างแก้ด้วยการตรวจว่าเส้นทางนี้อยู่บนสุดหรือไม่</p><pre class="code-vs"><code>void _onEvent(HubEvent event) {
+  if (!mounted) return;
+  // จอนี้ไม่ได้อยู่บนสุด — เก็บไว้ก่อน อย่าเด้ง dialog ทับจอที่ผู้ใช้ดูอยู่
+  if (ModalRoute.of(context)?.isCurrent != true) {
+    _pendingAlerts.add(event);
+    return;
+  }
+  _showAlert(event);
+}</code></pre><p>แล้วแสดงที่ค้างไว้ตอนกลับมา ซึ่งทำได้ใน <code>didPopNext</code> ของ <code>RouteAware</code></p></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เหตุการณ์เดียวถูกจัดการหลายครั้ง</td><td>ลงทะเบียนใน <code>build</code></td><td>ย้ายไป <code>initState</code></td></tr>
+<tr><td>เหตุการณ์แรก ๆ หายไป</td><td>ต่อก่อนฟัง</td><td>ฟังก่อนต่อ</td></tr>
+<tr><td>งานที่เสร็จแล้วกลับมาค้าง</td><td>คำตอบของ HTTP ที่เก่ากว่ามาถึงทีหลัง</td><td>เทียบเลขรุ่น (12.10)</td></tr>
+<tr><td><code>setState() called after dispose()</code></td><td>ไม่ได้ยกเลิกการฟัง</td><td>ยกเลิกใน <code>dispose</code> + เช็ค <code>mounted</code></td></tr>
+<tr><td>dialog เด้งทับจอที่ผู้ใช้กำลังดู</td><td>จอที่ถูก push ทับยังฟังอยู่</td><td>ตรวจ <code>ModalRoute.of(context)?.isCurrent</code></td></tr>
+<tr><td>ลงทะเบียนใน <code>didChangeDependencies</code> แล้วซ้ำ</td><td>เมธอดนั้นถูกเรียกได้หลายครั้ง</td><td>กันด้วยธง หรือย้ายไป <code>initState</code></td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>จอ “จุดคัดแยก” ต้องส่งเสียงเตือนและสั่นเมื่อได้รับเหตุการณ์ <code>StationFull</code> ผู้ใช้รายงานสองเรื่อง</p><ol><li>“บางครั้งเสียงดังทั้งที่ปิดจอนั้นไปแล้ว”</li><li>“บางครั้งเสียงดังสามครั้งติดกัน”</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ไม่ได้ยกเลิกการฟังตอนออกจากจอ — <code>State</code> ถูกทิ้งแล้วแต่ callback ยังอยู่ในรายชื่อของ singleton</p><p>สังเกตว่าอาการนี้ <strong>การเช็ค <code>mounted</code> ไม่ช่วย</strong> ถ้าการเล่นเสียงไม่ได้ผ่าน <code>setState</code></p><pre class="code-vs"><code>void _onStationFull(Map&lt;String, dynamic&gt; data) {
+  HapticFeedback.heavyImpact();     // ← ทำงานได้แม้ State ถูกทิ้งแล้ว
+  _player.play(alarmSound);         // ← ทำงานได้เช่นกัน
+  if (!mounted) return;             // ← สายไปแล้ว
+  setState(() =&gt; ...);
+}</code></pre><p>ทางแก้ที่ถูกคือยกเลิกการฟังใน <code>dispose</code> (12.8) และถ้าจะเช็ค <code>mounted</code> ต้องเช็ค<strong>บรรทัดแรก</strong> ไม่ใช่ก่อน <code>setState</code></p><p><strong>2.</strong> เสียงดังสามครั้งมีสองสาเหตุที่เป็นไปได้ และต้องแยกให้ออก</p><table><thead><tr><th>สาเหตุ</th><th>วิธีตรวจ</th></tr></thead><tbody>
+<tr><td>ลงทะเบียนซ้ำสามครั้ง</td><td>นับจำนวนใน <code>_stationFullListeners</code> ตอนรัน</td></tr>
+<tr><td>เซิร์ฟเวอร์ส่งเหตุการณ์ซ้ำจริง</td><td>บันทึกทุกเหตุการณ์ที่ได้รับพร้อมเวลาและเลขรุ่น</td></tr>
+</tbody></table><p>ถ้าเป็นข้อแรก มักเกิดจากการที่จอถูกสร้างใหม่โดยที่ตัวเก่ายังไม่ถูกทิ้ง — เช่นการ push จอเดิมซ้ำ หรือ <code>didChangeDependencies</code> ที่ถูกเรียกหลายครั้ง</p><p>ถ้าเป็นข้อสอง ให้กันที่ฝั่งแอปด้วยเลขรุ่น</p><pre class="code-vs"><code>if (version &lt;= _lastAlertedVersion[stationId]) return;   // เตือนไปแล้ว
+_lastAlertedVersion[stationId] = version;
+_alert();</code></pre><p><strong>ข้อคิดที่ใหญ่กว่าทั้งสองข้อ:</strong> การกระทำที่ผู้ใช้รับรู้ได้ — เสียง การสั่น การแจ้งเตือน — ต้องผ่านการกันซ้ำเสมอ เพราะมันคือสิ่งที่ผู้ใช้สังเกตเห็นทันทีเมื่อผิด ต่างจากการอัปเดตตัวเลขบนหน้าจอที่ทำซ้ำกี่ครั้งก็ได้ผลเหมือนเดิม</p><p>เป็นหลักเดียวกับ <code>Idempotency-Key</code> ใน 7.13 แต่อยู่ฝั่งขาเข้าแทนที่จะเป็นขาออก</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>ลงทะเบียนใน <code>initState</code> ไม่ใช่ใน <code>build</code></li><li>ฟังก่อนต่อ ไม่ใช่ต่อก่อนฟัง</li><li>คำตอบของ HTTP ที่มาทีหลังอาจเก่ากว่าเหตุการณ์ที่มาก่อน</li><li>เช็ค <code>mounted</code> เป็นบรรทัดแรก ไม่ใช่ก่อน <code>setState</code></li><li>จอที่ถูก push ทับยังได้รับเหตุการณ์ — ตรวจก่อนเด้ง dialog หรือเล่นเสียง</li><li>การกระทำที่ผู้ใช้รับรู้ได้ ต้องกันซ้ำเสมอ</li></ul></div><p><strong>บทหน้า:</strong> เลิกฟังให้ครบ และการรั่วที่ไม่มีใครเห็น</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

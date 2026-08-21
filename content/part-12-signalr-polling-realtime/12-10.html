@@ -1,15 +1,121 @@
-<div class="note"><strong>Event กับ HTTP refreshอาจชนกัน:</strong> response snapshotเก่าที่เริ่มก่อน eventสามารถกลับมาทีหลังแล้ว overwrite stateใหม่ ต้องมี version/generation/reducer—notอาศัยเวลามาถึง</div>
-<section><h2>1. Race timeline</h2><pre class="code-vs"><code>t1 GET tasks เริ่ม (snapshot version 10)
-t2 SignalR task T → COMPLETED version 11
-t3 GET v10 กลับมาและเขียน T = OPEN  ← ย้อนเวลา</code></pre></section>
-<section><h2>2. Entity version</h2><pre class="code-vs"><code>void apply(TaskChanged event) {
-  final current = tasks[event.taskId];
-  if (current != null &amp;&amp; event.version &lt;= current.version) return;
-  tasks[event.taskId] = current!.apply(event);
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: รันเทสต์เรื่องลำดับของเหตุการณ์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.4, 12.7, 9.9 (แหล่งความจริงเดียว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รวมข้อมูลจากสองแหล่งให้เป็นความจริงชุดเดียว โดยไม่มีข้อมูลเก่าทับข้อมูลใหม่</div>
+
+<section><h2>1. สองแหล่งที่ต้องอยู่ด้วยกัน</h2><table><thead><tr><th> </th><th>เหตุการณ์</th><th>โหลดผ่าน HTTP</th></tr></thead><tbody>
+<tr><td>ตอบคำถามว่า</td><td>มีอะไรเปลี่ยน</td><td>ตอนนี้เป็นอย่างไร</td></tr>
+<tr><td>ครบไหม</td><td>ไม่ครบ — พลาดได้ (12.2)</td><td>ครบ ณ วินาทีที่ถาม</td></tr>
+<tr><td>เร็วไหม</td><td>เกือบทันที</td><td>ต้องรอคำตอบ</td></tr>
+<tr><td>เชื่อได้แค่ไหน</td><td>เชื่อได้ถ้ามันมาถึง</td><td>เชื่อได้เสมอ แต่เก่าทันทีที่ได้รับ</td></tr>
+</tbody></table><div class="note">แถวสุดท้ายคือสิ่งที่คนมองข้าม — <strong>คำตอบของ HTTP เก่าตั้งแต่วินาทีที่เซิร์ฟเวอร์ถ่ายข้อมูลออกมา</strong> ไม่ใช่ตอนที่แอปได้รับ ระหว่างนั้นอาจมีอะไรเปลี่ยนไปแล้ว</div><p>นี่คือเหตุผลที่ทั้งสองแหล่งต้องมีตัวเทียบว่าอันไหนใหม่กว่า และตัวเทียบนั้นต้องมาจากเซิร์ฟเวอร์ ไม่ใช่จากเวลาที่แอปได้รับ</p></section>
+
+<section><h2>2. เหตุการณ์ไม่เรียงลำดับ</h2><p>ความเข้าใจผิดที่พบบ่อยที่สุดคือ “เหตุการณ์มาถึงตามลำดับที่เกิด”</p><pre class="code-vs"><code>เซิร์ฟเวอร์ส่ง:     TaskDispatched(v2)  →  TaskCompleted(v3)
+แอปได้รับ:          TaskCompleted(v3)  →  TaskDispatched(v2)</code></pre><p>สาเหตุที่เป็นไปได้</p><table><thead><tr><th>สาเหตุ</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>สายหลุดกลางทาง</td><td>อันแรกหาย อันที่สองมาถึงหลังต่อกลับ</td></tr>
+<tr><td>เซิร์ฟเวอร์ส่งจากหลาย instance</td><td>ระบบที่มี backplane ไม่รับประกันลำดับข้ามเครื่อง</td></tr>
+<tr><td>การโหลดใหม่แทรกกลาง</td><td>คำตอบของ HTTP ที่ถ่ายไว้ก่อนหน้า มาถึงหลังเหตุการณ์ (12.7 §3)</td></tr>
+</tbody></table><p>สาเหตุที่สามเกิดบ่อยที่สุดและไม่ต้องมีอะไรผิดปกติเลย</p></section>
+
+<section><h2>3. เลขรุ่นเป็นคำตอบ</h2><pre class="code-vs"><code>/// เลขรุ่นที่เซิร์ฟเวอร์เพิ่มขึ้นทุกครั้งที่งานนี้เปลี่ยน
+///
+/// เป็นตัวตัดสินว่าข้อมูลไหนใหม่กว่า — จะมาจากเหตุการณ์หรือจากการ
+/// โหลดผ่าน HTTP ก็ตัดสินด้วยตัวเลขนี้เหมือนกัน
+final int version;</code></pre><pre class="code-vs"><code>void _applyIfNewer(String taskId, int version, ...) {
+  final existing = _tasks[taskId];
+  if (existing == null) { ... }
+  if (version &lt;= existing.version) return; // เก่ากว่าหรือซ้ำ ทิ้ง
+  _tasks[taskId] = update(existing);
+}</code></pre><p>เงื่อนไข <code>&lt;=</code> ไม่ใช่ <code>&lt;</code> เพราะรุ่นเดียวกันแปลว่าเหตุการณ์ซ้ำ ซึ่งเกิดได้เมื่อเซิร์ฟเวอร์ส่งซ้ำหรือเมื่อได้รับทั้งจากเหตุการณ์และจากการโหลด</p><pre class="code-vs"><code>test('เหตุการณ์เก่าที่มาถึงช้า ต้องไม่ทับของใหม่', () async {
+  repository.result = [task('T-1', version: 5)];
+  await store.start();
+
+  // เหตุการณ์รุ่น 3 มาถึงหลังจากที่เรารู้รุ่น 5 แล้ว
+  inner.emit(const TaskCompleted(taskId: 'T-1', version: 3));
+
+  expect(store.tasks.single.status, LiveTaskStatus.waiting);
+  expect(store.tasks.single.version, 5);
+});</code></pre><table><thead><tr><th>ทางเลือกอื่นแทนเลขรุ่น</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>เวลาที่เซิร์ฟเวอร์บันทึก</td><td>ใช้ได้ ถ้าความละเอียดพอและนาฬิกาของเซิร์ฟเวอร์ทุกตัวตรงกัน</td></tr>
+<tr><td>เวลาที่แอปได้รับ</td><td><strong>ใช้ไม่ได้</strong> — เป็นตัวเลขที่บอกลำดับการมาถึง ไม่ใช่ลำดับการเกิด</td></tr>
+<tr><td>ไม่มีเลย ใช้อันหลังสุดเสมอ</td><td>คือปัญหาที่กำลังแก้อยู่</td></tr>
+</tbody></table></section>
+
+<section><h2>4. เขียนทับทั้งชุด หรือผสาน</h2><p>ตอนโหลดผ่าน HTTP มีสองทางเลือก</p><pre class="code-vs"><code>// lab เลือกทางนี้ — เขียนทับทั้งชุด
+_tasks
+  ..clear()
+  ..addEntries(result.map((task) =&gt; MapEntry(task.id, task)));</code></pre><table><thead><tr><th> </th><th>เขียนทับทั้งชุด</th><th>ผสานทีละรายการ</th></tr></thead><tbody>
+<tr><td>รายการที่หายไปจากคำตอบ</td><td>ถูกลบ — ถูกต้อง</td><td>ต้องตัดสินใจว่าลบไหม</td></tr>
+<tr><td>เหตุการณ์ที่มาถึงระหว่างรอคำตอบ</td><td>ถูกทับ</td><td>รอดถ้ารุ่นใหม่กว่า</td></tr>
+<tr><td>ความซับซ้อน</td><td>สามบรรทัด</td><td>ต้องเทียบทีละรายการ</td></tr>
+</tbody></table><p>แถวแรกเป็นเหตุผลที่ lab เลือกเขียนทับ — งานที่หายไปจากรายการงานค้าง แปลว่ามันไม่ค้างแล้ว การผสานจะทำให้มันอยู่ตลอดไป</p><p>แถวที่สองคือราคาที่จ่าย และมีขอบเขตจำกัด — หน้าต่างที่เสี่ยงคือช่วงระหว่างที่เซิร์ฟเวอร์ถ่ายข้อมูลกับตอนที่แอปได้รับ ซึ่งเป็นหลักร้อยมิลลิวินาที และครั้งถัดไปที่มีเหตุการณ์เกี่ยวกับงานนั้นก็จะแก้ให้ถูกเอง</p><p>ถ้ารับความเสี่ยงนี้ไม่ได้ ให้ผสานโดยเทียบรุ่น พร้อมจัดการรายการที่หายไปให้ชัด</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  final result = await repository.fetchOpen();
+  final incoming = {for (final task in result) task.id: task};
+
+  // ลบสิ่งที่ไม่อยู่ในคำตอบแล้ว — มันไม่ค้างแล้ว
+  _tasks.removeWhere((id, _) =&gt; !incoming.containsKey(id));
+
+  // ผสานทีละรายการ ให้รุ่นที่ใหม่กว่าชนะ
+  for (final task in result) {
+    final existing = _tasks[task.id];
+    if (existing == null || task.version &gt; existing.version) {
+      _tasks[task.id] = task;
+    }
+  }
+}</code></pre><div class="note">ยังมีช่องโหว่อยู่ — งานที่<strong>เพิ่งถูกสร้าง</strong>จากเหตุการณ์ระหว่างรอคำตอบ จะถูกลบโดยบรรทัด <code>removeWhere</code> เพราะไม่อยู่ในคำตอบที่ถ่ายไว้ก่อนหน้า การแก้ให้ครบต้องใช้เลขรุ่นระดับทั้งชุด ซึ่งฝั่งเซิร์ฟเวอร์ต้องรองรับ</div><p>เลือกทางที่ง่ายก่อนเสมอ แล้วยกระดับเมื่อวัดได้ว่าปัญหาเกิดจริง — ตามหลักใน 9.12</p></section>
+
+<section><h2>5. เหตุการณ์ที่พูดถึงสิ่งที่เราไม่รู้จัก</h2><pre class="code-vs"><code>case TaskCompleted(:final taskId, :final version):
+  _applyIfNewer(
+    taskId, version,
+    (task) =&gt; task.copyWith(status: LiveTaskStatus.done, version: version),
+    // งานที่เสร็จแล้วและเราไม่เคยรู้จัก ไม่ต้องเพิ่มเข้ามา —
+    // ลิสต์นี้แสดงงานค้าง การเพิ่มงานที่เสร็จแล้วเข้าไปไม่มีประโยชน์
+    orElse: null,
+  );</code></pre><p>เทียบกับ <code>TaskDispatched</code> ที่ตรงกันข้าม</p><pre class="code-vs"><code>case TaskDispatched(:final taskId, :final assignee, :final version):
+  _applyIfNewer(
+    taskId, version,
+    (task) =&gt; task.copyWith(...),
+    orElse: () =&gt; LiveTask(id: taskId, ...),   // งานใหม่ ต้องโผล่ในลิสต์
+  );</code></pre><p>ทั้งสองกรณีต้องตัดสินใจอย่างมีเหตุผล ไม่ใช่เขียนเหมือนกันไปหมด — และเหตุผลมาจากคำถามเดียวว่า <strong>ลิสต์นี้แสดงอะไร</strong></p></section>
+
+<section><h2>6. เมื่อไหร่ควรโหลดใหม่ทั้งที่มีเหตุการณ์</h2><table><thead><tr><th>จังหวะ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>เปิดจอ</td><td>ยังไม่มีข้อมูลอะไรเลย</td></tr>
+<tr><td>ต่อกลับหลังหลุด</td><td>มีช่วงที่ขาดไป (12.4)</td></tr>
+<tr><td>กลับมาจากพื้นหลัง</td><td>ระบบอาจตัดการเชื่อมต่อโดยไม่แจ้ง</td></tr>
+<tr><td>ผู้ใช้ดึงลงเพื่อรีเฟรช</td><td>เขาไม่เชื่อว่าข้อมูลทันสมัย — ควรให้เขาถูกต้องได้</td></tr>
+<tr><td>ได้รับเหตุการณ์ที่แปลงไม่ได้หลายครั้ง</td><td>สัญญาอาจเปลี่ยน เหตุการณ์เชื่อไม่ได้แล้ว</td></tr>
+<tr><td>ทุก ๆ ช่วงเวลาหนึ่ง แม้เรียลไทม์ปกติ</td><td>เป็นตาข่ายกันพลาดสำหรับเหตุการณ์ที่หายโดยไม่รู้ตัว</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นการยอมรับความจริง — ไม่มีระบบเรียลไทม์ไหนที่ไม่เคยพลาด การโหลดใหม่ทุกห้านาทีเป็นราคาที่ถูกมากเมื่อเทียบกับการที่หน้าจอผิดไปทั้งวันโดยไม่มีใครรู้</p><pre class="code-vs"><code>// ตาข่ายกันพลาด ห่างพอที่จะไม่กระทบต้นทุน แต่ถี่พอที่จะจำกัดความเสียหาย
+_safetyNet = Timer.periodic(const Duration(minutes: 5), (_) {
+  if (status == RealtimeStatus.connected) unawaited(load());
+});</code></pre></section>
+
+<section><h2>7. เหตุการณ์ที่บอกให้โหลด แทนที่จะบอกข้อมูล</h2><p>มีรูปแบบที่สามที่ใช้ได้ดีในหลายกรณี</p><pre class="code-vs"><code>// เซิร์ฟเวอร์ส่งแค่ว่า "มีอะไรเปลี่ยนในกลุ่มนี้" ไม่ส่งข้อมูล
+await _hub.Clients.All.SendAsync("TasksChanged", new { zone = "A1" });</code></pre><pre class="code-vs"><code>case TasksChanged(:final zone):
+  if (zone == _currentZone) unawaited(load());   // แล้วค่อยไปถามเอง</code></pre><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>ไม่ต้องกังวลเรื่องลำดับหรือรุ่นเลย</td><td>ยิง HTTP ทุกครั้งที่มีอะไรเปลี่ยน</td></tr>
+<tr><td>สัญญาของเหตุการณ์เล็กมาก แทบไม่มีอะไรให้ผิด</td><td>ช้ากว่าเล็กน้อย</td></tr>
+<tr><td>ข้อมูลถูกต้องเสมอเพราะมาจากแหล่งเดียว</td><td>ถ้ามีเหตุการณ์ถี่มาก จะยิงถี่ตาม</td></tr>
+</tbody></table><p>เหมาะกับข้อมูลที่เปลี่ยนไม่บ่อยแต่ต้องถูกต้องแน่นอน และเป็นทางที่ควรเริ่มก่อนถ้าไม่แน่ใจ — เพราะเขียนง่ายกว่ามากและยกระดับเป็นแบบส่งข้อมูลมาด้วยทีหลังได้</p><p>ถ้าเหตุการณ์ถี่ ให้รวบก่อนยิง</p><pre class="code-vs"><code>Timer? _debounce;
+
+void _scheduleReload() {
+  _debounce?.cancel();
+  // เหตุการณ์สิบอันใน 300ms ยิงคำขอเดียว
+  _debounce = Timer(const Duration(milliseconds: 300), () =&gt; unawaited(load()));
 }</code></pre></section>
-<section><h2>3. Snapshot version</h2><p>APIควรคืน asOfVersion/updatedAtหรือ ETag ถ้าไม่มี Storeใช้ request generationและ event queue: eventsที่มาระหว่าง loadถูก replayหลัง snapshot</p></section>
-<section><h2>4. Invalidation pattern</h2><p>ง่ายและปลอดภัย: eventไม่ patch detailแต่ debounce <code>refresh()</code> หลาย eventsเป็นหนึ่ง GET พร้อม single-flightและ trailing refreshหาก eventมาระหว่าง load</p></section>
-<section><h2>5. Optimistic command</h2><p>eventอาจ echo commandของเครื่องเอง ใช้ command/event IDและ version dedupe ไม่แสดง successสองครั้งหรือ rollback optimistic stateจาก eventเก่า</p></section>
-<section><h2>6. Multiple devices</h2><p>serverเป็น authority; conflict eventควรยุติ local flowหรือ refresh entityและแจ้งผู้ใช้ ไม่ assumeว่า event orderจากหลาย producersคงที่ทั่วระบบถ้า contractไม่รับประกัน</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ไม่มี versionใน eventเลยควร patch stateละเอียดไหม?</p><details><summary>แนวคำตอบ</summary><p>ใช้ eventเป็น invalidationและ debounce authoritative HTTP refreshปลอดภัยกว่า พร้อมเสนอเพิ่ม eventId/versionใน contract</p></details></section>
-<section><h2>8. Race tests</h2><div class="success">HTTP before/event after/response last, event burst, event during refresh, duplicate/out-of-order eventและ optimistic echo</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>งานที่เสร็จแล้วกลับมาค้าง</td><td>คำตอบเก่ามาถึงทีหลัง</td><td>เทียบเลขรุ่น</td></tr>
+<tr><td>สถานะกระพริบไปมา</td><td>เหตุการณ์กับการโหลดสลับกันทับ</td><td>ให้ตัวที่รุ่นใหม่กว่าชนะเสมอ</td></tr>
+<tr><td>งานที่เสร็จแล้วโผล่ในลิสต์งานค้าง</td><td>สร้างรายการใหม่จากเหตุการณ์ที่ไม่ควรสร้าง</td><td>ตัดสินใจแยกตามชนิดของเหตุการณ์</td></tr>
+<tr><td>ข้อมูลผิดทั้งวันโดยไม่มีใครรู้</td><td>ไม่มีการโหลดใหม่เป็นระยะ</td><td>ตาข่ายกันพลาดทุกไม่กี่นาที</td></tr>
+<tr><td>ยิง HTTP ถี่มากตอนมีเหตุการณ์รัว</td><td>โหลดใหม่ทุกเหตุการณ์</td><td>รวบด้วย debounce</td></tr>
+<tr><td>เชื่อเวลาที่แอปได้รับเป็นตัวตัดสิน</td><td>สับสนระหว่างลำดับการมาถึงกับลำดับการเกิด</td><td>ใช้เลขรุ่นจากเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมหลังบ้านบอกว่าเพิ่ม <code>version</code> ให้ทุกเหตุการณ์ไม่ได้ เพราะตารางเดิมไม่มีคอลัมน์นั้นและแก้ไม่ทันรุ่นนี้</p><ol><li>มีทางอื่นไหม</li><li>ทางไหนที่ควรเลือก</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สี่ทาง เรียงจากดีไปแย่</p><table><thead><tr><th>ทาง</th><th>ใช้ได้ไหม</th></tr></thead><tbody>
+<tr><td>ใช้เวลาที่เซิร์ฟเวอร์บันทึก (<code>updatedAt</code>) แทน</td><td>ได้ ถ้ามีคอลัมน์นี้อยู่แล้ว และความละเอียดถึงมิลลิวินาที</td></tr>
+<tr><td>เปลี่ยนเป็นเหตุการณ์ที่บอกให้โหลด (§7)</td><td>ได้ และแก้ปัญหาทั้งหมดโดยไม่ต้องแตะตาราง</td></tr>
+<tr><td>ให้เหตุการณ์ส่งสถานะเต็มมาด้วย แล้วเชื่ออันหลังสุด</td><td>ยังผิดได้ตอนคำตอบเก่ามาถึงทีหลัง</td></tr>
+<tr><td>ไม่ทำอะไร หวังว่าจะไม่เกิด</td><td>จะเกิด และจะแก้ยากเพราะทำซ้ำไม่ได้</td></tr>
+</tbody></table><p><strong>2. เลือกทางที่สอง</strong> — เปลี่ยนเป็นเหตุการณ์ที่บอกให้โหลด</p><p>เหตุผลที่ชนะทางแรก แม้ทางแรกจะดูตรงกว่า</p><ul><li>ไม่ต้องแตะฝั่งเซิร์ฟเวอร์เลยนอกจากลดข้อมูลที่ส่ง ซึ่งเป็นการแก้ที่เล็กกว่าการเพิ่มคอลัมน์</li><li>ไม่ต้องพึ่งความแม่นของนาฬิกาเซิร์ฟเวอร์ ซึ่งเป็นสมมติฐานที่พังเงียบเมื่อมีเซิร์ฟเวอร์หลายตัว</li><li>สัญญาเล็กลงมาก จึงมีอะไรให้ผิดน้อยลง</li></ul><p>ราคาที่จ่ายคือคำขอ HTTP เพิ่มขึ้น ซึ่งจัดการได้ด้วย debounce และยังน้อยกว่าการถามซ้ำทุกห้าวินาทีอยู่ดี</p><p><strong>สิ่งที่ควรทำควบคู่:</strong> เปิดตั๋วงานสำหรับการเพิ่ม <code>version</code> ไว้ พร้อมเขียนเหตุผลว่าทำไมถึงต้องมีในอนาคต — เพราะเมื่อระบบโตขึ้นและเหตุการณ์ถี่ขึ้น การโหลดใหม่ทุกครั้งจะกลายเป็นต้นทุนจริง และตอนนั้นจะได้ไม่ต้องเถียงกันใหม่ตั้งแต่ต้น</p><p>บทเรียนที่ใหญ่กว่า: เมื่อฝั่งหนึ่งทำสิ่งที่ถูกต้องที่สุดไม่ได้ ให้หา<strong>ทางที่ถูกต้องที่ทำได้ตอนนี้</strong> ไม่ใช่ทำสิ่งที่รู้อยู่แล้วว่าผิดแล้วหวังว่าจะไม่มีใครเจอ</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>เหตุการณ์บอกว่ามีอะไรเปลี่ยน HTTP บอกว่าตอนนี้เป็นอย่างไร ต้องมีทั้งคู่</li><li>เหตุการณ์ไม่เรียงลำดับ และคำตอบของ HTTP เก่าตั้งแต่ตอนที่เซิร์ฟเวอร์ถ่ายข้อมูล</li><li>ตัวตัดสินว่าอันไหนใหม่กว่าต้องมาจากเซิร์ฟเวอร์ ไม่ใช่เวลาที่แอปได้รับ</li><li>ตัดสินใจแยกตามชนิดของเหตุการณ์ ว่าควรสร้างรายการใหม่ไหม</li><li>มีตาข่ายกันพลาดที่โหลดใหม่เป็นระยะ แม้เรียลไทม์จะปกติ</li><li>เหตุการณ์ที่บอกให้โหลด เขียนง่ายกว่าและถูกต้องกว่าในหลายกรณี</li></ul></div><p><strong>บทหน้า:</strong> ทางสำรองเมื่อเรียลไทม์ใช้ไม่ได้</p></section>

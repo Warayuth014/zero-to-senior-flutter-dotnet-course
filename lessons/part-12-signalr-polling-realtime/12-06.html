@@ -4,23 +4,136 @@
 <title>Typed Listeners</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">12-06 · Realtime</span><h1>Typed Listeners</h1><p>Part 12: Realtime &amp; SignalR</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Typed listener</a></li><li><a href="#section-2">Snapshot iteration</a></li><li><a href="#section-3">Duplicate registration</a></li><li><a href="#section-4">Event-specific vs union</a></li><li><a href="#section-5">Stream option</a></li><li><a href="#section-6">Backpressure</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>Typed callbacksลด coupling:</strong> Serviceเผย domain eventไม่ใช่ raw map และคืน subscription/leaseที่ยกเลิกได้แทนคู่ add/removeหลาย methodที่ลืมง่าย</div>
-<section id="section-1"><h2>1. Typed listener</h2><pre class="code-vs"><code>typedef TaskEventListener = void Function(TaskRealtimeEvent event);
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">แบบที่หนึ่ง: รายชื่อ callback ต่อเหตุการณ์</a></li><li><a href="#section-2">รายละเอียดเล็ก ๆ ที่ถูกต้องมาก</a></li><li><a href="#section-3">แบบที่สอง: stream เส้นเดียวที่มีชนิด</a></li><li><a href="#section-4">เทียบสองแบบ</a></li><li><a href="#section-5">เมื่อไหร่ควรใช้แบบไหน</a></li><li><a href="#section-6">รูปแบบที่สาม: หนึ่ง stream ต่อหนึ่งเหตุการณ์</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เทียบสองแบบด้วยการนับบรรทัดจริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.5, Dart Foundation D1.16 (Stream)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ส่งเหตุการณ์ถึงคนที่สนใจโดยไม่ต้องเขียนโค้ดซ้ำต่อเหตุการณ์หนึ่งตัว</div>
 
-abstract interface class RealtimeSubscription {
-  void cancel();
+<section id="section-1"><h2>1. แบบที่หนึ่ง: รายชื่อ callback ต่อเหตุการณ์</h2><pre class="code-vs"><code>class SignalRService {
+  final List&lt;SignalRCallback&gt; _stationDispatchedListeners = [];
+  final List&lt;SignalRCallback&gt; _palletArrivedListeners = [];
+  final List&lt;SignalRCallback&gt; _palletReturnedListeners = [];
+  final List&lt;SignalRCallback&gt; _labelingCompletedListeners = [];
+
+  void addStationDispatchedListener(SignalRCallback cb) =&gt;
+      _stationDispatchedListeners.add(cb);
+  void removeStationDispatchedListener(SignalRCallback cb) =&gt;
+      _stationDispatchedListeners.remove(cb);
+  // ...คูณสี่...
+
+  void _onStationDispatched(List&lt;Object?&gt;? args) {
+    final data = _parseArgs(args);
+    for (final cb in List.of(_stationDispatchedListeners)) {
+      cb(data);
+    }
+  }
+  // ...คูณสี่...
+}</code></pre><p>อ่านง่ายและตรงไปตรงมา แต่มีสองอย่างที่โตตามจำนวนเหตุการณ์</p><table><thead><tr><th>ต่อเหตุการณ์หนึ่งตัว ต้องเขียน</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td>ฟิลด์รายชื่อ</td><td>1</td></tr>
+<tr><td>เมธอด add / remove</td><td>4</td></tr>
+<tr><td>ตัวจัดการที่กระจายไปทุกคน</td><td>6</td></tr>
+<tr><td>บรรทัด <code>.on(...)</code></td><td>1</td></tr>
+</tbody></table><p>สิบสองบรรทัดต่อเหตุการณ์หนึ่งตัว และไฟล์จริงสองไฟล์รวมกัน 235 บรรทัดสำหรับ 10 เหตุการณ์ — โดยที่โครงของทั้งสองไฟล์<strong>เหมือนกันทุกประการ</strong> ต่างแค่ชื่อ</p><p>สังเกตว่า <code>SortingSignalRService</code> เห็นปัญหานี้แล้วและแก้ไปครึ่งทาง</p><pre class="code-vs"><code>// helper: build handler ที่ broadcast ไปทุก listener ใน list
+void Function(List&lt;Object?&gt;?) _on(List&lt;SortingCallback&gt; listeners) =&gt; (args) {
+  final data = _parseArgs(args);
+  for (final cb in List.of(listeners)) {
+    cb(data);
+  }
+};</code></pre><p>ตัดส่วนที่ซ้ำที่สุดออกไปได้ เหลือ <code>_connection!.on('StationFull', _on(_stationFull));</code> บรรทัดเดียวต่อเหตุการณ์ — เป็นการปรับปรุงที่ดีและเห็นได้ว่าคนเขียนรู้ตัว</p></section>
+
+<section id="section-2"><h2>2. รายละเอียดเล็ก ๆ ที่ถูกต้องมาก</h2><pre class="code-vs"><code>for (final cb in List.of(_stationDispatchedListeners)) {
+  cb(data);
+}</code></pre><p><code>List.of(...)</code> คัดลอกรายชื่อก่อนวน แทนที่จะวนบนตัวจริง คำถามคือทำไม</p><p>เพราะ callback ที่ถูกเรียก<strong>อาจยกเลิกการฟังของตัวเอง</strong>ระหว่างนั้น</p><pre class="code-vs"><code>void _handleStationDispatched(Map&lt;String, dynamic&gt; data) {
+  if (data['stationId'] == _myStation) {
+    Navigator.pop(context);              // ปิดจอ
+    // → dispose() ทำงาน → removeStationDispatchedListener(...)
+    // → รายชื่อถูกแก้ระหว่างที่กำลังวนอยู่
+  }
+}</code></pre><p>ถ้าวนบนตัวจริงจะได้ <code>ConcurrentModificationError</code> ซึ่งเป็นข้อผิดพลาดที่เกิดเฉพาะบางจังหวะ ทำซ้ำยาก และหาสาเหตุยากมาก</p><div class="note">รายละเอียดแบบนี้คือสิ่งที่แยกโค้ดที่ผ่านการใช้งานจริง ออกจากโค้ดที่เพิ่งเขียนเสร็จ — มันไม่มีทางคิดออกตอนเขียนครั้งแรก แต่มาจากการที่เคยเจอมาแล้ว</div></section>
+
+<section id="section-3"><h2>3. แบบที่สอง: stream เส้นเดียวที่มีชนิด</h2><pre class="code-vs"><code>abstract interface class RealtimeClient {
+  Stream&lt;HubEvent&gt; get events;
+  Stream&lt;RealtimeStatus&gt; get status;
+  ...
+}</code></pre><p>เหตุการณ์ทุกชนิดไหลผ่านเส้นเดียว แล้วคนฟังแยกเองด้วย <code>switch</code></p><pre class="code-vs"><code>_eventSub = client.events.listen(_onEvent);
+
+void _onEvent(HubEvent event) {
+  switch (event) {
+    case TaskDispatched(:final taskId, :final assignee, :final version): ...
+    case TaskCompleted(:final taskId, :final version): ...
+    case StationCounterUpdated(): break;    // จอนี้ไม่สนใจ
+    case UnknownHubEvent(): break;
+    case MalformedHubEvent(): malformedEventCount++;
+  }
+}</code></pre><table><thead><tr><th>ต่อเหตุการณ์หนึ่งตัว ต้องเขียน</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td>คลาสของเหตุการณ์</td><td>ราว 8 (แต่ได้ชนิดที่ตรวจได้กลับมา)</td></tr>
+<tr><td>สาขาใน <code>decodeHubEvent</code></td><td>ราว 4</td></tr>
+<tr><td>โค้ดในตัวรับ</td><td>0 — ไม่ต้องเขียนอะไรเพิ่มถ้าไม่สนใจ</td></tr>
+</tbody></table></section>
+
+<section id="section-4"><h2>4. เทียบสองแบบ</h2><table><thead><tr><th> </th><th>รายชื่อ callback</th><th>stream ที่มีชนิด</th></tr></thead><tbody>
+<tr><td>ข้อมูลที่คนฟังได้รับ</td><td><code>Map&lt;String, dynamic&gt;</code></td><td>ชนิดที่คอมไพเลอร์ตรวจได้</td></tr>
+<tr><td>ยกเลิกการฟัง</td><td>ต้องจำว่า remove ตัวไหนบ้าง</td><td><code>subscription.cancel()</code> ตัวเดียว</td></tr>
+<tr><td>ลืมยกเลิกแล้วเกิดอะไร</td><td>รั่วเงียบ (12.8)</td><td>รั่วเงียบเหมือนกัน แต่มีที่เดียวให้ลืม</td></tr>
+<tr><td>เพิ่มเหตุการณ์ใหม่</td><td>เขียน 12 บรรทัด ทุกคนที่สนใจต้องเพิ่ม listener</td><td>เพิ่มคลาส คอมไพเลอร์ชี้ให้ว่าต้องแก้ตรงไหน</td></tr>
+<tr><td>คนฟังที่ไม่สนใจเหตุการณ์นั้น</td><td>ไม่ถูกเรียกเลย</td><td>ถูกเรียกแต่ตกในสาขาที่ไม่ทำอะไร</td></tr>
+<tr><td>กรองก่อนถึงคนฟัง</td><td>ทำไม่ได้</td><td><code>events.where(...)</code></td></tr>
+</tbody></table><p>แถวรองสุดท้ายเป็นข้อเสียจริงของ stream — จอที่สนใจเหตุการณ์เดียวจะถูกปลุกทุกครั้งที่มีเหตุการณ์ใดก็ตาม ในระบบที่เหตุการณ์เยอะมากอาจมีผล แต่ในคลังที่มีเหตุการณ์ไม่กี่ร้อยครั้งต่อวัน ไม่มีผลที่วัดได้</p><p>ถ้ามีผลจริง กรองที่ต้นทางได้</p><pre class="code-vs"><code>_sub = client.events
+    .where((event) =&gt; event is StationCounterUpdated)
+    .cast&lt;StationCounterUpdated&gt;()
+    .listen(_onCounter);</code></pre></section>
+
+<section id="section-5"><h2>5. เมื่อไหร่ควรใช้แบบไหน</h2><table><thead><tr><th>ใช้รายชื่อ callback</th><th>ใช้ stream</th></tr></thead><tbody>
+<tr><td>มีเหตุการณ์ไม่กี่ตัวและจะไม่เพิ่ม</td><td>เหตุการณ์เพิ่มเรื่อย ๆ</td></tr>
+<tr><td>ทีมยังไม่คุ้นกับ stream</td><td>อยากได้ชนิดที่คอมไพเลอร์ตรวจ</td></tr>
+<tr><td>ต้องการให้คนฟังถูกเรียกเฉพาะที่สนใจ</td><td>อยากกรองและแปลงก่อนถึงคนฟัง</td></tr>
+</tbody></table><p>ในทางปฏิบัติ ปัจจัยที่มีน้ำหนักที่สุดคือ<strong>ชนิดของข้อมูลที่คนฟังได้รับ</strong> — <code>Map&lt;String, dynamic&gt;</code> แปลว่าทุกจอที่ฟังต้องเขียนโค้ดอ่านฟิลด์เอง และเขียนไม่เหมือนกัน</p><pre class="code-vs"><code>// ทุกจอต้องเขียนแบบนี้เอง และแต่ละจอเขียนไม่เหมือนกัน
+void _onCounterUpdated(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as int?;   // จอนี้คิดว่าเป็น int
+  if (stationId == null || !mounted) return;
+  ...
+}</code></pre><p>สังเกต <code>as int?</code> — ถ้าเซิร์ฟเวอร์ส่ง <code>"01"</code> มาเป็นสตริง บรรทัดนี้จะได้ null เงียบ ๆ แล้ว <code>return</code> ทันที ผลคือเหตุการณ์ถูกทิ้งโดยไม่มีร่องรอย ซึ่งเป็นปัญหาเดียวกับที่ 12.5 แก้ด้วย <code>MalformedHubEvent</code></p></section>
+
+<section id="section-6"><h2>6. รูปแบบที่สาม: หนึ่ง stream ต่อหนึ่งเหตุการณ์</h2><pre class="code-vs"><code>class RealtimeClient {
+  Stream&lt;TaskDispatched&gt; get taskDispatched =&gt; ...;
+  Stream&lt;TaskCompleted&gt; get taskCompleted =&gt; ...;
+}</code></pre><p>ได้ชนิดที่ตรงตัวและคนฟังถูกเรียกเฉพาะที่สนใจ แต่กลับไปมีปัญหาเดิม คือต้องเขียนเพิ่มต่อเหตุการณ์หนึ่งตัว และคนฟังหลายเหตุการณ์ต้องเก็บ subscription หลายตัว</p><p>ทางสายกลางที่ใช้ได้ดีคือ<strong>มี stream เดียว แล้วให้ตัวช่วยกรอง</strong></p><pre class="code-vs"><code>extension HubEventStream on Stream&lt;HubEvent&gt; {
+  Stream&lt;T&gt; only&lt;T extends HubEvent&gt;() =&gt; where((e) =&gt; e is T).cast&lt;T&gt;();
 }
 
-RealtimeSubscription subscribe(TaskEventListener listener);</code></pre></section>
-<section id="section-2"><h2>2. Snapshot iteration</h2><pre class="code-vs"><code>for (final listener in List&lt;TaskEventListener&gt;.of(_listeners)) {
-  try { listener(event); } catch (error, stack) { report(error, stack); }
-}</code></pre><p>copyป้องกัน listener removeตัวเองระหว่าง iterationและ isolate errorราย listener</p></section>
-<section id="section-3"><h2>3. Duplicate registration</h2><p>ใช้ Setเมื่อ callback identityเหมาะหรือ subscription IDป้องกัน addซ้ำจาก didChangeDependencies/rebuild พร้อม testว่า eventหนึ่งเรียกครั้งเดียว</p></section>
-<section id="section-4"><h2>4. Event-specific vs union</h2><p>หลาย addXListener methodsชัดแต่ APIโต sealed union <code>TaskRealtimeEvent</code> + filter/streamทำ compositionง่าย เลือกตามจำนวน eventsและ consumer</p></section>
-<section id="section-5"><h2>5. Stream option</h2><p>broadcast Streamให้ <code>StreamSubscription.cancel()</code> และ operatorsได้ แต่กำหนด sync/async, buffering/error/close lifecycleให้ชัด ไม่ใช้ streamเพียงเพราะคำว่า realtime</p></section>
-<section id="section-6"><h2>6. Backpressure</h2><p>ถ้า eventถี่กว่า UIประมวลผลให้ coalesceตาม entity/version, debounce refreshหรือ batch ไม่ queue unboundedจน memoryโต</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>listener A throw แล้ว Bควรได้รับ eventไหม?</p><details><summary>เฉลย</summary><p>ควร isolate Aด้วย try/catch/reportแล้วส่ง Bต่อ เว้นแต่ architectureกำหนด stream error semanticsต่างอย่าง explicit</p></details></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">add/cancel/idempotent cancel, duplicate, removeระหว่าง dispatch, listener throw, orderingและ no eventsหลัง service dispose</div></section>
+// ในจอ
+_sub = client.events.only&lt;StationCounterUpdated&gt;().listen(_onCounter);</code></pre><p>ได้ทั้งชนิดที่ตรง การกรอง และ subscription ตัวเดียวต่อสิ่งที่สนใจ โดยที่ตัวไคลเอนต์ไม่ต้องเขียนเพิ่มเลยเมื่อมีเหตุการณ์ใหม่</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>ConcurrentModificationError</code> แบบสุ่ม</td><td>วนบนรายชื่อจริงขณะที่มีคน remove</td><td><code>List.of(...)</code> ก่อนวน</td></tr>
+<tr><td>เหตุการณ์ถูกทิ้งเงียบ ๆ</td><td><code>as int?</code> ที่ได้ null แล้ว return</td><td>แปลงที่ขอบให้มีชนิด (12.5)</td></tr>
+<tr><td>เพิ่มเหตุการณ์แล้วบางจอไม่รู้เรื่อง</td><td>ต้องไปเพิ่ม listener ทีละจอ</td><td>ใช้ <code>sealed</code> + <code>switch</code></td></tr>
+<tr><td>คนฟังตัวเดิมถูกเรียกสองครั้ง</td><td>เพิ่ม listener ซ้ำโดยไม่ได้ลบตัวเก่า</td><td>ตรวจใน <code>initState</code> ให้เพิ่มครั้งเดียว (12.7)</td></tr>
+<tr><td>เขียนโค้ดซ้ำสองไฟล์ที่เหมือนกันเป๊ะ</td><td>hub ที่สองคัดลอกจากตัวแรก</td><td>ทำตัวห่อที่รับรายชื่อเหตุการณ์เข้ามา</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>โปรเจกต์มี <code>SignalRService</code> กับ <code>SortingSignalRService</code> ที่โครงเหมือนกันทุกประการ ต่างแค่ชื่อ hub และรายชื่อเหตุการณ์ ตอนนี้จะเพิ่ม hub ที่สามสำหรับงานหยิบของ</p><ol><li>ควรคัดลอกไฟล์ที่สามไหม</li><li>ถ้าไม่ จะรวมอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ไม่ควร</strong> — สามครั้งคือจุดที่รูปแบบชัดแล้ว และการคัดลอกครั้งที่สามแปลว่าบั๊กที่พบในไฟล์หนึ่งต้องไปแก้อีกสองที่ ซึ่งจะลืม</p><p>แต่ต้องบอกตรง ๆ ว่า<strong>การคัดลอกครั้งที่สอง</strong> (ตอนที่ทำ <code>SortingSignalRService</code>) เป็นการตัดสินใจที่สมเหตุสมผล — ตอนนั้นยังไม่รู้ว่ารูปแบบจะซ้ำอีก และการรวมของสองชิ้นบ่อยครั้งได้ของกลางที่ผิดรูป</p><p><strong>2.</strong> ทำตัวห่อที่รับสิ่งที่ต่างเข้ามา</p><pre class="code-vs"><code>class HubClient implements RealtimeClient {
+  HubClient({
+    required this.path,                    // '/hubs/putaway'
+    required this.eventNames,              // รายชื่อที่จะลงทะเบียนฟัง
+    required this.decode,                  // ตัวแปลงของ hub นี้
+    required this.resolveBaseUrl,          // จาก Part 10
+    this.accessToken,
+  });
+
+  final String path;
+  final List&lt;String&gt; eventNames;
+  final HubEvent Function(String name, List&lt;Object?&gt;? args) decode;
+  ...
+}
+
+// ประกอบที่จุดเดียว (9.8)
+final putawayHub = HubClient(
+  path: '/hubs/putaway',
+  eventNames: PutawayEvents.all,
+  decode: decodePutawayEvent,
+  resolveBaseUrl: () =&gt; AppConfig.apiBaseUrl,
+);</code></pre><p>สามสิ่งที่ต่างกันระหว่าง hub กลายเป็นพารามิเตอร์ ส่วนสิ่งที่เหมือนกัน — การต่อ การต่อใหม่ การนับผู้ใช้ การแปลง callback เป็น stream — เขียนครั้งเดียว</p><p><strong>วิธีย้ายที่ปลอดภัย</strong> ตามหลักใน 9.15</p><ol><li>เขียน <code>HubClient</code> ใหม่ แล้วใช้กับ hub ที่สามก่อน — ยังไม่แตะสองตัวเดิม</li><li>ใช้จริงสักสองสัปดาห์ ดูว่าโครงรับมือกับของจริงได้ไหม</li><li>ย้าย <code>SortingSignalRService</code> มาใช้ พร้อมเทสต์ที่คุมพฤติกรรมเดิม</li><li>ย้าย <code>SignalRService</code> เป็นตัวสุดท้าย เพราะมีจอที่ใช้มากที่สุด</li></ol><p>ข้อ 2 สำคัญ — ของกลางที่ออกแบบจากสองตัวอย่างมักจะพอดีกับสองตัวนั้นเกินไป การเอาไปใช้กับตัวที่สามก่อนจะเผยว่าโครงยืดหยุ่นพอจริงไหม</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>รายชื่อ callback ต่อเหตุการณ์ ต้องเขียนราว 12 บรรทัดต่อเหตุการณ์หนึ่งตัว</li><li><code>List.of(...)</code> ก่อนวน กัน <code>ConcurrentModificationError</code> เมื่อคนฟังยกเลิกตัวเอง</li><li>stream ที่มีชนิดให้คอมไพเลอร์ช่วยตอนเพิ่มเหตุการณ์ใหม่</li><li>ปัจจัยที่มีน้ำหนักที่สุดคือชนิดของข้อมูลที่คนฟังได้รับ</li><li>hub ที่สามคือจุดที่ควรรวมเป็นตัวห่อตัวเดียว</li></ul></div><p><strong>บทหน้า:</strong> ลงทะเบียนฟังตอนไหน และจังหวะที่พลาดกันบ่อย</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

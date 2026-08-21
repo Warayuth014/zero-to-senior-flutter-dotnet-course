@@ -1,15 +1,120 @@
-<div class="note"><strong>Disposeต้องยกเลิกทั้ง listenerและทรัพยากร:</strong> remove/cancel subscriptionก่อน release connection lease, cancel timer/debounceและ invalidate async generation</div>
-<section><h2>1. Correct order</h2><pre class="code-vs"><code>@override
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เขียนเทสต์ที่จับการรั่ว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.7, 4.11 (ยกเลิกตัวจับเวลา), 8.8 (ล้างสถานะ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เก็บของให้ครบตอนปิดจอ และเขียนเทสต์ที่จับการรั่วซึ่งมองไม่เห็นด้วยตา</div>
+
+<section><h2>1. การรั่วหน้าตาเป็นอย่างไร</h2><p>ต่างจากบั๊กทั่วไปที่พังทันที การรั่วสะสมเงียบ ๆ แล้วโผล่ในรูปแบบที่โยงกลับหาสาเหตุยาก</p><table><thead><tr><th>สิ่งที่ลืมเก็บ</th><th>อาการที่ผู้ใช้เจอ</th></tr></thead><tbody>
+<tr><td>ไม่ยกเลิกการฟังเหตุการณ์</td><td>เปิดปิดจอสิบครั้ง แล้วเหตุการณ์เดียวถูกจัดการสิบครั้ง</td></tr>
+<tr><td>ไม่ยกเลิกตัวจับเวลา</td><td>ยิงคำขอเพิ่มขึ้นเรื่อย ๆ จนแอปช้าและแบตหมดเร็ว</td></tr>
+<tr><td>ไม่ปล่อยการเชื่อมต่อ</td><td>เซิร์ฟเวอร์ถือ connection ที่ไม่มีใครใช้</td></tr>
+<tr><td>ไม่ปิด <code>StreamController</code></td><td>หน่วยความจำโตขึ้นเรื่อย ๆ</td></tr>
+</tbody></table><div class="note">แถวแรกเป็นอาการที่หลอกที่สุด เพราะ<strong>แอปยังทำงานถูกต้อง</strong> แค่ทำงานซ้ำ — ตัวเลขบนหน้าจอยังถูก และไม่มีข้อผิดพลาดใด ๆ จนกว่าจะมีการกระทำที่ทำซ้ำแล้วเห็น เช่นเสียงเตือนที่ดังสิบครั้ง</div></section>
+
+<section><h2>2. รายการที่ต้องเก็บ</h2><pre class="code-vs"><code>/// หยุดทุกอย่างที่ยังทำงานอยู่
+///
+/// สามอย่างที่ต้องเก็บให้ครบ — สองการฟัง หนึ่งตัวจับเวลา และการปล่อย
+/// การเชื่อมต่อที่ใช้ร่วมกัน ลืมอย่างใดอย่างหนึ่งแปลว่ารั่ว
+@override
 void dispose() {
-  _subscription.cancel();
-  _debounce?.cancel();
-  store.releaseRealtimeLease();
+  _eventSub?.cancel();
+  _statusSub?.cancel();
+  _stopPolling();
+  unawaited(client.release());
   super.dispose();
-}</code></pre></section>
-<section><h2>2. Why unsubscribe first</h2><p>ระหว่าง async stop connectionอาจยังส่ง event ถ้าปล่อย leaseก่อน remove listener disposed widgetอาจถูก callbackและ setState after dispose</p></section>
-<section><h2>3. Async dispose</h2><p>Flutter disposeเป็น voidจึงเรียก stopแบบ unawaitedผ่าน owner/serviceที่ idempotentและจับ errorเอง ห้าม async disposeที่ frameworkไม่รอ</p></section>
-<section><h2>4. mounted is last guard</h2><p><code>if (!mounted) return</code> ป้องกัน crashแต่ไม่แก้ listener leak เพราะ callbackยังเก็บ Stateใน memoryและทำ parse/networkซ้ำ ต้อง unsubscribeจริง</p></section>
-<section><h2>5. App lifecycle observer</h2><p>ถ้า add <code>WidgetsBinding.instance.addObserver(this)</code> ต้อง removeObserverใน disposeและหยุด/ลด pollingตอน pausedตาม policy</p></section>
-<section><h2>6. Ref-count balance</h2><p>connect/releaseทุก consumerต้องสมดุลแม้ connect failหรือ initถูกเรียกซ้ำ Lease objectที่ cancelครั้งเดียวปลอดภัยกว่าตัวเลข refCountที่ callerจัดเอง</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>หน้าหลักกับ bottom sheetใช้ connectionเดียวกัน sheetปิดควร stop hubไหม?</p><details><summary>เฉลย</summary><p>ยกเลิก listener/leaseของ sheet; connectionหยุดเฉพาะเมื่อ owner/leaseสุดท้ายหมด ไม่ stopจนหน้าหลักขาด realtime</p></details></section>
-<section><h2>8. Leak tests</h2><div class="success">push/popซ้ำ, open/close sheet, connect failure, cancelสองครั้ง, eventระหว่าง stopและตรวจ listener/ref countกลับ baseline</div></section>
+}</code></pre><p>เทียบกับฝั่งที่ใช้รายชื่อ callback</p><pre class="code-vs"><code>@override
+void dispose() {
+  _signalR.removeStationDispatchedListener(_handleStationDispatched);
+  _signalR.removePalletArrivedListener(_handlePalletArrived);
+  _signalR.removePalletReturnedListener(_handlePalletReturned);
+  _signalR.removeLabelingCompletedListener(_handleLabelingCompleted);
+  _signalR.disconnect();
+  _stationController.dispose();
+  super.dispose();
+}</code></pre><p>โค้ดนี้ถูกต้องครบทุกบรรทัด แต่สังเกตว่ามันเป็น<strong>รายการที่ต้องจำ</strong> — เพิ่ม listener ตัวที่ห้าใน <code>initState</code> แล้วลืมเพิ่มบรรทัดที่ห้าใน <code>dispose</code> ไม่มีอะไรฟ้อง</p><table><thead><tr><th>วิธีลดโอกาสลืม</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ใช้ stream ตัวเดียว</td><td>subscription ตัวเดียวต่อสิ่งที่ฟัง ไม่ว่าจะมีเหตุการณ์กี่ชนิด</td></tr>
+<tr><td>เก็บ subscription ไว้ในลิสต์</td><td><code>for (final s in _subs) s.cancel();</code></td></tr>
+<tr><td>ให้ store เป็นคนถือ ไม่ใช่จอ</td><td>จอเรียก <code>store.dispose()</code> ที่เดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>3. <code>dispose</code> ที่ต้องรอผล</h2><pre class="code-vs"><code>unawaited(client.release());</code></pre><p><code>dispose()</code> ของ <code>ChangeNotifier</code> เป็น <code>void</code> ไม่ใช่ <code>Future</code> จึงรอ <code>await</code> ไม่ได้ ทางเลือกมีสองทาง</p><table><thead><tr><th>ทาง</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>unawaited(...)</code></td><td>สั่งแล้วปล่อย — ถูกสำหรับการปล่อยการเชื่อมต่อ เพราะไม่มีใครรอผล</td></tr>
+<tr><td>เมธอด <code>Future&lt;void&gt; close()</code> แยก</td><td>คนเรียกรอได้ แต่ต้องจำว่าต้องเรียกทั้ง <code>close</code> และ <code>dispose</code></td></tr>
+</tbody></table><p><code>unawaited</code> ไม่ได้แปลว่า “ไม่สนใจ” แต่แปลว่า “ตั้งใจไม่รอ” — ถ้าไม่เขียนคำนี้ ตัววิเคราะห์จะเตือนว่าลืม <code>await</code> ซึ่งเป็นการเตือนที่มีประโยชน์ในที่อื่น</p></section>
+
+<section><h2>4. เทสต์ที่จับการรั่ว</h2><p>การรั่วมองไม่เห็นด้วยตา แต่เทสต์จับได้ — และนี่คือเหตุผลหลักที่ lab ออกแบบให้ทุกอย่างรับเข้ามาทาง constructor</p><pre class="code-vs"><code>test('ทิ้ง store แล้วตัวจับเวลาต้องหยุด', () {
+  fakeAsync((async) {
+    unawaited(store.start());
+    async.flushMicrotasks();
+    inner.simulateDrop();
+    async.flushMicrotasks();
+    expect(store.isPolling, isTrue);
+
+    store.dispose();
+    final callsAtDispose = repository.fetchCalls;
+
+    async.elapse(const Duration(minutes: 10));
+    expect(repository.fetchCalls, callsAtDispose);
+  });
+});</code></pre><p><code>fakeAsync</code> ทำให้เวลาสิบนาทีผ่านไปในเสี้ยววินาที และถ้าตัวจับเวลายังเดินอยู่ จำนวนคำขอจะเพิ่มขึ้น 40 ครั้ง ซึ่งเทสต์จับได้ทันที</p><pre class="code-vs"><code>test('ทิ้ง store แล้วเหตุการณ์ที่มาทีหลังต้องไม่ถูกจัดการ', () async {
+  await store.start();
+  store.dispose();
+
+  // ถ้าไม่ยกเลิกการฟัง บรรทัดนี้จะทำให้ ChangeNotifier ที่ถูกทิ้งแล้ว
+  // ถูกเรียก notifyListeners ซึ่งโยนข้อผิดพลาด
+  inner.emit(const TaskCompleted(taskId: 'T-1', version: 9));
+  await Future&lt;void&gt;.delayed(Duration.zero);
+
+  expect(store.malformedEventCount, 0);
+});</code></pre><pre class="code-vs"><code>test('ทิ้ง store แล้วปล่อยการเชื่อมต่อที่ใช้ร่วมกัน', () async {
+  await store.start();
+  expect(shared.userCount, 1);
+
+  store.dispose();
+  await Future&lt;void&gt;.delayed(Duration.zero);
+
+  expect(shared.userCount, 0);
+  expect(inner.disconnectCalls, 1);
+});</code></pre><div class="note">สามเทสต์นี้ตรวจสามอย่างที่ต่างกัน และเขียนแยกกันโดยตั้งใจ — ถ้ารวมเป็นเทสต์เดียว เมื่อมันล้มจะไม่รู้ว่าลืมเก็บอะไร</div></section>
+
+<section><h2>5. <code>ChangeNotifier</code> ที่ถูกทิ้งแล้วจะโยน</h2><p>Flutter รุ่นใหม่ทำให้การเรียก <code>notifyListeners()</code> หลัง <code>dispose()</code> โยนข้อผิดพลาด</p><pre class="code-vs"><code>A ChangeNotifier was used after being disposed.
+Once you have called dispose() on a ChangeNotifier, it can no longer be used.</code></pre><p>ฟังดูน่ารำคาญ แต่เป็นของขวัญ — มันเปลี่ยนการรั่วที่เงียบให้กลายเป็นข้อผิดพลาดที่เห็นได้ระหว่างพัฒนา</p><table><thead><tr><th>อย่าแก้ด้วย</th><th>ให้แก้ด้วย</th></tr></thead><tbody>
+<tr><td>ใส่ธง <code>_disposed</code> แล้วเช็คก่อน notify</td><td>ยกเลิกการฟังให้ครบ</td></tr>
+<tr><td>ครอบด้วย <code>try/catch</code></td><td>หาว่าใครยังเรียกอยู่</td></tr>
+</tbody></table><p>ธง <code>_disposed</code> ทำให้ข้อผิดพลาดหายไปแต่การรั่วยังอยู่ — subscription ยังทำงาน ตัวจับเวลายังเดิน และการเชื่อมต่อยังถูกถือไว้ เปลี่ยนจากบั๊กที่เห็นได้เป็นบั๊กที่มองไม่เห็น ซึ่งแย่กว่าเดิม</p></section>
+
+<section><h2>6. ใครเป็นคนทิ้ง</h2><p>กฎจาก 9.8 ใช้ที่นี่ตรง ๆ — <strong>ใครสร้าง คนนั้นทิ้ง</strong></p><table><thead><tr><th>ใครสร้าง store</th><th>ใครเรียก dispose</th><th>store มีอายุเท่าไหร่</th></tr></thead><tbody>
+<tr><td>จอเดียว</td><td>จอนั้น</td><td>เท่าจอ</td></tr>
+<tr><td>shell ที่ครอบหลายจอ</td><td>shell</td><td>เท่า shell</td></tr>
+<tr><td>จุดประกอบใน <code>main</code></td><td>ไม่มีใคร</td><td>เท่าแอป</td></tr>
+</tbody></table><p>แถวสุดท้ายยอมรับได้ถ้าตั้งใจ แต่ต้องรู้ว่าแปลว่าการเชื่อมต่อจะค้างตลอดอายุแอป รวมถึงตอนที่ผู้ใช้ออกจากระบบ ซึ่งอาจไม่ใช่สิ่งที่ต้องการ (8.8)</p><pre class="code-vs"><code>// ออกจากระบบ → ทิ้ง shell → store ถูกทิ้ง → ปล่อยการเชื่อมต่อ
+// ถ้า store อยู่ที่ main การเชื่อมต่อจะยังค้างพร้อม token ของคนก่อน</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เหตุการณ์ถูกจัดการหลายครั้ง</td><td>ลืม remove listener</td><td>ใช้ stream ตัวเดียว หรือเก็บใน <code>_subs</code></td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>subscription ยังทำงาน</td><td>ยกเลิก อย่าใส่ธงกลบ</td></tr>
+<tr><td>คำขอยังยิงหลังปิดจอ</td><td>ลืม <code>timer.cancel()</code></td><td>ยกเลิกใน <code>dispose</code></td></tr>
+<tr><td>เพิ่ม listener ตัวใหม่แล้วลืมบรรทัดใน <code>dispose</code></td><td>รายการที่ต้องจำ</td><td>ให้ store ถือ ไม่ให้จอถือ</td></tr>
+<tr><td>การเชื่อมต่อค้างหลังออกจากระบบ</td><td>store มีอายุเท่าแอป</td><td>ให้ store มีอายุเท่า shell ที่ถูกทิ้งตอนออก</td></tr>
+<tr><td><code>Bad state: Cannot add event after closing</code></td><td>ปิด controller ก่อนหยุดต้นทาง</td><td>หยุดต้นทางก่อน แล้วค่อยปิด (12.3)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมสงสัยว่าแอปรั่ว เพราะผู้ใช้บอกว่า “ใช้ไปสักพักแล้วช้า ต้องปิดเปิดใหม่” แต่ไม่มีใครทำซ้ำได้</p><ol><li>จะยืนยันว่ารั่วจริงอย่างไร</li><li>จะหาว่ารั่วตรงไหน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> เขียนเทสต์ที่จำลองการใช้งานยาว ๆ แทนที่จะรอผู้ใช้รายงาน</p><pre class="code-vs"><code>testWidgets('เปิดปิดจอ 20 ครั้ง แล้วต้องไม่มีผู้ฟังค้าง', (tester) async {
+  final client = InMemoryRealtimeClient();
+  final shared = SharedRealtimeClient(client);
+
+  for (var i = 0; i &lt; 20; i++) {
+    await tester.pumpWidget(TaskScreen(client: shared, ...));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());   // ทิ้งจอ
+    await tester.pumpAndSettle();
+  }
+
+  expect(shared.userCount, 0);
+  expect(client.disconnectCalls, 20);
+});</code></pre><p>ตัวนับที่เปิดไว้ใน <code>SharedRealtimeClient</code> มีไว้เพื่อสิ่งนี้โดยเฉพาะ</p><pre class="code-vs"><code>/// จำนวนผู้ใช้งานตอนนี้ เปิดให้เทสต์ตรวจได้ว่าปล่อยครบไหม
+int get userCount =&gt; _users;</code></pre><p><strong>2.</strong> ไล่จากที่ตรวจง่ายไปยาก</p><table><thead><tr><th>วิธี</th><th>จับอะไรได้</th></tr></thead><tbody>
+<tr><td>นับ listener ตอนรัน แล้ว log ทุกครั้งที่เพิ่ม/ลด</td><td>listener ที่ไม่ถูกลบ — ตรงและเร็วที่สุด</td></tr>
+<tr><td>DevTools แท็บ Memory ถ่าย snapshot ก่อนและหลังเปิดปิดจอ 10 ครั้ง</td><td>วัตถุที่ควรถูกเก็บแต่ยังอยู่</td></tr>
+<tr><td>ค้นหา <code>Timer.periodic</code> และ <code>.listen(</code> ทั้งโปรเจกต์ แล้วเทียบกับ <code>cancel()</code></td><td>ที่ที่ลืมทั้งหมด</td></tr>
+</tbody></table><p>วิธีที่สามหยาบแต่ได้ผลดีอย่างน่าประหลาดใจ</p><pre class="code-vs"><code>grep -rn "\.listen(\|Timer.periodic" lib --include=*.dart | wc -l
+grep -rn "\.cancel()" lib --include=*.dart | wc -l</code></pre><p>ตัวเลขไม่ต้องเท่ากันเป๊ะ แต่ถ้าต่างกันมาก ให้ไล่ดูทีละที่</p><p><strong>ข้อคิดที่สำคัญกว่าวิธีหา:</strong> อาการ “ใช้ไปสักพักแล้วช้า” เป็นอาการที่ผู้ใช้<strong>ทนอยู่</strong>มานานก่อนจะบอก เพราะเขาแก้เองได้ด้วยการปิดเปิดแอป — แปลว่าตอนที่ได้ยิน มันอาจมีมานานแล้ว และการเพิ่มเทสต์แบบข้อ 1 เข้าไปในทุกจอสำคัญ คุ้มกว่าการไล่หาทีละครั้ง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>การรั่วเงียบ และแอปยังทำงานถูกอยู่ แค่ทำซ้ำ</li><li>เก็บให้ครบ — การฟัง ตัวจับเวลา การเชื่อมต่อ และ controller</li><li>ยิ่งมีของให้จำมาก ยิ่งลืม ให้ store ถือแทนจอ</li><li>อย่าใส่ธง <code>_disposed</code> กลบข้อผิดพลาด มันเปลี่ยนบั๊กที่เห็นเป็นบั๊กที่มองไม่เห็น</li><li>เทสต์ที่เปิดปิดจอหลายรอบแล้วนับ จับการรั่วได้ก่อนถึงมือผู้ใช้</li></ul></div><p><strong>บทหน้า:</strong> จอหลายจอที่ต้องการเหตุการณ์ชุดเดียวกัน</p></section>

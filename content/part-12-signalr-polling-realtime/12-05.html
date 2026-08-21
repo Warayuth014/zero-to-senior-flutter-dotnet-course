@@ -1,18 +1,144 @@
-<div class="note"><strong>SignalR argsยังเป็น dynamic boundary:</strong> ตรวจ list/จำนวน/top-level shape แล้ว parseผ่าน DTO converterเดียวกับ JSON API ไม่ castตรงใน screen</div>
-<section><h2>1. Raw handler</h2><pre class="code-vs"><code>void onTaskChanged(List&lt;Object?&gt;? args) {
-  if (args == null || args.length != 1) {
-    reportContractError('TaskStatusChanged args'); return;
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน <code>hub_events.dart</code> แล้วรันเทสต์ทั้งหก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.3, Part 6 (การอ่าน JSON), 9.13 (การแปลความล้มเหลว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แปลงข้อมูลไร้ชนิดจาก hub ให้ปลอดภัย โดยที่ข้อมูลเสียหนึ่งก้อนไม่ทำให้ทั้งวันพัง</div>
+
+<section><h2>1. สิ่งที่ hub ส่งมาจริง ๆ</h2><pre class="code-vs"><code>_connection!.on('StationDispatched', (List&lt;Object?&gt;? args) { ... });</code></pre><p><code>List&lt;Object?&gt;?</code> คือชนิดที่ให้ข้อมูลน้อยที่สุดเท่าที่จะเป็นไปได้ — เป็นลิสต์ อาจเป็น null สมาชิกอาจเป็นอะไรก็ได้</p><table><thead><tr><th>ทำไมเป็นแบบนี้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ฝั่ง .NET ส่งกี่ argument ก็ได้</td><td><code>SendAsync("Event", a, b, c)</code> ทำได้</td></tr>
+<tr><td>ไลบรารีไม่รู้ว่าเราตกลงอะไรไว้</td><td>มันแค่ถอดรหัส JSON แล้วส่งต่อ</td></tr>
+<tr><td>ไม่มีการสร้างโค้ดจากสัญญา</td><td>ต่างจากบางระบบที่สร้าง client ให้จากนิยาม</td></tr>
+</tbody></table><p>ผลคือ <strong>ขอบนี้คือจุดที่ต้องแปลงให้มีชนิด</strong> ก่อนที่ส่วนอื่นของแอปจะเห็น — เหมือนที่ Part 6 ทำกับ JSON จาก HTTP</p></section>
+
+<section><h2>2. แต่กฎการจัดการข้อผิดพลาดต่างกัน</h2><table><thead><tr><th> </th><th>JSON จาก HTTP (Part 6)</th><th>เหตุการณ์จาก hub</th></tr></thead><tbody>
+<tr><td>ใครรอผลอยู่</td><td>ผู้ใช้ที่เพิ่งกดปุ่ม</td><td>ไม่มีใคร — ทำงานเบื้องหลัง</td></tr>
+<tr><td>ถ้าโยน</td><td>จอแสดงข้อผิดพลาด ผู้ใช้ลองใหม่ได้</td><td><strong>การเชื่อมต่อหลุด</strong> และไม่ได้รับเหตุการณ์อีกเลย</td></tr>
+<tr><td>ความเสียหาย</td><td>คำขอเดียวล้มเหลว</td><td>เหตุการณ์ทั้งกะหายไป</td></tr>
+<tr><td>ผู้ใช้รู้ไหม</td><td>รู้ทันที</td><td>ไม่รู้เลย</td></tr>
+</tbody></table><div class="note">แถวที่สองคือเหตุผลทั้งหมดที่ <code>decodeHubEvent</code> <strong>ไม่โยนไม่ว่ากรณีใด</strong> — ข้อมูลเสียหนึ่งก้อนต้องไม่ทำให้เหตุการณ์ที่เหลือทั้งวันหายไปด้วย</div><pre class="code-vs"><code>/// **ไม่โยนไม่ว่ากรณีใด** — คนเรียกคือตัวรับเหตุการณ์ที่ทำงานอยู่เบื้องหลัง
+/// ถ้าโยน การเชื่อมต่อจะหลุดและผู้ใช้จะไม่ได้รับเหตุการณ์อีกเลยทั้งกะ
+/// โดยไม่มีใครรู้ว่าทำไม
+HubEvent decodeHubEvent(String name, List&lt;Object?&gt;? args) { ... }</code></pre></section>
+
+<section><h2>3. แต่ก็ไม่กลืนเงียบ ๆ</h2><p>ทางง่ายคือคืน null แล้วข้ามไป ซึ่งแก้ปัญหาการหลุดได้ แต่สร้างปัญหาใหม่ — ไม่มีใครรู้ว่าสัญญาผิดตั้งแต่เมื่อไหร่</p><p>lab จึงแยกสองกรณีที่หน้าตาเหมือนกันแต่ความหมายต่างกันมาก</p><pre class="code-vs"><code>/// เหตุการณ์ที่แอปรุ่นนี้ยังไม่รู้จัก
+///
+/// ไม่ใช่ความผิดพลาด — เซิร์ฟเวอร์รุ่นใหม่ส่งเหตุการณ์ที่แอปรุ่นเก่า
+/// ยังไม่รองรับเป็นเรื่องปกติ และต้องไม่ทำให้อะไรพัง
+class UnknownHubEvent extends HubEvent { ... }
+
+/// เหตุการณ์ที่รู้จักชื่อ แต่ข้อมูลข้างในไม่ตรงกับที่ตกลงไว้
+///
+/// ต่างจาก UnknownHubEvent ตรงที่อันนี้**เป็นปัญหา**ที่ทีมต้องรู้
+class MalformedHubEvent extends HubEvent {
+  final String reason;   // อธิบายว่าอะไรไม่ตรง
+}</code></pre><table><thead><tr><th>กรณี</th><th>ความหมาย</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ชื่อที่ไม่รู้จัก</td><td>เซิร์ฟเวอร์ใหม่กว่าแอป</td><td>ข้ามไปเงียบ ๆ — เป็นเรื่องปกติ</td></tr>
+<tr><td>ชื่อรู้จัก แต่ข้อมูลผิด</td><td>สัญญาถูกละเมิด</td><td>นับไว้และส่งเข้าระบบบันทึก</td></tr>
+</tbody></table><p>ถ้าไม่แยกสองอย่างนี้ จะเจอทางเลือกที่แย่ทั้งคู่ — เตือนทุกครั้งที่เซิร์ฟเวอร์ส่งอะไรใหม่มา (รกจนไม่มีใครดู) หรือเงียบทุกกรณี (ไม่มีวันรู้ว่าสัญญาพัง)</p></section>
+
+<section><h2>4. โครงของตัวแปลง</h2><pre class="code-vs"><code>HubEvent decodeHubEvent(String name, List&lt;Object?&gt;? args) {
+  final payload = _firstMap(args);
+  if (payload == null) {
+    return MalformedHubEvent(name, 'ข้อมูลที่ส่งมาไม่ใช่ object');
   }
-  final raw = args.single;
-  if (raw is! Map) { reportContractError('Expected map'); return; }
-  final event = TaskStatusChangedDto.fromJson(
-    Map&lt;String, dynamic&gt;.from(raw)).toDomain();
-  events.add(event);
-}</code></pre></section>
-<section><h2>2. Typed event</h2><p>ประกอบ eventId, entity ID, status enum, versionและ occurredAt ให้ validationชัด Unknown statusใช้ safe mappingหรือ trigger refresh ไม่ crash listener loop</p></section>
-<section><h2>3. Multiple arguments</h2><p>SignalR eventอาจส่งหลาย argsแต่ object payloadเดียว versionง่ายกว่า หาก contractหลาย argsให้ parse index+type explicitและมี testsจาก .NET fixtureจริง</p></section>
-<section><h2>4. Casing/numbers/time</h2><p>ใช้ convertersกลางจาก Part 6รองรับ camel/Pascal migration, int/doubleและ UTC timestamp ไม่สร้าง parse logicอีกชุดเฉพาะ realtime</p></section>
-<section><h2>5. Contract error isolation</h2><p>eventเสียหนึ่งตัวต้องไม่หยุด handlersอื่นหรือ connection แจ้ง telemetryพร้อม event name/trace safe metadataแล้ว schedule HTTP reconcile</p></section>
-<section><h2>6. ของจริง</h2><p>SignalR servicesใน <code>wmsapp</code> ใช้ <code>_parseArgs</code> แปลง Mapทั่วไปเป็น <code>Map&lt;String,dynamic&gt;</code> ขั้นต่อไปคือ typed DTOแทนส่ง mapถึง screen</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p><code>version</code> มาเป็น string "12" ควร cast intตรงไหม?</p><details><summary>เฉลย</summary><p>ไม่ ใช้ requireInt converterตาม contract/fallbackและบันทึก contract drift; ห้าม <code>as int</code> ใน UI handler</p></details></section>
-<section><h2>8. Fixture tests</h2><div class="success">null/empty/multiple args, Map&lt;dynamic,dynamic&gt;, missing ID, casing, number string, invalid date, unknown statusและ malformed eventไม่ฆ่า stream</div></section>
+
+  try {
+    return switch (name) {
+      'TaskDispatched' =&gt; TaskDispatched(
+        taskId: _requireText(payload, 'taskId'),
+        assignee: _requireText(payload, 'assignee'),
+        version: _requireInt(payload, 'version'),
+      ),
+      'TaskCompleted' =&gt; TaskCompleted(
+        taskId: _requireText(payload, 'taskId'),
+        version: _requireInt(payload, 'version'),
+      ),
+      ...
+      _ =&gt; UnknownHubEvent(name),
+    };
+  } on _FieldError catch (error) {
+    return MalformedHubEvent(name, error.message);
+  }
+}</code></pre><p>รูปแบบที่ใช้คือ <strong>ข้างในโยน ข้างนอกจับ</strong> — ตัวอ่านแต่ละฟิลด์โยนได้ตามปกติ ทำให้เขียนสั้นและอ่านง่าย ส่วนขอบนอกสุดจับทั้งหมดแล้วแปลงเป็นค่าคืน</p><p>ข้อดีคือการเพิ่มเหตุการณ์ใหม่ไม่ต้องเขียนโค้ดจัดการข้อผิดพลาดซ้ำ และเป็นไปไม่ได้ที่จะลืม</p><pre class="code-vs"><code>class _FieldError implements Exception {
+  const _FieldError(this.message);
+  final String message;
+}</code></pre><p><code>_FieldError</code> เป็นชนิดส่วนตัวของไฟล์นี้โดยตั้งใจ — มันไม่ควรหลุดออกไปข้างนอก เพราะข้างนอกไม่ควรต้องจับอะไรเลย</p></section>
+
+<section><h2>5. รายละเอียดที่ทำให้ต่างกัน</h2><pre class="code-vs"><code>/// SignalR ส่ง argument มาเป็นลิสต์ เพราะฝั่ง .NET เรียก
+/// `SendAsync("EventName", arg1, arg2)` ได้หลายตัว
+///
+/// สัญญาของระบบนี้คือส่ง object เดียว จึงอ่านเฉพาะตัวแรก
+Map&lt;String, dynamic&gt;? _firstMap(List&lt;Object?&gt;? args) {
+  if (args == null || args.isEmpty) return null;
+  final first = args.first;
+  if (first is Map&lt;String, dynamic&gt;) return first;
+  // มาจาก JSON ที่ถอดรหัสแล้วอาจเป็น Map&lt;dynamic, dynamic&gt;
+  if (first is Map) return Map&lt;String, dynamic&gt;.from(first);
+  return null;
+}</code></pre><p>บรรทัด <code>if (first is Map)</code> ตัวที่สองไม่ใช่ของฟุ่มเฟือย — ขึ้นกับว่า JSON ถูกถอดรหัสมาอย่างไร ค่าที่ได้อาจเป็น <code>Map&lt;dynamic, dynamic&gt;</code> ซึ่ง<strong>ไม่ผ่าน</strong>การตรวจ <code>is Map&lt;String, dynamic&gt;</code> โค้ดจริงของ <code>wmsapp</code> ก็เขียนสองชั้นแบบนี้เหมือนกัน</p><pre class="code-vs"><code>int _requireInt(Map&lt;String, dynamic&gt; json, String key) {
+  final value = json[key];
+  // JSON ไม่แยก int กับ double — 3 กับ 3.0 คือเลขเดียวกัน (6.7)
+  if (value is int) return value;
+  if (value is double &amp;&amp; value == value.roundToDouble()) return value.toInt();
+  throw _FieldError('$key ต้องเป็นจำนวนเต็ม แต่ได้ ${value.runtimeType}');
+}</code></pre><p>กฎเดียวกับ Part 6 — รับ <code>3.0</code> เพราะเป็นจำนวนเต็มเท่ากัน แต่ปฏิเสธ <code>3.5</code></p></section>
+
+<section><h2>6. เทสต์ที่สำคัญที่สุดของไฟล์นี้</h2><pre class="code-vs"><code>test('ไม่โยนไม่ว่าจะส่งอะไรมา', () {
+  // ตัวรับเหตุการณ์ทำงานอยู่เบื้องหลัง ถ้าโยนขึ้นไปการเชื่อมต่อจะหลุด
+  // แล้วผู้ใช้จะไม่ได้รับเหตุการณ์อีกเลยทั้งกะ
+  final inputs = &lt;List&lt;Object?&gt;?&gt;[
+    null,
+    [],
+    ['ข้อความ ไม่ใช่ object'],
+    [42],
+    [{'taskId': 123, 'version': 'สาม'}],
+  ];
+
+  for (final args in inputs) {
+    expect(() =&gt; decodeHubEvent('TaskCompleted', args), returnsNormally);
+    expect(decodeHubEvent('TaskCompleted', args), isA&lt;MalformedHubEvent&gt;());
+  }
+});</code></pre><p>ห้าค่าในลูปนี้คือทุกรูปแบบของ “สิ่งที่ไม่ใช่ที่ตกลงกันไว้” และแต่ละอันเข้าเส้นทางป้องกันคนละเส้น</p><p>เทสต์ที่คู่กันคืออันที่พิสูจน์ว่าสิ่งที่ถูกก็ยังผ่าน</p><pre class="code-vs"><code>test('เลขที่มาเป็น double แต่เป็นจำนวนเต็ม ใช้ได้', () {
+  final event = decodeHubEvent('TaskCompleted', [
+    {'taskId': 'T-1', 'version': 3.0},
+  ]);
+  expect((event as TaskCompleted).version, 3);
+});</code></pre></section>
+
+<section><h2>7. <code>sealed</code> ทำให้ลืมไม่ได้</h2><pre class="code-vs"><code>sealed class HubEvent {
+  const HubEvent();
+  String get name;
+}</code></pre><p><code>sealed</code> แปลว่าคลาสลูกทั้งหมดต้องอยู่ในไฟล์เดียวกัน ผลคือคอมไพเลอร์รู้รายชื่อครบ และ <code>switch</code> ที่จัดการไม่ครบจะคอมไพล์ไม่ผ่าน</p><pre class="code-vs"><code>void _onEvent(HubEvent event) {
+  switch (event) {
+    case TaskDispatched(:final taskId, :final assignee, :final version): ...
+    case TaskCompleted(:final taskId, :final version): ...
+    case StationCounterUpdated(): ...
+    case UnknownHubEvent(): ...
+    case MalformedHubEvent(): ...
+    // ลบบรรทัดใดบรรทัดหนึ่งออก แล้วคอมไพล์ไม่ผ่านทันที
+  }
+}</code></pre><p>วันที่เพิ่มเหตุการณ์ใหม่ คอมไพเลอร์จะชี้ให้เห็น<strong>ทุกที่</strong>ที่ต้องตัดสินใจว่าจะทำอย่างไรกับมัน — ต่างจากการใช้ <code>if (event.name == '...')</code> ที่เพิ่มแล้วไม่มีใครรู้ว่าต้องไปแก้ที่ไหนบ้าง</p><p>สังเกตว่า <code>case StationCounterUpdated(): break;</code> ที่ไม่ทำอะไร ก็ยังต้องเขียน — และนั่นคือข้อดี เพราะมันคือการบันทึกว่า “จอนี้ตัดสินใจแล้วว่าไม่สนใจ” ไม่ใช่ “ลืม”</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>การเชื่อมต่อหลุดเป็นระยะโดยไม่มีสาเหตุ</td><td>ตัวแปลงโยนเมื่อเจอข้อมูลแปลก</td><td>ห้ามโยน คืนค่าที่บอกว่าเสียแทน</td></tr>
+<tr><td>สัญญาพังมาสามเดือนแล้วไม่มีใครรู้</td><td>กลืนเงียบด้วยการคืน null</td><td>แยก unknown ออกจาก malformed</td></tr>
+<tr><td>แปลงไม่ผ่านทั้งที่ข้อมูลถูก</td><td>ตรวจ <code>is Map&lt;String, dynamic&gt;</code> อย่างเดียว</td><td>รองรับ <code>Map</code> ทั่วไปด้วย</td></tr>
+<tr><td>เลขที่มาเป็น <code>3.0</code> แปลงไม่ผ่าน</td><td>ตรวจ <code>is int</code> อย่างเดียว</td><td>รับ double ที่เป็นจำนวนเต็ม</td></tr>
+<tr><td>เพิ่มเหตุการณ์ใหม่แล้วลืมจัดการในบางจอ</td><td>ใช้ <code>if</code> เทียบชื่อ</td><td>ใช้ <code>sealed</code> + <code>switch</code></td></tr>
+<tr><td>แอปรุ่นเก่าพังเมื่อเซิร์ฟเวอร์อัปเดต</td><td>ไม่มีกรณี unknown</td><td>ให้ชื่อที่ไม่รู้จักตกไปที่ <code>UnknownHubEvent</code></td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมหลังบ้านเปลี่ยน <code>version</code> จากจำนวนเต็มเป็นสตริงแบบ <code>"3"</code> โดยไม่ได้บอกล่วงหน้า</p><ol><li>แอปจะเป็นอย่างไร</li><li>ควรรับสตริงด้วยไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ทุกเหตุการณ์กลายเป็น <code>MalformedHubEvent</code> ผลคือ</p><ul><li>การเชื่อมต่อยังอยู่ ไม่หลุด — นี่คือสิ่งที่การออกแบบนี้ซื้อมา</li><li>หน้าจอไม่อัปเดตจากเหตุการณ์อีกต่อไป แต่ยังถูกต้องอยู่เพราะยังโหลดผ่าน HTTP ได้</li><li><code>malformedEventCount</code> เพิ่มขึ้นเรื่อย ๆ ซึ่งเป็นสัญญาณที่ทีมเห็นได้</li></ul><p>เทียบกับการออกแบบที่โยน — การเชื่อมต่อจะหลุดทันทีที่เหตุการณ์แรกมาถึง แล้วต่อใหม่ แล้วหลุดอีก วนไปทั้งวัน กินแบตและกินเซิร์ฟเวอร์ โดยที่อาการที่ผู้ใช้เห็นคือ “แอปช้าและร้อน”</p><p><strong>2.</strong> คำถามนี้เป็นคำถามเดียวกับ 6.6 เรื่องการรองรับสองชื่อฟิลด์ และคำตอบเป็นแบบเดียวกัน</p><table><thead><tr><th>รับสตริงด้วย</th><th>ไม่รับ</th></tr></thead><tbody>
+<tr><td>แอปรุ่นเก่าที่ติดตั้งไปแล้วยังทำงานได้</td><td>สัญญาชัด ใครผิดรู้ทันที</td></tr>
+<tr><td>ต้องดูแลสองรูปแบบตลอดไป</td><td>ต้องอัปเดตแอปทุกเครื่องพร้อมเซิร์ฟเวอร์</td></tr>
+</tbody></table><p><strong>คำตอบที่ใช้จริงคือรับ แต่บันทึกไว้</strong></p><pre class="code-vs"><code>int _requireInt(Map&lt;String, dynamic&gt; json, String key) {
+  final value = json[key];
+  if (value is int) return value;
+  if (value is double &amp;&amp; value == value.roundToDouble()) return value.toInt();
+  // รับไว้เพื่อให้เครื่องที่ยังไม่ได้อัปเดตทำงานต่อได้ แต่ไม่ควรมี —
+  // ถ้าตัวนับนี้ขึ้น แปลว่าสัญญาถูกเปลี่ยนโดยไม่ได้ตกลงกัน
+  if (value is String &amp;&amp; int.tryParse(value) case final parsed?) {
+    legacyStringVersionCount++;
+    return parsed;
+  }
+  throw _FieldError('$key ต้องเป็นจำนวนเต็ม แต่ได้ ${value.runtimeType}');
+}</code></pre><p>เหตุผลที่เลือกทางนี้เฉพาะกับเรียลไทม์ ทั้งที่ Part 6 เข้มงวดกว่า คือ<strong>ความเสียหายไม่เท่ากัน</strong> — HTTP ที่ล้มเหลวผู้ใช้เห็นและลองใหม่ได้ ส่วนเรียลไทม์ที่พังจะเงียบและกินทรัพยากรไปเรื่อย ๆ</p><p>แต่ต้องมีวันหมดอายุ ให้เปิดตั๋วงานไว้ว่าจะลบบรรทัดนี้เมื่อเครื่องทุกเครื่องอัปเดตแล้ว ไม่งั้นมันจะอยู่ตลอดกาลและไม่มีใครกล้าลบ</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>hub ส่ง <code>List&lt;Object?&gt;?</code> ซึ่งเป็นชนิดที่บอกอะไรไม่ได้เลย</li><li>ตัวแปลงห้ามโยน เพราะการโยนทำให้การเชื่อมต่อหลุดและเงียบทั้งวัน</li><li>แต่ต้องไม่กลืนเงียบ — แยก “ยังไม่รู้จัก” ออกจาก “ข้อมูลผิด”</li><li>ข้างในโยน ข้างนอกจับ ทำให้เพิ่มเหตุการณ์ใหม่ไม่ต้องเขียนซ้ำ</li><li><code>sealed</code> ทำให้ลืมจัดการเหตุการณ์ใหม่ไม่ได้</li></ul></div><p><strong>บทหน้า:</strong> ทำให้เหตุการณ์ที่แปลงแล้วส่งถึงคนที่สนใจอย่างมีชนิด</p></section>

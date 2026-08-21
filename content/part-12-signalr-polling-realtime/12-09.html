@@ -1,14 +1,137 @@
-<div class="note"><strong>Singleton connectionแชร์ transport ไม่แชร์ UI state:</strong> service app/session-scopedถือ hubและ subscriptions แต่แต่ละ Storeถือ feature state/filtersของตน</div>
-<section><h2>1. Why one connection</h2><p>ลด sockets/auth/reconnect stormsและรับ eventsร่วม แต่ singleton globalทำ tests/server switchยากถ้าไม่มี interface/reset/lifecycleชัด</p></section>
-<section><h2>2. Lease model</h2><pre class="code-vs"><code>RealtimeLease acquire() {
-  final id = ++_nextLease;
-  _leases.add(id);
-  unawaited(_ensureConnected());
-  return Lease(() =&gt; _release(id));
-}</code></pre><p>release idempotentและ stopเมื่อไม่มี leasesตาม keep-alive policy</p></section>
-<section><h2>3. Ref-count pitfalls</h2><p>เพิ่ม countทุก <code>connect()</code> แม้ callerเดิมเรียกซ้ำ, connect throwแต่ countค้าง, disconnectเกินศูนย์และ nested sheetฟังโดยไม่ acquireทำ connectionหยุดผิดเวลา</p></section>
-<section><h2>4. Session boundary</h2><p>singletonต้อง resetเมื่อ logout/token/server realmเปลี่ยน: stop, clear handlers/groups/queued events, increment generationและห้าม reconnectด้วย tokenเดิม</p></section>
-<section><h2>5. Per-feature channels</h2><p>แยก Task/Sorting/Putaway facadeได้แม้ใช้ underlying connectionเดียว เพื่อ typed event contractsและไม่ให้ screenเห็น listenersทุกโดเมน</p></section>
-<section><h2>6. Testing seam</h2><p>inject <code>RealtimeClient</code> interface/fakeแทนเรียก singleton constructorใน Store; composition rootใช้ shared production instance</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ควรเปิด hubตั้งแต่ loginตลอด sessionหรือเฉพาะ screen?</p><details><summary>แนวคำตอบ</summary><p>ขึ้นกับ events/latency/battery ถ้า badgeทั้ง shellต้องสดอาจ session-scoped; ถ้า featureเฉพาะใช้ leasesและหยุดเมื่อไม่มี consumer</p></details></section>
-<section><h2>8. Invariants</h2><div class="success">หนึ่ง active realm/connection, lease/subscription idempotent, UI stateไม่อยู่ singleton, logout resetครบและ fakeทดสอบได้</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่านการนับผู้ใช้งานใน <code>SharedRealtimeClient</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 12.8, 9.3 (singleton)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ให้หลายจอใช้การเชื่อมต่อเดียวกัน โดยต่อและตัดในจังหวะที่ถูก</div>
+
+<section><h2>1. ปัญหา</h2><p>ในโปรเจกต์จริง จอ putaway กับจอ putaway prework ต่างก็ฟังเหตุการณ์จาก hub เดียวกัน และผู้ใช้เปิดจอที่สองซ้อนจอแรกได้</p><table><thead><tr><th>ถ้าแต่ละจอต่อของตัวเอง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>สอง socket ค้างไว้</td><td>กินแบตสองเท่า</td></tr>
+<tr><td>เซิร์ฟเวอร์เห็นสอง connection จากเครื่องเดียว</td><td>ส่งเหตุการณ์เดียวกันสองรอบ</td></tr>
+<tr><td>ปิดจอบน แล้วตัดการเชื่อมต่อ</td><td>จอล่างเงียบทั้งที่ยังเปิดอยู่</td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่ต้องแก้ให้ได้ — ไม่ใช่แค่ประหยัด แต่คือความถูกต้อง</p></section>
+
+<section><h2>2. การนับผู้ใช้งาน</h2><pre class="code-vs"><code>class SharedRealtimeClient {
+  SharedRealtimeClient(this._inner);
+
+  final RealtimeClient _inner;
+  int _users = 0;
+
+  /// ขอใช้การเชื่อมต่อ — ต่อจริงเฉพาะคนแรก
+  Future&lt;void&gt; acquire() async {
+    _users++;
+    if (_users == 1) await _inner.connect();
+  }
+
+  /// เลิกใช้ — ตัดจริงเฉพาะเมื่อไม่เหลือใครแล้ว
+  Future&lt;void&gt; release() async {
+    if (_users == 0) return;
+    _users--;
+    if (_users == 0) await _inner.disconnect();
+  }
+}</code></pre><p>แนวคิดตรงไปตรงมา และเป็นแนวเดียวกับที่ <code>wmsapp</code> ทำอยู่แล้ว</p><pre class="code-vs"><code>Future&lt;void&gt; connect() async {
+  _refCount++;
+  if (_connection != null &amp;&amp;
+      _connection!.state != HubConnectionState.Disconnected) {
+    return; // already connected
+  }
+  ...
+}
+
+Future&lt;void&gt; disconnect() async {
+  _refCount--;
+  if (_refCount &lt;= 0) {
+    _refCount = 0;
+    if (_connection != null) {
+      await _connection!.stop();
+      _connection = null;
+    }
+  }
+}</code></pre><p>สังเกต <code>if (_refCount &lt;= 0) { _refCount = 0; ... }</code> — เขียนกันค่าติดลบไว้แล้ว ซึ่งเป็นรายละเอียดที่คนมักลืม</p></section>
+
+<section><h2>3. ทำไมค่าติดลบถึงอันตราย</h2><pre class="code-vs"><code>test('ปล่อยเกินจำนวน ต้องไม่ทำให้ตัวนับติดลบ', () async {
+  await shared.acquire();
+  await shared.release();
+  await shared.release(); // เรียกเกิน — เป็นบั๊กที่พบบ่อย
+  await shared.release();
+
+  expect(shared.userCount, 0);
+
+  // ถ้าตัวนับติดลบ การขอใช้ครั้งถัดไปจะไม่ต่อจริง แล้วจอจะเงียบ
+  await shared.acquire();
+  expect(inner.connectCalls, 2);
+});</code></pre><p>ถ้าปล่อยให้ติดลบเป็น <code>-2</code> แล้วมีจอใหม่เรียก <code>acquire()</code> ตัวนับจะเป็น <code>-1</code> ซึ่งไม่เท่ากับ 1 จึงไม่ต่อจริง — จอนั้นจะเปิดขึ้นมาแล้วเงียบตลอดกาล โดยไม่มีข้อผิดพลาดใด ๆ</p><div class="note">การเรียก <code>release()</code> เกินเกิดง่ายกว่าที่คิด — จอที่ถูกทิ้งสองครั้ง โค้ดที่เรียกทั้งใน <code>dispose</code> และใน callback ของการออกจากระบบ หรือการรีเฟรชที่สร้าง store ใหม่โดยไม่ทิ้งตัวเก่า</div></section>
+
+<section><h2>4. กฎการจับคู่</h2><p>ทุก <code>acquire()</code> ต้องมี <code>release()</code> คู่กันเป๊ะ ๆ หนึ่งครั้ง วิธีที่ทำให้ผิดยากคือให้ทั้งคู่อยู่ในคลาสเดียวกัน</p><pre class="code-vs"><code>Future&lt;void&gt; start() async {
+  _eventSub = client.events.listen(_onEvent);
+  _statusSub = client.status.listen(_onStatus);
+  await client.acquire();          // ← ที่นี่
+  await load();
+}
+
+@override
+void dispose() {
+  _eventSub?.cancel();
+  _statusSub?.cancel();
+  _stopPolling();
+  unawaited(client.release());     // ← และที่นี่
+  super.dispose();
+}</code></pre><p>อ่านสองเมธอดนี้คู่กันแล้วเห็นทันทีว่าจับคู่ครบ — ต่างจากการที่จอหนึ่งเรียก <code>acquire</code> แล้วอีกที่หนึ่งเรียก <code>release</code></p><p>ถ้า <code>start()</code> ล้มเหลวกลางทางล่ะ</p><pre class="code-vs"><code>Future&lt;void&gt; start() async {
+  _eventSub = client.events.listen(_onEvent);
+  _statusSub = client.status.listen(_onStatus);
+  await client.acquire();
+  // ถ้า load() โยน acquire ก็ทำไปแล้ว และ dispose จะ release ให้
+  // — จับคู่ยังครบ เพราะ dispose ถูกเรียกเสมอเมื่อจอถูกทิ้ง
+  await load();
+}</code></pre><p>ที่นี่ปลอดภัยเพราะ <code>load()</code> จับข้อผิดพลาดเองอยู่แล้ว แต่ถ้ามีบรรทัดที่โยนได้อยู่ระหว่าง <code>acquire</code> กับจุดที่จอถือว่าเริ่มแล้ว ต้องคิดให้รอบคอบ</p></section>
+
+<section><h2>5. ควรตัดการเชื่อมต่อทันทีที่ไม่มีคนใช้ไหม</h2><p>คำตอบไม่ชัดเจนเท่าที่คิด</p><table><thead><tr><th>ตัดทันที</th><th>รอสักครู่ก่อนตัด</th></tr></thead><tbody>
+<tr><td>ประหยัดทันที</td><td>ผู้ใช้ที่สลับจอไปมาไม่ต้องรอต่อใหม่ทุกครั้ง</td></tr>
+<tr><td>ผู้ใช้ที่กดผิดแล้วกดกลับ ต้องรอต่อใหม่</td><td>ถือ socket ไว้เกินจำเป็นสักพัก</td></tr>
+</tbody></table><p>การต่อ SignalR ใหม่ใช้เวลาราวครึ่งวินาทีถึงสองวินาที ซึ่งผู้ใช้รู้สึกได้ ถ้าจอในฟีเจอร์เดียวกันสลับไปมาบ่อย การหน่วงก่อนตัดคุ้ม</p><pre class="code-vs"><code>Timer? _idleTimer;
+
+Future&lt;void&gt; release() async {
+  if (_users == 0) return;
+  _users--;
+  if (_users &gt; 0) return;
+
+  // รอสักครู่ เผื่อจอถัดไปในฟีเจอร์เดียวกันกำลังจะเปิด
+  _idleTimer?.cancel();
+  _idleTimer = Timer(const Duration(seconds: 10), () {
+    if (_users == 0) unawaited(_inner.disconnect());
+  });
+}
+
+Future&lt;void&gt; acquire() async {
+  _idleTimer?.cancel();          // มีคนมาใช้แล้ว ยกเลิกการตัด
+  _idleTimer = null;
+  _users++;
+  if (_users == 1 &amp;&amp; _inner.currentStatus != RealtimeStatus.connected) {
+    await _inner.connect();
+  }
+}</code></pre><div class="note">ระวังตรงนี้ — ตัวจับเวลาที่เพิ่มเข้ามาก็ต้องถูกยกเลิกให้ถูกจังหวะเหมือนกัน (12.8) และเงื่อนไข <code>_users == 1</code> ต้องเพิ่มการตรวจสถานะจริง ไม่งั้นจะต่อซ้ำตอนที่ยังต่ออยู่</div><p>อย่าเพิ่มความซับซ้อนนี้ตั้งแต่แรก — เพิ่มเมื่อวัดได้ว่าผู้ใช้สลับจอบ่อยจริงและการรอทำให้ช้า ตามหลักใน 9.12</p></section>
+
+<section><h2>6. hub หลายตัว</h2><p>โปรเจกต์จริงมีสอง hub และแต่ละตัวมีการนับของตัวเอง</p><pre class="code-vs"><code>final putawayHub = SharedRealtimeClient(HubClient(path: '/hubs/putaway', ...));
+final sortingHub = SharedRealtimeClient(HubClient(path: '/hubs/sorting', ...));</code></pre><table><thead><tr><th>คำถาม</th><th>คำตอบ</th></tr></thead><tbody>
+<tr><td>ควรรวมเป็น hub เดียวไหม</td><td>เป็นการตัดสินใจฝั่งเซิร์ฟเวอร์ — แยกทำให้แต่ละฟีเจอร์ปรับอิสระได้</td></tr>
+<tr><td>ควรมีตัวจัดการกลางที่ถือทุก hub ไหม</td><td>เมื่อมี hub ตัวที่สาม (12.6 §8)</td></tr>
+<tr><td>สลับ profile แล้วต้องทำอะไร</td><td>ตัดและต่อใหม่ทุก hub เพราะ URL เปลี่ยน (12.3 §7)</td></tr>
+</tbody></table><p>แถวสุดท้ายคือจุดที่ต้องมีตัวจัดการกลาง — ถ้าแต่ละ hub ถูกถือคนละที่ จะไม่มีใครรับผิดชอบการต่อใหม่ทั้งชุดตอนสลับเซิร์ฟเวอร์</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ปิดจอบนแล้วจอล่างเงียบ</td><td>ตัดการเชื่อมต่อโดยไม่นับผู้ใช้</td><td>นับผู้ใช้งาน</td></tr>
+<tr><td>จอใหม่เปิดแล้วเงียบตลอดกาล</td><td>ตัวนับติดลบ</td><td>กันที่ศูนย์</td></tr>
+<tr><td>มีสอง connection จากเครื่องเดียว</td><td>แต่ละจอสร้างของตัวเอง</td><td>ใช้ตัวที่แชร์กัน</td></tr>
+<tr><td>ต่อซ้ำทั้งที่ยังต่ออยู่</td><td>ตรวจแค่ตัวนับ ไม่ได้ตรวจสถานะจริง</td><td>ตรวจทั้งสองอย่าง</td></tr>
+<tr><td>สลับเซิร์ฟเวอร์แล้วยังฟัง hub เก่า</td><td>ไม่มีใครรับผิดชอบการต่อใหม่</td><td>มีตัวจัดการกลาง</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้ออกจากระบบแล้วเข้าใหม่ด้วยบัญชีอื่น การเชื่อมต่อ SignalR ควรเป็นอย่างไร</p><ol><li>ต้องตัดและต่อใหม่ไหม</li><li>ใครควรเป็นคนสั่ง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. ต้อง</strong> ด้วยเหตุผลสามข้อ</p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>token ที่ผูกกับ connection เป็นของคนเก่า</td><td>ส่งไปตอน <code>accessTokenFactory</code> ถูกเรียกครั้งแรก (12.3)</td></tr>
+<tr><td>กลุ่มที่เข้าไว้เป็นของคนเก่า</td><td>คนใหม่อาจดูแลสถานีคนละชุด</td></tr>
+<tr><td>เหตุการณ์ที่กรองตามผู้ใช้จะยังส่งของคนเก่า</td><td>ถ้า hub ใช้ <code>Clients.User(userId)</code></td></tr>
+</tbody></table><p>ข้อแรกสำคัญที่สุดในแง่ความปลอดภัย — เป็นรูปแบบเดียวกับที่ 8.8 ยืนยันว่าออกจากระบบต้องล้างทุกอย่างที่ผูกกับผู้ใช้</p><p><strong>2.</strong> ไม่ใช่ <code>SessionStore</code> และไม่ใช่ <code>SharedRealtimeClient</code> — ให้ shell ที่ถือทั้งสองตัวเป็นคนต่อ ตามหลักใน 9.15 ที่ห้ามการพึ่งพาที่วนกลับ</p><pre class="code-vs"><code>// ใน shell ที่ถือทั้งสองอย่าง
+sessionStore.addListener(() {
+  if (sessionStore.status == AuthStatus.signedOut) {
+    unawaited(hubs.disconnectAll());
+  }
+});</code></pre><p>แต่วิธีที่สะอาดกว่าและใช้ได้จริงมากกว่าคือ<strong>ผูกอายุของการเชื่อมต่อไว้กับ shell ที่มีเฉพาะตอนเข้าสู่ระบบแล้ว</strong> — ออกจากระบบทำให้ shell ถูกทิ้ง store ถูกทิ้ง และ <code>release()</code> ถูกเรียกตามลำดับโดยอัตโนมัติ (12.8 §6)</p><pre class="code-vs"><code>AuthStatus.signedIn =&gt; WarehouseShell(...)   // สร้าง hub + store ข้างใน
+AuthStatus.signedOut =&gt; LoginScreen(...)     // shell ถูกทิ้งทั้งก้อน</code></pre><p>ไม่ต้องเขียนโค้ดจัดการการออกจากระบบเลยแม้แต่บรรทัดเดียว และเป็นไปไม่ได้ที่จะลืม — <strong>วิธีที่ดีที่สุดในการไม่ลืมทำอะไร คือทำให้ไม่มีอะไรต้องจำ</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>นับผู้ใช้งาน ต่อจริงเฉพาะคนแรก ตัดจริงเฉพาะคนสุดท้าย</li><li>กันตัวนับติดลบ ไม่งั้นจอถัดไปจะเงียบตลอดกาล</li><li>ให้ <code>acquire</code> กับ <code>release</code> อยู่ในคลาสเดียวกัน จะได้เห็นว่าจับคู่ครบ</li><li>การหน่วงก่อนตัดคุ้มเมื่อผู้ใช้สลับจอบ่อย แต่อย่าเพิ่มตั้งแต่แรก</li><li>ผูกอายุการเชื่อมต่อไว้กับ shell ดีกว่าเขียนโค้ดจัดการการออกจากระบบ</li></ul></div><p><strong>บทหน้า:</strong> เหตุการณ์กับการโหลดใหม่ — อันไหนเชื่อได้แค่ไหน</p></section>
