@@ -4,24 +4,111 @@
 <title>Version &amp; Build Number</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">15-02 · Production</span><h1>Version &amp; Build Number</h1><p>Part 15: Production &amp; Security</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">pubspec mapping</a></li><li><a href="#section-2">Override ใน CI</a></li><li><a href="#section-3">SemVer กับ migration</a></li><li><a href="#section-4">Build number monotonic</a></li><li><a href="#section-5">แสดงในแอป</a></li><li><a href="#section-6">Compatibility gate</a></li><li><a href="#section-7">Release notes</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>Version มีสองมิติ:</strong> build name สำหรับผู้ใช้ เช่น <code>1.4.0</code> และ build number ที่ต้องเพิ่มทุก artifact ที่แจก เช่น <code>142</code> ทั้งสองโปรเจกต์ปัจจุบันยังเป็น <code>1.0.0+1</code></div>
-<section id="section-1"><h2>1. pubspec mapping</h2><pre class="code-vs"><code>version: 1.4.0+142
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">หนึ่งบรรทัด สองเลข</a></li><li><a href="#section-2">อาการเมื่อลืมเพิ่มเลข build</a></li><li><a href="#section-3">ตั้งชื่อรุ่นอย่างไร</a></li><li><a href="#section-4">ใครเพิ่มเลข build</a></li><li><a href="#section-5">เลขรุ่นกับสัญญาฝั่งเซิร์ฟเวอร์</a></li><li><a href="#section-6">อ่านรุ่นในโค้ด</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: รันเทสต์ของ <code>AppVersion</code> ใน lab</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งเลขรุ่นให้ผู้ใช้ติดตั้งทับได้ และรู้ว่าเลขไหนบอกอะไรกับใคร</div>
 
-// Android: versionName 1.4.0, versionCode 142
-// iOS: CFBundleShortVersionString 1.4.0, CFBundleVersion 142</code></pre></section>
-<section id="section-2"><h2>2. Override ใน CI</h2><pre class="code-vs"><code>flutter build appbundle --release \
-  --build-name=1.4.0 \
-  --build-number=142</code></pre><p>มี source of truth เดียวใน release pipeline อย่าให้ pubspec, Gradle และ Xcode เพิ่มเลขคนละทาง</p></section>
-<section id="section-3"><h2>3. SemVer กับ migration</h2><p>major/minor/patch สื่อความเข้ากันได้กับผู้ใช้/ทีม แต่ฐานข้อมูล local, queued commands และ API contract ต้องใช้ schema/version ของตนเอง การอัปแอปไม่ควรล้าง draft โดยไม่รู้ตัว</p></section>
-<section id="section-4"><h2>4. Build number monotonic</h2><p>ทุก upload ไป distribution channel ต้องใช้เลขสูงขึ้น แม้ build name เท่าเดิม ใช้ CI run number ที่ไม่ย้อนเมื่อย้าย branch/pipeline หรือระบบ version service กลาง</p></section>
-<section id="section-5"><h2>5. แสดงในแอป</h2><p>หน้า About/Settings ควรแสดง <code>1.4.0 (142)</code>, environment แบบไม่ลับ, API host ที่ sanitize และ Git short SHA/support ID ช่วย support ระบุ artifact โดยไม่ขอ screenshot หลายหน้า</p></section>
-<section id="section-6"><h2>6. Compatibility gate</h2><pre class="code-vs"><code>{
-  "minimumAppVersion": "1.3.0",
-  "recommendedAppVersion": "1.4.0",
-  "apiContractVersion": 3
-}</code></pre><p>server อาจ soft-warn หรือ block เวอร์ชันเก่าอย่างมีข้อความ/ทางอัปเดต ไม่เดาจาก version string ใน client อย่างเดียว</p></section>
-<section id="section-7"><h2>7. Release notes</h2><p>ผูก tag เช่น <code>v1.4.0+142</code> กับ commit, artifact checksum, migration, API minimum และ known issues ห้าม tag ก่อน test แล้ว rebuild หลัง tagโดยไม่มี trace</p></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">ติดตั้งทับเวอร์ชันก่อนหน้า, upgrade local schema/queued work, downgrade policy, first install, server compatibility และ About screen แสดงเลขตรง artifact จริง</div></section>
+<section id="section-1"><h2>1. หนึ่งบรรทัด สองเลข</h2><pre class="code-vs"><code># pubspec.yaml
+version: 3.1.0+42</code></pre><table><thead><tr><th> </th><th><code>3.1.0</code></th><th><code>42</code></th></tr></thead><tbody>
+<tr><td>เรียกว่า</td><td>version name</td><td>version code / build number</td></tr>
+<tr><td>ใครดู</td><td>ผู้ใช้และทีม</td><td>ระบบปฏิบัติการ</td></tr>
+<tr><td>บอกอะไร</td><td>เปลี่ยนมากแค่ไหน</td><td>รุ่นไหนใหม่กว่า</td></tr>
+<tr><td>ซ้ำได้ไหม</td><td>ได้</td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td>ต้องเพิ่มขึ้นไหม</td><td>ไม่บังคับ</td><td><strong>บังคับ</strong></td></tr>
+</tbody></table><div class="note"><strong>Android ตัดสินว่ารุ่นไหนใหม่กว่าจากเลขหลัง <code>+</code> เท่านั้น</strong> — ชื่อรุ่นไม่มีผลเลย รุ่นชื่อ <code>4.0.0+42</code> ติดตั้งทับ <code>3.1.0+42</code> ไม่ได้</div><pre class="code-vs"><code>test('เลข build ที่มากกว่าเท่านั้นที่ติดตั้งทับได้', () {
+  final installed = AppVersion.parse('3.1.0+42')!;
+
+  expect(AppVersion.parse('3.1.0+43')!.canUpgradeFrom(installed), isTrue);
+  expect(AppVersion.parse('3.1.0+42')!.canUpgradeFrom(installed), isFalse);
+  // ชื่อรุ่นใหม่กว่าแต่เลข build เท่าเดิม — Android ปฏิเสธ
+  expect(AppVersion.parse('4.0.0+42')!.canUpgradeFrom(installed), isFalse);
+});</code></pre></section>
+
+<section id="section-2"><h2>2. อาการเมื่อลืมเพิ่มเลข build</h2><table><thead><tr><th>ทาง</th><th>สิ่งที่เกิด</th></tr></thead><tbody>
+<tr><td>ติดตั้งด้วย <code>adb install</code></td><td>ล้มเหลวด้วย <code>INSTALL_FAILED_VERSION_DOWNGRADE</code></td></tr>
+<tr><td>ติดตั้งด้วยการกดไฟล์ APK</td><td>ขึ้นว่า “ไม่ได้ติดตั้งแอป” โดยไม่บอกสาเหตุ</td></tr>
+<tr><td>อัปโหลด Play Store</td><td>ปฏิเสธทันทีพร้อมบอกเลขที่ใช้ไปแล้ว</td></tr>
+</tbody></table><p>ทางกลางเป็นทางที่ใช้ในคลังมากที่สุด และเป็นทางที่บอกสาเหตุน้อยที่สุด — ช่างที่ไปติดตั้งจะเห็นแค่ “ไม่ได้ติดตั้งแอป” แล้วเดาว่าไฟล์เสีย</p><pre class="code-vs"><code>test('version ที่ไม่มีเลข build ต้องขวางการปล่อย', () {
+  final pubspec = goodPubspec.replaceAll('3.1.0+42', '3.1.0');
+
+  final findings = checkPubspec(pubspec);
+  expect(findings.single.code, 'missing-build-number');
+  expect(findings.single.fix, contains('+'));
+});</code></pre></section>
+
+<section id="section-3"><h2>3. ตั้งชื่อรุ่นอย่างไร</h2><p>รูปแบบที่ใช้กันคือสามส่วน</p><pre class="code-vs"><code>3 . 1 . 0
+│   │   └── แก้บั๊ก ผู้ใช้ไม่ต้องเรียนรู้อะไรใหม่
+│   └────── ฟีเจอร์ใหม่ที่เข้ากันได้กับของเดิม
+└────────── เปลี่ยนใหญ่ ผู้ใช้ต้องรู้ตัว</code></pre><table><thead><tr><th>เปลี่ยนอะไร</th><th>ขึ้นเลขไหน</th><th>ตัวอย่างจากคอร์สนี้</th></tr></thead><tbody>
+<tr><td>แก้ปีไทยที่ผิดไป 543 ปี</td><td>ตัวท้าย</td><td>11.9</td></tr>
+<tr><td>เพิ่มฟีเจอร์ถ่ายรูปหลักฐาน</td><td>ตัวกลาง</td><td>Part 13</td></tr>
+<tr><td>เปลี่ยนวิธีเข้าสู่ระบบทั้งหมด</td><td>ตัวหน้า</td><td>Part 8</td></tr>
+<tr><td>เปลี่ยนสัญญากับเซิร์ฟเวอร์จนแอปเก่าใช้ไม่ได้</td><td>ตัวหน้า</td><td>14.5</td></tr>
+</tbody></table><p>สำหรับแอปภายในองค์กร ประโยชน์ของชื่อรุ่นไม่ใช่การสื่อสารกับตลาด แต่คือ<strong>การให้ผู้ใช้บอกได้ว่าเขาใช้รุ่นไหน</strong>เมื่อโทรมาแจ้งปัญหา</p><pre class="code-vs"><code>// แสดงในหน้าตั้งค่าเสมอ
+Text('${AppConfig.appTitle} ${version.pubspecLine}')   // ACETEC WMS v3 3.1.0+42</code></pre><div class="note">แสดงทั้งสองเลข ไม่ใช่แค่ชื่อรุ่น — เพราะสองเครื่องที่บอกว่า “3.1.0” เหมือนกัน อาจเป็นคนละ build ที่ต่างกันสิบครั้ง</div></section>
+
+<section id="section-4"><h2>4. ใครเพิ่มเลข build</h2><table><thead><tr><th>วิธี</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>แก้มือใน <code>pubspec.yaml</code></td><td>เห็นชัดใน git</td><td>ลืมได้ และชนกันเมื่อสองคนแก้พร้อมกัน</td></tr>
+<tr><td>ส่งตอน build</td><td>ลืมไม่ได้</td><td>ต้องมีที่เก็บเลขล่าสุด</td></tr>
+<tr><td>ใช้เลขจากระบบ CI</td><td>อัตโนมัติและไม่ซ้ำแน่นอน</td><td>ต้องมี CI</td></tr>
+</tbody></table><pre class="code-vs"><code># ส่งตอน build โดยไม่แตะ pubspec
+flutter build apk --release --build-name=3.1.0 --build-number=42
+
+# ใช้เลขลำดับของ CI
+flutter build apk --release --build-number=$CI_PIPELINE_IID</code></pre><p>สำหรับทีมเล็กที่ยังไม่มี CI ทางที่ได้ผลคือ<strong>ทำให้ลืมไม่ได้</strong> ด้วยการตรวจในสคริปต์ที่ใช้ build</p><pre class="code-vs"><code># tool/release.sh
+current=$(grep '^version:' pubspec.yaml | cut -d'+' -f2)
+last=$(git tag --list 'v*' | tail -1 | cut -d'+' -f2)
+
+if [ "$current" -le "$last" ]; then
+  echo "เลข build $current ไม่มากกว่ารุ่นก่อน ($last)"
+  exit 1
+fi</code></pre></section>
+
+<section id="section-5"><h2>5. เลขรุ่นกับสัญญาฝั่งเซิร์ฟเวอร์</h2><p>14.5 ทิ้งคำถามไว้ว่าจะรู้ได้อย่างไรว่าแอปกับเซิร์ฟเวอร์เข้ากันได้ — เลขรุ่นคือส่วนหนึ่งของคำตอบ</p><pre class="code-vs"><code>// ส่งรุ่นของแอปไปกับทุกคำขอ ทำให้ฝั่งเซิร์ฟเวอร์รู้ว่ากำลังคุยกับใคร
+headers: {
+  'X-App-Version': version.pubspecLine,
+  ...
+}</code></pre><table><thead><tr><th>ฝั่งเซิร์ฟเวอร์ทำอะไรได้</th></tr></thead><tbody>
+<tr><td>บันทึกว่ารุ่นไหนยังใช้อยู่บ้าง — ใช้ตัดสินว่าลบสัญญาเก่าได้เมื่อไหร่ (14.5)</td></tr>
+<tr><td>ตอบข้อความที่ต่างกันให้แอปรุ่นเก่า</td></tr>
+<tr><td>ปฏิเสธรุ่นที่เก่าเกินไปพร้อมบอกให้อัปเดต</td></tr>
+</tbody></table><p>แถวแรกมีค่าที่สุดในทางปฏิบัติ — คำถามที่ว่า “ยังมีเครื่องที่ใช้รุ่นเก่าอยู่ไหม” ตอบได้จากข้อมูลจริง แทนที่จะเดา</p></section>
+
+<section id="section-6"><h2>6. อ่านรุ่นในโค้ด</h2><pre class="code-vs"><code>dependencies:
+  package_info_plus: ^8.0.0</code></pre><pre class="code-vs"><code>final info = await PackageInfo.fromPlatform();
+final version = AppVersion(
+  name: info.version,        // 3.1.0
+  build: int.parse(info.buildNumber),   // 42
+);</code></pre><p>เป็น <code>Future</code> จึงควรอ่านครั้งเดียวตอนเริ่มแล้วเก็บไว้ ไม่ใช่เรียกทุกครั้งที่ต้องใช้ — เหตุผลเดียวกับ 13.6</p><pre class="code-vs"><code>// อ่านครั้งเดียวใน main แล้วส่งต่อ (11.13)
+Future&lt;void&gt; main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final version = await readAppVersion();
+  ...
+  runApp(WmsApp(version: version));
+}</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ติดตั้งทับไม่ได้</td><td>เลข build เท่าเดิมหรือน้อยลง</td><td>เพิ่มทุกครั้งที่ build</td></tr>
+<tr><td>ผู้ใช้บอกรุ่นไม่ได้</td><td>ไม่ได้แสดงในแอป</td><td>แสดงในหน้าตั้งค่า</td></tr>
+<tr><td>สองเครื่องบอกรุ่นเดียวกันแต่พฤติกรรมต่างกัน</td><td>แสดงแค่ชื่อรุ่น</td><td>แสดงเลข build ด้วย</td></tr>
+<tr><td>เลข build ชนกันเมื่อสองคนปล่อยพร้อมกัน</td><td>แก้มือใน pubspec</td><td>ใช้เลขจาก CI</td></tr>
+<tr><td>ไม่รู้ว่ามีเครื่องใช้รุ่นเก่าอยู่ไหม</td><td>ไม่ได้ส่งรุ่นไปกับคำขอ</td><td>ส่งใน header</td></tr>
+<tr><td><code>PackageInfo</code> ช้าเพราะเรียกซ้ำ</td><td>เรียกทุกครั้งที่ต้องใช้</td><td>อ่านครั้งเดียวตอนเริ่ม</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมปล่อยรุ่น <code>3.1.0+42</code> ไปแล้ว แล้วพบบั๊กร้ายแรงที่ต้องแก้ด่วน</p><ol><li>รุ่นถัดไปควรเป็นเลขอะไร</li><li>ถ้าต้องย้อนกลับไปรุ่นเก่าล่ะ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> <code>3.1.1+43</code></p><pre class="code-vs"><code>test('ขึ้นรุ่นย่อยต้องเพิ่มเลข build ด้วย', () {
+  final next = AppVersion.parse('3.1.0+42')!.nextPatch();
+  expect(next.name, '3.1.1');
+  expect(next.build, 43);
+});</code></pre><p>สังเกตว่า <code>nextPatch()</code> เพิ่มทั้งสองเลข — เพราะการเพิ่มแค่ชื่อรุ่นไม่ทำให้ติดตั้งทับได้ ซึ่งเป็นข้อผิดพลาดที่เจอบ่อยมาก</p><p><strong>2. ย้อนกลับไม่ได้ตรง ๆ</strong> และนี่คือส่วนที่สำคัญที่สุดของคำถามนี้</p><table><thead><tr><th>สิ่งที่ทำไม่ได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ติดตั้ง <code>3.1.0+42</code> ทับ <code>3.1.1+43</code></td><td>เลข build น้อยกว่า Android ปฏิเสธ</td></tr>
+</tbody></table><table><thead><tr><th>สิ่งที่ทำได้</th><th>วิธี</th></tr></thead><tbody>
+<tr><td>ปล่อยโค้ดเดิมด้วยเลขใหม่</td><td>build จาก tag <code>v3.1.0</code> แต่ตั้งเลขเป็น <code>3.1.2+44</code></td></tr>
+<tr><td>ถอนแล้วติดตั้งใหม่</td><td>ทำได้แต่<strong>ข้อมูลในเครื่องหายหมด</strong> รวมถึง profile เซิร์ฟเวอร์ (Part 10)</td></tr>
+</tbody></table><pre class="code-vs"><code># ย้อนโค้ดแต่เดินเลขไปข้างหน้า
+git checkout v3.1.0
+flutter build apk --release --build-name=3.1.2 --build-number=44</code></pre><p>สิ่งที่ต้องระวังคือ<strong>ชื่อรุ่น 3.1.2 ที่มีโค้ดของ 3.1.0</strong> จะทำให้คนสับสนในภายหลัง จึงต้อง</p><ul><li>ตั้ง tag ใน git ให้ตรงกับเลขที่ปล่อยจริงเสมอ</li><li>บันทึกไว้ในบันทึกการเปลี่ยนแปลงว่า 3.1.2 คือการย้อนกลับไป 3.1.0</li></ul><p><strong>บทเรียนที่ใหญ่กว่า:</strong> การย้อนกลับที่แพงขนาดนี้เป็นเหตุผลที่ต้องมี checklist ก่อนปล่อย (15.12) — เพราะการป้องกันถูกกว่าการย้อนมาก และในคลังที่มี PDA ยี่สิบเครื่อง การย้อนแปลว่าต้องเดินไปทุกเครื่อง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ชื่อรุ่นบอกผู้ใช้ เลข build บอกระบบปฏิบัติการ</li><li>Android ตัดสินจากเลข build เท่านั้น และต้องเพิ่มขึ้นเสมอ</li><li>แสดงทั้งสองเลขในแอป เพื่อให้ผู้ใช้บอกได้ว่าใช้รุ่นไหน</li><li>ทำให้ลืมเพิ่มเลขไม่ได้ ด้วย CI หรือสคริปต์ที่ตรวจ</li><li>ส่งรุ่นไปกับคำขอ เพื่อให้รู้ว่ายังมีเครื่องใช้รุ่นเก่าอยู่ไหม</li><li>ย้อนรุ่นทำได้แค่การปล่อยโค้ดเดิมด้วยเลขใหม่</li></ul></div><p><strong>บทหน้า:</strong> สิทธิ์ที่หายไปในโหมด release และบั๊กที่มันสร้าง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

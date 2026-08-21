@@ -1,9 +1,118 @@
-<div class="note"><strong>ไม่มี client-side secret ที่ซ่อนได้จริง:</strong> APK/IPA และ <code>--dart-define</code> ถูกตรวจย้อนกลับได้ แอปเก็บได้เพียง credential/session ที่ server ออกให้ผู้ใช้ภายใต้ขอบเขตและอายุจำกัด</div>
-<section><h2>1. ห้ามฝังอะไร</h2><p>DB password, API master key, signing private key, certificate private key และ service-account credential ต้องอยู่ server/secret manager ไม่อยู่ Dart, assets, Gradle, plist, Git history หรือ CI log</p></section>
-<section><h2>2. Public config ไม่ใช่ secret</h2><p>API base URL, feature flag public และ environment name ใส่ flavor/<code>--dart-define</code> ได้ แต่ต้อง validate/allowlist ค่าและอย่าคิดว่าการ obfuscate ทำให้เป็นความลับ</p></section>
-<section><h2>3. Session storage</h2><p><code>SharedPreferences</code> เหมาะ settings non-sensitive เช่น theme/profile label ไม่เหมาะ long-lived bearer/refresh token ใช้ platform secure storage (Keychain/Keystore-backed) ตาม threat model และไม่เก็บ password</p></section>
-<section><h2>4. โค้ดจริง</h2><p><code>wmsapp</code> เก็บ userId/fullName/role ใน SharedPreferences และ clear ทั้ง store เมื่อ logout; ข้อมูลนี้ไม่ใช่หลักฐาน authorization Server ต้องตรวจ token/claims ทุก request และการ clear ทั้ง prefs อาจลบ settings ที่ไม่เกี่ยว ควร namespace/clearเฉพาะ session</p></section>
-<section><h2>5. Token lifecycle</h2><p>access token อายุสั้น, refresh rotation/revocation ตาม backend, clear memory/storage เมื่อ logout/401 และไม่ส่ง token ผิด origin Background/screenshot/clipboard ต้องไม่เผย token</p></section>
-<section><h2>6. CI secrets</h2><p>keystore password, service credentials และ signing materials มาจาก protected secret store เฉพาะ release job จำกัดสิทธิ์/branch, mask logs, rotate และ audit access ไม่เขียนลง generated fileที่ถูก upload เป็น artifact</p></section>
-<section><h2>7. Obfuscation</h2><p><code>--obfuscate --split-debug-info</code> เพิ่มต้นทุน reverse engineeringและต้องเก็บ symbols เพื่อถอด stack trace แต่ไม่แทน encryption/auth และไม่ปกป้องค่าที่แอปต้องอ่านได้ตอน runtime</p></section>
-<section><h2>8. Secret scan</h2><div class="success">สแกน source/history/artifacts สำหรับ token/private key/password, ตรวจ release logsและ crash reports, revoke ทันทีเมื่อพบ ไม่พอเพียงลบ commit ล่าสุดเพราะ secret ยังอยู่ใน history/cache</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: หาความลับที่หลุดอยู่ในโปรเจกต์ตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.5, 8.10 (ที่เก็บที่ปลอดภัย), 10.2 (<code>--dart-define</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าอะไรเก็บในแอปได้ อะไรเก็บไม่ได้ และหาสิ่งที่หลุดไปแล้ว</div>
+
+<section><h2>1. หลักข้อเดียว</h2><div class="note"><strong>ทุกอย่างที่อยู่ในแอป ถือว่าคนอื่นอ่านได้</strong> — APK คือไฟล์บีบอัดที่แกะดูได้ในสามคำสั่ง และการทำให้อ่านยากขึ้นไม่ได้ทำให้อ่านไม่ได้</div><pre class="code-vs"><code>unzip -o app-release.apk -d extracted/
+strings extracted/lib/arm64-v8a/libapp.so | grep -i "password\|secret\|key"</code></pre><table><thead><tr><th>สิ่งที่หลายคนคิดว่าปลอดภัย</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>ใส่ใน <code>--dart-define</code></td><td>ค่าถูกฝังในไฟล์ที่แจกออกไป</td></tr>
+<tr><td>เข้ารหัสไว้ในโค้ด</td><td>กุญแจถอดรหัสก็อยู่ในโค้ดด้วย</td></tr>
+<tr><td>เปิด obfuscation</td><td>ชื่อฟังก์ชันหายไป แต่ค่าคงที่ยังอยู่</td></tr>
+<tr><td>เก็บใน asset ที่เข้ารหัส</td><td>เหมือนข้อสอง</td></tr>
+</tbody></table></section>
+
+<section><h2>2. อะไรเก็บได้ อะไรเก็บไม่ได้</h2><table><thead><tr><th>เก็บในแอปได้</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ที่อยู่เซิร์ฟเวอร์</td><td>คนที่อยู่ในเครือข่ายก็รู้อยู่แล้ว</td></tr>
+<tr><td>ชื่อ endpoint</td><td>ดูจากคำขอที่วิ่งก็เห็น</td></tr>
+<tr><td>รหัสสาขา ชื่อสถานี</td><td>ไม่ใช่ความลับ</td></tr>
+<tr><td>กุญแจสาธารณะสำหรับตรวจลายเซ็น</td><td>ออกแบบมาให้เปิดเผย</td></tr>
+</tbody></table><table><thead><tr><th>เก็บในแอปไม่ได้</th><th>ควรอยู่ที่ไหน</th></tr></thead><tbody>
+<tr><td>รหัสผ่านฐานข้อมูล</td><td>เซิร์ฟเวอร์เท่านั้น</td></tr>
+<tr><td>API key ของบริการภายนอก</td><td>เซิร์ฟเวอร์เป็นตัวกลางเรียกให้</td></tr>
+<tr><td>กุญแจเซ็นแอป</td><td>ที่เก็บความลับ (15.5)</td></tr>
+<tr><td>รหัสผ่านของผู้ใช้</td><td><strong>ไม่เก็บที่ไหนเลย</strong> (8.1)</td></tr>
+<tr><td>token ที่ไม่หมดอายุ</td><td>อย่ามีตั้งแต่แรก</td></tr>
+</tbody></table><p>แถวที่สองเป็นรูปแบบที่ใช้ได้กับความลับเกือบทุกชนิด — <strong>ถ้าแอปต้องใช้ความลับ ให้เซิร์ฟเวอร์ใช้แทน</strong></p><pre class="code-vs"><code>// อย่าทำ — API key อยู่ในแอป
+final response = await http.get(Uri.parse(
+  'https://maps.example.com/geocode?key=$mapsApiKey&amp;q=$address',
+));
+
+// ทำ — เซิร์ฟเวอร์ถือ key แล้วเรียกให้
+final response = await api.getJson('/api/WMS/geocode?q=$address');</code></pre></section>
+
+<section><h2>3. <code>--dart-define</code> ไม่ใช่ที่เก็บความลับ</h2><p>10.2 พูดถึงเรื่องนี้ไปแล้ว และตรงนี้คือหลักฐาน</p><pre class="code-vs"><code>flutter build apk --release --dart-define=API_KEY=sk_live_abc123</code></pre><pre class="code-vs"><code>unzip -p app-release.apk lib/arm64-v8a/libapp.so | strings | grep sk_live
+sk_live_abc123</code></pre><p>ค่าอยู่ในไฟล์ตรง ๆ สิ่งที่ <code>--dart-define</code> ให้คือ<strong>ความสะดวกในการตั้งค่าต่อ build</strong> ไม่ใช่ความปลอดภัย</p><table><thead><tr><th>ใช้ <code>--dart-define</code> กับ</th><th>ไม่ใช้กับ</th></tr></thead><tbody>
+<tr><td>ที่อยู่เซิร์ฟเวอร์ของแต่ละลูกค้า</td><td>API key</td></tr>
+<tr><td>เปิดปิดฟีเจอร์</td><td>รหัสผ่าน</td></tr>
+<tr><td>ระบุว่าเป็น build ของ dev หรือ prod</td><td>อะไรก็ตามที่ถ้าหลุดแล้วเสียหาย</td></tr>
+</tbody></table></section>
+
+<section><h2>4. ความลับที่หลุดเข้า git</h2><p>เป็นทางที่พบบ่อยที่สุด และแก้ยากที่สุดเพราะประวัติ git เก็บทุกอย่างไว้</p><pre class="code-vs"><code># ค้นในประวัติทั้งหมด ไม่ใช่แค่ไฟล์ปัจจุบัน
+git log -p --all | grep -iE "password|secret|api[_-]?key|BEGIN.*PRIVATE"
+
+# หาไฟล์ที่ไม่ควรอยู่
+git log --all --name-only --format="" | sort -u | grep -iE "\.jks$|\.keystore$|key\.properties|\.env$"</code></pre><table><thead><tr><th>ถ้าพบ</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>รหัสผ่านหรือ key ที่ยังใช้อยู่</td><td><strong>เปลี่ยนค่านั้นทันที</strong> — การลบ commit ไม่ช่วยถ้ามีคน clone ไปแล้ว</td></tr>
+<tr><td>ไฟล์ keystore</td><td>สร้างกุญแจใหม่ ถ้ายังไม่ได้ปล่อยรุ่นแรก</td></tr>
+<tr><td>ค่าที่เลิกใช้แล้ว</td><td>เพิ่มใน <code>.gitignore</code> แล้วบันทึกไว้</td></tr>
+</tbody></table><div class="warn">ลำดับสำคัญ — <strong>เปลี่ยนค่าก่อน แล้วค่อยคิดเรื่องลบประวัติ</strong> เพราะการลบประวัติใช้เวลาและอาจทำไม่สำเร็จ ส่วนการเปลี่ยนค่าทำให้สิ่งที่หลุดไปแล้วไร้ประโยชน์ทันที</div><pre class="code-vs"><code># .gitignore ที่ควรมีตั้งแต่วันแรก
+android/key.properties
+*.jks
+*.keystore
+.env
+**/google-services.json
+ios/Runner/GoogleService-Info.plist</code></pre></section>
+
+<section><h2>5. ความลับที่หลุดเข้า log และรายงานข้อผิดพลาด</h2><p>7.17 จัดการเรื่อง log ไปแล้ว ส่วน 15.10 จะจัดการรายงานข้อผิดพลาด ตรงนี้คือจุดที่ทั้งสองต้องใช้กฎเดียวกัน</p><pre class="code-vs"><code>/// รายชื่อนี้ต้องตรงกับที่ 7.17 ใช้กับ log — ถ้าสองที่ไม่ตรงกัน จะมีทาง
+/// หนึ่งที่ปิดไว้และอีกทางที่เปิดอยู่
+const Set&lt;String&gt; sensitiveKeys = {
+  'token', 'accesstoken', 'refreshtoken', 'authorization',
+  'password', 'pwd', 'secret', 'apikey', 'pin',
+};</code></pre><p>lab มีเทสต์ที่จับกรณีที่ตัวปิดค่าทำงานไม่จริง ซึ่งเป็นบั๊กที่อันตรายกว่าไม่มีตัวปิดเลย เพราะทุกคนคิดว่าปิดแล้ว</p><pre class="code-vs"><code>test('Bearer token ต้องถูกปิด', () {
+  const text = 'headers: {Authorization: Bearer eyJhbGciOi.J9.abc}';
+  expect(redact(text), isNot(contains('eyJhbGciOi')));
+});</code></pre><p>เทสต์นี้ล้มตอนเขียนครั้งแรก เพราะลูปที่ปิดค่าตามชื่อคีย์เจอ <code>Authorization: Bearer</code> ก่อน แล้วปิดคำว่า <code>Bearer</code> ทิ้ง — <strong>ปล่อย token จริงไว้ทั้งอัน</strong></p><pre class="code-vs"><code>String redact(String text) {
+  // Bearer ต้องมาก่อนเสมอ — ถ้าปล่อยให้ลูปข้างล่างเจอ `Authorization: Bearer`
+  // ก่อน มันจะปิดคำว่า "Bearer" แล้วปล่อย token จริงไว้ ซึ่งเป็นการปิดที่
+  // ดูเหมือนทำงานแต่ไม่ได้ปิดอะไรเลย
+  var result = text.replaceAll(
+    RegExp(r'Bearer\s+[A-Za-z0-9._\-]+', caseSensitive: false),
+    'Bearer $_masked',
+  );
+  ...
+}</code></pre><div class="note">บทเรียนที่ใหญ่กว่าโค้ด — <strong>ตัวปิดค่าทุกตัวต้องมีเทสต์ที่ยืนยันว่ามันปิดจริง</strong> เพราะข้อผิดพลาดที่นี่ไม่มีอาการอะไรให้เห็นเลย จนกว่าจะมีคนไปอ่าน log แล้วเจอ token</div></section>
+
+<section><h2>6. obfuscation ทำอะไรและไม่ทำอะไร</h2><pre class="code-vs"><code>flutter build apk --release --obfuscate --split-debug-info=build/symbols</code></pre><table><thead><tr><th>ทำ</th><th>ไม่ทำ</th></tr></thead><tbody>
+<tr><td>เปลี่ยนชื่อคลาสและฟังก์ชันเป็นตัวอักษรสั้น</td><td>ซ่อนค่าคงที่ที่เป็นข้อความ</td></tr>
+<tr><td>ทำให้อ่านโครงโปรแกรมยากขึ้น</td><td>ทำให้ถอดรหัสไม่ได้</td></tr>
+<tr><td>ลดขนาดไฟล์เล็กน้อย</td><td>ป้องกันการแกะ</td></tr>
+</tbody></table><p><code>--split-debug-info</code> จำเป็นคู่กัน เพราะมันเก็บตารางแปลชื่อกลับไว้ให้ — ถ้าไม่มี รายงานข้อผิดพลาดจะอ่านไม่ออกเลย</p><pre class="code-vs"><code># แปล stack trace ที่ถูก obfuscate กลับ
+flutter symbolize -i crash.txt -d build/symbols/app.android-arm64.symbols</code></pre><div class="warn"><strong>ต้องเก็บไฟล์ symbols ของทุกรุ่นที่ปล่อย</strong> — ถ้าหาย รายงานข้อผิดพลาดจากรุ่นนั้นจะกลายเป็นตัวอักษรสุ่มตลอดไป</div></section>
+
+<section><h2>7. สิ่งที่ทำได้จริงแทนการซ่อน</h2><table><thead><tr><th>แทนที่จะ</th><th>ให้</th></tr></thead><tbody>
+<tr><td>ซ่อน API key ในแอป</td><td>ให้เซิร์ฟเวอร์เรียกแทน</td></tr>
+<tr><td>ทำให้ token ยาวจนเดายาก</td><td>ให้มันหมดอายุสั้น (8.3)</td></tr>
+<tr><td>ซ่อนว่ามี endpoint ไหนบ้าง</td><td>ให้เซิร์ฟเวอร์ตรวจสิทธิ์ทุกคำขอ (8.9)</td></tr>
+<tr><td>ซ่อนตรรกะการตรวจสอบ</td><td>ให้เซิร์ฟเวอร์ตรวจซ้ำ (13.9)</td></tr>
+</tbody></table><p>ทุกแถวมีรูปแบบเดียวกัน — <strong>ย้ายสิ่งที่ต้องเชื่อถือได้ไปอยู่ที่ที่เราควบคุมได้</strong> ซึ่งคือเซิร์ฟเวอร์ ไม่ใช่เครื่องที่อยู่ในมือผู้ใช้</p><p>และเมื่อยอมรับว่าแอปเป็นสิ่งที่คนอื่นอ่านได้ การออกแบบจะง่ายขึ้นมาก เพราะไม่ต้องเสียเวลากับการซ่อนที่ไม่ได้ผล</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>API key หลุด</td><td>ใส่ใน <code>--dart-define</code> หรือในโค้ด</td><td>ย้ายไปเซิร์ฟเวอร์ แล้วเปลี่ยน key</td></tr>
+<tr><td>keystore อยู่ในประวัติ git</td><td>commit ก่อนใส่ <code>.gitignore</code></td><td>สร้างกุญแจใหม่ถ้ายังไม่ปล่อย</td></tr>
+<tr><td>token โผล่ใน log</td><td>ตัวปิดค่าไม่ได้ปิดจริง</td><td>เขียนเทสต์ยืนยัน</td></tr>
+<tr><td>รายงานข้อผิดพลาดอ่านไม่ออก</td><td>obfuscate โดยไม่เก็บ symbols</td><td>เก็บทุกรุ่น</td></tr>
+<tr><td>คิดว่า obfuscation ป้องกันการแกะ</td><td>เข้าใจผิด</td><td>ย้ายความลับออกจากแอป</td></tr>
+<tr><td>เปลี่ยนค่าที่หลุดช้าเกินไป</td><td>มัวลบประวัติ git ก่อน</td><td>เปลี่ยนค่าก่อนเสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมจะเพิ่มฟีเจอร์ส่งข้อความแจ้งเตือนผ่านบริการภายนอก ซึ่งต้องใช้ API key</p><ol><li>เก็บ key ไว้ที่ไหน</li><li>ถ้าทีมหลังบ้านบอกว่าทำให้ไม่ได้ในรุ่นนี้ล่ะ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1. บนเซิร์ฟเวอร์</strong> และแอปเรียกผ่าน endpoint ของเราเอง</p><pre class="code-vs"><code>// แอปไม่รู้จัก key เลย
+await api.postJson('/api/WMS/mobile_notify', {
+  'recipient': supervisorId,
+  'message': 'จุดคัดแยก ST-01 เต็ม',
+});</code></pre><table><thead><tr><th>ได้อะไรเพิ่มนอกจากความปลอดภัย</th></tr></thead><tbody>
+<tr><td>เปลี่ยนผู้ให้บริการได้โดยไม่ต้องอัปเดตแอปทุกเครื่อง</td></tr>
+<tr><td>จำกัดจำนวนการส่งต่อผู้ใช้ได้</td></tr>
+<tr><td>บันทึกได้ว่าใครส่งอะไรไปหาใคร</td></tr>
+<tr><td>ตรวจสิทธิ์ได้ว่าคนนี้ส่งหาคนนั้นได้ไหม (8.9)</td></tr>
+</tbody></table><p><strong>2.</strong> ถ้าฝั่งเซิร์ฟเวอร์ทำไม่ทัน มีสามทาง และสองทางแรกผิด</p><table><thead><tr><th>ทาง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ใส่ key ในแอปไปก่อน แล้วย้ายทีหลัง</td><td><strong>อย่าทำ</strong> — key ที่ปล่อยไปแล้วถือว่าหลุด ต้องเปลี่ยนอยู่ดี และ “ทีหลัง” มักไม่มา</td></tr>
+<tr><td>ใส่ key แล้ว obfuscate</td><td>เหมือนข้อแรกแต่หลอกตัวเอง</td></tr>
+<tr><td><strong>เลื่อนฟีเจอร์ออกไป</strong></td><td>ถูก</td></tr>
+</tbody></table><p>ทางที่สามฟังดูเหมือนไม่ได้แก้อะไร แต่เป็นคำตอบที่ถูก เพราะ<strong>ฟีเจอร์นี้ทำไม่ได้อย่างปลอดภัยถ้าไม่มีฝั่งเซิร์ฟเวอร์</strong> และการทำแบบไม่ปลอดภัยไปก่อนคือการสร้างงานให้ตัวเองสองรอบ</p><p>สิ่งที่ควรทำคือหาว่างานฝั่งเซิร์ฟเวอร์เล็กแค่ไหนจริง ๆ</p><pre class="code-vs"><code>// ฝั่ง server (แนวคิด — รายละเอียดอยู่ในคอร์ส .NET)
+[HttpPost("mobile_notify")]
+public async Task&lt;IActionResult&gt; Notify([FromBody] NotifyRequest request)
+{
+    // ตรวจสิทธิ์ แล้วส่งต่อด้วย key ที่เก็บใน configuration
+    await _notifier.SendAsync(request.Recipient, request.Message);
+    return Ok();
+}</code></pre><p>สิบบรรทัด — บ่อยครั้งที่ “ทำไม่ทัน” มาจากการที่ยังไม่มีใครประเมินว่างานเล็กแค่ไหน มากกว่ามาจากงานที่ใหญ่จริง</p><p>ถ้าประเมินแล้วยังไม่ทันจริง ให้เลื่อนฟีเจอร์ — และบันทึกเหตุผลไว้ เพื่อไม่ให้กลายเป็นการถกเถียงซ้ำในรุ่นถัดไป</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ทุกอย่างในแอปถือว่าคนอื่นอ่านได้</li><li><code>--dart-define</code> และ obfuscation ไม่ใช่ที่เก็บความลับ</li><li>ถ้าแอปต้องใช้ความลับ ให้เซิร์ฟเวอร์ใช้แทน</li><li>ความลับที่หลุดเข้า git ต้องเปลี่ยนค่าก่อน แล้วค่อยคิดเรื่องลบประวัติ</li><li>ตัวปิดค่าใน log ต้องมีเทสต์ยืนยันว่าปิดจริง</li><li>เก็บไฟล์ symbols ของทุกรุ่นที่ปล่อย</li></ul></div><p><strong>บทหน้า:</strong> รูปแบบไฟล์ที่จะส่งออกไป</p></section>

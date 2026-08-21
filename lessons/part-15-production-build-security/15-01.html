@@ -4,20 +4,118 @@
 <title>Build Modes</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">15-01 · Production</span><h1>Build Modes</h1><p>Part 15: Production &amp; Security</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Debug</a></li><li><a href="#section-2">Profile</a></li><li><a href="#section-3">Release</a></li><li><a href="#section-4">เช็ก mode ในโค้ด</a></li><li><a href="#section-5">Environment แบบ typed</a></li><li><a href="#section-6">Flavors</a></li><li><a href="#section-7">Matrix ที่ต้องทดสอบ</a></li><li><a href="#section-8">Gate</a></li></ol></nav>
-<div class="note"><strong>Build mode ไม่ใช่ environment:</strong> debug/profile/release ควบคุม compiler, assertions และเครื่องมือวัด ส่วน dev/staging/prod คือ endpoint/configuration ต้องออกแบบแยกกันและห้ามให้ release ชี้ production โดยอาศัยชื่อ mode อย่างเดียว</div>
-<section id="section-1"><h2>1. Debug</h2><p>มี assertions, service extensions, debugger/hot reload และ optimization ไม่เต็ม เหมาะพัฒนาและ widget tests แต่เวลา frame/ขนาดไฟล์ไม่แทน production อย่าส่ง debug APK ให้ผู้ใช้จริงเพราะเซ็นด้วย debug key และเปิด surface สำหรับพัฒนา</p></section>
-<section id="section-2"><h2>2. Profile</h2><p>คงเครื่องมือ profiling สำคัญและ optimize ใกล้ release ใช้วัด jank/CPU/memory บนอุปกรณ์จริง ไม่มี hot reload แบบ debug พฤติกรรมบาง platform ต่างกัน จึงต้อง reproduce performance ใน profile ไม่ใช่ debug</p></section>
-<section id="section-3"><h2>3. Release</h2><p>ปิด assertions/service extensions ส่วนใหญ่และ optimize/AOT ตาม platform ต้องทดสอบ login, scanner, network, image, deep link และ error handling ใน artifact ที่เซ็นจริง เพราะ code ที่อยู่หลัง <code>assert</code> จะไม่ทำงาน</p></section>
-<section id="section-4"><h2>4. เช็ก mode ในโค้ด</h2><pre class="code-vs"><code>if (kDebugMode) { debugPrint('diagnostic only'); }
-if (kProfileMode) { /* optional profiling marker */ }
-if (kReleaseMode) { /* never use to choose secrets */ }</code></pre><p>อย่าใช้ flag นี้ตัด authorization หรือ certificate validation</p></section>
-<section id="section-5"><h2>5. Environment แบบ typed</h2><pre class="code-vs"><code>const environment = String.fromEnvironment('APP_ENV');
-const apiBase = String.fromEnvironment('WMS_API_BASE_URL');
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Part นี้แก้ปัญหาอะไร</a></li><li><a href="#section-2">สามโหมด</a></li><li><a href="#section-3">assert หายไปในโหมด release</a></li><li><a href="#section-4">แถบล้นที่หายไป</a></li><li><a href="#section-5">อะไรที่ควรต่างกันตามโหมด</a></li><li><a href="#section-6">อย่าเชื่อตัวเลขจากโหมด debug</a></li><li><a href="#section-7">build บ่อยแค่ไหน</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: build ทั้งสามโหมดแล้วเทียบขนาดและความเร็ว</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 14 (การวัดประสิทธิภาพ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกโหมด build ให้ถูกกับสิ่งที่กำลังทำ และรู้ว่าอะไรหายไปในโหมด release</div>
 
-// validate scheme/host and fail closed at startup</code></pre><p><code>--dart-define</code> เหมาะกับ public build config ไม่ใช่ความลับ เพราะค่าถูกฝังใน binary และดึงดูได้</p></section>
-<section id="section-6"><h2>6. Flavors</h2><p>ใช้ flavors/schemes เมื่อ dev/staging/prod ต้องมี application ID, display name, icon, signing หรือ entitlements ต่างกัน ให้เห็นชัดว่าแอปทดสอบไม่ใช่ production และติดตั้งคู่กันได้</p></section>
-<section id="section-7"><h2>7. Matrix ที่ต้องทดสอบ</h2><table><thead><tr><th>Artifact</th><th>Endpoint</th><th>จุดประสงค์</th></tr></thead><tbody><tr><td>debug-dev</td><td>local</td><td>พัฒนา</td></tr><tr><td>profile-stage</td><td>staging</td><td>วัด performance</td></tr><tr><td>release-stage</td><td>staging</td><td>release rehearsal</td></tr><tr><td>release-prod</td><td>production</td><td>แจกจริง</td></tr></tbody></table></section>
-<section id="section-8"><h2>8. Gate</h2><div class="success">CI ต้องบันทึก Flutter/Dart commit, mode, flavor, version, build number, Git SHA และ endpoint class โดยไม่เผย token พร้อม smoke test artifact เดียวกับที่จะส่ง ไม่ rebuild ใหม่หลังอนุมัติ</div></section>
+<section id="section-1"><h2>1. Part นี้แก้ปัญหาอะไร</h2><p>สิบสี่ Part ที่ผ่านมาสร้างแอปที่ทำงานได้บนเครื่องนักพัฒนา Part นี้พาแอปออกไปอยู่ในมือผู้ใช้จริง ซึ่งมีสิ่งที่ต่างออกไปมาก</p><table><thead><tr><th>ตอนพัฒนา</th><th>ตอนใช้งานจริง</th></tr></thead><tbody>
+<tr><td>ต่อสาย USB อยู่</td><td>เครื่องอยู่ในคลัง</td></tr>
+<tr><td>เห็น log ทุกบรรทัด</td><td>ไม่เห็นอะไรเลย</td></tr>
+<tr><td>สิทธิ์ที่ Flutter ใส่ให้อัตโนมัติ</td><td>ต้องประกาศเอง</td></tr>
+<tr><td>แอปพังแล้วเห็นทันที</td><td>ผู้ใช้โทรมาบอกอีกสามวัน</td></tr>
+</tbody></table><div class="note">แถวที่สามเป็นที่มาของบั๊กที่แพงที่สุดใน Part นี้ และ 15.3 จะแสดงตัวอย่างจริงจากโปรเจกต์นี้เอง</div></section>
+
+<section id="section-2"><h2>2. สามโหมด</h2><table><thead><tr><th>โหมด</th><th>คำสั่ง</th><th>ใช้ตอน</th></tr></thead><tbody>
+<tr><td>debug</td><td><code>flutter run</code></td><td>เขียนโค้ด</td></tr>
+<tr><td>profile</td><td><code>flutter run --profile</code></td><td>วัดประสิทธิภาพ</td></tr>
+<tr><td>release</td><td><code>flutter build apk --release</code></td><td>ส่งให้ผู้ใช้</td></tr>
+</tbody></table><table><thead><tr><th>คุณสมบัติ</th><th>debug</th><th>profile</th><th>release</th></tr></thead><tbody>
+<tr><td>hot reload</td><td>มี</td><td>ไม่มี</td><td>ไม่มี</td></tr>
+<tr><td>DevTools</td><td>ครบ</td><td>เกือบครบ</td><td>แทบไม่มี</td></tr>
+<tr><td><code>assert</code></td><td>ทำงาน</td><td>ไม่ทำงาน</td><td>ไม่ทำงาน</td></tr>
+<tr><td>แถบล้นสีเหลืองดำ</td><td>เห็น</td><td>ไม่เห็น</td><td>ไม่เห็น</td></tr>
+<tr><td>วิธีคอมไพล์</td><td>JIT</td><td>AOT</td><td>AOT</td></tr>
+<tr><td>ความเร็ว</td><td>ช้าที่สุด</td><td>เกือบเท่าจริง</td><td>เร็วที่สุด</td></tr>
+<tr><td>ขนาด</td><td>ใหญ่ที่สุด</td><td>กลาง</td><td>เล็กที่สุด</td></tr>
+</tbody></table><p>สองแถวที่มีผลกับการทำงานประจำวันมากที่สุดคือแถว <code>assert</code> และแถวแถบล้น</p></section>
+
+<section id="section-3"><h2>3. <code>assert</code> หายไปในโหมด release</h2><pre class="code-vs"><code>String pickSummary({required int scanned, required int required}) {
+  // ทั้งสองค่ามาจากการนับ จึงติดลบไม่ได้ — ถ้าติดลบแปลว่ามีบั๊กที่อื่น
+  assert(scanned &gt;= 0 &amp;&amp; required &gt;= 0, 'จำนวนติดลบ: $scanned/$required');
+  ...
+}</code></pre><table><thead><tr><th>ผลที่ตามมา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ใช้ <code>assert</code> ตรวจสมมติฐานของทีมได้อย่างสบายใจ</td><td>ไม่กระทบผู้ใช้และไม่กินเวลา</td></tr>
+<tr><td><strong>ห้ามใช้ <code>assert</code> ตรวจข้อมูลจากภายนอก</strong></td><td>ในโหมด release มันหายไป แล้วข้อมูลผิดจะไหลเข้าระบบ</td></tr>
+</tbody></table><pre class="code-vs"><code>// ผิด — ข้อมูลจากเซิร์ฟเวอร์ต้องตรวจด้วยโค้ดที่ทำงานจริง
+assert(json['quantity'] != null);
+
+// ถูก — ตรวจแล้วโยนแบบที่ทำงานทุกโหมด (6.5)
+final quantity = requireInt(json, 'quantity');</code></pre><div class="note">กฎที่จำง่าย — <code>assert</code> ตรวจ<strong>บั๊กของเรา</strong> ส่วนการตรวจ<strong>ข้อมูลจากคนอื่น</strong>ต้องใช้โค้ดปกติ</div></section>
+
+<section id="section-4"><h2>4. แถบล้นที่หายไป</h2><p>ในโหมด debug เนื้อหาที่ล้นจะเห็นเป็นแถบเหลืองดำ ในโหมด release มันแค่<strong>ถูกตัดหายไปเงียบ ๆ</strong></p><table><thead><tr><th>โหมด</th><th>ผู้ใช้เห็นอะไร</th></tr></thead><tbody>
+<tr><td>debug</td><td>แถบเหลืองดำที่บอกว่าล้นกี่พิกเซล</td></tr>
+<tr><td>release</td><td>ข้อความหรือปุ่มหายไปเฉย ๆ</td></tr>
+</tbody></table><p>นี่คือเหตุผลที่ 14.13 ยืนยันให้เขียนเทสต์ <code>tester.takeException()</code> — เพราะเป็นทางเดียวที่จะจับการล้นได้ก่อนที่จะกลายเป็นปุ่มที่ผู้ใช้กดไม่ได้</p></section>
+
+<section id="section-5"><h2>5. อะไรที่ควรต่างกันตามโหมด</h2><pre class="code-vs"><code>import 'package:flutter/foundation.dart';
+
+// ตัวแปรที่คอมไพเลอร์รู้ค่าตั้งแต่ตอน build จึงตัดโค้ดที่ไม่ใช้ทิ้งได้
+if (kDebugMode) {
+  debugPrint('...');
+}
+
+if (kReleaseMode) {
+  await crashReporter.initialize();
+}
+
+if (kProfileMode) { ... }</code></pre><table><thead><tr><th>ควรทำเฉพาะ debug</th><th>ควรทำเฉพาะ release</th></tr></thead><tbody>
+<tr><td><code>debugPrint</code> ที่ละเอียด</td><td>ส่งรายงานข้อผิดพลาดออกไป (15.10)</td></tr>
+<tr><td>เปิด <code>debugRepaintRainbowEnabled</code></td><td>ปิดปุ่มที่ใช้ทดสอบ</td></tr>
+<tr><td>ปุ่มลัดสำหรับทดสอบ</td><td>เก็บสถิติการใช้งาน</td></tr>
+<tr><td>ข้อมูลตัวอย่างที่ใส่ไว้ให้</td><td>—</td></tr>
+</tbody></table><div class="note"><code>kDebugMode</code> ไม่ใช่ตัวแปรธรรมดา — มันเป็น <code>const</code> ที่คอมไพเลอร์รู้ค่า ทำให้โค้ดในบล็อกนั้น<strong>ถูกตัดทิ้งทั้งก้อน</strong>ตอน build release ไม่ใช่แค่ข้ามตอนรัน</div><p>ต่างจากการเช็คด้วยตัวแปรที่อ่านจากที่อื่น ซึ่งโค้ดจะยังติดไปในแอป</p><pre class="code-vs"><code>// โค้ดข้างในถูกตัดทิ้ง ไม่ติดไปกับแอป
+if (kDebugMode) { showDebugPanel(); }
+
+// โค้ดข้างในยังติดไป แม้จะไม่มีวันทำงาน
+if (settings.debugEnabled) { showDebugPanel(); }</code></pre></section>
+
+<section id="section-6"><h2>6. อย่าเชื่อตัวเลขจากโหมด debug</h2><table><thead><tr><th>วัดอะไร</th><th>debug ต่างจากจริงแค่ไหน</th></tr></thead><tbody>
+<tr><td>ความเร็วในการวาด</td><td>ช้ากว่าหลายเท่า</td></tr>
+<tr><td>เวลาเปิดแอป</td><td>ช้ากว่ามาก</td></tr>
+<tr><td>ขนาดแอป</td><td>ใหญ่กว่าสองถึงสามเท่า</td></tr>
+<tr><td>หน่วยความจำ</td><td>ใกล้เคียง</td></tr>
+<tr><td>จำนวนคำขอเครือข่าย</td><td>เท่ากัน</td></tr>
+</tbody></table><p>สามแถวบนคือเหตุผลที่ 14.14 ยืนยันให้วัดในโหมด profile เท่านั้น — ตัวเลขจาก debug ทำให้คนไปแก้สิ่งที่ไม่ได้เป็นปัญหาจริง</p><p>ส่วนสองแถวล่างวัดในโหมด debug ได้ ซึ่งสะดวกกว่าเพราะมี DevTools ครบ</p></section>
+
+<section id="section-7"><h2>7. build บ่อยแค่ไหน</h2><table><thead><tr><th>จังหวะ</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>ทุกวันระหว่างพัฒนา</td><td>debug</td></tr>
+<tr><td>ก่อนบอกว่า “เสร็จแล้ว”</td><td><strong>release อย่างน้อยหนึ่งครั้ง แล้วลองบนเครื่องจริง</strong></td></tr>
+<tr><td>ก่อนปล่อยรุ่น</td><td>release + ทดสอบตาม checklist (15.12)</td></tr>
+<tr><td>เมื่อมีคนรายงานว่าช้า</td><td>profile บนเครื่องที่มีปัญหา</td></tr>
+</tbody></table><p>แถวที่สองเป็นแถวที่ทีมส่วนใหญ่ข้าม และเป็นที่มาของบั๊กประเภทที่ 15.3 จะแสดง — ฟีเจอร์ที่ทำงานสมบูรณ์ในโหมด debug แล้วใช้งานไม่ได้เลยในโหมด release</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทำงานใน debug แต่ไม่ทำงานใน release</td><td>สิทธิ์ที่ Flutter ใส่ให้เฉพาะ debug (15.3)</td><td>ประกาศเองใน main manifest</td></tr>
+<tr><td>ข้อมูลผิดหลุดเข้าระบบเฉพาะตอนใช้จริง</td><td>ใช้ <code>assert</code> ตรวจข้อมูลจากภายนอก</td><td>ใช้โค้ดที่ทำงานทุกโหมด</td></tr>
+<tr><td>ปุ่มหายไปเฉพาะบนเครื่องจริง</td><td>เนื้อหาล้นแต่ไม่มีแถบเตือน</td><td>เขียนเทสต์ (14.13)</td></tr>
+<tr><td>ไปแก้ประสิทธิภาพที่ไม่ได้เป็นปัญหา</td><td>วัดในโหมด debug</td><td>วัดในโหมด profile</td></tr>
+<tr><td><code>debugPrint</code> หลุดไปในแอปจริง</td><td>ไม่ได้ครอบด้วย <code>kDebugMode</code></td><td>ครอบ</td></tr>
+<tr><td>เจอปัญหาตอนใกล้ปล่อย</td><td>ไม่เคย build release ระหว่างทาง</td><td>build release อย่างน้อยสัปดาห์ละครั้ง</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ทีมพบว่าแอปที่ build เป็น release แล้ว “เปิดมาแล้วขาวเปล่า” แต่ในโหมด debug ทำงานปกติ</p><ol><li>สาเหตุที่เป็นไปได้</li><li>จะหาอย่างไรเมื่อไม่มี log</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สาเหตุที่พบบ่อย เรียงตามความน่าจะเป็น</p><table><thead><tr><th>สาเหตุ</th><th>ทำไมเห็นเฉพาะ release</th></tr></thead><tbody>
+<tr><td>โยนใน <code>main</code> ก่อน <code>runApp</code></td><td>ใน debug เห็นข้อความสีแดง ใน release เห็นจอเปล่า</td></tr>
+<tr><td>ขาดสิทธิ์ INTERNET แล้วโค้ดตอนเริ่มรอคำขอ</td><td>สิทธิ์มีเฉพาะ debug (15.3)</td></tr>
+<tr><td>asset ที่ไม่ได้ประกาศใน <code>pubspec.yaml</code></td><td>debug อ่านจากไฟล์ระบบได้ release อ่านจากที่รวม asset เท่านั้น</td></tr>
+<tr><td>โค้ดที่พึ่ง <code>assert</code> ให้ทำงาน</td><td><code>assert</code> ถูกตัดทิ้ง</td></tr>
+<tr><td>ปลั๊กอินที่ต้องตั้งค่า ProGuard</td><td>โค้ดถูกย่อจนหาคลาสไม่เจอ</td></tr>
+</tbody></table><p><strong>2.</strong> วิธีหาเมื่อไม่มี log — ไล่จากง่ายไปยาก</p><table><thead><tr><th>วิธี</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><code>flutter run --release</code> ต่อสาย USB</td><td>ได้ log ของ release build ซึ่งยังพิมพ์ข้อผิดพลาดร้ายแรงออกมา</td></tr>
+<tr><td><code>adb logcat</code></td><td>เห็นข้อผิดพลาดระดับ Android รวมถึงเรื่องสิทธิ์</td></tr>
+<tr><td><code>flutter build apk --profile</code></td><td>ถ้าโหมดนี้ทำงาน แปลว่าเป็นเรื่องของการย่อโค้ด ไม่ใช่ AOT</td></tr>
+<tr><td>ครอบ <code>main</code> ด้วยตัวจับข้อผิดพลาด</td><td>เห็นสิ่งที่โยนก่อน <code>runApp</code></td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; main() async {
+  // จับทุกอย่างที่โยนตอนเริ่ม แล้วแสดงบนหน้าจอ ไม่งั้นจะเห็นจอเปล่า
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await bootstrap();
+    runApp(const WmsApp());
+  }, (error, stack) {
+    // อย่างน้อยต้องมีอะไรให้เห็น
+    runApp(StartupFailureScreen(error: error.toString()));
+  });
+}</code></pre><p><strong>สิ่งที่ควรทำก่อนทั้งหมดนี้</strong> — บรรทัดแรกของ <code>flutter run --release</code> มักบอกคำตอบอยู่แล้ว แต่คนมักข้ามเพราะคิดว่าโหมด release ไม่มี log</p><p>และบทเรียนที่ใหญ่กว่าคือ<strong>จอเปล่าเป็นสิ่งที่ป้องกันได้</strong> — แอปที่มีหน้าจอบอกความล้มเหลวตอนเริ่ม ทำให้ผู้ใช้ส่งภาพหน้าจอมาให้ได้ แทนที่จะบอกได้แค่ว่า “มันไม่ขึ้น”</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>debug เขียนโค้ด profile วัดความเร็ว release ส่งให้ผู้ใช้</li><li><code>assert</code> หายไปใน release — ใช้ตรวจบั๊กของเรา ไม่ใช่ข้อมูลจากคนอื่น</li><li>แถบล้นหายไปด้วย เนื้อหาที่ล้นจะถูกตัดเงียบ ๆ</li><li><code>kDebugMode</code> ทำให้โค้ดถูกตัดทิ้ง ไม่ใช่แค่ข้ามตอนรัน</li><li>อย่าเชื่อตัวเลขความเร็วและขนาดจากโหมด debug</li><li>build release อย่างน้อยสัปดาห์ละครั้ง อย่ารอถึงวันปล่อย</li></ul></div><p><strong>บทหน้า:</strong> เลขรุ่นสองตัวที่ทำหน้าที่ต่างกันโดยสิ้นเชิง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

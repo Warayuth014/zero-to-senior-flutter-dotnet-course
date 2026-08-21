@@ -1,16 +1,108 @@
-<div class="note"><strong>APK กับ AAB ใช้คนละงาน:</strong> APK ติดตั้งตรงบน device ได้ ส่วน App Bundle เป็น publishing artifact ที่ store ใช้สร้าง APK ที่เหมาะกับอุปกรณ์ ต้องทดสอบ artifact/distribution path เดียวกับของจริง</div>
-<section><h2>1. Build commands</h2><pre class="code-vs"><code>flutter clean
-flutter pub get
-flutter analyze
-flutter test
-flutter build apk --release
-flutter build appbundle --release</code></pre><p>release pipeline ควร pin Flutter/Dart และ dependencies จาก lockfile ไม่ upgrade ระหว่าง build</p></section>
-<section><h2>2. APK variants</h2><p>universal APK สะดวก sideload แต่ใหญ่; split-per-abi ลดขนาดต่อ architectureแต่ต้องส่งไฟล์ถูกเครื่อง ในองค์กรใช้ MDM/private distribution และ checksum/version inventory ที่ตรวจสอบได้</p></section>
-<section><h2>3. App Bundle</h2><pre class="code-vs"><code>flutter build appbundle --release \
-  --build-name=1.4.0 --build-number=142 \
-  --dart-define=APP_ENV=production</code></pre><p>AAB ไม่ติดตั้งตรงเหมือน APK ใช้ store/internal testingหรือ bundletool สร้างชุด APK เพื่อทดสอบ delivery behavior</p></section>
-<section><h2>4. Reproducible input</h2><p>บันทึก commit SHA, Flutter version, lockfile hash, build command, flavor, environment config และ runner image Artifact ต้องมาจาก clean checkout ไม่พึ่ง <code>local.properties</code> หรือไฟล์ลับบนเครื่องนักพัฒนา</p></section>
-<section><h2>5. Size analysis</h2><pre class="code-vs"><code>flutter build appbundle --release --analyze-size</code></pre><p>ดู assets/font/native libraries ที่ใหญ่ผิดปกติและ license ไม่ลบ asset โดยเดาจน runtime หาย ทดสอบ tree shaking/icons กับ route ที่ใช้งานจริง</p></section>
-<section><h2>6. Install/upgrade rehearsal</h2><p>ติดตั้งใหม่, upgrade จากสองเวอร์ชันก่อนหน้า, retain settings/session ตาม policy, local schema migration, permissions ที่เคย deny และ rollback plan ใช้ release-signed buildบน PDA รุ่นจริง</p></section>
-<section><h2>7. Artifact integrity</h2><p>เก็บ SHA-256, SBOM/dependency inventory, signature verification และ provenance ใน release record จำกัด retention/สิทธิ์ download และไม่ส่ง artifact ผ่าน chat ที่ไม่มี audit</p></section>
-<section><h2>8. Smoke test</h2><div class="success">เปิดแอป → endpoint/status → login → scan receiving/picking → image/SignalR → background/resume → logout บน network production-like โดยไม่ใช้ debug bridge แล้ว approve artifact เดิมเท่านั้น</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: build ทั้งสองรูปแบบแล้วเทียบขนาด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.5<br><strong>จบบทนี้แล้วจะทำได้:</strong> เลือกรูปแบบไฟล์ที่ตรงกับวิธีแจก และลดขนาดแอปได้</div>
+
+<section><h2>1. สองรูปแบบ</h2><table><thead><tr><th> </th><th>APK</th><th>App Bundle (.aab)</th></tr></thead><tbody>
+<tr><td>คำสั่ง</td><td><code>flutter build apk</code></td><td><code>flutter build appbundle</code></td></tr>
+<tr><td>ติดตั้งได้เลยไหม</td><td>ได้</td><td><strong>ไม่ได้</strong> — ต้องผ่าน Play Store</td></tr>
+<tr><td>ขนาดที่ผู้ใช้โหลด</td><td>ทุกสถาปัตยกรรมรวมกัน</td><td>เฉพาะที่เครื่องนั้นใช้</td></tr>
+<tr><td>เหมาะกับ</td><td>แจกไฟล์เอง</td><td>ปล่อยผ่าน Play Store</td></tr>
+</tbody></table><div class="note"><strong>สำหรับ PDA ในคลังที่แจกไฟล์เอง คำตอบคือ APK</strong> — App Bundle ติดตั้งตรง ๆ ไม่ได้ เพราะมันเป็นรูปแบบที่ให้ Play Store ประกอบ APK ที่เหมาะกับแต่ละเครื่อง</div></section>
+
+<section><h2>2. ขนาดที่ต่างกัน</h2><pre class="code-vs"><code>flutter build apk --release
+# app-release.apk  ~18 MB — มีโค้ดของทุกสถาปัตยกรรม</code></pre><pre class="code-vs"><code>flutter build apk --release --split-per-abi
+# app-armeabi-v7a-release.apk  ~7 MB
+# app-arm64-v8a-release.apk    ~7 MB
+# app-x86_64-release.apk       ~7 MB</code></pre><table><thead><tr><th>สถาปัตยกรรม</th><th>ใช้กับ</th></tr></thead><tbody>
+<tr><td><code>arm64-v8a</code></td><td>เครื่อง Android แทบทั้งหมดตั้งแต่ปี 2017</td></tr>
+<tr><td><code>armeabi-v7a</code></td><td>เครื่องเก่า — PDA รุ่นเก่าบางตัวยังเป็นแบบนี้</td></tr>
+<tr><td><code>x86_64</code></td><td>emulator เป็นหลัก</td></tr>
+</tbody></table><p>สำหรับคลังที่รู้ว่าใช้ PDA รุ่นไหน การ build เฉพาะสถาปัตยกรรมที่ใช้จริงลดขนาดได้เกินครึ่ง</p><pre class="code-vs"><code># ตรวจว่า PDA เป็นสถาปัตยกรรมอะไร
+adb shell getprop ro.product.cpu.abi
+# arm64-v8a</code></pre><div class="warn">ถ้าแจกไฟล์เอง ต้องแน่ใจว่าส่งไฟล์ที่ตรงกับเครื่อง — APK ที่ผิดสถาปัตยกรรมจะติดตั้งได้แต่<strong>เปิดแล้วปิดทันที</strong> ซึ่งเป็นอาการที่หาสาเหตุยาก</div><p>ถ้าไม่แน่ใจว่าคลังมีเครื่องกี่รุ่น ให้ใช้ APK รวมไปก่อน — 18 MB ไม่ได้แพงเมื่อเทียบกับการส่งไฟล์ผิดเครื่อง</p></section>
+
+<section><h2>3. ลดขนาดด้วยการตัดสิ่งที่ไม่ได้ใช้</h2><pre class="code-vs"><code>// android/app/build.gradle.kts
+buildTypes {
+    release {
+        signingConfig = signingConfigs.getByName("release")
+        isMinifyEnabled = true      // ตัดโค้ด Kotlin/Java ที่ไม่ได้ใช้
+        isShrinkResources = true    // ตัด resource ที่ไม่ได้ใช้
+        proguardFiles(
+            getDefaultProguardFile("proguard-android-optimize.txt"),
+            "proguard-rules.pro",
+        )
+    }
+}</code></pre><table><thead><tr><th>สิ่งที่ตัด</th><th>ลดได้เท่าไหร่</th></tr></thead><tbody>
+<tr><td>โค้ด Java/Kotlin ที่ไม่ได้เรียก</td><td>ราว 1–3 MB</td></tr>
+<tr><td>resource ที่ไม่ได้อ้างถึง</td><td>ขึ้นกับจำนวน asset</td></tr>
+<tr><td>โค้ด Dart ที่ไม่ได้ใช้</td><td>Flutter ตัดให้อยู่แล้วโดยปริยาย</td></tr>
+</tbody></table><div class="warn">การย่อโค้ดทำให้ปลั๊กอินบางตัวพังตอนรัน เพราะมันหาคลาสด้วยชื่อตอนรัน ซึ่ง ProGuard เปลี่ยนชื่อไปแล้ว — <strong>ต้องทดสอบ APK ที่ย่อแล้วทุกเส้นทางหลัก</strong> ไม่ใช่แค่เปิดดูว่าเปิดได้</div><pre class="code-vs"><code># proguard-rules.pro — บอกให้เก็บคลาสที่ถูกหาด้วยชื่อ
+-keep class com.example.plugin.** { *; }</code></pre></section>
+
+<section><h2>4. ดูว่าอะไรกินพื้นที่</h2><pre class="code-vs"><code>flutter build apk --release --analyze-size</code></pre><p>คำสั่งนี้สร้างไฟล์ที่เปิดใน DevTools ได้ แล้วเห็นว่าขนาดมาจากไหน</p><table><thead><tr><th>สิ่งที่มักกินพื้นที่มากที่สุด</th><th>ลดอย่างไร</th></tr></thead><tbody>
+<tr><td>โค้ดของ Flutter engine</td><td>ลดไม่ได้ — เป็นพื้นฐาน</td></tr>
+<tr><td>ฟอนต์ที่ฝังไว้</td><td>ใส่เฉพาะน้ำหนักที่ใช้จริง (11.4)</td></tr>
+<tr><td>รูปใน asset</td><td>ใช้ SVG แทน PNG ที่ต้องมีหลายความละเอียด (11.10)</td></tr>
+<tr><td>แพ็กเกจที่ใช้เพียงเล็กน้อย</td><td>ตัดออกถ้าเขียนเองได้ในไม่กี่บรรทัด</td></tr>
+<tr><td>ไอคอนชุดใหญ่ทั้งชุด</td><td>ใช้ SVG เฉพาะตัวที่ต้องการ (11.10)</td></tr>
+</tbody></table><p>สำหรับ PDA ที่ติดตั้งครั้งเดียวผ่านสาย USB ขนาดแอปไม่ใช่ปัญหาเท่าไหร่ — สิ่งที่สำคัญกว่าคือ<strong>เวลาที่ใช้ติดตั้งข้ามยี่สิบเครื่อง</strong> ซึ่งขนาดมีผลโดยตรง</p></section>
+
+<section><h2>5. แพ็กเกจที่ไม่ควรติดไปกับแอป</h2><pre class="code-vs"><code>test('แพ็กเกจที่ใช้เฉพาะตอนพัฒนา อยู่ใน dependencies ต้องเตือน', () {
+  final pubspec = goodPubspec.replaceAll(
+    '  http: ^1.2.2',
+    '  http: ^1.2.2\n  build_runner: ^2.15.1',
+  );
+
+  final findings = checkPubspec(pubspec);
+  expect(findings.any((f) =&gt; f.code == 'dev-package-in-dependencies'), isTrue);
+});</code></pre><table><thead><tr><th>แพ็กเกจ</th><th>ควรอยู่ที่</th></tr></thead><tbody>
+<tr><td><code>flutter_launcher_icons</code></td><td><code>dev_dependencies</code> — ใช้ตอน build ไอคอน (11.12)</td></tr>
+<tr><td><code>build_runner</code></td><td><code>dev_dependencies</code> — ใช้สร้างโค้ด</td></tr>
+<tr><td><code>flutter_lints</code></td><td><code>dev_dependencies</code></td></tr>
+<tr><td><code>freezed</code>, <code>json_serializable</code></td><td><code>dev_dependencies</code> — ส่วน <code>*_annotation</code> อยู่ใน <code>dependencies</code></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นจุดที่สับสนบ่อย — ตัวสร้างโค้ดอยู่ฝั่ง dev ส่วนตัว annotation ที่โค้ดที่สร้างขึ้นต้องใช้ ต้องอยู่ฝั่งปกติ</p></section>
+
+<section><h2>6. ตรวจสิ่งที่อยู่ใน APK</h2><pre class="code-vs"><code># ดูไฟล์ทั้งหมดที่อยู่ข้างใน
+unzip -l app-release.apk | sort -k1 -n -r | head -20
+
+# ดูว่า asset อะไรติดไปบ้าง
+unzip -l app-release.apk | grep assets/</code></pre><table><thead><tr><th>สิ่งที่ควรตรวจ</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ไฟล์ตัวอย่างหรือข้อมูลทดสอบ</td><td>ไม่ควรติดไป</td></tr>
+<tr><td>รูปที่ความละเอียดสูงเกินจำเป็น</td><td>กินพื้นที่โดยไม่ได้ใช้</td></tr>
+<tr><td>ฟอนต์ที่ไม่ได้ใช้</td><td>เหมือนกัน</td></tr>
+<tr><td>ไฟล์ config ของ dev</td><td>อาจมีที่อยู่เซิร์ฟเวอร์ภายใน</td></tr>
+</tbody></table><p>แถวสุดท้ายเชื่อมกับ 15.6 — asset ที่ติดไปโดยไม่ตั้งใจเป็นทางหนึ่งที่ข้อมูลหลุด</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ติดตั้ง .aab ไม่ได้</td><td>มันไม่ใช่ไฟล์ที่ติดตั้งได้</td><td>ใช้ APK ถ้าแจกเอง</td></tr>
+<tr><td>ติดตั้งได้แต่เปิดแล้วปิดทันที</td><td>APK ผิดสถาปัตยกรรม</td><td>ตรวจด้วย <code>getprop ro.product.cpu.abi</code></td></tr>
+<tr><td>ปลั๊กอินพังเฉพาะ release</td><td>ProGuard เปลี่ยนชื่อคลาส</td><td>เพิ่มกฎ <code>-keep</code></td></tr>
+<tr><td>แอปใหญ่กว่าที่ควร</td><td>ฟอนต์หรือรูปที่ไม่ได้ใช้</td><td><code>--analyze-size</code></td></tr>
+<tr><td>เครื่องมือสร้างโค้ดติดไปกับแอป</td><td>อยู่ผิดส่วนใน pubspec</td><td>ย้ายไป <code>dev_dependencies</code></td></tr>
+<tr><td>ทดสอบ APK ที่ย่อแล้วแค่เปิดดู</td><td>คิดว่าเปิดได้คือใช้ได้</td><td>ทดสอบทุกเส้นทางหลัก</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>คลังมี PDA สองรุ่น รุ่นเก่า 8 เครื่องเป็น <code>armeabi-v7a</code> รุ่นใหม่ 12 เครื่องเป็น <code>arm64-v8a</code> ช่างต้องเดินไปติดตั้งทีละเครื่อง</p><ol><li>ควร build อย่างไร</li><li>จะลดโอกาสส่งไฟล์ผิดเครื่องอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> มีสองทางที่ใช้ได้ และคำตอบขึ้นกับว่าอะไรแพงกว่า</p><table><thead><tr><th>ทาง</th><th>ขนาดต่อไฟล์</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>APK รวมไฟล์เดียว</td><td>ราว 18 MB</td><td>ส่งผิดไม่ได้เลย</td></tr>
+<tr><td>แยกตามสถาปัตยกรรม</td><td>ราว 7 MB</td><td>ส่งผิดเครื่องได้</td></tr>
+</tbody></table><p><strong>สำหรับ 20 เครื่อง คำตอบคือไฟล์เดียว</strong> — ความต่าง 11 MB ต่อเครื่องผ่านสาย USB คือไม่กี่วินาที ส่วนการติดตั้งผิดไฟล์แล้วต้องกลับไปแก้ คือการเดินซ้ำ</p><p>การแยกไฟล์คุ้มเมื่อ</p><ul><li>ส่งผ่านเครือข่ายที่ช้าหรือมีค่าใช้จ่าย</li><li>มีเครื่องหลักร้อยขึ้นไป</li><li>มีระบบจัดการอุปกรณ์ที่เลือกไฟล์ให้อัตโนมัติ</li></ul><p><strong>2.</strong> ถ้าเลือกแยกไฟล์ ให้ลดโอกาสผิดด้วยสามอย่าง</p><table><thead><tr><th>ทำ</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>ตั้งชื่อไฟล์ให้บอกสถาปัตยกรรมชัด</td><td>Flutter ทำให้อยู่แล้ว — อย่าเปลี่ยนชื่อ</td></tr>
+<tr><td>เขียนสคริปต์ติดตั้งที่ตรวจเครื่องก่อน</td><td>ผิดไม่ได้เลย</td></tr>
+<tr><td>แสดงสถาปัตยกรรมในหน้าตั้งค่าของแอป</td><td>ตรวจย้อนหลังได้ว่าเครื่องไหนลงอะไร</td></tr>
+</tbody></table><pre class="code-vs"><code># tool/install.sh — เลือกไฟล์ตามเครื่องที่ต่ออยู่
+abi=$(adb shell getprop ro.product.cpu.abi | tr -d '\r')
+apk="build/app/outputs/flutter-apk/app-$abi-release.apk"
+
+if [ ! -f "$apk" ]; then
+  echo "ไม่มีไฟล์สำหรับ $abi"
+  exit 1
+fi
+
+adb install -r "$apk"</code></pre><p><strong>สิ่งที่มีค่ากว่าทั้งสองข้อ</strong> — ถามว่าทำไมต้องเดินไปทีละเครื่อง</p><table><thead><tr><th>ทางเลือก</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ระบบจัดการอุปกรณ์ขององค์กร</td><td>มีเครื่องเกินสิบและอัปเดตบ่อย</td></tr>
+<tr><td>ให้แอปตรวจรุ่นใหม่แล้วบอกผู้ใช้</td><td>ทำได้ทันทีโดยไม่ต้องมีระบบเพิ่ม</td></tr>
+</tbody></table><pre class="code-vs"><code>// ต่อยอดจาก health payload ที่ 10.9 ทำไว้แล้ว
+if (health.minimumAppBuild &gt; currentVersion.build) {
+  // บอกให้ไปรับการอัปเดต แทนที่จะปล่อยให้ใช้รุ่นเก่าไปเรื่อย ๆ
+}</code></pre><p>ข้อหลังใช้เวลาทำไม่กี่ชั่วโมง และแก้ปัญหาที่ใหญ่กว่าเรื่องขนาดไฟล์มาก — <strong>การไม่รู้ว่าเครื่องไหนใช้รุ่นอะไรอยู่</strong> ซึ่ง 15.2 ก็ชี้ไปที่เรื่องเดียวกัน</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>แจกไฟล์เองใช้ APK ส่วน App Bundle ใช้กับ Play Store เท่านั้น</li><li>แยกตามสถาปัตยกรรมลดขนาดเกินครึ่ง แต่เสี่ยงส่งผิดเครื่อง</li><li>APK ผิดสถาปัตยกรรมติดตั้งได้แต่เปิดแล้วปิดทันที</li><li>การย่อโค้ดทำให้ปลั๊กอินบางตัวพัง ต้องทดสอบทุกเส้นทาง</li><li>เครื่องมือสร้างโค้ดต้องอยู่ใน <code>dev_dependencies</code></li><li>ตรวจว่ามี asset อะไรติดไปกับ APK บ้าง</li></ul></div><p><strong>บทหน้า:</strong> ไอคอนและชื่อที่ผู้ใช้เห็นก่อนเปิดแอป</p></section>

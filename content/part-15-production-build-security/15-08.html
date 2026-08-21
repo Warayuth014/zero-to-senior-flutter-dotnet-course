@@ -1,17 +1,95 @@
-<div class="note"><strong>Release identity ต้องเตรียมก่อนแจก:</strong> ทั้งสองโปรเจกต์ปัจจุบันเซ็น release ด้วย debug key และ application ID ยังเป็น <code>com.example...</code> ซึ่งต้องเปลี่ยนก่อนมีผู้ใช้ production</div>
-<section><h2>1. Keystore</h2><p>สร้าง upload/release key ตาม distribution model เก็บ encryptedใน secret manager/backup ที่มี ownerอย่างน้อยสองคน บันทึก alias, validity และ recovery process ห้าม commit <code>.jks</code> หรือ password</p></section>
-<section><h2>2. Gradle signing</h2><pre class="code-vs"><code>signingConfigs {
-  create("release") {
-    storeFile = file(secretStoreFile)
-    storePassword = secretStorePassword
-    keyAlias = secretKeyAlias
-    keyPassword = secretKeyPassword
-  }
-}
-buildTypes.release.signingConfig = signingConfigs.getByName("release")</code></pre><p>ค่ามาจาก CI environment/protected fileและ fail หากหาย ไม่ fallback ไป debug key</p></section>
-<section><h2>3. Application ID และ namespace</h2><p>เลือกเช่น <code>com.company.wms</code> และ flavors อาจเป็น <code>.dev</code>/<code>.staging</code> ตรวจ deep link, Firebase/config/provider authority ทั้งหมดที่อิง ID ก่อนเปลี่ยน</p></section>
-<section><h2>4. Verify signature</h2><p>หลัง build ตรวจ certificate fingerprint/signature ของ APK/AAB เทียบค่าที่อนุมัติ และ install upgrade over production-signed previous build หากเซ็นคนละ key Android จะไม่ยอมอัปเดตทับ</p></section>
-<section><h2>5. Launcher icon</h2><p><code>wmsapp</code> มี flutter_launcher_icons ชี้ icon TKS และเปิด Android แต่ปิด iOS ตรวจ adaptive foreground/background, monochrome/theme, contrast และไม่มีข้อความเล็กที่อ่านไม่ได้บน launcher</p></section>
-<section><h2>6. Name/brand per environment</h2><p>dev/staging ควรมีชื่อ/icon badge ต่างจาก productionเพื่อลด operator ยิงข้อมูลผิด server แต่ไม่เปลี่ยน layoutจน testไม่แทนกัน ตรวจ label ใน Android manifestและ iOS display name</p></section>
-<section><h2>7. Key rotation/recovery</h2><p>กำหนดว่า store/MDM รองรับ key upgradeอย่างไร ทดลอง recoveryจาก backup และจำกัดผู้มีสิทธิ์ signing การทำ key หายอาจทำให้อัปเดตแอปเดิมไม่ได้</p></section>
-<section><h2>8. Gate</h2><div class="success">release build ต้อง fail ถ้าใช้ debug certificate, application ID/example, versionซ้ำ, icon placeholder หรือ signing secretsถูก log พร้อมเก็บ verified fingerprintใน release record</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: ตั้งชื่อและไอคอนของ build ที่จะปล่อย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.5, 11.12 (ไอคอนแอป)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตั้งชื่อแพ็กเกจ ชื่อแอป และไอคอนให้ถูกต้องก่อนปล่อยรุ่นแรก</div>
+
+<section><h2>1. ชื่อสามชื่อที่ต่างกัน</h2><table><thead><tr><th>ชื่อ</th><th>อยู่ที่</th><th>ใครเห็น</th><th>เปลี่ยนทีหลังได้ไหม</th></tr></thead><tbody>
+<tr><td><code>applicationId</code></td><td><code>build.gradle.kts</code></td><td>ระบบปฏิบัติการ</td><td><strong>ไม่ได้</strong> — เปลี่ยนแล้วกลายเป็นคนละแอป</td></tr>
+<tr><td><code>android:label</code></td><td><code>AndroidManifest.xml</code></td><td>ใต้ไอคอน</td><td>ได้</td></tr>
+<tr><td><code>MaterialApp.title</code></td><td>โค้ด Dart</td><td>ตัวสลับแอปของระบบ</td><td>ได้</td></tr>
+</tbody></table><p>แถวแรกเป็นแถวเดียวที่แก้ทีหลังไม่ได้ และเป็นแถวที่แม่แบบตั้งค่าผิดไว้ให้</p></section>
+
+<section><h2>2. <code>com.example</code> ที่ยังไม่ได้เปลี่ยน</h2><pre class="code-vs"><code>defaultConfig {
+    // TODO: Specify your own unique Application ID
+    applicationId = "com.example.wms_absolute_mobile"
+}</code></pre><p>บรรทัดนี้อยู่ในทั้งสองโปรเจกต์ พร้อมคอมเมนต์ TODO ที่แม่แบบใส่ไว้</p><table><thead><tr><th>ผลของการปล่อยด้วย <code>com.example.*</code></th></tr></thead><tbody>
+<tr><td>Play Store ปฏิเสธ — <code>com.example</code> เป็นชื่อจองไว้สำหรับตัวอย่าง</td></tr>
+<tr><td>ชนกับแอปตัวอย่างอื่นที่ใช้ชื่อเดียวกัน แล้วติดตั้งทับกัน</td></tr>
+<tr><td>ดูไม่น่าเชื่อถือเมื่อฝ่ายไอทีตรวจก่อนอนุญาต</td></tr>
+</tbody></table><pre class="code-vs"><code>test('applicationId ที่ยังเป็น com.example ต้องขวางการปล่อย', () {
+  final gradle = goodGradle.replaceAll('com.acetec.wms.pda"', 'com.example.wms_pda"');
+
+  final findings = checkAndroidGradle(gradle);
+  final blocker = findings.firstWhere((f) =&gt; f.isBlocker);
+  expect(blocker.code, 'default-application-id');
+});</code></pre></section>
+
+<section><h2>3. ตั้งชื่ออย่างไร</h2><pre class="code-vs"><code>com.acetec.wms.pda
+│    │      │   └── ชื่อแอปในกลุ่มนั้น
+│    │      └────── กลุ่มของระบบ
+│    └───────────── ชื่อองค์กร
+└────────────────── โดเมนกลับด้าน</code></pre><table><thead><tr><th>กฎ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ใช้โดเมนที่องค์กรเป็นเจ้าของ กลับด้าน</td><td>รับประกันว่าไม่ชนกับใคร</td></tr>
+<tr><td>ตัวพิมพ์เล็กทั้งหมด</td><td>บางระบบไฟล์ไม่แยกตัวพิมพ์</td></tr>
+<tr><td>ไม่มีขีดกลาง</td><td>ใช้ไม่ได้ในชื่อแพ็กเกจ Java</td></tr>
+<tr><td>สื่อว่าเป็นแอปอะไร</td><td>ฝ่ายไอทีอ่านแล้วเข้าใจ</td></tr>
+</tbody></table><p>ถ้ามีหลาย build ที่ต้องอยู่บนเครื่องเดียวกัน ให้ต่อท้าย</p><pre class="code-vs"><code>buildTypes {
+    debug {
+        // แอปทดสอบอยู่ร่วมกับแอปจริงบนเครื่องเดียวได้
+        applicationIdSuffix = ".dev"
+        resValue("string", "app_name", "ABS PDA (dev)")
+    }
+}</code></pre><p>ต่อยอดจาก 11.12 ที่บอกให้ทำไอคอนคนละชุด — <strong>ชื่อแพ็กเกจที่ต่างกันทำให้ติดตั้งพร้อมกันได้จริง</strong> ส่วนไอคอนกับชื่อทำให้แยกออกด้วยตา</p><table><thead><tr><th>ปัญหาที่แก้ได้</th><th>จาก</th></tr></thead><tbody>
+<tr><td>พนักงานเปิดแอปทดสอบแล้วบันทึกลงเซิร์ฟเวอร์ทดสอบทั้งกะ</td><td>11.12</td></tr>
+<tr><td>ต้องถอนแอปจริงก่อนลงตัวทดสอบ</td><td>บทนี้</td></tr>
+</tbody></table></section>
+
+<section><h2>4. เปลี่ยนชื่อแพ็กเกจต้องแก้กี่ที่</h2><pre class="code-vs"><code>android/app/build.gradle.kts          namespace + applicationId
+android/app/src/main/kotlin/...        โครงโฟลเดอร์และ package ใน MainActivity.kt
+android/app/src/*/AndroidManifest.xml  ถ้ามีการอ้างชื่อ</code></pre><p>ทำมือได้แต่พลาดง่าย ใช้เครื่องมือเร็วกว่า</p><pre class="code-vs"><code>dart pub global activate rename_app
+dart pub global run rename_app:main android --value "com.acetec.wms.pda"</code></pre><div class="note">ทำ<strong>ก่อนปล่อยรุ่นแรก</strong>เท่านั้น — หลังจากที่มีเครื่องติดตั้งไปแล้ว การเปลี่ยน <code>applicationId</code> ทำให้ระบบมองว่าเป็นคนละแอป ผู้ใช้จะเห็นสองไอคอนและข้อมูลเดิมทั้งหมดอยู่กับแอปเก่า</div></section>
+
+<section><h2>5. ชื่อที่ผู้ใช้เห็น</h2><pre class="code-vs"><code>&lt;application android:label="ABS PDA V3"&gt;</code></pre><table><thead><tr><th>ชื่อที่ดี</th><th>ชื่อที่ไม่ดี</th></tr></thead><tbody>
+<tr><td>สั้นพอที่จะไม่ถูกตัดใต้ไอคอน</td><td>ยาวจนเห็นแค่ครึ่ง</td></tr>
+<tr><td>บอกว่าเป็นแอปอะไร</td><td><code>wmsapp</code></td></tr>
+<tr><td>แยกออกจากแอปทดสอบ</td><td>ชื่อเดียวกันทั้งสอง build</td></tr>
+</tbody></table><p>ใต้ไอคอนบนหน้าจอ Android แสดงได้ราว 12 ตัวอักษรก่อนถูกตัด — <code>ABS PDA V3</code> พอดี ส่วน <code>ACETEC Warehouse Management</code> จะเห็นเป็น <code>ACETEC War...</code></p><pre class="code-vs"><code>test('ชื่อแอปว่าง ต้องเตือน', () {
+  final manifest = goodManifest.replaceAll('android:label="ABS PDA V3"', 'android:label=""');
+
+  expect(checkAndroidManifest(manifest).any((f) =&gt; f.code == 'empty-label'), isTrue);
+});</code></pre></section>
+
+<section><h2>6. ไอคอนก่อนปล่อย</h2><p>11.12 อธิบายวิธีสร้างไปแล้ว ตรงนี้คือสิ่งที่ต้องตรวจก่อนปล่อย</p><table><thead><tr><th>ตรวจ</th><th>อย่างไร</th></tr></thead><tbody>
+<tr><td>ไม่ใช่ไอคอน Flutter ที่แม่แบบให้มา</td><td>ดูบนเครื่องจริง</td></tr>
+<tr><td>ไม่ถูกตัดขอบบนเครื่องที่ใช้กรอบวงกลม</td><td>ทดสอบบนเครื่องที่ใช้จริง</td></tr>
+<tr><td>ไม่เบลอ</td><td>ไฟล์ต้นฉบับ 1024×1024 ขึ้นไป</td></tr>
+<tr><td>แอปทดสอบใช้ไอคอนคนละชุด</td><td>ดูสองแอปข้างกัน</td></tr>
+</tbody></table><pre class="code-vs"><code># สร้างใหม่หลังเปลี่ยนโลโก้ แล้วถอนติดตั้งใหม่เพราะ Android จำไอคอนเก่า
+dart run flutter_launcher_icons
+adb uninstall com.acetec.wms.pda
+flutter build apk --release &amp;&amp; adb install build/app/outputs/flutter-apk/app-release.apk</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>Play Store ปฏิเสธ</td><td><code>applicationId</code> เป็น <code>com.example.*</code></td><td>เปลี่ยนก่อนปล่อยรุ่นแรก</td></tr>
+<tr><td>เปลี่ยน applicationId แล้วผู้ใช้เห็นสองไอคอน</td><td>ระบบมองว่าเป็นคนละแอป</td><td>ทำก่อนปล่อยเท่านั้น</td></tr>
+<tr><td>ติดตั้งแอปทดสอบทับแอปจริง</td><td>ใช้ <code>applicationId</code> เดียวกัน</td><td>ใส่ <code>applicationIdSuffix</code></td></tr>
+<tr><td>ชื่อใต้ไอคอนถูกตัด</td><td>ยาวเกิน 12 ตัวอักษร</td><td>ย่อ</td></tr>
+<tr><td>ไอคอนไม่เปลี่ยนหลังสร้างใหม่</td><td>Android จำไอคอนเก่า</td><td>ถอนแล้วติดตั้งใหม่</td></tr>
+<tr><td>build ไม่ผ่านหลังเปลี่ยนชื่อ</td><td>โครงโฟลเดอร์ kotlin ไม่ตรงกับ package</td><td>ใช้เครื่องมือแทนการแก้มือ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมจะปล่อยแอปให้สามสาขา และอยากให้แต่ละสาขาเห็นชื่อสาขาตัวเองบนไอคอน</p><ol><li>ควรทำเป็นสามแอปแยก หรือแอปเดียวที่สลับได้</li><li>ถ้าเลือกแอปเดียว จะแสดงชื่อสาขาอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> เทียบสองทาง</p><table><thead><tr><th> </th><th>สามแอปแยก</th><th>แอปเดียว</th></tr></thead><tbody>
+<tr><td>ปล่อยรุ่นใหม่</td><td>build สามครั้ง ติดตั้งสามชุด</td><td>ครั้งเดียว</td></tr>
+<tr><td>เครื่องที่ย้ายสาขา</td><td>ต้องถอนแล้วลงตัวใหม่</td><td>สลับ profile (Part 10)</td></tr>
+<tr><td>เห็นสาขาก่อนเปิดแอป</td><td>เห็น</td><td>ไม่เห็น</td></tr>
+<tr><td>เปิดผิดสาขา</td><td>เป็นไปไม่ได้</td><td>เป็นไปได้</td></tr>
+</tbody></table><p><strong>แอปเดียวชนะ</strong> สำหรับกรณีนี้ เพราะ Part 10 สร้างระบบ profile ไว้แล้ว และแถวที่สองสำคัญกว่าที่คิด — PDA ที่ย้ายสาขาชั่วคราวเป็นเรื่องปกติในองค์กรที่มีหลายคลัง</p><p>สามแอปแยกคุ้มเมื่อ<strong>สาขาเป็นคนละองค์กรที่ไม่ควรเห็นข้อมูลของกัน</strong> ซึ่งตอนนั้นการแยกไม่ใช่แค่เรื่องความสะดวก</p><p><strong>2.</strong> แสดงชื่อสาขาในที่ที่ผู้ใช้เห็นตลอดเวลา ไม่ใช่แค่ตอนเปิด</p><table><thead><tr><th>ที่</th><th>จาก</th></tr></thead><tbody>
+<tr><td>ชื่อ profile บนแถบหัวจอ</td><td>10.12 — “ต่อผิดเครื่อง” เจอบ่อยกว่า “ต่อไม่ได้”</td></tr>
+<tr><td>สีของแถบหัวจอต่างกันตามสาขา</td><td>11.12 แบบฝึกหัด</td></tr>
+<tr><td>ชื่อสาขาในกล่องยืนยันของรายการที่ย้อนยาก</td><td>11.12</td></tr>
+</tbody></table><p>ข้อที่สองมีพลังที่สุด เพราะผู้ใช้จำสีได้เร็วกว่าอ่านชื่อ และรู้ตัวทันทีเมื่อเห็นสีที่ไม่คุ้น</p><pre class="code-vs"><code>// สีมาจาก profile ที่ใช้อยู่ ไม่ใช่จาก build
+Color headerColorFor(ServerProfile profile) =&gt; switch (profile.environment) {
+  ServerEnvironment.production =&gt; PdaColors.brand,
+  ServerEnvironment.development =&gt; PdaColors.warning,
+  ServerEnvironment.custom =&gt; PdaColors.subtitle,
+};</code></pre><p><strong>แต่ต้องระวังกับดักจาก 10.4</strong> — ป้าย <code>environment</code> ที่ผู้ใช้เลือกเอง ไม่ควรเอาไปเปลี่ยนพฤติกรรมของแอป การใช้มันเลือกสีนั้นยอมรับได้เพราะเป็นเรื่องของการแสดงผลล้วน ๆ แต่ต้องไม่เลยไปกว่านั้น</p><p>และคำถามที่ควรถามก่อนทั้งหมดนี้ — <strong>ทำไมพนักงานถึงเข้าเซิร์ฟเวอร์สาขาอื่นได้ตั้งแต่แรก</strong> ถ้าบัญชีผูกกับสาขา เซิร์ฟเวอร์ควรปฏิเสธการเข้าสู่ระบบเลย (11.12) — สีและไอคอนเป็นแค่การช่วยให้รู้ตัวเร็วขึ้น ไม่ใช่การป้องกัน</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>applicationId</code> เปลี่ยนทีหลังไม่ได้ — ต้องตั้งก่อนปล่อยรุ่นแรก</li><li><code>com.example.*</code> เป็นชื่อจองไว้สำหรับตัวอย่าง Play Store ปฏิเสธ</li><li><code>applicationIdSuffix</code> ทำให้แอปทดสอบอยู่ร่วมกับแอปจริงได้</li><li>ชื่อใต้ไอคอนแสดงได้ราว 12 ตัวอักษร</li><li>เปลี่ยนไอคอนแล้วต้องถอนติดตั้งใหม่ถึงจะเห็น</li><li>แสดงสาขาที่ใช้อยู่ในแอป ดีกว่าแยกเป็นหลายแอป</li></ul></div><p><strong>บทหน้า:</strong> การตั้งค่าฝั่ง iOS สำหรับวันที่ต้องรองรับ</p></section>

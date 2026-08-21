@@ -1,14 +1,149 @@
-<div class="note"><strong>Production diagnostics ต้องตอบว่า “อะไรเกิด ที่ไหน เมื่อไร” โดยไม่รั่วข้อมูล:</strong> ใช้ structured logs, correlation ID, crash/error reporting และ breadcrumb ที่กำหนด retention/access ชัดเจน</div>
-<section><h2>1. Log levels</h2><p>debug/trace ปิดหรือ samplingใน release, info สำหรับ lifecycle/business milestone, warning สำหรับ recoverable anomaly, error สำหรับ operationล้มพร้อม stack/cause ไม่ใช้ errorกับ validationปกติจน alert noise</p></section>
-<section><h2>2. Structured event</h2><pre class="code-vs"><code>logger.info('receiving.submit', fields: {
-  'operationId': operationId,
-  'build': buildNumber,
-  'durationMs': elapsed,
-  'result': 'success',
-});</code></pre><p>ใช้ stable event name/fields ไม่ parseข้อความภาษาไทยย้อนหลัง</p></section>
-<section><h2>3. Redaction</h2><p>ห้าม log password, JWT/Authorization, cookie, raw request body, signed URL, รูป, full serialหรือข้อมูลบุคคล Mask/hash เฉพาะเมื่อ threat model/กฎหมายอนุญาตและ hashก็อาจเป็น identifierได้</p></section>
-<section><h2>4. Correlation</h2><p>client สร้าง operation/request ID แล้วส่ง headerให้ .NET logร่วมกัน แยก session IDแบบสุ่มจาก user IDและ rotateตาม policy ช่วยไล่ timeout/duplicateโดยไม่ต้องเห็น payloadลับ</p></section>
-<section><h2>5. Crash vs handled error</h2><p>Flutter framework error, platform dispatcher error และ isolate errorต้องถูก captureตามจุดที่เหมาะ แต่ network offline/validationที่ handleแล้วควรเป็น metric/breadcrumb ไม่ส่งทุกครั้งเป็น crash</p></section>
-<section><h2>6. Symbols</h2><p>ถ้า obfuscate/minify ต้องเก็บ split debug info/mappingตรง build number ในที่จำกัดสิทธิ์ เพื่อ symbolicate stack trace ห้ามเผย symbolsสาธารณะหรือทำหายหลัง release</p></section>
-<section><h2>7. Operational metrics</h2><p>ติดตาม crash-free sessions, login/API failure rate, p95 duration, timeout, offline queue depth, duplicate conflictและ app version adoption ตั้ง alertตาม baseline/SLO ไม่ alertทุก exceptionเดี่ยว</p></section>
-<section><h2>8. Diagnostics test</h2><div class="success">บังคับ handled/unhandled failureใน staging ตรวจ eventถึงระบบ, symbolicateได้, correlationต่อ .NETได้, redactionผ่าน และผู้ใช้มี support IDโดยไม่ต้องส่ง token/screenshotข้อมูลลับ</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน <code>crash_report.dart</code> แล้วรันเทสต์ทั้งหก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.6, 7.17 (การปิดค่าใน log), 14.14 (DevTools)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าแอปพังที่หน้างานเมื่อไหร่และเพราะอะไร โดยไม่ทำให้ความลับหลุดไปด้วย</div>
+
+<section><h2>1. ปัญหา</h2><p>Part 14 สอนวิธีหาสาเหตุเมื่อ<strong>มีแอปอยู่ตรงหน้า</strong> แต่บน PDA ในคลัง สถานการณ์ต่างออกไป</p><table><thead><tr><th>ตอนพัฒนา</th><th>ที่หน้างาน</th></tr></thead><tbody>
+<tr><td>เห็น stack trace ทันที</td><td>ผู้ใช้เห็นจอขาวหรือแอปปิดตัวเอง</td></tr>
+<tr><td>ทำซ้ำได้</td><td>เกิดครั้งเดียวตอนบ่ายสาม</td></tr>
+<tr><td>ต่อ DevTools ได้</td><td>เครื่องอยู่ในคลัง</td></tr>
+<tr><td>รู้ว่าทำอะไรอยู่ตอนพัง</td><td>ผู้ใช้บอกได้แค่ “มันเด้งออก”</td></tr>
+</tbody></table><p>สิ่งที่ต้องการคือ<strong>ให้แอปเล่าเองว่าเกิดอะไรขึ้น</strong></p></section>
+
+<section><h2>2. จับข้อผิดพลาดสองชนิด</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ข้อผิดพลาดที่เกิดในโค้ดของ Flutter เช่นตอน build หรือ layout
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);   // ยังพิมพ์ออก console ตามเดิม
+    unawaited(reporter.record(details.exception, details.stack ?? StackTrace.empty));
+  };
+
+  // ข้อผิดพลาดที่หลุดออกนอก Flutter เช่นใน Future ที่ไม่มีใครจับ
+  PlatformDispatcher.instance.onError = (error, stack) {
+    unawaited(reporter.record(error, stack));
+    return true;   // จัดการแล้ว อย่าให้แอปปิดตัวเอง
+  };
+
+  runApp(const WmsApp());
+}</code></pre><table><thead><tr><th>ตัวจับ</th><th>จับอะไร</th><th>ตัวอย่างจากคอร์สนี้</th></tr></thead><tbody>
+<tr><td><code>FlutterError.onError</code></td><td>ข้อผิดพลาดใน widget</td><td>เนื้อหาล้น, <code>setState</code> หลัง dispose</td></tr>
+<tr><td><code>PlatformDispatcher.instance.onError</code></td><td><code>Future</code> ที่โยนแล้วไม่มีใครจับ</td><td><code>ContractException</code> จาก 6.5</td></tr>
+</tbody></table><div class="note">การคืน <code>true</code> ทำให้แอปไม่ปิดตัวเอง ซึ่งดีกับผู้ใช้ในคลัง — แต่ต้องระวังว่าแอปที่ทำงานต่อในสถานะที่ผิด อาจบันทึกข้อมูลผิดได้ ให้คืน <code>true</code> เฉพาะเมื่อมั่นใจว่าจอนั้นยังใช้งานต่อได้</div></section>
+
+<section><h2>3. เก็บอะไรบ้าง</h2><pre class="code-vs"><code>class CrashReport {
+  final String error;
+  final String stack;
+  final String appVersion;
+  final DateTime at;
+
+  /// จอที่ผู้ใช้อยู่ตอนเกิด — ข้อมูลที่มีค่าที่สุดในการหาสาเหตุ
+  final String? screen;
+
+  /// ข้อมูลประกอบที่ทีมกำหนดเอง
+  final Map&lt;String, String&gt; context;
+}</code></pre><table><thead><tr><th>ข้อมูล</th><th>ตอบคำถามว่า</th></tr></thead><tbody>
+<tr><td><code>error</code> และ <code>stack</code></td><td>พังตรงไหน</td></tr>
+<tr><td><code>appVersion</code></td><td>รุ่นไหน (15.2)</td></tr>
+<tr><td><code>at</code></td><td>เมื่อไหร่</td></tr>
+<tr><td><code>screen</code></td><td><strong>ผู้ใช้ทำอะไรอยู่</strong></td></tr>
+<tr><td><code>context</code></td><td>รหัสพาเลท โซน สถานะการเชื่อมต่อ</td></tr>
+</tbody></table><p>แถวที่สี่มีค่าที่สุดในทางปฏิบัติ — <code>stack</code> บอกว่าโค้ดบรรทัดไหน แต่ <code>screen</code> บอกว่า<strong>ทำอย่างไรถึงจะเกิดซ้ำ</strong> ซึ่งเป็นสิ่งที่ต้องรู้ก่อนจะแก้ได้</p><pre class="code-vs"><code>// อัปเดตทุกครั้งที่เปลี่ยนจอ
+class CrashContext {
+  static String? currentScreen;
+  static final Map&lt;String, String&gt; extra = {};
+}</code></pre></section>
+
+<section><h2>4. สิ่งที่ต้องไม่หลุดไปด้วย</h2><p>นี่คือส่วนที่สำคัญที่สุดของบทนี้ — <strong>รายงานที่ช่วยหาสาเหตุ อาจกลายเป็นช่องโหว่ที่เราสร้างเองด้วยความหวังดี</strong></p><pre class="code-vs"><code>/// รายชื่อนี้ต้องตรงกับที่ 7.17 ใช้กับ log — ถ้าสองที่ไม่ตรงกัน จะมีทาง
+/// หนึ่งที่ปิดไว้และอีกทางที่เปิดอยู่
+const Set&lt;String&gt; sensitiveKeys = {
+  'token', 'accesstoken', 'refreshtoken', 'authorization',
+  'password', 'pwd', 'secret', 'apikey', 'pin',
+};</code></pre><table><thead><tr><th>ความลับหลุดเข้ารายงานได้ทางไหน</th></tr></thead><tbody>
+<tr><td>ข้อความของ exception ที่มี URL พร้อม query string</td></tr>
+<tr><td>stack trace ที่มีชื่อพารามิเตอร์และค่า</td></tr>
+<tr><td>ข้อมูลประกอบที่ทีมใส่เอง</td></tr>
+<tr><td>header ที่ถูกพิมพ์ออกมาตอนดีบัก</td></tr>
+</tbody></table><pre class="code-vs"><code>test('รายงานที่สร้างแล้ว ต้องไม่มีความลับหลงเหลือ', () {
+  final report = buildReport(
+    error: Exception('401 on /api/tasks?token=abc123'),
+    stack: StackTrace.fromString('at login(password: s3cret)'),
+    ...
+    context: {'token': 'abc123'},
+  );
+
+  final json = report.toJson().toString();
+  expect(json, isNot(contains('abc123')));
+  expect(json, isNot(contains('s3cret')));
+  // แต่ข้อมูลที่ใช้หาสาเหตุต้องยังอยู่ครบ
+  expect(json, contains('401'));
+  expect(json, contains('tasks'));
+  expect(json, contains('3.1.0+42'));
+});</code></pre><p>สามบรรทัดสุดท้ายสำคัญพอกับสองบรรทัดแรก — <strong>ตัวปิดค่าที่ปิดจนอ่านอะไรไม่ได้เลย ก็ไร้ประโยชน์เหมือนกัน</strong></p></section>
+
+<section><h2>5. บั๊กที่เทสต์จับได้ตอนเขียน lab นี้</h2><p>เทสต์ข้อนี้ล้มในการรันครั้งแรก</p><pre class="code-vs"><code>test('Bearer token ต้องถูกปิด', () {
+  const text = 'headers: {Authorization: Bearer eyJhbGciOi.J9.abc}';
+  expect(redact(text), isNot(contains('eyJhbGciOi')));
+});</code></pre><pre class="code-vs"><code>Expected: not contains 'eyJhbGciOi'
+  Actual: 'headers: {Authorization: REDACTED eyJhbGciOi.J9.abc}'</code></pre><p>สาเหตุคือลำดับ — ลูปที่ปิดค่าตามชื่อคีย์ทำงานก่อน เจอ <code>Authorization: Bearer</code> แล้วถือว่า <code>Bearer</code> คือค่าที่ต้องปิด จึงปิดคำนั้นแล้ว<strong>ปล่อย token จริงไว้ทั้งอัน</strong></p><pre class="code-vs"><code>String redact(String text) {
+  // Bearer ต้องมาก่อนเสมอ — ถ้าปล่อยให้ลูปข้างล่างเจอ `Authorization: Bearer`
+  // ก่อน มันจะปิดคำว่า "Bearer" แล้วปล่อย token จริงไว้ ซึ่งเป็นการปิดที่
+  // ดูเหมือนทำงานแต่ไม่ได้ปิดอะไรเลย
+  var result = text.replaceAll(
+    RegExp(r'Bearer\s+[A-Za-z0-9._\-]+', caseSensitive: false),
+    'Bearer $_masked',
+  );
+
+  for (final key in sensitiveKeys) { ... }
+  return result;
+}</code></pre><div class="warn">อาการของบั๊กนี้คือ<strong>เห็นคำว่า REDACTED ในรายงาน</strong> ซึ่งทำให้ทุกคนสบายใจว่าการปิดค่าทำงานอยู่ — เป็นความล้มเหลวที่แย่กว่าการไม่มีตัวปิดค่าเลย เพราะไม่มีใครไปตรวจซ้ำ</div><p>บทเรียนที่ใช้ได้ทั่วไป — <strong>ทุกตัวปิดค่าต้องมีเทสต์ที่ตรวจว่าค่าจริงหายไป</strong> ไม่ใช่แค่ตรวจว่ามีคำว่า REDACTED โผล่ขึ้นมา</p></section>
+
+<section><h2>6. ส่งไปไหน</h2><pre class="code-vs"><code>abstract interface class CrashSink {
+  Future&lt;void&gt; send(CrashReport report);
+}</code></pre><table><thead><tr><th>ทาง</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ส่งเข้า endpoint ของเราเอง</td><td>คลังภายในที่ไม่อยากให้ข้อมูลออกนอกองค์กร</td></tr>
+<tr><td>บริการเก็บ crash สำเร็จรูป</td><td>ต้องการเครื่องมือวิเคราะห์และการจัดกลุ่ม</td></tr>
+<tr><td>เก็บในเครื่องแล้วให้ผู้ใช้ส่งเอง</td><td>เครือข่ายจำกัด หรือมีข้อกำหนดเรื่องข้อมูล</td></tr>
+</tbody></table><p>สำหรับ WMS ที่มีเซิร์ฟเวอร์ของตัวเองอยู่แล้ว ทางแรกตรงที่สุด</p><pre class="code-vs"><code>// ส่งพร้อมกับข้อมูลที่เซิร์ฟเวอร์รู้อยู่แล้ว เช่นผู้ใช้จาก token (13.4)
+await api.postJson('/api/WMS/mobile_crash', report.toJson());</code></pre><div class="note">อย่าให้การส่งรายงานทำให้แอปพังซ้ำ — ครอบด้วย <code>try/catch</code> ที่ไม่ทำอะไรเลยเมื่อล้มเหลว เพราะถ้าส่งไม่ได้แล้วโยน จะเกิดวนไม่รู้จบ</div><pre class="code-vs"><code>Future&lt;void&gt; record(Object error, StackTrace stack) async {
+  try {
+    await sink.send(buildReport(...));
+  } catch (_) {
+    // ส่งไม่ได้ก็ไม่เป็นไร — ห้ามให้การรายงานทำให้แอปพังเพิ่ม
+  }
+}</code></pre></section>
+
+<section><h2>7. สิ่งที่ต้องเก็บไว้ฝั่งเรา</h2><table><thead><tr><th>เก็บ</th><th>เพราะ</th><th>บท</th></tr></thead><tbody>
+<tr><td>ไฟล์ symbols ของทุกรุ่น</td><td>ถ้าเปิด obfuscation stack trace จะอ่านไม่ออกถ้าไม่มี</td><td>15.6</td></tr>
+<tr><td>tag ใน git ที่ตรงกับทุกรุ่นที่ปล่อย</td><td>ย้อนดูโค้ดของรุ่นนั้นได้</td><td>15.2</td></tr>
+<tr><td>บันทึกว่ารุ่นไหนปล่อยเมื่อไหร่ ให้ใคร</td><td>ตอบได้ว่ารายงานนี้มาจากเครื่องกลุ่มไหน</td><td>—</td></tr>
+</tbody></table><pre class="code-vs"><code>flutter symbolize -i crash.txt -d build/symbols/app.android-arm64.symbols</code></pre><p>สามอย่างนี้ต้องทำ<strong>ตอนปล่อย</strong> ไม่ใช่ตอนที่รายงานเข้ามาแล้ว — เพราะตอนนั้นไฟล์อาจถูกลบไปแล้ว</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ไม่มีรายงานเข้ามาเลย</td><td>ตั้งตัวจับแค่ตัวเดียว</td><td>ตั้งทั้ง <code>FlutterError</code> และ <code>PlatformDispatcher</code></td></tr>
+<tr><td>token โผล่ในรายงาน</td><td>ตัวปิดค่าไม่ได้ปิดจริง</td><td>เขียนเทสต์ยืนยันว่าค่าจริงหาย</td></tr>
+<tr><td>stack trace อ่านไม่ออก</td><td>obfuscate โดยไม่เก็บ symbols</td><td>เก็บทุกรุ่น</td></tr>
+<tr><td>รู้ว่าพังแต่ไม่รู้ว่าทำอะไรอยู่</td><td>ไม่ได้เก็บจอปัจจุบัน</td><td>เก็บ <code>screen</code></td></tr>
+<tr><td>แอปวนพังไม่หยุด</td><td>การส่งรายงานโยนซ้ำ</td><td>ครอบ <code>try/catch</code> ที่ไม่ทำอะไร</td></tr>
+<tr><td>รายงานเยอะจนไม่มีใครดู</td><td>รายงานทุกข้อผิดพลาดรวมถึงที่จัดการแล้ว</td><td>รายงานเฉพาะที่ไม่ได้จัดการ</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — ความล้มเหลวที่แอปจัดการแล้ว เช่น <code>ApiFailureKind.network</code> ที่แสดงข้อความให้ผู้ใช้ลองใหม่ (9.13) <strong>ไม่ใช่ crash</strong> และไม่ควรส่งเข้าระบบเดียวกัน</p></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมเปิดระบบเก็บรายงานแล้ว สัปดาห์แรกมีรายงานเข้ามา 4,000 รายการ</p><ol><li>เป็นสัญญาณอะไร</li><li>จะทำอะไรต่อ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ตัวเลขนี้บอกอะไรไม่ได้เลยจนกว่าจะจัดกลุ่ม — 4,000 รายการอาจเป็นบั๊กเดียวที่เกิด 4,000 ครั้ง หรือ 4,000 บั๊กที่ต่างกัน ซึ่งพาไปคนละทาง</p><table><thead><tr><th>ถ้าเป็น</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td>บั๊กเดียว 4,000 ครั้ง</td><td>ดีข่าวหนึ่ง — แก้ที่เดียวจบ</td></tr>
+<tr><td>รายงานสิ่งที่จัดการแล้วปนมา</td><td>ตั้งค่าผิด ไม่ใช่บั๊ก</td></tr>
+<tr><td>บั๊กกระจาย 50 แบบ</td><td>มีปัญหาเชิงโครงสร้าง</td></tr>
+</tbody></table><p><strong>2.</strong> ทำสามอย่างตามลำดับ</p><table><thead><tr><th>ขั้น</th><th>ทำ</th></tr></thead><tbody>
+<tr><td>1</td><td>จัดกลุ่มตามข้อความและบรรทัดแรกของ stack</td></tr>
+<tr><td>2</td><td>เรียงตามจำนวนเครื่องที่เจอ ไม่ใช่จำนวนครั้ง</td></tr>
+<tr><td>3</td><td>ดูสามอันดับแรก</td></tr>
+</tbody></table><p>ขั้นที่สองสำคัญกว่าที่คิด — บั๊กที่เกิด 3,000 ครั้งบนเครื่องเดียว อาจเป็นเครื่องที่มีปัญหาเฉพาะตัว ส่วนบั๊กที่เกิด 20 ครั้งบน 20 เครื่อง กระทบทุกคน</p><pre class="code-vs"><code>-- จัดกลุ่มแล้วนับเครื่องที่ไม่ซ้ำ
+SELECT error_signature, COUNT(*) AS total, COUNT(DISTINCT device_id) AS devices
+FROM crash_reports
+WHERE received_at &gt; NOW() - INTERVAL '7 days'
+GROUP BY error_signature
+ORDER BY devices DESC;</code></pre><p><strong>สิ่งที่ต้องระวัง</strong> — ก่อนไล่แก้ทั้งหมด ให้ตรวจว่ารายงานที่เข้ามาเป็น crash จริงไหม</p><table><thead><tr><th>ถ้าเจอ</th><th>ทำ</th></tr></thead><tbody>
+<tr><td><code>ApiException(network)</code> จำนวนมาก</td><td>ไม่ใช่ crash — เป็นเน็ตหลุดที่แอปจัดการแล้ว ให้ตัดออกจากระบบนี้</td></tr>
+<tr><td><code>ContractException</code></td><td><strong>เป็น crash จริง</strong> และเป็นสัญญาณว่าสัญญากับเซิร์ฟเวอร์เปลี่ยน (14.5)</td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>การรั่ว (12.8)</td></tr>
+<tr><td><code>RenderFlex overflowed</code></td><td>เนื้อหาล้นบนจอบางขนาด (14.13)</td></tr>
+</tbody></table><p>แถวที่หนึ่งกับแถวที่สองต่างกันตรงที่<strong>ใครแก้ได้</strong> — ซึ่งเป็นเส้นแบ่งเดียวกับที่ 9.13 ใช้ตัดสินว่าความล้มเหลวไหนควรแปลให้ผู้ใช้และไหนควรปล่อยให้ดัง</p><p>ถ้าตัดสองแถวแรกออกแล้วเหลือรายงานไม่กี่สิบรายการ นั่นคือรายการงานที่แท้จริง — และมักจะสั้นกว่าที่ตัวเลข 4,000 ทำให้กลัวมาก</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ตั้งตัวจับสองตัว — <code>FlutterError.onError</code> และ <code>PlatformDispatcher.onError</code></li><li>เก็บจอที่ผู้ใช้อยู่ตอนเกิด เพราะมันบอกวิธีทำซ้ำ</li><li>ตัวปิดค่าต้องมีเทสต์ที่ตรวจว่าค่าจริงหายไป ไม่ใช่แค่มี REDACTED</li><li>ตัวปิดค่าที่ปิดไม่จริง แย่กว่าไม่มีเลย</li><li>อย่าให้การส่งรายงานทำให้แอปพังซ้ำ</li><li>ความล้มเหลวที่แอปจัดการแล้ว ไม่ใช่ crash</li><li>จัดกลุ่มแล้วเรียงตามจำนวนเครื่อง ไม่ใช่จำนวนครั้ง</li></ul></div><p><strong>บทหน้า:</strong> ทำให้แอปทนกับเครือข่ายที่ไม่ดีของคลัง</p></section>

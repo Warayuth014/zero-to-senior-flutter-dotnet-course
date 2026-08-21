@@ -4,18 +4,125 @@
 <title>Android Permissions</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">15-03 · Production</span><h1>Android Permissions</h1><p>Part 15: Production &amp; Security</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">INTERNET ใน main</a></li><li><a href="#section-2">กล้อง/รูป</a></li><li><a href="#section-3">Runtime permission</a></li><li><a href="#section-4">Exported components</a></li><li><a href="#section-5">Application ID</a></li><li><a href="#section-6">Merged manifest</a></li><li><a href="#section-7">Feature audit</a></li><li><a href="#section-8">Security gate</a></li></ol></nav>
-<div class="note"><strong>Manifest คือ capability declaration:</strong> ขอเฉพาะสิทธิ์ที่ feature ใช้จริงและวางใน source set ที่ถูกต้อง ปัจจุบัน main manifest ของ <code>wmsapp</code> ไม่มี INTERNET ขณะที่ permission อยู่ใน debug/profile จึงต้องตรวจ release manifest ก่อนแจก</div>
-<section id="section-1"><h2>1. INTERNET ใน main</h2><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
-  &lt;uses-permission android:name="android.permission.INTERNET" /&gt;
-  &lt;application ...&gt;...&lt;/application&gt;
-&lt;/manifest&gt;</code></pre><p>network production ต้องประกาศใน <code>src/main</code>; debug/profile overlay มีไว้เพิ่มค่าพัฒนา ไม่ถูก merge เข้า release</p></section>
-<section id="section-2"><h2>2. กล้อง/รูป</h2><p>Image picker อาจต้อง permission/config ต่างกันตาม Android version และวิธีเลือกภาพ อ่าน merged manifest ของ plugin และเอกสารเวอร์ชันที่ล็อกไว้ อย่าประกาศ storage permission กว้าง “เผื่อไว้” หาก system picker ไม่ต้องใช้</p></section>
-<section id="section-3"><h2>3. Runtime permission</h2><p>manifest declaration ไม่เท่ากับ runtime grant ขอเมื่อผู้ใช้กด feature, อธิบายเหตุผล, รองรับ deny/deny ถาวร และเปิด Settings อย่างมีทางกลับ Feature ที่ไม่ต้องใช้ permission ต้องยังทำงานได้</p></section>
-<section id="section-4"><h2>4. Exported components</h2><p>Activity/receiver/service ที่มี intent filter ต้องทบทวน <code>android:exported</code> และ validate input/deep link <code>MainActivity</code> launcher ต้อง exported แต่ component ภายในควร false หากไม่ต้องรับจากแอปอื่น</p></section>
-<section id="section-5"><h2>5. Application ID</h2><p>ทั้งสองโปรเจกต์ยังใช้ <code>com.example...</code> ต้องกำหนด reverse-domain ที่องค์กรควบคุมก่อนเผยแพร่ เพราะ application ID คือ identity ของแอปและเปลี่ยนภายหลังเท่ากับแอปใหม่</p></section>
-<section id="section-6"><h2>6. Merged manifest</h2><p>ตรวจผล merge ของ main + flavor + build type + plugins ไม่อ่านไฟล์เดียวแล้วสรุป ใช้ Android Studio Merged Manifest หรือ build report เพื่อตรวจ permission/provider ที่ dependency เพิ่มมา</p></section>
-<section id="section-7"><h2>7. Feature audit</h2><table><thead><tr><th>Capability</th><th>ต้องมี</th><th>ตรวจ</th></tr></thead><tbody><tr><td>API</td><td>INTERNET</td><td>release call</td></tr><tr><td>Camera</td><td>ตาม picker/plugin</td><td>deny/grant</td></tr><tr><td>Scanner wedge</td><td>มักเป็น keyboard</td><td>device จริง</td></tr></tbody></table></section>
-<section id="section-8"><h2>8. Security gate</h2><div class="success">release manifest ไม่มี debug-only component, broad storage/location permission, test provider หรือ cleartext global โดยไม่อนุมัติ และทุก exported component มีเหตุผล/authorization test</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Flutter ใส่สิทธิ์ให้ — แต่เฉพาะบางโหมด</a></li><li><a href="#section-2">บั๊กที่ตามมา</a></li><li><a href="#section-3">เทียบสองโปรเจกต์จริง</a></li><li><a href="#section-4">เปลี่ยน checklist ให้เป็นเทสต์</a></li><li><a href="#section-5">สิทธิ์อื่นที่แอปคลังต้องใช้</a></li><li><a href="#section-6">ตรวจว่า APK ที่ build ออกมามีอะไรบ้าง</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด AndroidManifest ของโปรเจกต์ตัวเองแล้วตรวจ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.1, 13.1 (สิทธิ์กล้อง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ประกาศสิทธิ์ให้ครบสำหรับ build ที่ปล่อยจริง และรู้จักบั๊กที่มองไม่เห็นตอนพัฒนา</div>
+
+<section id="section-1"><h2>1. Flutter ใส่สิทธิ์ให้ — แต่เฉพาะบางโหมด</h2><p>โปรเจกต์ Flutter มี manifest สามไฟล์</p><pre class="code-vs"><code>android/app/src/
+  main/AndroidManifest.xml       ← ใช้กับทุกโหมด รวมถึง release
+  debug/AndroidManifest.xml      ← เพิ่มเฉพาะตอน debug
+  profile/AndroidManifest.xml    ← เพิ่มเฉพาะตอน profile</code></pre><pre class="code-vs"><code>&lt;!-- debug/AndroidManifest.xml ที่ Flutter สร้างให้ --&gt;
+&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;!-- The INTERNET permission is required for development. Specifically,
+         the Flutter tool needs it to communicate with the running application
+         to allow setting breakpoints, to provide hot reload, etc.
+    --&gt;
+    &lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+&lt;/manifest&gt;</code></pre><div class="note">อ่านคอมเมนต์ให้ดี — สิทธิ์นี้ถูกใส่ไว้<strong>เพื่อให้เครื่องมือของ Flutter ทำงาน</strong> ไม่ใช่เพื่อให้แอปของเราใช้ ดังนั้นมันจึงมีเฉพาะสองโหมดนั้น</div></section>
+
+<section id="section-2"><h2>2. บั๊กที่ตามมา</h2><table><thead><tr><th>คำสั่ง</th><th>มีสิทธิ์ INTERNET ไหม</th><th>แอปต่อเน็ตได้ไหม</th></tr></thead><tbody>
+<tr><td><code>flutter run</code></td><td>มี — จาก debug manifest</td><td>ได้</td></tr>
+<tr><td><code>flutter run --profile</code></td><td>มี — จาก profile manifest</td><td>ได้</td></tr>
+<tr><td><code>flutter build apk --release</code></td><td><strong>เฉพาะที่ประกาศใน main</strong></td><td>ขึ้นกับว่าประกาศไว้ไหม</td></tr>
+</tbody></table><p>ถ้า <code>main/AndroidManifest.xml</code> ไม่มีบรรทัดนั้น แอปที่ปล่อยจริงจะ<strong>ต่อเน็ตไม่ได้เลย</strong> และอาการที่ผู้ใช้เห็นคือทุกจอขึ้นว่า “โหลดไม่สำเร็จ” — ซึ่งแยกไม่ออกจากปัญหา Wi-Fi ของคลัง</p><pre class="code-vs"><code>SocketException: Failed host lookup / Permission denied</code></pre><p>ทีมที่ทดสอบด้วย <code>flutter run</code> มาตลอด จะไม่มีทางเจอปัญหานี้จนกว่าจะ build release แล้วเอาไปลงเครื่องจริง</p></section>
+
+<section id="section-3"><h2>3. เทียบสองโปรเจกต์จริง</h2><pre class="code-vs"><code>&lt;!-- wms_absolute_mobile/android/app/src/main/AndroidManifest.xml --&gt;
+&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;!-- Talks to the WMS backend over the local network. --&gt;
+    &lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+    &lt;application
+        android:label="ABS PDA V3"
+        android:usesCleartextTraffic="true"&gt;</code></pre><pre class="code-vs"><code>&lt;!-- wmsapp/android/app/src/main/AndroidManifest.xml --&gt;
+&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;application
+        android:label="TKS"
+        android:enableOnBackInvokedCallback="false"&gt;</code></pre><table><thead><tr><th> </th><th><code>wms_absolute_mobile</code></th><th><code>wmsapp</code></th></tr></thead><tbody>
+<tr><td>สิทธิ์ INTERNET ใน main</td><td>มี</td><td><strong>ไม่มี</strong></td></tr>
+<tr><td>อนุญาต http</td><td>มี</td><td><strong>ไม่มี</strong></td></tr>
+</tbody></table><div class="warn"><strong>ผลกับ <code>wmsapp</code>:</strong> APK ที่ build เป็น release จะขาดสิทธิ์ INTERNET และถูกบล็อกไม่ให้เรียก <code>http://</code> ด้วย — สองอย่างนี้แยกกัน และแต่ละอย่างพอที่จะทำให้ทุกคำขอล้มเหลว ทั้งคู่มองไม่เห็นเลยตอนรันด้วย <code>flutter run</code></div><p>สิ่งที่ต้องเพิ่มมีสองบรรทัด</p><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+    &lt;application
+        android:label="TKS"
+        android:networkSecurityConfig="@xml/network_security_config"&gt;</code></pre></section>
+
+<section id="section-4"><h2>4. เปลี่ยน checklist ให้เป็นเทสต์</h2><p>ปัญหาของ checklist ที่เป็นเอกสารคือไม่มีใครอ่านตอนรีบ ทางแก้คือให้เครื่องตรวจแทน</p><pre class="code-vs"><code>List&lt;ReleaseFinding&gt; checkAndroidManifest(String manifest) {
+  final findings = &lt;ReleaseFinding&gt;[];
+
+  // Flutter ใส่สิทธิ์นี้ให้เฉพาะใน debug และ profile manifest — ถ้า main
+  // ไม่มี แอปที่ build เป็น release จะต่อเน็ตไม่ได้เลย และอาการที่เห็นคือ
+  // "โหลดไม่สำเร็จ" ทุกจอ โดยที่ทดสอบตอนพัฒนาแล้วปกติทุกอย่าง
+  if (!manifest.contains('android.permission.INTERNET')) {
+    findings.add(const ReleaseFinding(
+      Severity.blocker,
+      'missing-internet-permission',
+      'main manifest ไม่มีสิทธิ์ INTERNET',
+      'เพิ่ม &lt;uses-permission android:name="android.permission.INTERNET"/&gt; '
+          'ใน android/app/src/main/AndroidManifest.xml',
+    ));
+  }
+  ...
+}</code></pre><pre class="code-vs"><code>test('ไม่มีสิทธิ์ INTERNET ต้องเป็นตัวขวางการปล่อย', () {
+  final manifest = goodManifest.replaceAll(
+    '&lt;uses-permission android:name="android.permission.INTERNET"/&gt;',
+    '',
+  );
+
+  final findings = checkAndroidManifest(manifest);
+  final blocker = findings.firstWhere((f) =&gt; f.isBlocker);
+  expect(blocker.code, 'missing-internet-permission');
+  expect(blocker.fix, contains('uses-permission'));
+});</code></pre><p>สังเกตว่าทุก finding มีช่อง <code>fix</code> — เพราะการบอกว่า “ผิด” โดยไม่บอกว่าแก้อย่างไร ทำให้คนที่เจอต้องไปหาต่อ ซึ่งเป็นหลักเดียวกับข้อความผิดพลาดใน 10.7</p></section>
+
+<section id="section-5"><h2>5. สิทธิ์อื่นที่แอปคลังต้องใช้</h2><table><thead><tr><th>สิทธิ์</th><th>ใช้ตอน</th><th>ต้องขอตอนรันไหม</th></tr></thead><tbody>
+<tr><td><code>INTERNET</code></td><td>ทุกคำขอ</td><td>ไม่ — ให้อัตโนมัติเมื่อประกาศ</td></tr>
+<tr><td><code>CAMERA</code></td><td>ถ่ายรูปหลักฐาน (13.1)</td><td>ต้อง</td></tr>
+<tr><td><code>ACCESS_NETWORK_STATE</code></td><td>ตรวจสถานะเครือข่าย (10.12)</td><td>ไม่</td></tr>
+<tr><td><code>POST_NOTIFICATIONS</code></td><td>แจ้งเตือน Android 13 ขึ้นไป</td><td>ต้อง</td></tr>
+<tr><td><code>VIBRATE</code></td><td>สั่นเมื่อสแกนสำเร็จ</td><td>ไม่</td></tr>
+</tbody></table><div class="note"><strong>ขอเท่าที่ใช้</strong> — สิทธิ์ที่ประกาศไว้แต่ไม่ได้ใช้ ทำให้ผู้ใช้และฝ่ายไอทีขององค์กรตั้งคำถาม และบางองค์กรมีนโยบายตรวจสิทธิ์ของแอปก่อนอนุญาตให้ติดตั้ง</div><p>สิทธิ์ที่ไม่ควรขอในแอปคลัง</p><table><thead><tr><th>สิทธิ์</th><th>ทำไมไม่ควร</th></tr></thead><tbody>
+<tr><td><code>READ_EXTERNAL_STORAGE</code></td><td>Android รุ่นใหม่ใช้ตัวเลือกไฟล์ของระบบแทน (13.1)</td></tr>
+<tr><td><code>ACCESS_FINE_LOCATION</code></td><td>ถ้าไม่ได้ใช้ตำแหน่งจริง ๆ จะดูเหมือนติดตามพนักงาน</td></tr>
+<tr><td><code>READ_PHONE_STATE</code></td><td>มักถูกขอเพื่อหารหัสเครื่อง ซึ่งมีวิธีอื่นที่ไม่ต้องขอสิทธิ์</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. ตรวจว่า APK ที่ build ออกมามีอะไรบ้าง</h2><pre class="code-vs"><code># ดูสิทธิ์ทั้งหมดใน APK ที่ build แล้ว
+aapt dump permissions build/app/outputs/flutter-apk/app-release.apk
+
+# หรือดู manifest ที่ถูกรวมแล้ว
+build/app/intermediates/merged_manifests/release/AndroidManifest.xml</code></pre><p>ไฟล์ที่สองสำคัญ — มันคือ manifest ที่<strong>รวมของเราเข้ากับของปลั๊กอินทุกตัวแล้ว</strong> ปลั๊กอินบางตัวเพิ่มสิทธิ์เข้ามาเองโดยไม่ได้บอก</p><table><thead><tr><th>ปลั๊กอิน</th><th>อาจเพิ่มสิทธิ์</th></tr></thead><tbody>
+<tr><td><code>image_picker</code></td><td>การเข้าถึงกล้องและสื่อ</td></tr>
+<tr><td>ไลบรารีวิเคราะห์การใช้งาน</td><td>สถานะเครือข่าย รหัสโฆษณา</td></tr>
+</tbody></table><p>ควรดูไฟล์นี้อย่างน้อยหนึ่งครั้งก่อนปล่อยรุ่นแรก และดูซ้ำทุกครั้งที่เพิ่มปลั๊กอินใหม่</p><pre class="code-vs"><code>&lt;!-- ลบสิทธิ์ที่ปลั๊กอินเพิ่มมาแต่เราไม่ได้ใช้ --&gt;
+&lt;uses-permission
+    android:name="android.permission.ACCESS_FINE_LOCATION"
+    tools:node="remove" /&gt;</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ทุกจอขึ้น “โหลดไม่สำเร็จ” เฉพาะ APK ที่ปล่อย</td><td>ไม่มี INTERNET ใน main manifest</td><td>เพิ่ม</td></tr>
+<tr><td>ทดสอบแล้วปกติทุกอย่าง</td><td>ทดสอบด้วย <code>flutter run</code> เท่านั้น</td><td>ทดสอบ APK ที่ build จริง (15.1)</td></tr>
+<tr><td>ฝ่ายไอทีไม่อนุญาตให้ติดตั้ง</td><td>ขอสิทธิ์เกินจำเป็น</td><td>ตรวจ manifest ที่รวมแล้ว</td></tr>
+<tr><td>สิทธิ์โผล่มาโดยไม่ได้ประกาศ</td><td>ปลั๊กอินเพิ่มให้</td><td>ลบด้วย <code>tools:node="remove"</code></td></tr>
+<tr><td>กล้องใช้ไม่ได้บนเครื่องบางรุ่น</td><td>ประกาศสิทธิ์แล้วแต่ไม่ได้ขอตอนรัน</td><td>ขอตอนใช้ครั้งแรก (13.1)</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมกำลังจะปล่อย <code>wmsapp</code> รุ่นแรกให้คลังใช้จริง โดยที่ผ่านมาทดสอบด้วย <code>flutter run</code> มาตลอด</p><ol><li>ทำอะไรก่อนเป็นอันดับแรก</li><li>จะป้องกันไม่ให้เกิดซ้ำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> build APK แล้วลงเครื่องจริง ก่อนทำอย่างอื่นทั้งหมด</p><pre class="code-vs"><code>flutter build apk --release
+adb install -r build/app/outputs/flutter-apk/app-release.apk</code></pre><p>แล้วทดสอบเส้นทางหลักหนึ่งรอบ — เข้าสู่ระบบ โหลดรายการ สแกน ยืนยัน</p><p>ในกรณีของ <code>wmsapp</code> จะติดตั้งแต่ขั้นเข้าสู่ระบบ เพราะขาดทั้งสิทธิ์ INTERNET และการอนุญาต http สองบรรทัดที่ต้องเพิ่มคือ</p><pre class="code-vs"><code>&lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+&lt;application android:networkSecurityConfig="@xml/network_security_config" ...&gt;</code></pre><p>พร้อมไฟล์ config ที่จำกัดเฉพาะเซิร์ฟเวอร์ของคลัง (15.4)</p><p><strong>2.</strong> ป้องกันสามชั้น</p><table><thead><tr><th>ชั้น</th><th>ทำอะไร</th><th>จับได้เมื่อ</th></tr></thead><tbody>
+<tr><td>เทสต์</td><td>รัน <code>checkRelease</code> ในชุดเทสต์ปกติ</td><td>ทุกครั้งที่รันเทสต์</td></tr>
+<tr><td>สคริปต์ build</td><td>ให้ <code>tool/release.sh</code> ตรวจก่อน build</td><td>ก่อนสร้าง APK</td></tr>
+<tr><td>กระบวนการ</td><td>ทุกงานที่ปิด ต้องทดสอบบน APK ที่ build จริง</td><td>ก่อนบอกว่าเสร็จ</td></tr>
+</tbody></table><pre class="code-vs"><code>// test/release_check_test.dart — รันกับไฟล์จริงของโปรเจกต์
+test('โปรเจกต์นี้พร้อมปล่อย', () {
+  final report = checkRelease(
+    androidManifest: File('android/app/src/main/AndroidManifest.xml')
+        .readAsStringSync(),
+    androidGradle: File('android/app/build.gradle.kts').readAsStringSync(),
+    pubspec: File('pubspec.yaml').readAsStringSync(),
+  );
+
+  expect(report.blockers, isEmpty, reason: report.toString());
+});</code></pre><p>เทสต์นี้จะล้มพร้อมข้อความที่บอกวิธีแก้ทุกข้อ ซึ่งดีกว่าการค้นพบตอนที่ APK อยู่ในมือผู้ใช้แล้ว</p><p><strong>ข้อสังเกตที่สำคัญที่สุด:</strong> บั๊กนี้ไม่ได้เกิดจากความไม่รู้ แต่เกิดจาก<strong>ความแตกต่างระหว่างสิ่งที่ทดสอบกับสิ่งที่ปล่อย</strong> — และนั่นคือช่องว่างที่ Part นี้ทั้ง Part พยายามปิด</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>Flutter ใส่สิทธิ์ INTERNET ให้เฉพาะ debug และ profile</li><li>build ที่ปล่อยจริงใช้เฉพาะสิ่งที่ประกาศใน main manifest</li><li>อาการคือทุกจอโหลดไม่สำเร็จ ซึ่งแยกไม่ออกจากปัญหา Wi-Fi</li><li>ขอสิทธิ์เท่าที่ใช้ และตรวจ manifest ที่รวมกับปลั๊กอินแล้ว</li><li>เปลี่ยน checklist ให้เป็นเทสต์ที่รันได้</li><li>ทดสอบบน APK ที่ build จริงก่อนบอกว่าเสร็จ</li></ul></div><p><strong>บทหน้า:</strong> เซิร์ฟเวอร์ที่เป็น http และการอนุญาตที่แคบที่สุดเท่าที่ทำได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

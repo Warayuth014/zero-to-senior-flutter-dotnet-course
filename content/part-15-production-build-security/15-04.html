@@ -1,16 +1,116 @@
-<div class="note"><strong>HTTP เปิดเผยทั้ง token และข้อมูล WMS บนเครือข่าย:</strong> <code>wms_absolute_mobile</code> ปัจจุบันตั้ง <code>android:usesCleartextTraffic="true"</code> ทั้งแอป เหมาะเป็นช่องทางชั่วคราวใน LAN ทดสอบ แต่ไม่ใช่ค่า production</div>
-<section><h2>1. Threat model</h2><p>LAN ไม่ได้แปลว่าปลอดภัย ผู้ที่อยู่ network เดียวกันอาจดัก/แก้ request ได้ Bearer token, serial, inventory และ command จึงต้องใช้ HTTPS เพื่อ confidentiality และ integrity</p></section>
-<section><h2>2. Production default</h2><pre class="code-vs"><code>&lt;application
-  android:usesCleartextTraffic="false"
-  android:networkSecurityConfig="@xml/network_security_config" /&gt;</code></pre><p>ให้ production fail closed เมื่อ endpoint เป็น <code>http://</code> และ validate URL ก่อน save profile ไม่รอให้ request แรกล้ม</p></section>
-<section><h2>3. Scoped development exception</h2><pre class="code-vs"><code>&lt;network-security-config&gt;
-  &lt;base-config cleartextTrafficPermitted="false" /&gt;
-  &lt;domain-config cleartextTrafficPermitted="true"&gt;
-    &lt;domain&gt;10.0.2.2&lt;/domain&gt;
-  &lt;/domain-config&gt;
-&lt;/network-security-config&gt;</code></pre><p>วาง exception ใน debug flavor/source set และจำกัด host ไม่เปิด global ใน release</p></section>
-<section><h2>4. Config UI policy</h2><p>production profile บังคับ HTTPS/allowlisted host; development profileอาจยอม HTTP พร้อม warning เด่น การให้ผู้ใช้เปลี่ยน protocol ได้ไม่ได้แปลว่า authorization/security policy ควรถูกข้าม</p></section>
-<section><h2>5. Mixed content และ media</h2><p>API เป็น HTTPS แต่ image/SignalR URL เป็น HTTP ก็ยังรั่วและอาจถูก platform block ตรวจทุก scheme รวม redirect, WebSocket (<code>wss</code>) และ URL ที่ backend คืนกลับ</p></section>
-<section><h2>6. Proxy/TLS termination</h2><p>อาจ terminate TLS ที่ reverse proxy แล้วคุย HTTP ใน private segment แต่ device → public/internal endpoint ต้องเป็น HTTPS และ proxy ส่ง forwarded headers อย่างไว้ใจเฉพาะ proxy ที่กำหนด</p></section>
-<section><h2>7. Tests</h2><p>release build ต้องปฏิเสธ HTTP, ยอม HTTPS production, redirect ไป HTTP ถูกปฏิเสธ และ debug exceptionทำงานเฉพาะ host ที่ตั้งไว้ ตรวจบน Android version ต่ำ/สูงสุดที่รองรับ</p></section>
-<section><h2>8. Migration</h2><div class="success">ติด certificate/hostname ที่ถูกต้องบน backend → เพิ่ม HTTPS profile → test health/login/SignalR/image → migrate devices → ปิด HTTP listener/cleartext exception ไม่แก้ด้วย accept-all certificate</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เขียน network security config ที่จำกัดเฉพาะเซิร์ฟเวอร์ของคลัง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.3, Part 10 (การตั้งค่าเซิร์ฟเวอร์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ให้แอปคุยกับเซิร์ฟเวอร์ http ในคลังได้ โดยไม่เปิดช่องกว้างกว่าที่จำเป็น</div>
+
+<section><h2>1. Android บล็อก http โดยปริยาย</h2><p>ตั้งแต่ Android 9 (API 28) การเรียก <code>http://</code> ถูกบล็อก</p><pre class="code-vs"><code>SocketException: Cleartext HTTP traffic to 192.168.1.194 not permitted</code></pre><table><thead><tr><th>ทำไมถึงบล็อก</th></tr></thead><tbody>
+<tr><td>ใครก็ตามที่อยู่ในเครือข่ายเดียวกัน อ่านทุกอย่างที่ส่งไปมาได้ รวมถึง token</td></tr>
+<tr><td>แก้ไขข้อมูลระหว่างทางได้โดยที่ทั้งสองฝั่งไม่รู้</td></tr>
+<tr><td>ปลอมเป็นเซิร์ฟเวอร์ได้</td></tr>
+</tbody></table><p>แต่เซิร์ฟเวอร์ WMS ในคลังส่วนใหญ่เป็น http เพราะอยู่ในเครือข่ายภายในและไม่มีใบรับรอง จึงต้องอนุญาต — คำถามคือ<strong>อนุญาตแค่ไหน</strong></p></section>
+
+<section><h2>2. สองวิธี</h2><pre class="code-vs"><code>&lt;!-- วิธีที่หนึ่ง — อนุญาตทั้งหมด --&gt;
+&lt;application android:usesCleartextTraffic="true"&gt;</code></pre><pre class="code-vs"><code>&lt;!-- วิธีที่สอง — อนุญาตเฉพาะที่ระบุ --&gt;
+&lt;application android:networkSecurityConfig="@xml/network_security_config"&gt;</code></pre><pre class="code-vs"><code>&lt;!-- android/app/src/main/res/xml/network_security_config.xml --&gt;
+&lt;?xml version="1.0" encoding="utf-8"?&gt;
+&lt;network-security-config&gt;
+    &lt;!-- ค่าปริยาย: บล็อก http ทุกที่ --&gt;
+    &lt;base-config cleartextTrafficPermitted="false" /&gt;
+
+    &lt;!-- ยกเว้นเซิร์ฟเวอร์ของคลังเท่านั้น --&gt;
+    &lt;domain-config cleartextTrafficPermitted="true"&gt;
+        &lt;domain includeSubdomains="false"&gt;192.168.1.194&lt;/domain&gt;
+        &lt;domain includeSubdomains="false"&gt;wms.acetec.local&lt;/domain&gt;
+    &lt;/domain-config&gt;
+&lt;/network-security-config&gt;</code></pre><table><thead><tr><th> </th><th><code>usesCleartextTraffic="true"</code></th><th>network security config</th></tr></thead><tbody>
+<tr><td>เขียน</td><td>บรรทัดเดียว</td><td>ไฟล์เพิ่มหนึ่งไฟล์</td></tr>
+<tr><td>ขอบเขต</td><td>ทุกที่อยู่</td><td>เฉพาะที่ระบุ</td></tr>
+<tr><td>ถ้ามีปลั๊กอินยิงไปที่อื่น</td><td>ยิงได้</td><td>ถูกบล็อก</td></tr>
+<tr><td>เมื่อผู้ใช้พิมพ์ที่อยู่ผิด</td><td>ยิงไปที่นั่นได้</td><td>ถูกบล็อก</td></tr>
+</tbody></table><p>แถวสุดท้ายคือประโยชน์ที่ชัดที่สุดสำหรับแอปนี้ — Part 10 เปิดให้ผู้ใช้พิมพ์ที่อยู่เซิร์ฟเวอร์เอง ซึ่งแปลว่าแอปอาจถูกชี้ไปที่ไหนก็ได้</p></section>
+
+<section><h2>3. ปัญหาที่ตามมาจากการให้ผู้ใช้ตั้งค่าเอง</h2><p>network security config ต้องระบุที่อยู่<strong>ตอน build</strong> แต่ Part 10 ออกแบบให้ผู้ใช้เพิ่ม profile ได้เอง สองอย่างนี้ขัดกัน</p><table><thead><tr><th>ทางเลือก</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ระบุทุกที่อยู่ที่รู้ตอน build</td><td>ปลอดภัยที่สุด แต่เพิ่มสาขาใหม่ต้อง build ใหม่</td></tr>
+<tr><td>อนุญาตทั้งช่วง IP ภายใน</td><td>ยืดหยุ่นพอควร และยังบล็อกที่อยู่ภายนอก</td></tr>
+<tr><td><code>usesCleartextTraffic="true"</code></td><td>ยืดหยุ่นที่สุด ไม่มีการจำกัด</td></tr>
+</tbody></table><div class="note">Android <strong>ไม่รองรับการระบุช่วง IP</strong> ใน <code>&lt;domain&gt;</code> — ระบุได้ทีละที่อยู่หรือทีละโดเมนเท่านั้น ทางที่สองจึงทำได้เฉพาะเมื่อใช้ชื่อโดเมนภายในที่มี suffix ร่วมกัน</div><pre class="code-vs"><code>&lt;!-- ใช้ได้ถ้าเซิร์ฟเวอร์ทุกสาขาอยู่ใต้โดเมนเดียวกัน --&gt;
+&lt;domain includeSubdomains="true"&gt;acetec.local&lt;/domain&gt;</code></pre><p>ถ้าใช้ IP ล้วน ทางที่ทำได้จริงคืออนุญาตทั้งหมดแล้วชดเชยด้วยการตรวจฝั่งแอป</p><pre class="code-vs"><code>// จำกัดที่อยู่ที่ยอมรับ ตอนที่ผู้ใช้บันทึก profile (10.7)
+String? _validateHost(String raw) {
+  final host = raw.trim();
+  ...
+  // เครือข่ายภายในเท่านั้น — กันการชี้ไปเซิร์ฟเวอร์ภายนอกโดยไม่ตั้งใจ
+  if (!_isPrivateAddress(host) &amp;&amp; !host.endsWith('.local')) {
+    return 'อนุญาตเฉพาะเซิร์ฟเวอร์ในเครือข่ายภายใน';
+  }
+  return null;
+}</code></pre><p>ต้องบอกตรง ๆ ว่านี่<strong>ไม่ใช่การป้องกัน</strong> — เป็นการช่วยไม่ให้ตั้งค่าผิด ตามหลักเดียวกับ 13.9 เพราะการตรวจฝั่งแอปเลี่ยงได้เสมอ</p></section>
+
+<section><h2>4. เทสต์ที่แยกสองระดับ</h2><pre class="code-vs"><code>test('ไม่มีทั้ง cleartext และ network config ต้องขวางการปล่อย', () {
+  final manifest = goodManifest.replaceAll(
+    'android:networkSecurityConfig="@xml/network_security_config"', '',
+  );
+
+  final findings = checkAndroidManifest(manifest);
+  expect(findings.any((f) =&gt; f.code == 'cleartext-blocked'), isTrue);
+});
+
+test('อนุญาต http ทั้งหมด ผ่านได้แต่ต้องเตือน', () {
+  final manifest = goodManifest.replaceAll(
+    'android:networkSecurityConfig="@xml/network_security_config"',
+    'android:usesCleartextTraffic="true"',
+  );
+
+  final findings = checkAndroidManifest(manifest);
+  expect(findings.any((f) =&gt; f.isBlocker), isFalse);
+  expect(findings.single.code, 'cleartext-too-broad');
+});</code></pre><p>สองระดับนี้สะท้อนความจริง — การอนุญาตทั้งหมด<strong>ทำงานได้</strong> จึงไม่ควรขวางการปล่อย แต่ควรมีคนรู้ว่ามันกว้างกว่าที่จำเป็น</p><p>หลักเดียวกับ 13.9 — ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่น่าสงสัยให้เตือน</p></section>
+
+<section><h2>5. ถ้าย้ายไป https</h2><table><thead><tr><th>ได้อะไร</th><th>ต้องทำอะไร</th></tr></thead><tbody>
+<tr><td>ไม่ต้องมี network security config เลย</td><td>ติดตั้งใบรับรองบนเซิร์ฟเวอร์</td></tr>
+<tr><td>token ไม่ถูกอ่านระหว่างทาง</td><td>ต่ออายุใบรับรองเมื่อหมดอายุ</td></tr>
+<tr><td>ผ่านนโยบายขององค์กรที่เข้มงวด</td><td>—</td></tr>
+</tbody></table><p>ปัญหาที่เจอบ่อยคือใบรับรองที่องค์กรออกเอง ซึ่งเครื่องไม่รู้จัก</p><pre class="code-vs"><code>HandshakeException: Handshake error in client</code></pre><p>10.9 แยกข้อผิดพลาดนี้ออกมาแล้ว เพราะเป็นกรณีที่พบบ่อยและมีทางแก้ชัดเจน</p><pre class="code-vs"><code>&lt;!-- ให้แอปเชื่อใบรับรองขององค์กรที่ฝังมากับแอป --&gt;
+&lt;domain-config&gt;
+    &lt;domain includeSubdomains="true"&gt;wms.acetec.local&lt;/domain&gt;
+    &lt;trust-anchors&gt;
+        &lt;certificates src="@raw/acetec_ca" /&gt;
+        &lt;certificates src="system" /&gt;
+    &lt;/trust-anchors&gt;
+&lt;/domain-config&gt;</code></pre><div class="warn"><strong>อย่าปิดการตรวจใบรับรอง</strong> ด้วยการ override <code>badCertificateCallback</code> ให้คืน <code>true</code> เสมอ — วิธีนั้นทำให้ https ไม่ต่างจาก http เลย และแย่กว่าเพราะทุกคนคิดว่าปลอดภัย</div><pre class="code-vs"><code>// อย่าเขียนแบบนี้ในแอปที่ปล่อยจริง
+HttpOverrides.global = _AcceptAnyCertificate();   // ← ปิดการป้องกันทั้งหมด</code></pre></section>
+
+<section><h2>6. iOS</h2><p>iOS มีกลไกคล้ายกันชื่อ App Transport Security</p><pre class="code-vs"><code>&lt;!-- ios/Runner/Info.plist --&gt;
+&lt;key&gt;NSAppTransportSecurity&lt;/key&gt;
+&lt;dict&gt;
+    &lt;key&gt;NSExceptionDomains&lt;/key&gt;
+    &lt;dict&gt;
+        &lt;key&gt;wms.acetec.local&lt;/key&gt;
+        &lt;dict&gt;
+            &lt;key&gt;NSExceptionAllowsInsecureHTTPLoads&lt;/key&gt;
+            &lt;true/&gt;
+        &lt;/dict&gt;
+    &lt;/dict&gt;
+&lt;/dict&gt;</code></pre><p>โปรเจกต์นี้ลงเฉพาะ Android (11.12) จึงยังไม่ต้องทำ แต่ต้องรู้ว่ามีอยู่ เพราะถ้าวันหนึ่งต้องรองรับ iPad ในคลัง จะติดตรงนี้ทันที</p><div class="note">Apple เข้มงวดกว่า — การใช้ <code>NSAllowsArbitraryLoads</code> ที่เปิดทั้งหมด ต้องอธิบายเหตุผลตอนส่งขึ้น App Store และมักถูกปฏิเสธ</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td><code>Cleartext HTTP traffic not permitted</code></td><td>ไม่ได้อนุญาต http</td><td>เพิ่ม network security config</td></tr>
+<tr><td>ทำงานบน Android 8 แต่ไม่ทำงานบน 9 ขึ้นไป</td><td>การบล็อกเริ่มที่ API 28</td><td>เหมือนกัน</td></tr>
+<tr><td>ระบุโดเมนแล้วยังถูกบล็อก</td><td>ระบุเป็น IP แต่แอปเรียกด้วยชื่อ หรือกลับกัน</td><td>ระบุให้ตรงกับที่เรียกจริง</td></tr>
+<tr><td>เพิ่มสาขาใหม่แล้วต้อง build ใหม่</td><td>ระบุที่อยู่ตายตัวใน config</td><td>ใช้โดเมนที่มี suffix ร่วมกัน</td></tr>
+<tr><td><code>HandshakeException</code> กับ https</td><td>ใบรับรองที่องค์กรออกเอง</td><td>ฝัง CA ไว้ใน <code>trust-anchors</code></td></tr>
+<tr><td>ปิดการตรวจใบรับรองเพื่อให้ผ่าน</td><td>รีบ</td><td>อย่าทำ — ฝัง CA แทน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>คลังมีเซิร์ฟเวอร์สามสาขา ทุกตัวเป็น http และใช้ IP ล้วน โดยที่ฝ่ายไอทีเปลี่ยน IP ได้ตลอด</p><ol><li>ควรตั้งค่าอย่างไร</li><li>มีอะไรที่ควรเสนอฝ่ายไอทีไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ในสถานการณ์นี้ <code>usesCleartextTraffic="true"</code> เป็นทางที่ทำได้จริง เพราะ</p><table><thead><tr><th>ทางเลือก</th><th>ทำไมใช้ไม่ได้</th></tr></thead><tbody>
+<tr><td>ระบุ IP ทั้งสามใน config</td><td>IP เปลี่ยนแล้วต้อง build ใหม่ทั้งสามสาขา</td></tr>
+<tr><td>ระบุช่วง IP</td><td>Android ไม่รองรับ</td></tr>
+<tr><td>ใช้โดเมน</td><td>ยังไม่มี</td></tr>
+</tbody></table><p>แต่ต้องชดเชยด้วยสิ่งที่ทำได้ฝั่งแอป</p><ul><li>ตรวจตอนบันทึก profile ว่าเป็นที่อยู่ในเครือข่ายภายใน (10.7)</li><li>ตรวจว่าปลายทางเป็น WMS จริงด้วย health payload ก่อนใช้ (10.9)</li><li>บันทึกว่าแอปกำลังคุยกับที่อยู่ไหน เพื่อให้ตามหาได้เมื่อมีปัญหา (7.17)</li></ul><p><strong>2. ควรเสนอสองอย่าง</strong> และข้อแรกแก้ปัญหาทั้งหมดในคำถามนี้</p><table><thead><tr><th>เสนอ</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><strong>ตั้งชื่อโดเมนภายในให้เซิร์ฟเวอร์</strong> เช่น <code>wms-bkk.acetec.local</code></td><td>IP เปลี่ยนได้โดยแอปไม่ต้องรู้ และระบุใน config ด้วย suffix เดียวได้</td></tr>
+<tr><td>ใบรับรองภายในสำหรับ https</td><td>ปิดช่องที่ token ถูกอ่านระหว่างทาง</td></tr>
+</tbody></table><p>ข้อแรกมีประโยชน์เกินเรื่องความปลอดภัย — มันแก้ปัญหาที่ Part 10 ทั้ง Part พยายามแก้ด้วย</p><table><thead><tr><th>ปัญหาจาก Part 10</th><th>หายไปเมื่อมีโดเมน</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ย้ายเครื่อง IP เปลี่ยน (10.1)</td><td>ผู้ใช้ไม่ต้องแก้อะไรเลย</td></tr>
+<tr><td>ผู้ใช้พิมพ์ IP ผิดหนึ่งตัว (10.7)</td><td>ชื่อผิดแล้วหาไม่เจอทันที ไม่ใช่ไปเจอเครื่องอื่น</td></tr>
+<tr><td>เช้าวันจันทร์ต้องล็อกอินใหม่เพราะ DHCP เปลี่ยน IP (8.11)</td><td>หายไป</td></tr>
+</tbody></table><p><strong>วิธีเสนอที่ได้ผล</strong> — อย่าเสนอเป็นเรื่องความปลอดภัย เพราะฝ่ายไอทีจะมองว่าเป็นงานเพิ่ม ให้เสนอเป็นการแก้ปัญหาที่เขาเจออยู่แล้ว</p><pre class="code-vs"><code>"ตอนนี้ทุกครั้งที่เซิร์ฟเวอร์เปลี่ยน IP ต้องเดินไปตั้งค่า PDA ทีละเครื่อง
+ถ้ามีชื่อโดเมนภายใน จะแก้ที่ DNS ที่เดียวแล้วทุกเครื่องตามทันที"</code></pre><p>นี่เป็นตัวอย่างของหลักที่ใช้ได้ทั่วไป — <strong>ข้อเสนอทางเทคนิคที่ผูกกับปัญหาที่อีกฝ่ายเจออยู่ มีโอกาสได้รับการอนุมัติมากกว่าข้อเสนอที่ผูกกับความถูกต้องทางทฤษฎี</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>Android บล็อก http ตั้งแต่ API 28</li><li>network security config จำกัดได้เฉพาะที่ระบุ ดีกว่าอนุญาตทั้งหมด</li><li>Android ไม่รองรับช่วง IP ระบุได้ทีละที่อยู่หรือทีละโดเมน</li><li>การตรวจฝั่งแอปเป็นการช่วย ไม่ใช่การป้องกัน</li><li>อย่าปิดการตรวจใบรับรอง ให้ฝัง CA แทน</li><li>โดเมนภายในแก้ปัญหาหลายอย่างพร้อมกัน รวมถึงที่ Part 10 เจอ</li></ul></div><p><strong>บทหน้า:</strong> ใบรับรองและกุญแจที่ใช้เซ็นแอป</p></section>

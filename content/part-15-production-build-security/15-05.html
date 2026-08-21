@@ -1,9 +1,123 @@
-<div class="note"><strong>HandshakeException คือสัญญาณให้แก้ trust chain:</strong> ห้ามแก้ด้วย <code>badCertificateCallback = (_,__,___) =&gt; true</code> เพราะเท่ากับปิดการยืนยันตัวตนของ server และเปิดทาง man-in-the-middle</div>
-<section><h2>1. Certificate ต้องตรงอะไร</h2><p>ยังไม่หมดอายุ/ยังไม่เริ่มก่อนเวลา, chain ถึง CA ที่ device เชื่อถือ, hostname/IP ตรง SAN และ device clock ถูกต้อง Certificate ที่ออกให้ DNS name จะไม่ผ่านเมื่อเรียกด้วย raw IP หาก SAN ไม่มี IP นั้น</p></section>
-<section><h2>2. Endpoint production</h2><p>ใช้ stable DNS name เช่น <code>wms-api.company.internal</code> แทน IP ที่เปลี่ยนง่าย และให้ reverse proxy/load balancerจัด renewal ทดสอบ health endpoint ผ่าน URL เดียวกับแอป ไม่ใช้ URL คนละชุดสำหรับ probe กับ request</p></section>
-<section><h2>3. Private CA</h2><p>ในองค์กรอาจใช้ private CA วิธีที่ถูกคือ provision root/intermediate CA ลง managed devices/MDM หรือกำหนด trust อย่างจำกัดตาม platform/build ไม่ bundle private key และไม่ trust certificate ใดก็ได้</p></section>
-<section><h2>4. Pinning trade-off</h2><p>certificate/public-key pinning ลดความเสี่ยง CA ถูกใช้ผิด แต่เพิ่ม outage risk ตอน rotate ต้องมี backup pins, expiry/rotation runbook และ remote recovery ที่ปลอดภัย สำหรับหลายระบบ standard platform trust + managed CA อาจเหมาะกว่า</p></section>
-<section><h2>5. Connection probe</h2><p>โค้ดจริงแยก <code>HandshakeException</code> จาก timeout/socket ได้ดี แต่ข้อความที่เสนอ “ลอง HTTP” ไม่ควรแสดงใน production เพราะชักนำ downgrade ให้บอกตรวจ certificate, hostname และเวลาเครื่องแทน</p></section>
-<section><h2>6. Server hardening</h2><p>ใช้ TLS versions/ciphers ที่รองรับ device fleet, ส่ง full chain, redirect HTTP อย่างระวังช่วง migration, HSTS เมื่อทุก subdomain พร้อม และ monitor certificate expiry ก่อนผู้ใช้เจอ</p></section>
-<section><h2>7. Test matrix</h2><p>valid chain, expired/not-yet-valid, wrong hostname, missing intermediate, untrusted root, clock skew, rotated cert และ offline ต้องแปลเป็น failure คนละแบบ ไม่ retry handshake errorแบบถี่ ๆ</p></section>
-<section><h2>8. Operational evidence</h2><div class="success">เก็บ endpoint host, certificate issuer/fingerprint แบบไม่ลับ, expiry alert, owner และ renewal rehearsal แต่ไม่ log token/request bodyหรือ private key</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: สร้าง keystore แล้วเก็บให้ปลอดภัย</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.4<br><strong>จบบทนี้แล้วจะทำได้:</strong> เซ็นแอปด้วยกุญแจของตัวเอง และเข้าใจว่าทำไมกุญแจที่หายเท่ากับปล่อยรุ่นใหม่ไม่ได้อีกเลย</div>
+
+<section><h2>1. การเซ็นแอปคืออะไร</h2><div class="note">ทุก APK ต้องถูกเซ็นด้วยกุญแจ Android ใช้ลายเซ็นนี้ตอบคำถามเดียว — <strong>“แอปที่จะติดตั้งทับ มาจากคนเดียวกับที่ติดตั้งไว้เดิมไหม”</strong></div><table><thead><tr><th>ลายเซ็นตรงกัน</th><th>ลายเซ็นไม่ตรง</th></tr></thead><tbody>
+<tr><td>ติดตั้งทับได้ ข้อมูลในเครื่องยังอยู่</td><td><strong>ติดตั้งทับไม่ได้เลย</strong></td></tr>
+<tr><td>—</td><td>ต้องถอนแล้วติดตั้งใหม่ ซึ่งลบข้อมูลทั้งหมด</td></tr>
+</tbody></table><p>ในคลัง การถอนแล้วติดตั้งใหม่แปลว่า <strong>profile เซิร์ฟเวอร์ทุกตัวหาย</strong> (Part 10) และช่างต้องพิมพ์ที่อยู่ใหม่ทีละเครื่อง</p></section>
+
+<section><h2>2. กุญแจ debug ที่แม่แบบตั้งให้</h2><pre class="code-vs"><code>// android/app/build.gradle.kts ที่ Flutter สร้างมา
+buildTypes {
+    release {
+        // TODO: Add your own signing config for the release build.
+        // Signing with the debug keys for now, so `flutter run --release` works.
+        signingConfig = signingConfigs.getByName("debug")
+    }
+}</code></pre><p>บรรทัดนี้อยู่ในทั้ง <code>wmsapp</code> และ <code>wms_absolute_mobile</code> ณ ตอนนี้ — เป็นค่าที่แม่แบบตั้งไว้ให้ทดลองได้เลย ไม่ใช่ค่าที่ตั้งใจ</p><table><thead><tr><th>ผลของการเซ็นด้วยกุญแจ debug</th></tr></thead><tbody>
+<tr><td><strong>ทุกเครื่องที่ติดตั้ง Android SDK มีกุญแจนี้เหมือนกัน</strong> — ใครก็สร้าง APK ที่ติดตั้งทับได้</td></tr>
+<tr><td>Play Store ปฏิเสธ</td></tr>
+<tr><td>กุญแจหมดอายุใน 365 วัน แล้วสร้างใหม่จะได้ลายเซ็นคนละอัน</td></tr>
+<tr><td>องค์กรที่ตรวจแอปก่อนติดตั้ง จะเห็นว่าเซ็นด้วยกุญแจ debug</td></tr>
+</tbody></table><p>แถวแรกคือความเสี่ยงจริง — คนที่เข้าถึงเครื่อง PDA ได้ สามารถติดตั้งแอปที่หน้าตาเหมือนกันแต่ส่งข้อมูลไปที่อื่นทับได้ โดยที่ผู้ใช้ไม่มีทางสังเกต</p><pre class="code-vs"><code>test('เซ็นด้วยกุญแจ debug ต้องขวางการปล่อย', () {
+  final gradle = goodGradle.replaceAll(
+    'signingConfigs.getByName("release")',
+    'signingConfigs.getByName("debug")',
+  );
+
+  final findings = checkAndroidGradle(gradle);
+  expect(findings.single.code, 'debug-signing');
+  expect(findings.single.isBlocker, isTrue);
+});</code></pre></section>
+
+<section><h2>3. สร้างกุญแจของตัวเอง</h2><pre class="code-vs"><code>keytool -genkey -v \
+  -keystore ~/keys/acetec-wms.jks \
+  -keyalg RSA -keysize 2048 \
+  -validity 10000 \
+  -alias acetec-wms</code></pre><table><thead><tr><th>พารามิเตอร์</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td><code>-validity 10000</code></td><td>อายุเป็นวัน — ราว 27 ปี ควรตั้งยาวเพราะกุญแจหมดอายุแล้วปล่อยรุ่นใหม่ไม่ได้</td></tr>
+<tr><td><code>-alias</code></td><td>ชื่อของกุญแจในไฟล์ ซึ่งเก็บได้หลายอัน</td></tr>
+<tr><td><code>-keysize 2048</code></td><td>ขนาดกุญแจ — 2048 พอสำหรับการใช้งานทั่วไป</td></tr>
+</tbody></table><div class="warn"><strong>กุญแจนี้ทดแทนไม่ได้</strong> — ถ้าหาย หรือลืมรหัสผ่าน จะปล่อยรุ่นใหม่ที่ติดตั้งทับของเดิมไม่ได้อีกเลย ทางเดียวคือให้ทุกเครื่องถอนแล้วติดตั้งใหม่</div></section>
+
+<section><h2>4. ต่อกับ Gradle โดยไม่ให้กุญแจเข้า git</h2><pre class="code-vs"><code># android/key.properties — ไฟล์นี้ต้องอยู่ใน .gitignore
+storeFile=/Users/dev/keys/acetec-wms.jks
+storePassword=...
+keyAlias=acetec-wms
+keyPassword=...</code></pre><pre class="code-vs"><code>// android/app/build.gradle.kts
+import java.util.Properties
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("key.properties")
+    if (file.exists()) load(file.inputStream())
+}
+
+android {
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+            storePassword = keystoreProperties["storePassword"] as String?
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+}</code></pre><pre class="code-vs"><code># .gitignore
+android/key.properties
+*.jks
+*.keystore</code></pre><div class="note"><code>if (file.exists())</code> สำคัญ — ทำให้คนที่ยังไม่มีกุญแจยัง <code>flutter build apk --debug</code> ได้ ไม่ใช่คอมไพล์ไม่ผ่านทั้งโปรเจกต์</div></section>
+
+<section><h2>5. เก็บกุญแจไว้ที่ไหน</h2><table><thead><tr><th>ที่</th><th>เหมาะไหม</th></tr></thead><tbody>
+<tr><td>เครื่องของนักพัฒนาคนเดียว</td><td><strong>ไม่</strong> — คนนั้นลาออกหรือเครื่องพังแล้วจบ</td></tr>
+<tr><td>ใน git</td><td><strong>ไม่</strong> — ใครที่โคลนได้ก็เซ็นแอปแทนได้</td></tr>
+<tr><td>ที่เก็บความลับขององค์กร</td><td>ใช่</td></tr>
+<tr><td>สำรองแบบเข้ารหัสในที่ที่คนสองคนเข้าถึงได้</td><td>ใช่ — ขั้นต่ำที่ยอมรับได้</td></tr>
+</tbody></table><p>สิ่งที่ต้องเก็บคู่กันเสมอ</p><table><thead><tr><th>เก็บ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ไฟล์ keystore</td><td>ตัวกุญแจ</td></tr>
+<tr><td>รหัสผ่านของ keystore และของ alias</td><td>ไม่มีรหัสผ่าน กุญแจก็ใช้ไม่ได้</td></tr>
+<tr><td>ชื่อ alias</td><td>ลืมแล้วต้องเดา</td></tr>
+<tr><td>ลายนิ้วมือ SHA-256 ของกุญแจ</td><td>ใช้ยืนยันว่าไฟล์ที่กู้มาถูกต้อง</td></tr>
+</tbody></table><pre class="code-vs"><code># จดลายนิ้วมือไว้ตอนสร้าง
+keytool -list -v -keystore ~/keys/acetec-wms.jks -alias acetec-wms | grep SHA256</code></pre><p>สำหรับทีมเล็ก สิ่งที่ทำได้ทันทีคือ<strong>เขียนเอกสารว่ากุญแจอยู่ที่ไหนและใครเข้าถึงได้</strong> — เพราะปัญหาที่พบจริงส่วนใหญ่ไม่ใช่กุญแจถูกขโมย แต่คือไม่มีใครรู้ว่ามันอยู่ที่ไหน</p></section>
+
+<section><h2>6. ตรวจว่า APK ถูกเซ็นด้วยอะไร</h2><pre class="code-vs"><code>apksigner verify --print-certs build/app/outputs/flutter-apk/app-release.apk</code></pre><pre class="code-vs"><code>Signer #1 certificate DN: CN=Android Debug, O=Android, C=US   ← กุญแจ debug
+Signer #1 certificate SHA-256 digest: a1b2c3...</code></pre><p>บรรทัด <code>CN=Android Debug</code> คือสัญญาณว่ายังเซ็นด้วยกุญแจ debug อยู่ — ตรวจได้ในสิบวินาทีและควรทำก่อนปล่อยทุกครั้ง</p><pre class="code-vs"><code># ใส่ในสคริปต์ปล่อยรุ่น
+if apksigner verify --print-certs "$APK" | grep -q "CN=Android Debug"; then
+  echo "APK ถูกเซ็นด้วยกุญแจ debug — หยุด"
+  exit 1
+fi</code></pre></section>
+
+<section><h2>7. เปลี่ยนกุญแจทีหลังได้ไหม</h2><table><thead><tr><th>สถานการณ์</th><th>ทำได้ไหม</th></tr></thead><tbody>
+<tr><td>แจกไฟล์ APK เอง (ไม่ผ่าน store)</td><td>เปลี่ยนได้ แต่ทุกเครื่องต้องถอนแล้วติดตั้งใหม่</td></tr>
+<tr><td>ผ่าน Play Store ที่เปิด Play App Signing</td><td>ขอเปลี่ยนกุญแจ upload ได้ ส่วนกุญแจที่ผู้ใช้เห็น Google ถือไว้</td></tr>
+<tr><td>ผ่าน Play Store แบบเดิม</td><td>เปลี่ยนไม่ได้</td></tr>
+</tbody></table><p>สำหรับ PDA ในคลังที่แจก APK เอง การเปลี่ยนกุญแจ<strong>ทำได้แต่แพง</strong> — ต้องเดินไปทุกเครื่อง ถอน ติดตั้ง แล้วตั้งค่า profile ใหม่</p><div class="note">ซึ่งเป็นเหตุผลที่ควรสร้างกุญแจให้ถูกตั้งแต่ก่อนปล่อยรุ่นแรก — ต้นทุนตอนนี้คือสิบนาที ต้นทุนทีหลังคือหนึ่งวันของช่างคูณจำนวนเครื่อง</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ติดตั้งทับไม่ได้ ขึ้นว่า “ไม่ได้ติดตั้งแอป”</td><td>ลายเซ็นไม่ตรงกับที่ติดตั้งไว้</td><td>ใช้กุญแจเดิม หรือถอนก่อน</td></tr>
+<tr><td>Play Store ปฏิเสธ</td><td>เซ็นด้วยกุญแจ debug</td><td>สร้างกุญแจของตัวเอง</td></tr>
+<tr><td>กุญแจอยู่ในเครื่องคนเดียว</td><td>ไม่มีกระบวนการเก็บ</td><td>สำรองและเขียนเอกสาร</td></tr>
+<tr><td>กุญแจหลุดเข้า git</td><td>ไม่ได้ใส่ <code>.gitignore</code></td><td>ใส่ก่อน แล้วสร้างกุญแจใหม่ถ้าหลุดไปแล้ว</td></tr>
+<tr><td>build ไม่ผ่านบนเครื่องคนอื่น</td><td>บังคับให้ต้องมี <code>key.properties</code></td><td><code>if (file.exists())</code></td></tr>
+<tr><td>กุญแจหมดอายุ</td><td>ตั้ง validity สั้น</td><td>ตั้งยาวตั้งแต่สร้าง — แก้ทีหลังไม่ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมจะปล่อยแอปให้คลังใช้จริงสัปดาห์หน้า และตอนนี้ยังใช้กุญแจ debug อยู่</p><ol><li>ต้องทำอะไรบ้าง</li><li>ถ้าปล่อยไปก่อนแล้วค่อยเปลี่ยนกุญแจทีหลัง จะเกิดอะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ห้าขั้น ใช้เวลารวมไม่ถึงชั่วโมง</p><table><thead><tr><th>ขั้น</th><th>ทำ</th></tr></thead><tbody>
+<tr><td>1</td><td>สร้าง keystore ด้วย <code>-validity 10000</code></td></tr>
+<tr><td>2</td><td>ใส่ <code>key.properties</code> และ <code>*.jks</code> ใน <code>.gitignore</code> <strong>ก่อน</strong>สร้างไฟล์</td></tr>
+<tr><td>3</td><td>ต่อกับ Gradle พร้อม <code>if (file.exists())</code></td></tr>
+<tr><td>4</td><td>สำรองกุญแจและรหัสผ่าน พร้อมจดลายนิ้วมือ SHA-256</td></tr>
+<tr><td>5</td><td>build แล้วยืนยันด้วย <code>apksigner verify --print-certs</code></td></tr>
+</tbody></table><p>ขั้นที่ 2 ต้องมาก่อนขั้นที่ 1 ในทางปฏิบัติ — เพราะถ้าสร้างไฟล์ก่อนแล้ว commit ไปโดยไม่ทันสังเกต กุญแจจะอยู่ในประวัติ git ตลอดไป และการลบ commit ทีหลังไม่ช่วยถ้ามีคน clone ไปแล้ว</p><p><strong>2.</strong> ต้นทุนที่ต้องจ่ายทีหลัง เรียงตามลำดับเวลา</p><table><thead><tr><th>ต้องทำ</th><th>ต้นทุน</th></tr></thead><tbody>
+<tr><td>เดินไปทุกเครื่อง ถอนแอปเดิม</td><td>เวลาช่างคูณจำนวนเครื่อง</td></tr>
+<tr><td>ติดตั้งรุ่นใหม่</td><td>—</td></tr>
+<tr><td>ตั้งค่า profile เซิร์ฟเวอร์ใหม่ทุกเครื่อง</td><td>ข้อมูลใน Part 10 หายหมด</td></tr>
+<tr><td>ผู้ใช้ต้องล็อกอินใหม่</td><td>session ที่เก็บไว้หายด้วย (Part 8)</td></tr>
+<tr><td>งานที่เก็บไว้ในเครื่องรอส่ง</td><td><strong>หายถาวร</strong> ถ้ามีฟีเจอร์นั้นแล้ว (Part 29)</td></tr>
+</tbody></table><p>แถวสุดท้ายอันตรายที่สุดและมักถูกลืมตอนวางแผน — การถอนแอปลบข้อมูลในเครื่องทั้งหมด ไม่มีข้อยกเว้น</p><p><strong>ข้อสรุป:</strong> การสร้างกุญแจตอนนี้ใช้เวลาสิบนาที ส่วนการเลื่อนไปทำทีหลังมีต้นทุนที่<strong>เพิ่มขึ้นตามจำนวนเครื่องที่ติดตั้งไปแล้ว</strong> — ซึ่งเป็นรูปแบบเดียวกับหนี้ทางเทคนิคชนิดอื่น ต่างที่อันนี้ตัวเลขคำนวณได้ชัดเจน</p><p>และถ้าทีมยังลังเล ให้ถามคำถามเดียว — <strong>“ถ้าอีกหกเดือนต้องแก้บั๊กด่วน แล้วพบว่าปล่อยรุ่นใหม่ไม่ได้เพราะกุญแจ debug หมดอายุ จะทำอย่างไร”</strong></p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ลายเซ็นตอบคำถามว่า “มาจากคนเดียวกันไหม” — ไม่ตรงแล้วติดตั้งทับไม่ได้</li><li>กุญแจ debug เป็นกุญแจสาธารณะที่ทุกเครื่องมีเหมือนกัน</li><li>ตั้ง validity ยาว เพราะแก้ทีหลังไม่ได้</li><li>กุญแจต้องไม่เข้า git และต้องมีคนเข้าถึงได้มากกว่าหนึ่งคน</li><li>ตรวจ <code>apksigner verify --print-certs</code> ก่อนปล่อยทุกครั้ง</li><li>เปลี่ยนกุญแจทีหลังแปลว่าทุกเครื่องต้องถอนแล้วติดตั้งใหม่</li></ul></div><p><strong>บทหน้า:</strong> ความลับอื่นที่ไม่ควรอยู่ในแอป</p></section>

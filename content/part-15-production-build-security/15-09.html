@@ -1,12 +1,82 @@
-<div class="note"><strong>iOS ต้องอธิบาย permission ก่อนเรียก API:</strong> ทั้งสอง <code>Info.plist</code> ปัจจุบันยังไม่มี camera/photo/local-network usage descriptions ขณะที่ wmsapp ใช้ image picker จึงต้องเติมข้อความตาม feature ที่ ship จริงและทดสอบบน device</div>
-<section><h2>1. Camera และ Photo Library</h2><pre class="code-vs"><code>&lt;key&gt;NSCameraUsageDescription&lt;/key&gt;
-&lt;string&gt;ใช้ถ่ายรูปชิ้นส่วนเพื่อแนบกับข้อมูล WMS&lt;/string&gt;
-&lt;key&gt;NSPhotoLibraryUsageDescription&lt;/key&gt;
-&lt;string&gt;ใช้เลือกรูปชิ้นส่วนจากคลังภาพเพื่ออัปโหลด&lt;/string&gt;</code></pre><p>ข้อความต้องเฉพาะเจาะจงและตรงพฤติกรรมจริง ไม่ขอสิทธิ์ที่ไม่ได้ใช้</p></section>
-<section><h2>2. Local Network</h2><p>หากแอปติดต่อ backendใน LAN และ platform/runtimeต้องขอ local-network access ให้กำหนด <code>NSLocalNetworkUsageDescription</code> พร้อมข้อความธุรกิจ หากใช้ Bonjour discovery ต้องทบทวน service types เพิ่ม ไม่เดาค่าจาก Android</p></section>
-<section><h2>3. App Transport Security</h2><p>production ใช้ HTTPS ที่ trustได้ ไม่เปิด <code>NSAllowsArbitraryLoads</code> ทั้งแอป หาก devจำเป็นต้อง exception ให้แคบตาม domain/configuration และไม่ปน Release scheme</p></section>
-<section><h2>4. Bundle identity/version</h2><p><code>PRODUCT_BUNDLE_IDENTIFIER</code>, team, provisioning profile, capabilities, <code>FLUTTER_BUILD_NAME</code>/<code>NUMBER</code> ต้องตรง distribution channel Application ID ฝั่ง Android ไม่กำหนดค่า iOS อัตโนมัติ</p></section>
-<section><h2>5. Signing/provisioning</h2><p>ใช้ automatic/manual signing ตามนโยบายทีมแต่ CIต้องเข้าถึง certificate/profileอย่างปลอดภัย Test archive/exportด้วย Release schemeและ device ที่อยู่ใน channel ไม่ใช่เพียง simulator</p></section>
-<section><h2>6. Privacy manifest/data disclosure</h2><p>ตรวจ SDK ทั้งหมด, collected data, tracking และ required-reason APIs ให้ตรง app privacy submission/manifest การไม่มี adไม่ได้แปลว่าไม่มีข้อมูล เช่น account identifier, diagnostics และรูปที่อัปโหลด</p></section>
-<section><h2>7. Lifecycle/device</h2><p>ทดสอบ permission deny/limited/settings, backgroundระหว่าง scan/upload, memory pressure, orientationที่ประกาศ, local networkเปลี่ยน และ appถูก terminate iOS simulatorไม่แทน camera/keychain/network permissionจริง</p></section>
-<section><h2>8. iOS gate</h2><div class="success">Archiveผ่าน, usage descriptionsครบและ localize, ATSไม่มี global bypass, icon/splashถูก, version/signingตรง, privacy disclosureตรง SDK และ TestFlight/internal deviceทำ critical flowได้</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เทียบสิ่งที่ต้องตั้งค่าสองแพลตฟอร์ม</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.3–15.8<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าต้องเตรียมอะไรถ้าวันหนึ่งต้องรองรับ iOS และตัดสินได้ว่าคุ้มไหม</div>
+
+<section><h2>1. โปรเจกต์นี้ยังไม่รองรับ iOS</h2><pre class="code-vs"><code># wms_absolute_mobile/pubspec.yaml
+flutter_launcher_icons:
+  android: true
+  ios: false</code></pre><p>เป็นการตัดสินใจที่ถูกต้องสำหรับตอนนี้ เพราะอุปกรณ์เป้าหมายคือ PDA ที่เป็น Android ทั้งหมด — แต่ควรรู้ว่าถ้าวันหนึ่งต้องรองรับ จะติดตรงไหน</p><table><thead><tr><th>เมื่อไหร่ที่อาจต้องรองรับ</th></tr></thead><tbody>
+<tr><td>หัวหน้าอยากดูรายงานจาก iPad</td></tr>
+<tr><td>คลังใหม่เลือกใช้ iPad แทน PDA</td></tr>
+<tr><td>ต้องมีแอปสำหรับผู้บริหารที่ใช้ iPhone</td></tr>
+</tbody></table></section>
+
+<section><h2>2. สิ่งที่ต้องตั้งค่า เทียบสองฝั่ง</h2><table><thead><tr><th>เรื่อง</th><th>Android</th><th>iOS</th></tr></thead><tbody>
+<tr><td>ชื่อแพ็กเกจ</td><td><code>applicationId</code></td><td><code>PRODUCT_BUNDLE_IDENTIFIER</code></td></tr>
+<tr><td>ชื่อที่ผู้ใช้เห็น</td><td><code>android:label</code></td><td><code>CFBundleDisplayName</code></td></tr>
+<tr><td>เลขรุ่น</td><td><code>versionCode</code></td><td><code>CFBundleVersion</code></td></tr>
+<tr><td>ชื่อรุ่น</td><td><code>versionName</code></td><td><code>CFBundleShortVersionString</code></td></tr>
+<tr><td>อนุญาต http</td><td>network security config</td><td><code>NSAppTransportSecurity</code></td></tr>
+<tr><td>สิทธิ์กล้อง</td><td><code>uses-permission</code></td><td><code>NSCameraUsageDescription</code></td></tr>
+<tr><td>การเซ็น</td><td>keystore ของเราเอง</td><td>ใบรับรองจาก Apple</td></tr>
+</tbody></table><p>Flutter อ่านเลขรุ่นจาก <code>pubspec.yaml</code> ให้ทั้งสองฝั่ง จึงไม่ต้องแก้สองที่ (15.2)</p></section>
+
+<section><h2>3. ความต่างที่สำคัญที่สุด — การเซ็น</h2><table><thead><tr><th> </th><th>Android</th><th>iOS</th></tr></thead><tbody>
+<tr><td>ใครออกใบรับรอง</td><td>เราสร้างเอง (15.5)</td><td><strong>Apple เท่านั้น</strong></td></tr>
+<tr><td>ค่าใช้จ่าย</td><td>ไม่มี</td><td>บัญชีนักพัฒนาต่อปี</td></tr>
+<tr><td>แจกไฟล์เองได้ไหม</td><td>ได้</td><td>ได้เฉพาะผ่านช่องทางที่ Apple กำหนด</td></tr>
+<tr><td>ต้องระบุเครื่องล่วงหน้าไหม</td><td>ไม่</td><td>ต้อง ถ้าแจกแบบทดสอบ</td></tr>
+</tbody></table><p>แถวที่สามคือข้อจำกัดที่กระทบวิธีทำงานของคลังโดยตรง — การส่งไฟล์ APK ให้ช่างไปติดตั้งทีละเครื่อง (15.7) ทำแบบเดียวกันบน iOS ไม่ได้</p><table><thead><tr><th>ช่องทางแจกบน iOS</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>App Store</td><td>แอปสาธารณะ</td></tr>
+<tr><td>TestFlight</td><td>ทดสอบภายใน จำกัดจำนวนคนและมีวันหมดอายุ</td></tr>
+<tr><td>Apple Business Manager</td><td>องค์กรที่แจกแอปภายในให้พนักงาน</td></tr>
+</tbody></table><div class="note">ช่องทางที่สามคือทางที่ตรงกับกรณีของคลัง แต่ต้องมีบัญชีองค์กรและกระบวนการที่ยาวกว่า Android มาก — <strong>นี่คือต้นทุนที่แท้จริงของการรองรับ iOS ไม่ใช่การเขียนโค้ด</strong></div></section>
+
+<section><h2>4. ที่ที่โค้ด Dart อาจติด</h2><p>คอร์สนี้ออกแบบมาให้ส่วนใหญ่ทำงานทั้งสองฝั่งอยู่แล้ว แต่มีจุดที่ต้องดู</p><table><thead><tr><th>เรื่อง</th><th>สถานะ</th><th>บท</th></tr></thead><tbody>
+<tr><td>เก็บไฟล์เป็นไบต์ ไม่ใช่ที่อยู่</td><td>ทำงานได้ทั้งสองฝั่งอยู่แล้ว</td><td>13.2</td></tr>
+<tr><td><code>statusBarBrightness</code></td><td>มีเฉพาะ iOS — ตั้งไว้แล้ว</td><td>11.13</td></tr>
+<tr><td>ฟอนต์ไทยที่ระบบให้</td><td>iOS ใช้ Thonburi ซึ่งหน้าตาต่างจาก Android</td><td>11.4</td></tr>
+<tr><td>ปุ่มย้อนกลับของเครื่อง</td><td><strong>iOS ไม่มี</strong> — ต้องมีปุ่มบนจอ</td><td>Part 5</td></tr>
+<tr><td>เครื่องสแกนบาร์โค้ด</td><td>iPad ไม่มี ต้องใช้กล้องแทน</td><td>Part 3</td></tr>
+</tbody></table><p>สองแถวล่างสำคัญที่สุดและเป็นเรื่องของการออกแบบ ไม่ใช่การตั้งค่า</p><pre class="code-vs"><code>// ปุ่มย้อนกลับที่ทดสอบไว้ใน 14.12 พึ่ง tester.pageBack()
+// ซึ่งจำลองปุ่มของ Android — บน iOS ผู้ใช้ปัดจากขอบจอแทน
+await tester.pageBack();</code></pre><p>แอปที่ออกแบบมาสำหรับ PDA ที่มีปุ่มฮาร์ดแวร์ อาจไม่มีปุ่มย้อนกลับบนจอเลย ซึ่งบน iOS จะกลายเป็นทางตัน</p></section>
+
+<section><h2>5. สิ่งที่ควรทำตั้งแต่ตอนนี้</h2><p>แม้จะยังไม่รองรับ iOS สิ่งเหล่านี้คุ้มค่าที่จะทำไว้ก่อน เพราะมันดีกับ Android อยู่แล้ว</p><table><thead><tr><th>ทำ</th><th>ได้อะไรกับ Android</th></tr></thead><tbody>
+<tr><td>เก็บไฟล์เป็นไบต์</td><td>ทดสอบง่ายขึ้น (13.2)</td></tr>
+<tr><td>มีปุ่มย้อนกลับบนจอเสมอ</td><td>ผู้ใช้ที่ถือเครื่องมือเดียวกดง่ายกว่าปุ่มฮาร์ดแวร์</td></tr>
+<tr><td>ห่อปลั๊กอินไว้หลัง interface</td><td>ทดสอบได้ (13.1)</td></tr>
+<tr><td>อ่านเลขรุ่นจากที่เดียว</td><td>ลืมเพิ่มไม่ได้ (15.2)</td></tr>
+</tbody></table><p>สิ่งที่<strong>ไม่</strong>ควรทำตอนนี้</p><table><thead><tr><th>อย่าทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>เขียนโค้ดแยกตามแพลตฟอร์มเผื่อไว้</td><td>เดาอนาคตที่ยังไม่มา (9.12)</td></tr>
+<tr><td>สมัครบัญชีนักพัฒนา Apple ไว้ก่อน</td><td>มีค่าใช้จ่ายต่อปีโดยไม่ได้ใช้</td></tr>
+<tr><td>ทดสอบบน iOS simulator เป็นประจำ</td><td>เสียเวลากับสิ่งที่ยังไม่ปล่อย</td></tr>
+</tbody></table></section>
+
+<section><h2>6. ถ้าตัดสินใจรองรับจริง</h2><table><thead><tr><th>ลำดับ</th><th>ทำ</th></tr></thead><tbody>
+<tr><td>1</td><td>ถามว่าใครจะใช้และใช้ทำอะไร — อาจพบว่าต้องการแค่หน้าดูรายงาน ซึ่งเว็บทำได้</td></tr>
+<tr><td>2</td><td>ตรวจว่าฟีเจอร์ที่พึ่งฮาร์ดแวร์ของ PDA ยังจำเป็นไหม</td></tr>
+<tr><td>3</td><td>รันบน simulator ดูว่าติดตรงไหนบ้าง</td></tr>
+<tr><td>4</td><td>ตั้งค่า Info.plist และการเซ็น</td></tr>
+<tr><td>5</td><td>ทดสอบบนเครื่องจริง</td></tr>
+</tbody></table><p>ขั้นที่หนึ่งมักจบเรื่อง — <strong>ความต้องการที่ว่า “อยากดูจาก iPad” มักหมายถึงอยากดูรายงาน ซึ่งเป็นงานของระบบเว็บอยู่แล้ว</strong> ตามที่บันทึกไว้ในขอบเขตของโปรเจกต์ว่า PDA ทำงานปฏิบัติการ ส่วนเว็บทำรายงานและการค้นย้อนหลัง</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>แอปปิดตัวเองตอนเปิดกล้องบน iOS</td><td>ไม่มี <code>NSCameraUsageDescription</code></td><td>เพิ่มพร้อมเหตุผลจริง (13.1)</td></tr>
+<tr><td>เรียก http ไม่ได้บน iOS</td><td>ไม่ได้ตั้ง <code>NSAppTransportSecurity</code></td><td>ตั้งเฉพาะโดเมนที่จำเป็น (15.4)</td></tr>
+<tr><td>ไอคอนแถบสถานะมองไม่เห็นบน iOS</td><td>ตั้ง <code>statusBarBrightness</code> ผิดทาง</td><td>ตั้งตรงข้ามกับ Android (11.13)</td></tr>
+<tr><td>ผู้ใช้ iOS ออกจากจอไม่ได้</td><td>ไม่มีปุ่มย้อนกลับบนจอ</td><td>ใส่เสมอ</td></tr>
+<tr><td>คอมไพล์ไม่ผ่านบน iOS</td><td>ใช้ <code>dart:io</code> ในที่ที่ไม่ควร</td><td>13.2</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้าบอกว่า “อยากให้ผู้จัดการดูสถานะคลังจาก iPad ได้”</p><ol><li>ควรทำแอป iOS ไหม</li><li>ถ้าไม่ จะเสนออะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ต้องถามต่อก่อนตอบ</p><table><thead><tr><th>คำถาม</th><th>ทำไมสำคัญ</th></tr></thead><tbody>
+<tr><td>ผู้จัดการจะดูอะไรบ้าง</td><td>ถ้าเป็นรายงานสรุป เว็บทำได้ทันที</td></tr>
+<tr><td>ต้องสั่งงานหรือแค่ดู</td><td>การสั่งงานต้องมีการยืนยันตัวตนและสิทธิ์เพิ่ม</td></tr>
+<tr><td>ต้องสแกนอะไรไหม</td><td>iPad ไม่มีเครื่องสแกน</td></tr>
+<tr><td>กี่คน</td><td>สองคนกับยี่สิบคนคุ้มไม่เท่ากัน</td></tr>
+</tbody></table><p>ถ้าคำตอบคือ “ดูสถานะอย่างเดียว สองสามคน” — <strong>ไม่ควรทำแอป iOS</strong> เพราะต้นทุนที่แท้จริงไม่ใช่การเขียนโค้ด แต่คือ</p><ul><li>บัญชีนักพัฒนาต่อปี</li><li>กระบวนการแจกแอปที่ยาวกว่า Android มาก</li><li>ชุดเทสต์ที่ต้องรันสองแพลตฟอร์ม</li><li>บั๊กที่เกิดเฉพาะฝั่งใดฝั่งหนึ่ง</li></ul><p><strong>2.</strong> เสนอสามทาง เรียงจากถูกที่สุด</p><table><thead><tr><th>ทาง</th><th>ต้นทุน</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>หน้าเว็บที่มีอยู่แล้ว</td><td>แทบไม่มี</td><td>ดูรายงาน ซึ่งเว็บทำได้ดีกว่าอยู่แล้ว</td></tr>
+<tr><td>ทำหน้าเว็บใหม่ที่ปรับให้อ่านง่ายบนแท็บเล็ต</td><td>ต่ำ</td><td>ต้องการหน้าจอเฉพาะ</td></tr>
+<tr><td>build แอป Flutter ตัวเดิมเป็นเว็บ</td><td>กลาง</td><td>อยากใช้โค้ดเดิม</td></tr>
+</tbody></table><p>ทางที่สามน่าสนใจแต่มีข้อจำกัดที่ 13.2 ระบุไว้แล้ว — CORS, เครื่องสแกนที่ไม่มี, และการเก็บข้อมูลที่ผู้ใช้ล้างได้</p><p><strong>ทางที่หนึ่งชนะเกือบเสมอ</strong> และเหตุผลอยู่ในขอบเขตของโปรเจกต์เอง — PDA ออกแบบมาให้ทำงานปฏิบัติการที่ต้องสแกน ส่วนการดูภาพรวมและค้นย้อนหลังเป็นงานที่เว็บทำได้ดีกว่าบนจอที่ใหญ่กว่า</p><p><strong>วิธีเสนอที่ได้ผล</strong> — อย่าตอบว่า “ทำไม่ได้” ให้ถามว่าเขาอยากเห็นอะไร แล้วเปิดหน้าเว็บที่มีอยู่ให้ดูบน iPad ทันที บ่อยครั้งที่คำตอบคือ “อ้าว มีอยู่แล้วเหรอ”</p><p>ถ้าหน้าเว็บนั้นใช้บนแท็บเล็ตไม่สะดวก นั่นคือปัญหาที่แท้จริง และแก้ด้วยแรงที่น้อยกว่าการทำแอปใหม่ทั้งตัวมาก</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>โปรเจกต์นี้ตั้งใจไม่รองรับ iOS ซึ่งถูกต้องสำหรับอุปกรณ์เป้าหมาย</li><li>Flutter อ่านเลขรุ่นจาก <code>pubspec.yaml</code> ให้ทั้งสองฝั่ง</li><li>ต้นทุนที่แท้จริงของ iOS คือการเซ็นและการแจก ไม่ใช่การเขียนโค้ด</li><li>iOS ไม่มีปุ่มย้อนกลับของเครื่อง และ iPad ไม่มีเครื่องสแกน</li><li>ทำสิ่งที่ดีกับทั้งสองฝั่งได้เลย แต่อย่าเขียนโค้ดเผื่อแพลตฟอร์มที่ยังไม่มา</li><li>ความต้องการ “อยากดูจาก iPad” มักตอบได้ด้วยเว็บที่มีอยู่แล้ว</li></ul></div><p><strong>บทหน้า:</strong> รู้ได้อย่างไรว่าแอปพังที่หน้างาน</p></section>

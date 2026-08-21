@@ -4,15 +4,136 @@
 <title>Production Checklist</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">15-12 · Production</span><h1>Production Checklist</h1><p>Part 15: Production &amp; Security</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Identity &amp; build</a></li><li><a href="#section-2">Signing &amp; supply chain</a></li><li><a href="#section-3">Platform config</a></li><li><a href="#section-4">Network &amp; backend</a></li><li><a href="#section-5">Data &amp; security</a></li><li><a href="#section-6">Resilience &amp; quality</a></li><li><a href="#section-7">Operations</a></li><li><a href="#section-8">Go/No-Go</a></li></ol></nav>
-<div class="note"><strong>Production readiness คือหลักฐาน ไม่ใช่ความรู้สึก:</strong> checklist นี้ต้องมี owner, artifact/build ID, ผลทดสอบและ sign-off ทุก release โดย gaps จากสอง reference apps เป็นรายการแก้ก่อนใช้งานจริง ไม่ใช่เพียงหัวข้ออ่าน</div>
-<section id="section-1"><h2>1. Identity & build</h2><ul><li>application/bundle ID ไม่ใช่ <code>com.example</code></li><li>version/buildเพิ่มและแสดงในแอป</li><li>release mode/flavor/endpointถูก</li><li>artifactสร้างจาก pinned clean CI</li></ul></section>
-<section id="section-2"><h2>2. Signing & supply chain</h2><ul><li>ไม่ใช้ debug signing</li><li>keysอยู่ secret storeและ recoveryทดสอบแล้ว</li><li>dependency/lockfile/SBOM review</li><li>signature/checksum/provenanceบันทึก</li></ul></section>
-<section id="section-3"><h2>3. Platform config</h2><ul><li>Android main manifestมี INTERNETและ permissionเท่าที่ใช้</li><li>releaseไม่เปิด cleartext global</li><li>iOS camera/photo/local-network descriptionsตาม feature</li><li>icons/names/orientation/exported componentsผ่าน</li></ul></section>
-<section id="section-4"><h2>4. Network & backend</h2><ul><li>HTTPS chain/hostname/renewalผ่าน</li><li>HTTP/WebSocket/mediaไม่ downgrade</li><li>health/login/SignalR/uploadผ่าน production-like proxy</li><li>API compatibility/minimum versionและ rollbackพร้อม</li></ul></section>
-<section id="section-5"><h2>5. Data & security</h2><ul><li>ไม่มี embedded master secrets</li><li>tokenเก็บ/หมดอายุ/logoutอย่างปลอดภัย</li><li>serverตรวจ authorization/idempotencyทุก command</li><li>logs/crash reports redactและจำกัด retention</li></ul></section>
-<section id="section-6"><h2>6. Resilience & quality</h2><ul><li>analyze/unit/widget/contract/E2Eผ่าน</li><li>offline/timeout/duplicate/conflict/lifecycleทดสอบ</li><li>upgrade migrationและ pending queueผ่าน</li><li>profileบน PDA ไม่มี critical jank/memory leak</li></ul></section>
-<section id="section-7"><h2>7. Operations</h2><p>มี staged rollout, canary devices, monitoring dashboards/alerts, support runbook, incident/rollback owner, certificate/signing expiry alerts, inventory device/app versionsและช่องทาง revoke session/buildที่มีปัญหา</p></section>
-<section id="section-8"><h2>8. Go/No-Go</h2><div class="success">No-Go หากยังใช้ debug key, HTTPพร้อม bearer token, certificate bypass, missing production permission, embedded secret, migrationไม่มี backup/rollback หรือ critical flowไม่ผ่าน release-signed artifact ทุกข้อยกเว้นต้องมี risk ownerและวันหมดอายุ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บทนี้ทำอะไร</a></li><li><a href="#section-2">แผนที่ของ lab</a></li><li><a href="#section-3">checklist ที่รันได้</a></li><li><a href="#section-4">โจทย์</a></li><li><a href="#section-5">เกณฑ์ที่ต้องผ่าน</a></li><li><a href="#section-6">คำใบ้สำหรับข้อที่ยาก</a></li><li><a href="#section-7">checklist สำหรับสิ่งที่เครื่องตรวจไม่ได้</a></li><li><a href="#section-8">แบบทดสอบตัวเองก่อนจบ Part 15</a></li><li><a href="#section-9">สรุปท้าย Part 15</a></li><li><a href="#section-10">ปิดกลุ่ม Part 7–15</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: ทำให้ checklist ของโปรเจกต์ตัวเองรันได้อัตโนมัติ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 15.1–15.11 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ปล่อยแอปออกสู่หน้างานได้อย่างมั่นใจ และปิดกลุ่ม Part 7–15</div>
+
+<section id="section-1"><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ไล่อ่าน <code>release_lab/</code> ทั้งหมด</td></tr>
+<tr><td>2</td><td>ทำให้ checklist รันได้กับโปรเจกต์จริง</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 16</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>release_checks.dart</code></td><td>ตรวจ manifest, gradle, pubspec</td><td>15.3, 15.4, 15.5, 15.7, 15.8</td></tr>
+<tr><td><code>app_version.dart</code></td><td>เลขรุ่นและกฎการติดตั้งทับ</td><td>15.2</td></tr>
+<tr><td><code>crash_report.dart</code></td><td>รายงานที่ปิดค่าอ่อนไหวแล้ว</td><td>15.6, 15.10</td></tr>
+<tr><td><code>test/release_test.dart</code></td><td>เทสต์ 26 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/release_test.dart</code></pre></section>
+
+<section id="section-3"><h2>3. checklist ที่รันได้</h2><pre class="code-vs"><code>ReleaseReport checkRelease({
+  required String androidManifest,
+  required String androidGradle,
+  required String pubspec,
+}) =&gt; ReleaseReport([
+  ...checkAndroidManifest(androidManifest),
+  ...checkAndroidGradle(androidGradle),
+  ...checkPubspec(pubspec),
+]);</code></pre><pre class="code-vs"><code>test('โปรเจกต์ที่เพิ่งสร้างจากแม่แบบ ปล่อยไม่ได้', () {
+  final report = checkRelease(...);
+
+  expect(report.canRelease, isFalse);
+  // สามข้อนี้คือสิ่งที่ทำให้ APK ที่ build ออกมาใช้งานจริงไม่ได้
+  expect(report.has('missing-internet-permission'), isTrue);
+  expect(report.has('cleartext-blocked'), isTrue);
+  expect(report.has('default-application-id'), isTrue);
+  expect(report.has('debug-signing'), isTrue);
+});</code></pre><p>สี่ข้อนี้คือสถานะของโปรเจกต์ Flutter ที่ยังไม่ได้ตั้งค่าอะไรเลย และเป็นสิ่งที่ 15.3 พบใน <code>wmsapp</code> จริง</p></section>
+
+<section id="section-4"><h2>4. โจทย์</h2><p>ทำให้ checklist ตรวจโปรเจกต์จริง แล้วต่อเข้ากับกระบวนการปล่อย</p><table><thead><tr><th>ส่วน</th><th>ต้องมี</th></tr></thead><tbody>
+<tr><td>เทสต์ที่อ่านไฟล์จริง</td><td>รันพร้อมชุดเทสต์ปกติ ล้มพร้อมวิธีแก้</td></tr>
+<tr><td>สคริปต์ปล่อยรุ่น</td><td>ตรวจก่อน build และตรวจ APK หลัง build</td></tr>
+<tr><td>การตรวจเพิ่ม</td><td>เรื่องที่ 15.1–15.11 พูดถึงแต่ยังไม่มีในโค้ด</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>เทสต์อ่าน manifest, gradle, pubspec ของโปรเจกต์จริง</td><td>15.3</td></tr>
+<tr><td>2</td><td>ล้มแล้วข้อความบอกวิธีแก้ทุกข้อ</td><td>15.3</td></tr>
+<tr><td>3</td><td>แยกตัวขวางออกจากคำเตือน และคำเตือนไม่ขวางการปล่อย</td><td>15.4</td></tr>
+<tr><td>4</td><td>ตรวจว่า <code>debug/AndroidManifest.xml</code> ไม่ได้ประกาศสิทธิ์ที่ควรอยู่ใน main</td><td>15.3</td></tr>
+<tr><td>5</td><td>ตรวจว่าเลข build ในรุ่นนี้มากกว่ารุ่นก่อน</td><td>15.2</td></tr>
+<tr><td>6</td><td>ตรวจว่าไม่มีไฟล์ keystore ในประวัติ git</td><td>15.6</td></tr>
+<tr><td>7</td><td>ตรวจว่า <code>.gitignore</code> มีรายการที่ควรมี</td><td>15.6</td></tr>
+<tr><td>8</td><td>สคริปต์ตรวจ APK ว่าไม่ได้เซ็นด้วยกุญแจ debug</td><td>15.5</td></tr>
+<tr><td>9</td><td>สคริปต์ตรวจว่า APK มีสิทธิ์ INTERNET จริง</td><td>15.3</td></tr>
+<tr><td>10</td><td>เก็บไฟล์ symbols ของทุกรุ่นที่ปล่อย</td><td>15.6, 15.10</td></tr>
+<tr><td>11</td><td>ตัวปิดค่ามีเทสต์ที่ตรวจว่าค่าจริงหายไป</td><td>15.10</td></tr>
+<tr><td>12</td><td>ตรวจว่ารายชื่อคีย์อ่อนไหวใน log กับในรายงาน ตรงกัน</td><td>15.6</td></tr>
+</tbody></table><p>เกณฑ์ 4, 6 และ 12 เป็นสามข้อที่ต้องคิดเองว่าจะตรวจอย่างไร</p></section>
+
+<section id="section-6"><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 1 — อ่านไฟล์จริง</strong></p><pre class="code-vs"><code>test('โปรเจกต์นี้พร้อมปล่อย', () {
+  final report = checkRelease(
+    androidManifest: File('android/app/src/main/AndroidManifest.xml')
+        .readAsStringSync(),
+    androidGradle: File('android/app/build.gradle.kts').readAsStringSync(),
+    pubspec: File('pubspec.yaml').readAsStringSync(),
+  );
+
+  expect(report.blockers, isEmpty, reason: report.toString());
+});</code></pre><p><code>reason: report.toString()</code> ทำให้ข้อความตอนล้มมีวิธีแก้ครบทุกข้อ</p><p><strong>เกณฑ์ 5 — เทียบกับรุ่นก่อน</strong></p><pre class="code-vs"><code>test('เลข build มากกว่ารุ่นที่ปล่อยล่าสุด', () {
+  final current = AppVersion.parse(readVersionLine())!;
+  final lastTag = Process.runSync('git', ['tag', '--list', 'v*', '--sort=-v:refname'])
+      .stdout.toString().split('\n').first.trim();
+  if (lastTag.isEmpty) return;   // ยังไม่เคยปล่อย
+
+  final released = AppVersion.parse(lastTag.substring(1))!;
+  expect(current.canUpgradeFrom(released), isTrue,
+      reason: 'รุ่นล่าสุดคือ $released');
+});</code></pre><p><strong>เกณฑ์ 8 และ 9 — ตรวจ APK หลัง build</strong></p><pre class="code-vs"><code># tool/release.sh
+APK="build/app/outputs/flutter-apk/app-release.apk"
+
+if apksigner verify --print-certs "$APK" | grep -q "CN=Android Debug"; then
+  echo "APK ถูกเซ็นด้วยกุญแจ debug"
+  exit 1
+fi
+
+if ! aapt dump permissions "$APK" | grep -q "android.permission.INTERNET"; then
+  echo "APK ไม่มีสิทธิ์ INTERNET"
+  exit 1
+fi</code></pre><p><strong>เกณฑ์ 12 — รายชื่อคีย์ต้องตรงกัน</strong></p><pre class="code-vs"><code>test('รายชื่อคีย์อ่อนไหวใน log กับในรายงาน ต้องเป็นชุดเดียวกัน', () {
+  // ถ้าสองที่ไม่ตรงกัน จะมีทางหนึ่งที่ปิดไว้และอีกทางที่เปิดอยู่
+  expect(sensitiveKeys, logSensitiveKeys);
+});</code></pre><p>ทางที่ดีกว่าคือให้ทั้งสองที่อ่านจากรายชื่อเดียวกันตั้งแต่แรก แล้วเทสต์นี้ไม่จำเป็น</p></section>
+
+<section id="section-7"><h2>7. checklist สำหรับสิ่งที่เครื่องตรวจไม่ได้</h2><p>บางข้อต้องมีคนทำ และควรอยู่ในเอกสารที่สั้นพอที่จะอ่านจริง</p><table><thead><tr><th>ก่อน build</th><th>บท</th></tr></thead><tbody>
+<tr><td>เทสต์ทั้งหมดผ่าน</td><td>Part 14</td></tr>
+<tr><td>เลขรุ่นถูกต้อง</td><td>15.2</td></tr>
+<tr><td>ทดสอบบน APK release บนเครื่องจริง</td><td>15.1</td></tr>
+</tbody></table><table><thead><tr><th>หลัง build ก่อนแจก</th><th>บท</th></tr></thead><tbody>
+<tr><td>ติดตั้งทับรุ่นเก่าได้โดยข้อมูลไม่หาย</td><td>15.5</td></tr>
+<tr><td>เข้าสู่ระบบได้</td><td>15.3</td></tr>
+<tr><td>สแกนและยืนยันได้หนึ่งรอบเต็ม</td><td>—</td></tr>
+<tr><td>ปิดเน็ตแล้วดูว่าข้อความบอกอะไร</td><td>15.11</td></tr>
+<tr><td>ไอคอนและชื่อถูกต้อง</td><td>15.8</td></tr>
+<tr><td>เก็บ symbols และตั้ง tag ใน git</td><td>15.10</td></tr>
+</tbody></table><div class="note">รายการนี้สั้นโดยตั้งใจ — checklist ที่ยาวสามหน้าจะไม่มีใครทำครบ ส่วนที่ตรวจได้ด้วยเครื่องควรอยู่ในเทสต์ ไม่ใช่ในเอกสาร</div></section>
+
+<section id="section-8"><h2>8. แบบทดสอบตัวเองก่อนจบ Part 15</h2><ol><li>สามโหมด build ต่างกันอย่างไร (15.1)</li><li>ทำไมห้ามใช้ <code>assert</code> ตรวจข้อมูลจากภายนอก (15.1)</li><li><code>kDebugMode</code> ต่างจากตัวแปรธรรมดาอย่างไร (15.1)</li><li>เลขไหนที่ Android ใช้ตัดสินว่ารุ่นใหม่กว่า (15.2)</li><li>ทำไมต้องแสดงทั้งชื่อรุ่นและเลข build ในแอป (15.2)</li><li>Flutter ใส่สิทธิ์ INTERNET ให้ตอนไหนบ้าง (15.3)</li><li>อาการของแอปที่ขาดสิทธิ์ INTERNET เป็นอย่างไร (15.3)</li><li>ทำไม Android บล็อก http และแก้อย่างไรให้แคบที่สุด (15.4)</li><li>ทำไมไม่ควรปิดการตรวจใบรับรอง (15.4)</li><li>ลายเซ็นแอปตอบคำถามอะไร (15.5)</li><li>เซ็นด้วยกุญแจ debug แล้วเกิดอะไร (15.5)</li><li>กุญแจหายแล้วทำอะไรได้บ้าง (15.5)</li><li>ทำไม <code>--dart-define</code> ไม่ใช่ที่เก็บความลับ (15.6)</li><li>ความลับหลุดเข้า git ต้องทำอะไรก่อน (15.6)</li><li>obfuscation ทำอะไรและไม่ทำอะไร (15.6)</li><li>APK ต่างจาก App Bundle อย่างไร (15.7)</li><li>APK ผิดสถาปัตยกรรมมีอาการอย่างไร (15.7)</li><li>ชื่อไหนที่เปลี่ยนทีหลังไม่ได้ (15.8)</li><li><code>applicationIdSuffix</code> ใช้ทำอะไร (15.8)</li><li>ต้นทุนที่แท้จริงของการรองรับ iOS คืออะไร (15.9)</li><li>ต้องตั้งตัวจับข้อผิดพลาดกี่ตัว และต่างกันอย่างไร (15.10)</li><li>ทำไมตัวปิดค่าที่ปิดไม่จริงแย่กว่าไม่มีเลย (15.10)</li><li>ความล้มเหลวแบบไหนที่ไม่ใช่ crash (15.10)</li><li>ต่อกลับหลังสายหลุดแล้วต้องทำอะไร (15.11)</li><li>ทำไมไม่ควรส่งคำสั่งซ้ำเองเมื่อเน็ตกลับมา (15.11)</li></ol></section>
+
+<section id="section-9"><h2>9. สรุปท้าย Part 15</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เลือกโหมด build ให้ตรงกับสิ่งที่ทำ และรู้ว่าอะไรหายไปในโหมด release</li><li>ตั้งเลขรุ่นให้ติดตั้งทับได้และตามหาได้ว่าเครื่องไหนใช้รุ่นอะไร</li><li>ประกาศสิทธิ์ให้ครบสำหรับ build ที่ปล่อยจริง</li><li>อนุญาต http เฉพาะเซิร์ฟเวอร์ที่จำเป็น</li><li>เซ็นแอปด้วยกุญแจของตัวเองและเก็บให้ปลอดภัย</li><li>รู้ว่าอะไรเก็บในแอปได้และอะไรต้องอยู่ที่เซิร์ฟเวอร์</li><li>เลือกรูปแบบไฟล์และลดขนาดแอป</li><li>ตั้งชื่อแพ็กเกจ ชื่อแอป และไอคอนก่อนปล่อยรุ่นแรก</li><li>รู้ว่าต้องเตรียมอะไรถ้าต้องรองรับ iOS</li><li>เก็บรายงานข้อผิดพลาดจากหน้างานโดยไม่ทำให้ความลับหลุด</li><li>ตรวจว่าแอปรับมือกับเครือข่ายคลังได้ครบทุกด้าน</li><li>เปลี่ยน checklist ให้เป็นเทสต์ที่รันได้</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>ทำงานตอนไม่มีเน็ตแล้วส่งทีหลัง</td><td>Part 29</td></tr>
+<tr><td>อ่านการตั้งค่าจริงของ <code>wms_absolute_mobile</code></td><td>Part 20</td></tr>
+<tr><td>อ่านการตั้งค่าจริงของ <code>wmsapp</code></td><td>Part 16</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. ปิดกลุ่ม Part 7–15</h2><p>เก้า Part นี้พาแอปจาก “คุยกับเซิร์ฟเวอร์ได้” ไปถึง “อยู่ในมือผู้ใช้จริงได้”</p><table><thead><tr><th>Part</th><th>เพิ่มอะไร</th></tr></thead><tbody>
+<tr><td>7</td><td>คุยกับ .NET และแยกความล้มเหลวให้ผู้ใช้ทำต่อได้</td></tr>
+<tr><td>8</td><td>เข้าสู่ระบบและจัดการ session</td></tr>
+<tr><td>9</td><td>แยกชั้นให้แก้และทดสอบทีละชิ้นได้</td></tr>
+<tr><td>10</td><td>ให้ผู้ใช้เปลี่ยนเซิร์ฟเวอร์เองได้</td></tr>
+<tr><td>11</td><td>หน้าตาและภาษาที่ใช้งานได้จริงในคลัง</td></tr>
+<tr><td>12</td><td>ข้อมูลที่เปลี่ยนโดยผู้ใช้ไม่ได้กด</td></tr>
+<tr><td>13</td><td>ไฟล์และรูป</td></tr>
+<tr><td>14</td><td>ทดสอบและวัดสิ่งที่ทำไป</td></tr>
+<tr><td>15</td><td>ปล่อยออกไปและดูแลต่อ</td></tr>
+</tbody></table><p>สิ่งที่เชื่อมทั้งเก้า Part เข้าด้วยกันคือคำถามเดียว — <strong>“ถ้าสิ่งนี้ผิดที่หน้างาน ผู้ใช้จะทำอะไรต่อได้”</strong></p><table><thead><tr><th>คำถามนั้นในแต่ละ Part</th></tr></thead><tbody>
+<tr><td>ความล้มเหลวชนิดไหนที่ลองใหม่แล้วช่วย (7.9)</td></tr>
+<tr><td>401 กับ 403 พาผู้ใช้ไปคนละทาง (8.1)</td></tr>
+<tr><td>ข้อความบอกว่าค่าควรไปอยู่ช่องไหน (10.7)</td></tr>
+<tr><td>ห้ามเฉพาะสิ่งที่ผิดแน่นอน ที่น่าสงสัยให้เตือน (13.9)</td></tr>
+<tr><td>ไม่ล้างงานที่ผู้ใช้ทำค้างเมื่อส่งไม่สำเร็จ (15.11)</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 16 เริ่มกลุ่มใหม่ — แทนที่จะสร้างของใหม่ จะพาไปอ่าน <code>wmsapp</code> ทั้งโปรเจกต์ ตั้งแต่ <code>main.dart</code> จนถึงจอที่ใหญ่ที่สุด โดยใช้ทุกอย่างที่สิบห้า Part ที่ผ่านมาสอนไว้เป็นเครื่องมือในการอ่าน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
