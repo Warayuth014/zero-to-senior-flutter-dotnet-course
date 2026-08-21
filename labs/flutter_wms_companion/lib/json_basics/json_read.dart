@@ -148,6 +148,44 @@ int requireInt(Map<String, dynamic> json, String key, {String path = ''}) {
   return parsed.toInt();
 }
 
+// ---------------------------------------------------------------- จริง/เท็จ
+
+/// อ่านค่าจริง/เท็จ
+///
+/// ไม่รับ "true" ที่เป็นข้อความ และไม่รับ 1/0 เพราะ ASP.NET ส่ง bool จริง
+/// เสมอ การเผื่อรูปแบบที่ยังไม่มีใครส่งมาคือการเดาอนาคต
+bool requireBool(Map<String, dynamic> json, String key, {String path = ''}) {
+  final value = _require(json, key, path);
+  if (value is! bool) {
+    throw ContractException(
+      _at(path, key),
+      'ต้องเป็น true หรือ false แต่ได้ ${value.runtimeType}',
+    );
+  }
+  return value;
+}
+
+/// อ่านค่าจริง/เท็จที่เซิร์ฟเวอร์อาจไม่ส่งมา
+///
+/// ต้องระบุ [orElse] เสมอ เพื่อบังคับให้คนเขียนตัดสินใจว่า "ไม่มีค่า"
+/// แปลว่าอะไรในงานนี้ แทนที่จะได้ false มาโดยไม่ได้ตั้งใจ
+bool readBool(
+  Map<String, dynamic> json,
+  String key, {
+  String path = '',
+  required bool orElse,
+}) {
+  final value = _raw(json, key);
+  if (identical(value, _absent) || value == null) return orElse;
+  if (value is! bool) {
+    throw ContractException(
+      _at(path, key),
+      'ต้องเป็น true หรือ false แต่ได้ ${value.runtimeType}',
+    );
+  }
+  return value;
+}
+
 // ---------------------------------------------------------------- เวลา
 
 /// เวลาต้องมี Z หรือ offset เสมอ

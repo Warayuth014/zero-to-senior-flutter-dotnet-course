@@ -1,16 +1,55 @@
-<div class="note"><strong>Domain layerมีเมื่อกฎคุ้มค่า:</strong> เพิ่มเมื่อมี invariants/calculation/workflow languageที่ต้องเป็นอิสระจาก Flutter/API ไม่ใช่เพราะทุก projectต้องมีสี่ชั้น</div>
-<section><h2>1. Signals ว่าควรมี</h2><ul><li>กฎเดียวใช้หลายหน้าหรือหลาย data source</li><li>workflow transitionซับซ้อน</li><li>ต้อง test business rulesจำนวนมาก</li><li>DTO shapeไม่ตรงคำศัพท์ใน app</li><li>offline/reconciliationต้องรักษา invariants</li></ul></section>
-<section><h2>2. Entity/value object</h2><pre class="code-vs"><code>final class Quantity {
-  Quantity._(this.value);
-  final double value;
-  static Quantity create(double value) {
-    if (!value.isFinite || value &lt;= 0) throw InvalidQuantity();
-    return Quantity._(value);
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ตัดสินใจจากโค้ดจริงว่าควรเพิ่มชั้นหรือไม่</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.5–9.11<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตอบได้ว่าเมื่อไหร่ควรเพิ่มชั้น domain และเมื่อไหร่มันเป็นแค่พิธีกรรม</div>
+
+<section><h2>1. ชั้นที่ยังไม่ได้พูดถึง</h2><p>ตอนนี้แอปมีสี่ชั้น</p><pre class="code-vs"><code>Widget  →  Store  →  Repository  →  ApiClient</code></pre><p>ในหนังสือสถาปัตยกรรมมักมีชั้นที่ห้าคั่นระหว่าง store กับ repository เรียกว่า <strong>domain layer</strong> หรือ <strong>use case</strong></p><pre class="code-vs"><code>Widget  →  Store  →  UseCase  →  Repository  →  ApiClient</code></pre><div class="note"><strong>Use case</strong> คือคลาสที่ทำงานทางธุรกิจหนึ่งอย่างให้จบ โดยไม่รู้จักหน้าจอและไม่รู้จัก HTTP เช่น <code>HoldPallet</code>, <code>ConfirmCycleCount</code></div></section>
+
+<section><h2>2. หน้าตาถ้าเพิ่มเข้ามา</h2><pre class="code-vs"><code>class HoldPallet {
+  const HoldPallet(this.pallets, this.audit);
+
+  final PalletRepository pallets;
+  final AuditRepository audit;
+
+  Future&lt;Pallet&gt; call(Pallet pallet, {required String username}) async {
+    if (pallet.onHold) {
+      throw const PalletFailure('พาเลทนี้ถูกล็อกอยู่แล้ว');
+    }
+    final held = await pallets.hold(pallet.code, commandId: ...);
+    await audit.record('hold', pallet.code, by: username);
+    return held;
   }
-}</code></pre></section>
-<section><h2>3. Domain service</h2><p>ใช้เมื่อ ruleข้ามหลาย entitiesและไม่มี ownerธรรมชาติ เช่น allocation policy แต่อย่าเรียก class wrapperทุก methodว่า Serviceโดยไม่มี domain logic</p></section>
-<section><h2>4. Application vs domain</h2><p>Domainตัดสิน “quantity valid/transition allowed”; applicationจัด “เรียก repository, loading, retry, user session”; infrastructureส่ง HTTP</p></section>
-<section><h2>5. เมื่อไม่ต้องมี</h2><p>หน้า read-only mappingตรง APIและไม่มี rule อาจใช้ DTO→ViewStateผ่าน repositoryได้ ชั้นเพิ่มโดยไม่มี logicทำ navigationยากและ boilerplateสูง</p></section>
-<section><h2>6. Backend authority</h2><p>Flutter domain validationช่วย UX/offlineแต่ .NETยังต้อง enforce invariantเพราะ clientถูกแก้/ข้อมูลแข่งขันได้ ให้ share contract/testsไม่ copy logicแบบหลง divergence</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>สี statusควรอยู่ domain entityไหม?</p><details><summary>เฉลย</summary><p>ไม่ สีเป็น presentation mapping; domainเก็บ typed statusและ allowed transitions ส่วน UI map theme/icon/color</p></details></section>
-<section><h2>8. Cost check</h2><div class="success">ก่อนเพิ่ม layer ระบุ rule, consumer, testและ change pressureที่ได้ประโยชน์ หากตอบไม่ได้ให้เริ่มเรียบง่ายและรักษา boundaryไว้ก่อน</div></section>
+}</code></pre><p>store จะเรียกแค่ <code>await holdPallet(pallet, username: ...)</code> โดยไม่รู้ว่าข้างในมีสองขั้น</p></section>
+
+<section><h2>3. คำถามที่ต้องตอบก่อนเพิ่ม</h2><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่าใช่</th></tr></thead><tbody>
+<tr><td>งานนี้ต้องประสาน repository มากกว่าหนึ่งตัวไหม</td><td>เป็นเหตุผลที่ดี</td></tr>
+<tr><td>มีกฎธุรกิจที่ต้องตรวจก่อนยิง และกฎนั้นใช้ในหลายจอไหม</td><td>เป็นเหตุผลที่ดี</td></tr>
+<tr><td>มีลำดับหลายขั้นที่ต้องทำให้ครบ ไม่งั้นข้อมูลค้างครึ่ง ๆ ไหม</td><td>เป็นเหตุผลที่ดี</td></tr>
+<tr><td>มี store หลายตัวที่ต้องทำงานเดียวกันนี้ไหม</td><td>เป็นเหตุผลที่ดี</td></tr>
+<tr><td>เพิ่มเพราะไดอะแกรมในบทความบอกว่าต้องมีใช่ไหม</td><td>ไม่ใช่เหตุผล</td></tr>
+</tbody></table><p>ถ้าไม่มีข้อไหนตอบว่าใช่ ผลของการเพิ่มชั้นคือคลาสที่มีเมธอดเดียวที่เรียกต่อไปยัง repository เฉย ๆ</p><pre class="code-vs"><code>// ชั้นที่ไม่ได้ทำอะไร นอกจากเพิ่มไฟล์
+class GetPalletsInZone {
+  const GetPalletsInZone(this.repository);
+  final PalletRepository repository;
+
+  Future&lt;List&lt;Pallet&gt;&gt; call(String zone) =&gt; repository.fetchInZone(zone);
+}</code></pre><p>คลาสแบบนี้ทำให้คนอ่านต้องเปิดไฟล์เพิ่มอีกหนึ่งไฟล์ เพื่อพบว่าไม่มีอะไรอยู่ในนั้น</p></section>
+
+<section><h2>4. ทางเลือกที่เบากว่าการเพิ่มชั้น</h2><p>ก่อนสร้างชั้นใหม่ ลองสามอย่างนี้ก่อน — ส่วนใหญ่พอ</p><table><thead><tr><th>ปัญหา</th><th>ทางแก้ที่เบากว่า</th></tr></thead><tbody>
+<tr><td>กฎธุรกิจกระจายอยู่หลายที่</td><td>ย้ายไปเป็นเมธอดในโมเดล เช่น <code>bool get canHold =&gt; !onHold &amp;&amp; quantity &gt; 0;</code></td></tr>
+<tr><td>store สองตัวทำงานเดียวกัน</td><td>ถามก่อนว่าทำไมถึงมีสอง — มักเป็นอาการของ 9.9</td></tr>
+<tr><td>เมธอดใน store ยาวเกินไป</td><td>แยกเป็นเมธอดส่วนตัวในคลาสเดิม ยังไม่ต้องมีไฟล์ใหม่</td></tr>
+</tbody></table><p>แถวแรกมีพลังมากกว่าที่คิด — กฎที่อยู่บนโมเดลเดินทางไปกับข้อมูลเสมอ ไม่มีทางที่จอไหนจะลืมตรวจ</p></section>
+
+<section><h2>5. ของจริงทั้งสองโปรเจกต์ไม่มีชั้นนี้</h2><p>ทั้ง <code>wmsapp</code> และ <code>wms_absolute_mobile</code> ไม่มี use case layer งานที่ประสานหลายขั้นอยู่ในเมธอดของ store แทน</p><pre class="code-vs"><code>// wms_absolute_mobile — dispatchTask ประสานหลายอย่างในเมธอดเดียว
+Future&lt;void&gt; dispatchTask(...) async {
+  ...ตรวจสิทธิ์ → ตรวจจุดปลายทาง → เรียก tasksRepository.dispatch → อัปเดตลิสต์...
+}</code></pre><p>ตัดสินอย่างไรว่าเลือกถูก ให้ดูว่าปัญหาที่เกิดจริงคืออะไร ในโปรเจกต์นี้ปัญหาไม่ใช่ “ตรรกะกระจาย” แต่เป็น “ทุกอย่างกองอยู่ใน store ตัวเดียว” ซึ่งการเพิ่ม use case ไม่ได้แก้ — มันจะได้ store ที่บางลงแต่มีไฟล์ use case สามสิบไฟล์ที่ยังพันกันอยู่ดี</p><div class="note"><strong>หลัก:</strong> เพิ่มชั้นเมื่อมันแก้ปัญหาที่มีอยู่จริงตอนนี้ ไม่ใช่ปัญหาที่อาจมีถ้าโปรเจกต์โตขึ้นสิบเท่า</div></section>
+
+<section><h2>6. กรณีที่คุ้มค่าจริง</h2><p>ตัวอย่างจากงานคลังที่ควรมี use case</p><pre class="code-vs"><code>ปิดงานหยิบของหนึ่งรอบ:
+  1. ยืนยันจำนวนที่หยิบได้จริง          → PickRepository
+  2. ปล่อยพาเลทที่ล็อกไว้                → PalletRepository
+  3. สร้างงานขนย้ายไปจุดแพ็ก            → TaskRepository
+  4. บันทึกว่าใครทำ เมื่อไหร่            → AuditRepository</code></pre><p>สี่ขั้นนี้ต้องเกิดครบ ใช้ในสองจอ (จอหยิบและจอหัวหน้า) และมีกฎว่าถ้าขั้นที่ 3 ล้มเหลวต้องไม่ปล่อยให้ขั้นที่ 2 ค้าง — พอมีความซับซ้อนระดับนี้ การมีคลาสที่ทดสอบได้เดี่ยว ๆ ชื่อ <code>CompletePickRound</code> คุ้มค่ากว่าการเขียนไว้ใน store สองตัว</p><p>สังเกตว่าตัวอย่างนี้ตอบว่า “ใช่” ถึงสี่ข้อในตาราง §3</p></section>
+
+<section><h2>7. แบบฝึกหัด</h2><p>ทีมเสนอให้เพิ่ม use case สำหรับทุกการกระทำในแอป รวมถึง <code>GetPalletsInZone</code>, <code>HoldPallet</code>, <code>LoadTasks</code> เหตุผลคือ “จะได้เป็นมาตรฐานเดียวกันทั้งโปรเจกต์”</p><ol><li>ข้อดีที่อ้างนี้จริงไหม</li><li>จะเสนออะไรกลับ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> จริงบางส่วน — ความสม่ำเสมอมีค่าจริง คนอ่านไม่ต้องเดาว่าตรรกะอยู่ไหน และคนใหม่รู้ว่าต้องสร้างไฟล์อะไรบ้าง แต่ค่านั้นต้องเทียบกับต้นทุน คือไฟล์ที่เพิ่มขึ้นเท่าตัวและไฟล์ส่วนใหญ่จะมีบรรทัดเดียว</p><p><strong>2.</strong> เสนอกฎที่แคบกว่าและตรวจได้</p><ul><li>งานที่แตะ repository มากกว่าหนึ่งตัว ให้เป็น use case</li><li>งานที่แตะตัวเดียวและไม่มีกฎธุรกิจ ให้ store เรียก repository ตรง ๆ</li><li>ถ้าวันหนึ่งงานตัวไหนโตขึ้นจนเข้าเกณฑ์ข้อแรก ค่อยยกขึ้นเป็น use case ตอนนั้น</li></ul><p>กฎนี้ยังสม่ำเสมอ — คนอ่านรู้ว่าถ้าเห็น use case แปลว่ามีอะไรซับซ้อนอยู่ ซึ่งเป็นข้อมูลที่มีประโยชน์กว่าการที่ทุกอย่างเป็น use case เหมือนกันหมดจนไม่บอกอะไรเลย</p></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li>เพิ่มชั้น domain เมื่อมีการประสานหลาย repository, กฎที่ใช้หลายที่ หรือลำดับที่ต้องครบ</li><li>ลองย้ายกฎไปไว้บนโมเดลก่อน — เบากว่าและกฎเดินทางไปกับข้อมูล</li><li>use case ที่แค่เรียกต่อ คือไฟล์ที่ทำให้คนอ่านเสียเวลาเปล่า</li><li>โปรเจกต์จริงทั้งสองตัวไม่มีชั้นนี้ และปัญหาของมันคือคนละเรื่อง</li></ul></div><p><strong>บทหน้า:</strong> เรื่องที่ทุกชั้นต้องตกลงกันให้ชัด คือความล้มเหลวเดินทางอย่างไร</p></section>

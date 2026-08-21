@@ -4,17 +4,79 @@
 <title>Single Source of Truth</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-09 · Architecture</span><h1>Single Source of Truth</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Choose owner</a></li><li><a href="#section-2">Derived state</a></li><li><a href="#section-3">Mutable list trap</a></li><li><a href="#section-4">Remote refresh</a></li><li><a href="#section-5">Cache is not another truth</a></li><li><a href="#section-6">Selection by ID</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Review questions</a></li></ol></nav>
-<div class="note"><strong>Single source of truth (SSOT):</strong> ข้อมูลหนึ่งชนิดมี ownerหลักหนึ่งจุด ส่วนค่าที่เหลือ deriveหรือ snapshotตาม contract ไม่ copy mutable stateหลายที่แล้วหวังว่าจะ syncเอง</div>
-<section id="section-1"><h2>1. Choose owner</h2><p>Authenticated userอยู่ AuthStore, active serverอยู่ ConnectionController, receiving workflowอยู่ ReceivingStore และ server inventoryเป็น authoritative remote stateที่ repositoryโหลดเข้ามา</p></section>
-<section id="section-2"><h2>2. Derived state</h2><pre class="code-vs"><code>List&lt;Task&gt; get openTasks =&gt;
-    state.tasks.where((task) =&gt; task.status == TaskStatus.open).toList();
-int get openCount =&gt; openTasks.length;</code></pre><p>ไม่เก็บ <code>openCount</code> แยกถ้าคำนวณได้ เพราะ mutationอาจลืมอัปเดต</p></section>
-<section id="section-3"><h2>3. Mutable list trap</h2><p>ห้าม expose <code>final List tasks</code> ให้ widget <code>add/remove</code> ได้ คืน <code>UnmodifiableListView</code> หรือ immutable stateและเปลี่ยนผ่าน actions</p></section>
-<section id="section-4"><h2>4. Remote refresh</h2><p>หลัง command success เลือก patch stateจาก typed responseหรือ re-fetch authoritative dataตาม consistency/performance ไม่ patchหนึ่ง storeแต่ลืม dashboardอีก store</p></section>
-<section id="section-5"><h2>5. Cache is not another truth</h2><p>cacheเป็นสำเนาที่มี freshness/version policy Repositoryเป็นผู้ reconcile remote/local และเปิด metadataเช่น stale/offlineให้ UIรู้</p></section>
-<section id="section-6"><h2>6. Selection by ID</h2><p>เก็บ selectedTaskIdแทน copy Task object เมื่อ list refresh getterหา current objectจาก SSOT ลดรายละเอียดเก่าค้าง แต่ handle IDหายอย่างชัดเจน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>HomeStoreกับTaskStoreถือ list tasksคนละชุด หลัง completeควรแก้อย่างไร?</p><details><summary>แนวคำตอบ</summary><p>มี task ownerเดียว/shared query cache หรือทั้งสอง invalidate/reloadผ่าน repository policy; อย่า mutateสอง listด้วย codeซ้ำ</p></details></section>
-<section id="section-8"><h2>8. Review questions</h2><div class="success">ใครเป็น owner? ใครเปลี่ยนได้? derivedอะไรได้? refreshแล้ว selectionยังถูกไหม? logout/server switchล้าง scopeใด?</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">อาการ</a></li><li><a href="#section-2">หลัก</a></li><li><a href="#section-3">สามหน้าตาของปัญหาเดียวกัน</a></li><li><a href="#section-4">แบบที่สองอันตรายที่สุด</a></li><li><a href="#section-5">แล้วสถานะของหน้าจอล่ะ</a></li><li><a href="#section-6">ของจริง: ทำไม warehouse_store ถึงถือทุกอย่าง</a></li><li><a href="#section-7">เมื่อสองแหล่งเลี่ยงไม่ได้</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: หาสถานะที่ซ้ำกันในโค้ดที่มีอยู่</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.7, 9.8<br><strong>จบบทนี้แล้วจะทำได้:</strong> มองออกว่าข้อมูลชุดไหนถูกเก็บซ้ำ และรู้ว่าจะรวมให้เหลือที่เดียวอย่างไร</div>
+
+<section id="section-1"><h2>1. อาการ</h2><p>ผู้ใช้ล็อกพาเลท PLT-001 ที่จอค้นหา แถวเปลี่ยนเป็น “ล็อกแล้ว” ถูกต้อง แล้วกดไปจอสรุป ตรงนั้นยังบอกว่าพาเลทใบนี้ว่างอยู่</p><p>ผู้ใช้จะรายงานว่า “แอปล็อกไม่ติด” ทั้งที่เซิร์ฟเวอร์ล็อกไปแล้วเรียบร้อย นี่คืออาการของข้อมูลชุดเดียวถูกเก็บไว้สองที่</p></section>
+
+<section id="section-2"><h2>2. หลัก</h2><div class="note"><strong>Single source of truth:</strong> ข้อมูลแต่ละอย่างมีเจ้าของที่เดียว ที่เหลืออ่านจากเจ้าของ ไม่เก็บสำเนาของตัวเอง</div><p>เหตุผลไม่ใช่เรื่องความสวยงาม แต่เป็นเรื่องคณิตศาสตร์ — ถ้าเก็บที่เดียว มันไม่มีวันไม่ตรงกัน ถ้าเก็บสองที่ ต้องมีโค้ดที่ซิงก์ให้ตรง และโค้ดนั้นจะลืมกรณีใดกรณีหนึ่งเสมอ</p></section>
+
+<section id="section-3"><h2>3. สามหน้าตาของปัญหาเดียวกัน</h2><table><thead><tr><th>แบบ</th><th>หน้าตา</th><th>เจอตอน</th></tr></thead><tbody>
+<tr><td>store สองตัวเก็บของเดียวกัน</td><td>จอ A กับจอ B สร้าง store คนละตัว</td><td>ข้อมูลไม่ตรงข้ามจอ</td></tr>
+<tr><td>จอ copy ค่าจาก store มาเก็บใน <code>State</code></td><td><code>_pallets = widget.store.pallets</code> ใน <code>initState</code></td><td>store อัปเดตแล้วจอไม่เปลี่ยน</td></tr>
+<tr><td>เก็บค่าที่คำนวณได้เป็น field</td><td><code>bool _hasHeldPallets</code> เก็บแยกจากลิสต์</td><td>ลืมอัปเดตในเส้นทางใดเส้นทางหนึ่ง</td></tr>
+</tbody></table></section>
+
+<section id="section-4"><h2>4. แบบที่สองอันตรายที่สุด</h2><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+class _PalletScreenState extends State&lt;PalletScreen&gt; {
+  List&lt;Pallet&gt; _pallets = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _pallets = widget.store.pallets;     // ← ถ่ายสำเนามาไว้
+  }
+}</code></pre><p>อันตรายเพราะ<strong>มันทำงานถูกในตอนแรก</strong> จอแสดงผลถูกต้อง เทสต์ที่เขียนแบบโหลดแล้วดูก็ผ่าน ปัญหาโผล่ตอนที่ store เปลี่ยนค่าหลังจากนั้น ซึ่งอาจเป็นสัปดาห์ต่อมาตอนเพิ่มปุ่มโหลดใหม่</p><p>วิธีที่ถูกคืออ่านจาก store ทุกครั้งที่วาด</p><pre class="code-vs"><code>ListenableBuilder(
+  listenable: widget.store,
+  builder: (context, _) {
+    final store = widget.store;          // อ่านสด ๆ ทุกครั้งที่วาด
+    ...
+  },
+)</code></pre></section>
+
+<section id="section-5"><h2>5. แล้วสถานะของหน้าจอล่ะ</h2><p>ไม่ใช่ทุกอย่างต้องอยู่ใน store สิ่งที่เป็นของหน้าจอจริง ๆ ควรอยู่ในหน้าจอ</p><table><thead><tr><th>อยู่ในจอได้</th><th>ต้องอยู่ใน store</th></tr></thead><tbody>
+<tr><td>ตำแหน่งการเลื่อนของลิสต์</td><td>รายการพาเลท</td></tr>
+<tr><td>ข้อความที่พิมพ์อยู่ในช่องค้นหา (ก่อนกดค้น)</td><td>คำค้นที่ค้นไปแล้ว</td></tr>
+<tr><td>dialog เปิดอยู่หรือไม่</td><td>ผลของการยืนยันใน dialog</td></tr>
+<tr><td>แท็บที่เลือกอยู่ ถ้าไม่มีผลกับข้อมูล</td><td>ขั้นตอนของ workflow ที่ทำค้างไว้</td></tr>
+</tbody></table><p>เกณฑ์ตัดสิน: <strong>ถ้าปิดจอแล้วเปิดใหม่ ค่านี้ควรหายไปไหม</strong> ถ้าควรหาย ให้อยู่ในจอ</p></section>
+
+<section id="section-6"><h2>6. ของจริง: ทำไม <code>warehouse_store</code> ถึงถือทุกอย่าง</h2><pre class="code-vs"><code>class WarehouseStore extends ChangeNotifier {
+  final List&lt;InboundOrder&gt; inboundOrders = [];
+  final List&lt;Pallet&gt; pallets = [];
+  final List&lt;WmsTask&gt; tasks = [];
+  final List&lt;Pick&gt; picks = [];
+  final List&lt;DestinationQueueSummary&gt; destinationQueues = [];
+  ...
+  String screen = 'home';
+}</code></pre><p>ทุกจอในฟีเจอร์คลังอ่านจาก store ตัวเดียวนี้ ข้อดีคือ<strong>ไม่มีทางที่สองจอจะเห็นข้อมูลไม่ตรงกันเลย</strong> เพราะไม่มีที่สองให้ไม่ตรง</p><p>แม้แต่ <code>screen</code> ที่บอกว่าตอนนี้อยู่จอไหน ก็อยู่ใน store ทำให้ปุ่มย้อนกลับกับขั้นตอนของงานสอดคล้องกันเสมอ</p><p>ราคาที่จ่ายคือไฟล์ 1,684 บรรทัด ซึ่งเป็นปัญหาคนละเรื่อง และ 9.15 จะพูดถึง — <strong>อย่าแก้ปัญหาไฟล์ใหญ่ด้วยการสร้างแหล่งความจริงที่สอง</strong></p></section>
+
+<section id="section-7"><h2>7. เมื่อสองแหล่งเลี่ยงไม่ได้</h2><p>บางกรณีมีข้อมูลสองที่จริง ๆ เช่น รายการที่แคชไว้ในเครื่องกับข้อมูลบนเซิร์ฟเวอร์ กรณีแบบนี้ต้องตอบสามคำถามให้ชัดตั้งแต่ออกแบบ</p><table><thead><tr><th>คำถาม</th><th>ตัวอย่างคำตอบ</th></tr></thead><tbody>
+<tr><td>ใครถูกเมื่อไม่ตรงกัน</td><td>เซิร์ฟเวอร์ถูกเสมอ</td></tr>
+<tr><td>ซิงก์ตอนไหน</td><td>ตอนเปิดจอ และตอนกลับมาจาก background</td></tr>
+<tr><td>ผู้ใช้รู้ได้อย่างไรว่ากำลังดูของเก่า</td><td>มีป้ายบอกเวลาที่ข้อมูลอัปเดตล่าสุด</td></tr>
+</tbody></table><p>ถ้าตอบไม่ได้ทั้งสามข้อ แปลว่ายังไม่ควรมีแคช — Part 29 จะลงรายละเอียดเรื่องนี้</p></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>อ่านโค้ดนี้แล้วบอกว่าจะพังตอนไหน</p><pre class="code-vs"><code>class _SummaryViewState extends State&lt;SummaryView&gt; {
+  late int _heldCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _heldCount = widget.store.pallets.where((p) =&gt; p.onHold).length;
+  }
+
+  @override
+  Widget build(BuildContext context) =&gt; Text('ล็อกอยู่ $_heldCount ใบ');
+}</code></pre><details><summary>แนวคำตอบ</summary><p>พังทันทีที่ store เปลี่ยน เพราะ <code>_heldCount</code> คำนวณครั้งเดียวตอนสร้างจอ และ <code>build</code> ไม่ได้ผูกกับ store ด้วย</p><p>มีบั๊กสองชั้นซ้อนกัน — ชั้นแรกคือเก็บค่าที่คำนวณได้ ชั้นสองคือไม่ได้ฟัง store แก้แล้วเหลือแบบนี้</p><pre class="code-vs"><code>Widget build(BuildContext context) =&gt; ListenableBuilder(
+  listenable: widget.store,
+  builder: (context, _) {
+    final heldCount = widget.store.pallets.where((p) =&gt; p.onHold).length;
+    return Text('ล็อกอยู่ $heldCount ใบ');
+  },
+);</code></pre><p>ถ้ามีหลายจอต้องใช้ตัวเลขนี้ ให้ย้ายไปเป็น getter ใน store แทนที่จะเขียน <code>where</code> ซ้ำ</p><pre class="code-vs"><code>int get heldCount =&gt; _pallets.where((p) =&gt; p.onHold).length;</code></pre><p>ยังเป็นการคำนวณ ไม่ใช่การเก็บ จึงไม่มีวันไม่ตรง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ข้อมูลหนึ่งอย่าง มีเจ้าของที่เดียว</li><li>อาการที่พบบ่อยที่สุดคือจอถ่ายสำเนาจาก store มาไว้ใน <code>State</code></li><li>สิ่งที่ควรหายเมื่อปิดจอ ให้อยู่ในจอ ที่เหลืออยู่ใน store</li><li>ค่าที่คำนวณได้ ให้คำนวณ อย่าเก็บ</li></ul></div><p><strong>บทหน้า:</strong> ข้อมูลไหลไปทางเดียว แล้วเหตุการณ์ไหลกลับอย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

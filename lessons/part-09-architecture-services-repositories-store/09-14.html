@@ -4,20 +4,94 @@
 <title>Split Giant Screen</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-14 · Architecture</span><h1>Split Giant Screen</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Inventory ก่อนตัด</a></li><li><a href="#section-2">Characterization tests</a></li><li><a href="#section-3">Extract pure widgets first</a></li><li><a href="#section-4">Extract view data</a></li><li><a href="#section-5">Move logic to Store</a></li><li><a href="#section-6">Keep commits small</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Done criteria</a></li></ol></nav>
-<div class="note"><strong>แตกหน้าจอ 2,000 บรรทัดแบบรักษาพฤติกรรม:</strong> characterization testsก่อน แล้วแยก pure widget, controllerและvertical slicesทีละขั้น ไม่ rewriteพร้อมเปลี่ยน UX/API</div>
-<section id="section-1"><h2>1. Inventory ก่อนตัด</h2><p>ทำ outline fields, lifecycle, controllers, async methods, sections/dialogs, dependenciesและ shared mutable variables พร้อมระบุ behaviorที่ต้องคง</p></section>
-<section id="section-2"><h2>2. Characterization tests</h2><p>ล็อก happy path, validation, back behavior, loading/errorและ scan transitionsที่มีอยู่ แม้ designไม่สวย Testsเป็น safety netระหว่าง move code</p></section>
-<section id="section-3"><h2>3. Extract pure widgets first</h2><pre class="code-vs"><code>class PalletSummaryCard extends StatelessWidget {
-  const PalletSummaryCard({required this.pallet, required this.onConfirm});
-  final PalletViewData pallet;
-  final VoidCallback onConfirm;
-  // render only
-}</code></pre></section>
-<section id="section-4"><h2>4. Extract view data</h2><p>ส่ง typed props/callbackแคบ ๆ ไม่ส่ง State objectทั้งก้อนให้ childแล้วเรียก private methodsกลับ ทำ widget testsง่ายและ couplingต่ำ</p></section>
-<section id="section-5"><h2>5. Move logic to Store</h2><p>หลัง UI sectionsแยกแล้ว ย้าย async workflow/derived stateทีละ actionไป Storeพร้อม unit tests Controller/FocusNodeยังอยู่ route widgetหรือ dedicated form controllerตาม lifetime</p></section>
-<section id="section-6"><h2>6. Keep commits small</h2><p>commitหนึ่ง extract/moveอย่างเดียว, formatter/analyze/testทุก step ห้าม renameทุก symbolพร้อมย้าย folderและเปลี่ยน behaviorเพราะ review/rollbackยาก</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>sectionหนึ่งอ่าน private fields 12 ตัวควรส่ง 12 paramsไหม?</p><details><summary>แนวคำตอบ</summary><p>สร้าง immutable ViewDataที่มีเฉพาะค่าที่ render และ callbacksตาม intent; ถ้ายังใหญ่แปลว่า boundaryของ sectionอาจผิด</p></details></section>
-<section id="section-8"><h2>8. Done criteria</h2><div class="success">root screenเห็น layout/orchestration, widgetsไม่มี API, Store testsครอบ flow, lifecycleยัง disposeครบและ screenshot/interactionไม่เปลี่ยนโดยไม่ตั้งใจ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ของจริงที่จะแยก</a></li><li><a href="#section-2">ทำไมจอถึงโตแบบนี้</a></li><li><a href="#section-3">สัญญาณว่าถึงเวลาแล้ว</a></li><li><a href="#section-4">ลำดับที่ปลอดภัย</a></li><li><a href="#section-5">ตัวอย่างขั้นที่ 2</a></li><li><a href="#section-6">แยกอย่างไรให้ได้ชิ้นที่มีความหมาย</a></li><li><a href="#section-7">กับดักตอนแยก</a></li><li><a href="#section-8">แล้วจอที่ยังไม่มีเทสต์ล่ะ</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 75–90 นาที</span><span>ลงมือทำ: เปิดไฟล์จริง 2,329 บรรทัดแล้ววางแผนแยก</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.1–9.13<br><strong>จบบทนี้แล้วจะทำได้:</strong> แยกจอใหญ่เป็นชิ้นเล็กโดยไม่ทำให้พฤติกรรมเปลี่ยน และรู้ว่าลำดับการแยกที่ปลอดภัยคืออะไร</div>
+
+<section id="section-1"><h2>1. ของจริงที่จะแยก</h2><pre class="code-vs"><code>wms_absolute_mobile/lib/features/warehouse/screens/ops_views.dart   2,329 บรรทัด
+  บรรทัด 15–22    class PickingView            (StatefulWidget เปล่า ๆ)
+  บรรทัด 23–1777  class _PickingViewState      ← 1,755 บรรทัด
+  บรรทัด 1778–1835 _ScanInputDialog
+  บรรทัด 1836–2032 AgvView
+  บรรทัด 2033–2329 StockView</code></pre><p>ใน <code>_PickingViewState</code> มีเมธอดที่ขึ้นต้นด้วย <code>Widget _</code> อยู่ 19 ตัว ตั้งแต่ <code>_destinationConveyors</code> ยาว 103 บรรทัด ไปจนถึง <code>_storeInConveyorWorkspace</code> ยาว 238 บรรทัด</p><p>ฝั่ง <code>wmsapp</code> มีเคสที่ใหญ่กว่านั้น คือ <code>packing_screen.dart</code> ขนาด 84KB</p></section>
+
+<section id="section-2"><h2>2. ทำไมจอถึงโตแบบนี้</h2><p>ไม่มีใครตั้งใจเขียนไฟล์สองพันบรรทัด มันโตทีละคำขอ</p><pre class="code-vs"><code>วันที่ 1   จอหยิบของ แสดงรายการ กดเลือก                     120 บรรทัด
+วันที่ 8   "ขอปุ่มดูสายพานปลายทางด้วย"                       +200
+วันที่ 20  "สายพานที่ 3 ทำงานไม่เหมือนตัวอื่น"                +180
+วันที่ 35  "ขอดูประวัติที่หยิบไปแล้ววันนี้"                    +250
+วันที่ 50  "ขอ dialog สแกนแบบพิมพ์มือได้ตอนสแกนเนอร์เสีย"      +120
+...</code></pre><p>ทุกคำขอสมเหตุสมผล และทุกครั้งการเพิ่มเข้าไปในไฟล์เดิมเป็นทางที่เร็วที่สุด — <strong>ไฟล์ใหญ่ไม่ได้เกิดจากความไม่รู้ แต่เกิดจากการที่ไม่มีใครหยุดถามว่าถึงเวลาแยกหรือยัง</strong></p></section>
+
+<section id="section-3"><h2>3. สัญญาณว่าถึงเวลาแล้ว</h2><table><thead><tr><th>สัญญาณ</th><th>วัดอย่างไร</th></tr></thead><tbody>
+<tr><td>ต้องเลื่อนหาเมธอดนานกว่าเขียนเมธอด</td><td>ความรู้สึกตอนแก้จริง</td></tr>
+<tr><td>สองคนแก้คนละเรื่องแล้ว merge ชนกัน</td><td>ดูจากประวัติ git</td></tr>
+<tr><td>เปลี่ยนส่วน A แล้วส่วน B พัง</td><td>มีตัวแปรที่ใช้ร่วมกันโดยไม่ตั้งใจ</td></tr>
+<tr><td>อธิบายให้คนใหม่ฟังไม่ได้ในสิบนาที</td><td>ลองจริง</td></tr>
+<tr><td>มี <code>bool</code> ที่ใช้เฉพาะสามบรรทัดในไฟล์ทั้งหมด</td><td>เช่น <code>_conveyor3Selected</code></td></tr>
+</tbody></table><p>สังเกตว่าไม่มีข้อไหนเขียนว่า “เกิน N บรรทัด” — จำนวนบรรทัดเป็นอาการ ไม่ใช่โรค</p></section>
+
+<section id="section-4"><h2>4. ลำดับที่ปลอดภัย</h2><div class="note">กฎเหล็ก: <strong>เขียนเทสต์ที่คุมพฤติกรรมปัจจุบันให้ได้ก่อน แล้วค่อยขยับโค้ด</strong> ไม่มีเทสต์ = ไม่ใช่ refactor แต่คือการเขียนใหม่แล้วหวังว่าจะเหมือนเดิม</div><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>เสี่ยงแค่ไหน</th></tr></thead><tbody>
+<tr><td>1</td><td>เขียนเทสต์ครอบเส้นทางหลักที่ผู้ใช้ทำจริง</td><td>ไม่แตะโค้ดเดิม</td></tr>
+<tr><td>2</td><td>ย้ายเมธอด <code>Widget _xxx()</code> ที่ไม่ใช้ตัวแปรของ State ออกเป็น <code>StatelessWidget</code></td><td>ต่ำมาก คอมไพเลอร์ฟ้องถ้าย้ายผิด</td></tr>
+<tr><td>3</td><td>ย้ายเมธอดที่ใช้ตัวแปร โดยส่งค่าเข้าไปเป็นพารามิเตอร์</td><td>ต่ำ แต่ต้องดูว่าส่งของถูกตัว</td></tr>
+<tr><td>4</td><td>ยกตรรกะที่ไม่เกี่ยวกับการวาดออกไป store</td><td>กลาง</td></tr>
+<tr><td>5</td><td>แยกไฟล์</td><td>ต่ำ เป็นแค่การย้ายที่อยู่</td></tr>
+</tbody></table><p>ขั้นที่ 2 คือขั้นที่ให้ผลมากที่สุดต่อความเสี่ยง เพราะเมธอดวาดส่วนใหญ่ในจอใหญ่ ๆ ไม่ได้แตะสถานะเลย</p></section>
+
+<section id="section-5"><h2>5. ตัวอย่างขั้นที่ 2</h2><pre class="code-vs"><code>// เดิม — เมธอดใน State
+Widget _destinationCountBadge(String text, Color color, Color background) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(color: background, borderRadius: ...),
+    child: Text(text, style: TextStyle(color: color)),
+  );
+}</code></pre><pre class="code-vs"><code>// ใหม่ — widget ของตัวเอง
+class DestinationCountBadge extends StatelessWidget {
+  const DestinationCountBadge({
+    super.key,
+    required this.text,
+    required this.color,
+    required this.background,
+  });
+
+  final String text;
+  final Color color;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) =&gt; Container(...);
+}</code></pre><p>ได้เพิ่มสามอย่างที่ไม่ใช่แค่ความสวยงาม</p><table><thead><tr><th>ได้อะไร</th><th>อธิบาย</th></tr></thead><tbody>
+<tr><td>วาดใหม่แคบลง</td><td>เป็น widget แยก มี <code>const</code> ได้ Flutter ข้ามการวาดใหม่ได้เมื่อค่าไม่เปลี่ยน — เมธอดในคลาสเดิมทำแบบนี้ไม่ได้</td></tr>
+<tr><td>ทดสอบชิ้นเดียวได้</td><td><code>pumpWidget(DestinationCountBadge(...))</code> โดยไม่ต้องสร้างทั้งจอ</td></tr>
+<tr><td>คอมไพเลอร์บอกว่าต้องใช้อะไร</td><td>พารามิเตอร์คือรายการพึ่งพา ถ้าเมธอดเดิมแอบใช้ <code>_conveyor3Selected</code> จะย้ายไม่ผ่านทันที</td></tr>
+</tbody></table></section>
+
+<section id="section-6"><h2>6. แยกอย่างไรให้ได้ชิ้นที่มีความหมาย</h2><p>อย่าแยกตามจำนวนบรรทัด ให้แยกตาม “สิ่งที่ผู้ใช้เห็นเป็นก้อนเดียวกัน”</p><pre class="code-vs"><code>screens/picking/
+  picking_view.dart              ← ประกอบ เลือกว่าจะแสดงก้อนไหน  (~150 บรรทัด)
+  widgets/
+    destination_conveyors.dart   ← แถบสายพานปลายทางด้านบน
+    conveyor_workspace.dart      ← พื้นที่ทำงานของสายพานที่เลือก
+    active_pick_panel.dart       ← งานที่กำลังหยิบอยู่
+    completed_picking_panel.dart ← ประวัติวันนี้
+    scan_input_dialog.dart       ← dialog พิมพ์รหัสมือ</code></pre><p>เกณฑ์ตรวจ: ตั้งชื่อไฟล์ได้โดยไม่ต้องใช้คำว่า <code>part1</code>, <code>helpers</code>, <code>misc</code> หรือ <code>utils</code> — ถ้าตั้งชื่อไม่ได้ แปลว่ายังไม่รู้ว่าก้อนนั้นคืออะไร ให้กลับไปดูใหม่</p></section>
+
+<section id="section-7"><h2>7. กับดักตอนแยก</h2><table><thead><tr><th>กับดัก</th><th>อาการ</th><th>ทางแก้</th></tr></thead><tbody>
+<tr><td>แยกแล้วต้องส่งพารามิเตอร์ 12 ตัว</td><td>ชิ้นนั้นไม่ได้เป็นก้อนเดียวกันจริง</td><td>แบ่งเส้นใหม่ หรือส่ง store เข้าไปแทนค่าดิบ</td></tr>
+<tr><td>widget ลูกเรียก <code>setState</code> ของแม่ผ่าน callback หลายชั้น</td><td>สถานะอยู่ผิดที่</td><td>ยกสถานะขึ้นไป store (9.9)</td></tr>
+<tr><td>แยกแล้วแต่ยังต้องเปิดสองไฟล์คู่กันเสมอ</td><td>ตัดผิดที่</td><td>รวมกลับ แล้วตัดใหม่</td></tr>
+<tr><td>สร้าง <code>widgets/common_widgets.dart</code> รวมทุกอย่าง</td><td>ย้ายปัญหา ไม่ได้แก้</td><td>ไฟล์ละ widget หรือละกลุ่มที่เกี่ยวกันจริง</td></tr>
+</tbody></table><p>กับดักที่สี่เกิดขึ้นจริงใน <code>wmsapp</code> — <code>lib/widgets/common_widgets.dart</code> มีขนาด 20KB ซึ่งเป็นไฟล์ที่ทุกจอต้อง import และทุกคนต้องแก้</p></section>
+
+<section id="section-8"><h2>8. แล้วจอที่ยังไม่มีเทสต์ล่ะ</h2><p>นี่คือสถานการณ์จริงของทั้งสองโปรเจกต์ ทางออกที่ใช้ได้คือ</p><ol><li>เขียนเทสต์ครอบเฉพาะเส้นทางที่จะแตะ ไม่ต้องครอบทั้งจอ</li><li>ถ้าจอทดสอบไม่ได้เลยเพราะหยิบ <code>ApiService()</code> เอง ให้ทำขั้นที่เล็กที่สุดก่อน คือเปลี่ยนให้รับเข้ามาทาง constructor พร้อมค่าเริ่มต้น</li></ol><pre class="code-vs"><code>class PackingScreen extends StatefulWidget {
+  const PackingScreen({super.key, ApiService? api}) : _api = api;
+  final ApiService? _api;
+}
+
+// ใน State
+late final _api = widget._api ?? ApiService();</code></pre><p>โค้ดที่เรียกใช้จริงทั้งหมดไม่ต้องแก้เลย แต่เทสต์ส่งของปลอมเข้าไปได้ทันที นี่เป็นก้าวเล็กที่สุดที่เปิดทางให้ก้าวถัดไป</p><div class="note">ก้าวนี้ยังไม่สวย เพราะจอยังรู้จัก <code>ApiService</code> อยู่ แต่มันปลอดภัยพอที่จะทำในวันที่มีงานอื่นรออยู่ — และปลอดภัยกว่าการรื้อทั้งจอในครั้งเดียว</div></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>เปิด <code>ops_views.dart</code> ดูเมธอด <code>_conveyorTile</code> (บรรทัด 264 เป็นต้นไป ยาวราว 205 บรรทัด) แล้วตอบ</p><ol><li>มันใช้ตัวแปรของ State ตัวไหนบ้าง</li><li>แยกเป็น <code>StatelessWidget</code> ได้ทันทีไหม ถ้าไม่ ต้องทำอะไรก่อน</li></ol><details><summary>แนวคำตอบ</summary><p>ขั้นตอนที่ควรทำคือไล่หา <code>_</code> ทุกตัวในเมธอดนั้น ตัวไหนเป็นตัวแปรของ State ตัวไหนเป็นพารามิเตอร์</p><ul><li>ถ้าใช้แค่พารามิเตอร์ที่ส่งเข้ามา — แยกได้ทันที เป็นการคัดลอกวางแล้วเปลี่ยนพารามิเตอร์เป็นฟิลด์</li><li>ถ้าใช้ <code>_conveyor3Selected</code> หรือ <code>setState</code> — ต้องตัดสินใจก่อนว่าสถานะนั้นควรอยู่ที่ไหน ถ้ามีแค่จอนี้ใช้และหายได้เมื่อปิดจอ ให้ส่งค่าเข้าไปพร้อม callback ถ้าฟีเจอร์อื่นต้องรู้ด้วย ให้ยกขึ้น <code>WarehouseStore</code></li><li>ถ้าใช้ <code>context.watch</code> หรืออ่าน store โดยตรง — แยกได้ เพราะ store เข้าถึงได้จากทุกที่ในต้นไม้</li></ul><p><strong>คำตอบที่ถูกที่สุดสำหรับไฟล์นี้:</strong> อย่าเพิ่งแยก ให้เขียนเทสต์ของเส้นทาง “เลือกสายพาน → สแกนพาเลท → ยืนยัน” ให้ผ่านก่อน แล้วค่อยขยับ เพราะการรื้อ 205 บรรทัดที่ไม่มีเทสต์คุม แลกความเสี่ยงกับความสวยที่ผู้ใช้ไม่เห็น</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>จอใหญ่เกิดจากคำขอที่สมเหตุสมผลทีละข้อ ไม่ใช่จากความไม่รู้</li><li>เทสต์มาก่อน ไม่มีเทสต์ก็ไม่ใช่ refactor</li><li>เริ่มจากเมธอดวาดที่ไม่แตะสถานะ ได้ผลมากที่สุดต่อความเสี่ยง</li><li>แยกตามก้อนที่ผู้ใช้เห็น ไม่ใช่ตามจำนวนบรรทัด</li><li>ถ้าตั้งชื่อไฟล์ไม่ได้ แปลว่ายังตัดผิดที่</li></ul></div><p><strong>บทหน้า:</strong> ปัญหาเดียวกันแต่อยู่ฝั่งสถานะ — store ที่ทำทุกอย่าง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

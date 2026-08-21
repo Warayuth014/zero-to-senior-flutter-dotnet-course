@@ -4,25 +4,84 @@
 <title>ApiService</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-03 · Architecture</span><h1>ApiService</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Transport responsibilities</a></li><li><a href="#section-2">ไม่ควรทำ</a></li><li><a href="#section-3">Generic core</a></li><li><a href="#section-4">Feature data source</a></li><li><a href="#section-5">ของจริง</a></li><li><a href="#section-6">Singleton trade-off</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Contract</a></li></ol></nav>
-<div class="note"><strong>ApiService เป็น data source:</strong> รู้ HTTP mechanics และ wire format แต่ไม่ควรเป็น global owner ของทุก workflow/state/navigation</div>
-<section id="section-1"><h2>1. Transport responsibilities</h2><ul><li>ประกอบ base URL/path/query</li><li>แนบ headers/token</li><li>timeout/retry policyพื้นฐาน</li><li>decode JSON/status/ProblemDetails</li><li>redacted logging และ correlation</li></ul></section>
-<section id="section-2"><h2>2. ไม่ควรทำ</h2><p>ApiService ไม่ควรเลือกหน้าถัดไป, ถือ selected pallet, เปิด SnackBar, mutate widget list หรือกำหนดว่า operator ต้อง scan step ใดต่อ</p></section>
-<section id="section-3"><h2>3. Generic core</h2><pre class="code-vs"><code>abstract interface class JsonClient {
-  Future&lt;Map&lt;String, dynamic&gt;&gt; get(String path,
-      {Map&lt;String, String&gt; query = const {}});
-  Future&lt;Map&lt;String, dynamic&gt;&gt; post(
-      String path, Map&lt;String, dynamic&gt; body);
-}</code></pre></section>
-<section id="section-4"><h2>4. Feature data source</h2><pre class="code-vs"><code>class ReceivingRemoteDataSource {
-  ReceivingRemoteDataSource(this.client);
-  final JsonClient client;
-  Future&lt;ReceiptDto&gt; receive(ReceiveRequestDto request) async =&gt;
-    ReceiptDto.fromJson(await client.post('/receiving/scan-part', request.toJson()));
-}</code></pre></section>
-<section id="section-5"><h2>5. ของจริง</h2><p><code>wmsapp/services/api_service.dart</code> รวม base resolution, GET/POST/upload และ ApiResult แล้ว domain extensionsเรียก private methods เป็นจุดเริ่มต้นที่ดีสำหรับแยก transport จาก endpoint-specific mapping</p></section>
-<section id="section-6"><h2>6. Singleton trade-off</h2><p>singleton สะดวกแต่ซ่อน dependency/global mutable base URL ทำให้ parallel testsและ multi-serverยาก Constructor injection ทำ lifetime และ fake ชัดกว่า; migrateได้โดยห่อ interface ก่อน</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p><code>getPO</code> ควรอยู่ generic ApiClient หรือ Receiving data source?</p><details><summary>เฉลย</summary><p>Receiving data source/repository เพราะรู้ endpointและ PO DTO; generic clientควรรู้เพียง HTTP/JSON</p></details></section>
-<section id="section-8"><h2>8. Contract</h2><div class="warn">อย่าคืน <code>Map&lt;String,dynamic&gt;</code> ผ่าน data layerไปถึง UI ให้ parse/validateที่ boundaryและคืน typed DTO/domain result</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทางที่สาม</a></li><li><a href="#section-2">หน้าตาของ ApiService</a></li><li><a href="#section-3">ปัญหาที่ singleton แก้ให้จริง</a></li><li><a href="#section-4">ApiResult: ความล้มเหลวเป็นค่า ไม่ใช่ข้อยกเว้น</a></li><li><a href="#section-5">จุดที่ต้องระวัง</a></li><li><a href="#section-6">เทียบสามโปรเจกต์</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน <code>wmsapp/lib/services/api_service.dart</code> ทั้งไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.1, 9.2, Part 7<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านสถาปัตยกรรมแบบ ApiService ออก รู้ว่ามันแก้ปัญหาอะไรได้ และแลกอะไรไป</div>
+
+<section id="section-1"><h2>1. ทางที่สาม</h2><p>9.2 เทียบสองรุ่นสุดขั้ว คือรวมทุกอย่างไว้ในจอ กับแยกเป็นห้าไฟล์ โปรเจกต์จริงส่วนใหญ่อยู่ตรงกลาง และ <code>wmsapp</code> เลือกจุดกลางที่ชัดเจนมาก คือ <strong>แยกเฉพาะการคุยกับเซิร์ฟเวอร์ออกมา ที่เหลือคงไว้ในจอ</strong></p><pre class="code-vs"><code>wmsapp/lib/services/
+  api_service.dart        ← 184 บรรทัด แกนกลาง
+  api/
+    receiving_api.dart    ← 92 บรรทัด
+    picking_api.dart      ← 151 บรรทัด
+    packing_api.dart      ← 61 บรรทัด
+    ... รวม 9 ไฟล์ 822 บรรทัด</code></pre></section>
+
+<section id="section-2"><h2>2. หน้าตาของ ApiService</h2><pre class="code-vs"><code>class ApiService {
+  static final ApiService _instance = ApiService._internal();
+
+  factory ApiService() =&gt; _instance;
+
+  ApiService._internal();
+  ...
+}</code></pre><p>สามบรรทัดนี้คือรูปแบบที่เรียกว่า <strong>singleton</strong> อ่านทีละบรรทัด</p><table><thead><tr><th>บรรทัด</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>ApiService._internal()</code></td><td>constructor ที่ขึ้นต้นด้วย <code>_</code> แปลว่าเรียกได้เฉพาะในไฟล์นี้ ข้างนอกสร้างเองไม่ได้</td></tr>
+<tr><td><code>static final _instance</code></td><td>สร้างไว้ตัวเดียว ตอนที่ถูกใช้ครั้งแรก</td></tr>
+<tr><td><code>factory ApiService()</code></td><td>คนเขียน <code>ApiService()</code> ได้เหมือนสร้างใหม่ แต่ได้ตัวเดิมกลับไปเสมอ</td></tr>
+</tbody></table><div class="note"><strong>factory constructor</strong> คือ constructor ที่ไม่จำเป็นต้องสร้างวัตถุใหม่ — จะคืนตัวที่มีอยู่แล้วก็ได้ ต่างจาก constructor ปกติที่สร้างใหม่เสมอ</div></section>
+
+<section id="section-3"><h2>3. ปัญหาที่ singleton แก้ให้จริง</h2><p>ApiService ถือของที่ควรมีชุดเดียวทั้งแอป</p><pre class="code-vs"><code>static String? _cachedBase;
+
+static Future&lt;String&gt; _resolveBase() async {
+  if (_cachedBase != null) return _cachedBase!;
+
+  final custom = await _configService.getCustomBase();
+  final isAndroid = !kIsWeb &amp;&amp; Platform.isAndroid;
+
+  final candidates = &lt;String&gt;[
+    if (custom != null) custom,
+    if (isAndroid) 'http://10.0.2.2:$_defaultPort',
+    if (!isAndroid) 'http://localhost:$_defaultPort',
+  ];
+
+  for (final base in candidates) {
+    ...ลองเปิด socket ดูว่าต่อติดไหม...
+  }
+}</code></pre><p>การหา base URL ต้องลองเปิด socket จริง ซึ่งช้า ถ้าทุกจอสร้าง <code>ApiService</code> ของตัวเอง ทุกจอจะต้องลองใหม่ การมีตัวเดียวทำให้ <code>_cachedBase</code> ใช้ร่วมกันได้ — นี่คือเหตุผลที่ถูกต้อง ไม่ใช่ความขี้เกียจ</p></section>
+
+<section id="section-4"><h2>4. ApiResult: ความล้มเหลวเป็นค่า ไม่ใช่ข้อยกเว้น</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
+  final bool success;
+  final T? data;
+  final String? error;
+  final int? statusCode;
+
+  ApiResult.success(this.data) : success = true, error = null, statusCode = 200;
+  ApiResult.error(this.error, {this.statusCode}) : success = false, data = null;
+
+  bool get isNotFound =&gt; statusCode == 404;
+}</code></pre><p>ต่างจาก lab ของเราที่โยน <code>ApiException</code> ออกมา ตรงนี้คืนกล่องที่บอกว่าสำเร็จหรือไม่ ผลของการเลือกแบบนี้คือ</p><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>ลืม handle ไม่ได้ง่าย ๆ เพราะต้องอ่าน <code>.data</code> ผ่าน <code>.success</code> ก่อน</td><td><code>data</code> เป็น <code>T?</code> เสมอ ต้องเขียน <code>!</code> หรือเช็ค null ทุกที่</td></tr>
+<tr><td>อ่านเส้นทางความล้มเหลวได้จากลายเซ็นเมธอด</td><td>ความล้มเหลวเป็น <code>String</code> ตัวเดียว แยกชนิดไม่ได้เหมือน <code>ApiFailureKind</code> (7.9)</td></tr>
+<tr><td>ไม่มี exception หลุดขึ้นไปทำแอปพัง</td><td>ความล้มเหลวเงียบได้ ถ้าคนเรียกไม่เช็ค <code>success</code></td></tr>
+</tbody></table><p>9.13 จะเทียบสามแบบนี้อย่างละเอียด ตอนนี้แค่รู้ว่าเป็นทางเลือกที่ต่างกัน ไม่ใช่ผิดถูก</p></section>
+
+<section id="section-5"><h2>5. จุดที่ต้องระวัง</h2><p>ค้นทั้งโปรเจกต์จะเจอบรรทัดนี้ 26 ที่</p><pre class="code-vs"><code>class _PackingScreenState extends State&lt;PackingScreen&gt; {
+  final _api = ApiService();     // ← สร้างเองข้างในจอ
+  ...
+}</code></pre><p>จอไปหยิบ <code>ApiService</code> มาเองจากอากาศ ไม่มีใครส่งให้ ผลตามมาสามข้อ</p><table><thead><tr><th>ผลตามมา</th><th>รู้สึกตอนไหน</th></tr></thead><tbody>
+<tr><td>เทสต์จอนี้โดยใส่ API ปลอมไม่ได้ ต้องแก้โค้ดจอก่อน</td><td>ตอนอยากเขียนเทสต์</td></tr>
+<tr><td>ไม่มีที่เดียวที่บอกว่าจอนี้ต้องพึ่งอะไรบ้าง ต้องอ่านทั้งไฟล์</td><td>ตอนคนใหม่อ่านโค้ด</td></tr>
+<tr><td>สลับเป็น API ของ server ทดสอบเฉพาะบางจอไม่ได้</td><td>ตอนแก้บั๊กที่เกิดเฉพาะที่</td></tr>
+</tbody></table><div class="note">สังเกตว่าปัญหาทั้งสามไม่ได้มาจาก “มีตัวเดียว” แต่มาจาก <strong>“หยิบเอง”</strong> — มีตัวเดียวแต่ส่งเข้าไปทาง constructor ก็ได้ ซึ่ง 9.8 จะพูดถึง</div></section>
+
+<section id="section-6"><h2>6. เทียบสามโปรเจกต์</h2><table><thead><tr><th> </th><th>wmsapp</th><th>wms_absolute_mobile</th><th>lab ของเรา</th></tr></thead><tbody>
+<tr><td>ตัวคุย HTTP</td><td><code>ApiService</code> singleton</td><td><code>ApiClient</code> ธรรมดา</td><td><code>ApiClient</code> ธรรมดา</td></tr>
+<tr><td>ความล้มเหลว</td><td><code>ApiResult&lt;T&gt;</code></td><td>โยน <code>ApiException</code></td><td>โยน <code>ApiException</code> + <code>kind</code></td></tr>
+<tr><td>จอได้ของมาอย่างไร</td><td>สร้างเอง</td><td>รับผ่าน store</td><td>รับผ่าน store</td></tr>
+<tr><td>ใส่ของปลอมตอนเทสต์</td><td>ไม่ได้ ต้องแก้โค้ดก่อน</td><td>ได้</td><td>ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>สมมติต้องเพิ่มความสามารถ “ถ้าเจอ 401 ให้เด้งกลับหน้าเข้าสู่ระบบทั้งแอป” ตามที่ 8.7 สอน</p><ol><li>ในโครงของ <code>wmsapp</code> จะใส่ตรงไหน</li><li>ในโครงของ lab จะใส่ตรงไหน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ใส่ได้ที่เดียว คือใน <code>_get</code>/<code>_post</code> ของ <code>ApiService</code> ซึ่งดีมาก เพราะทุกคำขอผ่านที่นั่นหมด แต่มีปัญหาต่อทันทีคือ ApiService จะแจ้งใครว่าให้เด้ง? มันไม่มี <code>BuildContext</code> และไม่ควรมี ทางออกคือ callback แบบเดียวกับ <code>onTokenChanged</code> ใน 8.4 หรือ <code>onToast</code> ที่ <code>wms_absolute_mobile</code> ใช้</p><p><strong>2.</strong> ที่เดียวกันในหลักการ คือชั้นล่างสุด แต่ lab แยกไว้ให้แล้วว่าใครตัดสินใจ — <code>ApiClient</code> แค่แปลง 401 เป็น <code>ApiFailureKind.unauthorized</code> ส่วน <code>SessionStore.handleUnauthorized()</code> เป็นคนตัดสินใจว่าจะออกจากระบบ</p><p>ข้อต่างที่สำคัญ: ในแบบแรก “ตรวจเจอ” กับ “ตัดสินใจ” อยู่ที่เดียวกัน ทำให้เปลี่ยนนโยบายทีหลังต้องแก้ในชั้นขนส่ง</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>singleton แก้ปัญหา “ของที่ควรมีชุดเดียว” ได้จริง เช่น base URL ที่หามาแล้ว</li><li>ปัญหาไม่ได้อยู่ที่มีตัวเดียว แต่อยู่ที่จอหยิบเองโดยไม่มีใครส่งให้</li><li><code>ApiResult&lt;T&gt;</code> ทำให้ความล้มเหลวเป็นค่าที่ต้องอ่าน แลกกับการที่ <code>data</code> เป็น null ได้เสมอ</li></ul></div><p><strong>บทหน้า:</strong> 822 บรรทัดใน 9 ไฟล์ กลายเป็นคลาสเดียวได้อย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

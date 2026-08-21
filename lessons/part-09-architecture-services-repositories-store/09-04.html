@@ -4,25 +4,69 @@
 <title>API Extensions</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-04 · Architecture</span><h1>API Extensions</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">โครงของจริง</a></li><li><a href="#section-2">ข้อดี</a></li><li><a href="#section-3">ข้อจำกัด</a></li><li><a href="#section-4">Extension resolution</a></li><li><a href="#section-5">เมื่อเหมาะ</a></li><li><a href="#section-6">ทางย้ายต่อ</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">หลักจำ</a></li></ol></nav>
-<div class="note"><strong>Dart part + extension:</strong> แบ่ง implementationของ libraryเดียวเป็นไฟล์ตามโดเมน ทำให้ extension เข้าถึงสมาชิก private ได้ แต่ยังเป็น ApiService type/lifetime เดียวกัน</div>
-<section id="section-1"><h2>1. โครงของจริง</h2><pre class="code-vs"><code>// api_service.dart
-part 'api/receiving_api.dart';
-part 'api/picking_api.dart';
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหา</a></li><li><a href="#section-2">part กับ part of</a></li><li><a href="#section-3">ทำไมต้องใช้ part ตรงนี้</a></li><li><a href="#section-4">extension ทำอะไร</a></li><li><a href="#section-5">ผลของการเลือกทางนี้</a></li><li><a href="#section-6">เทียบกับวิธีของ wms_absolute_mobile</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน <code>wmsapp/lib/services/api/receiving_api.dart</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.3, Dart Foundation D1.18 (library/import/privacy)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านโค้ดที่ใช้ <code>part</code> กับ <code>extension</code> ออก และรู้ว่าเลือกใช้ตอนไหน</div>
 
-// api/receiving_api.dart
+<section id="section-1"><h2>1. ปัญหา</h2><p><code>wmsapp</code> มีเมธอดเรียก endpoint 44 ตัว กระจายอยู่ใน 9 กลุ่มงาน (picking 11, receiving 6, sorting 6, checkin 5, putaway 5, packing 4, unload 3, basket 2, upload 2) ถ้าเขียนรวมในคลาสเดียวจะได้ไฟล์ราวพันบรรทัด ถ้าแยกเป็น 9 คลาส ก็ต้องหาทางแชร์โค้ดที่ใช้ร่วมกัน เช่น การหา base URL การใส่ header และการแปลงคำตอบ</p><p>ทางที่เลือกคือ <strong>คลาสเดียว แต่เขียนคนละไฟล์</strong></p></section>
+
+<section id="section-2"><h2>2. <code>part</code> กับ <code>part of</code></h2><pre class="code-vs"><code>// api_service.dart
+part 'api/upload_api.dart';
+part 'api/receiving_api.dart';
+part 'api/unload_api.dart';
+...
+
+class ApiService { ... }</code></pre><pre class="code-vs"><code>// api/receiving_api.dart
 part of '../api_service.dart';
-extension ReceivingApi on ApiService { /* getPO, scanReceiptPart */ }</code></pre></section>
-<section id="section-2"><h2>2. ข้อดี</h2><p>ลดไฟล์หลัก, group endpointตาม feature, reuse private <code>_get/_post</code> และ migrationจาก God serviceทำได้โดยไม่เปลี่ยน call sitesมาก</p></section>
-<section id="section-3"><h2>3. ข้อจำกัด</h2><p>ทุก part เป็น libraryเดียว จึงมี importsรวม, private boundaryไม่แยกจริง, inject/mockingราย featureยาก และ extensionเพิ่ม interface stateไม่ได้</p></section>
-<section id="section-4"><h2>4. Extension resolution</h2><p>Extension methodถูกเลือกแบบ staticจาก import/type ไม่ใช่ virtual dispatch จึงไม่ใช่ replacementของ repository interfaceสำหรับ polymorphic fake</p></section>
-<section id="section-5"><h2>5. เมื่อเหมาะ</h2><p>เหมาะกับ codebaseขนาดกลางที่ transportเดียวและต้องจัดกลุ่ม endpointเร็ว โดยยังไม่ต้อง local cacheหรือ implementationหลายแบบ</p></section>
-<section id="section-6"><h2>6. ทางย้ายต่อ</h2><pre class="code-vs"><code>class ReceivingApi implements ReceivingRepository {
-  ReceivingApi(this.client);
-  final JsonClient client;
-  // ย้าย methods ทีละตัวจาก extension
-}</code></pre><p>คง facadeเดิมชั่วคราวเพื่อไม่ break screens</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ต้อง fake เฉพาะ Receivingแต่ใช้ Pickingจริงใน test ควรคง extensionหรือแยก class?</p><details><summary>เฉลย</summary><p>แยก ReceivingRepository/class ทำ injectionราย feature; extensionบน singletonไม่ให้ seamที่ตรงความต้องการ</p></details></section>
-<section id="section-8"><h2>8. หลักจำ</h2><div class="success"><code>part</code> แบ่งไฟล์ ไม่ได้แบ่ง architecture boundary; ใช้เพื่อ organization แล้วเพิ่ม interfaceเมื่อมีเหตุผลด้าน test/implementation</div></section>
+
+extension ReceivingApi on ApiService {
+  Future&lt;ApiResult&lt;POResponse&gt;&gt; getPO(String poId) async {
+    final response = await _get('/receiving/po/$poId');
+    if (!response.success) return ApiResult.error(response.error);
+    return ApiResult.success(POResponse.fromJson(response.data!));
+  }
+  ...
+}</code></pre><div class="note"><strong><code>part</code> คืออะไร:</strong> Dart ปกติมองไฟล์หนึ่งไฟล์เป็นหนึ่ง library <code>part</code> ทำให้หลายไฟล์กลายเป็น <strong>library เดียวกัน</strong> ผลคือ ทุกไฟล์เห็นสมาชิกที่ขึ้นต้นด้วย <code>_</code> ของกันและกัน และไม่ต้อง import กันเอง</div></section>
+
+<section id="section-3"><h2>3. ทำไมต้องใช้ <code>part</code> ตรงนี้</h2><p>ดูบรรทัดนี้ในไฟล์ย่อย</p><pre class="code-vs"><code>final response = await _get('/receiving/po/$poId');</code></pre><p><code>_get</code> ขึ้นต้นด้วยขีดล่าง แปลว่าเป็นของส่วนตัวของ library ถ้า <code>receiving_api.dart</code> เป็น library ของตัวเองแล้ว <code>import</code> เข้ามาเฉย ๆ จะเรียก <code>_get</code> ไม่ได้เลย จะต้องเปลี่ยน <code>_get</code> เป็น <code>get</code> สาธารณะ ซึ่งแปลว่าจอไหนก็เรียก <code>ApiService().get('/อะไรก็ได้')</code> ได้</p><p>การใช้ <code>part</code> จึงเป็นการ <strong>แลกความเป็นไฟล์อิสระ เพื่อรักษาความเป็นส่วนตัวของเมธอดกลาง</strong></p></section>
+
+<section id="section-4"><h2>4. <code>extension</code> ทำอะไร</h2><pre class="code-vs"><code>extension ReceivingApi on ApiService {
+  Future&lt;ApiResult&lt;POResponse&gt;&gt; getPO(String poId) async { ... }
+}</code></pre><p>อ่านว่า “เพิ่มเมธอด <code>getPO</code> ให้กับคลาส <code>ApiService</code>” คนใช้เรียกได้เหมือนเมธอดปกติ</p><pre class="code-vs"><code>final result = await ApiService().getPO('PO-2026-001');</code></pre><table><thead><tr><th>extension ทำได้</th><th>extension ทำไม่ได้</th></tr></thead><tbody>
+<tr><td>เพิ่มเมธอด</td><td>เพิ่มฟิลด์ที่เก็บค่า</td></tr>
+<tr><td>เพิ่ม getter/setter ที่คำนวณจากของที่มี</td><td>override เมธอดเดิม</td></tr>
+<tr><td>เพิ่มให้คลาสที่เราแก้ไม่ได้ เช่นของใน package</td><td>ถูกเรียกแบบ polymorphic ผ่านตัวแปรชนิดแม่</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญ — extension ถูกเลือกตอน<strong>คอมไพล์</strong>จากชนิดของตัวแปร ไม่ใช่ตอนรันจากชนิดจริงของวัตถุ ถ้าตัวแปรประกาศเป็น <code>Object</code> จะเรียก <code>getPO</code> ไม่ได้แม้ข้างในจะเป็น <code>ApiService</code></p></section>
+
+<section id="section-5"><h2>5. ผลของการเลือกทางนี้</h2><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>ไฟล์ละกลุ่มงาน หาง่าย git ชนกันน้อย</td><td>ยังเป็นคลาสเดียว จอที่ต้องการแค่ <code>getPO</code> ได้ทุก endpoint ติดมาด้วย</td></tr>
+<tr><td>เมธอดกลาง <code>_get</code> ยังเป็นส่วนตัว</td><td>ไฟล์ย่อยเปิดอ่านเดี่ยว ๆ ไม่รู้ว่า <code>_get</code> มาจากไหน ต้องรู้ว่ามันเป็น part</td></tr>
+<tr><td>ไม่ต้องส่ง <code>ApiService</code> ไปมาระหว่างคลาสย่อย</td><td>ทำ <code>ApiService</code> ปลอมไม่ได้ เพราะไม่มี interface ให้ implement</td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่ต้องจ่ายจริงที่สุด <code>ReceivingApi</code> เป็น extension บนคลาสรูปธรรม ไม่ใช่บน interface ทำให้ในเทสต์ไม่มีอะไรให้สวมแทน — ต้องไปคุมที่ระดับ <code>http.Client</code> แทน ซึ่งแปลว่าเทสต์ต้องรู้ path และรูปแบบ JSON ทุกครั้ง</p></section>
+
+<section id="section-6"><h2>6. เทียบกับวิธีของ <code>wms_absolute_mobile</code></h2><pre class="code-vs"><code>// lib/api/tasks_api.dart
+abstract interface class TasksRepository {
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();
+  Future&lt;int&gt; fetchDoneTodayCount();
+  Future&lt;List&lt;LocationView&gt;&gt; fetchFreeLocations();
+  Future&lt;String&gt; dispatch({...});
+  ...
+}</code></pre><p>โครงเดียวกันคือ “จัดกลุ่ม endpoint ตามงาน” แต่ต่างกันที่ประกาศเป็น <code>abstract interface class</code> ทำให้สวมของปลอมได้ ราคาที่จ่ายคือต้องเขียนชื่อเมธอดสองรอบ ครั้งหนึ่งใน interface อีกครั้งในตัวจริง</p><table><thead><tr><th> </th><th>extension on class</th><th>interface + implementation</th></tr></thead><tbody>
+<tr><td>บรรทัดที่ต้องเขียน</td><td>น้อยกว่า</td><td>มากกว่า — <code>tasks_api.dart</code> ทั้งไฟล์ 665 บรรทัด เป็นส่วนประกาศสัญญา 59 บรรทัด</td></tr>
+<tr><td>สวมของปลอมในเทสต์</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>สลับ implementation (เช่น offline)</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>เห็นสัญญาทั้งหมดในที่เดียว</td><td>ต้องเปิด 9 ไฟล์</td><td>อ่านหัวไฟล์เดียว</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td><code>Undefined name '_get'</code></td><td>ลืม <code>part of</code> ที่บรรทัดแรก หรือไฟล์แม่ลืมประกาศ <code>part</code></td></tr>
+<tr><td><code>The name '_get' is being referenced before it is declared</code></td><td>ลำดับ <code>part</code> ไม่เกี่ยว — มักเป็นเพราะสะกดชื่อไฟล์ผิด</td></tr>
+<tr><td>เพิ่มฟิลด์ใน extension ไม่ได้</td><td>ถูกแล้ว extension เก็บสถานะไม่ได้ ถ้าต้องเก็บ ต้องไปไว้ในคลาสหลัก</td></tr>
+<tr><td>เรียกเมธอดของ extension ไม่ได้ทั้งที่ import แล้ว</td><td>ตัวแปรประกาศเป็นชนิดที่กว้างกว่า เช่น <code>dynamic</code> หรือ <code>Object</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมหลังบ้านจะทำ endpoint ชุดใหม่ให้โหมด offline ที่อ่านจากฐานข้อมูลในเครื่องแทน</p><ol><li>ในโครง <code>wmsapp</code> ต้องแก้อะไรบ้าง</li><li>ในโครง <code>wms_absolute_mobile</code> ต้องแก้อะไรบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ไม่มีจุดสลับ ต้องเลือกทางใดทางหนึ่ง — เพิ่ม <code>if (offline)</code> ในทุกเมธอดของ extension ทั้ง 60 ตัว, หรือแก้ <code>_get</code>/<code>_post</code> ให้เปลี่ยนเส้นทางไปที่ฐานข้อมูล ซึ่งทำไม่ได้จริงเพราะฐานข้อมูลไม่ได้พูด HTTP, หรือรื้อให้มี interface ก่อน</p><p><strong>2.</strong> เขียนคลาสใหม่ <code>OfflineTasksRepository implements TasksRepository</code> แล้วเปลี่ยนบรรทัดเดียวตอนสร้าง <code>WarehouseStore</code> ใน <code>warehouse_shell.dart</code> โค้ดที่เหลือไม่ต้องแตะ</p><p>นี่ไม่ได้แปลว่าโครงแรกผิด ถ้าไม่เคยต้องทำ offline เลย interface ที่เขียนไว้ก็เป็นบรรทัดที่ไม่ได้ใช้ ประเด็นคือ <strong>ราคาของการเปลี่ยนใจจ่ายตอนไหน</strong> — โครงแรกจ่ายทีเดียวตอนต้องเปลี่ยน โครงหลังจ่ายทีละนิดตั้งแต่วันแรก</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>part</code> รวมหลายไฟล์เป็น library เดียว ทำให้ยังเห็นสมาชิกส่วนตัวของกันได้</li><li><code>extension</code> เพิ่มเมธอดให้คลาสได้ แต่เพิ่มฟิลด์ไม่ได้ และถูกเลือกตอนคอมไพล์</li><li>extension บนคลาสรูปธรรมทำให้ไม่มีที่ให้สวมของปลอม</li></ul></div><p><strong>บทหน้า:</strong> ทางเลือกอีกทาง คือประกาศสัญญาไว้ก่อนว่าต้องการอะไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,12 +1,61 @@
-<div class="note"><strong>Constructor dependency injection:</strong> dependencyมองเห็นจาก signature, สร้างที่ composition rootและแทนด้วย fakeได้ ไม่ต้องใช้ global locatorเพื่อค้นหากลาง method</div>
-<section><h2>1. Inject graph</h2><pre class="code-vs"><code>final client = ApiClient(config: config, tokenProvider: auth.token);
-final receiving = RemoteReceivingRepository(ReceivingApi(client));
-final store = ReceivingStore(repository: receiving, clock: systemClock);
-runApp(App(receivingStoreFactory: () =&gt; store));</code></pre></section>
-<section><h2>2. Required dependencies</h2><p>ใช้ required constructorสำหรับสิ่งที่ classทำงานไม่ได้ เช่น repository; optional/defaultเฉพาะ convenienceที่ semanticsชัด เช่น Clock production—not silent singleton fallbackใน core logic</p></section>
-<section><h2>3. Inject values too</h2><p>Clock, UUID generator, retry policy, current userและ feature flagsเป็น nondeterministic/config dependenciesที่ควร injectเมื่อ logicต้องใช้ เพื่อ testเวลา/idempotencyได้</p></section>
-<section><h2>4. Lifetime</h2><p>ApiClient/authอาจ app-scoped, WarehouseStore shell-scoped, ReceivingFlowStore route-scoped กำหนด owner/disposeตรง composition boundary</p></section>
-<section><h2>5. Avoid service locator</h2><p><code>GetIt.I&lt;ApiService&gt;()</code> ใน methodซ่อน dependencyและทำ test order/global stateเสี่ยง ถ้าใช้ DI containerให้ resolveที่ boundaryแล้วส่ง constructorต่อ</p></section>
-<section><h2>6. Circular dependency</h2><p>Authต้องใช้ clientแต่ clientต้องใช้ token แก้ด้วย TokenProvider callback/interfaceหรือแยก anonymous transport ไม่ให้ AuthRepositoryกับ ApiClientอ้างกันเป็น owner</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>Storeใช้ <code>DateTime.now()</code> ตัด “done today” แล้ว testข้ามเที่ยง flaky จะแก้อย่างไร?</p><details><summary>เฉลย</summary><p>inject Clock/Now functionและกำหนด timezone boundary; testส่งเวลาคงที่</p></details></section>
-<section><h2>8. Checklist</h2><div class="success">ดู constructorแล้วรู้ dependencyครบ, lifetime/disposeชัด, fakeง่าย, ไม่มี network/storage/clock globalแอบอยู่ใน business method</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เทียบจุดประกอบของสามโปรเจกต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.7, 8.4 (เจ้าของ token)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินได้ว่าจะประกอบของที่ไหน และรู้ว่าทำไมการ “หยิบเอง” ถึงเป็นปัญหา</div>
+
+<section><h2>1. คำถามที่ยังไม่ตอบ</h2><p>ตอนนี้มีของสามชิ้นที่ต้องต่อกัน</p><pre class="code-vs"><code>ApiClient  →  RemotePalletRepository  →  PalletStore  →  PalletScreenV2</code></pre><p>คำถามคือ <strong>ใครเป็นคนต่อ และต่อตรงไหน</strong> คำตอบมีสองแบบใหญ่ ๆ</p><table><thead><tr><th> </th><th>หยิบเอง</th><th>รับเข้ามา</th></tr></thead><tbody>
+<tr><td>โค้ด</td><td><code>final _api = ApiService();</code></td><td><code>PalletScreenV2({required this.store})</code></td></tr>
+<tr><td>ใครรู้ว่าต้องใช้อะไร</td><td>ต้องอ่านทั้งไฟล์</td><td>ดูที่ constructor</td></tr>
+<tr><td>สลับของปลอมได้ไหม</td><td>ไม่ได้</td><td>ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>2. Constructor injection คืออะไร</h2><div class="note"><strong>Dependency injection</strong> คือการที่วัตถุ<strong>รับ</strong>ของที่ตัวเองต้องใช้เข้ามา แทนที่จะ<strong>สร้าง</strong>หรือ<strong>ไปหยิบ</strong>เอง เมื่อรับผ่าน constructor ก็เรียกว่า constructor injection</div><p>ไม่ต้องใช้ library อะไรเลย มันคือการเขียน constructor ให้รับพารามิเตอร์</p><pre class="code-vs"><code>class PalletStore extends ChangeNotifier {
+  PalletStore(this.repository, {String Function(String code)? createCommandId})
+    : _createCommandId = createCommandId ??
+          ((code) =&gt; '$code-${DateTime.now().microsecondsSinceEpoch}');
+
+  final PalletRepository repository;
+}</code></pre><p>สังเกตพารามิเตอร์ตัวที่สอง — <code>createCommandId</code> เป็นค่าที่มีค่าเริ่มต้นให้แล้ว โค้ดจริงไม่ต้องส่ง แต่เทสต์ส่งฟังก์ชันที่คืนค่าคงที่เข้าไปได้ เพื่อตรวจว่าส่ง <code>Idempotency-Key</code> ถูกไหม</p><div class="note"><strong>รูปแบบที่ใช้ได้ทั่วไป:</strong> อะไรที่ทำให้เทสต์เดาไม่ได้ — เวลา, สุ่ม, ตัวจับเวลา — ให้เปิดช่องรับเข้ามาพร้อมค่าเริ่มต้น เทสต์จะได้คุมได้ โดยที่โค้ดเรียกใช้จริงไม่ต้องเปลี่ยน</div></section>
+
+<section><h2>3. จุดประกอบเดียวของแอป</h2><p>ถ้าทุกชั้นรับของเข้ามา แปลว่ามีที่หนึ่งที่ต้องสร้างของจริงทั้งหมด ที่นั่นเรียกว่า <strong>composition root</strong></p><pre class="code-vs"><code>// จุดประกอบ — ที่เดียวในแอปที่รู้ว่าตัวจริงคือใคร
+final apiClient = ApiClient(baseUrl: settings.baseUrl);
+final palletStore = PalletStore(RemotePalletRepository(apiClient));
+
+runApp(MyApp(palletStore: palletStore));</code></pre><p>ในเทสต์ จุดประกอบคือบรรทัดสองบรรทัดในไฟล์เทสต์เอง</p><pre class="code-vs"><code>runSharedBehaviourTests((client) {
+  final api = ApiClient(baseUrl: baseUrl, client: client);
+  final store = PalletStore(RemotePalletRepository(api));
+  return PalletScreenV2(store: store, zone: 'A1');
+});</code></pre><p>โครงเหมือนกันเป๊ะ ต่างแค่ <code>client</code> — และนั่นคือทั้งหมดที่เทสต์ต้องเปลี่ยน</p></section>
+
+<section><h2>4. ของจริง: <code>warehouse_shell.dart</code></h2><pre class="code-vs"><code>store = WarehouseStore(
+      username: widget.auth.session?.username ?? '0000',
+      receivingRepository: ReceivingApi(widget.auth.client),
+      tasksRepository: TasksApi(widget.auth.client),
+      inventoryRepository: InventoryApi(widget.auth.client),
+      cycleCountRepository: CycleCountApi(widget.auth.client),
+      access: widget.auth.session?.access ?? const PdaAccess({}),
+    )
+    ..onToast = _showToast
+    ..onFlash = _showFlash;</code></pre><p>เก้าบรรทัดนี้คือจุดประกอบของ <code>wms_absolute_mobile</code> อ่านแล้วเห็นทั้งหมดว่าฟีเจอร์คลังพึ่งพาอะไรบ้าง — repository สี่ตัว, ชื่อผู้ใช้, สิทธิ์ และวิธีแจ้งข้อความสองแบบ</p><table><thead><tr><th>สิ่งที่สังเกตได้</th><th>ความหมาย</th></tr></thead><tbody>
+<tr><td>repository ทั้งสี่รับ <code>widget.auth.client</code> ตัวเดียวกัน</td><td>มี <code>ApiClient</code> ตัวเดียวที่ถือ token — ตรงกับกฎใน 8.4</td></tr>
+<tr><td><code>..onToast = _showToast</code></td><td>store บอกว่าเกิดอะไร จอตัดสินใจว่าจะแสดงอย่างไร</td></tr>
+<tr><td>ประกอบใน <code>initState</code> ของ shell</td><td>store มีอายุเท่ากับ shell — ออกจากระบบแล้ว shell ถูกทิ้ง store ก็ไปด้วย (8.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>5. เทียบกับ <code>wmsapp</code></h2><pre class="code-vs"><code>class _PackingScreenState extends State&lt;PackingScreen&gt; {
+  final _api = ApiService();
+  ...
+}</code></pre><p>รูปแบบนี้ปรากฏ 26 ที่ในโปรเจกต์ ผลที่ตามมามีข้อหนึ่งที่ไม่ชัดจนกว่าจะเจอเอง</p><p>สมมติต้องแก้บั๊กที่เกิดเฉพาะตอนเซิร์ฟเวอร์ตอบช้าเกิน 10 วินาที ในโครงที่รับของเข้ามา เขียนเทสต์ที่ทำให้ตอบช้าได้ใน 3 บรรทัด ในโครงที่หยิบเอง ต้องเลือกทางใดทางหนึ่งระหว่าง</p><ul><li>ตั้งเซิร์ฟเวอร์จริงให้ตอบช้า แล้วทดสอบด้วยมือ</li><li>แก้จอให้รับ <code>ApiService</code> เข้ามาก่อน (ซึ่งคือการทำ injection นั่นเอง)</li><li>ไม่เขียนเทสต์</li></ul><p>ทางที่สามคือทางที่เกิดขึ้นจริงเกือบทุกครั้ง</p></section>
+
+<section><h2>6. แล้วต้องส่งของผ่านทุกชั้นเลยไหม</h2><p>ปัญหาที่คนกลัวคือ “ต้องส่ง <code>ApiClient</code> ลงไปสิบชั้น” ซึ่งเกิดขึ้นจริงถ้าออกแบบผิด วิธีหลีกเลี่ยงคือ <strong>ส่งของที่ชั้นนั้นใช้จริง ไม่ใช่ส่งของดิบลงไปให้ชั้นล่างประกอบเอง</strong></p><table><thead><tr><th>แบบที่ทำให้ปวดหัว</th><th>แบบที่ควรทำ</th></tr></thead><tbody>
+<tr><td><code>PalletScreen(apiClient: apiClient)</code> แล้วจอสร้าง repository และ store เอง</td><td><code>PalletScreen(store: store)</code> — จอไม่รู้จัก <code>ApiClient</code> เลย</td></tr>
+</tbody></table><p>ในแอปที่ใหญ่ขึ้น ยังมีเครื่องมือที่ช่วยส่งของข้ามชั้นได้โดยไม่ต้องเขียน parameter ต่อกันเป็นทอด ๆ เช่น <code>InheritedWidget</code>, <code>provider</code> หรือ <code>riverpod</code> ซึ่งอยู่ใน Part 27 ทั้งหมดนั้นเปลี่ยนแค่ <strong>วิธีส่ง</strong> ไม่ได้เปลี่ยนหลักที่ว่าของต้องถูกส่งเข้ามา</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์แต่ละข้อเห็นข้อมูลของข้ออื่น</td><td>store เป็น static หรือ singleton</td><td>สร้างใหม่ทุกเทสต์</td></tr>
+<tr><td>สร้าง store ใน <code>build()</code></td><td><code>build</code> ถูกเรียกหลายครั้ง</td><td>สร้างใน <code>initState</code> หรือที่ชั้นบนกว่า</td></tr>
+<tr><td>ลืม <code>dispose</code> store</td><td>ไม่มีใครรับผิดชอบชัดเจน</td><td>ใครสร้าง คนนั้นทิ้ง</td></tr>
+<tr><td>ส่ง <code>BuildContext</code> เข้าไปใน store</td><td>อยากให้ store เปิด dialog</td><td>ใช้ callback แทน (9.7 §7)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>แอปมีสองจอที่ต้องเห็นรายการพาเลทเดียวกัน คือจอค้นหาและจอสรุป ถ้าจอหนึ่งล็อกพาเลท อีกจอต้องเห็นทันที</p><ol><li>ควรสร้าง <code>PalletStore</code> กี่ตัว</li><li>ควรสร้างที่ไหน</li><li>ใครเรียก <code>dispose</code></li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ตัวเดียว ถ้าสร้างสองตัว จะมีข้อมูลสองชุดที่ไม่ตรงกันทันทีที่ล็อกสำเร็จ — ปัญหานี้คือหัวข้อของ 9.9</p><p><strong>2.</strong> ที่ระดับที่ครอบทั้งสองจอ ถ้าสองจออยู่ใน shell เดียวกันก็สร้างที่ shell แบบเดียวกับที่ <code>warehouse_shell.dart</code> ทำ</p><p><strong>3.</strong> shell ที่สร้างมัน ไม่ใช่จอ — และนี่เป็นจุดที่ต้องระวัง เพราะ <code>task_screen.dart</code> ใน lab เรียก <code>widget.store.dispose()</code> ใน <code>dispose</code> ของตัวเอง ซึ่งถูกต้องเฉพาะตอนที่จอนั้นเป็นเจ้าของ store คนเดียว ถ้าเอาโครงนั้นมาใช้กับ store ที่แชร์กัน จอแรกที่ปิดจะทำให้จอที่สองพัง</p><p>กฎที่จำง่าย: <strong>ใครสร้าง คนนั้นทิ้ง</strong> — และถ้าเห็น <code>dispose</code> ของที่ตัวเองไม่ได้สร้าง ให้สงสัยไว้ก่อน</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>รับของเข้ามาทาง constructor แทนที่จะหยิบเอง ไม่ต้องใช้ library อะไร</li><li>constructor คือรายการพึ่งพาที่อ่านได้ในที่เดียว</li><li>จุดประกอบมีที่เดียวในแอป และอีกที่ในเทสต์</li><li>ส่งของที่ชั้นนั้นใช้จริง ไม่ส่งของดิบลงไปให้ประกอบเอง</li></ul></div><p><strong>บทหน้า:</strong> ถ้ามี store สองตัวที่เก็บของเดียวกัน จะเกิดอะไรขึ้น</p></section>

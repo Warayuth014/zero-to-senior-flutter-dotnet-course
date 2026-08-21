@@ -1,10 +1,44 @@
-<div class="note"><strong>Separation of concerns:</strong> แยกเพราะเหตุผลในการเปลี่ยนต่างกัน—not เพื่อเพิ่มจำนวนไฟล์ UI เปลี่ยนตาม UX, workflow เปลี่ยนตามธุรกิจ, transport เปลี่ยนตาม API และ persistence เปลี่ยนตามแหล่งข้อมูล</div>
-<section><h2>1. Four concerns</h2><ul><li>Presentation: render/input/navigation</li><li>Application: orchestration และ workflow state</li><li>Domain: กฎ/คำศัพท์ธุรกิจ</li><li>Infrastructure: HTTP, JSON, storage, SignalR</li></ul></section>
-<section><h2>2. Change test</h2><p>ถามว่า “ถ้า endpoint เปลี่ยน casing ไฟล์ UI ต้องแก้ไหม?” และ “ถ้า layout เปลี่ยน repository test พังไหม?” ถ้าพังข้ามเหตุผลแสดงว่า concerns ยังปนกัน</p></section>
-<section><h2>3. Boundary flow</h2><pre class="code-vs"><code>Widget → Store → Repository → RemoteDataSource → .NET
-       ← ViewState ← Domain model ← DTO/JSON</code></pre><p>dependency ชี้เข้าหา abstraction/logic ไม่ให้ domain import Flutter หรือ package http</p></section>
-<section><h2>4. แยกเท่าที่จำเป็น</h2><p>feature CRUD เล็กอาจใช้ Widget → Repository ได้ แต่ workflow scan หลาย step, offline/retry หรือหลาย data source ควรมี Store/application layer ห้ามสร้าง UseCase หนึ่งไฟล์ต่อ methodเพียงเพราะ diagram บอก</p></section>
-<section><h2>5. Cohesion</h2><p>ของที่เปลี่ยนด้วยกันควรอยู่ใกล้กัน เช่น Receiving API + DTOs + repository อยู่ feature เดียว ส่วน generic ApiClient, auth และ connection เป็น shared core</p></section>
-<section><h2>6. Warning signs</h2><ul><li>widget เรียก jsonDecode</li><li>ApiClient เปิด dialog</li><li>repository ถือ BuildContext</li><li>model import material.dart เพื่อเลือกสี</li><li>ทุก featureแก้ God Store ไฟล์เดียว</li></ul></section>
-<section><h2>7. แบบฝึกหัด</h2><p>จัดวาง barcode normalization, HTTP timeout, selected row และ quantity business limit ลงชั้นที่เหมาะสม</p><details><summary>แนวคำตอบ</summary><p>normalize input ที่ application/domain boundary, timeout infrastructure, selected row presentation/store, quantity invariant domain/server</p></details></section>
-<section><h2>8. หลักตัดสิน</h2><div class="success">ทุก class ควรบอกได้ว่ารับผิดชอบอะไร, ไม่รับผิดชอบอะไร, dependency ใด และทดสอบโดยไม่เปิดส่วนอื่นได้อย่างไร</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่านโค้ดจริงสองโปรเจกต์แล้วเทียบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 4 (สถานะ), Part 6 (โมเดล), Part 7 (HTTP), Part 8 (เข้าสู่ระบบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตอบได้ว่าโค้ดก้อนหนึ่งควรอยู่ไฟล์ไหน โดยมีเหตุผลที่ตรวจสอบได้ ไม่ใช่ความรู้สึก</div>
+
+<section><h2>1. ปัญหาที่บทนี้แก้</h2><p>Part 1–8 สร้างของมาแล้วหลายชิ้น — <code>ApiClient</code>, <code>TaskRepository</code>, <code>TaskStore</code>, <code>SessionStore</code>, หน้าจอหลายจอ ตอนนี้คำถามเปลี่ยนจาก “เขียนอย่างไร” เป็น <strong>“ของชิ้นนี้ควรอยู่ที่ไหน”</strong></p><p>คำถามนี้ตอบผิดแล้วไม่พังทันที มันพังตอนแก้ครั้งที่ยี่สิบ ตอนที่การเปลี่ยนสีปุ่มทำให้เทสต์ของ API พัง หรือตอนที่การเพิ่มฟิลด์หนึ่งช่องต้องแก้เจ็ดไฟล์</p></section>
+
+<section><h2>2. คำที่ต้องรู้ก่อน</h2><table><thead><tr><th>คำ</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td>concern</td><td>เรื่องหนึ่งเรื่องที่โปรแกรมต้องรับผิดชอบ เช่น “วาดหน้าจอ” หรือ “คุยกับเซิร์ฟเวอร์”</td></tr>
+<tr><td>layer (ชั้น)</td><td>กลุ่มไฟล์ที่รับผิดชอบ concern เดียวกัน</td></tr>
+<tr><td>coupling</td><td>ระดับที่ของสองชิ้นต้องรู้จักกัน ยิ่งรู้จักกันมาก ยิ่งแก้ทีละชิ้นยาก</td></tr>
+<tr><td>cohesion</td><td>ระดับที่ของในไฟล์เดียวกันเกี่ยวข้องกันจริง ๆ</td></tr>
+<tr><td>architecture</td><td>ข้อตกลงว่าจะแบ่งชั้นอย่างไร และใครเรียกใครได้</td></tr>
+</tbody></table></section>
+
+<section><h2>3. แบบจำลองในหัว: แยกตามเหตุผลที่จะเปลี่ยน</h2><div class="note">โค้ดสองก้อนควรอยู่คนละไฟล์ เมื่อ <strong>มันเปลี่ยนด้วยเหตุผลคนละอย่าง</strong></div><p>ไม่ใช่ “แยกเพราะไฟล์ยาว” และไม่ใช่ “แยกเพราะหนังสือบอก” ลองดูเหตุผลที่ทำให้โค้ดในแอปคลังต้องเปลี่ยนจริง ๆ</p><table><thead><tr><th>ใครสั่งให้เปลี่ยน</th><th>เปลี่ยนอะไร</th><th>ควรอยู่ชั้น</th></tr></thead><tbody>
+<tr><td>หัวหน้าคลังบอกว่าปุ่มเล็กไป</td><td>ขนาด สี ตำแหน่ง</td><td>UI</td></tr>
+<tr><td>เปลี่ยนขั้นตอนงาน ต้องยืนยันสองครั้ง</td><td>ลำดับการทำงาน</td><td>Logic / Store</td></tr>
+<tr><td>ทีมหลังบ้านเปลี่ยนชื่อ endpoint</td><td>path, ชื่อฟิลด์</td><td>Data / Repository</td></tr>
+<tr><td>เปลี่ยนจาก HTTP เป็น SignalR</td><td>วิธีขนส่งข้อมูล</td><td>Infrastructure</td></tr>
+</tbody></table><p>สี่แถวนี้มาจากคนละคน คนละเวลา ถ้าอยู่ไฟล์เดียวกัน ทุกครั้งที่คนหนึ่งขอเปลี่ยน คนอื่นก็เสี่ยงพังไปด้วย</p></section>
+
+<section><h2>4. บททดสอบสองข้อ</h2><p>เวลาสงสัยว่าแยกดีพอหรือยัง ถามสองคำถามนี้กับโค้ดที่มีอยู่</p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่า “ต้องแก้/พัง” แปลว่า</th></tr></thead><tbody>
+<tr><td>ถ้า endpoint เปลี่ยนจาก <code>quantity</code> เป็น <code>qty</code> ไฟล์ UI ต้องแก้ไหม</td><td>UI รู้เรื่องรูปแบบข้อมูลจากเซิร์ฟเวอร์มากเกินไป</td></tr>
+<tr><td>ถ้าเปลี่ยนจาก <code>ListView</code> เป็น <code>GridView</code> เทสต์ของ repository พังไหม</td><td>ตรรกะข้อมูลผูกกับวิธีวาดหน้าจอ</td></tr>
+</tbody></table><p>ในสองโปรเจกต์จริงที่จะอ่านกันตลอด Part นี้ คำตอบต่างกัน — และไม่ใช่เพราะฝีมือคนเขียนต่างกัน แต่เพราะเลือกจุดสมดุลคนละจุด</p></section>
+
+<section><h2>5. ทิศทางของการพึ่งพา</h2><pre class="code-vs"><code>Widget  ──เรียก──▶  Store  ──เรียก──▶  Repository  ──เรียก──▶  ApiClient  ──▶  .NET
+
+Widget  ◀──ข้อมูล──  Store  ◀──โมเดล──  Repository  ◀──JSON──   ApiClient  ◀──  .NET</code></pre><p>ลูกศรเรียกชี้ลงทางเดียว และห้ามชี้ย้อนกลับ แปลว่า</p><table><thead><tr><th>ทำได้</th><th>ทำไม่ได้</th></tr></thead><tbody>
+<tr><td>Widget รู้จัก Store</td><td>Store รู้จัก Widget</td></tr>
+<tr><td>Store รู้จัก Repository</td><td>Repository รู้จัก Store</td></tr>
+<tr><td>Repository รู้จัก <code>Pallet</code></td><td><code>Pallet</code> รู้จัก <code>http</code> หรือ <code>material.dart</code></td></tr>
+</tbody></table><p>กฎนี้ตรวจได้ด้วยตาเปล่า — ดูบรรทัด <code>import</code> ที่หัวไฟล์ ถ้า store มี <code>import 'package:flutter/material.dart'</code> แปลว่ามีอะไรผิดที่</p><p>ดูของจริงได้เลย <code>wms_absolute_mobile/lib/features/warehouse/warehouse_store.dart</code> เปิดมาบรรทัดที่สองเป็น <code>import 'package:flutter/foundation.dart'</code> ไม่ใช่ <code>material.dart</code> — นั่นตั้งใจ</p></section>
+
+<section><h2>6. ราคาของการแยก</h2><p>การแยกชั้นไม่ฟรี ต้องจ่ายสามอย่าง</p><table><thead><tr><th>จ่ายอะไร</th><th>รู้สึกตอนไหน</th></tr></thead><tbody>
+<tr><td>ไฟล์เยอะขึ้น ต้องเปิดหลายไฟล์กว่าจะเข้าใจงานเดียว</td><td>ตอนคนใหม่เข้าทีม</td></tr>
+<tr><td>เพิ่มฟิลด์หนึ่งช่องต้องแก้หลายชั้น</td><td>ตอนเพิ่มฟีเจอร์เล็ก</td></tr>
+<tr><td>ต้องตั้งชื่อและออกแบบ interface</td><td>ตอนเริ่มฟีเจอร์ใหม่</td></tr>
+</tbody></table><p>จะยอมจ่ายก็ต่อเมื่อได้อะไรกลับมา ซึ่งได้จริงสามอย่างเช่นกัน คือ <strong>ทดสอบทีละชิ้นได้</strong>, <strong>แก้ทีละชิ้นได้</strong> และ <strong>ใช้ซ้ำได้</strong> ถ้าฟีเจอร์นั้นไม่ต้องการทั้งสามอย่าง ก็ไม่ต้องแยก</p></section>
+
+<section><h2>7. สัญญาณว่ายังปนกันอยู่</h2><ul><li>widget เรียก <code>jsonDecode</code></li><li>widget แปลเลข status เป็นข้อความเอง</li><li><code>ApiClient</code> เปิด dialog</li><li>repository ถือ <code>BuildContext</code></li><li>โมเดลข้อมูล import <code>material.dart</code> เพื่อเลือกสี</li><li>ทุกฟีเจอร์แก้ไฟล์เดียวกัน แล้ว merge ชนกันทุกครั้ง</li></ul></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>งานสี่อย่างนี้ควรอยู่ชั้นไหน และเพราะอะไร</p><ol><li>ตัดช่องว่างหัวท้ายของบาร์โค้ดที่สแกนมา</li><li>timeout 15 วินาที</li><li>แถวที่ผู้ใช้เลือกอยู่ตอนนี้</li><li>กฎว่ารับของเกินจำนวนใน PO ไม่ได้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ขอบของการรับข้อมูล — ที่ที่ค่าจากเครื่องสแกนเข้ามา ทำที่เดียวก่อนส่งต่อ ไม่ใช่ให้ทุกที่ที่ใช้ค่าต้องจำว่าต้อง trim</p><p><strong>2.</strong> Infrastructure ใน <code>ApiClient</code> — เป็นเรื่องของการขนส่ง จอไม่ควรรู้ว่ากี่วินาที</p><p><strong>3.</strong> Presentation หรือ Store — ถ้าเลือกแล้วมีผลแค่เรื่องไฮไลต์ ให้อยู่ในจอ แต่ถ้าขั้นตอนถัดไปต้องใช้ว่าเลือกอะไร ให้อยู่ใน store</p><p><strong>4.</strong> ทั้งสองที่ — เซิร์ฟเวอร์ต้องบังคับเพราะเป็นความจริง ส่วนแอปตรวจก่อนเพื่อไม่ให้ผู้ใช้ยิงไปเสียเที่ยว แต่ถ้าสองที่ไม่ตรงกัน <strong>เซิร์ฟเวอร์ถูกเสมอ</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>แยกเพราะ “เหตุผลที่จะเปลี่ยนต่างกัน” ไม่ใช่เพราะไฟล์ยาว</li><li>ลูกศรเรียกชี้ทางเดียว ตรวจได้จากบรรทัด import</li><li>การแยกมีราคา ยอมจ่ายเมื่ออยากทดสอบ แก้ หรือใช้ซ้ำทีละชิ้น</li></ul></div><p><strong>บทหน้า:</strong> เอากฎนี้ไปจับกับโค้ดจริงหนึ่งจอ แล้วดูว่าบรรทัดไหนควรย้ายไปไหน</p></section>

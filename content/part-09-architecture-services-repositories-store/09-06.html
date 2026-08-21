@@ -1,18 +1,86 @@
-<div class="note"><strong>Remote implementation เป็น adapter:</strong> แปลง domain call → request DTO/HTTP และ response DTO → domain พร้อม error translation</div>
-<section><h2>1. Implementation</h2><pre class="code-vs"><code>final class RemoteReceivingRepository implements ReceivingRepository {
-  RemoteReceivingRepository(this.remote);
-  final ReceivingRemoteDataSource remote;
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่านและรันเทสต์ของ <code>RemotePalletRepository</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.5, Part 6 (การอ่าน JSON), Part 7 (ApiClient)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียนตัวจริงที่ทำตามสัญญา และทดสอบมันได้โดยไม่ต้องมีเซิร์ฟเวอร์</div>
 
-  @override
-  Future&lt;Receipt&gt; receive(ReceiveCommand command) async {
-    final dto = await remote.receive(ReceiveRequestDto.fromDomain(command));
-    return dto.toDomain();
+<section><h2>1. หน้าที่สามอย่างของตัวจริง</h2><table><thead><tr><th>หน้าที่</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>เรียก endpoint</td><td>แปลง argument เป็น path และ body</td></tr>
+<tr><td>อ่านคำตอบเป็นโมเดล</td><td>แปลง JSON เป็น <code>Pallet</code></td></tr>
+<tr><td>แปลความล้มเหลว</td><td>แปลง <code>ApiException</code> เป็น <code>PalletFailure</code></td></tr>
+</tbody></table><p>สามอย่างนี้อยู่ด้วยกันเพราะเปลี่ยนด้วยเหตุผลเดียวกัน คือ “สัญญากับเซิร์ฟเวอร์เปลี่ยน”</p></section>
+
+<section><h2>2. รับ interface เข้ามา ไม่ใช่คลาสจริง</h2><pre class="code-vs"><code>class RemotePalletRepository implements PalletRepository {
+  const RemotePalletRepository(this.api);
+
+  final JsonApi api;      // ← ไม่ใช่ ApiClient
+  ...
+}</code></pre><p><code>JsonApi</code> เป็น interface เล็ก ๆ ที่มีแค่ <code>getJson</code> กับ <code>postJson</code> ส่วน <code>ApiClient</code> เป็นตัวจริงที่ implement มัน การรับ interface ทำให้เทสต์ระดับนี้ใส่ตัวปลอมได้โดยไม่ต้องมี <code>baseUrl</code> หรือ <code>http.Client</code></p><div class="note"><strong>หลัก:</strong> รับสิ่งที่แคบที่สุดที่ยังทำงานได้ — ถ้าใช้แค่สองเมธอด อย่ารับทั้งคลาสที่มีสิบเมธอด</div></section>
+
+<section><h2>3. เส้นทางที่สำเร็จ</h2><pre class="code-vs"><code>@override
+Future&lt;List&lt;Pallet&gt;&gt; fetchInZone(String zone) async {
+  final Map&lt;String, dynamic&gt; json;
+  try {
+    json = await api.getJson(
+      '/api/WMS/mobile_pallets?zone=${Uri.encodeQueryComponent(zone)}',
+    );
+  } on ApiException catch (error) {
+    throw _translate(error);
   }
-}</code></pre></section>
-<section><h2>2. DTO mapping</h2><p>request mapperกำหนด casing/optional fields; response mapperตรวจ contractและ domain invariants ทำให้ domainไม่ import JSON annotationsหรือ legacy key fallback</p></section>
-<section><h2>3. Error translation</h2><p>Socket/timeout/ApiException/ContractExceptionถูกแปลงเป็น repository failuresที่ stable เช่น NetworkUnavailable, Conflict, Unauthorized และ UnexpectedContract โดยรักษา cause/trace IDสำหรับ diagnostics</p></section>
-<section><h2>4. Mapping vs orchestration</h2><p>repositoryอาจรวม remote+cache policy แต่ workflowหลาย stepเช่น validate→confirm→receiveควรอยู่ application service/Store ไม่ฝัง user interactionใน remote adapter</p></section>
-<section><h2>5. N+1 awareness</h2><p>ของจริง TasksApi โหลด task listแล้วขอ detailทีละ row การซ่อนหลัง repositoryทำ callerสะอาดแต่ไม่ได้ทำ performanceหาย ต้องมี metricsและพิจารณา backend aggregate/batch endpoint</p></section>
-<section><h2>6. Cancellation/generation</h2><p>Dart Futureทั่วไป cancelไม่ได้ง่าย Repositoryควรรับ cancellation abstractionเมื่อจำเป็นหรือ Store ignoreผลด้วย generation token; .NETรับ CancellationTokenต่อถึง DB</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>APIคืน 404 ตอนค้น order ควร throw ApiExceptionถึง UIหรือไม่?</p><details><summary>แนวคำตอบ</summary><p>Repositoryแปลงเป็น <code>OrderNotFound</code> หรือ nullตาม interface contract; UIไม่ควรรู้ status 404หาก semanticsคือไม่มี order</p></details></section>
-<section><h2>8. Repository tests</h2><div class="success">assert endpoint/request DTO, mapping success, legacy casing, each failure translation, trace preservationและไม่รั่ว transport type</div></section>
+
+  // อ่านคำตอบอยู่นอก try โดยตั้งใจ (8.2)
+  final items = requireList(json, 'items');
+  return [
+    for (var index = 0; index &lt; items.length; index++)
+      _readPallet(items[index], 'items[$index]'),
+  ];
+}</code></pre><table><thead><tr><th>บรรทัด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>Uri.encodeQueryComponent(zone)</code></td><td>โซนอาจมีช่องว่างหรืออักษรพิเศษ ถ้าไม่ encode จะได้ URL ที่ผิด</td></tr>
+<tr><td><code>final Map json;</code> ประกาศไว้ก่อน</td><td>เพื่อให้ <code>try</code> ครอบเฉพาะบรรทัดที่ยิงเน็ต ไม่ครอบการอ่านคำตอบ</td></tr>
+<tr><td><code>'items[$index]'</code></td><td>ถ้าแถวที่ 7 พัง ข้อความผิดพลาดจะบอกว่าแถวไหน ไม่ใช่แค่ “พัง”</td></tr>
+</tbody></table></section>
+
+<section><h2>4. ทำไม <code>try</code> ต้องแคบ</h2><p>นี่คือกฎเดียวกับ 8.2 แต่ครั้งนี้เห็นผลชัดกว่า ลองคิดว่าถ้าเขียนแบบนี้</p><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+try {
+  final json = await api.getJson('...');
+  final items = requireList(json, 'items');        // ← อยู่ใน try
+  return [...];
+} on ApiException catch (error) {
+  throw _translate(error);
+}</code></pre><p>ผลคือ ถ้าเซิร์ฟเวอร์ส่ง <code>items</code> ผิดรูป <code>ContractException</code> จะไม่ถูกจับ (เพราะจับแค่ <code>ApiException</code>) — ดูเหมือนไม่มีปัญหา แต่วันที่มีคนเปลี่ยนเป็น <code>catch (error)</code> เพื่อ “กันไว้ก่อน” ข้อผิดพลาดของสัญญาจะกลายเป็นข้อความว่า “เชื่อมต่อไม่ได้ ลองใหม่” แล้วผู้ใช้จะกดลองใหม่ทั้งวัน</p><p>เทสต์ในข้อนี้บังคับพฤติกรรมไว้แล้ว</p><pre class="code-vs"><code>test('ข้อมูลผิดสัญญาต้องโยน ContractException พร้อมตำแหน่ง', () async {
+  ... palletJson('PLT-002')..['quantity'] = 1.5,   // 1.5 ชิ้นไม่มีอยู่จริง
+  await expectLater(
+    repository.fetchInZone('A1'),
+    throwsA(isA&lt;ContractException&gt;()
+        .having((e) =&gt; e.path, 'path', 'items[1].quantity')),
+  );
+});</code></pre></section>
+
+<section><h2>5. อ่านโมเดลผ่านตัวอ่านกลาง</h2><pre class="code-vs"><code>Pallet _readPallet(Object? value, String path) {
+  final map = requireMap(value, path);
+  return Pallet(
+    code: requireString(map, 'code', path: path),
+    productCode: requireString(map, 'productCode', path: path),
+    quantity: requireInt(map, 'quantity', path: path),
+    onHold: readBool(map, 'onHold', path: path, orElse: false),
+  );
+}</code></pre><p>ทุกตัวมาจาก <code>json_basics/json_read.dart</code> ที่เขียนไว้ตั้งแต่ Part 6 กฎการแปลงค่าจึงเหมือนกันทั้งแอปโดยอัตโนมัติ</p><div class="note"><strong>ข้อสังเกต:</strong> ตอน Part 6 ไฟล์นั้นยังไม่มี <code>readBool</code> เลย เพราะยังไม่มีใครต้องอ่านค่าจริงเท็จ พอถึงบทนี้ที่ต้องใช้จริงจึงค่อยเพิ่ม — <strong>เพิ่มตอนมีคนใช้ ไม่ใช่เพิ่มเผื่อ</strong></div><p><code>readBool</code> บังคับให้ระบุ <code>orElse</code> เสมอ เพื่อให้คนเขียนต้องตอบว่า “ไม่มีค่า” แปลว่าอะไร แทนที่จะได้ <code>false</code> มาโดยไม่ได้ตั้งใจ</p></section>
+
+<section><h2>6. เทสต์โดยไม่มีเซิร์ฟเวอร์</h2><pre class="code-vs"><code>final repository = RemotePalletRepository(
+  ApiClient(
+    baseUrl: baseUrl,
+    client: MockClient((_) async =&gt; http.Response(
+      jsonEncode({'detail': 'พาเลทนี้ถูกล็อกโดยสมชายอยู่'}),
+      409,
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    )),
+  ),
+);</code></pre><p>เทสต์ระดับนี้ยังผ่าน <code>ApiClient</code> ตัวจริง เพราะอยากทดสอบด้วยว่ามันแปลง 409 เป็น <code>ApiFailureKind.conflict</code> ถูกไหม ถ้าอยากทดสอบเฉพาะ repository ล้วน ๆ ก็ใส่ <code>JsonApi</code> ปลอมแทนได้ — เลือกได้เพราะรับ interface ไว้</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เห็น “เชื่อมต่อไม่ได้” ทั้งที่เน็ตดี</td><td><code>try</code> กว้างเกิน ครอบการอ่านคำตอบด้วย</td><td>ย้ายการอ่านออกนอก <code>try</code></td></tr>
+<tr><td>ข้อความผิดพลาดบอกแค่ว่าพัง ไม่บอกว่าตรงไหน</td><td>ไม่ส่ง <code>path</code> ต่อลงไป</td><td>ส่ง <code>'items[$index]'</code> ทุกชั้น</td></tr>
+<tr><td>repository คืน <code>Map&lt;String, dynamic&gt;</code></td><td>เลื่อนการแปลงไปให้ store ทำ</td><td>แปลงให้เสร็จที่นี่ ชั้นบนต้องเห็นแต่โมเดล</td></tr>
+<tr><td>repository เก็บผลลัพธ์ล่าสุดไว้ใน field</td><td>สับสนระหว่างหน้าที่ของ repository กับ store</td><td>ให้ store เป็นคนเก็บ (9.9)</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>เซิร์ฟเวอร์เพิ่มฟิลด์ <code>lastCountedAt</code> ในพาเลท เป็นเวลาแบบ ISO และ<strong>อาจไม่มี</strong>ถ้ายังไม่เคยนับ</p><ol><li>ต้องแก้ไฟล์ไหนบ้าง</li><li>ถ้าเซิร์ฟเวอร์ส่ง <code>"2026-08-16T10:00:00"</code> มา (ไม่มี Z) ควรเกิดอะไรขึ้น</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> สองไฟล์ คือ <code>pallet.dart</code> เพิ่มฟิลด์ <code>DateTime? lastCountedAt</code> และ <code>pallet_repository.dart</code> อ่านค่า ส่วน store ไม่ต้องแก้ และจอแก้เฉพาะถ้าจะแสดงผล</p><p>ต้องเพิ่มตัวอ่านด้วย เพราะ <code>requireUtcTime</code> ที่มีอยู่บังคับว่าต้องมีค่า จึงต้องมีคู่แฝดที่ยอมให้ไม่มีได้ ทำนองเดียวกับ <code>requireString</code>/<code>readString</code></p><p><strong>2.</strong> ต้องโยน <code>ContractException</code> ตามที่ 6.9 ตัดสินใจไว้ — เวลาที่ไม่บอกเขตเวลาตีความไม่ได้ และการเดาว่าเป็นเวลาไทยจะทำให้รายงานผิดชั่วโมง ไม่ใช่ผิดนิดหน่อย</p><p>คำถามที่ควรถามต่อคือ “แล้วผู้ใช้จะเห็นอะไร” คำตอบคือจอพัง ซึ่งฟังดูแย่ แต่ถูกกว่าการแสดงเวลาที่ผิดเงียบ ๆ — และมันบังคับให้ทีมแก้ที่ต้นเหตุ ไม่ใช่ให้ผู้ใช้ทนใช้ข้อมูลผิด</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ตัวจริงทำสามอย่าง คือเรียก แปลงเป็นโมเดล และแปลความล้มเหลว</li><li>รับ interface ที่แคบที่สุดเข้ามา ไม่ใช่คลาสจริง</li><li><code>try</code> ครอบเฉพาะบรรทัดที่ยิงเน็ต การอ่านคำตอบต้องอยู่ข้างนอก</li><li>ส่ง <code>path</code> ลงไปทุกชั้น เพื่อให้ข้อความผิดพลาดบอกตำแหน่งได้</li></ul></div><p><strong>บทหน้า:</strong> ใครเก็บผลลัพธ์ที่ repository ส่งกลับมา</p></section>

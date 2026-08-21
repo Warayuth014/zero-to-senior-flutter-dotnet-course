@@ -4,20 +4,76 @@
 <title>Split God Store</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-15 · Architecture</span><h1>Split God Store</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Evidence จากของจริง</a></li><li><a href="#section-2">Map clusters</a></li><li><a href="#section-3">Extract fa&#231;ade-compatible slice</a></li><li><a href="#section-4">Split timers by owner</a></li><li><a href="#section-5">Cross-slice events</a></li><li><a href="#section-6">Preserve SSOT</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Safety plan</a></li></ol></nav>
-<div class="note"><strong>แตก God Storeตาม cohesive state + lifetime:</strong> ไม่ใช่แบ่งทุก 300 บรรทัด แต่แยก Receiving, Tasks, Inventory, CycleCountที่มี dependenciesและ workflowของตัวเอง</div>
-<section id="section-1"><h2>1. Evidence จากของจริง</h2><p><code>WarehouseStore</code> ประมาณ 1,684 บรรทัด ถือ repositoriesสี่ชุด, timer, receiving/tasks/picking/cycle count/navigationและ UI callbacks ทำให้ทุก feature share notify/lifetimeและแก้ไฟล์เดียวกัน</p></section>
-<section id="section-2"><h2>2. Map clusters</h2><p>สร้างตาราง field→methods→repository→widgets→timer แล้วหากลุ่มที่แทบไม่ cross-reference เช่น CycleCount state/methodsสามารถเป็น sliceแรก</p></section>
-<section id="section-3"><h2>3. Extract façade-compatible slice</h2><pre class="code-vs"><code>class CycleCountStore extends ChangeNotifier {
-  CycleCountStore(this.repository);
-  final CycleCountRepository repository;
-  CycleCountState state = const CycleCountIdle();
-  Future&lt;void&gt; load(String pallet) async { /* ... */ }
-}</code></pre><p>God Store delegateชั่วคราวเพื่อคง call sites</p></section>
-<section id="section-4"><h2>4. Split timers by owner</h2><p>task pollingอยู่ TasksStoreและเริ่ม/หยุดตาม screen/app lifecycle ไม่ให้ WarehouseStore constructorเริ่ม timerแม้ userยังไม่เปิด feature</p></section>
-<section id="section-5"><h2>5. Cross-slice events</h2><p>หลัง receiving successต้อง refresh tasks ใช้ coordinatorเรียกสอง storesหรือ typed domain eventที่ explicit อย่าให้ stores importกันวงกลม</p></section>
-<section id="section-6"><h2>6. Preserve SSOT</h2><p>ระหว่าง migrationอย่า copy listทั้ง God Storeและslice ให้ delegate getter/actionไป ownerใหม่จน consumerย้ายครบแล้วค่อยลบของเดิม</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ควรแตก NavigationStoreก่อนหรือ CycleCountStoreก่อน?</p><details><summary>แนวคำตอบ</summary><p>เลือก cluster dependencyน้อย/มี tests/ขอบเขตชัด เช่น CycleCount; navigationอาจพัวพันทุก flowและควรแยกหลังเข้าใจ state ownership</p></details></section>
-<section id="section-8"><h2>8. Safety plan</h2><div class="success">characterization tests → extract state/action → delegate façade → migrate widgets → remove duplicate → analyze/testทุก commit; ไม่ rewrite God Storeครั้งเดียว</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ของจริง</a></li><li><a href="#section-2">อาการที่รู้สึกได้</a></li><li><a href="#section-3">อาการที่ยังไม่ใช่ปัญหา</a></li><li><a href="#section-4">เส้นแบ่งที่ปลอดภัย</a></li><li><a href="#section-5">ลำดับที่ปลอดภัย</a></li><li><a href="#section-6">อย่าแยกถ้า</a></li><li><a href="#section-7">ทางเลือกที่เบากว่า</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 75–90 นาที</span><span>ลงมือทำ: อ่าน store 1,684 บรรทัดแล้ววางเส้นแบ่ง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.9, 9.14<br><strong>จบบทนี้แล้วจะทำได้:</strong> มองออกว่า store ที่ใหญ่เกินควรแยกตรงไหน และรู้ว่าการแยกผิดที่แพงกว่าไม่แยก</div>
+
+<section id="section-1"><h2>1. ของจริง</h2><pre class="code-vs"><code>wms_absolute_mobile/lib/features/warehouse/warehouse_store.dart
+  1,684 บรรทัด · คลาสเดียว · ~96 เมธอด · repository 4 ตัว</code></pre><p>ข้างในมีอะไรบ้าง — ดูจากกลุ่มของฟิลด์ที่ประกาศติดกัน</p><table><thead><tr><th>กลุ่ม</th><th>ตัวอย่างฟิลด์</th><th>ใช้ในจอ</th></tr></thead><tbody>
+<tr><td>รับเข้า</td><td><code>rPallet</code>, <code>rStep</code>, <code>rQty</code>, <code>recvOrderRo</code>, <code>inboundOrders</code></td><td>จอรับเข้า</td></tr>
+<tr><td>นับสต๊อก</td><td><code>cycleCountPallet</code>, <code>cycleCountMode</code>, <code>cycleCountValues</code></td><td>จอนับสต๊อก</td></tr>
+<tr><td>งานขนย้าย</td><td><code>tasks</code>, <code>taskId</code>, <code>tStep</code>, <code>freeLocations</code></td><td>จองาน</td></tr>
+<tr><td>หยิบของ</td><td><code>picks</code>, <code>selectedPickingConveyorNo</code>, <code>selectedActivePickId</code></td><td>จอหยิบ</td></tr>
+<tr><td>เบิกออก</td><td><code>wPallet</code>, <code>wQty</code>, <code>wDest</code></td><td>จอเบิก</td></tr>
+<tr><td>ของกลาง</td><td><code>screen</code>, <code>username</code>, <code>access</code>, <code>onToast</code></td><td>ทุกจอ</td></tr>
+</tbody></table><p>ห้ากลุ่มแรกแทบไม่แตะกันเลย — <strong>นั่นคือเส้นแบ่งที่โค้ดบอกเราเอง</strong></p></section>
+
+<section id="section-2"><h2>2. อาการที่รู้สึกได้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>แก้ตรรกะนับสต๊อก แต่ต้องอ่านผ่านโค้ดรับเข้า</td><td>อยู่ไฟล์เดียวกัน</td></tr>
+<tr><td>สองคนแก้คนละฟีเจอร์แล้ว merge ชน</td><td>ไฟล์เดียวกัน</td></tr>
+<tr><td>เขียนเทสต์ของนับสต๊อก ต้องสร้าง repository ครบสี่ตัว</td><td>constructor ต้องการทั้งหมด</td></tr>
+<tr><td><code>notifyListeners()</code> ครั้งเดียวทำให้ทุกจอวาดใหม่</td><td>ผู้ฟังทั้งหมดผูกกับ notifier ตัวเดียว</td></tr>
+<tr><td>เผลอใช้ตัวแปรข้ามฟีเจอร์โดยไม่รู้ตัว</td><td>ทุกอย่างอยู่ในขอบเขตเดียวกัน</td></tr>
+</tbody></table><p>แถวสุดท้ายคือความเสี่ยงที่แท้จริง ไม่ใช่เรื่องความสวย — เช่นถ้ามีใครใช้ <code>rQty</code> ในโค้ดของงานเบิกออกโดยเข้าใจผิดว่าเป็นจำนวนทั่วไป จะได้บั๊กที่ตามยากมาก และคอมไพเลอร์ช่วยอะไรไม่ได้เลยเพราะทุกอย่างอยู่ในคลาสเดียวกัน</p></section>
+
+<section id="section-3"><h2>3. อาการที่ยังไม่ใช่ปัญหา</h2><p>ก่อนแยก ต้องยอมรับข้อดีที่มีอยู่จริงก่อน ไม่งั้นจะแยกแล้วเสียของ</p><table><thead><tr><th>ข้อดีที่มี</th><th>ถ้าแยกผิดจะเสียไป</th></tr></thead><tbody>
+<tr><td>ไม่มีวันที่สองจอเห็นข้อมูลไม่ตรงกัน</td><td>แยกแล้วมี <code>pallets</code> สองชุดทันที</td></tr>
+<tr><td>งานที่ข้ามฟีเจอร์ทำได้ตรง ๆ เช่นรับเข้าเสร็จแล้วสร้างงานขนย้าย</td><td>ต้องหาทางให้ store คุยกัน</td></tr>
+<tr><td><code>screen</code> กับขั้นตอนของงานสอดคล้องกันเสมอ</td><td>ปุ่มย้อนกลับอาจพาไปจอที่สถานะไม่พร้อม</td></tr>
+<tr><td>จุดประกอบเดียว อ่านง่าย</td><td>ต้องประกอบห้าตัวและตัดสินใจว่าใครถือใคร</td></tr>
+</tbody></table><div class="note">แถวแรกสำคัญที่สุด <strong>ห้ามแก้ปัญหาไฟล์ใหญ่ด้วยการสร้างแหล่งความจริงที่สอง</strong> — ได้ไฟล์เล็กลงแต่ได้บั๊กประเภทที่แก้ยากที่สุดกลับมาแทน</div></section>
+
+<section id="section-4"><h2>4. เส้นแบ่งที่ปลอดภัย</h2><p>แบ่ง <strong>ตามข้อมูลที่เป็นเจ้าของ</strong> ไม่ใช่แบ่งตามจำนวนบรรทัด</p><pre class="code-vs"><code>WarehouseStore              ← ของกลาง: screen, username, access, onToast
+  ├─ InventoryStore         ← pallets, freeLocations, locationCount  (แหล่งเดียว)
+  ├─ ReceivingStore         ← inboundOrders, rPallet, rStep, rQty
+  ├─ CycleCountStore        ← cycleCountPallet, cycleCountValues
+  ├─ TaskStore              ← tasks, taskId, tStep
+  └─ PickingStore           ← picks, selectedPickingConveyorNo</code></pre><p>ตัวที่ต้องคิดหนักคือ <code>pallets</code> เพราะมีสามฟีเจอร์ที่ใช้ ทางแก้ที่ถูกคือ <strong>ให้มีเจ้าของคนเดียว แล้วให้คนอื่นถามเอา</strong> ไม่ใช่ให้แต่ละตัวเก็บสำเนา</p><pre class="code-vs"><code>class ReceivingStore extends ChangeNotifier {
+  ReceivingStore(this.repository, this.inventory);   // ถือ inventory ไว้ถาม
+
+  final InventoryStore inventory;
+
+  Future&lt;void&gt; confirmReceive() async {
+    await repository.receive(...);
+    await inventory.reload();       // บอกเจ้าของให้ไปโหลดใหม่ ไม่แก้ของเขาเอง
+  }
+}</code></pre></section>
+
+<section id="section-5"><h2>5. ลำดับที่ปลอดภัย</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ยังไม่ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>เขียนเทสต์ของฟีเจอร์ที่จะแยกออกก่อน โดยยังเรียกผ่าน <code>WarehouseStore</code> เดิม</td><td>ยังไม่ย้ายโค้ด</td></tr>
+<tr><td>2</td><td>จัดกลุ่มฟิลด์กับเมธอดของฟีเจอร์นั้นให้อยู่ติดกันในไฟล์เดิม</td><td>ยังไม่แยกไฟล์</td></tr>
+<tr><td>3</td><td>ดูว่ามีใครนอกกลุ่มใช้ฟิลด์เหล่านั้นบ้าง — รายชื่อนี้คือสิ่งที่ต้องออกแบบต่อ</td><td>ยังไม่แยก</td></tr>
+<tr><td>4</td><td>ย้ายออกเป็นคลาสใหม่ ให้ <code>WarehouseStore</code> ถือไว้และส่งต่อชั่วคราว</td><td>จอยังไม่ต้องแก้</td></tr>
+<tr><td>5</td><td>ค่อย ๆ เปลี่ยนจอให้ฟัง store ตัวใหม่โดยตรง แล้วลบตัวส่งต่อ</td><td>—</td></tr>
+</tbody></table><p>ขั้นที่ 4 คือหัวใจ เพราะทำให้แอปยังทำงานได้ตลอดเวลาระหว่างที่ย้าย</p><pre class="code-vs"><code>class WarehouseStore extends ChangeNotifier {
+  late final cycleCount = CycleCountStore(cycleCountRepository)
+    ..addListener(notifyListeners);    // ของใหม่เปลี่ยน ของเก่าก็แจ้งต่อ
+
+  // ตัวส่งต่อชั่วคราว — จอเดิมยังเรียกได้เหมือนไม่มีอะไรเกิดขึ้น
+  @Deprecated('ใช้ cycleCount.confirm() แทน')
+  Future&lt;void&gt; confirmCycleCount() =&gt; cycleCount.confirm();
+}</code></pre><p><code>..addListener(notifyListeners)</code> ทำให้จอที่ยังฟัง <code>WarehouseStore</code> อยู่ ได้รับแจ้งเหมือนเดิมทุกประการ — โค้ดจอไม่ต้องแก้แม้แต่บรรทัดเดียวในขั้นนี้</p></section>
+
+<section id="section-6"><h2>6. อย่าแยกถ้า</h2><ul><li>ยังไม่มีเทสต์ครอบฟีเจอร์นั้น</li><li>กำลังจะส่งงานสัปดาห์หน้า</li><li>เหตุผลเดียวคือ “ไฟล์ยาว”</li><li>ยังตอบไม่ได้ว่า <code>pallets</code> จะมีเจ้าของคนไหน</li><li>ทีมมีคนเดียวและไม่เคย merge ชนกัน</li></ul><p>ข้อสุดท้ายอาจฟังดูแปลก แต่ประโยชน์หลักข้อหนึ่งของการแยกคือให้หลายคนทำงานพร้อมกันได้ ถ้าไม่มีปัญหานั้น ประโยชน์ก็หายไปข้อหนึ่ง</p></section>
+
+<section id="section-7"><h2>7. ทางเลือกที่เบากว่า</h2><p>ถ้าปัญหาคือ “หาโค้ดไม่เจอ” ไม่ใช่ “แก้แล้วพัง” มีทางที่ถูกกว่ามาก</p><table><thead><tr><th>ทำ</th><th>ได้อะไร</th><th>เสี่ยง</th></tr></thead><tbody>
+<tr><td>จัดกลุ่มฟิลด์และเมธอดในไฟล์เดิมให้อยู่ติดกัน พร้อมคอมเมนต์คั่น</td><td>หาเจอเร็วขึ้นมาก</td><td>ไม่มี</td></tr>
+<tr><td>แยกเป็น <code>part</code> ไฟล์ตามฟีเจอร์</td><td>ไฟล์ละฟีเจอร์ แต่ยังเป็นคลาสเดียว</td><td>ต่ำ</td></tr>
+<tr><td>ยกงานที่ไม่แตะสถานะออกไปเป็นฟังก์ชันอิสระ</td><td>ทดสอบชิ้นนั้นได้เดี่ยว ๆ</td><td>ต่ำ</td></tr>
+</tbody></table><p>แถวกลางน่าสนใจ — เป็นเทคนิคเดียวกับที่ <code>wmsapp</code> ใช้กับ <code>ApiService</code> ใน 9.4 ได้ไฟล์เล็กลงโดยไม่แตะโครงสร้างอะไรเลย และไม่เสี่ยงสร้างแหล่งความจริงที่สอง</p></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมตัดสินใจแยก <code>CycleCountStore</code> ออกมาก่อนเป็นตัวแรก</p><ol><li>ทำไมเลือกตัวนี้เป็นตัวแรกถึงสมเหตุสมผล</li><li>มีอะไรที่ต้องตัดสินใจก่อนลงมือ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> เพราะกลุ่มนี้แยกตัวได้มากที่สุด — ฟิลด์ทั้งหมดขึ้นต้นด้วย <code>cycleCount</code>, ใช้ repository ตัวเดียว, และไม่มีฟีเจอร์อื่นอ่านค่าเหล่านั้นเลย เป็นการซ้อมที่ความเสี่ยงต่ำสุด ก่อนไปเจอตัวที่พันกันจริงอย่างงานรับเข้ากับงานขนย้าย</p><p><strong>2.</strong> อย่างน้อยสี่ข้อ</p><ul><li><strong>นับเสร็จแล้วต้องอัปเดต <code>pallets</code> ไหม</strong> ถ้าใช่ ต้องตัดสินตั้งแต่ตอนนี้ว่าใครเป็นเจ้าของ — และคำตอบต้องไม่ใช่ “เก็บไว้ทั้งสองที่”</li><li><strong>ใครเรียก <code>onToast</code></strong> ถ้า store ใหม่ต้องแจ้งข้อความ ต้องรับ callback เข้ามาด้วย หรือให้ตัวแม่ฟังแล้วแจ้งแทน</li><li><strong><code>screen</code> ยังอยู่ที่เดิมไหม</strong> ถ้า store ใหม่ต้องสั่งเปลี่ยนจอตอนนับเสร็จ แสดงว่ามันยังต้องคุยกับตัวแม่ ให้ทำผ่าน callback ไม่ใช่ให้ถือตัวแม่ไว้ ไม่งั้นจะได้การพึ่งพาที่วนกลับ</li><li><strong>จอยังฟังตัวเก่าอยู่ไหม</strong> ถ้าใช่ ต้องมี <code>..addListener(notifyListeners)</code> ตามขั้นที่ 4</li></ul><p>ข้อที่มักถูกลืมคือข้อสาม และมันจะกลายเป็นการพึ่งพาที่วนกลับ (แม่ถือลูก ลูกถือแม่) ซึ่งทำให้ทดสอบลูกเดี่ยว ๆ ไม่ได้อีก — เท่ากับแยกแล้วไม่ได้อะไรเลย</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>แบ่งตามข้อมูลที่เป็นเจ้าของ ไม่ใช่ตามจำนวนบรรทัด</li><li>ข้อมูลที่หลายฟีเจอร์ใช้ ต้องมีเจ้าของคนเดียว คนอื่นถามเอา</li><li>ย้ายทีละก้าวโดยให้ตัวเก่าส่งต่อชั่วคราว แอปต้องทำงานได้ตลอดทาง</li><li>ถ้าปัญหาคือหาโค้ดไม่เจอ ให้จัดกลุ่มหรือใช้ <code>part</code> ก่อน ถูกกว่าและไม่เสี่ยง</li></ul></div><p><strong>บทหน้า:</strong> ลงมือ refactor ฟีเจอร์จริงหนึ่งตัวด้วยตัวเอง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

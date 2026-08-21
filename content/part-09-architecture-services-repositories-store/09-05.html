@@ -1,13 +1,84 @@
-<div class="note"><strong>Repository interface ใช้ภาษาของ caller:</strong> ซ่อนว่า dataมาจาก HTTP/cacheและคืน domain result ไม่ expose URL, responseหรือ JSON</div>
-<section><h2>1. Interface example</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
-  Future&lt;InboundOrder&gt; findOrder(String orderNo);
-  Future&lt;Receipt&gt; receive(ReceiveCommand command);
-  Future&lt;List&lt;PendingPalletLine&gt;&gt; pendingPalletLines();
-}</code></pre></section>
-<section><h2>2. Naming by intent</h2><p><code>receive(command)</code> ดีกว่า <code>postScanPart(map)</code> เพราะ callerไม่ต้องรู้ transportและ interfaceยังคงเดิมเมื่อ endpointเปลี่ยน</p></section>
-<section><h2>3. Contract boundary</h2><p>กำหนด nullability, ordering, paginationและ failuresใน interface/docs เช่น not-foundเป็น nullหรือ typed exception ต้องเลือกแบบเดียว ไม่คืน nullสำหรับ offlineด้วย</p></section>
-<section><h2>4. Interface ไม่ต้องมีทุก class</h2><p>สร้างเมื่อมี consumerต้องการ abstraction, fake, remote/local variantsหรือ boundaryทีม ไม่สร้าง <code>IThing</code> ที่มี implementationเดียวและไม่มี test seamเพียงตามพิธี</p></section>
-<section><h2>5. Narrow interfaces</h2><p>Store รับเฉพาะ repositoryของ feature ไม่รับ GodRepository 50 methods ทำ dependencyชัดและ fakeเล็ก ใช้ Interface Segregationตาม use casesจริง</p></section>
-<section><h2>6. ของจริง</h2><p><code>TasksRepository</code>, <code>ReceivingRepository</code>, <code>InventoryRepository</code> และ <code>CycleCountRepository</code> ใน <code>wms_absolute_mobile</code> ทำให้ WarehouseStoreไม่ import package http</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>repositoryควรมี method <code>Future&lt;http.Response&gt; getTasks()</code> ไหม?</p><details><summary>เฉลย</summary><p>ไม่ เพราะรั่ว infrastructure type ให้คืน <code>List&lt;WmsTask&gt;</code> หรือ <code>TaskPage</code> และ translate failure</p></details></section>
-<section><h2>8. Testability</h2><div class="success">Fake repositoryเก็บ commandsและกำหนด result/failureได้ ทำให้ Store testsพิสูจน์ workflowโดยไม่มี JSON/network</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เขียน interface ของฟีเจอร์ตัวเอง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.4, Dart Foundation D1.8 (interface/inheritance)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียน repository interface ที่ใช้คำของงาน ไม่ใช่คำของ HTTP และรู้ว่าอะไรไม่ควรอยู่ในนั้น</div>
+
+<section><h2>1. repository คืออะไร</h2><div class="note"><strong>Repository</strong> คือชั้นที่ตอบว่า “ขอข้อมูลนี้” และ “สั่งให้เกิดสิ่งนี้” โดยที่คนขอ<strong>ไม่ต้องรู้ว่าข้อมูลมาจากไหน</strong> — จาก HTTP, จากฐานข้อมูลในเครื่อง, หรือจากตัวปลอมในเทสต์</div><p>ชื่อมาจากคำว่า “คลังเก็บของ” เดินไปที่เคาน์เตอร์ บอกว่าอยากได้อะไร แล้วได้ของ ไม่ต้องรู้ว่าของอยู่ชั้นไหน</p></section>
+
+<section><h2>2. หน้าตาใน lab</h2><pre class="code-vs"><code>abstract interface class PalletRepository {
+  Future&lt;List&lt;Pallet&gt;&gt; fetchInZone(String zone);
+  Future&lt;Pallet&gt; hold(String code, {required String commandId});
+}</code></pre><p>อ่านสามบรรทัดนี้แล้วรู้ทันทีว่าจอพาเลทต้องการอะไรจากโลกภายนอก — สองอย่าง ไม่มีมากกว่านั้น</p><table><thead><tr><th>คำที่อยู่ในนี้</th><th>คำที่ไม่อยู่ในนี้</th></tr></thead><tbody>
+<tr><td><code>Pallet</code>, <code>zone</code>, <code>hold</code></td><td><code>Response</code>, <code>statusCode</code>, <code>json</code>, <code>Uri</code></td></tr>
+</tbody></table><p>เกณฑ์ตรวจง่าย ๆ: <strong>ถ้าอ่าน interface ให้หัวหน้าคลังฟังแล้วเขาเข้าใจ แปลว่าใช้คำถูกชั้น</strong></p></section>
+
+<section><h2>3. <code>abstract interface class</code> คืออะไร</h2><p>Dart 3 แยกคำสั่งให้ชัดขึ้น สามคำนี้ต่างกัน</p><table><thead><tr><th>เขียนแบบ</th><th>สืบทอด (<code>extends</code>)</th><th>สวมสัญญา (<code>implements</code>)</th><th>สร้างตรง ๆ</th></tr></thead><tbody>
+<tr><td><code>class A</code></td><td>ได้</td><td>ได้</td><td>ได้</td></tr>
+<tr><td><code>abstract class A</code></td><td>ได้</td><td>ได้</td><td>ไม่ได้</td></tr>
+<tr><td><code>interface class A</code></td><td>เฉพาะในไฟล์เดียวกัน</td><td>ได้</td><td>ได้</td></tr>
+<tr><td><code>abstract interface class A</code></td><td>เฉพาะในไฟล์เดียวกัน</td><td>ได้</td><td>ไม่ได้</td></tr>
+</tbody></table><p>ตัวสุดท้ายคือ “สัญญาล้วน ๆ” — บังคับว่าคนที่จะใช้ต้อง <code>implements</code> และเขียนทุกเมธอดเอง ไม่มีทางลัดด้วยการ <code>extends</code> แล้วเขียนบางตัว</p></section>
+
+<section><h2>4. ทำไมต้องมี interface ทั้งที่มี implementation ตัวเดียว</h2><p>คำถามนี้ยุติธรรมมาก ถ้ามี <code>RemotePalletRepository</code> ตัวเดียว interface ก็ดูเหมือนบรรทัดส่วนเกิน คำตอบคือมันไม่ได้มีตัวเดียว</p><table><thead><tr><th>ตัวที่ implement</th><th>อยู่ที่ไหน</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>RemotePalletRepository</code></td><td><code>lib/</code></td><td>ของจริง</td></tr>
+<tr><td><code>_ScriptedRepository</code></td><td><code>test/architecture_test.dart</code></td><td>คุมได้ว่าจะตอบเมื่อไหร่ ตอบอะไร</td></tr>
+</tbody></table><pre class="code-vs"><code>class _ScriptedRepository implements PalletRepository {
+  final List&lt;Completer&lt;List&lt;Pallet&gt;&gt;&gt; _fetches = [];
+
+  @override
+  Future&lt;List&lt;Pallet&gt;&gt; fetchInZone(String zone) {
+    final completer = Completer&lt;List&lt;Pallet&gt;&gt;();
+    _fetches.add(completer);
+    return completer.future;      // ค้างไว้จนกว่าเทสต์จะสั่งให้ตอบ
+  }
+
+  void completeAt(int index, List&lt;Pallet&gt; pallets) =&gt;
+      _fetches[index].complete(pallets);
+}</code></pre><p>ตัวปลอมนี้ทำให้เขียนเทสต์ที่ <strong>ตอบคำขอที่สองก่อนคำขอแรก</strong> ได้ ซึ่งเป็นสถานการณ์ที่เกิดจริงบน PDA ที่สัญญาณไม่ดี แต่จำลองผ่าน HTTP ยากมาก</p></section>
+
+<section><h2>5. อะไรไม่ควรอยู่ใน interface</h2><table><thead><tr><th>อย่าใส่</th><th>เพราะ</th><th>ให้อยู่ที่</th></tr></thead><tbody>
+<tr><td><code>Future&lt;http.Response&gt; getRaw(String path)</code></td><td>รั่วรายละเอียดของ HTTP ออกมา คนเรียกต้องรู้จัก status code</td><td><code>ApiClient</code></td></tr>
+<tr><td><code>void showError(BuildContext c)</code></td><td>repository ไม่ควรรู้จักหน้าจอ</td><td>Widget</td></tr>
+<tr><td><code>bool get isLoading</code></td><td>เป็นสถานะของงาน ไม่ใช่ของแหล่งข้อมูล</td><td>Store</td></tr>
+<tr><td><code>List&lt;Pallet&gt; get cachedPallets</code></td><td>ถ้า repository เก็บของไว้เอง จะมีข้อมูลสองที่ทันที</td><td>Store (9.9)</td></tr>
+</tbody></table></section>
+
+<section><h2>6. ของจริง: <code>TasksRepository</code></h2><pre class="code-vs"><code>abstract interface class TasksRepository {
+  Future&lt;List&lt;WmsTask&gt;&gt; fetchOpen();
+  Future&lt;int&gt; fetchDoneTodayCount();
+  Future&lt;List&lt;CompletedTaskHistory&gt;&gt; fetchAgvDoneToday();
+  Future&lt;List&lt;LocationView&gt;&gt; fetchFreeLocations();
+  Future&lt;String&gt; dispatch({
+    required String serverId,
+    required String eventId,
+    required DispatchMode mode,
+    String? robot,
+    String? palletCode,
+    String? sourcePointCode,
+  });
+  Future&lt;void&gt; validateRobotPoint(String pointCode);
+  ...
+}</code></pre><p>ไฟล์ <code>lib/api/tasks_api.dart</code> ยาว 665 บรรทัด แต่ 59 บรรทัดแรกคือสัญญาทั้งหมด อ่านแค่นั้นก็รู้ว่าฟีเจอร์งานขนย้ายพึ่งพาอะไรบ้าง — นี่คือประโยชน์ที่ได้แม้จะมี implementation ตัวเดียว</p><p>สังเกต <code>required String serverId</code> ที่โผล่ในหลายเมธอด — มาจากบทเรียนใน 8.11 ว่า session ต้องผูกกับเซิร์ฟเวอร์ที่ออกมัน</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>ทำไมเป็นปัญหา</th></tr></thead><tbody>
+<tr><td>ตั้งชื่อเมธอดตาม path เช่น <code>getMobilePallets()</code></td><td>วันที่ path เปลี่ยน ชื่อเมธอดจะโกหก</td></tr>
+<tr><td>ทำ interface ที่มีเมธอดเดียวชื่อ <code>call(String path)</code></td><td>ได้ interface ที่ไม่ได้บอกอะไร เท่ากับไม่มี</td></tr>
+<tr><td>เขียน interface ตอนยังไม่รู้ว่าต้องการอะไร</td><td>จะได้สัญญาที่สะท้อน endpoint แทนที่จะสะท้อนงาน</td></tr>
+<tr><td>ใส่ทุก endpoint ของระบบไว้ใน interface เดียว</td><td>ตัวปลอมในเทสต์ต้องเขียนเมธอดเปล่าเป็นสิบตัว</td></tr>
+</tbody></table><p>ข้อสุดท้ายมีทางแก้: แยก interface ตามฟีเจอร์ ไม่ใช่ตามระบบ ให้ interface หนึ่งตัวเล็กพอที่ตัวปลอมจะเขียนได้ในสิบบรรทัด</p></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>จอ “นับสต๊อกหน้าแร็ค” ต้องทำสี่อย่าง — ค้นพาเลทจากรหัส, เริ่มรอบนับ, ส่งจำนวนที่นับได้ทีละรายการ, ปิดรอบนับ เขียน interface ให้จอนี้</p><details><summary>แนวคำตอบ</summary><pre class="code-vs"><code>abstract interface class CycleCountRepository {
+  Future&lt;CycleCountPallet&gt; lookupPallet(String palletCode);
+  Future&lt;CycleCountSession&gt; start(String palletCode, CycleCountMode mode);
+  Future&lt;void&gt; recordCount(String sessionId, String productCode, double quantity);
+  Future&lt;CycleCountResult&gt; confirm(String sessionId);
+}</code></pre><p>จุดที่ต้องคิด</p><ul><li><code>quantity</code> เป็น <code>double</code> ไม่ใช่ <code>int</code> เพราะบางสินค้าเป็นน้ำหนักหรือความยาว — ตัดสินจากงาน ไม่ใช่จากชนิดที่เผอิญมีในภาษา</li><li>ไม่มีเมธอด <code>getScannedItems()</code> เพราะสิ่งที่สแกนไปแล้วในรอบนี้เป็นสถานะที่ store ถืออยู่ ไม่ต้องถามเซิร์ฟเวอร์</li><li>ทั้งสี่เมธอดใช้คำที่หัวหน้าคลังเข้าใจ</li></ul><p><strong>ของจริงเลือกต่างจากนี้</strong> — <code>wms_absolute_mobile/lib/api/cycle_count_api.dart</code> มีสามเมธอด คือ <code>lookup</code>, <code>start</code>, <code>confirm</code> ไม่มี <code>recordCount</code> เพราะจำนวนที่นับได้ทั้งรอบถูกส่งไปทีเดียวตอน <code>confirm</code></p><pre class="code-vs"><code>Future&lt;CycleCountPallet&gt; confirm({
+  required String palletCode,
+  required String user,
+  required List&lt;CycleCountResult&gt; counts,   // ← ทั้งรอบส่งทีเดียว
+  String station = 'PDA',
+});</code></pre><p>ทั้งสองแบบใช้ได้ ต่างกันตรงนี้</p><table><thead><tr><th> </th><th>ส่งทีละรายการ</th><th>ส่งทีเดียวตอนปิดรอบ</th></tr></thead><tbody>
+<tr><td>สแกนไปครึ่งทางแล้วแบตหมด</td><td>ของที่นับไปแล้วอยู่บนเซิร์ฟเวอร์</td><td>หายหมด ต้องนับใหม่</td></tr>
+<tr><td>จำนวนคำขอ</td><td>เท่ากับจำนวนรายการ</td><td>สามครั้งต่อรอบ</td></tr>
+<tr><td>ทำงานตอนสัญญาณไม่ดี</td><td>ค้างกลางคันได้ ต้องมีกลไกส่งซ้ำ</td><td>สแกนตอนไม่มีเน็ตก็ได้ ติดแค่ตอนปิดรอบ</td></tr>
+</tbody></table><p>ในคลังที่ Wi-Fi ไม่ทั่วถึง แบบที่สองชนะ และนั่นคือเหตุผลที่ของจริงเลือกแบบนั้น — <strong>สัญญาที่ถูกต้องขึ้นกับหน้างาน ไม่ใช่ขึ้นกับความสวยของ interface</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>interface บอกว่า “ฟีเจอร์นี้ต้องการอะไร” ด้วยคำของงาน</li><li><code>abstract interface class</code> คือสัญญาล้วน ๆ ที่บังคับให้เขียนครบ</li><li>ประโยชน์ได้ทันทีสองข้อ คือมีที่ให้สวมของปลอม และมีที่เดียวที่อ่านแล้วรู้ว่าฟีเจอร์พึ่งอะไร</li><li>อย่าให้ HTTP, BuildContext หรือสถานะ หลุดเข้าไปใน interface</li></ul></div><p><strong>บทหน้า:</strong> เขียนตัวจริงที่ทำตามสัญญานี้</p></section>

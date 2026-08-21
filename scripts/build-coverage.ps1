@@ -89,6 +89,7 @@ function Map-Absolute([string]$path) {
     '^lib/core/connection_probe' { return '20-12' }
     '^lib/features/auth/auth_repository' { return '20-05' }
     '^lib/features/auth/auth_session' { return '20-06' }
+    '^lib/features/auth/pda_access' { return '20-06' }
     '^lib/features/auth/login_screen' { return '20-07' }
     '^lib/features/settings' { return '20-13' }
     '^lib/features/warehouse/warehouse_shell' { return '20-14' }
@@ -115,6 +116,7 @@ function Map-Absolute([string]$path) {
     '^test/connection_profile' { return '20-10' }
     '^test/connection_settings' { return '20-13' }
     '^test/user_menu' { return '20-15' }
+    '^test/pda_access' { return '20-06' }
     '^test/(cycle_count|inventory)' { return '21-15' }
     '^test/(agv|conveyor|picking|withdraw|flow_navigation)' { return '22-17' }
     '^test/' { return '14-17' }

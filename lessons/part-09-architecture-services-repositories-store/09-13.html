@@ -4,18 +4,92 @@
 <title>Error Translation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-13 · Architecture</span><h1>Error Translation</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Translation chain</a></li><li><a href="#section-2">Transport layer</a></li><li><a href="#section-3">Repository layer</a></li><li><a href="#section-4">Store layer</a></li><li><a href="#section-5">UI layer</a></li><li><a href="#section-6">Preserve cause</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Anti-pattern</a></li></ol></nav>
-<div class="note"><strong>Error translation ทีละ boundary:</strong> low-level causeยังอยู่สำหรับ diagnostics แต่แต่ละชั้นเห็นภาษาที่ตัดสินใจได้ ไม่ส่ง SocketExceptionหรือข้อความ .NETดิบถึง widget</div>
-<section id="section-1"><h2>1. Translation chain</h2><pre class="code-vs"><code>SocketException
-  → NetworkFailure(cause)
-  → ReceivingError.offline(retryAllowed: true)
-  → UI: “ติดต่อ WMS ไม่ได้ ตรวจเครือข่าย”</code></pre></section>
-<section id="section-2"><h2>2. Transport layer</h2><p>แปลง timeout/socket/status/ProblemDetails/contract errorเป็น typed infrastructure failuresพร้อม status/code/trace ID โดย redact payload</p></section>
-<section id="section-3"><h2>3. Repository layer</h2><p>แปลง 404เป็น OrderNotFound, 409 codeเป็น AlreadyReceived ฯลฯ เมื่อมี domain meaning; unknown server errorคงเป็น BackendFailureไม่เดาจาก message</p></section>
-<section id="section-4"><h2>4. Store layer</h2><p>ตัดสิน retry, state transitionและ recoverability เช่น conflictอาจ reload authoritative order; unauthorizedส่ง auth effect; contract errorแสดง support trace</p></section>
-<section id="section-5"><h2>5. UI layer</h2><p>localizeข้อความ/ปุ่มตาม typed error ไม่ parse string และไม่แสดง stack trace ให้ operator; loggingทำก่อน localizationเพื่อ aggregateด้วย code</p></section>
-<section id="section-6"><h2>6. Preserve cause</h2><p>ใช้ error objectมี <code>cause</code>/<code>stackTrace</code>/<code>traceId</code> สำหรับ telemetry แต่ equality/testsอิง stable kind/code ไม่อิงข้อความ</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>API 409 code <code>PALLET_ALREADY_ASSIGNED</code> ควรแปลที่ไหน?</p><details><summary>เฉลย</summary><p>ApiClient parse ProblemDetails; ReceivingRepository map codeเป็น domain conflict; Storeเลือก refresh/transition; UIแสดงคำแนะนำ</p></details></section>
-<section id="section-8"><h2>8. Anti-pattern</h2><div class="warn">catchทุกอย่างแล้วคืน empty list/nullทำ errorหายและ UIโกหกว่าไม่มีงาน—unknown failureต้องยังเป็น failure</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ความล้มเหลวเดินทางผ่านสี่ชั้น</a></li><li><a href="#section-2">ทำไมไม่แปลที่ ApiClient</a></li><li><a href="#section-3">ทำไมไม่แปลที่จอ</a></li><li><a href="#section-4">การแปลใน lab</a></li><li><a href="#section-5">สิ่งที่ต้องไม่แปล</a></li><li><a href="#section-6">สามวิธีส่งความล้มเหลวขึ้นไป</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: ไล่เส้นทางของความล้มเหลวหนึ่งครั้งจนถึงตาผู้ใช้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.6, Part 7 (โดยเฉพาะ 7.9 ชนิดความล้มเหลว), 8.2<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตัดสินว่าความล้มเหลวควรถูกแปลที่ชั้นไหน และเลือกวิธีส่งต่อได้อย่างมีเหตุผล</div>
+
+<section id="section-1"><h2>1. ความล้มเหลวเดินทางผ่านสี่ชั้น</h2><pre class="code-vs"><code>เซิร์ฟเวอร์ตอบ 409 พร้อม {"detail": "พาเลทนี้ถูกล็อกโดยสมชายอยู่"}
+   ↓
+ApiClient         → ApiException(kind: conflict, problem: ...)     ภาษาของ HTTP
+   ↓
+Repository        → PalletFailure('พาเลทนี้ถูกล็อกโดยสมชายอยู่')   ภาษาของงาน
+   ↓
+Store             → _failure = failure                              สถานะ
+   ↓
+Widget            → Text(failure.message)                           สิ่งที่ผู้ใช้เห็น</code></pre><p>คำถามหลักของบทนี้คือ <strong>แปลตรงไหน</strong> คำตอบคือชั้นที่สอง และมีเหตุผลชัดเจน</p></section>
+
+<section id="section-2"><h2>2. ทำไมไม่แปลที่ ApiClient</h2><p><code>ApiClient</code> รู้แค่ว่าได้ 409 มา แต่ 409 หมายถึงอะไรขึ้นกับว่ากำลังทำอะไรอยู่</p><table><thead><tr><th>ตอนกำลังทำ</th><th>409 แปลว่า</th></tr></thead><tbody>
+<tr><td>ล็อกพาเลท</td><td>มีคนล็อกไปก่อนแล้ว</td></tr>
+<tr><td>ปิดงานขนย้าย</td><td>งานนี้ถูกปิดไปแล้ว — ซึ่งอาจไม่ใช่ปัญหาเลย (4.13)</td></tr>
+<tr><td>เริ่มรอบนับสต๊อก</td><td>มีรอบนับที่ยังไม่ปิดค้างอยู่</td></tr>
+</tbody></table><p>ชั้นขนส่งไม่รู้บริบทนี้ หน้าที่มันคือแปลง 409 เป็น <code>ApiFailureKind.conflict</code> แล้วส่งต่อพร้อมข้อความที่เซิร์ฟเวอร์ให้มา จบแค่นั้น</p></section>
+
+<section id="section-3"><h2>3. ทำไมไม่แปลที่จอ</h2><p>นี่คือสิ่งที่ <code>pallet_screen_v1.dart</code> ทำ</p><pre class="code-vs"><code>_error = response.statusCode &gt;= 500
+    ? 'เซิร์ฟเวอร์มีปัญหา แจ้งทีมระบบถ้ายังไม่หาย'
+    : 'โหลดข้อมูลไม่สำเร็จ (${response.statusCode})';</code></pre><p>ผลที่ตามมาสามข้อ</p><table><thead><tr><th>ปัญหา</th><th>รูปธรรม</th></tr></thead><tbody>
+<tr><td>ทุกจอแปลไม่เหมือนกัน</td><td>จอหนึ่งบอก “เชื่อมต่อไม่ได้” อีกจอบอก “โหลดข้อมูลไม่สำเร็จ (0)”</td></tr>
+<tr><td>ผู้ใช้เห็นเลข status</td><td>“โหลดข้อมูลไม่สำเร็จ (409)” ไม่ได้บอกว่าต้องทำอะไรต่อ</td></tr>
+<tr><td>ข้อความที่เซิร์ฟเวอร์ตั้งใจส่งมาถูกทิ้ง</td><td>“พาเลทนี้ถูกล็อกโดยสมชายอยู่” หายไป เหลือแค่เลข</td></tr>
+</tbody></table><p>ข้อสุดท้ายเจ็บที่สุด เพราะเซิร์ฟเวอร์เป็นฝ่ายที่รู้เรื่องธุรกิจมากที่สุด</p></section>
+
+<section id="section-4"><h2>4. การแปลใน lab</h2><pre class="code-vs"><code>PalletFailure _translate(ApiException error) =&gt; switch (error.kind) {
+  ApiFailureKind.network =&gt; const PalletFailure(
+    'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสัญญาณแล้วลองใหม่', canRetry: true),
+  ApiFailureKind.timeout =&gt; const PalletFailure(
+    'เซิร์ฟเวอร์ไม่ตอบภายในเวลาที่กำหนด', canRetry: true),
+  ApiFailureKind.server =&gt; const PalletFailure(
+    'เซิร์ฟเวอร์มีปัญหา แจ้งทีมระบบถ้ายังไม่หาย', canRetry: true),
+  ApiFailureKind.notFound =&gt; const PalletFailure('ไม่พบข้อมูลที่ขอ'),
+  // สามชนิดนี้เซิร์ฟเวอร์รู้เรื่องดีกว่าเรา จึงใช้ข้อความของมัน
+  ApiFailureKind.conflict ||
+  ApiFailureKind.validation ||
+  ApiFailureKind.forbidden =&gt; PalletFailure(error.userMessage),
+  ApiFailureKind.unauthorized =&gt; const PalletFailure('เซสชันหมดอายุ'),
+  ApiFailureKind.contract =&gt; PalletFailure(error.userMessage),
+};</code></pre><table><thead><tr><th>สังเกต</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ไม่มี <code>default</code> หรือ <code>_</code></td><td>วันที่เพิ่มชนิดใหม่ คอมไพเลอร์จะฟ้องให้มาตัดสินใจ ไม่ใช่ปล่อยให้ตกไปเป็นข้อความกลาง</td></tr>
+<tr><td><code>canRetry</code> ตัดสินที่นี่</td><td>จอไม่ต้องรู้ว่าชนิดไหนลองใหม่ได้ แค่ดูว่าจะโชว์ปุ่มไหม</td></tr>
+<tr><td>บางชนิดใช้ข้อความของเซิร์ฟเวอร์</td><td>ข้อความที่เจาะจงกว่าย่อมมีประโยชน์กว่า</td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. สิ่งที่ต้อง<strong>ไม่</strong>แปล</h2><pre class="code-vs"><code>final items = requireList(json, 'items');    // อยู่นอก try โดยตั้งใจ</code></pre><p><code>ContractException</code> ไม่ถูกแปลเป็น <code>PalletFailure</code> เพราะมันไม่ใช่ปัญหาที่ผู้ใช้ทำอะไรได้ กดลองใหม่กี่ครั้งเซิร์ฟเวอร์ก็ส่งข้อมูลผิดรูปแบบเดิมกลับมา</p><table><thead><tr><th>ชนิด</th><th>ใครแก้ได้</th><th>ควรทำอย่างไร</th></tr></thead><tbody>
+<tr><td>เน็ตหลุด</td><td>ผู้ใช้</td><td>บอกและให้ลองใหม่</td></tr>
+<tr><td>ล็อกซ้ำ</td><td>ผู้ใช้ (ไปคุยกับสมชาย)</td><td>บอกให้ชัด</td></tr>
+<tr><td>ข้อมูลผิดสัญญา</td><td>ทีมพัฒนา</td><td>ปล่อยให้พังและส่งเข้าระบบเก็บ error</td></tr>
+<tr><td>บั๊กในโค้ดเรา</td><td>ทีมพัฒนา</td><td>ปล่อยให้พัง</td></tr>
+</tbody></table><div class="note">การจับข้อผิดพลาดทุกอย่างแล้วแสดง “เกิดข้อผิดพลาด กรุณาลองใหม่” คือการซ่อนสองแถวล่างไว้ใต้พรม — ผู้ใช้ทำตามที่บอกแล้วไม่ได้ผล และทีมไม่เคยรู้ว่ามีปัญหา</div></section>
+
+<section id="section-6"><h2>6. สามวิธีส่งความล้มเหลวขึ้นไป</h2><table><thead><tr><th> </th><th>โยน exception</th><th><code>ApiResult&lt;T&gt;</code></th><th>sealed class</th></tr></thead><tbody>
+<tr><td>ใช้ที่ไหน</td><td>lab, <code>wms_absolute_mobile</code></td><td><code>wmsapp</code></td><td>lab เฉพาะการเข้าสู่ระบบ (8.2)</td></tr>
+<tr><td>ลืมจัดการได้ไหม</td><td>ได้ แต่แอปจะพังให้เห็น</td><td>ได้ และเงียบ</td><td>ไม่ได้ คอมไพเลอร์บังคับ</td></tr>
+<tr><td>เส้นทางสำเร็จอ่านง่ายไหม</td><td>ง่ายที่สุด ไม่มี if คั่น</td><td>ต้องเช็ค <code>success</code> ก่อนทุกครั้ง</td><td>ต้อง <code>switch</code></td></tr>
+<tr><td>แยกกรณีย่อยได้ไหม</td><td>ได้ผ่าน <code>kind</code></td><td>ได้แค่ผ่านเลข status</td><td>ได้ดีที่สุด</td></tr>
+<tr><td>เขียนยาวไหม</td><td>สั้น</td><td>กลาง</td><td>ยาวที่สุด</td></tr>
+</tbody></table><p>เลือกอย่างไร</p><ul><li><strong>โยน</strong> เมื่อความล้มเหลวส่วนใหญ่จัดการเหมือนกันหมด คือแสดงข้อความแล้วให้ลองใหม่ — ครอบคลุมงานส่วนใหญ่</li><li><strong>sealed class</strong> เมื่อแต่ละกรณีต้องพาผู้ใช้ไปคนละทาง เช่นการเข้าสู่ระบบที่ 401 ให้พิมพ์ใหม่ ส่วน 403 ให้ไปติดต่อหัวหน้า</li><li><strong>ผลลัพธ์แบบกล่อง</strong> เมื่อทีมไม่อยากให้มี exception หลุดขึ้นไปเลย และยอมรับว่าต้องเช็คทุกจุดเรียก</li></ul></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เห็น <code>ContractException ที่ items[3].quantity: ...</code></td><td>เอา <code>toString()</code> ของ exception ไปแสดงตรง ๆ</td><td>แสดงข้อความกลาง แล้วส่งรายละเอียดเข้าระบบเก็บ log</td></tr>
+<tr><td>ทุกความผิดพลาดขึ้นว่า “เกิดข้อผิดพลาด”</td><td><code>catch (e)</code> ครอบทุกอย่าง</td><td>จับเฉพาะชนิดที่จัดการได้จริง</td></tr>
+<tr><td>ปุ่มลองใหม่โผล่ในกรณีที่ลองใหม่ไม่ช่วย</td><td>จอเดา <code>canRetry</code> จากการมี error</td><td>ให้ repository ตัดสินแล้วส่งมา</td></tr>
+<tr><td>ข้อความผิดพลาดค้างอยู่หลังลองใหม่สำเร็จ</td><td>ลืมล้างตอนเริ่มคำขอใหม่</td><td><code>_failure = null</code> ก่อน <code>notifyListeners()</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้กดล็อกพาเลท แล้วเน็ตหลุดระหว่างรอคำตอบ ตอนนี้ไม่มีใครรู้ว่าเซิร์ฟเวอร์ล็อกไปแล้วหรือยัง</p><ol><li><code>_translate</code> ที่มีอยู่จัดการกรณีนี้ถูกไหม</li><li>ควรแก้อย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ไม่ถูก มันแปลเป็น “เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสัญญาณแล้วลองใหม่” พร้อม <code>canRetry: true</code> ซึ่งชวนให้ผู้ใช้กดล็อกซ้ำ ทั้งที่อาจล็อกไปแล้ว</p><p>ข้อมูลที่ต้องใช้มีอยู่แล้วใน <code>ApiException.outcomeUnknown</code> ตั้งแต่ 7.10 แต่ <code>_translate</code> ทิ้งไป</p><p><strong>2.</strong> ส่งต่อขึ้นไปด้วย</p><pre class="code-vs"><code>class PalletFailure implements Exception {
+  const PalletFailure(this.message, {
+    this.canRetry = false,
+    this.outcomeUnknown = false,
+  });
+  ...
+}
+
+ApiFailureKind.network =&gt; PalletFailure(
+  error.outcomeUnknown
+      ? 'การเชื่อมต่อขาดระหว่างส่งคำสั่ง กำลังตรวจสอบสถานะล่าสุด'
+      : 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสัญญาณแล้วลองใหม่',
+  canRetry: !error.outcomeUnknown,
+  outcomeUnknown: error.outcomeUnknown,
+),</code></pre><p>แล้วให้ store โหลดใหม่เพื่อดูความจริง แทนที่จะให้ผู้ใช้เดา — แบบเดียวกับที่ <code>TaskStore.complete</code> ทำใน Part 4</p><p><strong>ประเด็นที่ควรจำ:</strong> โครงที่แยกชั้นไว้ดีแล้วก็ยังทำข้อมูลหล่นได้ ถ้าจุดแปลทิ้งสิ่งที่ชั้นล่างอุตส่าห์หามาให้ — ทุกครั้งที่เขียน <code>_translate</code> ให้ถามว่ากำลังทิ้งอะไรไปบ้าง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>แปลที่ repository เพราะเป็นชั้นแรกที่รู้บริบทของงาน</li><li>ชั้นขนส่งบอกแค่ชนิด จอแค่แสดง ไม่มีใครแปลซ้ำ</li><li>ความล้มเหลวที่ผู้ใช้แก้ไม่ได้ อย่าแปลงให้เป็นข้อความให้ผู้ใช้กดลองใหม่</li><li>เลือกวิธีส่งต่อจากลักษณะของงาน ไม่ใช่จากความชอบ</li></ul></div><p><strong>บทหน้า:</strong> เอาทุกอย่างที่เรียนมาไปจับกับจอ 2,329 บรรทัดของจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

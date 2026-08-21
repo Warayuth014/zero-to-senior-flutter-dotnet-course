@@ -1,25 +1,89 @@
-<div class="note"><strong>Store/ViewModel:</strong> ownerของ screen/feature stateและ actions ใช้ <code>ChangeNotifier</code> เพื่อประกาศการเปลี่ยน แต่ state transitionต้องถูกต้องแม้ไม่มี widget</div>
-<section><h2>1. State object</h2><pre class="code-vs"><code>class ReceivingState {
-  const ReceivingState({this.order, this.loading = false, this.error});
-  final InboundOrder? order;
-  final bool loading;
-  final Failure? error;
-  ReceivingState copyWith(/* fields */) =&gt; /* immutable copy */;
-}</code></pre></section>
-<section><h2>2. Action</h2><pre class="code-vs"><code>Future&lt;void&gt; loadOrder(String code) async {
-  final request = ++_generation;
-  _set(state.copyWith(loading: true, error: null));
-  try {
-    final order = await repository.findOrder(code);
-    if (request != _generation) return;
-    _set(ReceivingState(order: order));
-  } on Failure catch (e) {
-    if (request == _generation) _set(ReceivingState(error: e));
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่าน <code>pallet_store.dart</code> ทั้งไฟล์แล้วเทียบกับ <code>task_store.dart</code></span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.6, Part 4 (โดยเฉพาะ 4.9 กันกดซ้ำ และ 4.10 คำตอบมาช้า)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เขียน store ที่เป็นเจ้าของสถานะของฟีเจอร์ และรู้ว่าอะไรควร/ไม่ควรอยู่ในนั้น</div>
+
+<section><h2>1. store คืออะไร</h2><div class="note"><strong>Store</strong> คือวัตถุที่เก็บสถานะของฟีเจอร์หนึ่ง และประกาศให้คนที่สนใจรู้เมื่อสถานะเปลี่ยน — เป็นคำตอบของคำถามว่า “ตอนนี้เรื่องนี้เป็นอย่างไรอยู่”</div><p>ต่างจาก repository ตรงที่ repository <strong>ไม่จำอะไรเลย</strong> ถามครั้งไหนก็ไปเอาใหม่ ส่วน store <strong>จำ</strong> ว่าเอามาแล้วได้อะไร กำลังโหลดอยู่ไหม และพังตรงไหน</p></section>
+
+<section><h2>2. <code>ChangeNotifier</code> ทำงานอย่างไร</h2><pre class="code-vs"><code>class PalletStore extends ChangeNotifier {
+  List&lt;Pallet&gt; _pallets = const [];
+
+  List&lt;Pallet&gt; get pallets =&gt; List.unmodifiable(_pallets);
+
+  Future&lt;void&gt; load(String zone) async {
+    _loading = true;
+    notifyListeners();      // ← บอกทุกคนที่ฟังอยู่ว่ามีอะไรเปลี่ยน
+    ...
   }
-}</code></pre></section>
-<section><h2>3. Notify once per meaningful transition</h2><p>ใช้ private <code>_set</code> เปลี่ยน state+notify ไม่ expose mutable listให้ widgetแก้ และ batch synchronous mutationsก่อน notifyเพื่อลด intermediate invalid states</p></section>
-<section><h2>4. Lifecycle</h2><p>Storeที่สร้าง Timer/listenerต้อง dispose/cancel; owner route/shellเป็นผู้ disposeตาม lifetime ห้าม singleton storeถือ transient flowตลอดแอปโดยไม่ reset</p></section>
-<section><h2>5. UI effects</h2><p>หลีกเลี่ยง callback <code>onToast</code> ฝังใน Storeถ้าทำให้ test/lifetimeซับซ้อน ใช้ typed effect queue/operation resultหรือ UI map stateเป็น feedbackตาม architectureทีม</p></section>
-<section><h2>6. Selective rebuild</h2><p>แยก storesหรือใช้ selectors/listenableเฉพาะส่วนเมื่อ stateใหญ่ ไม่แก้ performanceด้วยการหยุด notifyจน UI stale</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>load Aแล้ว load B, response Aกลับหลัง B ต้องแสดงอะไร?</p><details><summary>เฉลย</summary><p>แสดง B; generation tokenของ Aไม่ตรงจึง ignore และไม่ overwrite loading/errorของ B</p></details></section>
-<section><h2>8. Store tests</h2><div class="success">assert state sequence loading→ready/error, duplicate guard, stale response, dispose timer และ repository commandโดยไม่ pump widget</div></section>
+}</code></pre><table><thead><tr><th>ส่วน</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>_pallets</code> (มีขีดล่าง)</td><td>ของจริง แก้ได้เฉพาะข้างในคลาส</td></tr>
+<tr><td><code>get pallets</code></td><td>ทางออกให้คนข้างนอกอ่าน</td></tr>
+<tr><td><code>List.unmodifiable</code></td><td>กันไม่ให้จอเผลอ <code>.add()</code> ใส่ลิสต์ตรง ๆ — ถ้าทำได้ store จะไม่รู้ว่ามีการเปลี่ยน แล้วหน้าจอกับความจริงจะไม่ตรงกัน</td></tr>
+<tr><td><code>notifyListeners()</code></td><td>สั่งให้ widget ที่ผูกไว้วาดใหม่</td></tr>
+</tbody></table></section>
+
+<section><h2>3. สถานะแยกเป็นสองกลุ่ม</h2><pre class="code-vs"><code>String _zone = '';
+List&lt;Pallet&gt; _pallets = const [];       // ข้อมูล
+bool _loading = false;                   // สถานะของงาน
+PalletFailure? _failure;                 // สถานะของงาน
+final Set&lt;String&gt; _busyCodes = {};       // สถานะของงาน รายแถว
+int _generation = 0;                     // กลไกภายใน ไม่เปิดให้ใครเห็น</code></pre><p>สังเกตว่า <code>_generation</code> ไม่มี getter — เป็นกลไกภายในล้วน ๆ ที่ไม่มีใครนอกคลาสต้องรู้</p></section>
+
+<section><h2>4. getter ที่คำนวณ ไม่ใช่ field ที่เก็บ</h2><pre class="code-vs"><code>bool get initialLoading =&gt; _loading &amp;&amp; _pallets.isEmpty;
+bool get refreshing =&gt; _loading &amp;&amp; _pallets.isNotEmpty;</code></pre><p>สองอย่างนี้คือสิ่งที่จอต้องรู้ คือ “โชว์วงหมุนเต็มจอ” กับ “โชว์แถบบาง ๆ ข้างบน” แต่ทั้งคู่คำนวณจาก <code>_loading</code> กับจำนวนข้อมูล ไม่ได้เก็บแยก</p><p>ถ้าเก็บเป็น field แยกจะมีสถานะที่เป็นไปไม่ได้เกิดขึ้นได้ทันที เช่น <code>initialLoading == true</code> พร้อมกับ <code>refreshing == true</code> ซึ่งไม่มีความหมาย และวันหนึ่งจะมีบั๊กที่มาจากตรงนี้</p><div class="note"><strong>หลัก:</strong> เก็บให้น้อยที่สุดเท่าที่จำเป็น แล้วคำนวณที่เหลือ — สิ่งที่ไม่ได้เก็บ ไม่มีวันไม่ตรงกัน</div></section>
+
+<section><h2>5. งานที่ store ต้องทำที่ repository ทำแทนไม่ได้</h2><pre class="code-vs"><code>Future&lt;void&gt; load(String zone) async {
+  _zone = zone;
+  final generation = ++_generation;       // จองเลขรุ่นของคำขอนี้
+  _loading = true;
+  _failure = null;
+  notifyListeners();
+
+  try {
+    final result = await repository.fetchInZone(zone);
+    if (generation != _generation) return;   // มีคำขอใหม่แซงไปแล้ว ทิ้งผลนี้
+    _pallets = result;
+  } on PalletFailure catch (failure) {
+    if (generation != _generation) return;
+    _failure = failure;
+  } finally {
+    if (generation == _generation) {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+}</code></pre><p>สามอย่างที่เกิดขึ้นตรงนี้เป็นเรื่องของ “ลำดับเวลาในแอป” ซึ่ง repository ไม่มีทางรู้</p><table><thead><tr><th>บรรทัด</th><th>ป้องกันอะไร</th></tr></thead><tbody>
+<tr><td><code>++_generation</code> แล้วเทียบทีหลัง</td><td>ผู้ใช้กดโหลดใหม่รัว ๆ หรือเปลี่ยนโซนเร็ว ๆ แล้วคำตอบเก่าที่ช้ากลับมาทับคำตอบใหม่ (4.10)</td></tr>
+<tr><td><code>_failure = null</code> ตอนเริ่ม</td><td>ข้อความผิดพลาดเก่าค้างอยู่ทั้งที่กำลังลองใหม่</td></tr>
+<tr><td><code>finally</code> + เช็ค generation</td><td>วงหมุนค้างเมื่อคำขอเก่าจบหลังคำขอใหม่เริ่ม</td></tr>
+</tbody></table><p>เทสต์ที่พิสูจน์ข้อแรกอยู่ใน <code>architecture_test.dart</code> และมันจงใจตอบคำขอที่สองก่อนคำขอแรก</p><pre class="code-vs"><code>final first = store.load('A1');
+final second = store.load('B2');
+
+repository.completeAt(1, [palletB2]);   await second;   // ตอบตัวที่สองก่อน
+repository.completeAt(0, [palletA1]);   await first;    // แล้วค่อยตอบตัวแรก
+
+expect(store.pallets.single.code, 'PLT-B2');   // ของใหม่ต้องชนะ</code></pre></section>
+
+<section><h2>6. กันกดซ้ำรายแถว</h2><pre class="code-vs"><code>Future&lt;void&gt; hold(Pallet pallet) async {
+  if (_busyCodes.contains(pallet.code)) return;   // กดซ้ำระหว่างรอ ไม่ยิงซ้ำ
+  _busyCodes.add(pallet.code);
+  ...
+  } finally {
+    _busyCodes.remove(pallet.code);
+    notifyListeners();
+  }
+}</code></pre><p>ใช้ <code>Set</code> ไม่ใช่ <code>bool</code> ตัวเดียว เพราะผู้ใช้ล็อกพาเลทหลายใบพร้อมกันได้ ถ้าใช้ <code>bool busy</code> ตัวเดียว การล็อกใบหนึ่งจะปิดปุ่มของทุกใบ</p><div class="note">บน PDA ปุ่มโดนกดซ้ำเป็นเรื่องปกติ ไม่ใช่กรณีพิเศษ — หน้าจอไม่ตอบสนองทันทีเพราะเน็ตช้า ผู้ใช้ก็กดอีก</div></section>
+
+<section><h2>7. สิ่งที่ store ทำไม่ได้ และเป็นเรื่องดี</h2><pre class="code-vs"><code>import 'package:flutter/foundation.dart';   // ไม่ใช่ material.dart</code></pre><p>บรรทัดเดียวนี้ทำให้ store</p><ul><li>เปิด dialog เองไม่ได้</li><li>push route เองไม่ได้</li><li>เรียก <code>ScaffoldMessenger</code> เองไม่ได้</li><li>ทดสอบได้โดยไม่ต้องสร้าง widget เลย</li></ul><p><code>wms_absolute_mobile</code> ใช้กฎเดียวกัน เปิด <code>warehouse_store.dart</code> บรรทัดที่ 2 จะเห็น <code>foundation.dart</code> ไม่ใช่ <code>material.dart</code> ทั้งที่ไฟล์ยาว 1,684 บรรทัด</p><p>แล้วเวลามันต้องบอกให้จอโชว์ข้อความล่ะ? ใช้ callback</p><pre class="code-vs"><code>void Function(String msg, {bool err})? onToast;
+void Function(bool ok)? onFlash;</code></pre><p>store บอกว่า “เกิดเรื่องนี้” ส่วนจอเป็นคนตัดสินใจว่าจะแสดงอย่างไร — แนวเดียวกับ <code>onTokenChanged</code> ใน 8.4</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>หน้าจอไม่อัปเดตทั้งที่ข้อมูลเปลี่ยน</td><td>ลืม <code>notifyListeners()</code></td><td>เรียกทุกครั้งที่ค่าที่คนอื่นเห็นเปลี่ยน</td></tr>
+<tr><td>วาดใหม่รัวจนกระตุก</td><td>เรียก <code>notifyListeners()</code> ในลูป</td><td>เปลี่ยนค่าให้เสร็จก่อน แล้วค่อยเรียกครั้งเดียว</td></tr>
+<tr><td>จอแก้ลิสต์ได้เองแล้วสถานะเพี้ยน</td><td>คืน <code>_pallets</code> ตรง ๆ</td><td><code>List.unmodifiable</code></td></tr>
+<tr><td>วงหมุนค้าง</td><td>ไม่ได้ตั้ง <code>_loading = false</code> ใน <code>finally</code></td><td>ใช้ <code>finally</code> เสมอ</td></tr>
+<tr><td><code>A ChangeNotifier was used after being disposed</code></td><td>งาน async จบหลัง store ถูกทิ้ง</td><td>เช็คก่อน notify หรือยกเลิกงานตอน dispose (8.8)</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>หัวหน้าคลังขอให้เพิ่ม “กรองเฉพาะพาเลทที่ยังไม่ถูกล็อก” ด้วยสวิตช์บนหัวจอ</p><ol><li>สถานะของสวิตช์ควรอยู่ที่ไหน — ในจอ หรือใน store</li><li>ลิสต์ที่กรองแล้วควรเป็น field หรือ getter</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ขึ้นกับว่ามันต้องอยู่รอดข้ามอะไรบ้าง ถ้าเปิดจอใหม่แล้วเริ่มใหม่ทุกครั้งก็อยู่ในจอได้ แต่ถ้าอยากให้ค่าคงอยู่ตอนกลับมาจากจออื่น หรืออยากเขียนเทสต์ว่ากรองถูกไหมโดยไม่สร้าง widget ให้อยู่ใน store</p><p>คำแนะนำจริง: เริ่มที่จอ ย้ายเมื่อมีเหตุผลข้อใดข้อหนึ่งข้างบนเกิดขึ้นจริง</p><p><strong>2.</strong> getter เสมอ</p><pre class="code-vs"><code>List&lt;Pallet&gt; get visiblePallets =&gt;
+    _hideHeld ? [for (final p in _pallets) if (!p.onHold) p] : pallets;</code></pre><p>ถ้าเก็บเป็น field จะต้องจำให้ได้ว่าต้องคำนวณใหม่ตอนไหนบ้าง — ตอนโหลดเสร็จ ตอนล็อกสำเร็จ ตอนสลับสวิตช์ และตอนที่ยังนึกไม่ออกในอนาคต ลืมที่เดียวก็เพี้ยน</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>store จำสถานะของฟีเจอร์ ส่วน repository ไม่จำอะไรเลย</li><li>เก็บให้น้อย คำนวณให้มาก — สถานะที่ไม่ได้เก็บไม่มีวันไม่ตรงกัน</li><li>เลขรุ่นของคำขอและ <code>Set</code> ของแถวที่กำลังทำงาน เป็นหน้าที่ของ store</li><li>store ที่ไม่ import <code>material.dart</code> คือ store ที่ทดสอบได้และแยกหน้าที่ชัด</li></ul></div><p><strong>บทหน้า:</strong> ใครเป็นคนประกอบ repository กับ store เข้าด้วยกัน และประกอบที่ไหน</p></section>

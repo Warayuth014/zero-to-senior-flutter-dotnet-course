@@ -1,16 +1,103 @@
-<div class="note"><strong>Feature-first:</strong> เก็บ UI, state, domainและ dataของ workflowเดียวกันใกล้กัน เพื่อลดการเดินข้ามโฟลเดอร์ global screens/services/modelsเมื่อแก้ feature</div>
-<section><h2>1. Example tree</h2><pre class="code-vs"><code>lib/
-  core/                 # api client, auth, config
-  features/receiving/
-    data/               # DTO, remote source, repository impl
-    domain/             # entities, repository contract
-    application/        # store/state/effects
-    presentation/       # screens/widgets
-  features/tasks/...</code></pre></section>
-<section><h2>2. Shared threshold</h2><p>อย่าย้ายของเข้า commonตั้งแต่ใช้ครั้งแรก รอให้มี reuseจริงและ semanticsเดียวกัน เช่น ErrorPanel genericได้ แต่ ReceivingQuantityCardอาจไม่ควร generic</p></section>
-<section><h2>3. Public surface</h2><p>แต่ละ featureมี barrel/public exportsเท่าที่ consumerต้องใช้และเก็บ DTO/helpers private ลด accidental couplingข้าม feature</p></section>
-<section><h2>4. Cross-feature coordination</h2><p>Shell/application coordinatorเรียก narrow interfacesหรือ shared domain events ไม่ให้ ReceivingStore import WarehouseScreen internals</p></section>
-<section><h2>5. ของจริงสองแบบ</h2><p><code>wmsapp</code> แยก top-level screens/services/modelsแล้วมี subfoldersตาม flow; <code>wms_absolute_mobile</code> รวม warehouse featureแต่ APIอยู่ top-level ขั้น refactorคือย้ายทีละ vertical sliceโดยคง importsชั่วคราว</p></section>
-<section><h2>6. Tests colocated conceptually</h2><p>mirror feature treeใน <code>test/features/receiving/...</code> และ fixtureอยู่กับ data tests ทำ ownershipหาได้ง่าย</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p><code>StationInfo</code> ใช้เฉพาะ putaway screenควรอยู่ core/modelsไหม?</p><details><summary>เฉลย</summary><p>อยู่ feature putaway presentation/domainตามความหมาย จนมี consumerอื่นที่ใช้ conceptเดียวกันจริง</p></details></section>
-<section><h2>8. Migration rule</h2><div class="success">ย้ายตาม featureที่กำลังแก้, ใช้ forwarding exportชั่วคราว, testsผ่านทุก stepและไม่ทำ big-bang folder rewrite</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เทียบโครงโฟลเดอร์ของสองโปรเจกต์จริง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.1–9.10<br><strong>จบบทนี้แล้วจะทำได้:</strong> วางโฟลเดอร์ให้คนใหม่หาของเจอ และรู้ว่าเมื่อไหร่ควรย้ายของขึ้นไปเป็นของกลาง</div>
+
+<section><h2>1. สองวิธีจัดโฟลเดอร์</h2><table><thead><tr><th>แบ่งตามชนิดของไฟล์</th><th>แบ่งตามฟีเจอร์</th></tr></thead><tbody>
+<tr><td><pre class="code-vs"><code>lib/
+  models/
+    pallet.dart
+    task.dart
+  repositories/
+    pallet_repository.dart
+    task_repository.dart
+  stores/
+    pallet_store.dart
+    task_store.dart
+  screens/
+    pallet_screen.dart
+    task_screen.dart</code></pre></td><td><pre class="code-vs"><code>lib/
+  features/
+    pallets/
+      pallet.dart
+      pallet_repository.dart
+      pallet_store.dart
+      pallet_screen.dart
+    tasks/
+      task.dart
+      task_repository.dart
+      task_store.dart
+      task_screen.dart</code></pre></td></tr>
+</tbody></table><p>ทั้งสองแบบมีไฟล์เท่ากัน ต่างที่ว่า “ของที่ถูกแก้พร้อมกัน อยู่ใกล้กันไหม”</p></section>
+
+<section><h2>2. บททดสอบ</h2><p>งานจริงที่จะได้รับคือ “เพิ่มช่องหมายเหตุในพาเลท” ลองนับว่าต้องเปิดกี่โฟลเดอร์</p><table><thead><tr><th> </th><th>แบ่งตามชนิด</th><th>แบ่งตามฟีเจอร์</th></tr></thead><tbody>
+<tr><td>โฟลเดอร์ที่ต้องเปิด</td><td>4</td><td>1</td></tr>
+<tr><td>เวลาลบฟีเจอร์ทิ้งทั้งตัว</td><td>ต้องไล่ลบทีละโฟลเดอร์ และมักลืม</td><td>ลบโฟลเดอร์เดียว</td></tr>
+<tr><td>คนใหม่ถามว่า “ฟีเจอร์รับเข้าอยู่ตรงไหน”</td><td>ตอบว่า “กระจายอยู่ทั่ว”</td><td>ตอบว่า <code>features/receiving/</code></td></tr>
+</tbody></table><p>ด้วยเหตุนี้ โปรเจกต์ที่โตเกินสิบจอมักจบที่แบ่งตามฟีเจอร์</p></section>
+
+<section><h2>3. ของกลางอยู่ที่ไหน</h2><p>ของที่ทุกฟีเจอร์ใช้ ไม่ควรอยู่ในฟีเจอร์ใดฟีเจอร์หนึ่ง</p><pre class="code-vs"><code>lib/
+  core/          ← ApiClient, ตัวอ่าน JSON, การตั้งค่า, ภาษา
+  widgets/       ← ปุ่ม การ์ด แถบสถานะ ที่ใช้ซ้ำทุกจอ
+  features/
+    auth/
+    receiving/
+    tasks/</code></pre><div class="note"><strong>กฎ:</strong> ฟีเจอร์ import จาก <code>core</code> ได้ แต่ <code>core</code> ห้าม import จากฟีเจอร์ — ถ้าวันไหน <code>core</code> ต้องรู้จักฟีเจอร์ แปลว่าของชิ้นนั้นไม่ใช่ของกลาง</div><p>คำถามที่ตามมาคือ “ฟีเจอร์ import ข้ามฟีเจอร์ได้ไหม” ตอบว่าได้ แต่ให้รู้ตัว — ทุกลูกศรข้ามฟีเจอร์คือการบอกว่าสองอันนี้ลบทีละอันไม่ได้แล้ว ถ้ามีเยอะจนเป็นใยแมงมุม ให้ยกของที่ใช้ร่วมกันขึ้นไปไว้ <code>core</code></p></section>
+
+<section><h2>4. ของจริง: <code>wms_absolute_mobile</code></h2><pre class="code-vs"><code>lib/
+  api/                          ← repository ทั้งหมดรวมกัน
+    tasks_api.dart
+    receiving_api.dart
+    inventory_api.dart
+    cycle_count_api.dart
+  core/
+    api_client.dart
+    connection_profile.dart
+    app_language.dart
+  features/
+    auth/
+    settings/
+    warehouse/
+      warehouse_store.dart
+      warehouse_shell.dart
+      models/
+      screens/
+      ui/
+  widgets/</code></pre><p>เป็นแบบผสม — แบ่งตามฟีเจอร์เป็นหลัก แต่ยก repository ทั้งหมดออกมาไว้ <code>api/</code> ด้วยกัน</p><table><thead><tr><th>ผลที่ได้</th><th>ผลที่เสีย</th></tr></thead><tbody>
+<tr><td>เปิด <code>api/</code> เห็นสัญญากับหลังบ้านทั้งหมดในที่เดียว</td><td>เพิ่มฟิลด์หนึ่งช่องต้องเปิดสองโฟลเดอร์</td></tr>
+<tr><td>รู้ทันทีว่าแอปคุยกับ endpoint กี่กลุ่ม</td><td><code>api/tasks_api.dart</code> ต้อง import โมเดลจาก <code>features/warehouse/models/</code> — ลูกศรชี้ย้อนเข้าไปในฟีเจอร์</td></tr>
+</tbody></table><p>แถวสุดท้ายดูได้จากหัวไฟล์จริง</p><pre class="code-vs"><code>import '../features/warehouse/models/task_models.dart'
+    show EventView, CompletedPickHistory, CompletedTaskHistory, WmsTask;</code></pre><p>ไม่ผิด เพราะโมเดลไม่ได้เป็นของกลางจริง ๆ มันเป็นของฟีเจอร์คลัง แต่แปลว่า <code>api/</code> กับ <code>features/warehouse/</code> แยกจากกันไม่ได้จริง — เป็นฟีเจอร์เดียวกันที่วางไว้สองที่</p></section>
+
+<section><h2>5. ของจริง: <code>wmsapp</code></h2><pre class="code-vs"><code>lib/
+  models/        ← แบ่งตามชนิด แต่ข้างในแบ่งตามฟีเจอร์อีกชั้น
+    receiving/
+    picking/
+    packing/
+  screens/
+    receiving/
+    picking/
+    packing/
+  services/
+  widgets/
+  theme/</code></pre><p>ชั้นนอกแบ่งตามชนิด ชั้นในแบ่งตามฟีเจอร์ ผลคือฟีเจอร์ picking กระจายอยู่สามที่ คือ <code>models/picking/</code>, <code>screens/picking/</code> และ <code>services/api/picking_api.dart</code></p><p>ข้อดีที่ได้จริงคือหาไฟล์ตามชนิดง่าย ถ้ารู้อยู่แล้วว่าจะแก้อะไร ข้อเสียคือคนใหม่ที่ได้โจทย์ว่า “ไปดูฟีเจอร์ picking” ต้องเปิดสามที่ก่อนจะเห็นภาพ</p></section>
+
+<section><h2>6. โครงที่แนะนำสำหรับโปรเจกต์ใหม่</h2><pre class="code-vs"><code>lib/
+  core/
+    api/           ApiClient, ชนิดความล้มเหลว, การ log
+    json/          ตัวอ่านค่ากลาง
+    config/        การตั้งค่า, เซิร์ฟเวอร์
+  features/
+    &lt;feature&gt;/
+      &lt;feature&gt;.dart              โมเดล
+      &lt;feature&gt;_repository.dart   สัญญา + ตัวจริง
+      &lt;feature&gt;_store.dart        สถานะ
+      &lt;feature&gt;_screen.dart       จอหลัก
+      widgets/                    ชิ้นส่วนที่ใช้เฉพาะฟีเจอร์นี้
+  widgets/                        ชิ้นส่วนที่ใช้ทุกฟีเจอร์
+  main.dart                       จุดประกอบ</code></pre><p>สอง<strong>ไม่</strong>ที่สำคัญกว่ารายละเอียดโครง</p><ul><li>อย่าสร้างโฟลเดอร์ล่วงหน้าให้ฟีเจอร์ที่ยังไม่มี</li><li>อย่ายกของขึ้นไป <code>widgets/</code> ตั้งแต่มีคนใช้คนเดียว — รอให้มีคนใช้ที่สองก่อน</li></ul></section>
+
+<section><h2>7. แบบฝึกหัด</h2><p>ฟีเจอร์ “รับเข้า” กับ “นับสต๊อก” ต่างก็ต้องใช้ widget ช่องสแกนบาร์โค้ดที่มีปุ่มล้างและเสียงบี๊บ ตอนนี้แต่ละฟีเจอร์เขียนของตัวเอง</p><ol><li>ควรยกขึ้นไปไว้ <code>widgets/</code> ไหม</li><li>ถ้าฟีเจอร์รับเข้าต้องการให้ช่องสแกนโชว์จำนวนที่รับไปแล้วด้วย ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ควร เพราะมีผู้ใช้สองรายแล้ว และพฤติกรรมของช่องสแกน (โฟกัสกลับอัตโนมัติ ล้างหลังสแกน กันสแกนซ้ำ) เป็นเรื่องของอุปกรณ์ ไม่ใช่ของงานรับเข้าหรืองานนับ</p><p><strong>2.</strong> <strong>อย่าใส่ตรรกะของงานรับเข้าเข้าไปใน widget กลาง</strong> ให้เปิดช่องรับเข้ามาแทน</p><pre class="code-vs"><code>ScanField(
+  onScan: store.scanPart,
+  trailing: Text('รับแล้ว ${store.receivedCount}'),   // ฟีเจอร์ส่งของตัวเองเข้าไป
+)</code></pre><p>สัญญาณอันตรายคือถ้าเริ่มเขียน <code>if (mode == 'receiving')</code> ใน widget กลาง — แปลว่าของกลางเริ่มรู้จักฟีเจอร์แล้ว ซึ่งเป็นการละเมิดกฎใน §3 และจะจบที่ widget เดียวที่มี <code>if</code> ของทุกฟีเจอร์อยู่ข้างใน</p></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li>แบ่งตามฟีเจอร์ทำให้ของที่แก้พร้อมกันอยู่ใกล้กัน</li><li>ฟีเจอร์ใช้ของกลางได้ ของกลางห้ามรู้จักฟีเจอร์</li><li>ยกของขึ้นเป็นของกลางเมื่อมีผู้ใช้รายที่สอง ไม่ใช่ตอนเขียนรายแรก</li><li>โครงจริงมักเป็นแบบผสม และรอยต่อของแบบผสมจะเห็นได้จากบรรทัด import</li></ul></div><p><strong>บทหน้า:</strong> มีชั้นที่ห้าที่บางโปรเจกต์เพิ่มเข้ามา ควรเพิ่มเมื่อไหร่</p></section>

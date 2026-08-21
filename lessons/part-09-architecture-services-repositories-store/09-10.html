@@ -4,20 +4,71 @@
 <title>Unidirectional Data Flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-10 · Architecture</span><h1>Unidirectional Data Flow</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Flow</a></li><li><a href="#section-2">Intent not mutation</a></li><li><a href="#section-3">State machine</a></li><li><a href="#section-4">Async sequence</a></li><li><a href="#section-5">One-shot effects</a></li><li><a href="#section-6">Debuggability</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">Test style</a></li></ol></nav>
-<div class="note"><strong>Unidirectional data flow:</strong> UI ส่ง intentลงไป, actionเรียก dependency, resultเปลี่ยน state, UIอ่าน stateกลับมาเป็นวงเดียวที่ตามและทดสอบได้</div>
-<section id="section-1"><h2>1. Flow</h2><pre class="code-vs"><code>User event → Store action → Repository → Result
-     UI ← render(state) ← New immutable state</code></pre></section>
-<section id="section-2"><h2>2. Intent not mutation</h2><p>ใช้ <code>store.confirmQuantity(value)</code> แทน <code>store.qty = value; store.step++</code> ใน widget เพื่อให้ Storeตรวจ invariantและ transition atomically</p></section>
-<section id="section-3"><h2>3. State machine</h2><pre class="code-vs"><code>sealed class ReceiveState {}
-class AwaitingPallet extends ReceiveState {}
-class AwaitingPart extends ReceiveState { /* pallet */ }
-class Confirming extends ReceiveState { /* draft */ }
-class Submitted extends ReceiveState { /* receipt */ }</code></pre><p>ลด boolean combinationsที่เป็นไปไม่ได้</p></section>
-<section id="section-4"><h2>4. Async sequence</h2><p>Actionประกาศ loadingก่อน await แล้ว success/failureหลัง awaitโดยมี generation/idempotency guard UIไม่ต้องเดาว่า requestกำลังวิ่งจาก local variable</p></section>
-<section id="section-5"><h2>5. One-shot effects</h2><p>navigation/toast/hapticอาจเป็น typed effectที่ UI consumeครั้งเดียว แยกจาก persistent state เพื่อ rebuildไม่ replay effect</p></section>
-<section id="section-6"><h2>6. Debuggability</h2><p>log action name + previous state type + next state type + elapsedโดยไม่ log secret/payload ทำ timelineว่า flowพังที่ transitionใด</p></section>
-<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>Scanner callbackเรียก APIแล้ว Navigator.popเองมีปัญหาอะไร?</p><details><summary>เฉลย</summary><p>callbackผูก transport/navigationและ raceง่าย ให้ส่ง scan intent→Store state/effect→UI navigateเมื่อ transitionสำเร็จและ mounted</p></details></section>
-<section id="section-8"><h2>8. Test style</h2><div class="success">Given initial state + fake repository, When action, Then assert ordered states/effectsและ exact command—ไม่ต้อง inspect private widgets</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">หลัก</a></li><li><a href="#section-2">ไล่จริงทีละขั้น</a></li><li><a href="#section-3">ทำไมห้ามลัด</a></li><li><a href="#section-4">สิ่งที่บังคับให้ไหลทางเดียว</a></li><li><a href="#section-5">เมื่อ store ต้องบอกจอให้ทำอะไร</a></li><li><a href="#section-6">ตรวจว่าไหลทางเดียวจริงไหม</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: ไล่เส้นทางของการกดปุ่มหนึ่งครั้ง</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.9<br><strong>จบบทนี้แล้วจะทำได้:</strong> ไล่ตามได้ว่าการกดปุ่มหนึ่งครั้งทำให้เกิดอะไรตามลำดับไหน และรู้ว่าอะไรที่ทำให้ไล่ไม่ได้</div>
+
+<section id="section-1"><h2>1. หลัก</h2><div class="note"><strong>Unidirectional data flow:</strong> เหตุการณ์ไหลขึ้น ข้อมูลไหลลง และไม่มีทางลัด</div><pre class="code-vs"><code>            ผู้ใช้กดปุ่ม
+                 │  เหตุการณ์ไหลขึ้น
+                 ▼
+  Widget ──────────────────▶ Store ──────▶ Repository ──▶ เซิร์ฟเวอร์
+    ▲                          │
+    │  ข้อมูลไหลลง             │ เปลี่ยนสถานะ
+    └──────────────────────────┘  notifyListeners()</code></pre><p>จอไม่เคยเปลี่ยนสถานะเอง มันแค่บอกว่ามีอะไรเกิดขึ้น แล้วรอดูว่า store จะบอกอะไรกลับมา</p></section>
+
+<section id="section-2"><h2>2. ไล่จริงทีละขั้น</h2><p>ผู้ใช้กดปุ่ม “ล็อก” ที่แถว PLT-001</p><table><thead><tr><th>ขั้น</th><th>ที่ไหน</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td><code>pallet_screen_v2.dart</code></td><td><code>onPressed: () =&gt; store.hold(pallet)</code></td></tr>
+<tr><td>2</td><td><code>pallet_store.dart</code></td><td>เช็คว่ากำลังทำอยู่ไหม, เพิ่มลง <code>_busyCodes</code>, <code>notifyListeners()</code></td></tr>
+<tr><td>3</td><td>Flutter</td><td><code>ListenableBuilder</code> วาดใหม่ ปุ่มกลายเป็นจาง กดไม่ได้</td></tr>
+<tr><td>4</td><td><code>pallet_repository.dart</code></td><td>POST พร้อม <code>Idempotency-Key</code></td></tr>
+<tr><td>5</td><td>เซิร์ฟเวอร์</td><td>ล็อกจริง ตอบพาเลทที่อัปเดตแล้ว</td></tr>
+<tr><td>6</td><td><code>pallet_repository.dart</code></td><td>แปลง JSON เป็น <code>Pallet</code></td></tr>
+<tr><td>7</td><td><code>pallet_store.dart</code></td><td>แทนที่แถวนั้นในลิสต์, เอาออกจาก <code>_busyCodes</code>, <code>notifyListeners()</code></td></tr>
+<tr><td>8</td><td>Flutter</td><td>วาดใหม่ แถวนั้นกลายเป็น “ล็อกแล้ว”</td></tr>
+</tbody></table><p>สังเกตว่าขั้นที่ 3 กับ 8 คือการวาดใหม่ทั้งคู่ และในทั้งสองครั้ง <strong>จอวาดจากสิ่งที่ store บอก ไม่ได้จำว่าตัวเองเพิ่งทำอะไรไป</strong></p></section>
+
+<section id="section-3"><h2>3. ทำไมห้ามลัด</h2><p>ทางลัดที่คนอยากทำที่สุดคือให้จอเปลี่ยนค่าเองเลยหลังกด เพื่อให้ตอบสนองเร็ว</p><pre class="code-vs"><code>// อย่าเขียนแบบนี้
+onPressed: () {
+  setState(() =&gt; pallet.onHold = true);   // เปลี่ยนเองเลย
+  store.hold(pallet);                      // แล้วค่อยบอก store
+}</code></pre><p>ปัญหาโผล่ตอนคำสั่งล้มเหลว — จอบอกว่าล็อกแล้ว เซิร์ฟเวอร์บอกว่าไม่ได้ล็อก และไม่มีใครแก้จอกลับ ผู้ใช้เดินไปหยิบพาเลทที่คิดว่าล็อกไว้แล้ว เจอว่ามีคนอื่นเอาไปแล้ว</p><div class="note">ในงานคลัง หน้าจอที่ตอบสนองเร็วแต่โกหก แย่กว่าหน้าจอที่ช้าแต่จริง</div><p>ถ้าอยากได้ทั้งเร็วและถูก ต้องทำแบบที่เรียกว่า optimistic update ซึ่ง<strong>ต้องมีการย้อนกลับ</strong>เมื่อล้มเหลว และการย้อนกลับนั้นต้องอยู่ใน store ไม่ใช่ในจอ</p></section>
+
+<section id="section-4"><h2>4. สิ่งที่บังคับให้ไหลทางเดียว</h2><table><thead><tr><th>กฎ</th><th>บังคับด้วยอะไร</th></tr></thead><tbody>
+<tr><td>store เปิด dialog เองไม่ได้</td><td>ไม่ import <code>material.dart</code></td></tr>
+<tr><td>จอแก้ลิสต์ของ store ไม่ได้</td><td><code>List.unmodifiable</code></td></tr>
+<tr><td>โมเดลถูกแก้กลางทางไม่ได้</td><td>ฟิลด์เป็น <code>final</code> ทั้งหมด ใช้ <code>copyWith</code> แทน</td></tr>
+<tr><td>repository จำสถานะไม่ได้</td><td>ประกาศเป็น <code>const</code> constructor ไม่มี field ที่เปลี่ยนได้</td></tr>
+</tbody></table><p>ทั้งสี่ข้อไม่ใช่ข้อตกลงในเอกสาร แต่เป็นสิ่งที่คอมไพเลอร์บังคับ — <strong>กฎที่คอมไพเลอร์บังคับไม่ได้ คือกฎที่จะถูกละเมิดในวันที่รีบ</strong></p></section>
+
+<section id="section-5"><h2>5. เมื่อ store ต้องบอกจอให้ทำอะไร</h2><p>บางเรื่องจอต้องทำจริง ๆ เช่นแสดงข้อความ สั่นเครื่อง หรือเล่นเสียง store สั่งเองไม่ได้ จึงต้องมีทางบอก สองแบบที่ใช้กันคือ</p><table><thead><tr><th>แบบ</th><th>หน้าตา</th><th>เหมาะกับ</th></tr></thead><tbody>
+<tr><td>สถานะที่จออ่าน</td><td><code>String? actionMessage</code> ใน store</td><td>ข้อความที่ค้างอยู่ได้ เช่น แถบผิดพลาด</td></tr>
+<tr><td>callback</td><td><code>void Function(String msg)? onToast</code></td><td>เหตุการณ์ที่เกิดครั้งเดียว เช่น toast, เสียงบี๊บ</td></tr>
+</tbody></table><p>เลือกผิดแล้วจะเจออาการคลาสสิก คือ toast เด้งซ้ำทุกครั้งที่จอวาดใหม่ เพราะเอาเหตุการณ์ไปเก็บเป็นสถานะแล้วลืมล้าง</p><pre class="code-vs"><code>// wms_absolute_mobile เลือกแบบ callback สำหรับเหตุการณ์ครั้งเดียว
+void Function(String msg, {bool err})? onToast;
+void Function(bool ok)? onFlash;</code></pre></section>
+
+<section id="section-6"><h2>6. ตรวจว่าไหลทางเดียวจริงไหม</h2><p>สามคำถามที่ตอบได้เร็ว</p><ol><li>ใน widget มี <code>setState</code> ที่แก้ข้อมูลของงาน (ไม่ใช่ของหน้าจอ) ไหม</li><li>ใน store มี <code>import 'package:flutter/material.dart'</code> ไหม</li><li>มีที่ไหนที่แก้ค่าในโมเดลโดยตรงไหม เช่น <code>pallet.onHold = true</code></li></ol><p>ถ้าตอบว่ามีข้อใดข้อหนึ่ง แปลว่ามีทางลัดอยู่ ให้ตามไปดูว่ามันแก้ปัญหาอะไร แล้วหาทางแก้ปัญหานั้นโดยไม่ลัด</p></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้บ่นว่ากดปุ่มล็อกแล้วต้องรอสองวินาทีกว่าแถวจะเปลี่ยน อยากให้เปลี่ยนทันที ออกแบบวิธีที่ทั้งเร็วและไม่โกหก</p><details><summary>แนวคำตอบ</summary><p>ทำ optimistic update ใน store โดยเก็บค่าเดิมไว้ก่อน</p><pre class="code-vs"><code>Future&lt;void&gt; hold(Pallet pallet) async {
+  if (_busyCodes.contains(pallet.code)) return;
+  _busyCodes.add(pallet.code);
+
+  final previous = _pallets;                    // เก็บของเดิมไว้ทั้งลิสต์
+  _replace(pallet.copyWith(onHold: true));      // เปลี่ยนให้เห็นทันที
+  notifyListeners();
+
+  try {
+    final updated = await repository.hold(pallet.code, commandId: ...);
+    _replace(updated);                          // ยึดของจริงจากเซิร์ฟเวอร์
+  } on PalletFailure catch (failure) {
+    _pallets = previous;                        // ล้มเหลว ย้อนกลับ
+    _failure = failure;
+  } finally {
+    _busyCodes.remove(pallet.code);
+    notifyListeners();
+  }
+}</code></pre><p>สามจุดที่ต้องคิดต่อ</p><ul><li>ยังไหลทางเดียวอยู่ เพราะการเปลี่ยนและการย้อนกลับอยู่ใน store ทั้งคู่ จอไม่รู้เรื่องเลย</li><li><strong>ห้ามทำกับ <code>PalletFailure</code> ที่ไม่รู้ผล</strong> — ถ้า POST timeout เราไม่รู้ว่าเซิร์ฟเวอร์ล็อกไปแล้วหรือยัง (7.10) ย้อนกลับก็ผิด ไม่ย้อนก็ผิด ทางที่ถูกคือโหลดใหม่แล้วดูของจริง</li><li>ต้องเก็บทั้งลิสต์ ไม่ใช่เก็บแค่ <code>bool</code> เดิมของแถวนั้น เพราะระหว่างรออาจมีการโหลดใหม่ที่เปลี่ยนลิสต์ทั้งชุด</li></ul><p>ข้อสองคือเหตุผลที่ optimistic update ไม่ควรใส่ทุกที่ — มันเหมาะกับงานที่ล้มเหลวแล้วไม่เสียหาย เช่นกดถูกใจ ไม่ใช่งานที่ผลกระทบเป็นของจริงในคลัง</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>เหตุการณ์ขึ้น ข้อมูลลง จอไม่เปลี่ยนสถานะของงานเอง</li><li>ทางลัดที่ทำให้เร็วขึ้น แลกมาด้วยหน้าจอที่อาจโกหก</li><li>กฎที่คอมไพเลอร์บังคับได้ ดีกว่ากฎที่เขียนไว้ในเอกสาร</li><li>เหตุการณ์ครั้งเดียวใช้ callback สถานะที่ค้างอยู่ได้ใช้ field</li></ul></div><p><strong>บทหน้า:</strong> ไฟล์ทั้งหมดนี้ควรวางในโฟลเดอร์อย่างไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

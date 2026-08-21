@@ -1,21 +1,86 @@
-<div class="note"><strong>สามชั้นที่ใช้จริง:</strong> UI แสดง state/ส่ง intent, logic คุม workflow, data layer อ่านเขียนข้อมูลและแปลง contract</div>
-<section><h2>1. UI layer</h2><p>Widget อ่าน immutable ViewState, เรียก action เช่น <code>store.scan(code)</code>, จัด focus/navigation/dialog ตาม effect และไม่รู้ endpoint/JSON</p></section>
-<section><h2>2. Logic layer</h2><p>Store/ViewModel ตรวจ transition, loading/duplicate/race, เรียก repository และสร้าง state ใหม่ โดยไม่สร้าง Widget หรือใช้ ScaffoldMessenger โดยตรง</p></section>
-<section><h2>3. Data layer</h2><p>Repository/DataSource กำหนด URI, request DTO, decode response, cache/remote policy และ translate transport errors ให้ logic layer เข้าใจ</p></section>
-<section><h2>4. Example</h2><pre class="code-vs"><code>// UI
-onSubmitted: store.submitBarcode
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่านไฟล์ lab แล้วชี้ว่าแต่ละบรรทัดอยู่ชั้นไหน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.1<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอเดียวที่ทำทุกอย่าง แล้วบอกได้ว่าบรรทัดไหนควรย้ายไปไหน และย้ายแล้วได้อะไร</div>
 
-// Logic
-Future&lt;void&gt; submitBarcode(String raw) async {
-  state = state.loading();
-  final item = await repository.validateBarcode(raw.trim());
-  state = state.ready(item);
-}
+<section><h2>1. ของจริงที่จะใช้ทั้ง Part</h2><p>Part นี้มีไฟล์ตัวอย่างที่รันได้จริงและมีเทสต์คุมอยู่ อยู่ที่ <code>labs/flutter_wms_companion/lib/architecture_lab/</code></p><table><thead><tr><th>ไฟล์</th><th>คืออะไร</th></tr></thead><tbody>
+<tr><td><code>pallet_screen_v1.dart</code></td><td>จอค้นพาเลทในโซน เขียนรวมทุกอย่างไว้ในจอเดียว</td></tr>
+<tr><td><code>pallet.dart</code></td><td>โมเดล</td></tr>
+<tr><td><code>pallet_failure.dart</code></td><td>ความล้มเหลวในภาษาของงาน</td></tr>
+<tr><td><code>pallet_repository.dart</code></td><td>สัญญา + ตัวจริงที่คุยกับ .NET</td></tr>
+<tr><td><code>pallet_store.dart</code></td><td>เจ้าของสถานะ</td></tr>
+<tr><td><code>pallet_screen_v2.dart</code></td><td>จอเดียวกัน หลังแยกชั้น</td></tr>
+</tbody></table><p>ทั้งสองรุ่นทำงานเหมือนกันทุกประการในสายตาผู้ใช้ และ <code>test/architecture_test.dart</code> พิสูจน์ข้อนี้ด้วยเทสต์ชุดเดียวกันที่รันกับทั้งสองรุ่น</p><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter test --no-pub test/architecture_test.dart</code></pre></section>
 
-// Data
-Future&lt;Item&gt; validateBarcode(String code) async =&gt;
-  ItemDto.fromJson(await api.get('/items/$code')).toDomain();</code></pre></section>
-<section><h2>5. Effects ไม่ใช่ state ทุกอย่าง</h2><p>toast/navigation แบบ one-shot ใช้ effect channel/callbackที่ typed หรือให้ UI ตอบสนองต่อ action result อย่าเก็บ bool <code>showSuccess</code> ค้างจน rebuild ซ้ำ</p></section>
-<section><h2>6. Rule of dependencies</h2><p>UI import logic/models; logic import repository interface/domain; infrastructure implement interfaceและ import HTTP DTO หลีกเลี่ยง circular importด้วย ownership ที่ชัด</p></section>
-<section><h2>7. แบบฝึกหัด</h2><p>ปัจจุบัน screen มี try/catch SocketException แล้ว set error string ควรย้ายอะไร?</p><details><summary>เฉลย</summary><p>Data layer แปลง SocketException เป็น NetworkFailure; logic map เป็น error state; UI render message/retry action</p></details></section>
-<section><h2>8. Review checklist</h2><div class="success">เปลี่ยน widget testโดย fake store, เปลี่ยน APIโดย repository test, และทดสอบ workflowโดย fake repositoryได้อย่างอิสระ</div></section>
+<section><h2>2. สามชั้นที่ต้องแยกให้ออก</h2><table><thead><tr><th>ชั้น</th><th>ตอบคำถามว่า</th><th>ห้ามรู้เรื่อง</th></tr></thead><tbody>
+<tr><td>UI</td><td>สิ่งที่มีอยู่ตอนนี้ หน้าตาเป็นอย่างไร</td><td>HTTP, JSON, ชื่อฟิลด์ของเซิร์ฟเวอร์</td></tr>
+<tr><td>Logic</td><td>เมื่อผู้ใช้ทำแบบนี้ ต้องเกิดอะไรตามลำดับไหน</td><td>ปุ่มอยู่ตรงไหน สีอะไร</td></tr>
+<tr><td>Data</td><td>ข้อมูลมาจากไหน หน้าตาตอนอยู่บนสายเป็นอย่างไร</td><td>ใครจะเอาไปแสดง</td></tr>
+</tbody></table></section>
+
+<section><h2>3. เปิด <code>pallet_screen_v1.dart</code> แล้วชี้ทีละส่วน</h2><p>ไฟล์นี้ยาวประมาณ 220 บรรทัด อ่านจากบนลงล่างรู้เรื่องหมด นั่นคือข้อดีของมัน ลองดูว่าข้างในมีอะไรปนกันบ้าง</p><pre class="code-vs"><code>class _PalletScreenV1State extends State&lt;PalletScreenV1&gt; {
+  bool _loading = false;                        // Logic — สถานะของงาน
+  String? _error;                               // Logic
+  bool _canRetry = false;                       // Logic
+  List&lt;Map&lt;String, dynamic&gt;&gt; _pallets = const []; // Data — ยังเป็น JSON ดิบ!
+  final Set&lt;String&gt; _busyCodes = {};             // Logic
+
+  static const String _baseUrl = 'http://localhost:5000';  // Infrastructure</code></pre><p>สังเกต <code>List&lt;Map&lt;String, dynamic&gt;&gt;</code> — จอนี้เก็บ JSON ดิบไว้ตรง ๆ แปลว่าเวลาวาด ต้องเขียน <code>pallet['code'] as String</code> ในส่วนที่วาด UI ซึ่งแปลว่า <strong>ถ้าเซิร์ฟเวอร์เปลี่ยนชื่อฟิลด์ ต้องไปแก้ในโค้ดวาดหน้าจอ</strong> — ตกบททดสอบข้อแรกใน 9.1 ทันที</p></section>
+
+<section><h2>4. สามอย่างที่ปนกันในเมธอดเดียว</h2><pre class="code-vs"><code>Future&lt;void&gt; _load() async {
+  setState(() { _loading = true; _error = null; });          // (1) UI state
+
+  try {
+    final response = await widget.client.get(...)             // (3) Data
+        .timeout(const Duration(seconds: 15));
+
+    if (response.statusCode &gt;= 400) {
+      setState(() {
+        _error = response.statusCode &gt;= 500                   // (2) แปลความหมาย
+            ? 'เซิร์ฟเวอร์มีปัญหา แจ้งทีมระบบถ้ายังไม่หาย'
+            : 'โหลดข้อมูลไม่สำเร็จ (${response.statusCode})';
+        _canRetry = response.statusCode &gt;= 500;
+        _loading = false;
+      });
+      return;
+    }
+
+    final json = jsonDecode(response.body) as Map&lt;String, dynamic&gt;;  // (3)
+    final items = (json['items'] as List&lt;dynamic&gt;)
+        .cast&lt;Map&lt;String, dynamic&gt;&gt;().toList(growable: false);
+    ...</code></pre><p>เมธอดเดียวทำสามเรื่อง และแต่ละเรื่องเปลี่ยนด้วยเหตุผลคนละอย่างตามตารางใน 9.1 §3</p></section>
+
+<section><h2>5. อาการที่มองไม่เห็นจากการอ่าน</h2><p>ในบล็อกข้างบนมีคอมเมนต์บรรทัดหนึ่งที่ต้องอ่านให้ดี</p><pre class="code-vs"><code>// ไม่มีการเช็คว่าคำขอนี้ยังใหม่อยู่ไหม — กด "โหลดใหม่" รัว ๆ แล้ว
+// คำตอบของคำขอเก่าที่กลับมาช้าจะทับคำตอบใหม่ได้ (4.10)
+if (!mounted) return;
+setState(() { _pallets = items; _loading = false; });</code></pre><p>Part 4 สอนวิธีแก้ไปแล้ว คือใช้เลขรุ่นของคำขอ คำถามคือ <strong>ทำไมรุ่นนี้ถึงลืม</strong> คำตอบไม่ใช่เพราะคนเขียนไม่รู้ แต่เพราะเทสต์ที่จะจับเรื่องนี้ต้องคุมจังหวะการตอบของเซิร์ฟเวอร์ให้ได้ ซึ่งในรุ่นนี้ทำได้ทางเดียวคือผ่าน <code>MockClient</code> พร้อมกับต้องสร้าง widget ทั้งจอขึ้นมา — แพงพอที่คนส่วนใหญ่จะไม่เขียน</p><div class="note"><strong>หลักที่ใช้ได้ทั่วไป:</strong> โค้ดที่ทดสอบยาก มักจะไม่ถูกทดสอบ และโค้ดที่ไม่ถูกทดสอบ มักจะมีบั๊กที่รู้วิธีแก้อยู่แล้ว</div></section>
+
+<section><h2>6. หลังแยกชั้น: บรรทัดเดียวกันไปอยู่ที่ไหน</h2><table><thead><tr><th>ใน v1</th><th>ย้ายไปอยู่</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>_baseUrl</code>, <code>timeout</code>, headers</td><td><code>core/api_client.dart</code></td><td>ทุกจอใช้เหมือนกัน</td></tr>
+<tr><td><code>jsonDecode</code> + อ่านฟิลด์</td><td><code>pallet_repository.dart</code></td><td>เปลี่ยนตามสัญญากับเซิร์ฟเวอร์</td></tr>
+<tr><td>แปลเลข status เป็นข้อความ</td><td><code>pallet_repository.dart</code></td><td>ต้องแปลเหมือนกันทุกจอ</td></tr>
+<tr><td><code>_loading</code>, <code>_error</code>, <code>_busyCodes</code></td><td><code>pallet_store.dart</code></td><td>เป็นสถานะของงาน ไม่ใช่ของหน้าจอ</td></tr>
+<tr><td><code>Map&lt;String, dynamic&gt;</code></td><td>กลายเป็น <code>Pallet</code></td><td>UI ควรเห็นคำศัพท์ของงาน</td></tr>
+<tr><td><code>ListTile</code>, <code>Column</code>, ปุ่ม</td><td><code>pallet_screen_v2.dart</code></td><td>อยู่ที่เดิม เพราะเป็นเรื่องของหน้าจอจริง ๆ</td></tr>
+</tbody></table></section>
+
+<section><h2>7. ผลลัพธ์ที่วัดได้</h2><p>เทสต์ใน <code>architecture_test.dart</code> แบ่งเป็นสองส่วน ส่วนแรกเจ็ดข้อรันกับทั้งสองรุ่นด้วยโค้ดชุดเดียวกัน</p><pre class="code-vs"><code>group('พฤติกรรมเดียวกัน · รุ่นรวมทุกอย่างไว้ในจอ', () {
+  runSharedBehaviourTests((client) =&gt; PalletScreenV1(client: client, zone: 'A1'));
+});
+
+group('พฤติกรรมเดียวกัน · รุ่นแยกชั้น', () {
+  runSharedBehaviourTests((client) {
+    final api = ApiClient(baseUrl: baseUrl, client: client);
+    final store = PalletStore(RemotePalletRepository(api));
+    return PalletScreenV2(store: store, zone: 'A1');
+  });
+});</code></pre><p>ผ่านทั้งคู่ แปลว่า <strong>ผู้ใช้ไม่รู้เลยว่าเราแยกชั้น</strong> ซึ่งเป็นนิยามของคำว่า refactor</p><p>ส่วนที่สองอีกหกข้อ ทดสอบ repository และ store โดยตรง ไม่สร้าง widget เลยสักตัว — และนี่คือส่วนที่รุ่น v1 เขียนไม่ได้ ไม่ใช่เพราะยาก แต่เพราะกฎอยู่ใน <code>_PalletScreenV1State</code> ซึ่งเป็นคลาสส่วนตัวที่เข้าถึงจากข้างนอกไม่ได้</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>“v1 เขียนผิด”</td><td>v1 ทำงานถูก และเร็วกว่าถ้าจอนี้จะไม่โตอีก ที่ต่างคือสิ่งที่ทำได้ตอนแก้และตอนทดสอบ</td></tr>
+<tr><td>“แยกชั้นแล้วโค้ดสั้นลง”</td><td>ยาวขึ้น v1 มีไฟล์เดียว v2 มีห้าไฟล์ ที่ได้คือแต่ละไฟล์เข้าใจได้ด้วยตัวเอง</td></tr>
+<tr><td>“ต้องแยกทุกจอ”</td><td>จอตั้งค่าที่มีสองสวิตช์ไม่ต้องมี repository และ store</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>เปิด <code>pallet_screen_v1.dart</code> หาเมธอด <code>_hold</code> แล้วตอบ</p><ol><li>บรรทัดไหนบ้างที่จะต้องแก้ ถ้าเซิร์ฟเวอร์เปลี่ยนจากตอบ 200 พร้อมพาเลทที่อัปเดตแล้ว เป็นตอบ 204 ที่ไม่มีเนื้อหา</li><li>ถ้าเปลี่ยนแบบเดียวกันในรุ่น v2 ต้องแก้กี่ไฟล์</li></ol><details><summary>แนวคำตอบ</summary><p><strong>1.</strong> ต้องแก้ในจอ ตรงที่ <code>jsonDecode(response.body)</code> และตรงที่แทนที่แถวในลิสต์ ซึ่งอยู่ใน <code>setState</code> ปนกับโค้ดวาดหน้าจอ ถ้ามีจออื่นที่ล็อกพาเลทได้ด้วย ต้องไปแก้ที่จอนั้นอีก</p><p><strong>2.</strong> สองไฟล์ และ <strong>ไม่มีไฟล์หน้าจอ</strong> — 204 ไม่มีเนื้อหา แปลว่า repository สร้าง <code>Pallet</code> คืนไม่ได้อีก สัญญาต้องเปลี่ยนเป็น <code>Future&lt;void&gt; hold(...)</code> แล้ว <code>PalletStore.hold</code> เปลี่ยนมาอัปเดตแถวเองด้วย <code>pallet.copyWith(onHold: true)</code></p><p>ข้อนี้ตอบยากกว่าที่คิด และสอนสองอย่างพร้อมกัน คือ (ก) เปลี่ยนสัญญาแล้วกระเทือนถึงคนเรียก หนีไม่พ้น แต่ (ข) มันหยุดอยู่แค่ชั้นที่ถัดไป ไม่ลามไปถึงโค้ดวาดหน้าจอ ต่างจาก v1 ที่การเปลี่ยนนี้ลงไปแก้ในกองเดียวกับ <code>ListTile</code></p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>UI ตอบว่า “มีอะไร” Logic ตอบว่า “ทำอะไรต่อ” Data ตอบว่า “มาจากไหน”</li><li>จอที่เก็บ <code>Map&lt;String, dynamic&gt;</code> คือจอที่รู้เรื่องเซิร์ฟเวอร์มากเกินไป</li><li>สิ่งที่ทดสอบยาก จะไม่ถูกทดสอบ และจะมีบั๊ก</li><li>refactor ที่ถูกต้องคือเทสต์ชุดเดิมยังผ่าน</li></ul></div><p><strong>บทหน้า:</strong> ดูวิธีที่ <code>wmsapp</code> เลือกใช้ ซึ่งไม่ใช่ทั้ง v1 และ v2 แต่เป็นทางที่สาม</p></section>

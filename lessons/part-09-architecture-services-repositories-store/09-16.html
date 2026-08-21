@@ -4,25 +4,105 @@
 <title>Lab: Feature Refactor</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">09-16 · Architecture</span><h1>Lab: Feature Refactor</h1><p>Part 9: App Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Acceptance criteria</a></li><li><a href="#section-2">Target files</a></li><li><a href="#section-3">Repository contract</a></li><li><a href="#section-4">State sequence tests</a></li><li><a href="#section-5">Repository tests</a></li><li><a href="#section-6">Widget tests</a></li><li><a href="#section-7">Migration sequence</a></li><li><a href="#section-8">Exit test</a></li></ol></nav>
-<div class="note"><strong>Lab ปิด Part 9:</strong> Refactor Receiving sliceหนึ่งจาก screen/API couplingเป็น Widget → ReceivingStore → ReceivingRepository → RemoteDataSource พร้อม testsทุก boundary</div>
-<section id="section-1"><h2>1. Acceptance criteria</h2><ul><li>Screenไม่มี HTTP/JSON/storage</li><li>repository interfaceใช้ domain language</li><li>remote implementation map DTO/failure</li><li>Storeมี immutable stateและ generation guard</li><li>dependenciesเข้าทาง constructor</li><li>characterization + repository + store + widget testsผ่าน</li></ul></section>
-<section id="section-2"><h2>2. Target files</h2><pre class="code-vs"><code>features/receiving/
-  domain/receiving_repository.dart
-  data/receiving_remote_data_source.dart
-  data/remote_receiving_repository.dart
-  application/receiving_state.dart
-  application/receiving_store.dart
-  presentation/receiving_screen.dart
-  presentation/widgets/...</code></pre></section>
-<section id="section-3"><h2>3. Repository contract</h2><pre class="code-vs"><code>abstract interface class ReceivingRepository {
-  Future&lt;InboundOrder&gt; findOrder(String orderNo);
-  Future&lt;Receipt&gt; receive(ReceiveCommand command);
-}</code></pre><p>ใช้ fakeตัวนี้เขียน Store testsก่อนย้าย HTTP</p></section>
-<section id="section-4"><h2>4. State sequence tests</h2><ul><li>load: idle→loading→ready</li><li>not found/network/contract errorแยกกัน</li><li>scan Aแล้ว B: A responseเก่าถูก ignore</li><li>submitซ้ำถูก guard</li><li>successอัปเดต SSOT/typed effectครั้งเดียว</li></ul></section>
-<section id="section-5"><h2>5. Repository tests</h2><p>ใช้ fake JsonClient assert path/query/body, fixturesสำหรับ casing/null, map domainและ error code <code>PALLET_ALREADY_ASSIGNED</code> โดยไม่มี Flutter binding</p></section>
-<section id="section-6"><h2>6. Widget tests</h2><p>inject fake Store/repository, submit barcode, verify loading/empty/error/success, focusและ dialog result โดยไม่เปิด server; screenshotเดิมช่วยตรวจว่า refactorไม่เปลี่ยน UI</p></section>
-<section id="section-7"><h2>7. Migration sequence</h2><ol><li>ล็อก behaviorเดิม</li><li>สร้าง interface+fake</li><li>ย้าย remote mapping</li><li>ย้าย action/state</li><li>extract widgets</li><li>ลบ codeซ้ำและ forwarding facade</li></ol></section>
-<section id="section-8"><h2>8. Exit test</h2><div class="success">เมื่อจบต้องชี้ owner/dependency/error/SSOTของทุกชั้นได้ เปลี่ยน endpointโดยไม่แก้ widgetและเปลี่ยน UIโดยไม่แก้ repository พร้อมใช้ patternเดียวกัน refactor God Screen/Storeส่วนถัดไป</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บทนี้ทำอะไร</a></li><li><a href="#section-2">แผนที่ของ lab</a></li><li><a href="#section-3">โครงของเทสต์ที่ต้องเข้าใจก่อนทำโจทย์</a></li><li><a href="#section-4">โจทย์</a></li><li><a href="#section-5">เกณฑ์ที่ต้องผ่าน</a></li><li><a href="#section-6">คำใบ้สำหรับข้อที่ยาก</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</a></li><li><a href="#section-8">แบบทดสอบตัวเองก่อนจบ Part 9</a></li><li><a href="#section-9">สรุปท้าย Part 9</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 120–150 นาที</span><span>ลงมือทำ: refactor ฟีเจอร์จริงหนึ่งตัว โดยพฤติกรรมต้องไม่เปลี่ยน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 9.1–9.15 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> รับจอที่เขียนรวมทุกอย่างไว้ แล้วแยกชั้นได้โดยพิสูจน์ได้ว่าไม่ทำอะไรพัง</div>
+
+<section id="section-1"><h2>1. บทนี้ทำอะไร</h2><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>อ่าน lab ทั้งหมดของ Part นี้ พร้อมรู้ว่าแต่ละส่วนมาจากบทไหน</td></tr>
+<tr><td>2</td><td>ทำโจทย์ refactor ตามเกณฑ์ที่ให้</td></tr>
+<tr><td>3</td><td>ตอบแบบทดสอบตัวเองก่อนขึ้น Part 10</td></tr>
+</tbody></table></section>
+
+<section id="section-2"><h2>2. แผนที่ของ lab</h2><table><thead><tr><th>ไฟล์</th><th>หน้าที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>pallet_screen_v1.dart</code></td><td>จุดตั้งต้น รวมทุกอย่างไว้ในจอ</td><td>9.2</td></tr>
+<tr><td><code>pallet.dart</code></td><td>โมเดล ไม่ import อะไรเลย</td><td>9.2</td></tr>
+<tr><td><code>pallet_failure.dart</code></td><td>ความล้มเหลวในภาษาของงาน</td><td>9.13</td></tr>
+<tr><td><code>pallet_repository.dart</code></td><td>สัญญา + ตัวจริง + จุดแปลความล้มเหลว</td><td>9.5, 9.6, 9.13</td></tr>
+<tr><td><code>pallet_store.dart</code></td><td>เจ้าของสถานะ</td><td>9.7, 9.9, 9.10</td></tr>
+<tr><td><code>pallet_screen_v2.dart</code></td><td>จอที่วาดอย่างเดียว</td><td>9.10</td></tr>
+<tr><td><code>test/architecture_test.dart</code></td><td>เทสต์ 20 ข้อ</td><td>ทั้ง Part</td></tr>
+</tbody></table><pre class="code-vs"><code>cd labs/flutter_wms_companion
+flutter analyze --no-pub
+flutter test --no-pub test/architecture_test.dart</code></pre></section>
+
+<section id="section-3"><h2>3. โครงของเทสต์ที่ต้องเข้าใจก่อนทำโจทย์</h2><pre class="code-vs"><code>void runSharedBehaviourTests(Widget Function(http.Client client) build) { ... }
+
+group('พฤติกรรมเดียวกัน · รุ่นรวมทุกอย่างไว้ในจอ', () {
+  runSharedBehaviourTests((client) =&gt; PalletScreenV1(client: client, zone: 'A1'));
+});
+
+group('พฤติกรรมเดียวกัน · รุ่นแยกชั้น', () {
+  runSharedBehaviourTests((client) {
+    final api = ApiClient(baseUrl: baseUrl, client: client);
+    return PalletScreenV2(store: PalletStore(RemotePalletRepository(api)), zone: 'A1');
+  });
+});</code></pre><p>กุญแจอยู่ที่ <strong>ทั้งสองรุ่นรับ <code>http.Client</code> เป็นจุดเดียวที่ของปลอมเข้าไป</strong> ทำให้เขียนเทสต์ชุดเดียวแล้วรันกับทั้งคู่ได้ — เป็นเทคนิคที่ใช้ได้กับทุก refactor ที่ต้องพิสูจน์ว่าพฤติกรรมไม่เปลี่ยน</p></section>
+
+<section id="section-4"><h2>4. โจทย์</h2><p>ในโฟลเดอร์ <code>lib/architecture_lab/</code> มีจอที่ยังไม่ได้แยก คือจอ <strong>“ย้ายพาเลทไปตำแหน่งใหม่”</strong> ให้เขียนเองตั้งแต่ต้นตามนี้</p><p>เขียน <code>move_screen_v1.dart</code> แบบรวมทุกอย่างไว้ในจอก่อน ตามพฤติกรรมนี้</p><table><thead><tr><th>สิ่งที่จอทำ</th></tr></thead><tbody>
+<tr><td>สแกนรหัสพาเลท แล้ว <code>GET /api/WMS/mobile_pallets/{code}</code> เพื่อดูรายละเอียด</td></tr>
+<tr><td>แสดงตำแหน่งว่างที่แนะนำ จาก <code>GET /api/WMS/mobile_locations/free?zone={zone}</code></td></tr>
+<tr><td>สแกนรหัสตำแหน่งปลายทาง แล้วตรวจว่าอยู่ในรายการที่ว่างไหม</td></tr>
+<tr><td>กดยืนยัน แล้ว <code>POST /api/WMS/mobile_pallets/{code}/move</code> พร้อม <code>Idempotency-Key</code></td></tr>
+<tr><td>สำเร็จแล้วล้างหน้าจอ พร้อมรับพาเลทใบถัดไป</td></tr>
+</tbody></table><p>แล้ว refactor เป็น <code>move_repository.dart</code> + <code>move_store.dart</code> + <code>move_screen_v2.dart</code></p></section>
+
+<section id="section-5"><h2>5. เกณฑ์ที่ต้องผ่าน</h2><table><thead><tr><th>#</th><th>เกณฑ์</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>เทสต์พฤติกรรมชุดเดียวกันผ่านทั้ง v1 และ v2 อย่างน้อย 6 ข้อ</td><td>9.2</td></tr>
+<tr><td>2</td><td>v2 ไม่มี <code>jsonDecode</code>, <code>http</code> หรือเลข status ในไฟล์จอ</td><td>9.2</td></tr>
+<tr><td>3</td><td>จอเก็บ <code>Map&lt;String, dynamic&gt;</code> ไม่ได้ ต้องเห็นแต่โมเดล</td><td>9.2</td></tr>
+<tr><td>4</td><td>มี interface ที่อ่านแล้วรู้ว่าจอต้องการอะไร ด้วยคำของงาน</td><td>9.5</td></tr>
+<tr><td>5</td><td>repository รับ <code>JsonApi</code> ไม่ใช่ <code>ApiClient</code></td><td>9.6</td></tr>
+<tr><td>6</td><td>การอ่านคำตอบอยู่นอก <code>try</code> ที่ครอบการยิงเน็ต</td><td>9.6, 8.2</td></tr>
+<tr><td>7</td><td>ข้อมูลผิดสัญญาโยน <code>ContractException</code> พร้อม path ที่บอกตำแหน่ง</td><td>9.6</td></tr>
+<tr><td>8</td><td>store ไม่ import <code>material.dart</code></td><td>9.7</td></tr>
+<tr><td>9</td><td>สถานะที่คำนวณได้ต้องเป็น getter ไม่ใช่ field</td><td>9.7, 9.9</td></tr>
+<tr><td>10</td><td>สแกนพาเลทใบใหม่ระหว่างที่ใบเก่ายังโหลดไม่เสร็จ ต้องได้ข้อมูลของใบใหม่</td><td>9.7</td></tr>
+<tr><td>11</td><td>กดยืนยันซ้ำระหว่างรอ ต้องยิงคำสั่งครั้งเดียว</td><td>9.7</td></tr>
+<tr><td>12</td><td>store รับ repository ทาง constructor</td><td>9.8</td></tr>
+<tr><td>13</td><td>การแปลความล้มเหลวอยู่ที่ repository ที่เดียว และ <code>switch</code> ไม่มี <code>default</code></td><td>9.13</td></tr>
+<tr><td>14</td><td>ปลายทางที่ไม่อยู่ในรายการว่าง ต้องเตือนโดยไม่ยิงคำขอ</td><td>9.12</td></tr>
+<tr><td>15</td><td>เทสต์ของ store อย่างน้อย 3 ข้อ ที่ไม่สร้าง widget เลย</td><td>9.5, 9.7</td></tr>
+</tbody></table><p>เกณฑ์ข้อ 10 และ 11 คือสองข้อที่ v1 จะไม่ผ่านถ้าเขียนตามธรรมชาติ — และนั่นคือสิ่งที่ต้องเห็นด้วยตาตัวเอง</p></section>
+
+<section id="section-6"><h2>6. คำใบ้สำหรับข้อที่ยาก</h2><p><strong>เกณฑ์ 14 — ตรวจก่อนยิง แต่ไม่ทำให้เซิร์ฟเวอร์เป็นเพียงพิธี</strong></p><p>กฎนี้ควรอยู่บนโมเดลหรือใน store ไม่ใช่ในจอ (9.12)</p><pre class="code-vs"><code>// ใน store
+void scanDestination(String code) {
+  final match = _freeLocations.where((l) =&gt; l.code == code).firstOrNull;
+  if (match == null) {
+    _failure = const MoveFailure('ตำแหน่งนี้ไม่ว่าง หรือไม่อยู่ในโซนนี้');
+    notifyListeners();
+    return;
+  }
+  _destination = match;
+  _failure = null;
+  notifyListeners();
+}</code></pre><p>แต่ยังต้องปล่อยให้เซิร์ฟเวอร์ปฏิเสธได้อยู่ดี เพราะรายการที่ว่างอาจเก่าไปแล้วตั้งแต่ตอนโหลด — การตรวจฝั่งแอปคือความสะดวก ไม่ใช่ความจริง (9.1 แบบฝึกหัดข้อ 4)</p><p><strong>เกณฑ์ 10 — สแกนใบใหม่แซงใบเก่า</strong></p><p>ใช้เลขรุ่นแบบเดียวกับ <code>PalletStore.load</code> แต่ระวังจุดที่ต่าง คือที่นี่ค่าที่ต้องทิ้งไม่ใช่แค่ลิสต์ แต่รวมถึงตำแหน่งปลายทางที่สแกนไว้ด้วย</p><p><strong>เกณฑ์ 15 — เทสต์ที่ไม่มี widget</strong></p><pre class="code-vs"><code>class _ScriptedMoveRepository implements MoveRepository {
+  final List&lt;Completer&lt;PalletDetail&gt;&gt; _lookups = [];
+
+  @override
+  Future&lt;PalletDetail&gt; lookup(String code) {
+    final completer = Completer&lt;PalletDetail&gt;();
+    _lookups.add(completer);
+    return completer.future;     // ค้างไว้จนกว่าเทสต์จะสั่งตอบ
+  }
+}</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อยตอนทำ lab นี้</h2><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>วิธีแก้</th></tr></thead><tbody>
+<tr><td>เทสต์ v1 กับ v2 ต้องเขียนคนละชุด</td><td>ตั้ง <code>Key</code> ไม่เหมือนกัน</td><td>ใช้ key เดียวกันทั้งสองรุ่น</td></tr>
+<tr><td>ข้อความผิดพลาดสองรุ่นไม่ตรงกัน</td><td>v1 แปลจากเลข status v2 แปลจาก <code>kind</code></td><td>ให้ v1 แปลด้วยคำเดียวกันก่อน แล้วค่อยย้าย</td></tr>
+<tr><td>store พังตอนเทสต์ว่า <code>Bad state: Future already completed</code></td><td>ตัวปลอมตอบสองครั้ง</td><td>ตรวจว่า <code>completeAt</code> ชี้ index ถูก</td></tr>
+<tr><td>วงหมุนค้าง</td><td>ลืม <code>finally</code></td><td>ตั้ง <code>_loading = false</code> ใน <code>finally</code> เสมอ</td></tr>
+<tr><td>สแกนใบใหม่แล้วปลายทางเก่ายังค้าง</td><td>ล้างไม่ครบ</td><td>รวมการล้างไว้ในเมธอดเดียว</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบทดสอบตัวเองก่อนจบ Part 9</h2><ol><li>“แยกเพราะเหตุผลที่จะเปลี่ยนต่างกัน” หมายความว่าอย่างไร (9.1)</li><li>บททดสอบสองข้อที่ใช้ตรวจว่าแยกดีพอหรือยัง คืออะไร (9.1)</li><li>จอที่เก็บ <code>Map&lt;String, dynamic&gt;</code> มีปัญหาอะไร (9.2)</li><li>ทำไม refactor ที่ถูกต้องต้องมีเทสต์ชุดเดิมผ่าน (9.2)</li><li>singleton แก้ปัญหาอะไรได้จริง และไม่ได้แก้อะไร (9.3)</li><li><code>ApiResult&lt;T&gt;</code> ได้อะไรและเสียอะไร (9.3, 9.13)</li><li><code>part</code> ต่างจาก <code>import</code> อย่างไร (9.4)</li><li>ทำไม extension บนคลาสรูปธรรมถึงสวมของปลอมไม่ได้ (9.4)</li><li>อะไรที่ไม่ควรอยู่ใน repository interface (9.5)</li><li>ทำไมการอ่านคำตอบต้องอยู่นอก <code>try</code> (9.6)</li><li>ทำไม <code>initialLoading</code> ต้องเป็น getter (9.7)</li><li>ทำไม store ไม่ควร import <code>material.dart</code> (9.7, 9.10)</li><li>constructor injection คืออะไร ต้องใช้ library ไหม (9.8)</li><li>composition root คือที่ไหน (9.8)</li><li>อาการของการมีแหล่งความจริงสองที่ เป็นอย่างไร (9.9)</li><li>ค่าไหนควรอยู่ในจอ ค่าไหนควรอยู่ใน store (9.9)</li><li>optimistic update ห้ามใช้กับกรณีไหน (9.10)</li><li>ควรยก widget ขึ้นเป็นของกลางเมื่อไหร่ (9.11)</li><li>เมื่อไหร่ควรเพิ่มชั้น use case (9.12)</li><li>ความล้มเหลวชนิดไหนที่ไม่ควรแปลให้ผู้ใช้ (9.13)</li><li>ขั้นแรกของการแยกจอใหญ่คืออะไร (9.14)</li><li>ทำไมห้ามแก้ปัญหา store ใหญ่ด้วยการแยกข้อมูลออกเป็นสองชุด (9.15)</li></ol></section>
+
+<section id="section-9"><h2>9. สรุปท้าย Part 9</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>ตัดสินได้ว่าโค้ดก้อนหนึ่งควรอยู่ชั้นไหน โดยมีเหตุผลที่ตรวจสอบได้</li><li>อ่านสถาปัตยกรรมสามแบบออก และบอกได้ว่าแต่ละแบบแลกอะไร</li><li>เขียน repository interface ด้วยคำของงาน</li><li>เขียนตัวจริงที่แปลง JSON เป็นโมเดล และแปลความล้มเหลวที่จุดเดียว</li><li>เขียน store ที่เป็นเจ้าของสถานะ ทดสอบได้โดยไม่ต้องมี widget</li><li>ประกอบของทั้งหมดที่จุดเดียว และสลับเป็นของปลอมในเทสต์ได้</li><li>มองออกว่าข้อมูลถูกเก็บซ้ำตรงไหน</li><li>วางแผนแยกจอใหญ่และ store ใหญ่โดยไม่ทำให้พฤติกรรมเปลี่ยน</li></ul></div><p><strong>สิ่งที่ยังไม่ได้ทำและจะทำที่ไหน</strong></p><table><thead><tr><th>เรื่อง</th><th>อยู่ที่</th></tr></thead><tbody>
+<tr><td>ส่ง store ข้ามชั้นโดยไม่ต้องต่อ parameter เป็นทอด ๆ</td><td>Part 27</td></tr>
+<tr><td>จัดการเส้นทางและ deep link</td><td>Part 28</td></tr>
+<tr><td>เก็บข้อมูลลงเครื่องและทำงานตอนไม่มีเน็ต</td><td>Part 29</td></tr>
+<tr><td>สร้างโมเดลและ <code>copyWith</code> อัตโนมัติ</td><td>Part 30</td></tr>
+<tr><td>ลงมือแยกจอจริงของ <code>wmsapp</code></td><td>Part 23</td></tr>
+</tbody></table><p><strong>บทถัดไป:</strong> Part 10 กลับมาที่เรื่องที่ 8.11 เปิดค้างไว้ — แอปจะรู้ได้อย่างไรว่าต้องคุยกับเซิร์ฟเวอร์ตัวไหน จัดการหลายสภาพแวดล้อมอย่างไร และจะบอกผู้ใช้อย่างไรเมื่อสัญญาณหาย</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
