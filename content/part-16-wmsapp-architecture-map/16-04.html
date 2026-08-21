@@ -1,18 +1,140 @@
-<div class="note"><strong>Login ปัจจุบันเป็น prototype:</strong> <code>LoginScreen</code> มีผู้ใช้ 3 คน hardcode, passwordทุกคนคือ <code>1234</code> และหน่วง 500 ms ไม่มี API/JWT จึงห้ามตีความว่าเป็น authentication production</div>
-<section><h2>1. UI state</h2><p>เก็บ selected user, password controller, obscure/loading/error และ animation controllerใน State พร้อม disposeถูกต้อง Flowคือ validate → loading → delay → compare password → save prefs → callback</p></section>
-<section><h2>2. Mock credentials</h2><pre class="code-vs"><code>final _users = [
-  {'userId': 'USR-001', 'role': 'OPERATOR'},
-  {'userId': 'USR-003', 'role': 'SUPERVISOR'},
-];
-if (_passController.text != '1234') ...</code></pre><p>ใช้ demoได้แต่ credentialอยู่ใน binaryและ roleเลือกจาก clientเอง</p></section>
-<section><h2>3. Persistence</h2><pre class="code-vs"><code>prefs.setString('userId', ...);
-prefs.setString('fullName', ...);
-prefs.setString('role', ...);</code></pre><p><code>AuthSessionService.loadSession</code>อ่านสาม keyนี้และ <code>isLoggedIn</code>ดูเพียง userId ไม่ตรวจ expiry/token/server</p></section>
-<section><h2>4. Callback handshake</h2><p>HomeScreen push LoginScreenพร้อม <code>onLoginSuccess</code> ที่ pop route แล้ว reload prefs วิธีนี้มีสอง side effectsข้าม route หาก callbackเกิดหลัง disposeต้อง guard context และ typed route resultจะตามง่ายกว่า</p></section>
-<section><h2>5. clearSession risk</h2><p><code>prefs.clear()</code>ล้าง SharedPreferencesทั้งหมด รวม API host/protocol/portและ theme/settingsอื่นที่ใช้ storeเดียวกัน Logoutควร removeเฉพาะ session namespace ไม่ทำให้ endpointเปลี่ยนเงียบ ๆ</p></section>
-<section><h2>6. Production shape</h2><pre class="code-vs"><code>credentials → AuthRepository.login()
-→ access/refresh token + claims + expiration
-→ secure storage → authenticated ApiClient
-→ 401 refresh-or-logout → clear scoped session</code></pre></section>
-<section><h2>7. Authorization</h2><p>roleใน clientใช้ซ่อนเมนูเพื่อ UXได้ แต่ .NETต้องตรวจ permissionทุก endpointและ derive claimsจาก signed token ห้ามเชื่อ role/userIdที่ request bodyหรือ SharedPreferencesส่งมา</p></section>
-<section><h2>8. Characterization tests</h2><div class="success">ก่อน refactorล็อก behavior: ไม่เลือก user, passwordว่าง/ผิด, success callbackครั้งเดียว, dispose animation, reload Homeและ logoutไม่ลบ server config จากนั้นแทน delay/mockด้วย repositoryทีละขั้น</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด login_screen.dart และ auth_session_service.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.3, Part 8 (การยืนยันตัวตน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าการล็อกอินของ wmsapp เป็นของจำลอง และรู้ว่าต้องเปลี่ยนอะไรบ้างเมื่อต่อของจริง</div>
+
+<section><h2>1. ล็อกอินที่ไม่ได้คุยกับเซิร์ฟเวอร์</h2><p>บนสุดของ <code>_LoginScreenState</code></p><pre class="code-vs"><code>// Mock users ตรงกับ seed data
+final _users = [
+  {'userId': 'USR-001', 'fullName': 'สมชาย ใจดี', 'role': 'OPERATOR'},
+  {'userId': 'USR-002', 'fullName': 'สมหญิง รักงาน', 'role': 'OPERATOR'},
+  {'userId': 'USR-003', 'fullName': 'สมศักดิ์ หัวหน้า', 'role': 'SUPERVISOR'},
+];</code></pre><p>ผู้ใช้ทั้งหมดฝังอยู่ในโค้ด ไม่ได้โหลดมาจากที่ไหน และการตรวจรหัสผ่านเป็นแบบนี้</p><pre class="code-vs"><code>// Mock: password = "1234" ทุก user
+await Future.delayed(const Duration(milliseconds: 500));
+
+if (_passController.text != '1234') {
+  setState(() {
+    _loading = false;
+    _error = 'รหัสผ่านไม่ถูกต้อง';
+  });
+  return;
+}</code></pre><p>และท้ายจอมีข้อความบอกไว้ตรง ๆ</p><pre class="code-vs"><code>Text('รหัสผ่านทดสอบ: 1234')</code></pre><div class="note">คอมเมนต์ <code>// Mock:</code> สามจุดกับข้อความบนหน้าจอบอกชัดเจนว่าเป็นของชั่วคราว — <strong>นี่คือวิธีทำ mock ที่ถูกต้อง</strong> คนที่มาอ่านทีหลังรู้ทันทีว่ายังไม่ใช่ของจริง ไม่ต้องเดา</div><p>เทียบกับ <code>wms_absolute_mobile</code> ที่ยิงไป <code>/api/Authenticate/login</code> จริงและได้ token กลับมา สองโปรเจกต์นี้อยู่คนละขั้นในเรื่องเดียวกัน</p></section>
+
+<section><h2>2. เกิดอะไรขึ้นเมื่อล็อกอินผ่าน</h2><pre class="code-vs"><code>final prefs = await SharedPreferences.getInstance();
+await prefs.setString('userId', _selectedUser!['userId']!);
+await prefs.setString('fullName', _selectedUser!['fullName']!);
+await prefs.setString('role', _selectedUser!['role']!);
+
+setState(() =&gt; _loading = false);
+widget.onLoginSuccess?.call();</code></pre><p>เขียนสามคีย์ลง <code>SharedPreferences</code> แล้วเรียก callback กลับไปที่ <code>HomeScreen</code></p><p>เทียบกับสิ่งที่การล็อกอินจริงต้องมี</p><table><thead><tr><th>สิ่งที่ Part 8 สอน</th><th>wmsapp มีไหม</th></tr></thead><tbody>
+<tr><td>ยิงคำขอไปเซิร์ฟเวอร์</td><td>ไม่มี</td></tr>
+<tr><td>เก็บ token</td><td>ไม่มี — ไม่มี token</td></tr>
+<tr><td>แนบ token กับทุกคำขอ</td><td>ไม่มี</td></tr>
+<tr><td>รับมือ 401 แล้วพากลับไปล็อกอิน</td><td>ไม่มี</td></tr>
+<tr><td>รู้ว่า token หมดอายุเมื่อไร</td><td>ไม่มี</td></tr>
+<tr><td>จำว่าใครล็อกอินอยู่</td><td><strong>มี</strong></td></tr>
+</tbody></table><p>สิ่งเดียวที่มีคือช่องท้ายสุด และมันก็เพียงพอสำหรับสิ่งที่แอปนี้ใช้ <code>userId</code> ทำ — ส่งไปกับ body ของคำขอเพื่อบอกว่าใครเป็นคนทำรายการ</p><pre class="code-vs"><code>final response = await _post('/receiving/scan-part', {
+  'poId': poId,
+  'partId': partId,
+  'operatorId': operatorId,   // ← มาจาก userId ที่ส่งต่อกันมาตั้งแต่ HomeScreen
+  ...</code></pre><div class="note"><strong>ประเด็นสำคัญ:</strong> เซิร์ฟเวอร์เชื่อ <code>operatorId</code> ที่แอปส่งมาโดยไม่ตรวจ ใครแก้ค่านี้ก็อ้างเป็นคนอื่นได้ ในเครือข่ายคลังปิดกับผู้ใช้ที่รู้จักกันหมด ความเสี่ยงต่ำ แต่ต้องรู้ว่านี่คือสิ่งที่ยังไม่มี ไม่ใช่คิดว่ามีแล้ว</div></section>
+
+<section><h2>3. AuthSessionService — 27 บรรทัดทั้งไฟล์</h2><pre class="code-vs"><code>class AuthSession {
+  final String? userId;
+  final String? fullName;
+  final String? role;
+
+  const AuthSession({
+    required this.userId,
+    required this.fullName,
+    required this.role,
+  });
+
+  bool get isLoggedIn =&gt; userId != null;
+}
+
+class AuthSessionService {
+  const AuthSessionService();
+
+  Future&lt;AuthSession&gt; loadSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    return AuthSession(
+      userId: prefs.getString('userId'),
+      fullName: prefs.getString('fullName'),
+      role: prefs.getString('role'),
+    );
+  }
+
+  Future&lt;void&gt; clearSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+  }
+}</code></pre><p>มีเรื่องที่ทำถูกและเรื่องที่เป็นบั๊ก</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>เป็น <code>const</code> constructor</td><td>ไม่มี state ในตัวเอง สร้างกี่ครั้งก็เหมือนเดิม</td></tr>
+<tr><td>คืน <code>AuthSession</code> แทนสาม String</td><td>ค่าที่มาด้วยกันเดินทางไปด้วยกัน</td></tr>
+<tr><td>มี <code>isLoggedIn</code></td><td>ตั้งชื่อความหมายให้เงื่อนไข</td></tr>
+</tbody></table><p>แต่ <code>clearSession()</code> มีปัญหาจริง</p></section>
+
+<section><h2>4. ออกจากระบบแล้วลบเกิน</h2><pre class="code-vs"><code>Future&lt;void&gt; clearSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.clear();       // ← ลบทุกคีย์ ไม่ใช่แค่ของเซสชัน
+}</code></pre><p>ไล่ดูว่ามีใครเก็บอะไรไว้ใน <code>SharedPreferences</code> บ้าง</p><table><thead><tr><th>คีย์</th><th>เจ้าของ</th><th>ควรหายตอนออกจากระบบไหม</th></tr></thead><tbody>
+<tr><td><code>userId</code>, <code>fullName</code>, <code>role</code></td><td><code>AuthSessionService</code></td><td>ควร</td></tr>
+<tr><td><code>apiHost</code></td><td><code>ApiConfigService</code></td><td><strong>ไม่ควร</strong></td></tr>
+<tr><td><code>apiPort</code></td><td><code>ApiConfigService</code></td><td><strong>ไม่ควร</strong></td></tr>
+<tr><td><code>apiProtocol</code></td><td><code>ApiConfigService</code></td><td><strong>ไม่ควร</strong></td></tr>
+</tbody></table><p>อาการที่เกิดขึ้นจริงในคลัง</p><pre class="code-vs"><code>ผู้ใช้กะเช้ากดออกจากระบบ
+  → apiHost หายไปด้วย
+    → ผู้ใช้กะบ่ายเปิดแอป ล็อกอิน แล้วกดรับสินค้า
+      → "ไม่สามารถเชื่อมต่อ server ได้"
+        → ไม่มีใครรู้ว่าต้องไปตั้ง IP ใหม่ในหน้า Settings</code></pre><p>อาการนี้แยกจาก “เน็ตมีปัญหา” ไม่ออกเลยจากมุมผู้ใช้ และเกิดเฉพาะกับเครื่องที่มีคนกดออกจากระบบ ทำให้ยิ่งหาสาเหตุยาก</p><p>แก้ได้ด้วยการลบเฉพาะที่เป็นของตัวเอง</p><pre class="code-vs"><code>Future&lt;void&gt; clearSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.remove('userId');
+  await prefs.remove('fullName');
+  await prefs.remove('role');
+}</code></pre><div class="note"><strong>บทเรียนที่ใหญ่กว่าบั๊กนี้:</strong> <code>SharedPreferences</code> เป็นพื้นที่ที่ทุกคนใช้ร่วมกัน แต่ไม่มีอะไรบอกว่าคีย์ไหนเป็นของใคร <code>prefs.clear()</code> จึงเป็นคำสั่งที่แตะของคนอื่นเสมอ<br><strong>อย่าใช้ <code>clear()</code> ในโค้ดของฟีเจอร์ใดฟีเจอร์หนึ่ง</strong> — ลบเฉพาะคีย์ที่ตัวเองเขียน</div><p>สังเกตด้วยว่าคีย์ทั้งหกถูกเขียนไว้เป็นสตริงดิบกระจายสามที่: <code>login_screen.dart</code> เขียน, <code>auth_session_service.dart</code> อ่านและลบ, <code>api_config_service.dart</code> ใช้ค่าคงที่ของตัวเอง — ฝั่งหลังทำถูกกว่า</p><pre class="code-vs"><code>static const _keyHost = 'apiHost';
+static const _keyPort = 'apiPort';
+static const _keyProtocol = 'apiProtocol';</code></pre></section>
+
+<section><h2>5. รายละเอียดของจอที่ทำถูก</h2><table><thead><tr><th>สิ่งที่ทำ</th><th>ทำไมดี</th><th>บทที่เกี่ยว</th></tr></thead><tbody>
+<tr><td><code>_passController.dispose()</code> และ <code>_animCtrl.dispose()</code></td><td>คืนทรัพยากรครบทั้งสองตัว</td><td>4.14</td></tr>
+<tr><td>ตรวจช่องว่างก่อนยิง</td><td>ไม่เสียเวลารอเพื่อจะได้ข้อความว่ากรอกไม่ครบ</td><td>3.7</td></tr>
+<tr><td><code>onSubmitted: (_) =&gt; _login()</code></td><td>กด Enter จากเครื่องสแกนได้เลย</td><td>3.4</td></tr>
+<tr><td>ปุ่มเปิด/ปิดการมองเห็นรหัส</td><td>พิมพ์ผิดบนแป้นเล็กแล้วตรวจได้</td><td>3.5</td></tr>
+<tr><td><code>AnimatedSize</code> ครอบข้อความผิดพลาด</td><td>ข้อความโผล่แล้วเลย์เอาต์ไม่กระตุก</td><td>2.13</td></tr>
+</tbody></table><p>แต่มีจุดหนึ่งที่ขาด — ระหว่างที่ <code>_loading == true</code> ปุ่มถูกปิดผ่าน <code>PrimaryButton(loading: _loading)</code> แต่ช่องรหัสผ่านยังพิมพ์ได้ และ <code>onSubmitted</code> ยังเรียก <code>_login()</code> ซ้ำได้ ในกรณีนี้ไม่เสียหายเพราะเป็น mock แต่ถ้าต่อของจริงจะกลายเป็นการยิงคำขอซ้ำ</p></section>
+
+<section><h2>6. ถ้าจะต่อของจริงต้องทำอะไร</h2><table><thead><tr><th>ลำดับ</th><th>งาน</th><th>ไฟล์</th></tr></thead><tbody>
+<tr><td>1</td><td>เพิ่ม <code>login()</code> ที่ยิง <code>POST /Authenticate/login</code></td><td>ไฟล์ใหม่ <code>services/api/auth_api.dart</code></td></tr>
+<tr><td>2</td><td>เก็บ token ลง <code>SharedPreferences</code></td><td><code>auth_session_service.dart</code></td></tr>
+<tr><td>3</td><td>ให้ <code>_headers</code> อ่าน token ทุกครั้งที่ยิง</td><td><code>api_service.dart</code></td></tr>
+<tr><td>4</td><td>รับมือ 401 → ล้างเซสชัน → พากลับไปล็อกอิน</td><td><code>api_service.dart</code> + จุดกลาง</td></tr>
+<tr><td>5</td><td>เปลี่ยนจอล็อกอินจากรายการผู้ใช้เป็นช่องกรอกชื่อผู้ใช้</td><td><code>login_screen.dart</code></td></tr>
+<tr><td>6</td><td>เลิกส่ง <code>operatorId</code> ใน body ให้เซิร์ฟเวอร์อ่านจาก token แทน</td><td>ทุกไฟล์ใน <code>services/api/</code> + ฝั่ง .NET</td></tr>
+</tbody></table><p>ข้อ 3 มีอุปสรรคเฉพาะของโปรเจกต์นี้</p><pre class="code-vs"><code>final _headers = {'Content-Type': 'application/json'};</code></pre><p><code>_headers</code> เป็น <code>final</code> ที่สร้างครั้งเดียวตอนสร้าง <code>ApiService</code> ซึ่งเป็น singleton — ถ้าใส่ token ลงไปตอนล็อกอิน แล้วผู้ใช้ออกจากระบบและล็อกอินใหม่เป็นคนอื่น token เก่าจะค้างอยู่ ต้องเปลี่ยนเป็นสร้างใหม่ทุกคำขอตามที่ 8.4 สอน</p><pre class="code-vs"><code>Map&lt;String, String&gt; _buildHeaders() =&gt; {
+  'Content-Type': 'application/json',
+  if (_token != null) 'Authorization': 'Bearer $_token',
+};</code></pre><p>ข้อ 4 ยากที่สุด เพราะตอนนี้ไม่มีที่กลางที่รู้เรื่องการนำทาง — <code>ApiService</code> ไม่มี <code>context</code> และไม่มีตัวจัดการ state กลางที่จอทุกจอฟังอยู่ ทางที่ทำได้คือให้ <code>ApiResult</code> พก <code>statusCode</code> ไปถึงจอ แล้วให้จอตัดสินใจ — ซึ่งแปลว่าต้องเขียนซ้ำทุกจอ และ 16.7 จะแสดงว่าตอนนี้ <code>statusCode</code> หายระหว่างทางด้วยซ้ำ</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ล็อกอินสำเร็จแปลว่าเซิร์ฟเวอร์ยอมรับแล้ว</td><td>ไม่มีการติดต่อเซิร์ฟเวอร์เลย</td></tr>
+<tr><td>ล็อกอินได้แปลว่าเชื่อมต่อเซิร์ฟเวอร์ได้</td><td>คนละเรื่องกันสิ้นเชิง</td></tr>
+<tr><td><code>prefs.clear()</code> ลบแค่ของเซสชัน</td><td>ลบทุกคีย์ รวมที่อยู่เซิร์ฟเวอร์</td></tr>
+<tr><td><code>role</code> ควบคุมสิทธิ์อยู่</td><td>ถูกแสดงอย่างเดียว</td></tr>
+<tr><td>เพิ่ม token แล้วจบ</td><td>ต้องแก้ทั้งหกข้อในตารางข้างบน</td></tr>
+</tbody></table><p>แถวที่สองอธิบายอาการที่สับสนที่สุดในคลัง — ผู้ใช้ล็อกอินผ่านสวย ๆ แล้วกดเมนูปุ๊บขึ้น “ไม่สามารถเชื่อมต่อ server ได้” เพราะการล็อกอินไม่เคยแตะเครือข่าย</p></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “เมื่อวานใช้ได้ วันนี้ล็อกอินได้แต่กดรับสินค้าแล้วขึ้นว่าต่อเซิร์ฟเวอร์ไม่ได้” เครื่องอื่นในคลังใช้ได้ปกติ</p><ol><li>เรียงสมมติฐานตามความน่าจะเป็น</li><li>คำถามแรกที่ควรถามผู้ใช้คืออะไร</li><li>ถ้ายืนยันว่าเป็นสาเหตุจากบทนี้ จะแก้ระยะสั้นและระยะยาวอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ลำดับ</th><th>สมมติฐาน</th><th>ทำไมอยู่ตรงนี้</th></tr></thead><tbody>
+<tr><td>1</td><td>มีคนกดออกจากระบบบนเครื่องนี้ → <code>apiHost</code> ถูกลบ</td><td>อธิบายได้ครบว่าทำไมเครื่องเดียวและทำไมล็อกอินยังผ่าน</td></tr>
+<tr><td>2</td><td>เครื่องนี้ต่อ Wi-Fi คนละวง</td><td>เป็นไปได้ แต่ปกติจะกระทบทั้งจุดนั้น</td></tr>
+<tr><td>3</td><td>มีคนเข้าไปแก้ IP ในหน้า Settings</td><td>เป็นไปได้ แต่ต้องตั้งใจทำ</td></tr>
+<tr><td>4</td><td>เซิร์ฟเวอร์มีปัญหา</td><td>ตัดทิ้งได้ เพราะเครื่องอื่นใช้ได้</td></tr>
+</tbody></table><p>สมมติฐานที่ 1 ชนะเพราะอธิบาย<strong>ทุกข้อสังเกต</strong>พร้อมกัน — ล็อกอินผ่าน (ไม่ต้องใช้เครือข่าย) แต่ยิง API ไม่ได้ (ไม่มีที่อยู่) และเกิดเครื่องเดียว (คนอื่นไม่ได้กดออกจากระบบ)</p><p><strong>ข้อ 2 — คำถามแรก</strong></p><p>“เมื่อวานหรือเช้านี้มีใครกดออกจากระบบบนเครื่องนี้ไหม”</p><p>ถ้าตอบว่าใช่ ยืนยันได้ทันทีโดยไม่ต้องต่อเครื่องมือใด ๆ</p><p>คำถามที่<strong>ไม่</strong>ควรถามก่อนคือ “ต่อ Wi-Fi อยู่ไหม” — เพราะผู้ใช้เห็นสัญญาณเต็มก็จะตอบว่าต่ออยู่ ซึ่งจริงและไม่ช่วยอะไร</p><p>วิธียืนยันแบบไม่ต้องถาม: ให้ผู้ใช้เปิดหน้า Settings แล้วดูว่าช่อง IP ว่างหรือไม่</p><p><strong>ข้อ 3 — แก้อย่างไร</strong></p><table><thead><tr><th>ระยะ</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>ทันที</td><td>ให้ผู้ใช้ตั้ง IP ใหม่ในหน้า Settings</td></tr>
+<tr><td>สั้น</td><td>แก้ <code>clearSession()</code> ให้ลบเฉพาะสามคีย์ของตัวเอง</td></tr>
+<tr><td>กลาง</td><td>ย้ายชื่อคีย์ทั้งหมดไปเป็นค่าคงที่ในที่เดียว</td></tr>
+<tr><td>ยาว</td><td>เพิ่มการตรวจในหน้าหลัก ว่าถ้ายังไม่ตั้งที่อยู่เซิร์ฟเวอร์ ให้บอกก่อนที่ผู้ใช้จะกดเมนู</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญที่สุด เพราะแก้ที่อาการที่ผู้ใช้เจอ ไม่ใช่แค่ที่สาเหตุอันเดียว — ยังมีทางอื่นที่ทำให้ที่อยู่เซิร์ฟเวอร์หายหรือผิด เช่นย้ายคลังแล้วเปลี่ยนวงเครือข่าย</p><pre class="code-vs"><code>// ใน HomeScreen — ตรวจก่อนที่ผู้ใช้จะเจอ error ตอนกดเมนู
+final base = await const ApiConfigService().getCustomBase();
+if (base == null &amp;&amp; mounted) {
+  showWarningSnackbar(context, 'ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ — กดไอคอนตั้งค่ามุมขวาบน');
+}</code></pre><p>ข้อความนี้ต่างจาก “ไม่สามารถเชื่อมต่อ server ได้” ตรงที่<strong>บอกว่าต้องทำอะไรต่อ</strong> ซึ่งเป็นหลักเดียวกับที่ 10.7 และ 15.11 ย้ำมาตลอด</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>การล็อกอินของ wmsapp เป็นของจำลอง — ผู้ใช้สามคนฝังในโค้ด รหัส <code>1234</code> ไม่แตะเครือข่าย</li><li>มีคอมเมนต์และข้อความบนจอบอกไว้ชัด ซึ่งเป็นวิธีทำ mock ที่ถูกต้อง</li><li>ล็อกอินสำเร็จ ≠ ต่อเซิร์ฟเวอร์ได้</li><li><code>operatorId</code> ถูกส่งไปกับ body และเซิร์ฟเวอร์เชื่อโดยไม่ตรวจ</li><li><code>clearSession()</code> เรียก <code>prefs.clear()</code> ซึ่งลบที่อยู่เซิร์ฟเวอร์ไปด้วย — บั๊กจริงที่ทำให้เครื่องใช้งานไม่ได้หลังออกจากระบบ</li><li>อย่าใช้ <code>prefs.clear()</code> ในโค้ดของฟีเจอร์เดียว ลบเฉพาะคีย์ของตัวเอง</li><li>การต่อการยืนยันตัวตนจริงมีหกงาน ไม่ใช่แค่เพิ่ม token</li></ul></div><p><strong>บทหน้า:</strong> หน้า Settings และ <code>ApiConfigService</code> — ส่วนที่ทำได้ดีที่สุดในโปรเจกต์นี้</p></section>

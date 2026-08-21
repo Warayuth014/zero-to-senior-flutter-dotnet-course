@@ -1,19 +1,135 @@
-<div class="note"><strong>Composition root ปัจจุบันเล็กมาก:</strong> <code>main.dart</code> initialize Flutter แล้วสร้าง MaterialApp ซึ่งฟัง global <code>themeProvider</code>; dependencies อื่นยังถูกสร้างภายใน screens/services</div>
-<section><h2>1. Startup</h2><pre class="code-vs"><code>void main() async {
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เปิด main.dart และ theme/theme.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.1, Part 11 (ธีมและภาษา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจุดเริ่มของแอปได้ครบ และรู้ว่าธีมถูกสลับอย่างไรโดยไม่มีตัวจัดการ state กลาง</div>
+
+<section><h2>1. ไฟล์แรกที่ต้องเปิดเสมอ</h2><p><code>lib/main.dart</code> ทั้งไฟล์มี 39 บรรทัด</p><pre class="code-vs"><code>void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   runApp(const WmsApp());
-}</code></pre><p>ยังไม่มี async bootstrap จริง แต่ ensureInitialized เตรียมไว้สำหรับ plugin/config ก่อน runApp</p></section>
-<section><h2>2. Theme rebuild boundary</h2><pre class="code-vs"><code>ValueListenableBuilder&lt;ThemeMode&gt;(
-  valueListenable: themeProvider,
-  builder: (_, mode, __) =&gt; MaterialApp(
-    theme: AppTheme.light,
-    darkTheme: AppTheme.dark,
-    themeMode: mode,
-  ),
-)</code></pre><p>toggle ทำให้ MaterialApp subtree rebuild แต่ Flutterรักษา element/stateที่ key/typeเดิม</p></section>
-<section><h2>3. Global ThemeProvider</h2><p><code>ThemeProvider extends ValueNotifier&lt;ThemeMode&gt;</code> อยู่ใน <code>theme.dart</code> และ global instanceเริ่ม light มี <code>toggle/setMode</code> ง่ายแต่ inject/test/resetยาก และยังไม่ persist themeข้าม restart</p></section>
-<section><h2>4. AppTheme</h2><p>รวม brand colors, light/dark palettes, semantic getters, radius/spacing/touchTarget และ component themes ใช้ Sarabunทั่ว app จุดอ่านสำคัญคือ semantic getterที่รับ contextเทียบกับ legacy static light colorsซึ่งอาจผิดใน dark mode</p></section>
-<section><h2>5. Localization shell</h2><p>Material/Widgets/Cupertino delegatesรองรับ Thai/English แต่ <code>locale</code> fixเป็น <code>th_TH</code> และข้อความ businessจำนวนมาก hardcodeไทย นี่คือ platform widget localization ไม่ใช่ full app localization</p></section>
-<section><h2>6. Home route</h2><pre class="code-vs"><code>home: const HomeScreen()</code></pre><p>ไม่มี named/declarative router; navigationส่วนใหญ่สร้าง <code>MaterialPageRoute</code> ใน callbacks จึงตาม route graphจาก HomeScreenและ domain menus</p></section>
-<section><h2>7. Bootstrap ที่ควรขยาย</h2><p>อนาคต composition rootควรสร้าง config, HTTP client, session repository, stores/logger แล้ว injectลง tree รวม bootstrap state loading/failure ทำให้ singletonลดลงและ testทั้ง appด้วย fakeได้</p></section>
-<section><h2>8. จุดทดสอบ</h2><div class="success">pump WmsApp แล้ว assert Thai Material locale, light/dark toggleเปลี่ยน brightness, HomeScreenยังรักษา state และ dispose/recreate providerได้โดยไม่แชร์ globalข้าม test</div></section>
+}
+
+class WmsApp extends StatelessWidget {
+  const WmsApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder&lt;ThemeMode&gt;(
+      valueListenable: themeProvider,
+      builder: (_, themeMode, __) =&gt; MaterialApp(
+        title: 'WMS',
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: themeMode,
+        debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('th', 'TH'),
+          Locale('en', 'US'),
+        ],
+        locale: const Locale('th', 'TH'),
+        home: const HomeScreen(),
+      ),
+    );
+  }
+}</code></pre><p>สั้นแต่มีข้อมูลเยอะ ไล่ทีละบรรทัด</p></section>
+
+<section><h2>2. อ่านทีละบรรทัด</h2><table><thead><tr><th>บรรทัด</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>main() async</code></td><td>ประกาศเป็น async แต่ไม่มี <code>await</code> เลย — ไม่ผิด แต่เป็นร่องรอยว่าเคยมีอะไรอยู่</td></tr>
+<tr><td><code>ensureInitialized()</code></td><td>จำเป็นเมื่อจะเรียก plugin ก่อน <code>runApp</code> — ตอนนี้ไม่ได้เรียก แต่ปล่อยไว้ไม่เสียหาย</td></tr>
+<tr><td><code>ValueListenableBuilder</code></td><td>ทั้งแอปสร้างใหม่เมื่อธีมเปลี่ยน</td></tr>
+<tr><td><code>themeProvider</code></td><td>ตัวแปรระดับไฟล์จาก <code>theme.dart</code> — ไม่ได้ส่งเข้ามา</td></tr>
+<tr><td><code>debugShowCheckedModeBanner: false</code></td><td>ซ่อนแถบ DEBUG มุมขวาบน</td></tr>
+<tr><td><code>supportedLocales</code> มีสองภาษา</td><td>แต่ <code>locale</code> ตรึงไว้ที่ <code>th_TH</code></td></tr>
+<tr><td><code>home:</code> ไม่ใช่ <code>routes:</code></td><td>ไม่มีตารางเส้นทาง ทุกการนำทางเป็น <code>Navigator.push</code> ตรง ๆ</td></tr>
+</tbody></table><div class="note"><strong>เรื่อง <code>locale</code> ที่ตรึงไว้</strong> — ประกาศรองรับสองภาษาแต่บังคับใช้ไทยเสมอ แปลว่าผู้ใช้เปลี่ยนภาษาไม่ได้แม้จะตั้งเครื่องเป็นอังกฤษ<br>สิ่งที่ <code>localizationsDelegates</code> ทำจริงคือแปล<strong>ข้อความของ Flutter เอง</strong> (ปุ่ม “ยกเลิก” ในตัวเลือกวันที่ ข้อความในเมนูคัดลอก/วาง) ไม่ได้แปลข้อความของแอปเรา — ตรงกับที่ 11.7 อธิบายไว้ ส่วนข้อความในแอปทั้งหมดเป็นภาษาไทยฝังในโค้ด</div></section>
+
+<section><h2>3. ธีมถูกสลับอย่างไร</h2><p>ใน <code>theme/theme.dart</code></p><pre class="code-vs"><code>class ThemeProvider extends ValueNotifier&lt;ThemeMode&gt; {
+  ThemeProvider() : super(ThemeMode.light);
+
+  bool get isDark =&gt; value == ThemeMode.dark;
+
+  void toggle() {
+    value = isDark ? ThemeMode.light : ThemeMode.dark;
+  }
+
+  void setMode(ThemeMode mode) =&gt; value = mode;
+}
+
+// Global instance
+final themeProvider = ThemeProvider();</code></pre><p>ตัวแปรระดับไฟล์หนึ่งตัว ใครก็เรียกได้ถ้า import ไฟล์นี้ ใน <code>home_screen.dart</code> จึงเขียนได้เลยว่า</p><pre class="code-vs"><code>onPressed: () =&gt; themeProvider.toggle(),</code></pre><table><thead><tr><th></th><th>วิธีนี้</th><th>วิธีใน Part 11</th></tr></thead><tbody>
+<tr><td>เข้าถึงจาก</td><td>import ไฟล์</td><td>อ่านจาก <code>context</code></td></tr>
+<tr><td>โค้ดที่ต้องเขียน</td><td>บรรทัดเดียว</td><td>ต้องมี Scope ครอบ</td></tr>
+<tr><td>สลับตัวปลอมในเทสต์</td><td>ทำไม่ได้</td><td>ทำได้</td></tr>
+<tr><td>รู้ว่าใครใช้บ้าง</td><td>ต้องค้นทั้งโปรเจกต์</td><td>ดูจากที่ครอบ</td></tr>
+</tbody></table><p>สำหรับค่าที่มีตัวเดียวทั้งแอปและไม่ต้องทดสอบ อย่างธีม วิธีนี้ตรงไปตรงมาและอ่านง่าย ปัญหาจะเกิดเมื่อเอาวิธีเดียวกันไปใช้กับสิ่งที่ต้องทดสอบ — ซึ่งจะเจอที่ 16.6</p><div class="note"><strong>ธีมที่เลือกไว้ไม่ถูกจำ</strong> — <code>ThemeProvider()</code> เริ่มที่ <code>ThemeMode.light</code> เสมอ ปิดแอปแล้วเปิดใหม่กลับเป็นสว่างทุกครั้ง ทั้งที่โปรเจกต์นี้มี <code>shared_preferences</code> ใช้อยู่แล้วในที่อื่น</div></section>
+
+<section><h2>4. AppTheme — สองแบบในไฟล์เดียว</h2><p><code>AppTheme</code> ยาว 324 บรรทัด และมีสามส่วน</p><table><thead><tr><th>ส่วน</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>ค่าคงที่</td><td>สีแบรนด์ 7 สี, จานสีสว่าง 7 ค่า, จานสีมืด 7 ค่า, รัศมี 5 ระดับ, ระยะห่าง 5 ระดับ</td></tr>
+<tr><td>ตัวช่วยที่รู้ธีม</td><td><code>textPrimary(context)</code>, <code>textGrey(context)</code>, <code>border(context)</code>…</td></tr>
+<tr><td>ตัวสร้าง <code>ThemeData</code></td><td><code>light</code>, <code>dark</code> เรียก <code>_build()</code> ตัวเดียวกัน</td></tr>
+</tbody></table><pre class="code-vs"><code>static Color textPrimary(BuildContext context) =&gt;
+    _isDark(context) ? _darkTextPrimary : _lightTextPrimary;
+
+static bool _isDark(BuildContext context) =&gt;
+    Theme.of(context).brightness == Brightness.dark;</code></pre><p>รูปแบบนี้แก้ปัญหาจริง — ค่าที่ <code>ThemeData</code> ไม่มีช่องให้เก็บ (เช่นสีเทาของข้อความรอง) ต้องเก็บไว้เองแล้วเลือกตามธีม</p><p>สังเกตว่า <code>_build()</code> ตัวเดียวรับ 9 พารามิเตอร์แล้วสร้างทั้งสองธีม แปลว่าเพิ่มการตกแต่งใหม่ครั้งเดียวได้ทั้งสองโหมด — เป็นการตัดสินใจที่ดีและควรทำตาม</p></section>
+
+<section><h2>5. ค่าคงที่ที่เชื่อมกับหน้างาน</h2><pre class="code-vs"><code>static const double touchTarget = 48;</code></pre><p>แล้วถูกใช้ที่</p><pre class="code-vs"><code>elevatedButtonTheme: ElevatedButtonThemeData(
+  style: ElevatedButton.styleFrom(
+    minimumSize: const Size(double.infinity, touchTarget + 4),
+    ...</code></pre><p>ปุ่มหลักทุกปุ่มในแอปจึงสูง 52 และกว้างเต็มพื้นที่ — ตัดสินใจครั้งเดียวมีผลทั้งแอป ตรงกับที่ 11.3 บอกว่าค่าปุ่มต้องมาจากที่เดียว</p><p>อีกจุดที่เชื่อมกับหน้างานคือฟอนต์</p><pre class="code-vs"><code>fontFamily: 'Sarabun',</code></pre><p>Sarabun เป็นฟอนต์ไทยที่ฝังมากับแอป (3 น้ำหนัก อยู่ใน <code>assets/fonts/</code>) ไม่ได้พึ่งฟอนต์ของเครื่อง — สำคัญบน PDA ที่ฟอนต์ไทยของระบบมักไม่ครบ</p></section>
+
+<section><h2>6. จุดที่ต้องระวังเมื่อจะแก้</h2><table><thead><tr><th>จุด</th><th>ทำไมต้องระวัง</th></tr></thead><tbody>
+<tr><td>ค่าคงที่ใน <code>AppTheme</code></td><td>ถูกอ้างจากทุกจอ เปลี่ยนแล้วกระทบทั้งแอป</td></tr>
+<tr><td><code>textPrimaryColor</code> / <code>borderColor</code></td><td>เวอร์ชันไม่รู้ธีม ใช้สีสว่างเสมอ — ในโหมดมืดจะเพี้ยน</td></tr>
+<tr><td><code>_build()</code></td><td>เปลี่ยนพารามิเตอร์เดียวกระทบทั้งสองธีม</td></tr>
+<tr><td><code>themeProvider</code></td><td>ไม่มีที่ครอบ ต้องค้นทั้งโปรเจกต์ว่าใครแตะบ้าง</td></tr>
+</tbody></table><p>แถวที่สองมาจากส่วนนี้ในไฟล์จริง</p><pre class="code-vs"><code>// ── Backwards-compat static colors ────────
+// (used by screens that don't have context yet)
+static const textPrimaryColor = _lightTextPrimary;
+static const textGreyColor    = _lightTextGrey;
+static const borderColor      = _lightBorder;</code></pre><p>คอมเมนต์บอกตรง ๆ ว่าเป็นของเก่าที่เก็บไว้ให้โค้ดเดิมใช้ได้ ถ้าเจอจอที่สีเพี้ยนในโหมดมืด ให้สงสัยสามตัวนี้ก่อน — ค้นชื่อมันทั้งโปรเจกต์แล้วเปลี่ยนเป็นเวอร์ชันที่รับ <code>context</code></p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>main()</code> เป็น async แปลว่ารออะไรอยู่</td><td>ไม่มี <code>await</code> เลย เป็นร่องรอยเก่า</td></tr>
+<tr><td>มี <code>supportedLocales</code> สองภาษา แปลว่าสลับภาษาได้</td><td><code>locale</code> ตรึงไว้ที่ไทย</td></tr>
+<tr><td><code>localizationsDelegates</code> แปลข้อความในแอปให้</td><td>แปลเฉพาะข้อความของ Flutter เอง</td></tr>
+<tr><td>ธีมที่เลือกจะถูกจำไว้</td><td>เริ่มที่สว่างทุกครั้งที่เปิดแอป</td></tr>
+<tr><td><code>AppTheme.borderColor</code> รู้ธีม</td><td>เป็นค่าคงที่ของธีมสว่างเสมอ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><ol><li>ทำให้ธีมที่ผู้ใช้เลือกถูกจำไว้หลังปิดแอป — เขียนโค้ดที่ต้องแก้ทั้งหมด</li><li>ถ้าต้องให้ผู้ใช้สลับภาษาไทย/อังกฤษได้จริง ต้องเปลี่ยนอะไรบ้าง เรียงตามลำดับที่ทำจริงได้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — จำธีมไว้</strong></p><p>ใน <code>theme.dart</code></p><pre class="code-vs"><code>class ThemeProvider extends ValueNotifier&lt;ThemeMode&gt; {
+  ThemeProvider() : super(ThemeMode.light);
+
+  static const _key = 'themeMode';
+
+  Future&lt;void&gt; restore() async {
+    final prefs = await SharedPreferences.getInstance();
+    value = prefs.getString(_key) == 'dark'
+        ? ThemeMode.dark
+        : ThemeMode.light;
+  }
+
+  Future&lt;void&gt; _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, isDark ? 'dark' : 'light');
+  }
+
+  void toggle() {
+    value = isDark ? ThemeMode.light : ThemeMode.dark;
+    unawaited(_persist());
+  }
+}</code></pre><p>ใน <code>main.dart</code></p><pre class="code-vs"><code>void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await themeProvider.restore();   // ตอนนี้ async มีเหตุผลแล้ว
+  runApp(const WmsApp());
+}</code></pre><p>สังเกตว่า <code>ensureInitialized()</code> ที่ดูเหมือนเกินความจำเป็น กลายเป็นสิ่งจำเป็นทันทีที่เรียก <code>SharedPreferences</code> ก่อน <code>runApp</code> — คนเขียนคนแรกอาจเคยตั้งใจทำแบบนี้</p><p>มีกับดักหนึ่งข้อ: <code>AuthSessionService.clearSession()</code> เรียก <code>prefs.clear()</code> ซึ่งลบทุกคีย์ — ธีมที่จำไว้จะหายตอนออกจากระบบด้วย เรื่องนี้อธิบายเต็ม ๆ ที่ 16.4</p><p><strong>ข้อ 2 — สลับภาษาได้จริง</strong></p><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>ขนาดงาน</th></tr></thead><tbody>
+<tr><td>1</td><td>ทำ <code>localeProvider</code> แบบเดียวกับ <code>themeProvider</code> แล้วผูกกับ <code>locale:</code></td><td>เล็ก</td></tr>
+<tr><td>2</td><td>สร้างที่เก็บข้อความแบบ 11.8</td><td>กลาง</td></tr>
+<tr><td>3</td><td>ย้ายข้อความไทยที่ฝังในโค้ดออกมาทีละจอ</td><td><strong>ใหญ่มาก</strong></td></tr>
+<tr><td>4</td><td>ตรวจว่าคำอังกฤษไม่ล้นปุ่มที่ออกแบบด้วยความยาวคำไทย</td><td>กลาง</td></tr>
+</tbody></table><p>ขั้นที่ 3 คืองานจริง — ข้อความไทยกระจายอยู่ใน 80 ไฟล์ และหลายอันอยู่กลาง <code>build()</code> ที่ยาวเป็นพันบรรทัด</p><p><strong>ข้อสรุปที่สำคัญกว่าตัวคำตอบ:</strong> ขั้นที่ 1 ใช้เวลาไม่ถึงชั่วโมงและทำให้ดูเหมือน “ทำเสร็จแล้ว” แต่ถ้าหยุดแค่นั้น ผู้ใช้กดสลับภาษาแล้วทุกอย่างยังเป็นไทยหมด ซึ่งแย่กว่าไม่มีปุ่มเลย</p><p>ถ้าจะทำ ต้องทำทีละจอและปล่อยเมื่อครบทั้งจอ ไม่ใช่ปล่อยปุ่มก่อนแล้วค่อยตามแปล</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>main.dart</code> 39 บรรทัด: <code>MaterialApp</code> ห่อด้วย <code>ValueListenableBuilder</code> ที่ฟังธีม</li><li>ไม่มีตารางเส้นทาง ใช้ <code>home:</code> แล้ว <code>Navigator.push</code> ตรง ๆ ทุกที่</li><li>ประกาศรองรับสองภาษาแต่ตรึง <code>locale</code> ไว้ที่ไทย</li><li><code>themeProvider</code> เป็นตัวแปรระดับไฟล์ — เรียกง่าย แต่ไม่มีที่ครอบและสลับตัวปลอมไม่ได้</li><li>ธีมที่เลือกไม่ถูกจำหลังปิดแอป</li><li><code>AppTheme</code> เก็บทั้งค่าคงที่ ตัวช่วยที่รู้ธีม และตัวสร้าง <code>ThemeData</code> ในไฟล์เดียว</li><li>ระวังสามค่าท้ายไฟล์ที่เป็นของเก่าและไม่รู้ธีม</li></ul></div><p><strong>บทหน้า:</strong> <code>HomeScreen</code> — 553 บรรทัดที่คุมทั้งการล็อกอิน การนำทาง และเมนูซ่อน</p></section>

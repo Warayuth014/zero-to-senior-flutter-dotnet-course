@@ -4,23 +4,159 @@
 <title>PartThumbnail</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-10 · Real Codebase</span><h1>PartThumbnail</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Input/output</a></li><li><a href="#section-2">Async path</a></li><li><a href="#section-3">Rebuild issue</a></li><li><a href="#section-4">URL issue</a></li><li><a href="#section-5">Image memory</a></li><li><a href="#section-6">Error states</a></li><li><a href="#section-7">Better boundary</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>PartThumbnail เป็นตัวอย่าง dependency ไหลเข้า widget:</strong> StatelessWidgetสร้าง <code>ApiService()</code>, resolve relative URLผ่าน FutureBuilder แล้วโหลด Image.network จึงรวม config, async, network, cacheและ presentationในจุดเดียว</div>
-<section id="section-1"><h2>1. Input/output</h2><p>รับ <code>String? imageUrl</code>และ size default 40 ถ้า null/emptyแสดง package icon มิฉะนั้น resolve URL → spinner → network imageหรือ error icon</p></section>
-<section id="section-2"><h2>2. Async path</h2><pre class="code-vs"><code>FutureBuilder&lt;String&gt;(
-  future: ApiService().getImageFullUrl(imageUrl!),
-  builder: (_, snap) =&gt; snap.hasData
-      ? Image.network(snap.data!)
-      : spinner,
-)</code></pre></section>
-<section id="section-3"><h2>3. Rebuild issue</h2><p>สร้าง Futureใหม่ทุก build ทำให้ parent rebuildจาก search/theme/pollingเริ่ม resolveซ้ำแม้ URLเดิม Futureควร cacheใน State/repositoryหรือ resolutionควร synchronousหลัง config bootstrap</p></section>
-<section id="section-4"><h2>4. URL issue</h2><p><code>getImageFullUrl</code>นำ API baseไป <code>replaceAll('/api','')</code>แล้วต่อ relative string เสี่ยง slash/path/hostผิด ใช้ <code>Uri.resolve</code>กับ media baseที่ explicitและ allowlist absolute origin</p></section>
-<section id="section-5"><h2>5. Image memory</h2><p>กำหนด layout width/heightแต่ไม่ได้ส่ง <code>cacheWidth/cacheHeight</code> decoderอาจเก็บ bitmapต้นฉบับใหญ่สำหรับ thumbnail 40px เพิ่ม decode sizeตาม devicePixelRatioและ versioned cache key</p></section>
-<section id="section-6"><h2>6. Error states</h2><p>resolve Future errorตอนนี้แสดง spinnerต่อเพราะเช็กเพียง <code>hasData</code> ต้องแยก waiting/error/emptyและ retry ส่วน Image.networkมี errorBuilderแล้วแต่ไม่มี loading progressจาก download</p></section>
-<section id="section-7"><h2>7. Better boundary</h2><pre class="code-vs"><code>PartThumbnail(
-  imageUri: mediaPolicy.resolve(part.imageUrl),
-  cacheKey: part.imageVersion,
-)</code></pre><p>widgetรับ presentation-ready valueและ ImageProviderที่ fakeได้ ไม่รู้ ApiService</p></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">null/empty, resolving, resolve failure, network failure, parent rebuildเรียก resolverครั้งเดียว, URLเปลี่ยน, theme/list reorderและ decode dimensionsเหมาะกับ PDA</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">widget เล็กที่ถูกใช้เยอะที่สุด</a></li><li><a href="#section-2">โค้ดทั้งหมด</a></li><li><a href="#section-3">ปัญหาที่ 1 — FutureBuilder อยู่ใน build</a></li><li><a href="#section-4">ปัญหาที่ 2 — รูปใหญ่ในกล่องเล็ก</a></li><li><a href="#section-5">จอที่อัปโหลดรูป</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด widgets/part_thumbnail.dart และ screens/supervisor/part_image_screen.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.9, Part 13 (ไฟล์และรูป), 14.13 (การวัดประสิทธิภาพ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> วิเคราะห์ปัญหาประสิทธิภาพจากการอ่านโค้ด และคำนวณต้นทุนหน่วยความจำของรูปได้</div>
+
+<section id="section-1"><h2>1. widget เล็กที่ถูกใช้เยอะที่สุด</h2><p><code>PartThumbnail</code> ยาว 61 บรรทัด ถูกใช้ใน 12 จุด ทั่ว 11 จอ</p><table><thead><tr><th>จอ</th><th>ขนาดที่ขอ</th></tr></thead><tbody>
+<tr><td><code>putaway/.../pallet_items_page.dart</code></td><td>56</td></tr>
+<tr><td><code>checkin_screen.dart</code></td><td>44, 42, 52</td></tr>
+<tr><td><code>pending_pallet_po_group.dart</code></td><td>44</td></tr>
+<tr><td><code>picking_order_detail_screen.dart</code></td><td>42</td></tr>
+<tr><td><code>pick_items_screen.dart</code>, <code>packing_screen.dart</code></td><td>40</td></tr>
+<tr><td><code>unload_items_list.dart</code></td><td>36</td></tr>
+<tr><td><code>po_items_list.dart</code></td><td>40 (ค่าเริ่มต้น)</td></tr>
+</tbody></table><p>ทุกที่ขอขนาดระหว่าง 36 ถึง 56 พิกเซล — เป็นรูปเล็กในรายการทั้งหมด ไม่มีที่ไหนแสดงรูปใหญ่</p><p>จำตัวเลขนี้ไว้ แล้วดูโค้ด</p></section>
+
+<section id="section-2"><h2>2. โค้ดทั้งหมด</h2><pre class="code-vs"><code>class PartThumbnail extends StatelessWidget {
+  final String? imageUrl;
+  final double size;
+
+  const PartThumbnail({super.key, this.imageUrl, this.size = 40});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImg = imageUrl != null &amp;&amp; imageUrl!.isNotEmpty;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: size,
+        height: size,
+        color: Colors.grey.shade100,
+        child: hasImg
+            ? FutureBuilder&lt;String&gt;(
+                future: ApiService().getImageFullUrl(imageUrl!),   // ← ปัญหาที่ 1
+                builder: (_, snap) {
+                  if (!snap.hasData) {
+                    return const Center(
+                      child: SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+                  return Image.network(
+                    snap.data!,                                    // ← ปัญหาที่ 2
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =&gt; Icon(...),
+                  );
+                },
+              )
+            : Icon(MdiIcons.packageVariantClosed, ...),
+      ),
+    );
+  }
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ตรวจทั้ง <code>null</code> และสตริงว่าง</td><td>ต่างจาก <code>_fullName</code> ใน 16.3</td></tr>
+<tr><td>มี <code>errorBuilder</code></td><td>รูปโหลดไม่ได้ไม่ทำให้จอพัง</td></tr>
+<tr><td>ใช้ไอคอนแทนเมื่อไม่มีรูป</td><td>แถวไม่กระโดดเพราะกล่องขนาดเท่ากันเสมอ</td></tr>
+<tr><td><code>ClipRRect</code> ครอบ</td><td>รูปที่ไม่ใช่จัตุรัสไม่ล้นมุมโค้ง</td></tr>
+</tbody></table><p>สี่ข้อนี้ครอบคลุมสิ่งที่ 1.10 และ 13.5 สอนไว้ครบ — ปัญหาไม่ได้อยู่ที่ความถูกต้อง แต่อยู่ที่<strong>ต้นทุน</strong></p></section>
+
+<section id="section-3"><h2>3. ปัญหาที่ 1 — FutureBuilder อยู่ใน build</h2><pre class="code-vs"><code>future: ApiService().getImageFullUrl(imageUrl!),</code></pre><p>บรรทัดนี้สร้าง <code>Future</code> ใหม่ทุกครั้งที่ <code>build()</code> ทำงาน และ <code>FutureBuilder</code> ที่ได้ <code>Future</code> ตัวใหม่จะกลับไปเริ่มที่สถานะ “ยังไม่มีข้อมูล” เสมอ</p><p>ผลคือ<strong>วงกลมหมุนกระพริบทุกครั้งที่ widget ถูกวาดใหม่</strong></p><table><thead><tr><th>เมื่อ</th><th>build ทำงานไหม</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td>เลื่อนรายการขึ้นลง</td><td>ทำ ทุกครั้งที่แถวเข้าจอ</td><td>วงกลมแวบแล้วรูปโผล่</td></tr>
+<tr><td>พิมพ์ค้นหาทีละตัว</td><td>ทำ ทุกตัวอักษร</td><td>ทั้งรายการกระพริบ</td></tr>
+<tr><td><code>setState</code> ของจอ</td><td>ทำ ทั้งรายการ</td><td>กระพริบพร้อมกันหมด</td></tr>
+</tbody></table><p>ตรงกับกับดักที่ 13.10 อธิบายไว้ตรง ๆ</p><p>ที่ตลกร้ายคือ <code>getImageFullUrl</code> ไม่จำเป็นต้องเป็น async ด้วยซ้ำ</p><pre class="code-vs"><code>Future&lt;String&gt; getImageFullUrl(String relativePath) async {
+  final base = await ApiService._resolveBase();
+  final serverBase = base.replaceAll('/api', '');
+  return '$serverBase$relativePath';
+}</code></pre><p>เป็น async เพราะ <code>_resolveBase()</code> เป็น async แต่หลังจากคำขอแรก <code>_cachedBase</code> มีค่าแล้ว (16.6) ฟังก์ชันนี้จึงคืนค่าทันทีเกือบทุกครั้ง — เสียค่าใช้จ่ายของ <code>FutureBuilder</code> ทั้งหมดเพื่อรอสิ่งที่มีอยู่แล้ว</p><p>แก้ได้โดยให้ผู้เรียกส่ง URL เต็มมาเลย</p><pre class="code-vs"><code>class PartThumbnail extends StatelessWidget {
+  final String? imageUrl;      // รับ URL เต็มมาเลย
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    ...
+    child: hasImg
+        ? Image.network(imageUrl!, fit: BoxFit.cover, errorBuilder: ...)
+        : Icon(...),
+  }
+}</code></pre><p>แต่แบบนี้ผู้เรียก 12 จุดต้องประกอบ URL เอง วิธีที่กระทบน้อยกว่าคือทำให้การประกอบเป็นแบบไม่ต้องรอ</p><pre class="code-vs"><code>// ใน ApiService — คืนทันทีถ้ารู้ base แล้ว
+static String? get cachedServerBase =&gt;
+    _cachedBase?.replaceAll('/api', '');</code></pre><pre class="code-vs"><code>// ใน PartThumbnail
+final base = ApiService.cachedServerBase;
+if (base == null) return Icon(...);          // ยังไม่รู้ base — แสดงไอคอนไปก่อน
+return Image.network('$base$imageUrl', ...);</code></pre><p>ไม่มี <code>FutureBuilder</code> ไม่มีการกระพริบ และกรณีที่ยังไม่รู้ base เกิดได้เฉพาะก่อนคำขอแรกซึ่งตอนนั้นยังไม่มีรายการให้แสดงอยู่แล้ว</p><div class="note"><strong>ข้อควรระวังของ <code>replaceAll('/api', '')</code></strong> — แทนที่ทุกที่ที่เจอ ไม่ใช่แค่ท้ายสุด ถ้าวันหนึ่ง base เป็น <code>http://api-server:5000/api</code> จะได้ <code>http://-server:5000</code> ซึ่งผิด<br>ที่ถูกคือตัดเฉพาะท้าย: <code>base.substring(0, base.length - 4)</code> หรือใช้ <code>Uri.resolve</code> ตามที่ 13.6 สอน</div></section>
+
+<section id="section-4"><h2>4. ปัญหาที่ 2 — รูปใหญ่ในกล่องเล็ก</h2><pre class="code-vs"><code>return Image.network(snap.data!, fit: BoxFit.cover, ...);</code></pre><p>ไม่มี <code>cacheWidth</code> แปลว่า Flutter จะคลายรูปที่ขนาดเต็มลงหน่วยความจำ แล้วค่อยย่อตอนวาด</p><p>รูปที่อัปโหลดจาก <code>part_image_screen.dart</code> มีขนาดเท่าไร ดูที่ต้นทาง</p><pre class="code-vs"><code>final picked = await _picker.pickImage(
+  source: source,
+  maxWidth: 1024,
+  maxHeight: 1024,
+  imageQuality: 85,
+);</code></pre><p>ใหญ่สุด 1024×1024 คำนวณต้นทุนตามสูตรของ 13.11 (กว้าง × สูง × 4 ไบต์)</p><table><thead><tr><th></th><th>ขนาดที่คลาย</th><th>หน่วยความจำต่อรูป</th></tr></thead><tbody>
+<tr><td>ตอนนี้</td><td>1024 × 1024</td><td>4.2 MB</td></tr>
+<tr><td>ถ้ามี <code>cacheWidth</code></td><td>112 × 112 (56 × 2 เท่าของความละเอียดจอ)</td><td><strong>50 KB</strong></td></tr>
+</tbody></table><p>ต่างกัน 84 เท่า และรายการมีหลายแถว</p><table><thead><tr><th>จำนวนแถวที่แสดง</th><th>ตอนนี้</th><th>ถ้าแก้</th></tr></thead><tbody>
+<tr><td>10</td><td>42 MB</td><td>0.5 MB</td></tr>
+<tr><td>30</td><td>126 MB</td><td>1.5 MB</td></tr>
+<tr><td>50</td><td><strong>210 MB</strong></td><td>2.5 MB</td></tr>
+</tbody></table><p>PDA ในคลังมักมี RAM 2–4 GB และแบ่งให้แต่ละแอปได้ไม่มาก ตัวเลขแถวล่างคือจุดที่ระบบปฏิบัติการเริ่มปิดแอปทิ้ง</p><p>อาการที่ผู้ใช้แจ้งจะเป็น “แอปเด้งออกเองตอนเลื่อนรายการยาว ๆ” ซึ่งฟังดูไม่เกี่ยวกับรูปเลย</p><p>แก้ด้วยบรรทัดเดียว</p><pre class="code-vs"><code>return Image.network(
+  url,
+  fit: BoxFit.cover,
+  // คลายที่ขนาดที่ใช้จริง ไม่ใช่ขนาดเต็มของไฟล์
+  cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+  errorBuilder: ...,
+);</code></pre><p>คูณด้วยความละเอียดของจอเพราะ <code>size</code> เป็นหน่วยที่ไม่ขึ้นกับความหนาแน่นพิกเซล — ถ้าใส่ <code>cacheWidth: 56</code> ตรง ๆ รูปจะเบลอบนจอความละเอียดสูง</p></section>
+
+<section id="section-5"><h2>5. จอที่อัปโหลดรูป</h2><p><code>part_image_screen.dart</code> 352 บรรทัด เป็นจอเดียวที่ส่งไฟล์ขึ้นเซิร์ฟเวอร์</p><pre class="code-vs"><code>Future&lt;void&gt; _loadParts() async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.getAllParts();       // ← โหลดทุกชิ้นทีเดียว
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+  ...
+}
+
+void _filterParts() {
+  final q = _searchCtrl.text.trim().toLowerCase();
+  setState(() {
+    _filteredParts = _allParts.where((p) { ... }).toList();   // ← กรองในเครื่อง
+  });
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ตรวจ <code>mounted</code> ก่อน <code>setState</code></td><td>จอนี้ถูกปิดระหว่างโหลดได้จริง</td></tr>
+<tr><td>ค้นหาสามฟิลด์พร้อมกัน</td><td>รหัส คำอธิบาย และยี่ห้อ</td></tr>
+<tr><td>ค้นในเครื่อง</td><td>พิมพ์แล้วเห็นผลทันที ไม่ต้องรอเน็ต</td></tr>
+</tbody></table><p>แต่มีข้อจำกัดที่จะโตขึ้นตามจำนวนสินค้า</p><table><thead><tr><th>จำนวนสินค้า</th><th>ผล</th></tr></thead><tbody>
+<tr><td>หลักร้อย</td><td>ทำงานได้ดี</td></tr>
+<tr><td>หลักพัน</td><td>โหลดครั้งแรกช้า และกินหน่วยความจำ</td></tr>
+<tr><td>หลักหมื่น</td><td>ใช้ไม่ได้</td></tr>
+</tbody></table><p>เป็นรูปแบบ “โหลดทั้งหมดแล้วกรองในเครื่อง” ที่ 10.10 เตือนไว้ — ทำงานได้ดีจนถึงจุดหนึ่งแล้วพังทันที ไม่ค่อย ๆ ช้าลง</p><p>และการกรองยังมีจุดที่พังได้</p><pre class="code-vs"><code>final desc = (p['itemDesc'] as String).toLowerCase();</code></pre><p>ถ้าสินค้าชิ้นไหนไม่มีคำอธิบาย <code>as String</code> จะโยน <code>TypeError</code> ตอนพิมพ์ค้นหา — เป็นบั๊กที่ไม่โผล่ตอนเปิดจอ แต่โผล่ตอนผู้ใช้เริ่มพิมพ์ ซึ่งทำให้เดาสาเหตุยาก</p><pre class="code-vs"><code>// ปลอดภัยกว่า
+final desc = (p['itemDesc'] as String? ?? '').toLowerCase();</code></pre></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>รูปเล็กใช้หน่วยความจำน้อย</td><td>ขึ้นกับขนาดไฟล์ ไม่ใช่ขนาดที่แสดง</td></tr>
+<tr><td><code>fit: BoxFit.cover</code> ย่อรูปให้แล้ว</td><td>ย่อตอนวาด แต่คลายเต็มขนาดในหน่วยความจำ</td></tr>
+<tr><td><code>FutureBuilder</code> ใน <code>build</code> ทำงานครั้งเดียว</td><td>สร้าง <code>Future</code> ใหม่ทุกครั้งที่ build</td></tr>
+<tr><td>ใส่ <code>cacheWidth: 56</code> ตรง ๆ ได้เลย</td><td>ต้องคูณความละเอียดจอ ไม่งั้นเบลอ</td></tr>
+<tr><td><code>replaceAll('/api','')</code> ตัดท้าย</td><td>ตัดทุกที่ที่เจอ</td></tr>
+<tr><td>แอปเด้งออกแปลว่ามีบั๊กในโค้ดที่กำลังทำ</td><td>อาจเป็นหน่วยความจำจากรูปที่โหลดไว้ก่อนหน้า</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งสองเรื่องที่ดูไม่เกี่ยวกัน</p><ol><li>“จอ Packing เลื่อนแล้วรูปกระพริบตลอด”</li><li>“แอปปิดตัวเองบางครั้ง ตอนดูรายการยาว ๆ”</li></ol><p>วินิจฉัยและเรียงลำดับการแก้ พร้อมบอกว่าจะวัดผลอย่างไร</p><details><summary>แนวคำตอบ</summary><p><strong>ทั้งสองมาจากไฟล์เดียวกัน</strong></p><table><thead><tr><th>อาการ</th><th>สาเหตุ</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td>รูปกระพริบ</td><td><code>FutureBuilder</code> สร้าง <code>Future</code> ใหม่ทุก build</td><td><code>part_thumbnail.dart:31</code></td></tr>
+<tr><td>แอปปิดตัวเอง</td><td>ไม่มี <code>cacheWidth</code> — รูปละ 4.2 MB</td><td><code>part_thumbnail.dart:43</code></td></tr>
+</tbody></table><p>ทั้งคู่อยู่ห่างกัน 12 บรรทัดในไฟล์ 61 บรรทัด และแก้พร้อมกันได้</p><p><strong>ลำดับการแก้</strong></p><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>1</td><td>ใส่ <code>cacheWidth</code></td><td>บรรทัดเดียว ไม่กระทบใคร แก้อาการที่ร้ายแรงกว่า</td></tr>
+<tr><td>2</td><td>เอา <code>FutureBuilder</code> ออก</td><td>ต้องเพิ่ม getter ใน <code>ApiService</code> ด้วย</td></tr>
+<tr><td>3</td><td>แก้ <code>replaceAll</code> เป็นตัดเฉพาะท้าย</td><td>ยังไม่เป็นปัญหา แต่ทำพร้อมกันเลย</td></tr>
+</tbody></table><p>แก้ข้อ 1 ก่อนเพราะ<strong>แอปปิดตัวเองทำให้เสียงานที่ทำค้าง</strong> ส่วนรูปกระพริบแค่รำคาญ — จัดลำดับตามผลกระทบต่อผู้ใช้ ไม่ใช่ตามความยากง่าย</p><p><strong>วัดผลอย่างไร</strong></p><table><thead><tr><th>วัดอะไร</th><th>ด้วย</th><th>คาดหวัง</th></tr></thead><tbody>
+<tr><td>หน่วยความจำตอนเลื่อนรายการ 50 แถว</td><td>DevTools แท็บ Memory</td><td>ลดจากหลักร้อย MB เหลือหลักสิบ</td></tr>
+<tr><td>จำนวนครั้งที่ <code>build</code> ทำงาน</td><td>ตัวนับแบบ 14.12</td><td>ไม่เปลี่ยน — เราแก้ที่ต้นทุนต่อครั้ง ไม่ใช่จำนวนครั้ง</td></tr>
+<tr><td>รูปกระพริบไหม</td><td>ตาดู เลื่อนขึ้นลงเร็ว ๆ</td><td>ไม่มีวงกลมแวบ</td></tr>
+</tbody></table><p>แถวกลางสำคัญ — ถ้าคาดว่าจำนวน build จะลดแล้วมันไม่ลด อาจสรุปผิดว่าแก้ไม่สำเร็จ ทั้งที่แก้ถูกจุดแล้ว</p><p><strong>วิธียืนยันก่อนแก้</strong></p><p>วัดก่อนแก้ด้วย ไม่งั้นไม่มีอะไรเทียบ</p><pre class="code-vs"><code># เปิด DevTools แล้วเลื่อนรายการ 50 แถวขึ้นลง 3 รอบ จดตัวเลขไว้
+flutter run --profile</code></pre><p>ต้องใช้ <code>--profile</code> ไม่ใช่ <code>--debug</code> ตามที่ 15.1 อธิบาย — โหมด debug มีค่าใช้จ่ายเพิ่มที่ทำให้ตัวเลขไม่ตรงกับของจริง</p><p><strong>สิ่งที่ต้องระวังหลังแก้</strong></p><p><code>cacheWidth</code> ทำให้รูปที่แคชไว้เป็นคนละขนาดกับที่เคยแคช ถ้าจอไหนแสดงรูปเดียวกันสองขนาด (เช่น <code>checkin_screen.dart</code> ที่ใช้ทั้ง 42 44 และ 52) จะโหลดและแคชแยกกันสามชุด</p><p>ในกรณีนี้ยังคุ้ม เพราะสามชุดที่ 50 KB รวมกันยังน้อยกว่าชุดเดียวที่ 4.2 MB มาก แต่ถ้าอยากให้ดีที่สุดคือทำให้ขนาดที่ใช้เท่ากันทั้งแอป</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li><code>PartThumbnail</code> 61 บรรทัด ถูกใช้ 12 จุด ทุกที่ขอขนาด 36–56 พิกเซล</li><li>ความถูกต้องครบ — ตรวจสตริงว่าง มี <code>errorBuilder</code> มีไอคอนสำรอง</li><li><code>FutureBuilder</code> ใน <code>build</code> สร้าง <code>Future</code> ใหม่ทุกครั้ง → รูปกระพริบตอนเลื่อนและตอนพิมพ์ค้นหา</li><li><code>getImageFullUrl</code> ไม่จำเป็นต้อง async หลังจากรู้ base แล้ว</li><li>ไม่มี <code>cacheWidth</code> → รูป 1024×1024 กิน 4.2 MB ต่อรูป ต่างจากที่ควรเป็น 84 เท่า</li><li>50 แถวคือ 210 MB ซึ่งเป็นจุดที่ระบบเริ่มปิดแอปทิ้ง</li><li><code>cacheWidth</code> ต้องคูณด้วยความละเอียดจอ ไม่งั้นรูปเบลอ</li><li>จอ <code>part_image_screen</code> โหลดสินค้าทั้งหมดแล้วกรองในเครื่อง — ดีจนถึงหลักพัน</li></ul></div><p><strong>บทหน้า:</strong> ไฟล์นอก <code>lib/</code> — Android, ฟอนต์ ไอคอน และสิ่งที่ต้องแก้ก่อนปล่อยจริง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

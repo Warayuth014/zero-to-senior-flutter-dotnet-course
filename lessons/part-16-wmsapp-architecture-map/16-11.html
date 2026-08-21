@@ -4,18 +4,147 @@
 <title>Platform &amp; Assets</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-11 · Real Codebase</span><h1>Platform &amp; Assets</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">SDK/dependencies</a></li><li><a href="#section-2">Assets/fonts</a></li><li><a href="#section-3">Launcher configuration</a></li><li><a href="#section-4">Android</a></li><li><a href="#section-5">iOS</a></li><li><a href="#section-6">Web/desktop boundary</a></li><li><a href="#section-7">Lock/build inputs</a></li><li><a href="#section-8">Platform checklist</a></li></ol></nav>
-<div class="note"><strong>โค้ด Dart ไม่ใช่ทั้งแอป:</strong> <code>pubspec.yaml</code>, assets/fonts/icons, Android/iOS manifests, Gradle/Xcodeและ generated plugin registrationกำหนดว่า feature compile/รันบน deviceได้จริงหรือไม่</div>
-<section id="section-1"><h2>1. SDK/dependencies</h2><p>pubspecกำหนด Dart <code>^3.9.2</code> และใช้ http, shared_preferences, intl, image_picker, material icons, signalr_netcore รวม Flutter localization ทุก packageเพิ่ม platform code, permissions, lifecycleและ supply-chain surface</p></section>
-<section id="section-2"><h2>2. Assets/fonts</h2><pre class="code-vs"><code>fonts/Sarabun-Regular.ttf
-fonts/Sarabun-Medium.ttf (500)
-fonts/Sarabun-Bold.ttf   (700)
-icons/icon-tks-square.png</code></pre><p>path/caseต้องตรงและ assetsถูก bundle; themeตั้ง fontFamily Sarabun</p></section>
-<section id="section-3"><h2>3. Launcher configuration</h2><p><code>flutter_launcher_icons</code>เปิด Android, ปิด iOSและใช้ icon TKS การแก้ YAMLต้องรัน generatorและ review generated mipmaps ไม่ใช่แก้ assetอย่างเดียว</p></section>
-<section id="section-4"><h2>4. Android</h2><p><code>android/app/build.gradle.kts</code>ยังใช้ <code>com.example.wmsapp</code>และ release debug signing; main manifestกำหนด label/icon/activityแต่ INTERNETอยู่ debug/profile ไม่ใช่ main ประเด็นนี้ Part 15จัดเป็น production blockers</p></section>
-<section id="section-5"><h2>5. iOS</h2><p><code>Info.plist</code>กำหนด display/bundle version/orientationsแต่ยังไม่มี camera/photo usage descriptionsที่ image pickerต้องใช้ และ iOS launcher generationปิด ต้องตรวจ signing/capabilities/ATSบน Mac/deviceจริง</p></section>
-<section id="section-6"><h2>6. Web/desktop boundary</h2><p><code>ApiService</code>import <code>dart:io</code>และ uploadรับ File แม้ resolverเช็ก kIsWeb จึงต้องตรวจ compile targetจริง ไม่ใช่เห็น web foldersแล้วสรุปรองรับทุก feature Conditional adapter/XFileช่วยแยก platform</p></section>
-<section id="section-7"><h2>7. Lock/build inputs</h2><p><code>pubspec.lock</code>, analysis options, Gradle wrapper, Podfileและ platform projectเป็น review surface Pin toolchainใน CIและ rebuild from clean checkoutเพื่อจับ native configที่เครื่อง devเคย cache</p></section>
-<section id="section-8"><h2>8. Platform checklist</h2><div class="success">dependency → Dart usage → plugin docs/version → manifest/plist permission → runtime deny path → release build/signing → device test ทุกครั้งที่เพิ่ม packageที่แตะ camera, storage, network, notificationหรือbackground</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สิ่งที่อยู่นอก lib/</a></li><li><a href="#section-2">assets — ฟอนต์กับไอคอน</a></li><li><a href="#section-3">Android — สิ่งที่ Part 15 พบ</a></li><li><a href="#section-4">build.gradle.kts — สอง TODO ที่ยังอยู่</a></li><li><a href="#section-5">ไลบรารีที่ใช้</a></li><li><a href="#section-6">test/ — ไฟล์เดียวที่ไม่ได้ทำอะไร</a></li><li><a href="#section-7">เอกสารในโปรเจกต์</a></li><li><a href="#section-8">รายการที่ต้องแก้ก่อนปล่อยจริง</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิดโฟลเดอร์ android/ และ pubspec.yaml</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.10, Part 15 (การปล่อยแอป)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านไฟล์นอก <code>lib/</code> ได้ และรู้ว่าโปรเจกต์นี้ยังปล่อยจริงไม่ได้เพราะอะไร</div>
+
+<section id="section-1"><h2>1. สิ่งที่อยู่นอก lib/</h2><table><thead><tr><th>โฟลเดอร์</th><th>คืออะไร</th><th>ใช้จริงไหม</th></tr></thead><tbody>
+<tr><td><code>android/</code></td><td>โปรเจกต์ Android</td><td><strong>ใช่ — เป้าหมายเดียว</strong></td></tr>
+<tr><td><code>ios/</code>, <code>macos/</code>, <code>linux/</code>, <code>windows/</code>, <code>web/</code></td><td>โครงที่ Flutter สร้างให้</td><td>ไม่ — ไม่เคยสร้างจริง</td></tr>
+<tr><td><code>assets/</code></td><td>ฟอนต์และไอคอน</td><td>ใช่</td></tr>
+<tr><td><code>test/</code></td><td>เทสต์</td><td>มีไฟล์เดียวที่เป็นแม่แบบ</td></tr>
+<tr><td><code>docs/</code></td><td>เอกสาร</td><td>ใช่</td></tr>
+<tr><td><code>build/</code>, <code>.dart_tool/</code></td><td>ผลของการ build</td><td>ไม่ต้องอ่าน</td></tr>
+</tbody></table><p>ห้าโฟลเดอร์แพลตฟอร์มที่ไม่ได้ใช้ยังอยู่เพราะ <code>flutter create</code> สร้างมาให้ทั้งหมด ลบได้ถ้าแน่ใจ แต่ก็ไม่ได้เสียหายอะไรถ้าปล่อยไว้</p></section>
+
+<section id="section-2"><h2>2. assets — ฟอนต์กับไอคอน</h2><pre class="code-vs"><code>flutter:
+  uses-material-design: true
+  fonts:
+    - family: Sarabun
+      fonts:
+        - asset: assets/fonts/Sarabun-Regular.ttf
+        - asset: assets/fonts/Sarabun-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Sarabun-Bold.ttf
+          weight: 700</code></pre><p>สามน้ำหนักถูกประกาศไว้ แล้ว <code>theme.dart</code> ใช้ทั่วทั้งแอปด้วยบรรทัดเดียว</p><pre class="code-vs"><code>fontFamily: 'Sarabun',</code></pre><table><thead><tr><th>ทำไมต้องฝังฟอนต์ไทย</th></tr></thead><tbody>
+<tr><td>PDA หลายรุ่นมีฟอนต์ไทยไม่ครบ สระบางตัวขึ้นเป็นกล่องสี่เหลี่ยม</td></tr>
+<tr><td>ฟอนต์ระบบต่างรุ่นต่างกัน ทำให้เลย์เอาต์ที่เผื่อความสูงไว้พังบางเครื่อง</td></tr>
+<tr><td>ฟอนต์ที่เลือกเองคุมความหนาได้ตรงกันทุกเครื่อง</td></tr>
+</tbody></table><p>ตรงกับที่ 11.5 อธิบายเรื่องภาษาไทยที่มีสระสี่ระดับ ถ้าฟอนต์ไม่รองรับหรือความสูงบรรทัดไม่พอ สระบนกับวรรณยุกต์จะทับกัน</p><p>ส่วนไอคอนแอปตั้งผ่านเครื่องมือ</p><pre class="code-vs"><code>flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icons/icon-tks-square.png"</code></pre><p>เครื่องมือนี้สร้างไอคอนทุกขนาดที่ Android ต้องการจากรูปเดียว รันด้วย <code>dart run flutter_launcher_icons</code> เมื่อเปลี่ยนรูป — ไม่ได้รันอัตโนมัติตอน build</p><p>ในโฟลเดอร์มีสามไฟล์ (<code>icon-tks.png</code>, <code>icon-tks-v1.png</code>, <code>icon-tks-square.png</code>) แต่ใช้จริงตัวเดียว สองตัวที่เหลือเป็นเวอร์ชันเก่าที่ยังไม่ได้ลบ</p></section>
+
+<section id="section-3"><h2>3. Android — สิ่งที่ Part 15 พบ</h2><p><code>android/app/src/main/AndroidManifest.xml</code></p><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;application
+        android:label="TKS"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="false"&gt;
+        ...</code></pre><p>สังเกตว่า<strong>ไม่มี <code>uses-permission</code> เลย</strong></p><p>แล้วดู <code>android/app/src/debug/AndroidManifest.xml</code></p><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;!-- The INTERNET permission is required for development. Specifically,
+         the Flutter tool needs it to communicate with the running application
+         to allow setting breakpoints, to provide hot reload, etc.
+    --&gt;
+    &lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+&lt;/manifest&gt;</code></pre><p>สิทธิ์เข้าถึงอินเทอร์เน็ตมีเฉพาะใน debug และ profile ตามที่ 15.3 อธิบาย</p><table><thead><tr><th>โหมด</th><th>manifest ที่รวมกัน</th><th>ต่อเน็ตได้ไหม</th></tr></thead><tbody>
+<tr><td><code>flutter run</code></td><td>main + debug</td><td>ได้</td></tr>
+<tr><td><code>flutter run --profile</code></td><td>main + profile</td><td>ได้</td></tr>
+<tr><td><code>flutter build apk</code></td><td><strong>main อย่างเดียว</strong></td><td><strong>ไม่ได้</strong></td></tr>
+</tbody></table><div class="note"><strong>ผลที่ตามมา:</strong> APK ที่ build ออกไปแจกจะเปิดได้ ล็อกอินได้ (เพราะล็อกอินเป็น mock ตาม 16.4) แล้วกดเมนูปุ๊บขึ้น “ไม่สามารถเชื่อมต่อ server ได้” ทุกครั้ง<br>และปัญหานี้<strong>มองไม่เห็นเลย</strong>ระหว่างพัฒนา เพราะทุกคนรันด้วย <code>flutter run</code></div><p>แก้โดยย้ายไปที่ main manifest</p><pre class="code-vs"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"&gt;
+    &lt;uses-permission android:name="android.permission.INTERNET"/&gt;
+    &lt;application ...</code></pre><p>และยังต้องเพิ่มอีกอย่างหนึ่ง — เซิร์ฟเวอร์ WMS ใช้ <code>http</code> ซึ่ง Android บล็อกตั้งแต่ API 28</p><pre class="code-vs"><code>&lt;application
+    android:label="TKS"
+    android:networkSecurityConfig="@xml/network_security_config"
+    ...</code></pre><p>พร้อมไฟล์ <code>android/app/src/main/res/xml/network_security_config.xml</code> ที่อนุญาตเฉพาะวงที่ใช้จริง ตามที่ 15.4 สอน</p></section>
+
+<section id="section-4"><h2>4. build.gradle.kts — สอง TODO ที่ยังอยู่</h2><pre class="code-vs"><code>defaultConfig {
+    // TODO: Specify your own unique Application ID
+    applicationId = "com.example.wmsapp"
+    ...
+}
+
+buildTypes {
+    release {
+        // TODO: Add your own signing config for the release build.
+        // Signing with the debug keys for now, so `flutter run --release` works.
+        signingConfig = signingConfigs.getByName("debug")
+    }
+}</code></pre><p>สอง TODO นี้เป็นของที่ <code>flutter create</code> ใส่มาให้ และยังไม่มีใครแก้</p><table><thead><tr><th>เรื่อง</th><th>ผล</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>com.example.wmsapp</code></td><td>ขึ้น Play Store ไม่ได้ และ<strong>เปลี่ยนทีหลังไม่ได้</strong>ถ้าติดตั้งไปแล้ว</td><td>15.8</td></tr>
+<tr><td>เซ็นด้วยกุญแจ debug</td><td>กุญแจนี้เหมือนกันทุกเครื่อง ใครก็สร้างแอปที่ติดตั้งทับได้</td><td>15.5</td></tr>
+</tbody></table><p>แถวแรกร้ายแรงกว่าที่คิด — <code>applicationId</code> คือสิ่งที่ Android ใช้ระบุตัวแอป เปลี่ยนแล้วจะกลายเป็นแอปคนละตัว ผู้ใช้ต้องถอนของเก่าแล้วติดตั้งใหม่ และข้อมูลใน <code>SharedPreferences</code> หายทั้งหมด รวมถึงที่อยู่เซิร์ฟเวอร์ที่ตั้งไว้</p><p>ยิ่งเลื่อนแก้ ยิ่งมีเครื่องที่ต้องตั้งค่าใหม่มากขึ้น</p><p>ส่วนอีกสามค่ามาจาก <code>pubspec.yaml</code> โดยอัตโนมัติ</p><pre class="code-vs"><code>versionCode = flutter.versionCode      // ← มาจาก 1 ใน "1.0.0+1"
+versionName = flutter.versionName      // ← มาจาก 1.0.0</code></pre><pre class="code-vs"><code># pubspec.yaml
+version: 1.0.0+1</code></pre><p>ยังเป็นค่าเริ่มต้น แปลว่ายังไม่เคยปล่อยรุ่นจริง — ถ้าปล่อยแล้วต้องเพิ่มเลขหลัง <code>+</code> ทุกครั้ง ไม่งั้นติดตั้งทับไม่ได้ตามที่ 15.2 อธิบาย</p></section>
+
+<section id="section-5"><h2>5. ไลบรารีที่ใช้</h2><pre class="code-vs"><code>dependencies:
+  flutter: {sdk: flutter}
+  flutter_localizations: {sdk: flutter}
+  http: ^1.2.0                          # ยิง API
+  shared_preferences: ^2.2.2            # เก็บ session + ที่อยู่เซิร์ฟเวอร์
+  intl: ^0.20.2                         # จัดรูปแบบวันเวลา
+  cupertino_icons: ^1.0.8
+  image_picker: ^1.2.1                  # ถ่าย/เลือกรูป
+  material_design_icons_flutter: ^7.0.7296
+  signalr_netcore: 1.3.7                # เรียลไทม์จาก .NET</code></pre><p>เก้าตัว ซึ่งน้อยมากสำหรับแอป 22,000 บรรทัด</p><table><thead><tr><th>ไม่มี</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ไลบรารีจัดการ state</td><td>ใช้ <code>setState</code> ล้วน</td></tr>
+<tr><td>ไลบรารีนำทาง</td><td>ใช้ <code>Navigator.push</code> ตรง ๆ</td></tr>
+<tr><td>ตัวสร้างโค้ด JSON</td><td>เขียน <code>fromJson</code> เอง</td></tr>
+<tr><td>ไลบรารีเก็บรูปในเครื่อง</td><td>ใช้ <code>Image.network</code> ล้วน</td></tr>
+<tr><td>ฐานข้อมูลในเครื่อง</td><td>ไม่มีโหมดออฟไลน์</td></tr>
+</tbody></table><div class="note"><strong>การมีไลบรารีน้อยเป็นข้อดีที่ประเมินต่ำเกินไป</strong> — อัปเกรด Flutter แล้วมีโอกาสพังน้อยกว่า, คนใหม่ไม่ต้องเรียนของเพิ่ม, และไม่มีอะไรถูกยกเลิกการดูแลกลางทาง<br>ราคาที่จ่ายคือต้องเขียนเองมากขึ้น ซึ่งเห็นได้จาก 80 จอที่ถือ state เอง</div><p>สังเกต <code>signalr_netcore: 1.3.7</code> ที่ตรึงเวอร์ชันไว้ไม่มี <code>^</code> ต่างจากตัวอื่น — เป็นการตั้งใจล็อกไว้ ซึ่งมักแปลว่าเวอร์ชันใหม่กว่าเคยมีปัญหา</p><p><code>dev_dependencies</code> มีสองตัว</p><pre class="code-vs"><code>dev_dependencies:
+  flutter_test: {sdk: flutter}
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4</code></pre><p><code>flutter_lints</code> ถูกเปิดใช้ใน <code>analysis_options.yaml</code> โดยไม่ได้ปิดกฎไหนเลย ซึ่งดี — โปรเจกต์นี้ผ่านการตรวจมาตรฐานทั้งหมดโดยไม่ต้องยกเว้นอะไร</p></section>
+
+<section id="section-6"><h2>6. test/ — ไฟล์เดียวที่ไม่ได้ทำอะไร</h2><p>โฟลเดอร์ <code>test/</code> มี <code>widget_test.dart</code> ไฟล์เดียว ซึ่งเป็นแม่แบบที่ <code>flutter create</code> สร้างและถูกคอมเมนต์ทิ้งไว้</p><table><thead><tr><th></th><th>wmsapp</th><th>wms_absolute_mobile</th><th>lab ของคอร์สนี้</th></tr></thead><tbody>
+<tr><td>ไฟล์เทสต์</td><td>1 (แม่แบบ)</td><td>14</td><td>18</td></tr>
+<tr><td>จำนวนเทสต์</td><td><strong>0</strong></td><td>~92</td><td>384</td></tr>
+</tbody></table><p>16.6 อธิบายเหตุผลหลักไปแล้ว — <code>ApiService()</code> เป็น singleton ที่ฉีดของทดสอบไม่ได้ จอที่อยากเทสต์จึงยิงเน็ตจริงเสมอ</p><p>แต่มีบางส่วนที่<strong>เทสต์ได้ทันทีโดยไม่ต้องแก้อะไรเลย</strong></p><table><thead><tr><th>สิ่งที่เทสต์ได้เลย</th><th>อยู่ไฟล์ไหน</th></tr></thead><tbody>
+<tr><td><code>validateHost</code> / <code>validatePort</code></td><td><code>api_config_service.dart</code></td></tr>
+<tr><td><code>probeConnection</code></td><td><code>connection_probe.dart</code> (รับ client ได้)</td></tr>
+<tr><td><code>Model.fromJson</code> ทั้ง 11 ไฟล์</td><td><code>models/</code></td></tr>
+<tr><td><code>StatusBadge</code> แปลงสถานะเป็นสี</td><td><code>common_widgets.dart</code></td></tr>
+<tr><td><code>AuthSession.isLoggedIn</code></td><td><code>auth_session_service.dart</code></td></tr>
+</tbody></table><p>ห้าอย่างนี้เขียนได้เป็นร้อยข้อโดยไม่แตะโค้ดเดิม และจะจับบั๊กที่ 16.8 ชี้ไว้ได้ทันที — เช่นเทสต์ที่ยืนยันว่า <code>createdAt</code> ที่หายไปไม่ควรกลายเป็นเวลาปัจจุบัน</p></section>
+
+<section id="section-7"><h2>7. เอกสารในโปรเจกต์</h2><p>มีโฟลเดอร์ <code>docs/</code> และไฟล์ <code>CLAUDE.md</code> ที่ราก ซึ่งเป็นสัญญาณที่ดี — โปรเจกต์ที่มีเอกสารในตัวเองบอกได้ว่าทีมคิดถึงคนที่จะมาอ่านทีหลัง</p><p>เวลาเข้าโปรเจกต์ใหม่ ไฟล์เหล่านี้ควรอ่านก่อนโค้ดเสมอ</p><table><thead><tr><th>ไฟล์</th><th>มักบอกอะไร</th></tr></thead><tbody>
+<tr><td><code>README.md</code></td><td>วิธีรัน วิธี build</td></tr>
+<tr><td><code>CLAUDE.md</code></td><td>ข้อตกลงของโปรเจกต์ สิ่งที่ห้ามทำ</td></tr>
+<tr><td><code>docs/</code></td><td>สัญญาของ API รูปแบบข้อมูล</td></tr>
+</tbody></table><p>แต่อย่าเชื่อทั้งหมด — เอกสารมักล้าหลังกว่าโค้ด ใช้เป็นแผนที่คร่าว ๆ แล้วยืนยันกับโค้ดจริงเสมอ</p></section>
+
+<section id="section-8"><h2>8. รายการที่ต้องแก้ก่อนปล่อยจริง</h2><table><thead><tr><th>#</th><th>ต้องแก้</th><th>ระดับ</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ย้าย <code>INTERNET</code> ไป main manifest</td><td><strong>ขวางการปล่อย</strong></td><td>15.3</td></tr>
+<tr><td>2</td><td>เพิ่ม network security config สำหรับ http</td><td><strong>ขวางการปล่อย</strong></td><td>15.4</td></tr>
+<tr><td>3</td><td>เปลี่ยน <code>applicationId</code></td><td><strong>ขวางการปล่อย</strong></td><td>15.8</td></tr>
+<tr><td>4</td><td>สร้างกุญแจของตัวเองแล้วเซ็นด้วยกุญแจนั้น</td><td><strong>ขวางการปล่อย</strong></td><td>15.5</td></tr>
+<tr><td>5</td><td>ตั้งเลขรุ่นที่ไม่ใช่ค่าเริ่มต้น</td><td>ควรทำ</td><td>15.2</td></tr>
+<tr><td>6</td><td>ต่อการยืนยันตัวตนจริง</td><td>ควรทำ</td><td>16.4</td></tr>
+<tr><td>7</td><td>แก้ <code>clearSession()</code> ไม่ให้ลบที่อยู่เซิร์ฟเวอร์</td><td>ควรทำ</td><td>16.4</td></tr>
+<tr><td>8</td><td>ใส่ <code>cacheWidth</code> ที่ <code>PartThumbnail</code></td><td>ควรทำ</td><td>16.10</td></tr>
+</tbody></table><p>สี่ข้อแรกทำให้ APK ที่ปล่อยออกไปใช้งานไม่ได้จริง และทั้งสี่ข้อ<strong>มองไม่เห็นเลยตอน <code>flutter run</code></strong> — เป็นเหตุผลที่ 15.12 ยืนยันว่าต้องทดสอบบน APK release บนเครื่องจริงก่อนแจก</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>หัวหน้าบอกว่า “พรุ่งนี้ต้องเอาแอปไปติดตั้งที่คลังให้ผู้ใช้ 20 เครื่อง” ตอนนี้เป็นเช้าวันนี้</p><ol><li>ต้องทำอะไรบ้าง เรียงลำดับ</li><li>อะไรที่ต้องตัดสินใจแล้วเปลี่ยนทีหลังไม่ได้</li><li>ทดสอบอะไรก่อนออกจากออฟฟิศ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เรียงลำดับ</strong></p><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>เวลา</th></tr></thead><tbody>
+<tr><td>1</td><td>ตัดสินใจ <code>applicationId</code> ให้จบ</td><td>15 นาที (แต่ต้องคุยกัน)</td></tr>
+<tr><td>2</td><td>สร้าง keystore แล้วเก็บสำรองไว้สองที่</td><td>30 นาที</td></tr>
+<tr><td>3</td><td>ย้าย <code>INTERNET</code> + เพิ่ม network security config</td><td>30 นาที</td></tr>
+<tr><td>4</td><td>ตั้งเลขรุ่นเป็น <code>1.0.0+1</code> แล้วตั้ง tag ใน git</td><td>10 นาที</td></tr>
+<tr><td>5</td><td>build APK release แล้วทดสอบบนเครื่องจริง</td><td><strong>ครึ่งวัน</strong></td></tr>
+<tr><td>6</td><td>เตรียมเอกสารตั้งค่า IP ให้ผู้ติดตั้ง</td><td>30 นาที</td></tr>
+</tbody></table><p>ข้อ 5 กินเวลามากที่สุดและตัดไม่ได้ เพราะเป็นครั้งแรกที่จะได้เห็นว่า APK release ทำงานจริงหรือไม่</p><p>ข้อ 6 มักถูกลืม — ผู้ติดตั้ง 20 เครื่องต้องรู้ว่าต้องเข้าหน้า Settings แล้วใส่ IP อะไร ถ้าไม่บอก ทุกเครื่องจะขึ้น “ไม่สามารถเชื่อมต่อ server ได้”</p><p><strong>ข้อ 2 — เปลี่ยนทีหลังไม่ได้</strong></p><table><thead><tr><th>สิ่งที่</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>applicationId</code></td><td>เปลี่ยนแล้วกลายเป็นแอปคนละตัว ต้องถอนติดตั้งใหม่ทั้ง 20 เครื่อง และค่าที่ตั้งไว้หายหมด</td></tr>
+<tr><td>keystore</td><td>หายแล้วอัปเดตแอปเดิมไม่ได้อีกเลย ต้องให้ทุกเครื่องถอนแล้วติดตั้งใหม่</td></tr>
+</tbody></table><p>สองอย่างนี้ต้องตัดสินใจให้ถูกตั้งแต่วันแรก และ keystore ต้องสำรองไว้ในที่ที่ไม่หายพร้อมกัน — ไม่ใช่แค่บนเครื่องคนเดียว และ<strong>ไม่ใช่ใน git</strong> ตามที่ 15.6 ย้ำ</p><p><strong>ข้อ 3 — ทดสอบอะไร</strong></p><p>ทั้งหมดนี้ต้องทำบน <strong>APK release บนเครื่อง PDA จริง</strong> ไม่ใช่ <code>flutter run</code></p><table><thead><tr><th>ทดสอบ</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td>ติดตั้งแล้วเปิด</td><td>ลายเซ็นและไอคอน</td></tr>
+<tr><td>ตั้ง IP ในหน้า Settings แล้วกดทดสอบ</td><td><strong>สิทธิ์ INTERNET และ cleartext</strong></td></tr>
+<tr><td>ล็อกอินแล้วกดเมนูสักอัน</td><td>ยิง API ได้จริง</td></tr>
+<tr><td>สแกนและยืนยันหนึ่งรอบเต็ม</td><td>flow ทำงานครบ</td></tr>
+<tr><td>ปิด Wi-Fi แล้วกด</td><td>ข้อความบอกอะไร</td></tr>
+<tr><td>กดออกจากระบบ แล้วล็อกอินใหม่แล้วกดเมนู</td><td><strong>บั๊ก <code>prefs.clear()</code> จาก 16.4</strong></td></tr>
+<tr><td>เลื่อนรายการยาว ๆ สักสองนาที</td><td>หน่วยความจำจากรูป (16.10)</td></tr>
+</tbody></table><p>สองแถวล่างเป็นแถวที่ปกติไม่มีใครทดสอบ แต่เป็นสองข้อที่จะทำให้ต้องกลับไปที่คลังอีกรอบถ้าไม่เจอตอนนี้</p><p><strong>สิ่งที่ควรบอกหัวหน้า</strong></p><p>ถ้าเวลาไม่พอทำครบ ข้อที่<strong>ตัดไม่ได้จริง ๆ</strong> คือข้อ 1–3 และการทดสอบสองแถวแรกของข้อ 3 — เพราะถ้าไม่มีสามข้อนั้น แอปจะใช้งานไม่ได้เลยสักเครื่อง ไม่ใช่แค่ทำงานได้ไม่ดี</p><p>ส่วนบั๊ก <code>prefs.clear()</code> ถ้าแก้ไม่ทัน อย่างน้อยต้องบอกผู้ใช้ว่า “อย่ากดออกจากระบบ” และแจ้งวิธีตั้ง IP ใหม่ถ้าเผลอกด — การรู้ปัญหาแล้วบอกล่วงหน้า ต่างจากปล่อยให้ผู้ใช้เจอเองมาก</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>Android เป็นแพลตฟอร์มเดียวที่ใช้จริง อีกห้าเป็นโครงที่ <code>flutter create</code> สร้างไว้</li><li>ฟอนต์ Sarabun สามน้ำหนักถูกฝังมาเพราะ PDA มีฟอนต์ไทยไม่ครบ</li><li><code>INTERNET</code> อยู่ใน debug/profile manifest เท่านั้น — APK release ต่อเน็ตไม่ได้</li><li>ยังไม่มี network security config ทั้งที่เซิร์ฟเวอร์เป็น http</li><li>สอง TODO ของ <code>flutter create</code> ยังอยู่: <code>com.example.wmsapp</code> และเซ็นด้วยกุญแจ debug</li><li>ไลบรารีเก้าตัว น้อยมากสำหรับ 22,000 บรรทัด ซึ่งเป็นข้อดี</li><li>เทสต์ 0 ข้อ แต่มีห้าส่วนที่เขียนเทสต์ได้ทันทีโดยไม่ต้องแก้โค้ดเดิม</li><li>สี่ข้อที่ขวางการปล่อยจริงมองไม่เห็นเลยตอน <code>flutter run</code></li></ul></div><p><strong>บทหน้า:</strong> สรุปวิธีอ่านโปรเจกต์นี้ให้เป็นระบบ และเตรียมเข้า Part 17 ที่จะเปิดจอโดเมนจริงจอแรก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

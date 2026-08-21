@@ -1,15 +1,157 @@
-<div class="note"><strong>models คือ DTO boundary:</strong> <code>wms_models.dart</code>เป็น barrel exportไปยัง commonและ 8 domain model files ทำให้ ApiService importครั้งเดียว แต่ screenบางแห่ง importไฟล์โดเมนตรงเพื่อ dependencyชัดกว่า</div>
-<section><h2>1. Barrel map</h2><pre class="code-vs"><code>common/user.dart, common/part.dart
-receiving, unload, putaway, picking,
-packing, basket, checkin, sorting</code></pre></section>
-<section><h2>2. Simple fromJson</h2><pre class="code-vs"><code>factory Part.fromJson(Map&lt;String, dynamic&gt; json) =&gt; Part(
-  partId: json['partId'],
-  owner: json['owner'],
-  imageUrl: json['imageUrl'],
-);</code></pre><p>อ่านง่ายแต่ required fieldผิดชนิด/nullจะ throw runtime cast ไม่บอก JSON pathชัดเจน</p></section>
-<section><h2>3. Nested collections</h2><p>response models map listย่อยด้วย <code>.map(...fromJson).toList()</code> ต้องตรวจ root key missing/null/wrong type, elementไม่ใช่ Mapและ empty list จาก fixtureจริง อย่าเชื่อ <code>response.data!</code>โดยไม่มี contract</p></section>
-<section><h2>4. Naming/casing</h2><p>DTO keysสะท้อน backendหลาย style เช่น partIdกับ business abbreviations ให้ codecชั้นเดียวรับผิดชอบ ห้ามกระจาย <code>json['...']</code>ใน widgets เพราะ renameหนึ่ง keyจะแก้หลายหน้า</p></section>
-<section><h2>5. Nullability</h2><p>nullableต้องหมายถึง domainจริง ไม่ใช่ใช้ <code>?/?? ''</code>เพื่อกลบ server bug Required fieldควร failพร้อม field pathใน repositoryและ UIแสดง contract error ไม่ renderข้อมูลผิดเงียบ ๆ</p></section>
-<section><h2>6. Domain vs DTO</h2><p>ปัจจุบันหลาย classเป็นทั้ง wire DTOและ UI model ใช้ง่ายแต่ status string/date/number semanticsรั่ว Refactorเฉพาะจุดซับซ้อนให้ DTO parseก่อนแล้ว mapเป็น domain type เช่น enum, Quantity, EntityId</p></section>
-<section><h2>7. Immutability/equality</h2><p>fieldsส่วนใหญ่ finalแต่ constructorsไม่ const/equalityไม่ได้กำหนด Store/testจึงอาจเปรียบเทียบ identity เพิ่ม value equality/copyWithเมื่อ state architectureต้องใช้ ไม่ทำ mechanical rewriteทุก modelโดยไม่มี consumer</p></section>
-<section><h2>8. Contract checklist</h2><div class="success">happy fixtureจาก .NET, missing/null/wrong type, unknown status, int/double, Thai/Unicode, UTC/offset, extra fields, empty/nested list และ outbound key names พร้อมผูก OpenAPI/integration testกัน drift</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด models/ ทั้ง 11 ไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.7, Part 6 (โมเดลและ JSON)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านตัวแปลง JSON ของโปรเจกต์นี้ได้ และบอกได้ว่าฟิลด์ไหนจะพังเงียบ ๆ เมื่อฝั่ง .NET เปลี่ยน</div>
+
+<section><h2>1. โครงของ models/</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td><code>picking/picking_models.dart</code></td><td>387</td>
+</tr><tr><td><code>receiving/receiving_models.dart</code></td><td>264</td></tr>
+<tr><td><code>packing/packing_models.dart</code></td><td>203</td></tr>
+<tr><td><code>sorting/sorting_models.dart</code></td><td>179</td></tr>
+<tr><td><code>checkin/checkin_models.dart</code></td><td>160</td></tr>
+<tr><td><code>unload/unload_models.dart</code></td><td>120</td></tr>
+<tr><td><code>basket/basket_models.dart</code></td><td>98</td></tr>
+<tr><td><code>putaway/putaway_models.dart</code></td><td>49</td></tr>
+<tr><td><code>common/part.dart</code>, <code>common/user.dart</code></td><td>37</td></tr>
+<tr><td><code>wms_models.dart</code></td><td>10</td></tr>
+</tbody></table><p>ไฟล์สุดท้ายไม่มีคลาสเลย มีแค่การรวมทางเข้า</p><pre class="code-vs"><code>export 'common/user.dart';
+export 'common/part.dart';
+export 'receiving/receiving_models.dart';
+export 'unload/unload_models.dart';
+...</code></pre><p>ทำให้ <code>api_service.dart</code> เขียน <code>import</code> บรรทัดเดียวแล้วได้โมเดลทั้งหมด — และเพราะไฟล์ใน <code>api/</code> เป็น <code>part</code> ทุกไฟล์จึงเห็นโมเดลทั้งหมดด้วย</p><pre class="code-vs"><code>import '../models/wms_models.dart';</code></pre><div class="note">รูปแบบนี้เรียกว่าไฟล์รวมทางเข้า สะดวกตรงที่ผู้ใช้ไม่ต้องรู้ว่าคลาสไหนอยู่ไฟล์ไหน ราคาที่จ่ายคือทุกไฟล์ที่ import ตัวนี้จะขึ้นกับโมเดลทั้งหมด แก้ไฟล์ไหนก็คอมไพล์ใหม่หมด — ในโปรเจกต์ขนาดนี้ยังไม่เป็นปัญหา</div></section>
+
+<section><h2>2. รูปแบบมาตรฐานของคลาส</h2><pre class="code-vs"><code>class PickOrderListItem {
+  final String pickOrderId;
+  final String status;          // WAITING | PICKING
+  final String owner;
+  final String? customerOrderId;
+  final int partCount;
+  final int totalRequiredQty;
+  final int palletCount;
+  final DateTime createdAt;
+
+  PickOrderListItem({
+    required this.pickOrderId,
+    required this.status,
+    required this.owner,
+    this.customerOrderId,
+    ...
+  });
+
+  factory PickOrderListItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      PickOrderListItem(
+        pickOrderId: json['pickOrderId'],
+        status: json['status'] ?? 'WAITING',
+        owner: json['owner'] ?? '',
+        customerOrderId: json['customerOrderId'],
+        partCount: json['partCount'] ?? 0,
+        ...
+      );
+
+  bool get isWaiting =&gt; status == 'WAITING';
+  bool get isPicking =&gt; status == 'PICKING';
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th><th>บท</th></tr></thead><tbody>
+<tr><td>ทุกฟิลด์เป็น <code>final</code></td><td>สร้างแล้วเปลี่ยนไม่ได้ ปลอดภัยเมื่อส่งต่อหลายที่</td><td>6.3</td></tr>
+<tr><td>ฟิลด์ที่อาจไม่มีเป็น <code>String?</code></td><td>คอมไพเลอร์บังคับให้คิดเรื่องไม่มีค่า</td><td>6.5</td></tr>
+<tr><td>ค่าเริ่มต้นด้วย <code>??</code></td><td>ฝั่ง .NET ไม่ส่งมาก็ยังใช้งานได้</td><td>6.7</td></tr>
+<tr><td>คอมเมนต์บอกค่าที่เป็นไปได้</td><td><code>// WAITING | PICKING</code> ช่วยได้มากตอนอ่าน</td><td>—</td></tr>
+<tr><td>มี getter ตั้งชื่อให้เงื่อนไข</td><td><code>isWaiting</code> อ่านง่ายกว่า <code>status == 'WAITING'</code></td><td>6.12</td></tr>
+</tbody></table><p>รูปแบบนี้ซ้ำแทบทุกคลาสในทั้ง 11 ไฟล์ ซึ่งเป็นข้อดี — อ่านคลาสแรกเข้าใจแล้วอ่านที่เหลือได้เร็ว</p></section>
+
+<section><h2>3. สามชั้นของการป้องกัน</h2><p>ไล่ดูวิธีอ่านค่าที่ใช้จริงในโปรเจกต์ เรียงจากปลอดภัยน้อยไปมาก</p><pre class="code-vs"><code>// ชั้น 1 — ไม่ป้องกันเลย
+pickOrderId: json['pickOrderId'],
+
+// ชั้น 2 — มีค่าเริ่มต้น
+status: json['status'] ?? 'WAITING',
+partCount: json['partCount'] ?? 0,
+
+// ชั้น 3 — แปลงแล้วมีค่าเริ่มต้น
+createdAt: DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now(),</code></pre><table><thead><tr><th>ชั้น</th><th>ถ้าฝั่ง .NET ไม่ส่งค่านี้มา</th></tr></thead><tbody>
+<tr><td>1</td><td><code>TypeError</code> ตอนแปลง — จอเห็นเป็นข้อความผิดพลาดที่อ่านไม่รู้เรื่อง</td></tr>
+<tr><td>2</td><td>ได้ค่าเริ่มต้น ทำงานต่อได้</td></tr>
+<tr><td>3</td><td>ได้เวลาปัจจุบัน ทำงานต่อได้</td></tr>
+</tbody></table><p>สังเกตว่าฟิลด์ชั้น 1 มักเป็นรหัสหลัก — <code>pickOrderId</code>, <code>palletId</code>, <code>partId</code> ซึ่งเป็นการตัดสินใจที่สมเหตุสมผล เพราะถ้าไม่มีรหัส ข้อมูลชิ้นนั้นก็ไม่มีความหมายอยู่ดี</p><p>แต่มีปัญหาตรงที่<strong>ข้อความผิดพลาดที่ได้ไม่ช่วยอะไร</strong></p><pre class="code-vs"><code>// ผู้ใช้เห็นแบบนี้
+เกิดข้อผิดพลาด: type 'Null' is not a subtype of type 'String'</code></pre><p>เทียบกับสิ่งที่ 6.9 สอน — อ่านผ่านตัวช่วยที่บอกได้ว่าฟิลด์ไหนหาย</p><pre class="code-vs"><code>pickOrderId: requireString(json, 'pickOrderId', path: 'PickOrderListItem'),
+// ล้มเหลว → 'PickOrderListItem.pickOrderId: ต้องมีค่าแต่ไม่พบ'</code></pre><p>ต่างกันตรงที่ข้อความหลังบอกได้ทันทีว่าต้องไปคุยกับใครเรื่องอะไร</p></section>
+
+<section><h2>4. ชั้น 3 มีกับดักที่ต้องรู้</h2><pre class="code-vs"><code>createdAt: DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now(),</code></pre><p>ทนทานมาก ไม่มีทางพัง แต่<strong>ทนทานเกินไป</strong></p><table><thead><tr><th>ถ้า .NET ส่ง</th><th>ได้</th><th>ถูกไหม</th></tr></thead><tbody>
+<tr><td><code>"2026-08-16T09:30:00Z"</code></td><td>เวลานั้น</td><td>ถูก</td></tr>
+<tr><td>ไม่ส่งมาเลย</td><td><strong>เวลาปัจจุบัน</strong></td><td>ผิด แต่ไม่มีใครรู้</td></tr>
+<tr><td><code>"16/08/2026"</code></td><td><strong>เวลาปัจจุบัน</strong></td><td>ผิด แต่ไม่มีใครรู้</td></tr>
+<tr><td><code>null</code></td><td><strong>เวลาปัจจุบัน</strong></td><td>ผิด แต่ไม่มีใครรู้</td></tr>
+</tbody></table><p>อาการที่เกิดในคลัง: รายการงานที่เรียงตามเวลาสร้างจะเรียงผิด งานเก่าโผล่ขึ้นบนสุดเพราะได้เวลาปัจจุบัน และ<strong>ยิ่งค้างนานยิ่งดูใหม่</strong></p><p>สาเหตุนี้หายากมาก เพราะไม่มี error ไม่มี log และหน้าจอดูปกติทุกอย่าง</p><div class="note"><strong>หลักที่ใช้ตัดสิน:</strong> ค่าเริ่มต้นที่ดีต้อง<strong>บอกได้ว่าเป็นค่าเริ่มต้น</strong> — <code>0</code> กับ <code>''</code> บอกได้ แต่ <code>DateTime.now()</code> บอกไม่ได้ เพราะดูเหมือนข้อมูลจริงทุกประการ<br>สำหรับวันเวลา ทางที่ตรงกว่าคือให้เป็น <code>DateTime?</code> แล้วให้จอแสดง <code>'—'</code> เมื่อไม่มี</div><p>รูปแบบเดียวกันนี้อยู่ใน <code>receiving_models.dart</code> ด้วย</p><pre class="code-vs"><code>createdAt: json['createdAt'] != null
+    ? DateTime.tryParse(json['createdAt']) ?? DateTime.now()
+    : DateTime.now(),</code></pre><p>เขียนยาวกว่าแต่ได้ผลเหมือนกันทุกประการ</p></section>
+
+<section><h2>5. รายการซ้อนรายการ</h2><pre class="code-vs"><code>factory PickOrderDetailFull.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+    PickOrderDetailFull(
+      ...
+      pallets: ((json['pallets'] ?? []) as List)
+          .map((e) =&gt; PickOrderPalletInfo.fromJson(e))
+          .toList(),
+      parts: ((json['parts'] ?? []) as List)
+          .map((e) =&gt; PickOrderPartInfo.fromJson(e))
+          .toList(),
+    );</code></pre><p>อ่านจากในออก</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>json['pallets'] ?? []</code></td><td>ไม่มีก็ใช้รายการว่าง</td></tr>
+<tr><td><code>as List</code></td><td>บอก Dart ว่าเป็นรายการ</td></tr>
+<tr><td><code>.map(...fromJson(e))</code></td><td>แปลงทีละตัว</td></tr>
+<tr><td><code>.toList()</code></td><td>ปิด lazy ให้เป็นรายการจริง</td></tr>
+</tbody></table><p><code>.toList()</code> จำเป็น — <code>map</code> ใน Dart เป็นแบบขี้เกียจ ถ้าไม่ปิด การแปลงจะเกิดใหม่ทุกครั้งที่วนอ่าน ซึ่งใน <code>ListView</code> ที่เลื่อนขึ้นลงจะแปลงซ้ำนับร้อยครั้ง ตรงกับที่ 6.10 อธิบาย</p><p>แต่มีจุดที่ยังไม่ปลอดภัย</p><pre class="code-vs"><code>.map((e) =&gt; PickOrderPalletInfo.fromJson(e))
+//                                       ^ e เป็น dynamic</code></pre><p>ถ้าสมาชิกในรายการไม่ใช่ <code>Map</code> — เช่นเซิร์ฟเวอร์ส่งรายการของสตริงมา — จะพังตอนอ่านฟิลด์แรก ไม่ใช่ตอนนี้ ทำให้ข้อความยิ่งไกลจากสาเหตุ</p><p>ในไฟล์เดียวกันมีอีกที่ที่เขียนไว้ปลอดภัยกว่า</p><pre class="code-vs"><code>.map((e) =&gt; PickOrderListItem.fromJson(e as Map&lt;String, dynamic&gt;))</code></pre><p>เขียนแบบหลังดีกว่า เพราะพังตรงจุดที่ผิดจริงและข้อความบอกชนิดที่ได้มา</p></section>
+
+<section><h2>6. สิ่งที่ไม่มีในโมเดลทั้งหมด</h2><p>ค้นทั้งโฟลเดอร์ <code>models/</code> เจอ <code>toJson</code> แค่ที่เดียว</p><table><thead><tr><th>ไม่มี</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td><code>toJson()</code></td><td>body ของ POST ถูกประกอบเป็น <code>Map</code> ด้วยมือใน <code>services/api/</code></td></tr>
+<tr><td><code>copyWith()</code></td><td>อัปเดตทีละฟิลด์ไม่ได้ ต้องสร้างใหม่ทั้งตัวหรือเก็บใน state แยก</td></tr>
+<tr><td><code>==</code> / <code>hashCode</code></td><td>เทียบสองตัวว่าเหมือนกันไม่ได้ ต้องเทียบทีละฟิลด์</td></tr>
+<tr><td>การสร้างโค้ดอัตโนมัติ</td><td>เขียนมือทั้งหมด — ควบคุมได้เต็มที่ แต่พิมพ์ผิดชื่อคีย์แล้วไม่มีใครจับ</td></tr>
+</tbody></table><p>สามข้อแรกไม่มีเพราะไม่ได้ใช้ ซึ่งถูกต้อง — ข้อมูลไหลทางเดียวจากเซิร์ฟเวอร์มาที่จอ ไม่มีการแก้แล้วส่งกลับทั้งก้อน</p><pre class="code-vs"><code>// body ถูกประกอบเองใน picking_api.dart
+final response = await _post('/picking/confirm-pick', {
+  'pickOrderId': pickOrderId,
+  'sourcePalletId': sourcePalletId,
+  'destPalletId': destPalletId,
+  'items': items,          // ← List&lt;Map&lt;String, dynamic&gt;&gt; ที่จอประกอบมาเอง
+  'operatorId': operatorId,
+});</code></pre><p><code>items</code> ตรงนี้เป็นจุดที่เสี่ยงที่สุด — เป็น <code>List&lt;Map&lt;String, dynamic&gt;&gt;</code> ที่จอสร้างขึ้นเอง ไม่มีชนิดกำกับ พิมพ์ชื่อคีย์ผิดคอมไพเลอร์ไม่จับ และจะรู้ตอนเซิร์ฟเวอร์ตอบกลับมาว่าข้อมูลไม่ครบ</p></section>
+
+<section><h2>7. ชื่อคีย์กับสิ่งที่ .NET ส่งมา</h2><p>ทุกคีย์ในโปรเจกต์นี้เป็น camelCase</p><pre class="code-vs"><code>json['pickOrderId'], json['partCount'], json['createdAt']</code></pre><p>ตรงกับค่าเริ่มต้นของ ASP.NET Core ที่แปลง PascalCase เป็น camelCase ให้อัตโนมัติ — <code>PickOrderId</code> ฝั่ง C# กลายเป็น <code>pickOrderId</code> ใน JSON</p><div class="note"><strong>สิ่งที่ต้องระวัง:</strong> ถ้ามีใครเปลี่ยนการตั้งค่า serialization ฝั่ง .NET หรือมี endpoint ที่คืน object ที่สร้างเองแบบไม่ผ่านตัวแปลงมาตรฐาน คีย์จะกลายเป็น PascalCase แล้ว<strong>ทุกฟิลด์จะเป็น null พร้อมกัน</strong><br>อาการคือหน้าจอว่างเปล่าหรือขึ้นศูนย์หมด ทั้งที่เซิร์ฟเวอร์ตอบ 200 และข้อมูลมีจริง — 14.9 เจอเคสนี้ตอนเขียนเทสต์กับ fixture ที่เป็น PascalCase</div><p>วิธีป้องกันคือให้ตัวอ่านรับได้ทั้งสองแบบ</p><pre class="code-vs"><code>/// อ่านคีย์แบบ camelCase ก่อน ถ้าไม่มีลอง PascalCase
+Object? pick(Map&lt;String, dynamic&gt; json, String key) =&gt;
+    json[key] ?? json[key[0].toUpperCase() + key.substring(1)];</code></pre><p>แต่ในโปรเจกต์นี้ยังไม่จำเป็น เพราะทุก endpoint มาจาก controller เดียวกันและตั้งค่าเหมือนกัน — จดไว้เป็นสิ่งที่ต้องตรวจถ้าวันหนึ่งหน้าจอว่างเปล่าโดยไม่มี error</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ค่าเริ่มต้นทำให้ปลอดภัยขึ้นเสมอ</td><td><code>DateTime.now()</code> ซ่อนปัญหาแทนที่จะบอก</td></tr>
+<tr><td>ไม่มี error แปลว่าข้อมูลถูก</td><td>วันเวลาผิดไม่ทำให้เกิด error</td></tr>
+<tr><td><code>as List</code> รับประกันชนิดของสมาชิก</td><td>รับประกันแค่ว่าเป็นรายการ</td></tr>
+<tr><td>ลืม <code>.toList()</code> แล้วแค่ช้าลงนิดหน่อย</td><td>แปลงใหม่ทุกครั้งที่วนอ่าน</td></tr>
+<tr><td>โมเดลมี <code>toJson</code> อยู่แล้ว</td><td>มีที่เดียวในทั้งโฟลเดอร์ — body ประกอบเองด้วยมือ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “รายการ Pick Order เรียงมั่ว งานที่สั่งเมื่อวานอยู่บนสุดเหมือนเพิ่งสั่ง”</p><ol><li>สาเหตุที่น่าจะเป็นคืออะไร และยืนยันอย่างไรโดยไม่ต้องแก้โค้ด</li><li>แก้อย่างไรให้ปัญหานี้ไม่กลับมาเงียบ ๆ อีก</li><li>ถ้าฝั่ง .NET แก้ไม่ได้ในเร็ว ๆ นี้ ฝั่งแอปควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><p><code>createdAt</code> ของรายการเหล่านั้นอ่านไม่ได้ จึงกลายเป็น <code>DateTime.now()</code> ทุกครั้งที่โหลด — ยิ่งโหลดใหม่ยิ่งดูใหม่</p><p>ยืนยันโดยไม่แก้โค้ด</p><table><thead><tr><th>วิธี</th><th>ดูอะไร</th></tr></thead><tbody>
+<tr><td>ยิง endpoint ตรงด้วยเบราว์เซอร์หรือ curl</td><td><code>createdAt</code> มีในคำตอบไหม รูปแบบเป็นอย่างไร</td></tr>
+<tr><td>รีเฟรชหน้าจอสองครั้งห่างกันหนึ่งนาที</td><td>ถ้าเวลาที่แสดงขยับตาม แปลว่าเป็นเวลาปัจจุบัน ไม่ใช่เวลาจริง</td></tr>
+</tbody></table><p>วิธีที่สองยืนยันได้เร็วที่สุดและทำได้จากหน้างานเลย</p><p><strong>ข้อ 2 — แก้ไม่ให้กลับมาเงียบ ๆ</strong></p><pre class="code-vs"><code>class PickOrderListItem {
+  ...
+  final DateTime? createdAt;      // เปลี่ยนเป็นยอมให้ไม่มี
+
+  factory PickOrderListItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      PickOrderListItem(
+        ...
+        // ไม่มีหรืออ่านไม่ได้ = ไม่มี ไม่ใช่ "ตอนนี้"
+        createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? ''),
+      );
+}</code></pre><p>คอมไพเลอร์จะบังคับให้ทุกที่ที่ใช้ <code>createdAt</code> จัดการกรณีไม่มีค่า ซึ่งเป็นสิ่งที่ต้องการ</p><pre class="code-vs"><code>// ตอนแสดง
+Text(item.createdAt != null ? formatThaiDateTime(item.createdAt!) : '—')
+
+// ตอนเรียง — ตัวที่ไม่มีเวลาไปอยู่ท้าย ไม่ใช่บนสุด
+items.sort((a, b) {
+  if (a.createdAt == null) return 1;
+  if (b.createdAt == null) return -1;
+  return b.createdAt!.compareTo(a.createdAt!);
+});</code></pre><p>ตอนนี้ปัญหาเดิมจะแสดงตัวเป็น <code>—</code> บนหน้าจอ ซึ่ง<strong>มองเห็นได้</strong> แทนที่จะซ่อนอยู่</p><p><strong>ข้อ 3 — ถ้า .NET แก้ไม่ได้เร็ว</strong></p><table><thead><tr><th>ทำ</th><th>ไม่ทำ</th></tr></thead><tbody>
+<tr><td>แสดง <code>—</code> ในช่องเวลา</td><td>ใส่เวลาปัจจุบันแทน</td></tr>
+<tr><td>เรียงด้วยฟิลด์อื่นที่เชื่อได้ เช่นรหัสงานที่เรียงตามลำดับ</td><td>ปล่อยให้เรียงมั่วต่อไป</td></tr>
+<tr><td>บันทึกไว้ว่ามีกี่รายการที่อ่านเวลาไม่ได้</td><td>เงียบ</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญ เพราะจะได้รู้ว่าปัญหาใหญ่แค่ไหน — สองรายการกับสองพันรายการต้องได้ความสำคัญต่างกัน</p><pre class="code-vs"><code>final missing = items.where((e) =&gt; e.createdAt == null).length;
+if (missing &gt; 0) {
+  debugPrint('createdAt อ่านไม่ได้ $missing/${items.length} รายการ');
+}</code></pre><p><strong>ข้อสรุปที่สำคัญกว่าตัวบั๊ก:</strong> ค่าเริ่มต้นทุกตัวคือการตัดสินใจว่า “ถ้าไม่มีข้อมูล จะเดาว่าอะไร” — เดาแล้วผู้ใช้เห็นว่าเป็นการเดา (<code>0</code>, <code>'—'</code>) ยอมรับได้ แต่เดาแล้วดูเหมือนข้อมูลจริง (<code>DateTime.now()</code>) จะกลายเป็นข้อมูลผิดที่ไม่มีใครจับได้</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>11 ไฟล์ 1,507 บรรทัด แยกตามโดเมน มี <code>wms_models.dart</code> เป็นทางเข้าเดียว</li><li>ทุกคลาสใช้รูปแบบเดียวกัน: ฟิลด์ <code>final</code> + <code>fromJson</code> + getter ตั้งชื่อเงื่อนไข</li><li>การอ่านค่ามีสามชั้น — รหัสหลักไม่ป้องกัน ฟิลด์อื่นมีค่าเริ่มต้น</li><li><code>DateTime.now()</code> เป็นค่าเริ่มต้นที่อันตราย เพราะดูเหมือนข้อมูลจริง</li><li><code>as List</code> ไม่รับประกันชนิดของสมาชิก ควร cast ตอน <code>map</code> ด้วย</li><li>ไม่มี <code>toJson</code>/<code>copyWith</code>/<code>==</code> เพราะข้อมูลไหลทางเดียว — body ประกอบเองด้วยมือ</li><li>คีย์เป็น camelCase ตามค่าเริ่มต้นของ ASP.NET Core ถ้าเปลี่ยนจะ null พร้อมกันทั้งหมด</li></ul></div><p><strong>บทหน้า:</strong> <code>common_widgets.dart</code> — 11 widget ที่ทำให้ 80 จอหน้าตาเหมือนกัน</p></section>

@@ -1,13 +1,208 @@
-<div class="note"><strong><code>common_widgets.dart</code> คือ design system แบบไฟล์เดียว:</strong> มี AppBar, cards, scan input, buttons, badges, info rows, loading overlay, dialogs/snackbars, section headerและ empty state รวมประมาณ 700 บรรทัด</div>
-<section><h2>1. Widget inventory</h2><pre class="code-vs"><code>WmsAppBar, WmsCard, ScanTextField,
-Primary/Danger/WarningButton, StatusBadge,
-InfoRow, LoadingOverlay, SectionHeader, EmptyState</code></pre><p>นอกจากนี้มี top-level dialog/snackbar helpers</p></section>
-<section><h2>2. ScanTextField</h2><p>รับ controller/focus/onSubmittedและ presentation options เป็น shared seamของ scanner UX เวลาปรับ autofocus/suffix/keyboard actionต้องทดสอบทุก flowที่ใช้ ไม่ให้ widgetแอบถือ business duplicate logic</p></section>
-<section><h2>3. Buttons</h2><p>semantic variantsกำหนดสี/icon/loading/disabled patternให้เหมือนกัน แต่ callbackยังเป็นเจ้าของ screen ป้องกัน double-submitต้องเกิดทั้ง UI disableและ command idempotency ไม่พึ่ง buttonอย่างเดียว</p></section>
-<section><h2>4. LoadingOverlay</h2><p>วาง spinner/messageทับ child ช่วยรักษา contextเดิม แต่ถ้าครอบทั้ง screenจะบล็อก scanner/navigationทุก operation ควรเลือกระดับ overlayตาม state ownerและ semantics accessibility</p></section>
-<section><h2>5. Dialog helpers</h2><pre class="code-vs"><code>showConfirmDialog(...) → Future&lt;bool&gt;
-showErrorDialog(...)   → Future&lt;void&gt;
-showSuccessSnackbar / showWarningSnackbar</code></pre><p>confirmแปลง nullจาก barrier/backเป็น false เป็น contractที่ callersอาศัย</p></section>
-<section><h2>6. Theme dependency</h2><p>widgetsเรียก <code>AppTheme.textPrimary(context)</code>และ semantic colors จึงรองรับ dark modeดีกว่า screenที่ใช้ legacy static colors HapticFeedbackใน snackbarเป็น platform side effectที่ widget testsต้องห่อ/ยอมรับ</p></section>
-<section><h2>7. File size refactor</h2><p>แยกตาม primitive/feedback/layoutเมื่อทีมแก้ชนกันหรือ test/importช้า แต่คง barrel exportเพื่อ migration ไม่ย้าย business screen widgetsเข้าคลัง commonเพียงเพราะใช้สองครั้งถ้า semanticsต่างโดเมน</p></section>
-<section><h2>8. Design-system tests</h2><div class="success">light/dark, text scale, Thaiยาว, narrow PDA, loading/disabled, focus/submit, dialog cancel/backและ semantics labels การทดสอบ primitivesชุดเล็กช่วยลด regressionข้าม 80 screens</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด widgets/common_widgets.dart ทั้ง 653 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.8, Part 1 (widget), Part 11 (ธีม)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ใช้ชุด widget กลางของโปรเจกต์ได้ถูก และรู้ว่าเปลี่ยนตรงไหนกระทบกี่จอ</div>
+
+<section><h2>1. อะไรอยู่ในไฟล์นี้บ้าง</h2><p>ไฟล์เดียว 653 บรรทัด มี 11 คลาสและ 4 ฟังก์ชัน</p><table><thead><tr><th>ชื่อ</th><th>ชนิด</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>WmsAppBar</code></td><td>widget</td><td>แถบบนที่มีชื่อจอ + ชื่อผู้ใช้</td></tr>
+<tr><td><code>WmsCard</code></td><td>widget</td><td>การ์ดที่มีระยะขอบมาตรฐาน</td></tr>
+<tr><td><code>ScanTextField</code></td><td>widget</td><td>ช่องสแกนบาร์โค้ด</td></tr>
+<tr><td><code>PrimaryButton</code></td><td>widget</td><td>ปุ่มหลัก มีสถานะกำลังโหลด</td></tr>
+<tr><td><code>DangerButton</code></td><td>widget</td><td>ปุ่มลบ/ยกเลิก</td></tr>
+<tr><td><code>WarningButton</code></td><td>widget</td><td>ปุ่มที่ต้องระวัง</td></tr>
+<tr><td><code>StatusBadge</code></td><td>widget</td><td>ป้ายสถานะที่แปลงสถานะเป็นสี</td></tr>
+<tr><td><code>InfoRow</code></td><td>widget</td><td>แถวป้ายกำกับ–ค่า</td></tr>
+<tr><td><code>LoadingOverlay</code></td><td>widget</td><td>ม่านทึบทับทั้งจอตอนกำลังทำงาน</td></tr>
+<tr><td><code>SectionHeader</code></td><td>widget</td><td>หัวข้อย่อย</td></tr>
+<tr><td><code>EmptyState</code></td><td>widget</td><td>หน้าจอตอนไม่มีข้อมูล</td></tr>
+<tr><td><code>showConfirmDialog</code></td><td>ฟังก์ชัน</td><td>ถามยืนยัน คืน <code>bool</code></td></tr>
+<tr><td><code>showErrorDialog</code></td><td>ฟังก์ชัน</td><td>แจ้งข้อผิดพลาด</td></tr>
+<tr><td><code>showSuccessSnackbar</code></td><td>ฟังก์ชัน</td><td>แถบเขียว + สั่นเบา</td></tr>
+<tr><td><code>showWarningSnackbar</code></td><td>ฟังก์ชัน</td><td>แถบเหลือง + สั่นแรงกว่า</td></tr>
+</tbody></table><p>สิบห้าชิ้นนี้คือเหตุผลที่จอทั้ง 80 จอหน้าตาเหมือนกัน — และคือ<strong>จุดที่มีผลกระทบกว้างที่สุดในโปรเจกต์</strong> แก้บรรทัดเดียวเห็นผลทุกจอ</p></section>
+
+<section><h2>2. ปุ่มที่จัดการสถานะกำลังโหลดให้</h2><pre class="code-vs"><code>class PrimaryButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+  final bool loading;
+  final IconData? icon;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton(
+      onPressed: loading ? null : onPressed,      // ← กดซ้ำไม่ได้ระหว่างโหลด
+      ...
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: loading
+            ? const SizedBox(
+                key: ValueKey('loading'),
+                height: 22, width: 22,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+              )
+            : Row(
+                key: const ValueKey('content'),
+                ...</code></pre><table><thead><tr><th>รายละเอียด</th><th>ทำไมสำคัญ</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>onPressed: loading ? null : onPressed</code></td><td>ป้องกันการกดซ้ำโดยไม่ต้องเขียนที่ผู้เรียก</td><td>4.9</td></tr>
+<tr><td><code>AnimatedSwitcher</code> + <code>ValueKey</code></td><td>ไม่มี key แล้ว Flutter จะคิดว่าเป็น widget เดิม ไม่เกิดแอนิเมชัน</td><td>1.12</td></tr>
+<tr><td><code>Flexible</code> + <code>ellipsis</code> รอบ <code>Text</code></td><td>ข้อความยาวไม่ทำให้ล้น</td><td>2.9</td></tr>
+</tbody></table><p>แถวแรกคือประโยชน์ที่ใหญ่ที่สุด — 4.9 สอนว่าปุ่มที่ยิงคำขอต้องปิดตัวเองระหว่างรอ ถ้าให้แต่ละจอเขียนเอง จะมีจอที่ลืม แต่พอฝังไว้ในปุ่มกลาง ทุกจอที่ใช้ปุ่มนี้ได้ไปฟรี</p><div class="note"><strong>สังเกตความต่าง:</strong> <code>DangerButton</code> ก็มี <code>loading</code> แต่<strong>ไม่มี <code>AnimatedSwitcher</code></strong> และ <code>WarningButton</code> <strong>ไม่มี <code>loading</code> เลย</strong> — ปุ่มที่ต้องระวังจึงกดซ้ำได้ระหว่างที่กำลังทำงาน<br>ถ้าจะแก้ที่เดียวให้ครบ ควรทำ <code>WarningButton</code> ให้มี <code>loading</code> เหมือนอีกสองตัว</div></section>
+
+<section><h2>3. StatusBadge — ตารางแปลงสถานะเป็นสี</h2><pre class="code-vs"><code>Color get _color =&gt; switch (status.toUpperCase()) {
+  'FG' =&gt; AppTheme.success,
+  'PW' =&gt; AppTheme.warning,
+  'DAMAGED' =&gt; AppTheme.danger,
+  'RECEIVED' =&gt; AppTheme.primary,
+  'PARTIAL' =&gt; AppTheme.warning,
+  'PENDING' =&gt; const Color(0xFF78909C),
+  'CONFIRMED' =&gt; AppTheme.success,
+  ...
+  'OPERATOR' =&gt; AppTheme.primary,
+  'SUPERVISOR' =&gt; AppTheme.purple,
+  _ =&gt; const Color(0xFF78909C),
+};</code></pre><p>17 สถานะจากทุกโดเมนรวมอยู่ในตารางเดียว ผู้เรียกส่งสถานะเข้ามาแล้วได้ป้ายสีที่ถูกต้อง</p><pre class="code-vs"><code>StatusBadge(_role ?? '')          // ใน HomeScreen
+StatusBadge(item.status)          // ในจอรายการ</code></pre><table><thead><tr><th>ข้อดี</th><th>ข้อควรระวัง</th></tr></thead><tbody>
+<tr><td>สีของสถานะเดียวกันตรงกันทุกจอ</td><td>สถานะจากคนละโดเมนปนกัน — <code>'PENDING'</code> ของ receiving กับของ picking ได้สีเดียวกันเสมอ</td></tr>
+<tr><td><code>toUpperCase()</code> กันเรื่องตัวพิมพ์</td><td>สถานะใหม่ที่ยังไม่ได้เพิ่มจะได้สีเทาเงียบ ๆ</td></tr>
+<tr><td><code>_ =&gt;</code> กันพัง</td><td>ไม่มีอะไรเตือนว่าลืมเพิ่ม</td></tr>
+</tbody></table><p>ข้อควรระวังข้อสุดท้ายเจอได้จริง — ฝั่ง .NET เพิ่มสถานะ <code>'HOLD'</code> แล้วป้ายขึ้นสีเทาเหมือนสถานะที่ไม่รู้จัก ผู้ใช้ตีความว่าไม่สำคัญ ทั้งที่เป็นสถานะที่ต้องรีบจัดการ</p><p>ทำให้เห็นได้ด้วยการแยกสีของ “ไม่รู้จัก” ออกจากสีของสถานะจริง</p><pre class="code-vs"><code>_ =&gt; AppTheme.purple,     // สีที่ไม่มีสถานะไหนใช้ → เห็นทันทีว่ามีอะไรใหม่</code></pre><p>หรือถ้าอยากให้จับได้ตั้งแต่ตอนพัฒนา</p><pre class="code-vs"><code>_ =&gt; () {
+  assert(false, 'StatusBadge: ไม่รู้จักสถานะ "$status"');
+  return const Color(0xFF78909C);
+}(),</code></pre><p><code>assert</code> ถูกตัดออกใน release ตามที่ 15.1 อธิบาย — แอปที่ผู้ใช้ใช้จะไม่พัง แต่คนพัฒนาจะเจอทันทีที่รัน</p></section>
+
+<section><h2>4. ScanTextField — ช่องที่ออกแบบมาสำหรับเครื่องสแกน</h2><pre class="code-vs"><code>return TextField(
+  controller: controller,
+  focusNode: focusNode,
+  enabled: enabled,
+  keyboardType: keyboardType,
+  textInputAction: TextInputAction.search,
+  onSubmitted: (_) =&gt; onSubmit(),           // ← เครื่องสแกนส่ง Enter มา
+  decoration: InputDecoration(
+    prefixIcon: Icon(MdiIcons.barcodeScan, ...),
+    suffixIcon: ... InkWell(onTap: enabled ? onSubmit : null, ...)   // ← กดส่งด้วยมือได้
+  ),
+);</code></pre><p>สองทางเข้าที่ต้องมีทั้งคู่ตามที่ 3.4 สอน</p><table><thead><tr><th>ทาง</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td>เครื่องสแกนยิง แล้วส่ง Enter</td><td>ปกติ</td></tr>
+<tr><td>พิมพ์เองแล้วกดปุ่มส่ง</td><td>บาร์โค้ดขาด อ่านไม่ติด</td></tr>
+</tbody></table><p>สิ่งที่ widget นี้<strong>ไม่ได้</strong>ทำ และผู้เรียกต้องทำเอง</p><table><thead><tr><th>ต้องทำเอง</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ล้างช่องหลังสแกนสำเร็จ</td><td>ถ้าไม่ล้าง สแกนถัดไปจะต่อท้ายค่าเดิม</td></tr>
+<tr><td>คืนโฟกัสหลังสแกน</td><td>ถ้าไม่คืน สแกนถัดไปไม่เข้าช่อง</td></tr>
+<tr><td>สร้างและ dispose <code>controller</code></td><td>ไม่งั้นรั่ว</td></tr>
+</tbody></table><p>สามข้อนี้คือสิ่งที่แต่ละจอต้องเขียนซ้ำ และเป็นจุดที่จอหนึ่งอาจลืมทำในขณะที่จออื่นทำ — Part 17 จะดูว่าจอรับสินค้าจริงจัดการอย่างไร</p></section>
+
+<section><h2>5. สองแถบข้อความที่ต่างกันตรงการสั่น</h2><pre class="code-vs"><code>void showSuccessSnackbar(BuildContext context, String message) {
+  HapticFeedback.lightImpact();       // ← สั่นเบา
+  ...backgroundColor: AppTheme.success,
+}
+
+void showWarningSnackbar(BuildContext context, String message) {
+  HapticFeedback.mediumImpact();      // ← สั่นแรงกว่า
+  ...backgroundColor: AppTheme.warning,
+}</code></pre><p>รายละเอียดเล็กที่สำคัญมากในคลัง — ผู้ใช้ถือ PDA แล้วมองของที่กำลังหยิบ ไม่ได้มองหน้าจอตลอดเวลา <strong>ความรู้สึกที่มือบอกผลได้เร็วกว่าสายตา</strong></p><table><thead><tr><th>ความรู้สึก</th><th>ผู้ใช้รู้ทันทีว่า</th></tr></thead><tbody>
+<tr><td>สั่นเบา</td><td>ผ่าน สแกนชิ้นถัดไปได้</td></tr>
+<tr><td>สั่นแรง</td><td>ต้องหยุดมอง</td></tr>
+</tbody></table><p>สิ่งที่ยังขาดคือแถบสำหรับความล้มเหลว — ตอนนี้มีแค่สำเร็จกับเตือน ส่วนความผิดพลาดจริงต้องใช้ <code>showErrorDialog</code> ที่ขวางทั้งจอและต้องกดปิด</p><table><thead><tr><th>ระดับ</th><th>วิธีแสดง</th><th>ผู้ใช้ต้องกด</th></tr></thead><tbody>
+<tr><td>สำเร็จ</td><td>แถบเขียว หายเอง</td><td>ไม่ต้อง</td></tr>
+<tr><td>เตือน</td><td>แถบเหลือง หายเอง</td><td>ไม่ต้อง</td></tr>
+<tr><td>ผิดพลาด</td><td>กล่องข้อความกลางจอ</td><td>ต้องกดตกลง</td></tr>
+</tbody></table><p>การบังคับให้กดตกลงเหมาะกับความผิดพลาดที่ต้องหยุดทำงาน แต่ไม่เหมาะกับความล้มเหลวชั่วคราวอย่างเน็ตกระพริบ ซึ่งควรบอกแล้วให้ลองใหม่ได้เลย</p></section>
+
+<section><h2>6. LoadingOverlay — ม่านที่ต้องระวัง</h2><pre class="code-vs"><code>return Stack(
+  children: [
+    child,
+    if (loading)
+      Container(
+        color: Colors.black.withValues(alpha: 0.35),
+        child: Center(child: ...),
+      ),
+  ],
+);</code></pre><p>ทำงานถูกต้อง — ม่านทับทั้งจอ กดอะไรข้างหลังไม่ได้ และมีข้อความบอกได้ว่ากำลังทำอะไร</p><p>สิ่งที่ต้องระวังคือ<strong>ผู้ใช้ยกเลิกไม่ได้</strong> ถ้าคำขอค้าง 10 วินาทีตาม timeout ของ <code>_get</code> ผู้ใช้จะมองม่านดำอยู่ 10 วินาทีโดยทำอะไรไม่ได้เลย</p><p>บน PDA ที่ทำงานเป็นจังหวะเร็ว 10 วินาทีคือนานมาก — 15.11 จัดว่าเป็นอาการ “กดแล้วค้าง” ในสายตาผู้ใช้</p><p>ถ้าจะให้ดีขึ้นโดยไม่แก้เยอะ ให้ม่านแสดงเวลาที่ผ่านไปหลังจากผ่านไปสักพัก</p><pre class="code-vs"><code>// หลัง 3 วินาที เปลี่ยนข้อความให้ผู้ใช้รู้ว่ายังไม่ค้าง
+if (elapsed &gt; const Duration(seconds: 3))
+  Text('กำลังรอเซิร์ฟเวอร์... ${elapsed.inSeconds} วินาที')</code></pre><p>ผู้ใช้ที่เห็นตัวเลขเดินจะรอต่อ ผู้ใช้ที่เห็นวงกลมหมุนนิ่ง ๆ จะปิดแอป</p></section>
+
+<section><h2>7. ผลกระทบเมื่อแก้ไฟล์นี้</h2><table><thead><tr><th>แก้อะไร</th><th>กระทบ</th><th>ต้องตรวจอะไร</th></tr></thead><tbody>
+<tr><td>ความสูงของ <code>PrimaryButton</code></td><td>ทุกจอที่มีปุ่มหลัก</td><td>จอที่มีปุ่มหลายปุ่มเรียงกันจะล้นไหม</td></tr>
+<tr><td>สีใน <code>StatusBadge</code></td><td>ทุกจอที่แสดงสถานะ</td><td>สถานะที่เคยต่างสีกันยังต่างอยู่ไหม</td></tr>
+<tr><td>ความกว้าง 110 ของ <code>InfoRow</code></td><td>ทุกจอที่แสดงรายละเอียด</td><td>ป้ายกำกับที่ยาวจะตัดไหม</td></tr>
+<tr><td>เพิ่ม field ที่ <code>required</code></td><td><strong>คอมไพล์ไม่ผ่านทุกที่ที่เรียก</strong></td><td>ให้มีค่าเริ่มต้นแทน</td></tr>
+<tr><td><code>showConfirmDialog</code></td><td>ทุกที่ที่ถามยืนยัน</td><td>ค่าที่คืนตอนกดนอกกล่องยังเป็น <code>false</code> ไหม</td></tr>
+</tbody></table><p>แถวสุดท้ายมีรายละเอียดที่ทำถูกไว้แล้ว</p><pre class="code-vs"><code>final result = await showDialog&lt;bool&gt;(...);
+return result ?? false;</code></pre><p>ผู้ใช้กดนอกกล่องหรือกดปุ่มย้อนกลับ → <code>showDialog</code> คืน <code>null</code> → แปลงเป็น <code>false</code> แปลว่า “ไม่ยืนยัน”</p><p>ถ้าเขียนเป็น <code>result ?? true</code> การกดพลาดออกนอกกล่องจะกลายเป็นการยืนยัน ซึ่งเป็นบั๊กที่อันตรายมากเพราะกล่องนี้ถูกใช้ยืนยันการลบด้วย</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ปุ่มทุกตัวมี <code>loading</code></td><td><code>WarningButton</code> ไม่มี</td></tr>
+<tr><td><code>StatusBadge</code> รู้จักทุกสถานะ</td><td>ที่ไม่รู้จักได้สีเทาเงียบ ๆ</td></tr>
+<tr><td><code>ScanTextField</code> ล้างช่องให้เอง</td><td>ผู้เรียกต้องล้างและคืนโฟกัสเอง</td></tr>
+<tr><td>เพิ่มพารามิเตอร์ใหม่ได้เลย</td><td>ถ้า <code>required</code> จะพังทุกที่ที่เรียก</td></tr>
+<tr><td><code>LoadingOverlay</code> ยกเลิกได้</td><td>ต้องรอจนคำขอจบ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมอยากให้ทุกจอมีปุ่ม “ลองใหม่” เมื่อโหลดข้อมูลไม่สำเร็จ ตอนนี้แต่ละจอเขียนเอง หน้าตาไม่เหมือนกัน บางจอไม่มีเลย</p><ol><li>ควรเพิ่มอะไรในไฟล์นี้</li><li>เขียนโค้ดให้ครบ</li><li>ต้องระวังอะไรบ้างเมื่อเอาไปใช้จริง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><p><code>EmptyState</code> มี <code>onRetry</code> อยู่แล้ว แต่ชื่อและไอคอนเป็นของ “ไม่มีข้อมูล” ซึ่งคนละความหมายกับ “โหลดไม่สำเร็จ”</p><table><thead><tr><th>สถานการณ์</th><th>ผู้ใช้ต้องเข้าใจว่า</th></tr></thead><tbody>
+<tr><td>ไม่มีข้อมูล</td><td>ถามสำเร็จ คำตอบคือไม่มี — ไปทำอย่างอื่น</td></tr>
+<tr><td>โหลดไม่สำเร็จ</td><td>ยังไม่รู้ว่ามีหรือไม่มี — ลองใหม่</td></tr>
+</tbody></table><p>ต้องเป็นคนละ widget ไม่ใช่ตัวเดียวกัน — เป็นเรื่องเดียวกับที่ 16.7 ข้อ 3 สรุปไว้ว่ารายการว่างกับความล้มเหลวต้องแยกกัน</p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>// =============================================
+// ErrorState — โหลดไม่สำเร็จ (คนละเรื่องกับ EmptyState)
+// =============================================
+class ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback? onRetry;
+  final bool retrying;
+
+  const ErrorState({
+    super.key,
+    required this.message,
+    this.onRetry,
+    this.retrying = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.danger.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cloud_off_rounded,
+                  color: AppTheme.danger, size: 40),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.5,               // ภาษาไทยมีสระบนล่าง ต้องเผื่อ
+                color: AppTheme.textGrey(context),
+              ),
+            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 20),
+              SizedBox(
+                width: 200,
+                child: PrimaryButton(
+                  label: 'ลองใหม่',
+                  icon: Icons.refresh_rounded,
+                  loading: retrying,       // กดซ้ำระหว่างลองใหม่ไม่ได้
+                  onPressed: onRetry,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}</code></pre><p>ใช้ <code>PrimaryButton</code> ที่มีอยู่แล้วแทนที่จะสร้างปุ่มใหม่ — ได้พฤติกรรมกันกดซ้ำมาฟรี และถ้าวันหนึ่งเปลี่ยนหน้าตาปุ่มหลัก ปุ่มนี้เปลี่ยนตาม</p><p><code>SizedBox(width: 200)</code> จำเป็นเพราะ <code>PrimaryButton</code> ตั้ง <code>minimumSize: Size(double.infinity, ...)</code> ไว้ ถ้าไม่ครอบ ปุ่มจะกว้างเต็มจอซึ่งดูแปลกกลางหน้าว่าง</p><p><strong>ข้อ 3 — ต้องระวังอะไร</strong></p><table><thead><tr><th>เรื่อง</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ข้อความต้องมาจาก <code>ApiResult.error</code> ไม่ใช่เขียนตายตัว</td><td>“ไม่มีสัญญาณ” กับ “เซิร์ฟเวอร์ไม่ตอบ” ต้องบอกคนละอย่าง (7.9)</td></tr>
+<tr><td>ห้ามใช้กับความล้มเหลวของคำสั่งที่เปลี่ยนข้อมูล</td><td>“ลองใหม่” กับคำสั่งที่อาจไปถึงแล้ว = ข้อมูลซ้ำ (7.10)</td></tr>
+<tr><td>ต้องไม่ล้างข้อมูลเดิมที่เคยโหลดสำเร็จ</td><td>ข้อมูลเก่าที่มีเวลากำกับ ดีกว่าหน้าว่าง (10.12)</td></tr>
+<tr><td>ปุ่มต้องปิดตัวเองระหว่างลองใหม่</td><td>ไม่งั้นผู้ใช้รัวปุ่มตอนรอ</td></tr>
+</tbody></table><p>แถวที่สองสำคัญที่สุด — widget นี้เหมาะกับ<strong>การโหลดข้อมูล</strong>เท่านั้น ถ้าเอาไปใช้กับหน้าจอที่ยืนยันการรับสินค้าไม่สำเร็จ จะกลายเป็นการชวนผู้ใช้สร้างรายการซ้ำ</p><p>ทางที่ถูกสำหรับคำสั่งที่เปลี่ยนข้อมูลคือแสดงข้อความที่บอกว่าให้ตรวจก่อนส่งซ้ำ ตามที่ 15.11 สรุปไว้</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ไฟล์เดียว 653 บรรทัด มี 11 widget + 4 ฟังก์ชัน ที่ทำให้ 80 จอหน้าตาเหมือนกัน</li><li><code>PrimaryButton</code> ปิดตัวเองระหว่างโหลด — ทุกจอที่ใช้ได้พฤติกรรมนี้ฟรี</li><li><code>DangerButton</code> มี <code>loading</code> แต่ <code>WarningButton</code> ไม่มี</li><li><code>StatusBadge</code> รวม 17 สถานะจากทุกโดเมนไว้ตารางเดียว ที่ไม่รู้จักได้สีเทาเงียบ ๆ</li><li><code>ScanTextField</code> รับทั้งเครื่องสแกนและการพิมพ์เอง แต่ไม่ล้างช่อง/คืนโฟกัสให้</li><li>แถบข้อความสั่นต่างกันสองระดับ เพราะผู้ใช้ไม่ได้มองหน้าจอตลอด</li><li><code>LoadingOverlay</code> ยกเลิกไม่ได้ ผู้ใช้อาจต้องรอถึง 10 วินาที</li><li><code>showConfirmDialog</code> คืน <code>false</code> เมื่อกดนอกกล่อง ซึ่งเป็นค่าที่ถูกต้อง</li></ul></div><p><strong>บทหน้า:</strong> <code>PartThumbnail</code> — 61 บรรทัดที่มีปัญหาประสิทธิภาพสองข้อซ่อนอยู่</p></section>

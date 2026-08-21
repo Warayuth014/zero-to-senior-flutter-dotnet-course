@@ -4,22 +4,201 @@
 <title>Settings &amp; API Config</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-05 · Real Codebase</span><h1>Settings &amp; API Config</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Stored record</a></li><li><a href="#section-2">Form validation</a></li><li><a href="#section-3">Load sequence</a></li><li><a href="#section-4">Test before save</a></li><li><a href="#section-5">Save invalidates cache</a></li><li><a href="#section-6">Clear behavior</a></li><li><a href="#section-7">Probe semantics</a></li><li><a href="#section-8">Refactor seam</a></li></ol></nav>
-<div class="note"><strong>Connection flow มีสามไฟล์:</strong> <code>SettingsScreen</code>ดูแล form/UX, <code>ApiConfigService</code>เก็บ host/port/protocol และ <code>connection_probe.dart</code>ยิง <code>/api/health</code>เพื่อยืนยันว่าเป็น WMS API</div>
-<section id="section-1"><h2>1. Stored record</h2><pre class="code-vs"><code>({String? host, int port, String protocol})
-defaultPort = 5000
-defaultProtocol = 'http'</code></pre><p>ใช้ SharedPreferencesสาม key ไม่มี base path/profileหลายชุด</p></section>
-<section id="section-2"><h2>2. Form validation</h2><p><code>validateHost</code>ห้าม scheme, space, colon, slash เพราะ protocol/portแยกช่อง; <code>validatePort</code>รับ 1–65535 Validationเป็น pure functionsจึง unit testง่าย</p></section>
-<section id="section-3"><h2>3. Load sequence</h2><pre class="code-vs"><code>load config → fill controllers
-→ ApiService.resolveServerUrl()
-→ render active URL → _probeActive()</code></pre><p>มี mounted guardหลัง awaitและแยก loading/testing/saving/probing flags</p></section>
-<section id="section-4"><h2>4. Test before save</h2><p><code>_testConnection</code>ประกอบ URLจากค่าร่างแล้วยิง probeโดยไม่เปลี่ยน active config แสดง success/warning snackbar ช่วยป้องกัน saveค่าที่พิมพ์ผิดแต่ผู้ใช้ยังเลือก saveได้ตาม flow</p></section>
-<section id="section-5"><h2>5. Save invalidates cache</h2><pre class="code-vs"><code>await config.save(...);
-ApiService.resetBaseUrl();
-final active = await ApiService.resolveServerUrl();
-_probeActive();</code></pre><p>ถ้าลืม reset singletonยังใช้ serverเก่า นี่คือ couplingสำคัญที่ต้องจำ</p></section>
-<section id="section-6"><h2>6. Clear behavior</h2><p>clearสาม config keys → reset cache → resolverกลับ emulator/localhost → probeใหม่ ต่างจาก <code>AuthSessionService.clearSession()</code> ที่ clear prefsทั้งก้อนและอาจทำผลเดียวกันโดยไม่ตั้งใจ</p></section>
-<section id="section-7"><h2>7. Probe semantics</h2><p>validate URI, GET healthพร้อม timeout, ตรวจ status 2xxและ payload signature แยก timeout, TLS handshake, socketและ client error Probe successหมายถึง endpointตอบเป็น WMS ไม่ได้พิสูจน์ login/permissionทุกโดเมน</p></section>
-<section id="section-8"><h2>8. Refactor seam</h2><div class="success">ใช้ typed ConnectionProfile + repository, inject HTTP client/resolver, commit profileแบบ atomicหลัง probe, production policyบังคับ HTTPS และให้ endpoint switchหยุด session/SignalR/in-flight requestsอย่างชัดเจน</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทำไมบทนี้ต่างจากบทอื่น</a></li><li><a href="#section-2">ApiConfigService — เก็บสามค่า</a></li><li><a href="#section-3">ตัวตรวจค่าที่กรอก — ฟังก์ชันบริสุทธิ์</a></li><li><a href="#section-4">ConnectionProbe — “พอร์ตเปิด” ไม่ได้แปลว่า “ถูกเครื่อง”</a></li><li><a href="#section-5">รายละเอียดที่มองข้ามง่ายแต่สำคัญ</a></li><li><a href="#section-6">หน้าจอ Settings</a></li><li><a href="#section-7">สิ่งที่ยังขาด</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–60 นาที</span><span>ลงมือทำ: เปิด settings_screen.dart, api_config_service.dart, connection_probe.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.4, Part 10 (การตั้งค่าเซิร์ฟเวอร์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านส่วนที่แยกชั้นได้ดีที่สุดในโปรเจกต์นี้ และรู้ว่าทำไมมันถึงต่างจากส่วนอื่น</div>
+
+<section id="section-1"><h2>1. ทำไมบทนี้ต่างจากบทอื่น</h2><p>สามไฟล์ในบทนี้เป็นส่วนที่<strong>แยกชั้นได้ดีที่สุด</strong>ในทั้งโปรเจกต์ และเป็นส่วนเดียวที่เขียนเทสต์ได้ทันทีโดยไม่ต้องรื้ออะไร</p><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>api_config_service.dart</code></td><td>66</td><td>เก็บ/อ่านที่อยู่เซิร์ฟเวอร์ + ตรวจค่าที่กรอก</td></tr>
+<tr><td><code>connection_probe.dart</code></td><td>97</td><td>ทดสอบว่าปลายทางเป็นเซิร์ฟเวอร์ของเราจริง</td></tr>
+<tr><td><code>settings_screen.dart</code></td><td>337</td><td>หน้าจอ</td></tr>
+</tbody></table><p>สังเกตสัดส่วน — ตรรกะ 163 บรรทัดอยู่นอกจอ ต่างจากจอโดเมนที่ตรรกะทั้งหมดอยู่ในจอ</p><div class="note">ส่วนนี้ถูกเขียนทีหลังและแก้ปัญหาที่เจ็บจริง (ย้ายเครื่องแล้วต้องแก้โค้ด) — เป็นตัวอย่างว่าเมื่อทีมนี้มีเวลาและรู้ว่าปัญหาคืออะไร งานที่ออกมาเป็นอย่างไร</div></section>
+
+<section id="section-2"><h2>2. ApiConfigService — เก็บสามค่า</h2><pre class="code-vs"><code>class ApiConfigService {
+  const ApiConfigService();
+
+  static const _keyHost = 'apiHost';
+  static const _keyPort = 'apiPort';
+  static const _keyProtocol = 'apiProtocol';
+
+  static const defaultPort = 5000;
+  static const defaultProtocol = 'http';
+
+  Future&lt;({String? host, int port, String protocol})&gt; load() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (
+      host: prefs.getString(_keyHost),
+      port: prefs.getInt(_keyPort) ?? defaultPort,
+      protocol: prefs.getString(_keyProtocol) ?? defaultProtocol,
+    );
+  }</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ชื่อคีย์เป็นค่าคงที่</td><td>พิมพ์ผิดแล้วคอมไพเลอร์จับได้ ต่างจาก <code>'userId'</code> ใน 16.4</td></tr>
+<tr><td>ค่าเริ่มต้นอยู่ที่เดียว</td><td>ผู้ใช้ทุกที่ได้ค่าเดียวกัน</td></tr>
+<tr><td>คืน record</td><td>สามค่าที่มาด้วยกันเดินทางไปด้วยกันโดยไม่ต้องสร้างคลาส</td></tr>
+<tr><td><code>const</code> constructor</td><td>ไม่มี state ในตัวเอง</td></tr>
+</tbody></table><p>แล้วมีเมธอดที่ประกอบเป็น URL ให้เลย</p><pre class="code-vs"><code>Future&lt;String?&gt; getCustomBase() async {
+  final prefs = await SharedPreferences.getInstance();
+  final host = prefs.getString(_keyHost);
+  if (host == null || host.trim().isEmpty) return null;
+  final port = prefs.getInt(_keyPort) ?? defaultPort;
+  final protocol = prefs.getString(_keyProtocol) ?? defaultProtocol;
+  return '$protocol://$host:$port';
+}</code></pre><p><code>null</code> แปลว่า “ผู้ใช้ยังไม่ได้ตั้งค่า” ไม่ใช่ “เกิดข้อผิดพลาด” — และตรวจทั้ง <code>null</code> และสตริงว่าง ต่างจาก <code>_fullName</code> ใน 16.3 ที่ตรวจแค่ <code>null</code></p></section>
+
+<section id="section-3"><h2>3. ตัวตรวจค่าที่กรอก — ฟังก์ชันบริสุทธิ์</h2><pre class="code-vs"><code>String? validateHost(String host) {
+  final trimmed = host.trim();
+  if (trimmed.isEmpty) return 'กรุณาใส่ IP หรือชื่อเครื่อง';
+  if (trimmed.contains('://') || trimmed.toLowerCase().startsWith('http')) {
+    return 'ใส่เฉพาะ IP/hostname ไม่ต้องมี http:// (เลือก Protocol ด้านล่างแทน)';
+  }
+  if (trimmed.contains(' ')) return 'ห้ามมีช่องว่าง';
+  if (trimmed.contains(':')) return 'พอร์ตให้ใส่ในช่อง Port แยกต่างหาก';
+  if (trimmed.contains('/')) return 'ห้ามมี / ในช่องนี้';
+  return null;
+}</code></pre><p>สองฟังก์ชันนี้อยู่นอกคลาส ไม่แตะ <code>SharedPreferences</code> ไม่แตะเครือข่าย รับสตริงคืนสตริง — <strong>เทสต์ได้ทันที</strong></p><pre class="code-vs"><code>test('ใส่ http:// มาในช่อง host ต้องบอกให้ไปเลือก protocol แทน', () {
+  expect(validateHost('http://192.168.1.50'), contains('Protocol'));
+});
+
+test('host ที่ถูกต้องผ่าน', () {
+  expect(validateHost('192.168.1.50'), isNull);
+  expect(validateHost('  wms-server  '), isNull);
+});</code></pre><p>ที่สำคัญกว่าคือ<strong>ข้อความบอกว่าค่าควรไปอยู่ที่ไหน</strong> ไม่ได้บอกแค่ว่าผิด</p><table><thead><tr><th>ผู้ใช้พิมพ์</th><th>ข้อความที่ได้</th><th>ผู้ใช้รู้ว่าต้องทำอะไร</th></tr></thead><tbody>
+<tr><td><code>http://192.168.1.50</code></td><td>ไปเลือก Protocol ด้านล่างแทน</td><td>รู้</td></tr>
+<tr><td><code>192.168.1.50:5000</code></td><td>พอร์ตให้ใส่ในช่อง Port แยกต่างหาก</td><td>รู้</td></tr>
+<tr><td><code>192.168.1.50/api</code></td><td>ห้ามมี / ในช่องนี้</td><td>รู้</td></tr>
+</tbody></table><p>สามเคสนี้คือสิ่งที่ผู้ใช้พิมพ์จริงเพราะเคยเห็น URL เต็ม ๆ มาก่อน — คนเขียนดักไว้ตรงจุด ตรงกับหลักของ 10.7</p></section>
+
+<section id="section-4"><h2>4. ConnectionProbe — “พอร์ตเปิด” ไม่ได้แปลว่า “ถูกเครื่อง”</h2><p>คอมเมนต์บนหัวไฟล์บอกเหตุผลไว้เอง</p><pre class="code-vs"><code>// เช็คว่า server ที่ปลายทางเป็น WmsApi จริง ไม่ใช่แค่ port เปิด (raw socket connect
+// หลอกได้ถ้ามี service อื่นฟังพอร์ตเดียวกันอยู่) — ยิง GET /api/health แล้วอ่าน payload</code></pre><pre class="code-vs"><code>bool _isHealthPayload(String body) {
+  try {
+    final json = jsonDecode(body);
+    return json is Map &amp;&amp; json['service'] == 'WmsApi' &amp;&amp; json['ok'] == true;
+  } catch (_) {
+    return false;
+  }
+}</code></pre><p>นี่คือสิ่งที่ 10.8 เรียกว่า “ตรวจเนื้อหาของคำตอบ ไม่ใช่แค่รหัสสถานะ” และป้องกันกับดักที่ 10.9 อธิบายไว้ — เว็บที่ตั้งค่า fallback ไว้จะตอบ 200 พร้อม HTML ให้ทุก path ทำให้ “ต่อได้” ทั้งที่ยิง API จริงไม่ได้เลย</p><p>ผลลัพธ์แยกเป็นสามระดับ ไม่ใช่ผ่าน/ไม่ผ่าน</p><pre class="code-vs"><code>message: isWms
+    ? 'เชื่อมต่อสำเร็จ · ${watch.elapsedMilliseconds} ms'
+    : reachedApi
+    ? 'เซิร์ฟเวอร์ตอบกลับ แต่ไม่ใช่ WmsApi'
+    : 'ตอบกลับ HTTP $code — ไม่ใช่เซิร์ฟเวอร์ WmsApi',</code></pre><table><thead><tr><th>ผลลัพธ์</th><th>แปลว่า</th><th>ผู้ใช้ต้องทำ</th></tr></thead><tbody>
+<tr><td>สำเร็จ + เวลา</td><td>ถูกเครื่อง ถูกพอร์ต</td><td>กดบันทึกได้</td></tr>
+<tr><td>ตอบกลับแต่ไม่ใช่ WmsApi</td><td>ต่อติดแต่ผิดเครื่อง</td><td>ตรวจ IP</td></tr>
+<tr><td>ไม่ตอบใน 5 วินาที</td><td>ไม่มีอะไรอยู่ที่นั่น</td><td>ตรวจ IP และพอร์ต</td></tr>
+</tbody></table><p>และแยกชนิดของความล้มเหลวครบสี่แบบ</p><pre class="code-vs"><code>} on TimeoutException {      → 'ไม่ตอบใน 5 วินาที — ตรวจ IP และพอร์ต'
+} on HandshakeException {    → 'ใบรับรอง HTTPS ไม่ผ่าน — ลองใช้ HTTP หรือแก้ใบรับรอง'
+} on SocketException {       → 'ติดต่อที่อยู่นี้ไม่ได้ — ตรวจสัญญาณและเครื่อง server'
+} on http.ClientException catch (e) { ... }</code></pre><p>ตรงกับ <code>ApiFailureKind</code> ที่ 7.9 สอน — ต่างกันตรงที่นี่แปลงเป็นข้อความเลยเพราะใช้ที่เดียว</p></section>
+
+<section id="section-5"><h2>5. รายละเอียดที่มองข้ามง่ายแต่สำคัญ</h2><pre class="code-vs"><code>Future&lt;ConnectionTestResult&gt; probeConnection({
+  required String baseUrl,
+  Duration timeout = const Duration(seconds: 5),
+  http.Client? client,          // ← ตรงนี้
+}) async {
+  final watch = Stopwatch()..start();
+  final owned = client == null;
+  final httpClient = client ?? http.Client();</code></pre><p><code>client</code> รับเข้ามาได้ — แปลว่าเทสต์ใส่ <code>MockClient</code> เข้าไปได้โดยไม่ต้องมีเซิร์ฟเวอร์จริง ตรงกับที่ 14.4 สอน</p><p>และ <code>owned</code> แก้ปัญหาที่ตามมาทันที — ถ้าเราสร้าง client เอง เราต้องปิด ถ้าคนอื่นส่งมา เขาปิดเอง</p><pre class="code-vs"><code>} finally {
+  if (owned) httpClient.close();
+}</code></pre><p>ถ้าปิด client ที่ผู้เรียกส่งมา คำขอถัดไปของเขาจะพังทั้งที่เขาไม่ได้ทำอะไรผิด</p><div class="note"><strong>นี่คือไฟล์เดียวในโปรเจกต์ที่เปิดช่องให้ฉีดของทดสอบเข้าไปได้</strong> — และเป็นไฟล์เดียวที่เขียนเทสต์เครือข่ายได้โดยไม่ต้องรื้ออะไร ทั้งสองอย่างนี้ไม่ใช่เรื่องบังเอิญ</div></section>
+
+<section id="section-6"><h2>6. หน้าจอ Settings</h2><p>state ทั้งหมดของจอ</p><pre class="code-vs"><code>String _protocol = ApiConfigService.defaultProtocol;
+String? _activeUrl;
+bool _loading = true;
+bool _testing = false;
+bool _saving = false;
+
+String? _hostError;
+String? _portError;
+
+ConnectionTestResult? _activeStatus;
+bool _probingActive = false;</code></pre><p>สาม flag แยกกัน ไม่ใช่ <code>bool _busy</code> ตัวเดียว — เพราะสามงานนี้เกิดคนละเวลาและปิดปุ่มคนละปุ่ม</p><table><thead><tr><th>flag</th><th>ปิดอะไร</th></tr></thead><tbody>
+<tr><td><code>_loading</code></td><td>ทั้งจอ (ตอนเปิดครั้งแรก)</td></tr>
+<tr><td><code>_testing</code></td><td>ปุ่มทดสอบ</td></tr>
+<tr><td><code>_saving</code></td><td>ปุ่มบันทึก</td></tr>
+<tr><td><code>_probingActive</code></td><td>ไม่ปิดอะไร แค่แสดงว่ากำลังตรวจ</td></tr>
+</tbody></table><p>ลำดับตอนกดบันทึกทำครบ</p><pre class="code-vs"><code>Future&lt;void&gt; _save() async {
+  if (!_validateFields()) return;
+  ...
+  await _configService.save(host: host, port: port, protocol: _protocol);
+  ApiService.resetBaseUrl();               // ← ล้าง cache ที่ ApiService จำไว้
+  final active = await ApiService.resolveServerUrl();
+
+  if (!mounted) return;                    // ← ตรวจก่อน setState
+  setState(() { _activeUrl = active; _saving = false; });
+  showSuccessSnackbar(context, 'บันทึกการตั้งค่าเรียบร้อย');
+  _probeActive();                          // ← ตรวจที่อยู่ใหม่ทันที
+}</code></pre><p>บรรทัด <code>resetBaseUrl()</code> คือหัวใจ — ถ้าลืม ผู้ใช้จะบันทึก IP ใหม่แล้วแอปยังยิงไปที่เก่าจนกว่าจะปิดเปิดใหม่ 16.6 จะอธิบายว่า cache นั้นอยู่ที่ไหน</p><p>และการตรวจค่าทำแบบ “ผิดแล้วค่อยตรวจทุกครั้งที่พิมพ์”</p><pre class="code-vs"><code>onChanged: (_) {
+  if (_hostError != null) {
+    setState(() =&gt; _hostError = validateHost(_hostController.text));
+  }
+},</code></pre><p>ก่อนกดปุ่มครั้งแรกจะไม่มีข้อความแดงขึ้นระหว่างพิมพ์ แต่พอผิดแล้วจะอัปเดตทันทีที่แก้ถูก — ตรงกับที่ 3.8 แนะนำ</p></section>
+
+<section id="section-7"><h2>7. สิ่งที่ยังขาด</h2><table><thead><tr><th>ขาด</th><th>ผลที่ตามมา</th><th>Part 10 บทที่</th></tr></thead><tbody>
+<tr><td>เก็บได้เซิร์ฟเวอร์เดียว</td><td>สลับ dev/prod ต้องพิมพ์ใหม่ทุกครั้ง</td><td>10.5</td></tr>
+<tr><td>ไม่เตือนตอนสลับขณะมีงานค้าง</td><td>งานที่ทำอยู่ชี้ไปคนละเครื่อง</td><td>10.6</td></tr>
+<tr><td>ไม่มีเทสต์ ทั้งที่เขียนได้ทันที</td><td>ตัวตรวจค่าเปลี่ยนแล้วไม่มีใครรู้</td><td>14.2</td></tr>
+<tr><td>ที่อยู่ที่ใช้อยู่ไม่แสดงในจออื่น</td><td>ผู้ใช้ไม่รู้ว่ากำลังยิงไปไหนตอนทำงาน</td><td>10.12</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นสาเหตุของอาการที่หายาก — เครื่องที่ตั้ง IP ผิดจะทำงานได้ปกติทุกอย่างจนกว่าจะมีคนสงสัยว่าทำไมข้อมูลไม่ตรงกับเครื่องอื่น</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ทดสอบผ่านแปลว่าบันทึกแล้ว</td><td>ปุ่มทดสอบไม่บันทึก ต้องกดบันทึกอีกครั้ง</td></tr>
+<tr><td>บันทึกแล้วต้องปิดเปิดแอป</td><td><code>resetBaseUrl()</code> ทำให้มีผลทันที</td></tr>
+<tr><td>ต่อพอร์ตติดแปลว่าถูกเครื่อง</td><td>ต้องอ่าน payload ถึงจะรู้</td></tr>
+<tr><td>ล้างค่าแล้วต่อเซิร์ฟเวอร์ไม่ได้</td><td>กลับไปหา localhost/emulator อัตโนมัติ</td></tr>
+<tr><td>ตั้งค่าที่นี่แล้วรอดจากทุกปัญหา</td><td>ออกจากระบบแล้วค่านี้หายไปด้วย (16.4)</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><ol><li>เขียนชุดเทสต์ให้ <code>validateHost</code> และ <code>validatePort</code> — ต้องมีกี่ข้อและครอบอะไรบ้าง</li><li><code>probeConnection</code> ต้องเทสต์อะไรบ้าง และเทสต์ได้โดยไม่มีเซิร์ฟเวอร์จริงหรือไม่</li><li>ถ้าต้องเพิ่มการเก็บหลายเซิร์ฟเวอร์แบบ 10.5 ต้องเปลี่ยนอะไรบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>group('validateHost', () {
+  test('ค่าที่ถูกต้องผ่าน', () {
+    expect(validateHost('192.168.1.50'), isNull);
+    expect(validateHost('wms-server'), isNull);
+    expect(validateHost('  192.168.1.50  '), isNull);   // ตัดช่องว่างหัวท้าย
+  });
+
+  test('ว่างเปล่าไม่ผ่าน', () {
+    expect(validateHost(''), isNotNull);
+    expect(validateHost('   '), isNotNull);
+  });
+
+  test('มี protocol ปนมา ต้องบอกให้ไปเลือก Protocol', () {
+    expect(validateHost('http://192.168.1.50'), contains('Protocol'));
+    expect(validateHost('HTTPS://x'), contains('Protocol'));   // ตัวพิมพ์ใหญ่
+  });
+
+  test('มี port ปนมา ต้องบอกให้ไปช่อง Port', () {
+    expect(validateHost('192.168.1.50:5000'), contains('Port'));
+  });
+});
+
+group('validatePort', () {
+  test('ขอบเขต', () {
+    expect(validatePort('1'), isNull);
+    expect(validatePort('65535'), isNull);
+    expect(validatePort('0'), isNotNull);
+    expect(validatePort('65536'), isNotNull);
+  });
+
+  test('ไม่ใช่ตัวเลข', () {
+    expect(validatePort('abc'), isNotNull);
+    expect(validatePort('5000a'), isNotNull);
+  });
+});</code></pre><p>ราว 10–12 ข้อ ครอบสี่กลุ่ม: ค่าที่ถูก, ค่าว่าง, ค่าที่ผู้ใช้พิมพ์ผิดแบบที่เจอจริง, และขอบเขตตัวเลข</p><p>ทั้งหมดนี้เขียนได้<strong>โดยไม่ต้องแก้โค้ดเดิมแม้แต่บรรทัดเดียว</strong> เพราะเป็นฟังก์ชันบริสุทธิ์อยู่แล้ว</p><p>มีเคสหนึ่งที่ต้องตัดสินใจ: <code>validateHost('http')</code> จะไม่ผ่านเพราะ <code>startsWith('http')</code> ทั้งที่ <code>http</code> อาจเป็นชื่อเครื่องจริงในบางองค์กร — เป็นการแลกที่ยอมรับได้ ควรเขียนเทสต์บันทึกพฤติกรรมนี้ไว้ว่าตั้งใจ</p><p><strong>ข้อ 2 — เทสต์ probeConnection</strong></p><p>ได้ เพราะรับ <code>client</code> เข้ามาได้</p><table><thead><tr><th>เคส</th><th>ให้ MockClient ตอบ</th><th>คาดหวัง</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ถูกต้อง</td><td>200 + <code>{"service":"WmsApi","ok":true}</code></td><td><code>ok == true</code></td></tr>
+<tr><td>ตอบ 200 แต่เป็น HTML</td><td>200 + <code>&lt;html&gt;...</code></td><td><code>ok == false</code></td></tr>
+<tr><td>ตอบ 200 แต่ JSON คนละ service</td><td>200 + <code>{"service":"Other"}</code></td><td><code>ok == false</code></td></tr>
+<tr><td>404</td><td>404</td><td><code>ok == false</code>, ข้อความมีรหัส</td></tr>
+<tr><td>URL ผิดรูป</td><td>—</td><td>ไม่ยิงเลย, ข้อความบอกที่อยู่ผิด</td></tr>
+<tr><td>ไม่ตอบ</td><td>โยน <code>TimeoutException</code></td><td>ข้อความมีจำนวนวินาที</td></tr>
+</tbody></table><p>เคสที่สองสำคัญที่สุด เพราะเป็นกับดัก <code>MapFallbackToPage</code> ที่ 10.9 อธิบาย และเป็นเหตุผลที่ฟังก์ชัน <code>_isHealthPayload</code> มีอยู่</p><p>ต้องเพิ่มอีกเคสหนึ่งที่มักลืม: <strong>client ที่ส่งเข้าไปต้องไม่ถูกปิด</strong></p><pre class="code-vs"><code>test('client ที่ผู้เรียกส่งมา ต้องไม่ถูกปิด', () async {
+  final client = MockClient((_) async =&gt; http.Response('{"ok":true,"service":"WmsApi"}', 200));
+  await probeConnection(baseUrl: 'http://x:5000', client: client);
+  // ยิงซ้ำได้ = ยังไม่ถูกปิด
+  await probeConnection(baseUrl: 'http://x:5000', client: client);
+});</code></pre><p><strong>ข้อ 3 — เก็บหลายเซิร์ฟเวอร์</strong></p><table><thead><tr><th>ไฟล์</th><th>เปลี่ยนอะไร</th></tr></thead><tbody>
+<tr><td><code>api_config_service.dart</code></td><td>เก็บเป็นรายการ + ธงว่าตัวไหนใช้อยู่ (10.5)</td></tr>
+<tr><td><code>settings_screen.dart</code></td><td>เพิ่มรายการให้เลือก + ปุ่มเพิ่ม/ลบ</td></tr>
+<tr><td><code>api_service.dart</code></td><td>ไม่ต้องแก้ ถ้า <code>getCustomBase()</code> ยังคืน URL ตัวที่ใช้อยู่</td></tr>
+</tbody></table><p>ข้อสุดท้ายเป็นผลของการแยกชั้นที่ทำไว้ดี — <code>ApiService</code> ถามแค่ว่า “ตอนนี้ใช้ที่ไหน” ไม่รู้ว่าคำตอบมาจากค่าเดียวหรือจากรายการ</p><p>สิ่งที่ต้องเพิ่มด้วยและมักลืมคือ<strong>คำเตือนตอนสลับ</strong> (10.6) — และในแอปนี้ยากกว่าปกติ เพราะไม่มีที่กลางที่รู้ว่ามีงานค้างอยู่กี่ชิ้น แต่ละจอถือ state ของตัวเอง ทางที่ทำได้จริงคือปิดการสลับเมื่อไม่ได้อยู่ที่หน้าหลัก</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>สามไฟล์นี้แยกชั้นดีที่สุดในโปรเจกต์ — ตรรกะ 163 บรรทัดอยู่นอกจอ</li><li>ชื่อคีย์เป็นค่าคงที่ ค่าเริ่มต้นอยู่ที่เดียว คืน record</li><li>ตัวตรวจค่าเป็นฟังก์ชันบริสุทธิ์ และข้อความบอกว่าค่าควรไปอยู่ช่องไหน</li><li><code>probeConnection</code> อ่าน payload ไม่ใช่แค่รหัสสถานะ — กัน fallback ที่ตอบ 200 ให้ทุก path</li><li>รับ <code>client</code> เข้ามาได้ และปิดเฉพาะตัวที่ตัวเองสร้าง</li><li><code>_save()</code> เรียก <code>resetBaseUrl()</code> ทำให้ค่าใหม่มีผลทันที</li><li>ยังขาด: หลายเซิร์ฟเวอร์, คำเตือนตอนสลับ, เทสต์, และการแสดงที่อยู่ในจออื่น</li></ul></div><p><strong>บทหน้า:</strong> <code>ApiService</code> — singleton ที่ถูกสร้างขึ้นใหม่ 26 ครั้งในโปรเจกต์ และ cache ที่ทำให้เกิดผลข้างเคียงที่คาดไม่ถึง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

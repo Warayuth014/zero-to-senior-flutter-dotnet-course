@@ -4,20 +4,168 @@
 <title>Domain API Extensions</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-07 · Real Codebase</span><h1>Domain API Extensions</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">รายชื่อ 9 โดเมน</a></li><li><a href="#section-2">Pattern อ่าน method</a></li><li><a href="#section-3">Endpoint contract</a></li><li><a href="#section-4">Method distribution</a></li><li><a href="#section-5">Typed vs dynamic</a></li><li><a href="#section-6">Error propagation</a></li><li><a href="#section-7">Part trade-off</a></li><li><a href="#section-8">Trace exercise</a></li></ol></nav>
-<div class="note"><strong>Dart part files ทำให้ extension เข้าถึง private transport:</strong> <code>api_service.dart</code>ประกาศ 9 <code>part</code> files แต่ละไฟล์เป็น <code>extension ... on ApiService</code> จึงเรียก <code>_get/_post/_uploadFile</code>ได้เหมือน libraryเดียวกัน</div>
-<section id="section-1"><h2>1. รายชื่อ 9 โดเมน</h2><pre class="code-vs"><code>upload, receiving, unload, putaway, picking,
-packing, basket, checkin, sorting</code></pre><p>รวมประมาณ 45 public async methods เป็น API facadeที่ screensเรียก</p></section>
-<section id="section-2"><h2>2. Pattern อ่าน method</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;T&gt;&gt; action(...) async {
-  final response = await _post('/domain/action', body);
-  if (!response.success) return ApiResult.error(...);
-  return ApiResult.success(T.fromJson(response.data!));
-}</code></pre></section>
-<section id="section-3"><h2>3. Endpoint contract</h2><p>จด method/path, body/query fields, response root, DTO parserและ error special caseทุก public method อย่าเดาจากชื่อ Dartเพราะ backendอาจใช้ casing/pathต่างกัน</p></section>
-<section id="section-4"><h2>4. Method distribution</h2><table><thead><tr><th>Extension</th><th>จำนวน</th></tr></thead><tbody><tr><td>Picking</td><td>11</td></tr><tr><td>Receiving/Sorting</td><td>6 + 6</td></tr><tr><td>Putaway/Check-in</td><td>5 + 5</td></tr><tr><td>Packing</td><td>4</td></tr><tr><td>Unload/Upload</td><td>3 + 3</td></tr><tr><td>Basket</td><td>2</td></tr></tbody></table></section>
-<section id="section-5"><h2>5. Typed vs dynamic</h2><p>บาง methodคืน modelชัด เช่น <code>UnloadSession</code>/<code>SortingDashboardData</code> แต่ command responseหลายจุดยังเป็น <code>Map&lt;String,dynamic&gt;</code> ทำให้ key knowledgeไหลเข้า screenและ contract testsยากขึ้น</p></section>
-<section id="section-6"><h2>6. Error propagation</h2><p>extensionsมักส่ง <code>response.error</code>ต่อแล้ว screensใช้ fallbackข้อความไทย ต้องตรวจว่า statusCodeถูกเก็บหรือหายเพราะสร้าง ApiResult.errorใหม่ หาก 404/409/401มี business meaningควร map typed failure</p></section>
-<section id="section-7"><h2>7. Part trade-off</h2><p>ช่วยแบ่งไฟล์โดยยังใช้ private method แต่ทั้งหมดเป็น libraryเดียว, dependency directionไม่ถูกบังคับและ compile couplingสูง ทางเลือกคือ domain API classesที่รับ transport interface ทำให้ fake/ownershipแยกชัด</p></section>
-<section id="section-8"><h2>8. Trace exercise</h2><div class="success">เลือกหนึ่งปุ่มใน screen → หา extension methodด้วย Go to Definition → จด endpoint/payload → เปิด model.fromJson → หา .NET DTO/route → เขียน contract fixtureและ error casesก่อนเปลี่ยนทั้งสองฝั่ง</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เก้าไฟล์ที่เป็นไฟล์เดียวกัน</a></li><li><a href="#section-2">part ทำอะไร</a></li><li><a href="#section-3">extension ทำอะไร</a></li><li><a href="#section-4">รูปแบบที่ซ้ำกัน 42 ครั้ง</a></li><li><a href="#section-5">ข้อมูลที่หายระหว่างทาง</a></li><li><a href="#section-6">ความไม่สม่ำเสมออื่นที่เจอในไฟล์เดียวกัน</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด services/api/ ทั้งเก้าไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.6, D1.16 (extension), Part 7<br><strong>จบบทนี้แล้วจะทำได้:</strong> เข้าใจกลไก <code>part</code> + <code>extension</code> ที่โปรเจกต์นี้ใช้ และเห็นข้อมูลที่หายระหว่างทางโดยไม่มีใครสังเกต</div>
+
+<section id="section-1"><h2>1. เก้าไฟล์ที่เป็นไฟล์เดียวกัน</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>จำนวน endpoint</th></tr></thead><tbody>
+<tr><td><code>picking_api.dart</code></td><td>133</td><td>11</td></tr>
+<tr><td><code>sorting_api.dart</code></td><td>78</td><td>6</td></tr>
+<tr><td><code>receiving_api.dart</code></td><td>78</td><td>4</td></tr>
+<tr><td><code>checkin_api.dart</code></td><td>64</td><td>5</td></tr>
+<tr><td><code>packing_api.dart</code></td><td>57</td><td>4</td></tr>
+<tr><td><code>putaway_api.dart</code></td><td>52</td><td>5</td></tr>
+<tr><td><code>unload_api.dart</code></td><td>48</td><td>3</td></tr>
+<tr><td><code>basket_api.dart</code></td><td>34</td><td>2</td></tr>
+<tr><td><code>upload_api.dart</code></td><td>24</td><td>2</td></tr>
+<tr><td><strong>รวม</strong></td><td><strong>568</strong></td><td><strong>42</strong></td></tr>
+</tbody></table><p>ทุกไฟล์เริ่มเหมือนกัน</p><pre class="code-vs"><code>part of '../api_service.dart';
+
+extension ReceivingApi on ApiService {
+  ...
+}</code></pre><p>สองบรรทัดนี้ทำงานคนละอย่างและต้องมีทั้งคู่</p></section>
+
+<section id="section-2"><h2>2. part ทำอะไร</h2><p>ปกติแต่ละไฟล์ Dart เป็นหน่วยของตัวเอง สิ่งที่ขึ้นต้นด้วยขีดล่างจะเห็นได้เฉพาะในไฟล์นั้น</p><pre class="code-vs"><code>// ถ้าเป็นไฟล์ธรรมดา บรรทัดนี้จะคอมไพล์ไม่ผ่าน
+final response = await _get('/receiving/po/$poId');
+//                          ^^^^ _get เป็น private ของ api_service.dart</code></pre><p><code>part</code> ทำให้เก้าไฟล์นี้กลายเป็น<strong>เนื้อเดียวกัน</strong>กับ <code>api_service.dart</code> ในสายตาคอมไพเลอร์</p><table><thead><tr><th></th><th><code>part</code></th><th><code>import</code></th></tr></thead><tbody>
+<tr><td>เห็นสิ่งที่ขึ้นต้นด้วย <code>_</code></td><td>เห็น</td><td>ไม่เห็น</td></tr>
+<tr><td>ต้องประกาศสองฝั่ง</td><td>ต้อง (<code>part</code> + <code>part of</code>)</td><td>ฝั่งเดียว</td></tr>
+<tr><td>มี import ของตัวเอง</td><td>ไม่มี ใช้ของไฟล์หลัก</td><td>มี</td></tr>
+<tr><td>นับเป็นไฟล์แยกตอนอ่าน</td><td>ใช่</td><td>ใช่</td></tr>
+</tbody></table><p>สังเกตแถวที่สาม — ไฟล์ใน <code>api/</code> ไม่มี <code>import</code> เลยแม้แต่บรรทัดเดียว ทั้งที่ใช้ <code>File</code>, <code>Uri</code>, และคลาสโมเดลทั้งหมด เพราะได้มาจาก <code>api_service.dart</code> ทั้งหมด</p><div class="note"><strong>ผลที่ต้องรู้ตอนแก้:</strong> ถ้าจะใช้คลาสใหม่ใน <code>picking_api.dart</code> ต้องไปเพิ่ม <code>import</code> ที่ <code>api_service.dart</code> ไม่ใช่ที่ไฟล์ที่กำลังแก้ — เป็นจุดที่คนใหม่งงบ่อยที่สุด</div></section>
+
+<section id="section-3"><h2>3. extension ทำอะไร</h2><p><code>extension</code> เพิ่มเมธอดให้คลาสที่มีอยู่แล้ว โดยไม่ต้องแก้ตัวคลาส</p><pre class="code-vs"><code>extension ReceivingApi on ApiService {
+  Future&lt;ApiResult&lt;POResponse&gt;&gt; getPO(String poId) async { ... }
+}</code></pre><p>ทำให้เรียกได้เหมือนเป็นเมธอดของ <code>ApiService</code> เอง</p><pre class="code-vs"><code>final result = await ApiService().getPO('PO-2024-001');</code></pre><p>ประโยชน์ที่ได้จริง</p><table><thead><tr><th>ประโยชน์</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>api_service.dart</code> ไม่บวม</td><td>ถ้าเอา 42 เมธอดมาไว้ในคลาสจะยาว 700+ บรรทัด</td></tr>
+<tr><td>หาของง่าย</td><td>อยากรู้เรื่อง picking เปิดไฟล์เดียว</td></tr>
+<tr><td>แก้คนละโดเมนไม่ชนกัน</td><td>สองคนแก้คนละไฟล์ merge ได้</td></tr>
+</tbody></table><p>ข้อจำกัดที่ต้องรู้</p><table><thead><tr><th>ข้อจำกัด</th><th>ผล</th></tr></thead><tbody>
+<tr><td>extension เพิ่ม state ไม่ได้</td><td>ประกาศ field ในนี้ไม่ได้ ต้องไปไว้ที่คลาส</td></tr>
+<tr><td>ไม่ใช่ชั้นที่แยกจริง</td><td>ยังเป็น <code>ApiService</code> ตัวเดิม สลับตัวปลอมไม่ได้</td></tr>
+<tr><td>ชื่อชนกันได้ถ้ามีสอง extension</td><td>ต้องระวังตั้งชื่อเมธอดซ้ำ</td></tr>
+</tbody></table><p>แถวกลางสำคัญ — การแยกเป็นเก้าไฟล์ช่วยเรื่อง<strong>การอ่าน</strong> ไม่ได้ช่วยเรื่อง<strong>การทดสอบ</strong> ต่างจากชั้น repository ที่ 9.4 สอน ซึ่งแยกด้วย interface และสลับได้จริง</p></section>
+
+<section id="section-4"><h2>4. รูปแบบที่ซ้ำกัน 42 ครั้ง</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;POResponse&gt;&gt; getPO(String poId) async {
+  final response = await _get('/receiving/po/$poId');
+  if (!response.success) return ApiResult.error(response.error);
+
+  return ApiResult.success(POResponse.fromJson(response.data!));
+}</code></pre><p>สี่บรรทัดนี้ทำสามอย่าง</p><table><thead><tr><th>บรรทัด</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ประกอบ path แล้วยิง</td></tr>
+<tr><td>2</td><td>ล้มเหลว → ส่งต่อ</td></tr>
+<tr><td>3</td><td>สำเร็จ → แปลง <code>Map</code> เป็นโมเดล</td></tr>
+</tbody></table><p>นี่คือหน้าที่ที่ 9.5 เรียกว่า “ชั้นที่แปลงข้อมูลดิบเป็นชนิดที่โดเมนใช้” — จอไม่ต้องรู้จัก <code>Map&lt;String, dynamic&gt;</code> เลย ได้ <code>POResponse</code> ที่มีชนิดกำกับครบ</p><p>รูปแบบการประกอบ path มีสามแบบในโปรเจกต์</p><pre class="code-vs"><code>// แบบที่ 1 — ต่อสตริงตรง ๆ
+await _get('/receiving/po/$poId');
+
+// แบบที่ 2 — ใช้ Uri สำหรับ query parameters
+final path = Uri(
+  path: '/receiving/validate-serial',
+  queryParameters: {'partId': partId, 'serialNo': serialNo},
+).toString();
+
+// แบบที่ 3 — เข้ารหัสเอง
+final qs = pickOrderId != null
+    ? '?pickOrderId=${Uri.encodeQueryComponent(pickOrderId)}'
+    : '';</code></pre><table><thead><tr><th>แบบ</th><th>ปลอดภัยไหม</th></tr></thead><tbody>
+<tr><td>1</td><td><strong>ไม่</strong> ถ้าค่ามีอักขระพิเศษ เช่น <code>#</code> หรือช่องว่าง</td></tr>
+<tr><td>2</td><td>ปลอดภัย — <code>Uri</code> เข้ารหัสให้</td></tr>
+<tr><td>3</td><td>ปลอดภัย แต่ต้องจำเองทุกครั้ง</td></tr>
+</tbody></table><p>ในทางปฏิบัติแบบที่ 1 ทำงานได้เพราะรหัส PO และรหัสพาเลทเป็นตัวอักษรกับตัวเลขล้วน แต่ถ้าวันหนึ่งมีรหัสที่มีขีดทับหรือช่องว่าง จะพังโดยไม่มีคำเตือน</p></section>
+
+<section id="section-5"><h2>5. ข้อมูลที่หายระหว่างทาง</h2><p>เปิด <code>picking_api.dart</code> แล้วดูสองเมธอดที่อยู่ห่างกันไม่กี่บรรทัด</p><pre class="code-vs"><code>// บรรทัด 116–121
+Future&lt;ApiResult&lt;ReturnPalletPreview&gt;&gt; previewReturnPallet(String palletId) async {
+  final response = await _get('/picking/return-pallet-preview/$palletId');
+  if (!response.success) {
+    return ApiResult.error(response.error, statusCode: response.statusCode);   // ← ส่งต่อ
+  }
+  ...
+}
+
+// บรรทัด 123–129
+Future&lt;ApiResult&lt;List&lt;Map&lt;String, dynamic&gt;&gt;&gt;&gt; getAvailableLines() async {
+  final response = await _get('/picking/available-lines');
+  if (!response.success) return ApiResult.error(response.error);              // ← ไม่ส่งต่อ
+  ...
+}</code></pre><p>นับทั้งเก้าไฟล์</p><table><thead><tr><th>ไฟล์</th><th>ส่งต่อ <code>statusCode</code></th><th>ทิ้ง</th></tr></thead><tbody>
+<tr><td><code>checkin_api.dart</code></td><td>5</td><td>0</td></tr>
+<tr><td><code>sorting_api.dart</code></td><td>6</td><td>0</td></tr>
+<tr><td><code>packing_api.dart</code></td><td>4</td><td>0</td></tr>
+<tr><td><code>basket_api.dart</code></td><td>2</td><td>0</td></tr>
+<tr><td><code>picking_api.dart</code></td><td>6</td><td>5</td></tr>
+<tr><td><code>receiving_api.dart</code></td><td>0</td><td>6</td></tr>
+<tr><td><code>putaway_api.dart</code></td><td>0</td><td>5</td></tr>
+<tr><td><code>unload_api.dart</code></td><td>0</td><td>3</td></tr>
+<tr><td><code>upload_api.dart</code></td><td>0</td><td>1</td></tr>
+<tr><td><strong>รวม</strong></td><td><strong>23</strong></td><td><strong>20</strong></td></tr>
+</tbody></table><p>ผลที่ตามมา — <code>ApiResult.isNotFound</code> ใช้ได้กับ 23 เมธอดและใช้ไม่ได้กับอีก 20 โดยที่ไม่มีอะไรบอก</p><pre class="code-vs"><code>final result = await api.getPO(poId);
+if (result.isNotFound) {          // ← ไม่มีวันเป็น true เพราะ getPO ทิ้ง statusCode
+  showNotFoundMessage();
+}</code></pre><div class="note"><strong>สิ่งที่ทำให้เรื่องนี้อันตราย:</strong> โค้ดคอมไพล์ผ่าน ไม่มีคำเตือน และเงื่อนไขเป็น <code>false</code> เงียบ ๆ ผลคือแอปแสดงข้อความผิดพลาดทั่วไปแทนข้อความที่ควรบอกว่า “ไม่พบ PO นี้”</div><p>ตอนนี้ยัง<strong>ไม่มีจอไหนใช้ <code>isNotFound</code> เลย</strong> — ค้นทั้งโปรเจกต์เจอที่เดียวคือบรรทัดที่ประกาศมันเอง จึงยังไม่เกิดปัญหา แต่คนแรกที่หยิบไปใช้จะเจอทันที และจะหาสาเหตุยากมาก</p><p>แก้ได้ด้วยการเปลี่ยน 20 บรรทัด</p><pre class="code-vs"><code>- if (!response.success) return ApiResult.error(response.error);
++ if (!response.success) {
++   return ApiResult.error(response.error, statusCode: response.statusCode);
++ }</code></pre><p>วิธีที่ดีกว่าคือทำให้ลืมไม่ได้ตั้งแต่แรก — เพิ่มตัวช่วยใน <code>ApiResult</code></p><pre class="code-vs"><code>/// แปลงความล้มเหลวเป็นชนิดอื่นโดยพก statusCode ไปด้วยเสมอ
+ApiResult&lt;R&gt; asFailure&lt;R&gt;() =&gt; ApiResult&lt;R&gt;.error(error, statusCode: statusCode);</code></pre><pre class="code-vs"><code>if (!response.success) return response.asFailure();</code></pre><p>สั้นกว่าเดิม อ่านง่ายกว่า และ<strong>ไม่มีทางลืม</strong>เพราะไม่มีอะไรให้ลืม</p></section>
+
+<section id="section-6"><h2>6. ความไม่สม่ำเสมออื่นที่เจอในไฟล์เดียวกัน</h2><p><code>picking_api.dart</code> มีทั้งสามแบบของการคืนรายการ</p><pre class="code-vs"><code>// แบบ A — กัน null ไว้
+final items = (response.data!['items'] as List? ?? [])
+
+// แบบ B — ไม่กัน
+final list = (response.data!['items'] as List).cast&lt;Map&lt;String, dynamic&gt;&gt;();</code></pre><p>แบบ B จะโยน <code>TypeError</code> ถ้าเซิร์ฟเวอร์ไม่ส่ง <code>items</code> มา ซึ่งเกิดได้ถ้ามีการเปลี่ยนฝั่ง .NET</p><p>และมีเมธอดหนึ่งที่คืนชนิดที่น่าสนใจ</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;({String palletId, bool continued})?&gt;&gt;
+    getSuggestedDestPallet({String? pickOrderId}) async {
+  ...
+  if (list.isEmpty) return ApiResult.success(null);   // ← สำเร็จ แต่ไม่มีข้อมูล</code></pre><p>แยก “สำเร็จแต่ไม่มีพาเลทว่าง” ออกจาก “ล้มเหลว” ได้ถูกต้อง — ตรงกับที่ 6.11 สอนว่าอย่าเอา <code>null</code> ไปปนกับความผิดพลาด</p><table><thead><tr><th>ผลลัพธ์</th><th>แปลว่า</th><th>จอควรทำ</th></tr></thead><tbody>
+<tr><td><code>success</code> + ข้อมูล</td><td>มีพาเลทแนะนำ</td><td>เติมให้เลย</td></tr>
+<tr><td><code>success</code> + <code>null</code></td><td>ไม่มีพาเลทว่าง</td><td>ให้ผู้ใช้สแกนเอง</td></tr>
+<tr><td><code>error</code></td><td>ถามไม่ได้</td><td>แสดงข้อความ</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ไฟล์ใน <code>api/</code> เป็นไฟล์แยก เพิ่ม import ที่นั่นได้</td><td>ต้องเพิ่มที่ <code>api_service.dart</code></td></tr>
+<tr><td>การแยกเป็นเก้าไฟล์ทำให้เทสต์ง่ายขึ้น</td><td>ช่วยการอ่าน ไม่ช่วยการทดสอบ</td></tr>
+<tr><td><code>isNotFound</code> ใช้ได้ทุกเมธอด</td><td>ใช้ได้ 23 จาก 43 จุด</td></tr>
+<tr><td>ต่อ path ด้วยสตริงปลอดภัย</td><td>พังถ้าค่ามีอักขระพิเศษ</td></tr>
+<tr><td><code>ApiResult.success(null)</code> แปลว่ามีอะไรผิด</td><td>แปลว่าสำเร็จและคำตอบคือ “ไม่มี”</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ต้องเพิ่ม endpoint ใหม่: ค้นหา PO จากรหัสผู้ขาย คืนรายการ PO ที่ยังไม่ปิด</p><ol><li>ต้องแตะไฟล์ไหนบ้าง เรียงตามลำดับที่ทำจริง</li><li>เขียนเมธอดให้ครบ โดยไม่ทำผิดแบบที่บทนี้ชี้ไว้</li><li>ถ้าผู้ขายไม่มี PO ค้างเลย ควรคืนอะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ลำดับ</th><th>ไฟล์</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ฝั่ง .NET</td><td>ทำ endpoint ให้มีก่อน ไม่งั้นทดสอบไม่ได้</td></tr>
+<tr><td>2</td><td><code>models/receiving/receiving_models.dart</code></td><td>เพิ่มคลาสถ้ารูปร่างข้อมูลใหม่</td></tr>
+<tr><td>3</td><td><code>services/api/receiving_api.dart</code></td><td>เพิ่มเมธอด</td></tr>
+<tr><td>4</td><td>จอที่ใช้</td><td>เรียกและแสดง</td></tr>
+</tbody></table><p>ไม่ต้องแตะ <code>api_service.dart</code> ยกเว้นต้องใช้คลาสจากไลบรารีใหม่</p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>/// ค้นหา PO ที่ยังไม่ปิดของผู้ขายรายหนึ่ง
+/// คืนรายการว่างถ้าไม่มี PO ค้าง — ไม่ใช่ความล้มเหลว
+Future&lt;ApiResult&lt;List&lt;POSummary&gt;&gt;&gt; getOpenPOsBySupplier(String supplierId) async {
+  // ใช้ Uri เพื่อให้รหัสผู้ขายที่มีอักขระพิเศษไม่ทำ path พัง
+  final path = Uri(
+    path: '/receiving/pos',
+    queryParameters: {'supplierId': supplierId, 'status': 'OPEN'},
+  ).toString();
+
+  final response = await _get(path);
+  if (!response.success) {
+    // ส่ง statusCode ต่อ ไม่งั้น isNotFound ใช้ไม่ได้
+    return ApiResult.error(response.error, statusCode: response.statusCode);
+  }
+
+  // กัน null ไว้ — เซิร์ฟเวอร์อาจไม่ส่ง items มาถ้าไม่มีข้อมูล
+  final items = (response.data!['items'] as List? ?? [])
+      .map((e) =&gt; POSummary.fromJson(e as Map&lt;String, dynamic&gt;))
+      .toList();
+
+  return ApiResult.success(items);
+}</code></pre><p>สี่จุดที่เลี่ยงกับดักของบทนี้: ใช้ <code>Uri</code>, ส่ง <code>statusCode</code> ต่อ, กัน <code>null</code> ที่ <code>items</code>, และ cast ชนิดของสมาชิกให้ชัด</p><p><strong>ข้อ 3 — ไม่มี PO ค้าง</strong></p><table><thead><tr><th>ทางเลือก</th><th>เหมาะไหม</th></tr></thead><tbody>
+<tr><td><code>ApiResult.success([])</code></td><td><strong>ใช่</strong> — ถามสำเร็จ คำตอบคือไม่มี</td></tr>
+<tr><td><code>ApiResult.success(null)</code></td><td>ไม่ — ทำให้จอต้องตรวจสองอย่าง (null และ ว่าง)</td></tr>
+<tr><td><code>ApiResult.error('ไม่พบ PO')</code></td><td>ไม่ — จอจะแสดงเป็นข้อความผิดพลาดสีแดง ทั้งที่ไม่มีอะไรผิด</td></tr>
+</tbody></table><p>ต่างจาก <code>getSuggestedDestPallet</code> ที่คืน <code>null</code> ได้อย่างถูกต้อง เพราะที่นั่นคำตอบคือของชิ้นเดียว ไม่ใช่รายการ — ของชิ้นเดียวที่ไม่มีคือ <code>null</code> แต่รายการที่ไม่มีสมาชิกคือรายการว่าง</p><p><strong>สิ่งที่จอต้องทำต่างกัน</strong></p><pre class="code-vs"><code>if (!result.success) {
+  showError(result.error!);              // ถามไม่ได้
+} else if (result.data!.isEmpty) {
+  showEmptyState('ผู้ขายรายนี้ไม่มี PO ค้าง');   // ถามได้ คำตอบคือไม่มี
+} else {
+  showList(result.data!);
+}</code></pre><p>สามทางนี้ต้องแยกกันเสมอ เพราะผู้ใช้ต้องทำคนละอย่าง — ทางแรกลองใหม่ ทางที่สองไปสแกนที่อื่น ทางที่สามทำงานต่อ</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>เก้าไฟล์ใน <code>services/api/</code> รวม 568 บรรทัด 42 endpoint และเป็น <code>part</code> ของ <code>api_service.dart</code></li><li><code>part</code> ทำให้เห็นเมธอดที่ขึ้นต้นด้วยขีดล่าง แต่ต้องเพิ่ม <code>import</code> ที่ไฟล์หลัก</li><li><code>extension</code> ช่วยจัดระเบียบให้อ่านง่าย แต่ไม่ได้แยกชั้นจริงและไม่ช่วยเรื่องเทสต์</li><li>รูปแบบซ้ำ 42 ครั้ง: ยิง → ล้มเหลวส่งต่อ → สำเร็จแปลงเป็นโมเดล</li><li>23 จุดส่ง <code>statusCode</code> ต่อ อีก 20 จุดทิ้ง ทำให้ <code>isNotFound</code> ใช้ได้ไม่ทั่ว</li><li>ยังไม่มีจอไหนใช้ <code>isNotFound</code> จึงยังไม่เกิดปัญหา แต่คนแรกที่ใช้จะเจอ</li><li>เพิ่ม <code>asFailure()</code> แล้วจะลืมไม่ได้อีก</li><li>รายการที่ไม่มีสมาชิกคือรายการว่าง ไม่ใช่ <code>null</code> และไม่ใช่ความล้มเหลว</li></ul></div><p><strong>บทหน้า:</strong> <code>models/</code> — 11 ไฟล์ที่แปลง JSON เป็นชนิดที่ Dart เข้าใจ และจุดที่จะพังถ้าฝั่ง .NET เปลี่ยนอะไร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

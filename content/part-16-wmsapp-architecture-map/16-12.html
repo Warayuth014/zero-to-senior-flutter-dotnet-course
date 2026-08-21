@@ -1,14 +1,112 @@
-<div class="note"><strong>Reading lab:</strong> ใช้ checklistนี้เพื่อพิสูจน์ว่าเข้าใจ wmsappทั้งระบบก่อนลง Part 17–19 ซึ่งจะเจาะ inbound, putaway/picking และ outbound ทีละ workflow</div>
-<section><h2>1. Pass 1: composition</h2><ol><li>เปิด <code>main.dart</code>/<code>theme.dart</code></li><li>วาด WmsApp → HomeScreen</li><li>จด global singleton/notifier</li><li>หา locale/theme/home route</li></ol></section>
-<section><h2>2. Pass 2: route catalog</h2><p>อ่าน HomeScreenและ menu screens จดทุก route, constructor arguments, login/role gate, route result, logoutและ dev tools ผลลัพธ์คือ route graphหนึ่งหน้า ไม่ต้องอ่าน widget stylingทุกบรรทัด</p></section>
-<section><h2>3. Pass 3: vertical slice</h2><pre class="code-vs"><code>user gesture
-→ screen callback/state
-→ ApiService extension
-→ endpoint + payload
-→ model.fromJson
-→ rendered success/error</code></pre><p>ทำอย่างน้อยหนึ่ง readและหนึ่ง writeต่อโดเมน</p></section>
-<section><h2>4. Pass 4: cross-cutting</h2><p>ไล่ session, server settings/base cache, theme, common widgets, SignalR, image URL, timeoutและ platform config ถามว่า logout/switch server/backgroundกระทบ resourceใดบ้าง</p></section>
-<section><h2>5. Coverage evidence</h2><p>Partนี้ mapลึก 19 ไฟล์แกนกลางใน <code>coverage-manifest.json</code> ส่วน domain filesถูก mapไป Parts 17–19 Coverageหมายถึงมีบทชี้ไฟล์ ไม่ใช่ว่า behaviorผ่าน testแล้ว</p></section>
-<section><h2>6. Test reality</h2><p><code>test/widget_test.dart</code>ของ wmsappเป็น templateที่ commentทั้งหมด ส่วน test screensสองไฟล์ถูกซ่อนใน Home dev menu จึงยังไม่ใช่ automated safety net ต้องเพิ่ม characterization testsก่อนแยก giant screens/singletons</p></section>
-<section><h2>7. Refactor priority</h2><ol><li>production auth/session boundary</li><li>inject HTTP/config</li><li>typed contract failures</li><li>store/repositoryต่อ workflow</li><li>แยก giant screens</li><li>platform release blockers</li></ol><p>ทำทีละ vertical sliceพร้อม tests ไม่ rewriteพร้อมกันทั้งแอป</p></section>
-<section><h2>8. Definition of Done</h2><div class="success">อธิบายได้ว่าเริ่มแอปอย่างไร, ทุก Home cardไปไฟล์ไหน, requestประกอบ URLที่ใด, 9 API extensionsและ DTOอยู่ไหน, session/config/cacheถูกล้างอย่างไร, shared UI/platform filesใดมี blast radius และจะวาง test seamตรงไหน</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ทำแผนที่โปรเจกต์ด้วยตัวเองหนึ่งรอบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.1–16.11 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> เข้าโปรเจกต์ที่ไม่เคยเห็นแล้วหาของเจอภายในหนึ่งวัน และพร้อมอ่านจอโดเมนจริงใน Part 17</div>
+
+<section><h2>1. ลำดับที่ควรอ่าน</h2><p>เจ็ดขั้นนี้คือสิ่งที่ Part 16 ทำมาทั้งหมด เรียงให้ใช้ซ้ำกับโปรเจกต์อื่นได้</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ได้อะไร</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>นับไฟล์และบรรทัด</td><td>รู้ว่าน้ำหนักอยู่ตรงไหน</td><td>16.1</td></tr>
+<tr><td>2</td><td>อ่านจุดเริ่ม</td><td>รู้ว่าอะไรถูกตั้งค่าไว้ทั้งแอป</td><td>16.2</td></tr>
+<tr><td>3</td><td>ตามหนึ่งการกดจนถึงเซิร์ฟเวอร์</td><td>รู้เส้นทางที่ทุกอย่างเดินตาม</td><td>16.3–16.8</td></tr>
+<tr><td>4</td><td>อ่านของกลางที่ทุกจอใช้</td><td>รู้ว่าแก้ตรงไหนกระทบกว้าง</td><td>16.9–16.10</td></tr>
+<tr><td>5</td><td>ดูไฟล์นอกโค้ด</td><td>รู้ว่าปล่อยจริงได้หรือยัง</td><td>16.11</td></tr>
+<tr><td>6</td><td>จดสิ่งที่ไม่มี</td><td>ไม่เสียเวลาตามหาของที่ไม่มี</td><td>16.1</td></tr>
+<tr><td>7</td><td>จดสิ่งที่น่าสงสัย แต่ยังไม่แก้</td><td>มีรายการงานที่ยืนยันแล้ว</td><td>ทั้ง Part</td></tr>
+</tbody></table><p>ขั้นที่ 7 สำคัญที่สุดและทำผิดง่ายที่สุด — ระหว่างอ่านจะเจอสิ่งที่อยากแก้ตลอดเวลา ถ้าแก้ทันทีจะไม่ได้อ่านต่อ และแก้โดยไม่มีเทสต์รับ</p></section>
+
+<section><h2>2. แผนที่ที่ได้จาก Part นี้</h2><pre class="code-vs"><code>main.dart (39)
+  │  ValueListenableBuilder ฟัง themeProvider
+  ▼
+HomeScreen (553)                          ← ถือ userId/fullName/role ของทั้งแอป
+  │  _requireLogin() → LoginScreen (378)   ← mock: 3 ผู้ใช้ รหัส 1234
+  │  ส่ง userId + fullName ผ่านตัวสร้าง
+  ▼
+จอโดเมน (Part 17–19)                       ← ถือ state ของ flow เอง
+  │  ApiService()                          ← singleton, 26 จุด
+  ▼
+services/api/*.dart (568, 42 endpoint)    ← part + extension
+  │  _get / _post / _uploadFile
+  │    └─ _resolveBase() → _cachedBase     ← ล้างด้วย resetBaseUrl()
+  │         └─ ApiConfigService            ← IP ที่ผู้ใช้ตั้ง
+  ▼
+_handle() → ApiResult&lt;Map&gt;
+  ▼
+Model.fromJson (11 ไฟล์, 1,507)
+  ▼
+setState → widget tree
+     ใช้ common_widgets.dart (653) + part_thumbnail.dart (61)</code></pre><p>เก็บภาพนี้ไว้ Part 17–19 จะเติมกล่อง “จอโดเมน” ทีละใบ</p></section>
+
+<section><h2>3. ตารางหาของ</h2><table><thead><tr><th>อยากรู้</th><th>เปิดไฟล์</th></tr></thead><tbody>
+<tr><td>แอปเริ่มยังไง ธีมมาจากไหน</td><td><code>main.dart</code>, <code>theme/theme.dart</code></td></tr>
+<tr><td>ใครล็อกอินอยู่</td><td><code>auth_session_service.dart</code></td></tr>
+<tr><td>ยิงไปที่ IP ไหน</td><td><code>api_config_service.dart</code>, <code>api_service.dart</code></td></tr>
+<tr><td>endpoint ของโดเมน X</td><td><code>services/api/X_api.dart</code></td></tr>
+<tr><td>รูปร่างข้อมูลของโดเมน X</td><td><code>models/X/X_models.dart</code></td></tr>
+<tr><td>ปุ่ม/การ์ด/ป้ายสถานะ</td><td><code>widgets/common_widgets.dart</code></td></tr>
+<tr><td>รูปสินค้า</td><td><code>widgets/part_thumbnail.dart</code></td></tr>
+<tr><td>สิทธิ์ ลายเซ็น เลขรุ่น</td><td><code>android/app/</code>, <code>pubspec.yaml</code></td></tr>
+</tbody></table></section>
+
+<section><h2>4. สิ่งที่ยืนยันแล้วว่าเป็นปัญหา</h2><p>ทั้งหมดนี้อ่านจากโค้ดจริงและตรวจสอบได้ ไม่ใช่ความเห็น</p><table><thead><tr><th>#</th><th>เรื่อง</th><th>ผลกับผู้ใช้</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td><code>INTERNET</code> ไม่อยู่ใน main manifest</td><td>APK release ต่อเซิร์ฟเวอร์ไม่ได้เลย</td><td>16.11</td></tr>
+<tr><td>2</td><td>ไม่มี network security config</td><td>http ถูกบล็อกใน release</td><td>16.11</td></tr>
+<tr><td>3</td><td><code>clearSession()</code> เรียก <code>prefs.clear()</code></td><td>ออกจากระบบแล้วที่อยู่เซิร์ฟเวอร์หาย</td><td>16.4</td></tr>
+<tr><td>4</td><td>ไม่มี <code>cacheWidth</code> ที่ <code>PartThumbnail</code></td><td>แอปถูกปิดตอนเลื่อนรายการยาว</td><td>16.10</td></tr>
+<tr><td>5</td><td><code>FutureBuilder</code> ใน <code>build</code></td><td>รูปกระพริบตอนเลื่อนและพิมพ์ค้นหา</td><td>16.10</td></tr>
+<tr><td>6</td><td><code>DateTime.now()</code> เป็นค่าเริ่มต้น</td><td>รายการเรียงผิดโดยไม่มีใครรู้</td><td>16.8</td></tr>
+<tr><td>7</td><td>20 จุดทิ้ง <code>statusCode</code></td><td><code>isNotFound</code> ใช้ไม่ได้ทั่ว</td><td>16.7</td></tr>
+<tr><td>8</td><td><code>_requireLogin()</code> แข่งเวลากับ <code>_loadUser()</code></td><td>ยังไม่เกิด เพราะแอนิเมชันช้ากว่า</td><td>16.3</td></tr>
+<tr><td>9</td><td><code>_fullName!</code> ไม่ถูกรับประกัน</td><td>พังได้ถ้าเซสชันไม่ครบ</td><td>16.3</td></tr>
+<tr><td>10</td><td><code>applicationId</code> ยังเป็น <code>com.example</code></td><td>เปลี่ยนทีหลังต้องถอนติดตั้งทุกเครื่อง</td><td>16.11</td></tr>
+</tbody></table><p>เรียงตามลำดับที่ควรแก้</p><table><thead><tr><th>กลุ่ม</th><th>ข้อ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ขวางการปล่อย</td><td>1, 2, 10</td><td>ถ้าไม่แก้ แจกไปก็ใช้ไม่ได้</td></tr>
+<tr><td>ผู้ใช้เจอจริงแล้ว</td><td>3, 4, 5</td><td>มีคนแจ้งได้ทันที</td></tr>
+<tr><td>ข้อมูลผิดแบบเงียบ</td><td>6</td><td>ร้ายแรงเพราะไม่มีใครจับได้</td></tr>
+<tr><td>รอวันเกิด</td><td>7, 8, 9</td><td>ยังไม่เกิด แต่จะเกิดแน่</td></tr>
+</tbody></table></section>
+
+<section><h2>5. สิ่งที่ทำได้ดีและควรรักษาไว้</h2><p>รายการนี้สำคัญพอ ๆ กับรายการปัญหา เพราะเป็นสิ่งที่ห้ามทำหายตอน refactor</p><table><thead><tr><th>เรื่อง</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>_build()</code> ตัวเดียวสร้างทั้งธีมสว่างและมืด</td><td>16.2</td></tr>
+<tr><td>คอมเมนต์ <code>// Mock:</code> บอกตรง ๆ ว่าอะไรยังไม่จริง</td><td>16.4</td></tr>
+<tr><td><code>probeConnection</code> อ่าน payload ไม่ใช่แค่รหัสสถานะ</td><td>16.5</td></tr>
+<tr><td>รับ <code>client</code> เข้ามาได้และปิดเฉพาะตัวที่สร้างเอง</td><td>16.5</td></tr>
+<tr><td>ข้อความตรวจค่าบอกว่าค่าควรไปช่องไหน</td><td>16.5</td></tr>
+<tr><td>คอมเมนต์อธิบายกับดัก <code>kIsWeb</code> และ fallback</td><td>16.6</td></tr>
+<tr><td>timeout ครบทุกเมธอด และอัปโหลดยาวกว่า</td><td>16.6</td></tr>
+<tr><td>แยกไฟล์ตามโดเมนทั้ง api และ models</td><td>16.7, 16.8</td></tr>
+<tr><td><code>ApiResult.success(null)</code> แทน “สำเร็จแต่ไม่มี”</td><td>16.7</td></tr>
+<tr><td><code>PrimaryButton</code> ปิดตัวเองระหว่างโหลด</td><td>16.9</td></tr>
+<tr><td>สั่นสองระดับ เพราะผู้ใช้ไม่ได้มองจอตลอด</td><td>16.9</td></tr>
+<tr><td><code>showConfirmDialog</code> คืน <code>false</code> เมื่อกดนอกกล่อง</td><td>16.9</td></tr>
+<tr><td>ฝังฟอนต์ไทยเอง ไม่พึ่งฟอนต์ระบบ</td><td>16.11</td></tr>
+<tr><td>ไลบรารีแค่เก้าตัว</td><td>16.11</td></tr>
+</tbody></table><div class="note">สิบสี่ข้อนี้บอกอะไรบางอย่าง — ทีมนี้<strong>รู้ว่าอะไรถูก</strong> สิ่งที่ยังไม่ทำส่วนใหญ่เป็นเรื่องที่ยังไม่มีเวลา ไม่ใช่เรื่องที่ไม่รู้ ซึ่งเปลี่ยนวิธีที่เราควรเสนอการเปลี่ยนแปลงไปเลย</div></section>
+
+<section><h2>6. ลงมือทำ</h2><p>ทำแผนที่ด้วยตัวเองหนึ่งรอบ โดยเลือกโดเมนที่ Part 16 ยังไม่ได้แตะ — <strong>unload</strong> หรือ <strong>basket</strong></p><table><thead><tr><th>#</th><th>ต้องได้</th></tr></thead><tbody>
+<tr><td>1</td><td>รายการไฟล์ของโดเมนนั้นพร้อมจำนวนบรรทัด</td></tr>
+<tr><td>2</td><td>แผนภาพเส้นทางจากปุ่มบนหน้าหลักถึง endpoint</td></tr>
+<tr><td>3</td><td>รายการ endpoint ทั้งหมดพร้อม path จริง</td></tr>
+<tr><td>4</td><td>รายการโมเดลพร้อมฟิลด์ที่ไม่มีการป้องกัน</td></tr>
+<tr><td>5</td><td>จุดที่ทิ้ง <code>statusCode</code></td></tr>
+<tr><td>6</td><td>state ที่จอถืออยู่ทั้งหมด</td></tr>
+<tr><td>7</td><td>สิ่งที่น่าสงสัยอย่างน้อยสามข้อ พร้อมหลักฐานจากโค้ด</td></tr>
+<tr><td>8</td><td>สิ่งที่ทำได้ดีอย่างน้อยสามข้อ</td></tr>
+</tbody></table><p><strong>คำใบ้สำหรับข้อ 2</strong></p><pre class="code-vs"><code># หาว่าจอนี้ถูกเปิดจากไหน
+rg "UnloadMenuScreen" lib
+
+# หาว่าจอนี้เรียก API อะไรบ้าง
+rg "_api\.|ApiService\(\)\." lib/screens/unload
+
+# หาว่า endpoint นั้นยิงไป path ไหน
+rg "_get\('|_post\('" lib/services/api/unload_api.dart</code></pre><p><strong>คำใบ้สำหรับข้อ 6</strong></p><p>state ของจอคือทุกฟิลด์ในคลาส <code>State</code> — ให้จดว่าแต่ละตัวถูกเปลี่ยนที่ไหนบ้าง ตัวที่ถูกเปลี่ยนจากหลายที่คือตัวที่จะทำให้เกิดบั๊กยาก ๆ</p><p><strong>ข้อ 8 บังคับ ไม่ใช่ทางเลือก</strong> — คนที่อ่านโค้ดคนอื่นแล้วเจอแต่ข้อเสีย มักอ่านไม่ครบหรืออ่านด้วยอคติ ทุกโค้ดที่ทำงานอยู่จริงมีการตัดสินใจที่ถูกอยู่ในนั้น</p></section>
+
+<section><h2>7. แบบทดสอบตัวเอง</h2><ol><li>83% ของโค้ดอยู่โฟลเดอร์ไหน และแปลว่าอะไร (16.1)</li><li>ทำไม <code>putaway</code> มี 26 ไฟล์แต่ <code>packing</code> มีไฟล์เดียว (16.1)</li><li>ธีมถูกสลับด้วยกลไกอะไร และทำไมไม่ถูกจำ (16.2)</li><li><code>locale</code> ถูกตรึงไว้ที่อะไร และ <code>localizationsDelegates</code> แปลอะไรจริง ๆ (16.2)</li><li><code>_requireLogin()</code> ทำงานถูกเพราะอะไร (16.3)</li><li>ทำไม <code>_fullName!</code> ไม่ปลอดภัย (16.3)</li><li><code>(_fullName ?? '?')[0]</code> พังกับค่าอะไร (16.3)</li><li>การล็อกอินยิงไปที่เซิร์ฟเวอร์ไหม (16.4)</li><li><code>prefs.clear()</code> ลบอะไรไปด้วย และผู้ใช้เจออาการอะไร (16.4)</li><li>ทำไม <code>probeConnection</code> ต้องอ่าน payload (16.5)</li><li><code>owned</code> ใน <code>probeConnection</code> แก้ปัญหาอะไร (16.5)</li><li>ทำไม singleton ทำให้เขียนเทสต์ไม่ได้ (16.6)</li><li><code>_cachedBase</code> ถูกล้างเมื่อไร (16.6)</li><li><code>_handle</code> พังกับ JSON แบบไหน (16.6)</li><li><code>part</code> ต่างจาก <code>import</code> อย่างไร (16.7)</li><li>จะเพิ่ม import ให้ <code>picking_api.dart</code> ต้องไปเพิ่มที่ไหน (16.7)</li><li><code>isNotFound</code> ใช้ได้กี่จุดจากทั้งหมด (16.7)</li><li>การอ่านค่าใน <code>fromJson</code> มีกี่ชั้น ต่างกันอย่างไร (16.8)</li><li>ทำไม <code>DateTime.now()</code> เป็นค่าเริ่มต้นที่อันตราย (16.8)</li><li>ทำไม <code>.toList()</code> จำเป็น (16.8)</li><li>ปุ่มไหนไม่มีสถานะกำลังโหลด (16.9)</li><li><code>StatusBadge</code> ทำอย่างไรกับสถานะที่ไม่รู้จัก (16.9)</li><li>ทำไม <code>showConfirmDialog</code> ต้องคืน <code>false</code> เมื่อกดนอกกล่อง (16.9)</li><li>รูป 1024×1024 กินหน่วยความจำเท่าไร และควรเป็นเท่าไร (16.10)</li><li>ทำไม <code>cacheWidth</code> ต้องคูณความละเอียดจอ (16.10)</li><li>สิทธิ์ INTERNET อยู่ไฟล์ไหน และ APK release ได้ไหม (16.11)</li><li>สองอย่างที่เปลี่ยนทีหลังไม่ได้คืออะไร (16.11)</li><li>ส่วนไหนของ wmsapp เขียนเทสต์ได้ทันที (16.11)</li></ol></section>
+
+<section><h2>8. สรุปท้าย Part 16</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>วัดขนาดโปรเจกต์แล้วบอกได้ว่าน้ำหนักอยู่ตรงไหน</li><li>อ่านจุดเริ่มของแอปแล้วรู้ว่าอะไรถูกตั้งค่าไว้ทั้งแอป</li><li>ตามเส้นทางจากปุ่มถึงเซิร์ฟเวอร์แล้วกลับได้ครบ</li><li>อ่าน state ที่กระจายอยู่ในจอและมองเห็นการแข่งเวลาที่ซ่อนอยู่</li><li>แยกได้ว่าอะไรเป็นของจำลองและอะไรเป็นของจริง</li><li>อ่านชั้นเชื่อมต่อและอธิบายได้ว่าทำไมเขียนเทสต์ไม่ได้</li><li>อ่านตัวแปลง JSON แล้วบอกได้ว่าฟิลด์ไหนจะพังเงียบ ๆ</li><li>รู้ว่าแก้ของกลางตรงไหนกระทบกี่จอ</li><li>วิเคราะห์ปัญหาประสิทธิภาพจากการอ่านโค้ดโดยไม่ต้องรัน</li><li>ตรวจไฟล์นอกโค้ดแล้วบอกได้ว่าปล่อยจริงได้หรือยัง</li><li>แยก “ปัญหาที่ยืนยันแล้ว” ออกจาก “สิ่งที่ไม่ชอบ”</li><li>เห็นสิ่งที่ทำได้ดีและรู้ว่าต้องรักษาไว้</li></ul></div><p><strong>ทักษะที่ Part นี้ให้จริง ๆ</strong></p><table><thead><tr><th>ไม่ใช่</th><th>แต่เป็น</th></tr></thead><tbody>
+<tr><td>จำได้ว่า wmsapp มีอะไรบ้าง</td><td>รู้ลำดับที่จะอ่านโปรเจกต์ที่ไม่เคยเห็น</td></tr>
+<tr><td>รู้ว่าโค้ดนี้ผิดตรงไหน</td><td>แยกปัญหาที่ยืนยันได้ ออกจากรสนิยม</td></tr>
+<tr><td>อยากรื้อทั้งหมด</td><td>รู้ว่าต้องมีเทสต์ก่อนถึงจะแตะได้</td></tr>
+</tbody></table><p><strong>Part ถัดไป</strong></p><table><thead><tr><th>Part</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>17</td><td>Receiving และ Unload — จอรับสินค้า 3,403 บรรทัด รวม <code>scan_part_screen.dart</code> ที่ยาว 1,727</td></tr>
+<tr><td>18</td><td>Putaway และ Picking — โดเมนที่แตกไฟล์แล้ว เทียบกับที่ยัง</td></tr>
+<tr><td>19</td><td>Packing, Check-in, Sorting — สามจอใหญ่ที่ยังไม่ถูกแตก</td></tr>
+<tr><td>20–22</td><td><code>wms_absolute_mobile</code> — โปรเจกต์ที่แก้ปัญหาเดียวกันด้วยโครงคนละแบบ</td></tr>
+<tr><td>23</td><td>เทียบสองโปรเจกต์แล้วตัดสินใจว่าจะย้ายอะไร</td></tr>
+</tbody></table><p>Part 17 จะเริ่มด้วยคำถามที่ต่างจาก Part นี้ — ไม่ใช่ “อะไรอยู่ตรงไหน” แต่เป็น <strong>“จอเดียว 1,727 บรรทัดถือ state อะไรบ้าง และทำไมถึงยาวขนาดนั้น”</strong></p></section>

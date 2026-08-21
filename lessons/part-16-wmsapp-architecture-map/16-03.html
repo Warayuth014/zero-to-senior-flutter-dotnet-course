@@ -4,28 +4,161 @@
 <title>HomeScreen</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-03 · Real Codebase</span><h1>HomeScreen</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Session state</a></li><li><a href="#section-2">Login gate</a></li><li><a href="#section-3">Workflow cards</a></li><li><a href="#section-4">Action cards</a></li><li><a href="#section-5">Navigation style</a></li><li><a href="#section-6">Role และ dev tools</a></li><li><a href="#section-7">Logout</a></li><li><a href="#section-8">Refactor seam</a></li></ol></nav>
-<div class="note"><strong>HomeScreen คือ shell + route catalog + session gate:</strong> ไฟล์เดียวโหลด session, เปิด login/settings/dev tools/logout และประกอบ workflow cards จึงเป็นจุดแรกสำหรับเข้าใจเส้นทางผู้ใช้ทั้งหมด</div>
-<section id="section-1"><h2>1. Session state</h2><pre class="code-vs"><code>String? _userId;
-String? _fullName;
-String? _role;
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">จอนี้ทำอะไรบ้าง</a></li><li><a href="#section-2">โหลดผู้ใช้</a></li><li><a href="#section-3">การแข่งเวลาที่ซ่อนอยู่</a></li><li><a href="#section-4">เครื่องหมายอัศเจรีย์ที่กระจายอยู่</a></li><li><a href="#section-5">เมนูซ่อน</a></li><li><a href="#section-6">การนำทาง</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด screens/home_screen.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.2, Part 5 (การนำทาง), Part 4 (async กับ state)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ถือ state เองได้ และมองเห็นการแข่งเวลาที่ซ่อนอยู่ในโค้ดที่ดูเหมือนทำงานปกติ</div>
 
-initState() → _loadUser() → AuthSessionService.loadSession()</code></pre><p>ระหว่าง async loadไม่มี explicit loading state จึงต้องระวัง UIแสดง guestชั่วคราว</p></section>
-<section id="section-2"><h2>2. Login gate</h2><pre class="code-vs"><code>Future&lt;bool&gt; _requireLogin() async {
+<section id="section-1"><h2>1. จอนี้ทำอะไรบ้าง</h2><p><code>home_screen.dart</code> ยาว 553 บรรทัด และรับผิดชอบสี่เรื่องพร้อมกัน</p><table><thead><tr><th>เรื่อง</th><th>อยู่ตรงไหน</th></tr></thead><tbody>
+<tr><td>โหลดว่าใครล็อกอินอยู่</td><td><code>_loadUser()</code></td></tr>
+<tr><td>บังคับล็อกอินก่อนเข้า flow</td><td><code>_requireLogin()</code></td></tr>
+<tr><td>เมนูหลัก 8 การ์ด</td><td><code>build()</code></td></tr>
+<tr><td>เมนูซ่อนสำหรับนักพัฒนา</td><td><code>_openDevToolsMenu()</code></td></tr>
+</tbody></table><p>สาม state ที่ถือไว้</p><pre class="code-vs"><code>class _HomeScreenState extends State&lt;HomeScreen&gt; {
+  final _sessionService = const AuthSessionService();
+  String? _userId;
+  String? _fullName;
+  String? _role;</code></pre><p>สามช่องนี้คือ<strong>แหล่งความจริงเรื่องผู้ใช้ทั้งแอป</strong> ไม่มีที่อื่นเก็บอีก — จอโดเมนทุกจอรับ <code>userId</code> กับ <code>fullName</code> ผ่านตัวสร้าง</p></section>
+
+<section id="section-2"><h2>2. โหลดผู้ใช้</h2><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  _loadUser();
+}
+
+Future&lt;void&gt; _loadUser() async {
+  final session = await _sessionService.loadSession();
+  setState(() {
+    _userId = session.userId;
+    _fullName = session.fullName;
+    _role = session.role;
+  });
+}</code></pre><p>เป็นรูปแบบเดียวกับที่ 4.11 สอน — <code>initState</code> เรียกงาน async แล้ว <code>setState</code> เมื่อเสร็จ</p><div class="note"><strong>ขาด <code>mounted</code></strong> — ระหว่างที่ <code>loadSession()</code> รออยู่ ถ้าจอถูกถอดออกไปก่อน <code>setState</code> จะถูกเรียกบน State ที่ตายแล้ว<br>ในทางปฏิบัติจอนี้เป็นจอแรกและไม่เคยถูกถอด จึงไม่เคยเกิด แต่ถ้าคัดลอกรูปแบบนี้ไปใช้กับจอย่อย จะเจอทันที ตรงกับที่ 4.13 เตือนไว้</div></section>
+
+<section id="section-3"><h2>3. การแข่งเวลาที่ซ่อนอยู่</h2><p>สามฟังก์ชันนี้ทำงานต่อกันเป็นทอด</p><pre class="code-vs"><code>Future&lt;void&gt; _openLogin() async {
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) =&gt; LoginScreen(
+        onLoginSuccess: () {
+          Navigator.pop(context);
+          _loadUser();          // ← ไม่มี await และเรียกไม่ได้ด้วย
+        },
+      ),
+    ),
+  );
+}
+
+Future&lt;bool&gt; _requireLogin() async {
   if (_userId != null) return true;
+
   await _openLogin();
+  return _userId != null;       // ← ตรงนี้ต้องหวังว่า _loadUser เสร็จแล้ว
+}</code></pre><p>ไล่ลำดับเวลาให้ครบ</p><table><thead><tr><th>ลำดับ</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ผู้ใช้กดการ์ด → <code>_requireLogin()</code> เห็น <code>_userId == null</code></td></tr>
+<tr><td>2</td><td><code>await _openLogin()</code> → จอล็อกอินเปิด</td></tr>
+<tr><td>3</td><td>ผู้ใช้ล็อกอินสำเร็จ → <code>onLoginSuccess</code> ทำงาน</td></tr>
+<tr><td>4</td><td><code>Navigator.pop(context)</code> — เริ่มปิดจอ</td></tr>
+<tr><td>5</td><td><code>_loadUser()</code> เริ่มทำงาน แต่<strong>ไม่มีใครรอ</strong></td></tr>
+<tr><td>6</td><td><code>await _openLogin()</code> คืนค่าเมื่อจอปิดเสร็จ</td></tr>
+<tr><td>7</td><td><code>return _userId != null</code></td></tr>
+</tbody></table><p>ขั้นที่ 5 กับ 7 แข่งกัน ถ้าขั้น 5 ยังไม่เสร็จตอนถึงขั้น 7 ผู้ใช้จะล็อกอินสำเร็จแล้วแต่การ์ดไม่เปิด</p><div class="note"><strong>ทำไมถึงไม่เคยเห็นบั๊กนี้</strong> — เพราะขั้นที่ 6 ต้องรอแอนิเมชันปิดจอจบก่อน ซึ่งใช้เวลาราว 300 มิลลิวินาที ส่วน <code>SharedPreferences</code> ที่โหลดมาแล้วใช้เวลาไม่ถึงมิลลิวินาที<br><strong>โค้ดนี้ทำงานถูกเพราะแอนิเมชันช้ากว่าการอ่านค่า</strong> ไม่ใช่เพราะเขียนให้ถูกลำดับ</div><p>วิธีแก้ที่ตรงเหตุ — ให้ค่ากลับมาทางเดียวแทนที่จะหวังลำดับ</p><pre class="code-vs"><code>Future&lt;bool&gt; _requireLogin() async {
+  if (_userId != null) return true;
+
+  await Navigator.push&lt;void&gt;(
+    context,
+    MaterialPageRoute(
+      builder: (_) =&gt; LoginScreen(
+        onLoginSuccess: () =&gt; Navigator.pop(context),
+      ),
+    ),
+  );
+  if (!mounted) return false;
+
+  await _loadUser();      // โหลดหลังจอปิดแล้ว ไม่ต้องแข่งกับใคร
   return _userId != null;
-}</code></pre><p>card callbackต้องเรียก gateก่อน push route; นี่เป็น UI gate ไม่ใช่ server authorization</p></section>
-<section id="section-3"><h2>3. Workflow cards</h2><p><code>HomeFlowCard</code> เป็น gradient cardสำหรับ Receiving, Unload, Putaway, Prework, Picking, Packing, Check-in และ Sorting แต่ละ callbackส่ง <code>userId/fullName</code>ลง screen ผ่าน constructor</p></section>
-<section id="section-4"><h2>4. Action cards</h2><p><code>HomeActionCard</code> เป็น cardแนวนอนสำหรับ actionรอง แยกจาก flow cardช่วยลด build code แต่ route definitionsยังอยู่ HomeScreen ทำให้เพิ่ม workflowต้องแก้ imports + UI + callbackที่เดียวกัน</p></section>
-<section id="section-5"><h2>5. Navigation style</h2><pre class="code-vs"><code>Navigator.push(
-  context,
-  MaterialPageRoute(builder: (_) =&gt; ReceivingMenuScreen(
-    userId: _userId!, fullName: _fullName!,
-  )),
-);</code></pre><p>เครื่องหมาย !ปลอดภัยได้เพราะ gate แต่ compilerไม่รู้ invariant; session objectแบบ non-nullหลัง authจะชัดกว่า</p></section>
-<section id="section-6"><h2>6. Role และ dev tools</h2><p>roleแสดงใน badgeและ supervisor flowบางส่วน ส่วน long-press avatarเปิด Test Pick Order/Test Sorting menu ต้องไม่ shipเป็น hidden security boundary Productionควร compile/authorize dev toolsอย่างชัดเจน</p></section>
-<section id="section-7"><h2>7. Logout</h2><p>confirm → <code>clearSession()</code> → set fields null แต่ต้องตรวจ service singletons, SignalR, cached data และ in-flight requestsในทุกโดเมนด้วย เพราะการล้าง Home fieldsอย่างเดียวไม่เท่ากับ session boundaryสมบูรณ์</p></section>
-<section id="section-8"><h2>8. Refactor seam</h2><div class="success">สร้าง immutable SessionState + RouteDefinition list (label/icon/permission/builder), inject SessionController และให้ router/guardเป็นเจ้าของ auth จะลด callbacksซ้ำและทำ role/navigation testsได้</div></section>
+}</code></pre><p>ตอนนี้ลำดับถูกบังคับด้วย <code>await</code> ไม่ใช่ด้วยความบังเอิญ</p></section>
+
+<section id="section-4"><h2>4. เครื่องหมายอัศเจรีย์ที่กระจายอยู่</h2><p>ทุกการ์ดในเมนูเขียนแบบเดียวกัน</p><pre class="code-vs"><code>onTap: () async {
+  if (!await _requireLogin()) return;
+  if (!context.mounted) return;
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) =&gt; ReceivingMenuScreen(
+        userId: _userId!,
+        fullName: _fullName!,     // ← ตรงนี้
+      ),
+    ),
+  );
+},</code></pre><p><code>_requireLogin()</code> รับประกันว่า <code>_userId</code> ไม่เป็น null แต่<strong>ไม่ได้รับประกัน <code>_fullName</code></strong></p><p>ค่าทั้งสามมาจาก <code>SharedPreferences</code> คนละคีย์</p><pre class="code-vs"><code>return AuthSession(
+  userId: prefs.getString('userId'),
+  fullName: prefs.getString('fullName'),
+  role: prefs.getString('role'),
+);</code></pre><p>ถ้ามี <code>userId</code> แต่ไม่มี <code>fullName</code> — เช่นเวอร์ชันเก่าเคยเก็บไม่ครบ หรือเขียนไม่จบ — แอปจะพังตรง <code>_fullName!</code></p><p>และมีอีกจุดที่แรงกว่า</p><pre class="code-vs"><code>child: Text(
+  (_fullName ?? '?')[0],    // ← ป้องกัน null แล้ว แต่ไม่ได้ป้องกันสตริงว่าง
+  ...</code></pre><p>ถ้า <code>_fullName</code> เป็น <code>''</code> จะได้ <code>RangeError</code> แทน</p><table><thead><tr><th>ค่า</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>'สมชาย ใจดี'</code></td><td>ได้ <code>'ส'</code></td></tr>
+<tr><td><code>null</code></td><td>ได้ <code>'?'</code></td></tr>
+<tr><td><code>''</code></td><td><strong>RangeError</strong></td></tr>
+</tbody></table><p>เขียนให้ครอบทั้งสองกรณีได้ในบรรทัดเดียว</p><pre class="code-vs"><code>final initial = (_fullName ?? '').trim();
+Text(initial.isEmpty ? '?' : initial[0]);</code></pre><div class="note">รูปแบบ “ป้องกัน null แต่ลืมสตริงว่าง” เจอบ่อยมากในโค้ดจริง เพราะ Dart บังคับให้คิดเรื่อง null แต่ไม่บังคับให้คิดเรื่องความยาว — ตรงกับที่ D1.9 สอนเรื่องความต่างของ “ไม่มีค่า” กับ “มีค่าแต่ว่าง”</div></section>
+
+<section id="section-5"><h2>5. เมนูซ่อน</h2><pre class="code-vs"><code>GestureDetector(
+  onLongPress: () async {
+    if (!await _requireLogin()) return;
+    if (!mounted) return;
+    _openDevToolsMenu();
+  },
+  child: Container(  // รูปวงกลมตัวอักษรแรกของชื่อ
+    ...</code></pre><p>กดค้างที่รูปผู้ใช้จะเปิดเมนูที่มีสองรายการ: <em>Test Pick Order</em> และ <em>Test Sorting Batch</em> — จอสร้างข้อมูลทดสอบที่ปกติเป็นงานของฝั่งเว็บ</p><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ทดสอบในคลังจริงได้โดยไม่ต้องเปิดเว็บ</td><td>ผู้ใช้จริงกดโดนได้</td></tr>
+<tr><td>ไม่รกหน้าจอหลัก</td><td>ไม่มีใครรู้ว่ามีถ้าไม่บอก</td></tr>
+<tr><td>ทำงานได้ทั้งใน release</td><td><strong>ทำงานได้ทั้งใน release</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นทั้งข้อดีและข้อเสีย — Part 15.1 สอนไว้ว่าถ้าต้องการให้มีเฉพาะตอนพัฒนา ใช้ <code>kDebugMode</code> ครอบ</p><pre class="code-vs"><code>onLongPress: kDebugMode ? () async { ... } : null,</code></pre><p>แต่ในที่นี้อาจตั้งใจให้มีใน release จริง เพราะทีมต้องใช้สร้างข้อมูลทดสอบตอนติดตั้งหน้างาน ถ้าจะให้ปลอดภัยขึ้นโดยยังใช้งานได้ ทางที่ตรงกว่าคือผูกกับบทบาท</p><pre class="code-vs"><code>onLongPress: _role == 'SUPERVISOR' ? () async { ... } : null,</code></pre><p>ข้อมูลบทบาทมีอยู่แล้วใน <code>_role</code> และแสดงอยู่บนการ์ดผู้ใช้ด้วยซ้ำ แต่ตอนนี้ยังไม่ถูกใช้ตัดสินใจอะไรเลยทั้งแอป</p></section>
+
+<section id="section-6"><h2>6. การนำทาง</h2><p>ทั้งจอนี้ใช้ <code>Navigator.push(MaterialPageRoute(builder: ...))</code> อย่างเดียว ไม่มี named route</p><table><thead><tr><th></th><th>วิธีนี้</th><th>named route (5.4)</th></tr></thead><tbody>
+<tr><td>ส่งค่าเข้าจอ</td><td>ผ่านตัวสร้าง มีชนิดกำกับ</td><td>ผ่าน <code>arguments</code> เป็น <code>Object?</code></td></tr>
+<tr><td>คอมไพเลอร์ช่วย</td><td>ช่วยเต็มที่</td><td>ไม่ช่วย ต้อง cast เอง</td></tr>
+<tr><td>เห็นว่าจอไหนเปิดจอไหน</td><td>ต้องค้นชื่อคลาส</td><td>ดูที่ตารางเดียว</td></tr>
+<tr><td>ลิงก์จากภายนอกเข้าจอ</td><td>ทำไม่ได้</td><td>ทำได้</td></tr>
+</tbody></table><p>สำหรับแอปที่ทุกจอเปิดจากเมนูเดียวและไม่มีลิงก์จากภายนอก การส่งผ่านตัวสร้างชนะเรื่องความปลอดภัยของชนิด</p><p>ราคาที่จ่ายอยู่ในไฟล์นี้เอง — <code>home_screen.dart</code> ต้อง <code>import</code> ทุกจอปลายทาง รวม 12 บรรทัด import และเป็นเหตุผลหนึ่งที่ไฟล์ยาว 553 บรรทัด</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>_requireLogin()</code> รับประกันว่าข้อมูลผู้ใช้ครบ</td><td>รับประกันแค่ <code>_userId</code></td></tr>
+<tr><td>โค้ดที่ไม่เคยพัง แปลว่าเขียนถูก</td><td>อาจถูกเพราะจังหวะเวลาบังเอิญ</td></tr>
+<tr><td><code>(_fullName ?? '?')[0]</code> ปลอดภัยแล้ว</td><td>สตริงว่างยังพัง</td></tr>
+<tr><td>เมนูซ่อนมีเฉพาะตอนพัฒนา</td><td>มีใน release ด้วย</td></tr>
+<tr><td><code>_role</code> ถูกใช้ควบคุมสิทธิ์</td><td>ถูกแสดงอย่างเดียว ยังไม่ได้ใช้ตัดสินใจ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมอยากให้แอปจำการล็อกอินไว้ข้ามวัน แต่หมดอายุหลัง 12 ชั่วโมง</p><ol><li>ต้องแก้ไฟล์ไหนบ้าง</li><li>ควรตรวจเวลาหมดอายุที่จุดไหน และทำไมไม่ใช่จุดอื่น</li><li>ถ้าเซสชันหมดอายุระหว่างที่ผู้ใช้อยู่กลางงานรับสินค้า ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>auth_session_service.dart</code></td><td>เก็บเวลาที่ล็อกอิน + ตรวจอายุตอนโหลด</td></tr>
+<tr><td><code>login_screen.dart</code></td><td>บันทึกเวลาตอนล็อกอินสำเร็จ</td></tr>
+<tr><td><code>home_screen.dart</code></td><td>รับมือกรณีเซสชันหมดอายุ</td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;AuthSession&gt; loadSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  final at = prefs.getInt('loginAt');
+  if (at == null) return const AuthSession(userId: null, fullName: null, role: null);
+
+  final age = DateTime.now().difference(
+    DateTime.fromMillisecondsSinceEpoch(at),
+  );
+  if (age &gt; const Duration(hours: 12)) {
+    return const AuthSession(userId: null, fullName: null, role: null);
+  }
+  ...</code></pre><p><strong>ข้อ 2 — ตรวจที่ไหน</strong></p><table><thead><tr><th>จุด</th><th>เหมาะไหม</th></tr></thead><tbody>
+<tr><td>ใน <code>loadSession()</code></td><td><strong>ใช่</strong> — ทุกคนที่ถามว่าใครล็อกอินอยู่ได้คำตอบที่ผ่านการตรวจแล้ว</td></tr>
+<tr><td>ใน <code>HomeScreen.initState</code></td><td>ไม่ — ถ้ามีจอไหนโหลดเซสชันเองจะข้ามการตรวจ</td></tr>
+<tr><td>ตอนกดการ์ด</td><td>ไม่ — การ์ดมี 8 ใบ ต้องเขียนซ้ำ 8 ที่</td></tr>
+<tr><td>ตัวจับเวลาที่นับถอยหลัง</td><td>ไม่ — แอปถูกปิดไปแล้วตัวจับเวลาก็หายไปด้วย</td></tr>
+</tbody></table><p>หลักการเดียวกับ 9.6: ตรวจที่<strong>ขอบเขตที่ทุกคนต้องผ่าน</strong> ไม่ใช่ที่ผู้เรียกแต่ละราย</p><p><strong>ข้อ 3 — หมดอายุกลางงาน</strong></p><p>นี่คือข้อที่สำคัญที่สุดและมักถูกมองข้าม</p><table><thead><tr><th>ทางเลือก</th><th>ผลกับผู้ใช้</th></tr></thead><tbody>
+<tr><td>เด้งกลับหน้าหลักทันที</td><td>เสียงานที่สแกนมาทั้งหมด — ผิดข้อ 20 ของ 15.11</td></tr>
+<tr><td>ปล่อยให้ทำต่อจนจบงาน แล้วค่อยหมดอายุ</td><td>ปลอดภัยกับผู้ใช้ แต่เซสชันยืดเกิน 12 ชั่วโมงจริง</td></tr>
+<tr><td>ตรวจเฉพาะตอนกลับมาหน้าหลัก</td><td>งานที่ทำอยู่ไม่ถูกขัด</td></tr>
+</tbody></table><p>ทางที่สามตรงกับโครงของแอปนี้พอดี เพราะ <code>_loadUser()</code> ถูกเรียกจาก <code>HomeScreen</code> อยู่แล้ว และจอโดเมนรับ <code>userId</code> ไปเป็นค่าสำเนาตอนเปิด — เซสชันหมดอายุระหว่างทางจึงไม่กระทบจอที่เปิดค้างอยู่</p><p>ต้องเพิ่มอีกอย่างคือเรียก <code>_loadUser()</code> ตอนกลับมาที่หน้าหลัก ซึ่งตอนนี้ยังไม่ทำ</p><pre class="code-vs"><code>Navigator.push(...).then((_) {
+  if (mounted) _loadUser();     // กลับจากจอโดเมน → ตรวจเซสชันใหม่
+});</code></pre><p><strong>สิ่งที่ต้องบอกผู้ใช้:</strong> เมื่อเซสชันหมดอายุ ข้อความควรบอกว่า “หมดเวลาการใช้งาน กรุณาเข้าสู่ระบบใหม่” ไม่ใช่ปล่อยให้หน้าจอกลับไปเป็นสถานะยังไม่ล็อกอินเฉย ๆ ซึ่งผู้ใช้จะคิดว่าแอปพัง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>HomeScreen</code> ถือ state ผู้ใช้ทั้งแอปไว้ในสามช่อง แล้วส่งต่อผ่านตัวสร้าง</li><li><code>_requireLogin()</code> ทำงานถูกเพราะแอนิเมชันช้ากว่าการอ่านค่า ไม่ใช่เพราะบังคับลำดับไว้</li><li><code>_fullName!</code> ไม่ได้ถูกรับประกันโดย <code>_requireLogin()</code></li><li><code>(_fullName ?? '?')[0]</code> ป้องกัน null แต่ไม่ป้องกันสตริงว่าง</li><li>เมนูซ่อนกดค้างที่รูปผู้ใช้ ทำงานได้ทั้งใน release</li><li><code>_role</code> ถูกแสดงแต่ยังไม่ถูกใช้ตัดสินใจอะไร</li><li>ไม่มี named route — ปลอดภัยเรื่องชนิด แต่ทำให้ไฟล์นี้ต้อง import ทุกจอ</li></ul></div><p><strong>บทหน้า:</strong> จอล็อกอินที่ไม่ได้คุยกับเซิร์ฟเวอร์เลย และเซสชันที่ลบเกินความจำเป็น</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

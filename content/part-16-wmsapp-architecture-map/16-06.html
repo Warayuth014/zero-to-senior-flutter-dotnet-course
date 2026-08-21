@@ -1,16 +1,228 @@
-<div class="note"><strong>ApiService เป็น transport hub:</strong> factoryทุกครั้งคืน singletonเดียว มี private GET/POST/upload, shared headers, base URL discovery/cache และ JSON/error normalization ส่วน domain methodsอยู่ใน part extensions</div>
-<section><h2>1. Singleton</h2><pre class="code-vs"><code>static final ApiService _instance = ApiService._internal();
-factory ApiService() =&gt; _instance;
-ApiService._internal();</code></pre><p>เรียกง่ายจากทุก screenแต่ inject fake client/base/authยากและ mutable stateแชร์ทั้ง app/tests</p></section>
-<section><h2>2. Base candidates</h2><pre class="code-vs"><code>custom setting
-→ Android emulator http://10.0.2.2:5000
-→ other platforms http://localhost:5000</code></pre><p>ลอง <code>Socket.connect</code> 1 วินาทีทีละ candidateแล้ว cache <code>$base/api</code></p></section>
-<section><h2>3. Discovery caveat</h2><p>TCP portเปิดไม่ได้แปลว่าเป็น WMS APIและ sequential probeเพิ่ม startup latency Resolverจับ errorทั้งหมดเงียบแล้ว fallback candidateแรก Requestจริงจึงเป็นผู้แสดง error ส่วน Settings health probeตรวจ identityลึกกว่า</p></section>
-<section><h2>4. Transport methods</h2><p><code>_get/_post</code>ใช้ top-level http functions, JSON headerและ timeout 10s; <code>_uploadFile</code>ใช้ MultipartRequest timeout 30s ไม่มี injected client/auth/cancellation/retry</p></section>
-<section><h2>5. Response normalization</h2><pre class="code-vs"><code>decoded List → {'items': decoded}
-decoded Map  → Map&lt;String, dynamic&gt;
-2xx          → ApiResult.success(body)
-non-2xx      → error/detail/statusCode</code></pre><p>cast Mapอาจ throwหาก JSONเป็น scalar/nullและถูก catchใน caller transport</p></section>
-<section><h2>6. ApiResult</h2><p>เก็บ success/data/error/statusCodeและ helper <code>isNotFound</code> ลด exceptionใน UI แต่ success constructorfix statusCode=200แม้ responseจริงเป็น 201/204 จึงสูญเสีย metadataบางส่วน</p></section>
-<section><h2>7. URL helper risk</h2><p><code>resolveServerUrl</code>และ image helperใช้ <code>replaceAll('/api','')</code> ซึ่งเปราะหาก path/hostnameมีคำนี้ ควรเก็บ origin/API base/media baseเป็น Uri typedแทนตัด string</p></section>
-<section><h2>8. Refactor order</h2><div class="success">1) inject http.Client/base resolver 2) typed failures/status 3) auth/correlation 4) Uri composition 5) repository per domain 6) cancellation/idempotency โดย characterization testsล็อก request/responseเดิมก่อน</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด services/api_service.dart ทั้ง 154 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 16.5, Part 7 (การคุยกับ .NET), Part 9 (การแยกชั้น)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านหัวใจของการเชื่อมต่อทั้งแอปได้ และอธิบายได้ว่าทำไม 26 บรรทัดที่เขียนว่า <code>ApiService()</code> จึงเป็นอุปสรรคของการทดสอบ</div>
+
+<section><h2>1. ไฟล์นี้คืออะไร</h2><p>คำขอทุกคำขอในแอปผ่านไฟล์นี้ 154 บรรทัด ประกอบด้วย</p><table><thead><tr><th>ส่วน</th><th>บรรทัด</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>ApiResult&lt;T&gt;</code></td><td>21–32</td><td>ผลลัพธ์ที่สำเร็จหรือล้มเหลว</td></tr>
+<tr><td>singleton</td><td>34–45</td><td>ให้มีตัวเดียวทั้งแอป</td></tr>
+<tr><td><code>_resolveBase()</code></td><td>51–89</td><td>หาว่าจะยิงไปที่ไหน</td></tr>
+<tr><td><code>_get</code> / <code>_post</code> / <code>_uploadFile</code></td><td>91–183</td><td>ยิงจริง</td></tr>
+<tr><td><code>_handle()</code></td><td>130–156</td><td>แปลงคำตอบเป็น <code>ApiResult</code></td></tr>
+</tbody></table><p>บนสุดของไฟล์มีบรรทัดที่บอกโครงทั้งหมด</p><pre class="code-vs"><code>part 'api/upload_api.dart';
+part 'api/receiving_api.dart';
+part 'api/unload_api.dart';
+part 'api/putaway_api.dart';
+part 'api/picking_api.dart';
+part 'api/packing_api.dart';
+part 'api/basket_api.dart';
+part 'api/checkin_api.dart';
+part 'api/sorting_api.dart';</code></pre><p>เก้าไฟล์นี้เป็น<strong>ส่วนหนึ่งของไฟล์เดียวกัน</strong> ไม่ใช่ไฟล์แยก — จึงเรียก <code>_get</code> ที่ขึ้นต้นด้วยขีดล่างได้ 16.7 จะอธิบายกลไกนี้เต็ม ๆ</p></section>
+
+<section><h2>2. ApiResult — ผลลัพธ์สองทาง</h2><pre class="code-vs"><code>class ApiResult&lt;T&gt; {
+  final bool success;
+  final T? data;
+  final String? error;
+  final int? statusCode;
+
+  ApiResult.success(this.data) : success = true, error = null, statusCode = 200;
+
+  ApiResult.error(this.error, {this.statusCode}) : success = false, data = null;
+
+  bool get isNotFound =&gt; statusCode == 404;
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>มีตัวสร้างสองแบบ</td><td>สร้างสถานะที่ขัดแย้งกันไม่ได้</td></tr>
+<tr><td>เก็บ <code>statusCode</code></td><td>แยก 404 ออกจากพังทั่วไปได้</td></tr>
+<tr><td><code>isNotFound</code></td><td>ตั้งชื่อให้เงื่อนไขที่ใช้บ่อย</td></tr>
+</tbody></table><p>เทียบกับสิ่งที่ 7.9 สอน</p><table><thead><tr><th></th><th><code>ApiResult</code></th><th><code>ApiFailure</code> (7.9)</th></tr></thead><tbody>
+<tr><td>รู้ว่าสำเร็จไหม</td><td>รู้</td><td>รู้</td></tr>
+<tr><td>มีข้อความให้ผู้ใช้</td><td>มี</td><td>มี</td></tr>
+<tr><td>รู้ว่าล้มเหลว<strong>แบบไหน</strong></td><td>ต้องอ่านจากข้อความ</td><td>มี <code>kind</code></td></tr>
+<tr><td>รู้ว่าลองใหม่แล้วช่วยไหม</td><td>ไม่รู้</td><td>รู้</td></tr>
+<tr><td>รู้ว่าคำสั่งไปถึงหรือยัง</td><td>ไม่รู้</td><td>มี <code>outcomeUnknown</code></td></tr>
+</tbody></table><p>ผลของสองแถวล่างเห็นได้ในโค้ดที่ใช้จริง — จอไม่มีทางรู้ว่าควรเสนอปุ่ม “ลองใหม่” หรือควรเตือนว่า “ตรวจก่อนส่งซ้ำ” จึงแสดงข้อความเดียวกันหมดทุกกรณี</p></section>
+
+<section><h2>3. singleton</h2><pre class="code-vs"><code>class ApiService {
+  static final ApiService _instance = ApiService._internal();
+
+  factory ApiService() =&gt; _instance;
+
+  ApiService._internal();</code></pre><p>รูปแบบนี้ทำให้ <code>ApiService()</code> ที่เขียนกี่ครั้งก็ได้ตัวเดิมเสมอ ประโยชน์คือไม่ต้องส่งผ่านตัวสร้าง</p><pre class="code-vs"><code>// ในจอไหนก็เขียนแบบนี้ได้เลย
+final _api = ApiService();</code></pre><p>และมี 26 บรรทัดใน 22 ไฟล์ที่เขียนแบบนี้</p><table><thead><tr><th>ไฟล์</th><th>ครั้ง</th></tr></thead><tbody>
+<tr><td><code>unload/unload_session/unload_session_sheet.dart</code></td><td>4</td></tr>
+<tr><td><code>sorting/sorting_screen.dart</code></td><td>2</td></tr>
+<tr><td>อีก 20 ไฟล์</td><td>ไฟล์ละ 1</td></tr>
+</tbody></table><p>ราคาที่จ่ายคือ<strong>ไม่มีจุดไหนที่สลับตัวปลอมเข้าไปได้</strong></p><pre class="code-vs"><code>// อยากเทสต์จอนี้ — แต่ ApiService() ยิงเน็ตจริงเสมอ
+testWidgets('จอ Receiving แสดงรายการหลังโหลดเสร็จ', (tester) async {
+  await tester.pumpWidget(const ReceivingMenuScreen(userId: 'x', fullName: 'y'));
+  // ยิงไป localhost:5000 จริง → เทสต์ล้มถ้าไม่มีเซิร์ฟเวอร์
+});</code></pre><div class="note"><strong>นี่คือคำอธิบายว่าทำไม wmsapp มีเทสต์ 0 ข้อ</strong> — ไม่ใช่เพราะไม่มีใครอยากเขียน แต่เพราะเขียนไม่ได้โดยไม่รื้อ ต่างจาก <code>probeConnection</code> ใน 16.5 ที่รับ <code>client</code> เข้ามาได้และเทสต์ได้ทันที</div><p>วิธีเปิดช่องโดยไม่รื้อทั้งแอป — เพิ่มตัวสร้างที่สองไว้สำหรับเทสต์</p><pre class="code-vs"><code>class ApiService {
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() =&gt; _instance;
+  ApiService._internal() : _client = http.Client();
+
+  /// สำหรับเทสต์เท่านั้น — ฉีด client ปลอมเข้ามา
+  ApiService.withClient(this._client);
+
+  final http.Client _client;</code></pre><p>โค้ดเดิม 26 บรรทัดไม่ต้องแก้เลย แต่จอที่อยากเทสต์ต้องรับ <code>ApiService</code> ผ่านตัวสร้างแทนที่จะสร้างเอง ซึ่งเป็นงานทีละจอ — Part 23 จะทำจริง</p></section>
+
+<section><h2>4. หาว่าจะยิงไปที่ไหน</h2><pre class="code-vs"><code>static String? _cachedBase;
+
+static Future&lt;String&gt; _resolveBase() async {
+  if (_cachedBase != null) return _cachedBase!;
+
+  final custom = await _configService.getCustomBase();
+  // kIsWeb ต้องเช็คก่อนเสมอ — Platform.* throw บน web (dart:io ไม่รองรับ)
+  final isAndroid = !kIsWeb &amp;&amp; Platform.isAndroid;
+
+  final candidates = &lt;String&gt;[
+    if (custom != null) custom,
+    if (isAndroid) 'http://10.0.2.2:$_defaultPort',
+    if (!isAndroid) 'http://localhost:$_defaultPort',
+  ];
+
+  for (final base in candidates) {
+    final uri = Uri.parse(base);
+    try {
+      final socket = await Socket.connect(uri.host, uri.port,
+          timeout: const Duration(seconds: 1));
+      socket.destroy();
+      _cachedBase = '$base/api';
+      return _cachedBase!;
+    } catch (_) {}
+  }
+
+  _cachedBase = '${candidates.first}/api';
+  return _cachedBase!;
+}</code></pre><p>ลำดับความสำคัญคือค่าที่ผู้ใช้ตั้ง มาก่อนค่าเริ่มต้นของแพลตฟอร์ม ตรงกับที่ 10.3 สอน และคอมเมนต์บนบรรทัด <code>kIsWeb</code> อธิบายกับดักจริงไว้ให้ด้วย</p><table><thead><tr><th>สถานการณ์</th><th>ยิงไปที่</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ตั้ง IP แล้ว</td><td>IP นั้น</td></tr>
+<tr><td>ยังไม่ตั้ง + รันบน emulator</td><td><code>10.0.2.2:5000</code></td></tr>
+<tr><td>ยังไม่ตั้ง + รันบนเดสก์ท็อป/เว็บ</td><td><code>localhost:5000</code></td></tr>
+<tr><td>ยังไม่ตั้ง + รันบน PDA จริง</td><td><code>10.0.2.2:5000</code> ซึ่ง<strong>ไม่มีอยู่จริง</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือเหตุผลที่หน้า Settings มีอยู่ — บนเครื่องจริง <code>10.0.2.2</code> เป็นที่อยู่ที่ไม่มีความหมาย ต้องตั้งเอง</p></section>
+
+<section><h2>5. cache ที่ต้องรู้จัก</h2><p><code>_cachedBase</code> เป็น <code>static</code> จำไว้จนกว่าจะถูกล้างด้วยมือ</p><pre class="code-vs"><code>static void resetBaseUrl() =&gt; _cachedBase = null;</code></pre><p>เหตุผลที่ต้อง cache: <code>_resolveBase()</code> ทำ <code>Socket.connect</code> ที่รอได้ถึง 1 วินาทีต่อ candidate ถ้าไม่จำไว้ ทุกคำขอจะเสียเวลาตรงนี้ก่อน</p><p>ผลข้างเคียงที่ต้องรู้</p><table><thead><tr><th>เมื่อ</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>ผู้ใช้บันทึก IP ใหม่</td><td>ต้องเรียก <code>resetBaseUrl()</code> ไม่งั้นยังยิงที่เก่า</td></tr>
+<tr><td>ย้ายวง Wi-Fi ระหว่างใช้งาน</td><td>cache ยังเป็นที่อยู่เดิม ซึ่งอาจถูกอยู่</td></tr>
+<tr><td>เซิร์ฟเวอร์ที่ผู้ใช้ตั้งล่มตอนเปิดแอป</td><td><strong>fallback ไป localhost แล้วจำไว้ทั้ง session</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นกรณีที่หายากแต่หาสาเหตุยากที่สุด ไล่ตามลำดับ</p><pre class="code-vs"><code>ผู้ใช้ตั้ง 192.168.1.50 ไว้แล้ว
+  → เปิดแอปตอนเซิร์ฟเวอร์กำลังรีสตาร์ท
+    → Socket.connect ไป 192.168.1.50 ล้มเหลว
+      → ไม่มี candidate อื่น (ไม่ใช่ Android emulator)
+        → _cachedBase = '192.168.1.50/api' ← ยังถูกอยู่ เพราะใช้ candidates.first
+          → เซิร์ฟเวอร์กลับมา → ใช้งานได้ปกติ</code></pre><p>ในเคสนี้บรรทัด fallback <code>candidates.first</code> ช่วยไว้ เพราะ candidate แรกคือค่าที่ผู้ใช้ตั้ง — คนเขียนคิดเรื่องนี้แล้วและเขียนคอมเมนต์อธิบายไว้</p><pre class="code-vs"><code>// ไม่มี candidate ไหน connect ได้ตอนนี้ — ใช้ตัวแรก (custom ถ้ามี) เป็น fallback
+// request จริงจะ throw SocketException ให้เห็น error ชัดเจนแทน</code></pre><div class="note">แต่ยังมีช่องที่ไม่ได้ปิด: ถ้าผู้ใช้<strong>ไม่เคยตั้งค่า</strong>และรันบน Android จริง candidate แรกคือ <code>10.0.2.2</code> ซึ่งจะถูกจำไว้ทั้ง session — ผู้ใช้ต้องปิดเปิดแอปหลังตั้งค่า ยกเว้นจะตั้งผ่านหน้า Settings ที่เรียก <code>resetBaseUrl()</code> ให้</div></section>
+
+<section><h2>6. สามเมธอดที่ยิงจริง</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; _get(String path) async {
+  try {
+    final base = await ApiService._resolveBase();
+    final response = await http
+        .get(Uri.parse('$base$path'), headers: _headers)
+        .timeout(const Duration(seconds: 10));
+    return _handle(response);
+  } on SocketException {
+    return ApiResult.error('ไม่สามารถเชื่อมต่อ server ได้');
+  } on TimeoutException {
+    return ApiResult.error('การเชื่อมต่อหมดเวลา กรุณาลองใหม่');
+  } catch (error) {
+    return ApiResult.error('เกิดข้อผิดพลาด: $error');
+  }
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>บทที่เกี่ยว</th></tr></thead><tbody>
+<tr><td>มี timeout ทุกเมธอด</td><td>7.6</td></tr>
+<tr><td>อัปโหลดใช้ 30 วินาที คำขอปกติ 10 วินาที</td><td>13.8</td></tr>
+<tr><td>ไม่โยน exception ออกไปให้จอ</td><td>7.8</td></tr>
+<tr><td>มี <code>catch</code> ท้ายสุดกันตกหล่น</td><td>7.8</td></tr>
+</tbody></table><p>สิ่งที่ยังไม่มี</p><table><thead><tr><th>ขาด</th><th>ผล</th><th>บท</th></tr></thead><tbody>
+<tr><td>ไม่แยกชนิดความล้มเหลว</td><td>จอเสนอทางแก้ที่ถูกต้องไม่ได้</td><td>7.9</td></tr>
+<tr><td>ไม่มี <code>outcomeUnknown</code></td><td>ผู้ใช้ไม่รู้ว่าควรส่งซ้ำไหม</td><td>7.10</td></tr>
+<tr><td>ไม่มีการลองใหม่</td><td>สัญญาณกระพริบครั้งเดียวก็ล้ม</td><td>7.12</td></tr>
+<tr><td>ไม่มี <code>Idempotency-Key</code></td><td>ผู้ใช้กดซ้ำแล้วได้ข้อมูลซ้ำ</td><td>7.13</td></tr>
+<tr><td>ไม่มี PUT/DELETE</td><td>ทุกอย่างเป็น POST</td><td>—</td></tr>
+</tbody></table><p>แถวสุดท้ายไม่ใช่ปัญหา — เป็นการเลือกที่สอดคล้องกัน ถ้าฝั่ง .NET ออกแบบให้ทุกคำสั่งเป็น POST ฝั่งแอปก็ไม่ต้องมี</p></section>
+
+<section><h2>7. _handle — แปลงคำตอบ</h2><pre class="code-vs"><code>ApiResult&lt;Map&lt;String, dynamic&gt;&gt; _handle(http.Response response) {
+  dynamic decoded;
+
+  try {
+    decoded = jsonDecode(response.body);
+  } catch (_) {
+    return ApiResult.error('Server ส่งข้อมูลไม่ถูกต้อง (${response.statusCode})');
+  }
+
+  final body = decoded is List
+      ? &lt;String, dynamic&gt;{'items': decoded}
+      : decoded as Map&lt;String, dynamic&gt;;
+
+  if (response.statusCode &gt;= 200 &amp;&amp; response.statusCode &lt; 300) {
+    return ApiResult.success(body);
+  }
+
+  final error = body['error']?.toString();
+  final detail = body['detail']?.toString();
+  final message = (error != null &amp;&amp; detail != null)
+      ? '$error\n$detail'
+      : error ?? detail ?? 'เกิดข้อผิดพลาด (${response.statusCode})';
+
+  return ApiResult.error(message, statusCode: response.statusCode);
+}</code></pre><p>สามเรื่องที่ทำได้ดี</p><table><thead><tr><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>JSON พังไม่ทำให้แอปพัง</td><td>ครอบ <code>jsonDecode</code> ด้วย try แล้วคืนข้อความที่มีรหัสสถานะให้ตามต่อได้</td></tr>
+<tr><td>รับได้ทั้ง array และ object</td><td>ห่อ array เป็น <code>{'items': [...]}</code> ให้ชั้นบนอ่านแบบเดียวกัน</td></tr>
+<tr><td>อ่าน <code>detail</code> จาก ProblemDetails</td><td>ตรงกับที่ .NET ส่งมา (7.7)</td></tr>
+</tbody></table><p>จุดที่เสี่ยง</p><pre class="code-vs"><code>: decoded as Map&lt;String, dynamic&gt;;</code></pre><p>ถ้าเซิร์ฟเวอร์ตอบ JSON ที่ถูกต้องแต่เป็นค่าเดี่ยว — เช่น <code>true</code>, <code>42</code>, หรือ <code>"ok"</code> — <code>jsonDecode</code> จะผ่าน แล้ว <code>as Map</code> จะโยน <code>TypeError</code> ซึ่ง<strong>ถูกจับโดย <code>catch (error)</code> ใน <code>_get</code></strong> แล้วกลายเป็นข้อความ <code>'เกิดข้อผิดพลาด: type ...'</code> ที่ผู้ใช้อ่านไม่รู้เรื่อง</p><p>เขียนให้ตรงกว่าได้ด้วยการตรวจชนิดแทน cast</p><pre class="code-vs"><code>final Map&lt;String, dynamic&gt; body;
+if (decoded is List) {
+  body = {'items': decoded};
+} else if (decoded is Map&lt;String, dynamic&gt;) {
+  body = decoded;
+} else {
+  return ApiResult.error(
+    'Server ส่งข้อมูลผิดรูปแบบ (${response.statusCode})',
+    statusCode: response.statusCode,
+  );
+}</code></pre><p>รูปแบบนี้ตรงกับที่ 6.9 สอนว่าให้ตรวจชนิดที่ขอบแล้วคืนข้อความที่ผู้ใช้เข้าใจ ดีกว่าปล่อยให้ <code>TypeError</code> หลุดไปโผล่เป็นข้อความภาษาอังกฤษ</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>singleton ทำให้เทสต์ง่ายขึ้น</td><td>ตรงกันข้าม — ปิดช่องฉีดของทดสอบ</td></tr>
+<tr><td><code>ApiService()</code> สร้างตัวใหม่ทุกครั้ง</td><td>ได้ตัวเดิมเสมอ</td></tr>
+<tr><td>เปลี่ยน IP แล้วมีผลทันทีเสมอ</td><td>ต้องผ่าน <code>resetBaseUrl()</code></td></tr>
+<tr><td><code>_resolveBase()</code> ตรวจว่าเป็นเซิร์ฟเวอร์เราจริง</td><td>ตรวจแค่ว่าพอร์ตเปิด — งานตรวจจริงอยู่ที่ <code>probeConnection</code></td></tr>
+<tr><td><code>_handle</code> รับ JSON ทุกรูปแบบ</td><td>ค่าเดี่ยวจะกลายเป็นข้อความผิดพลาดที่อ่านไม่รู้เรื่อง</td></tr>
+<tr><td>ทุกความล้มเหลวเหมือนกัน</td><td>ต่างกันมาก แต่โค้ดนี้ยุบเป็นข้อความอย่างเดียว</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><p>ทีมอยากเพิ่มการลองใหม่อัตโนมัติเมื่อสัญญาณกระพริบ</p><ol><li>ควรใส่ที่ไหนในไฟล์นี้ และ<strong>ห้าม</strong>ใส่ที่ไหน</li><li>ต้องเปลี่ยนอะไรใน <code>ApiResult</code> ก่อน</li><li>เขียนโค้ดที่แก้จริง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ใส่ที่ไหน</strong></p><table><thead><tr><th>เมธอด</th><th>ลองใหม่ได้ไหม</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>_get</code></td><td><strong>ได้</strong></td><td>อ่านอย่างเดียว ยิงซ้ำไม่เปลี่ยนอะไร</td></tr>
+<tr><td><code>_post</code></td><td><strong>ไม่ได้</strong></td><td>อาจสร้างรายการซ้ำ</td></tr>
+<tr><td><code>_uploadFile</code></td><td><strong>ไม่ได้</strong></td><td>เหมือนกัน และไฟล์ใหญ่ทำให้เสียเวลามาก</td></tr>
+</tbody></table><p>นี่คือกฎเดียวกับ 7.12 และเป็นเหตุผลที่ต้องแยก <code>_get</code> ออกจาก <code>_post</code> ตั้งแต่แรก</p><p><strong>ข้อ 2 — ต้องเปลี่ยน ApiResult ก่อน</strong></p><p>ตอนนี้ <code>ApiResult.error</code> เก็บแค่ข้อความ ตัวลองใหม่จะไม่รู้ว่าความล้มเหลวนี้ลองแล้วมีโอกาสต่างไหม การเดาจากข้อความเป็นวิธีที่พังง่ายที่สุด</p><pre class="code-vs"><code>enum ApiFailureKind { network, timeout, server, client, decode }
+
+class ApiResult&lt;T&gt; {
+  ...
+  final ApiFailureKind? kind;
+
+  ApiResult.error(this.error, {this.statusCode, this.kind})
+      : success = false, data = null;
+
+  bool get isRetryable =&gt;
+      kind == ApiFailureKind.network || kind == ApiFailureKind.timeout;
+}</code></pre><p>ต้องแก้จุดที่สร้าง <code>ApiResult.error</code> ทั้งหมดให้ระบุ <code>kind</code> ด้วย ซึ่งมีในไฟล์นี้ 12 จุด</p><p><strong>ข้อ 3 — โค้ดที่แก้จริง</strong></p><pre class="code-vs"><code>Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; _get(String path) async {
+  const maxAttempts = 3;
+
+  for (var attempt = 1; ; attempt++) {
+    final result = await _getOnce(path);
+    if (result.success || !result.isRetryable || attempt &gt;= maxAttempts) {
+      return result;
+    }
+    // ถอยห่างขึ้นทุกครั้ง + สุ่มเล็กน้อย ไม่ให้ทุกเครื่องยิงพร้อมกันหลังเน็ตกลับมา
+    final backoff = Duration(milliseconds: 300 * attempt + _random.nextInt(200));
+    await Future&lt;void&gt;.delayed(backoff);
+  }
+}
+
+Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; _getOnce(String path) async {
+  // เนื้อเดิมของ _get ทั้งหมด ไม่เปลี่ยน
+}</code></pre><p><strong>สามเรื่องที่ต้องคิดต่อและมักถูกลืม</strong></p><table><thead><tr><th>เรื่อง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>เวลารวมที่ผู้ใช้รอ</td><td>10 วิ × 3 + หน่วง ≈ 31 วินาที — นานเกินไปบนหน้าจอ</td></tr>
+<tr><td>ผู้ใช้กดยกเลิกไม่ได้</td><td>ต้องรอจนครบทุกครั้ง</td></tr>
+<tr><td>ไม่มีอะไรบอกว่ากำลังลองใหม่</td><td>ผู้ใช้เห็นแค่วงกลมหมุนนานผิดปกติ</td></tr>
+</tbody></table><p>ทางแก้ที่สมดุลกว่าคือลดเวลา timeout ต่อครั้งลงเมื่อจะลองใหม่</p><pre class="code-vs"><code>// ครั้งแรกใจร้อน ครั้งหลังใจเย็น รวมแล้วไม่เกิน ~18 วินาที
+final timeout = Duration(seconds: attempt == 1 ? 5 : 10);</code></pre><p><strong>ข้อสรุปที่สำคัญกว่าโค้ด:</strong> การลองใหม่ทำให้แอปทนสัญญาณกระพริบได้จริง แต่แลกมาด้วยเวลารอที่ผู้ใช้เห็น ถ้าไม่บอกผู้ใช้ว่ากำลังทำอะไร จะกลายเป็น “แอปช้าลง” ในสายตาเขา ไม่ใช่ “แอปทนขึ้น”</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>ทุกคำขอในแอปผ่าน <code>_get</code>, <code>_post</code>, <code>_uploadFile</code> ในไฟล์เดียว 154 บรรทัด</li><li><code>ApiResult</code> แยกสำเร็จ/ล้มเหลวได้ แต่ไม่แยกชนิดของความล้มเหลว</li><li>singleton ทำให้เรียกง่ายจาก 26 จุด แต่ปิดช่องฉีดของทดสอบ — เป็นเหตุผลที่แอปนี้ไม่มีเทสต์</li><li><code>_resolveBase()</code> เรียงค่าที่ผู้ใช้ตั้งไว้ก่อน แล้วค่อยตกไปที่ค่าของแพลตฟอร์ม</li><li><code>_cachedBase</code> จำไว้ทั้ง session ต้องล้างด้วย <code>resetBaseUrl()</code> เมื่อเปลี่ยนค่า</li><li>มี timeout ครบทุกเมธอด แต่ไม่มีการลองใหม่ ไม่มีรหัสคำสั่ง</li><li><code>_handle</code> รับ array และ object ได้ แต่ค่าเดี่ยวจะกลายเป็นข้อความที่ผู้ใช้อ่านไม่รู้เรื่อง</li></ul></div><p><strong>บทหน้า:</strong> เก้าไฟล์ใน <code>services/api/</code> และกลไก <code>part</code> ที่ทำให้มันเป็นไฟล์เดียวกัน</p></section>

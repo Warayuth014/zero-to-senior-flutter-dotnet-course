@@ -4,27 +4,114 @@
 <title>wmsapp Solution Map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">16-01 · Real Codebase</span><h1>wmsapp Solution Map</h1><p>Part 16: wmsapp Architecture</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ภาพรวมขนาดจริง</a></li><li><a href="#section-2">โครงโฟลเดอร์</a></li><li><a href="#section-3">Runtime path</a></li><li><a href="#section-4">Domain boundaries</a></li><li><a href="#section-5">Shared core</a></li><li><a href="#section-6">State ownership ปัจจุบัน</a></li><li><a href="#section-7">Strengths และ risks</a></li><li><a href="#section-8">วิธีอ่าน</a></li></ol></nav>
-<div class="note"><strong>เป้าหมาย Part นี้:</strong> อ่าน wmsapp แบบมีแผนที่ ไม่เริ่มจาก screen ใหญ่สุ่ม ๆ เราจะตามเส้น <code>main → HomeScreen → domain screen → ApiService extension → model → .NET</code> แล้วรู้ว่า state/side effect อยู่ชั้นใด</div>
-<section id="section-1"><h2>1. ภาพรวมขนาดจริง</h2><table><thead><tr><th>พื้นที่</th><th>ไฟล์ Dart</th><th>ประมาณบรรทัด</th></tr></thead><tbody><tr><td>screens</td><td>80</td><td>18,271</td></tr><tr><td>models</td><td>11</td><td>1,507</td></tr><tr><td>services</td><td>15</td><td>1,108</td></tr><tr><td>widgets/theme</td><td>3</td><td>1,033</td></tr></tbody></table><p>น้ำหนักอยู่ที่ screens จึงพบ business state และ API orchestration ใน StatefulWidget จำนวนมาก</p></section>
-<section id="section-2"><h2>2. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/
-├─ main.dart
-├─ theme/theme.dart
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คอร์สเปลี่ยนโหมดตรงนี้</a></li><li><a href="#section-2">wmsapp ใหญ่แค่ไหน</a></li><li><a href="#section-3">จอไหนใหญ่ที่สุด</a></li><li><a href="#section-4">โครงโฟลเดอร์</a></li><li><a href="#section-5">เส้นทางของหนึ่งการกด</a></li><li><a href="#section-6">สิ่งที่ไม่มีในโปรเจกต์นี้</a></li><li><a href="#section-7">เครื่องมือที่ใช้ตามหาของ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อยตอนเริ่มอ่านโปรเจกต์ใหญ่</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–55 นาที</span><span>ลงมือทำ: เปิดโปรเจกต์ wmsapp จริงไปพร้อมกัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 1–15 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> รู้ว่าโปรเจกต์ wmsapp ใหญ่แค่ไหน มีอะไรอยู่ตรงไหน และควรเริ่มอ่านจากจุดไหน</div>
+
+<section id="section-1"><h2>1. คอร์สเปลี่ยนโหมดตรงนี้</h2><p>สิบห้า Part ที่ผ่านมาเราสร้างของขึ้นมาเองทีละชิ้นใน <code>labs/flutter_wms_companion</code> ทุกอย่างเล็กพอที่จะอ่านจบในหน้าเดียวและมีเทสต์กำกับ</p><p>ตั้งแต่ Part นี้ไปจะกลับกัน — เราจะ<strong>อ่านโค้ดที่มีอยู่แล้ว</strong> ที่ไม่มีใครเขียนมาให้เราอ่านง่าย</p><table><thead><tr><th></th><th>Part 1–15</th><th>Part 16–22</th></tr></thead><tbody>
+<tr><td>โค้ด</td><td>เราเขียนเอง</td><td>มีอยู่แล้ว</td></tr>
+<tr><td>ขนาด</td><td>ไฟล์ละ 50–200 บรรทัด</td><td>ไฟล์ใหญ่สุด 2,176 บรรทัด</td></tr>
+<tr><td>เทสต์</td><td>384 ข้อ</td><td>wmsapp มี 0 ข้อ</td></tr>
+<tr><td>เป้าหมาย</td><td>เข้าใจแนวคิด</td><td>หาของให้เจอและแก้ได้โดยไม่พัง</td></tr>
+</tbody></table><div class="note">ทักษะที่ Part นี้ฝึกคือ<strong>การอ่านโค้ดที่ไม่ได้เขียนเอง</strong> ซึ่งเป็นสิ่งที่ใช้เวลาส่วนใหญ่ในงานจริง มากกว่าการเขียนใหม่</div></section>
+
+<section id="section-2"><h2>2. wmsapp ใหญ่แค่ไหน</h2><p>ตัวเลขจากโปรเจกต์จริง นับเฉพาะ <code>lib/</code></p><table><thead><tr><th>โฟลเดอร์</th><th>ไฟล์</th><th>บรรทัด</th><th>สัดส่วน</th></tr></thead><tbody>
+<tr><td><code>screens/</code></td><td>80</td><td>18,412</td><td>83%</td></tr>
+<tr><td><code>models/</code></td><td>11</td><td>1,507</td><td>7%</td></tr>
+<tr><td><code>services/</code></td><td>15</td><td>1,108</td><td>5%</td></tr>
+<tr><td><code>widgets/</code></td><td>2</td><td>709</td><td>3%</td></tr>
+<tr><td><code>theme/</code></td><td>1</td><td>324</td><td>1%</td></tr>
+<tr><td><strong>รวม</strong></td><td><strong>110</strong></td><td><strong>22,095</strong></td><td></td></tr>
+</tbody></table><p>ตัวเลขนี้บอกอะไรก่อนที่จะเปิดไฟล์ไหนเลย — <strong>ตรรกะทางธุรกิจเกือบทั้งหมดอยู่ในจอ</strong> ไม่ได้อยู่ในชั้นกลางที่แยกไว้</p><p>เทียบกับสิ่งที่ Part 9 สอน (แยกชั้น repository/store) โปรเจกต์นี้ไม่มีชั้นนั้น ทุกอย่างที่ Part 9 เรียกว่า “งานของ store” อยู่ใน <code>State</code> ของ <code>StatefulWidget</code></p><div class="note"><strong>ยังไม่ต้องตัดสินว่าดีหรือไม่ดี</strong> — เป้าหมายของบทนี้คือรู้ว่าโครงเป็นแบบไหน จะได้หาของถูกที่ ส่วนเรื่องว่าควรเปลี่ยนไหมและเปลี่ยนอย่างไร อยู่ที่ Part 23</div></section>
+
+<section id="section-3"><h2>3. จอไหนใหญ่ที่สุด</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td><code>screens/packing/packing_screen.dart</code></td><td>2,176</td></tr>
+<tr><td><code>screens/receiving/scan_part/scan_part_screen.dart</code></td><td>1,727</td></tr>
+<tr><td><code>screens/picking/pick_items/pick_items_screen.dart</code></td><td>1,599</td></tr>
+<tr><td><code>screens/checkin/checkin_screen.dart</code></td><td>1,441</td></tr>
+<tr><td><code>screens/sorting/sorting_screen.dart</code></td><td>1,030</td></tr>
+</tbody></table><p>ห้าไฟล์นี้รวมกัน 7,973 บรรทัด — คิดเป็น 36% ของทั้งโปรเจกต์</p><p>สังเกตว่าบางโดเมนถูกแตกย่อยแล้ว บางโดเมนยัง</p><table><thead><tr><th>โดเมน</th><th>ไฟล์</th><th>บรรทัด</th><th>เฉลี่ยต่อไฟล์</th></tr></thead><tbody>
+<tr><td>putaway</td><td>26</td><td>2,378</td><td>91</td></tr>
+<tr><td>receiving</td><td>18</td><td>3,403</td><td>189</td></tr>
+<tr><td>picking</td><td>15</td><td>3,483</td><td>232</td></tr>
+<tr><td>unload</td><td>10</td><td>1,989</td><td>199</td></tr>
+<tr><td>packing</td><td>1</td><td>2,176</td><td>2,176</td></tr>
+<tr><td>checkin</td><td>1</td><td>1,441</td><td>1,441</td></tr>
+<tr><td>sorting</td><td>1</td><td>1,030</td><td>1,030</td></tr>
+</tbody></table><p>สามแถวล่างคือจอที่ยัง<strong>ไม่ถูกแตก</strong> ส่วน <code>putaway</code> คือตัวอย่างที่แตกไปแล้วมากที่สุด</p><p>ถ้าจะดูว่า “แตกแล้วหน้าตาเป็นยังไง” ให้เปิด <code>putaway/</code> ถ้าจะดูว่า “ก่อนแตกเป็นยังไง” ให้เปิด <code>packing_screen.dart</code> — ทั้งสองอยู่ในโปรเจกต์เดียวกันและเขียนโดยคนเดียวกัน</p></section>
+
+<section id="section-4"><h2>4. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/
+├─ main.dart                    ← เริ่มที่นี่ (16.2)
+├─ theme/theme.dart             ← สี ฟอนต์ ระยะ (16.2)
 ├─ widgets/
-├─ services/          // transport, config, session, SignalR
-├─ models/            // DTO แยกโดเมน
-└─ screens/           // receiving, unload, putaway, picking...</code></pre></section>
-<section id="section-3"><h2>3. Runtime path</h2><pre class="code-vs"><code>WmsApp
-  → HomeScreen
-    → require login
-      → domain menu/screen
-        → ApiService().domainMethod()
-          → _get/_post/_uploadFile
-            → ApiResult&lt;T&gt; → setState → widget tree</code></pre></section>
-<section id="section-4"><h2>4. Domain boundaries</h2><p>Receiving/Unload เป็น inbound, Putaway เคลื่อนเข้า storage, Picking/Packing/Check-in/Sorting เป็น outbound, Basket เป็นปลาย unload และ Upload เป็น supervisor image แต่ boundary ปัจจุบันเป็นโฟลเดอร์/extension มากกว่า repository/store ที่บังคับทางสถาปัตยกรรม</p></section>
-<section id="section-5"><h2>5. Shared core</h2><p><code>theme.dart</code>, <code>common_widgets.dart</code>, <code>ApiService</code>, <code>ApiConfigService</code>, <code>AuthSessionService</code> และ SignalR singletons ถูกใช้ข้ามโดเมน การเปลี่ยนไฟล์เหล่านี้มี blast radius สูง ต้องหา usages และเพิ่ม regression tests ก่อน</p></section>
-<section id="section-6"><h2>6. State ownership ปัจจุบัน</h2><p>local controllers/loading/selected entity มักอยู่ใน State ของ screen, sessionอยู่ SharedPreferences + HomeScreen fields, base URLอยู่ prefs + static cache, realtime connectionอยู่ service singleton จึงต้องตาม lifecycleหลายตำแหน่งเมื่อ debug race/logout/switch server</p></section>
-<section id="section-7"><h2>7. Strengths และ risks</h2><p>ข้อดีคือชื่อโดเมนชัด, API/model แยกไฟล์, widget บาง flow ถูกแยกย่อยแล้ว ข้อเสี่ยงคือ singletonซ่อน dependency, mock login, giant screens, dynamic JSON และ testหลักของ wmsappยังไม่มี safety net</p></section>
-<section id="section-8"><h2>8. วิธีอ่าน</h2><div class="success">เริ่ม composition → เลือกหนึ่ง user action → จด stateก่อน/หลัง → ตาม methodถึง endpoint → เปิด DTO → ไล่ error/lifecycle → เขียน characterization test แล้วจึง refactor ห้ามอ่านทุกไฟล์เรียง alphabetically</div></section>
+│   ├─ common_widgets.dart      ← 11 widget ที่ใช้ทั้งแอป (16.9)
+│   └─ part_thumbnail.dart      ← รูปสินค้า (16.10)
+├─ services/
+│   ├─ api_service.dart         ← ตัวส่งคำขอ (16.6)
+│   ├─ api/*.dart               ← 9 ไฟล์ แยกตามโดเมน (16.7)
+│   ├─ api_config_service.dart  ← ที่อยู่เซิร์ฟเวอร์ (16.5)
+│   ├─ auth_session_service.dart← ใครล็อกอินอยู่ (16.4)
+│   ├─ connection_probe.dart    ← ทดสอบการเชื่อมต่อ (16.5)
+│   └─ *signalr_service.dart    ← เรียลไทม์ 2 ไฟล์
+├─ models/                      ← 11 ไฟล์ แยกตามโดเมน (16.8)
+└─ screens/                     ← 80 ไฟล์</code></pre><p>โครงนี้แบ่งตาม<strong>ชนิดของไฟล์</strong> (screens/models/services) ไม่ได้แบ่งตามฟีเจอร์ — ต่างจากที่ Part 9 สอน</p><table><thead><tr><th>แบ่งแบบ</th><th>เปิดฟีเจอร์เดียวต้อง</th></tr></thead><tbody>
+<tr><td>ตามชนิด (wmsapp)</td><td>เปิด 3 โฟลเดอร์: screens/, models/, services/api/</td></tr>
+<tr><td>ตามฟีเจอร์ (Part 9)</td><td>เปิดโฟลเดอร์เดียว</td></tr>
+</tbody></table><p>แต่ภายในแต่ละชนิด wmsapp แยกตามโดเมนไว้อีกชั้น (<code>models/picking/</code>, <code>services/api/picking_api.dart</code>, <code>screens/picking/</code>) ซึ่งทำให้ตามหาได้ไม่ยากถ้ารู้ชื่อโดเมน</p></section>
+
+<section id="section-5"><h2>5. เส้นทางของหนึ่งการกด</h2><p>ทุกอย่างในแอปนี้เดินตามเส้นเดียวกัน จำเส้นนี้ไว้แล้วจะอ่านจอไหนก็ได้</p><pre class="code-vs"><code>main.dart
+  └─ WmsApp (MaterialApp)
+       └─ HomeScreen                     ← เมนูหลัก
+            └─ [ผู้ใช้กดการ์ด]
+                 └─ _requireLogin()      ← ยังไม่ล็อกอิน → เด้ง LoginScreen
+                      └─ Navigator.push(จอโดเมน)
+                           └─ setState(loading = true)
+                                └─ ApiService().someMethod()
+                                     └─ _get / _post / _uploadFile
+                                          └─ HTTP → .NET
+                                     └─ Model.fromJson(...)
+                                └─ setState(ข้อมูล = ผลลัพธ์)</code></pre><table><thead><tr><th>ชั้น</th><th>อยู่ไฟล์ไหน</th><th>บทที่อธิบาย</th></tr></thead><tbody>
+<tr><td>ราก</td><td><code>main.dart</code></td><td>16.2</td></tr>
+<tr><td>เมนู</td><td><code>home_screen.dart</code></td><td>16.3</td></tr>
+<tr><td>ล็อกอิน</td><td><code>login_screen.dart</code></td><td>16.4</td></tr>
+<tr><td>ที่อยู่เซิร์ฟเวอร์</td><td><code>api_config_service.dart</code></td><td>16.5</td></tr>
+<tr><td>ส่งคำขอ</td><td><code>api_service.dart</code></td><td>16.6</td></tr>
+<tr><td>เมธอดต่อโดเมน</td><td><code>services/api/*.dart</code></td><td>16.7</td></tr>
+<tr><td>แปลง JSON</td><td><code>models/*/</code></td><td>16.8</td></tr>
+</tbody></table><p>Part 16 เดินไปตามเส้นนี้ทีละชั้น จบ Part นี้แล้วจะเปิดจอโดเมนจริงใน Part 17</p></section>
+
+<section id="section-6"><h2>6. สิ่งที่ไม่มีในโปรเจกต์นี้</h2><p>การรู้ว่า<strong>อะไรไม่มี</strong> ช่วยได้พอ ๆ กับรู้ว่ามีอะไร เพราะจะได้ไม่เสียเวลาตามหา</p><table><thead><tr><th>ไม่มี</th><th>ผลที่ตามมา</th><th>เจอที่บท</th></tr></thead><tbody>
+<tr><td>เทสต์</td><td>เปลี่ยนอะไรก็ไม่มีตาข่ายรับ</td><td>16.12</td></tr>
+<tr><td>ชั้น repository / store</td><td>ตรรกะอยู่ในจอ</td><td>16.3</td></tr>
+<tr><td>ตัวจัดการ state กลาง</td><td>ทุกจอถือ state ของตัวเอง</td><td>16.3</td></tr>
+<tr><td>named route</td><td>ทุกการนำทางเป็น <code>Navigator.push</code> ตรง ๆ</td><td>16.3</td></tr>
+<tr><td>token / การยืนยันตัวตนจริง</td><td>ล็อกอินเป็นของจำลอง</td><td>16.4</td></tr>
+<tr><td>การจัดการภาษาแบบเลือกได้</td><td>ตรึงไว้ที่ไทยในโค้ด</td><td>16.2</td></tr>
+</tbody></table><div class="note">แอปนี้ทำงานได้จริงในคลังทั้งที่ไม่มีของพวกนี้ — <strong>“ไม่มี” ไม่ได้แปลว่า “ผิด”</strong> แต่ละข้อมีต้นทุนที่ตามมา ซึ่งจะเห็นชัดตอนเจอปัญหาจริงใน Part ต่อ ๆ ไป</div></section>
+
+<section id="section-7"><h2>7. เครื่องมือที่ใช้ตามหาของ</h2><p>อ่านโค้ด 22,000 บรรทัดด้วยการเลื่อนดูไม่ไหว ต้องใช้การค้นหา</p><table><thead><tr><th>อยากรู้</th><th>ค้นด้วย</th></tr></thead><tbody>
+<tr><td>จอนี้เรียก API ตัวไหน</td><td>ค้น <code>ApiService()</code> ในไฟล์นั้น</td></tr>
+<tr><td>เมธอดนี้ยิงไปที่ path ไหน</td><td>ค้นชื่อเมธอดใน <code>services/api/</code></td></tr>
+<tr><td>ใครใช้ widget นี้บ้าง</td><td>ค้นชื่อคลาสทั้งโปรเจกต์</td></tr>
+<tr><td>ค่านี้ถูกเก็บที่ไหน</td><td>ค้นชื่อคีย์ เช่น <code>'userId'</code></td></tr>
+<tr><td>จอนี้ถูกเปิดจากที่ไหน</td><td>ค้นชื่อคลาสจอ</td></tr>
+</tbody></table><pre class="code-vs"><code># ตัวอย่างจริง — หาว่ามีกี่ที่ที่สร้าง ApiService ขึ้นมาเอง
+rg "ApiService\(\)" lib --count-matches
+# ผลลัพธ์: 26 ครั้ง ใน 22 ไฟล์</code></pre><p>ตัวเลข 26 นี้เป็นข้อมูลสำคัญที่ 16.6 จะอธิบายว่าทำไมถึงมีผลต่อการเขียนเทสต์</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อยตอนเริ่มอ่านโปรเจกต์ใหญ่</h2><table><thead><tr><th>ทำแบบนี้</th><th>ปัญหา</th><th>ทำแทน</th></tr></thead><tbody>
+<tr><td>เปิดไฟล์เรียงตามตัวอักษร</td><td>ไม่รู้ว่าอันไหนสำคัญ</td><td>ตามเส้นทางของหนึ่งการกด</td></tr>
+<tr><td>เริ่มที่ไฟล์ใหญ่ที่สุด</td><td>ไม่มีบริบท อ่านไม่รู้เรื่อง</td><td>เริ่มที่ <code>main.dart</code></td></tr>
+<tr><td>อ่านให้จบก่อนแตะโค้ด</td><td>ไม่มีวันจบ</td><td>อ่านเท่าที่ต้องใช้กับงานตรงหน้า</td></tr>
+<tr><td>รีบตัดสินว่าเขียนผิด</td><td>มองไม่เห็นเหตุผลเดิม</td><td>ถามว่า “ทำไมถึงเขียนแบบนี้” ก่อน</td></tr>
+<tr><td>แก้ทันทีที่เจอสิ่งที่ไม่ชอบ</td><td>ไม่มีเทสต์รับ</td><td>จดไว้ก่อน แก้ทีหลังพร้อมเทสต์</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญที่สุดในโปรเจกต์นี้ เพราะไม่มีเทสต์เลยแม้แต่ข้อเดียว</p></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>ยังไม่ต้องเปิดไฟล์ไหน ใช้แค่ตัวเลขในบทนี้ตอบ</p><ol><li>ถ้าได้รับแจ้งว่า “จอ Packing กดยืนยันแล้วค้าง” จะเปิดไฟล์ไหนก่อน และคาดว่าจะเจออะไร</li><li>ถ้าต้องเพิ่มฟิลด์ใหม่จาก API หนึ่งช่องให้แสดงในจอ Picking ต้องแก้กี่ไฟล์ และไฟล์ไหนบ้าง</li><li>ทำไมโฟลเดอร์ <code>putaway</code> มี 26 ไฟล์แต่ <code>packing</code> มีไฟล์เดียว ทั้งที่บรรทัดใกล้เคียงกัน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><p><code>screens/packing/packing_screen.dart</code> — 2,176 บรรทัด และเป็นไฟล์เดียวของโดเมนนั้น</p><p>คาดว่าจะเจอ: state ทั้งหมดของ flow อยู่ในไฟล์เดียว, การเรียก API อยู่ปนกับการวาดหน้าจอ, และเมธอดที่ยาวมากหนึ่งหรือสองตัวที่ทำงานตอนกดยืนยัน</p><p>วิธีเข้าเร็วที่สุดคือค้นคำว่า <code>ApiService()</code> ในไฟล์นั้นเพื่อหาจุดที่คุยกับเซิร์ฟเวอร์ แล้วไล่ขึ้นไปว่าใครเรียก</p><p><strong>ข้อ 2</strong></p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>models/picking/picking_models.dart</code></td><td>เพิ่มฟิลด์ + อ่านใน <code>fromJson</code></td></tr>
+<tr><td><code>screens/picking/.../xxx_screen.dart</code></td><td>เอาไปแสดง</td></tr>
+</tbody></table><p>สองไฟล์ ถ้า endpoint เดิมส่งค่านั้นมาอยู่แล้ว</p><p>ถ้า endpoint ยังไม่ส่ง ต้องเพิ่มอีกสองที่ — <code>services/api/picking_api.dart</code> (ถ้าต้องเปลี่ยน path หรือ body) และฝั่ง .NET</p><p>สังเกตว่าคำตอบนี้ตอบได้เพราะรู้โครง ไม่ต้องเปิดไฟล์ดูเลย นี่คือประโยชน์ของการทำแผนที่ก่อนอ่าน</p><p><strong>ข้อ 3</strong></p><p>เพราะทั้งสองถูกเขียนคนละเวลา และ <code>putaway</code> ถูกแตกทีหลัง</p><p>สิ่งที่บอกเราคือ ทีมนี้<strong>รู้วิธีแตกไฟล์อยู่แล้ว</strong> — <code>putaway</code> คือหลักฐาน ดังนั้น <code>packing</code> ที่ยังไม่แตกไม่ใช่เพราะไม่รู้ แต่เพราะยังไม่ได้ทำ</p><p>ข้อสรุปนี้เปลี่ยนวิธีคุยกับทีม จาก “ควรแตกไฟล์นะ” (ซึ่งเขารู้อยู่แล้ว) เป็น “จะแตก packing ตามแบบเดียวกับ putaway ไหม” ซึ่งเป็นคำถามที่คุยต่อได้จริง</p><p>และเป็นข่าวดีสำหรับเราด้วย — มีตัวอย่างในโปรเจกต์เดียวกันให้เดินตาม ไม่ต้องออกแบบใหม่</p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>wmsapp มี 110 ไฟล์ 22,095 บรรทัด และ 83% อยู่ใน <code>screens/</code></li><li>ตรรกะทางธุรกิจอยู่ในจอ ไม่มีชั้น repository/store</li><li>แบ่งโฟลเดอร์ตามชนิดไฟล์ แล้วแยกโดเมนภายในอีกชั้น</li><li>ทุกการกดเดินตามเส้นเดียวกัน: จอ → ApiService → extension → model → setState</li><li><code>putaway</code> คือตัวอย่างที่แตกไฟล์แล้ว <code>packing</code> คือตัวอย่างที่ยัง</li><li>ไม่มีเทสต์เลย — ห้ามแก้อะไรโดยไม่เพิ่มตาข่ายก่อน</li><li>อ่านตามเส้นทางของหนึ่งการกด อย่าอ่านเรียงตามตัวอักษร</li></ul></div><p><strong>บทหน้า:</strong> เปิดไฟล์แรกจริง ๆ — <code>main.dart</code> ที่มีแค่ 39 บรรทัด แต่ตัดสินใจไว้หลายอย่างที่กระทบทั้งแอป</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
