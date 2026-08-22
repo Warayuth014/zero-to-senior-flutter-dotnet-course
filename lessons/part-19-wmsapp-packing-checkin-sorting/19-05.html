@@ -4,15 +4,284 @@
 <title>Auto-finalize Packing</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-05 · Real Codebase</span><h1>Auto-finalize Packing</h1><p>Part 19: wmsapp Outbound</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Batch local confirm</a></li><li><a href="#section-2">Sequential partial commit</a></li><li><a href="#section-3">Auto-finalize signal</a></li><li><a href="#section-4">Synthetic success model</a></li><li><a href="#section-5">Success transition</a></li><li><a href="#section-6">Duplicate finalize</a></li><li><a href="#section-7">Pack vs pallet completion</a></li><li><a href="#section-8">Finalize tests</a></li></ol></nav>
-<div class="note"><strong>ไม่มีปุ่ม finalize แยก:</strong> backend auto-finalize pack เมื่อ scan part สุดท้ายทำให้ทุก detail DONE และ response เดียวบอก tracking กับการ release pallet</div>
-<section id="section-1"><h2>1. Batch local confirm</h2><p><code>_confirmCollectedPack</code> สร้าง readyParts: serial ต้องครบ remaining, non-serial ต้องมี qty&gt;0 แล้วเรียก <code>_confirmPart</code> ทีละรายการตามลำดับ</p></section>
-<section id="section-2"><h2>2. Sequential partial commit</h2><p>หาก part แรกสำเร็จแต่ part ที่สอง fail ธุรกรรมแรกถูก commit แล้ว นี่ไม่ใช่ atomic batch UI ต้องเก็บผลใหม่และแจ้งว่าอะไรสำเร็จ ไม่เสนอ retry ทั้งชุดโดยไม่ตรวจ state</p></section>
-<section id="section-3"><h2>3. Auto-finalize signal</h2><p><code>PackingOrderResponse.packFinalized</code> เป็น true เมื่อ server ปิด pack แล้ว พร้อม trackingId และ <code>palletReleased</code> ซึ่งบอกว่า pallet ไม่มี pack อื่นค้าง</p></section>
-<section id="section-4"><h2>4. Synthetic success model</h2><p>UI สร้าง ConfirmPackResponse เองจาก order response และใช้ <code>DateTime.now()</code> เป็น completedAt จึงไม่ใช่เวลา server จริง ควรให้ API คืน typed finalize result/UTC timestamp โดยตรง</p></section>
-<section id="section-5"><h2>5. Success transition</h2><p>เมื่อ finalized ล้าง draft ของ part แล้วเปลี่ยน state success หาก palletReleased แสดงว่าพร้อมใช้ pallet ใหม่ มิฉะนั้นต้อง refresh pack list เพื่อทำงานที่เหลือ</p></section>
-<section id="section-6"><h2>6. Duplicate finalize</h2><p>double tap/timeout อาจยิง scan ชิ้นสุดท้ายซ้ำ Endpoint ต้อง idempotent ด้วย operation key และ unique constraint; client ควร disable command และ query pack เมื่อผลไม่แน่นอน</p></section>
-<section id="section-7"><h2>7. Pack vs pallet completion</h2><p>pack DONE ไม่เท่ากับ pallet released เสมอ เพราะ pallet มีหลาย packs UI/metrics ต้องแยกสอง concept ไม่ใช้ status เดียวตัดสินนำ palletออก</p></section>
-<section id="section-8"><h2>8. Finalize tests</h2><div class="success">ทดสอบ one/multi-order pack, finalize ที่ part สุดท้าย, sequential second failure, duplicate request, tracking missing, pallet released true/false และ server/client clock ต่างกัน</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เซิร์ฟเวอร์ปิดกล่องให้เอง</a></li><li><a href="#section-2">แอปประกอบผลลัพธ์ขึ้นเอง</a></li><li><a href="#section-3">สองเส้นทางที่จบไม่เหมือนกัน</a></li><li><a href="#section-4">การยืนยันหลายรายการในรอบเดียว</a></li><li><a href="#section-5">เมื่อการวนหยุดกลางคัน</a></li><li><a href="#section-6">หน้าสรุปที่ไม่มีทางย้อน</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _confirmPart และ _confirmCollectedPack</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.4, 17.7 (ผลลัพธ์ที่มีหลายแบบ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการทำงานที่เซิร์ฟเวอร์ตัดสินให้ และเห็นจุดที่แอปประกอบข้อมูลขึ้นเอง</div>
+
+<section id="section-1"><h2>1. เซิร์ฟเวอร์ปิดกล่องให้เอง</h2><p>คอมเมนต์ในฝั่ง API อธิบายไว้</p><pre class="code-vs"><code>/// สแกน Part (เพิ่ม scanned qty) — ส่ง serialNumbers ได้ (optional)
+/// Auto-finalize เมื่อทุก Detail ใน Pack เป็น DONE — response จะมี
+/// packFinalized=true + trackingId + palletReleased
+Future&lt;ApiResult&lt;PackingOrderResponse&gt;&gt; scanPackPart({...})</code></pre><table><thead><tr><th>ฟิลด์ในคำตอบ</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>packFinalized</code></td><td>กล่องนี้แพ็กครบแล้วและถูกปิด</td></tr>
+<tr><td><code>trackingId</code></td><td>เลขติดตามที่เพิ่งสร้าง</td></tr>
+<tr><td><code>palletReleased</code></td><td>พาเลทว่างแล้ว (กล่องสุดท้ายบนพาเลท)</td></tr>
+</tbody></table><p>สามฟิลด์นี้มีค่าเฉพาะเมื่อสแกนชิ้นสุดท้าย — คำขอเดียวกันจึงตอบได้สองแบบ</p><pre class="code-vs"><code>packFinalized: json['packFinalized'] ?? false,
+trackingId: json['trackingId'],
+palletReleased: json['palletReleased'] ?? false,</code></pre><p>ค่าเริ่มต้นเป็น <code>false</code> ทั้งคู่ — เป็นค่าเริ่มต้นแบบเข้มงวดตามที่ 17.9 อธิบาย</p><table><thead><tr><th>ถ้าเดาผิด</th><th>ผล</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ปิดกล่องแล้วแต่ไม่ส่งฟิลด์มา</td><td>แอปคิดว่ายังไม่ปิด → ผู้ใช้อยู่หน้าสินค้าที่แพ็กครบแล้ว</td></tr>
+</tbody></table><p>ผู้ใช้จะเห็นว่าทุกอย่างครบแต่ไม่มีอะไรเกิดขึ้น — น่ารำคาญแต่ไม่ทำให้ข้อมูลเสีย</p><div class="note">ต่างจาก <code>condition ?? 'FG'</code> ใน 17.9 ที่เดาผิดแล้วของเสียผ่านไปเป็นของดี — ที่นี่เดาผิดแล้วผู้ใช้แค่ติดขัด</div></section>
+
+<section id="section-2"><h2>2. แอปประกอบผลลัพธ์ขึ้นเอง</h2><pre class="code-vs"><code>if (resp.packFinalized) {
+  setState(() {
+    _confirmResult = ConfirmPackResponse(
+      packingId: resp.packingId,
+      status: 'DONE',                             // ← เขียนเอง
+      trackingId: resp.trackingId,
+      palletShipped: resp.palletReleased,
+      completedAt: DateTime.now(),                // ← เวลาของเครื่อง
+      message: resp.palletReleased
+          ? 'Pack สำเร็จ — Pallet เปล่าพร้อมใช้ใหม่'
+          : 'Pack สำเร็จ (ยังเหลือ Pack อื่นใน Pallet)',   // ← ข้อความของแอป
+    );
+    ...
+    _state = _PackState.success;
+  });
+  return;
+}</code></pre><p>คำตอบจากเซิร์ฟเวอร์เป็น <code>PackingOrderResponse</code> แต่หน้า <code>success</code> ต้องการ <code>ConfirmPackResponse</code></p><p>แอปจึงสร้างขึ้นเองจากข้อมูลที่มี</p><table><thead><tr><th>ฟิลด์</th><th>มาจาก</th><th>เชื่อได้แค่ไหน</th></tr></thead><tbody>
+<tr><td><code>packingId</code></td><td>เซิร์ฟเวอร์</td><td>เชื่อได้</td></tr>
+<tr><td><code>trackingId</code></td><td>เซิร์ฟเวอร์</td><td>เชื่อได้</td></tr>
+<tr><td><code>palletShipped</code></td><td>เซิร์ฟเวอร์</td><td>เชื่อได้</td></tr>
+<tr><td><code>status: 'DONE'</code></td><td><strong>แอปเขียนเอง</strong></td><td>สมเหตุสมผล — <code>packFinalized</code> แปลว่าปิดแล้ว</td></tr>
+<tr><td><code>completedAt: DateTime.now()</code></td><td><strong>เวลาของเครื่อง</strong></td><td><strong>อาจไม่ตรงกับเซิร์ฟเวอร์</strong></td></tr>
+<tr><td><code>message</code></td><td><strong>แอปเขียนเอง</strong></td><td>สรุปจาก <code>palletReleased</code></td></tr>
+</tbody></table><div class="note"><strong><code>DateTime.now()</code> ตรงนี้ต่างจากกรณีที่ 16.8 เตือน</strong><br>ที่นั่นเป็นค่าเริ่มต้นเมื่ออ่านค่าไม่ได้ — ทำให้ข้อมูลผิดโดยไม่มีใครรู้<br>ที่นี่เป็นเวลาที่แอปบันทึกไว้เพื่อ<strong>แสดงบนหน้าจอทันที</strong> ไม่ได้ส่งกลับไปเซิร์ฟเวอร์<br>ความเสี่ยงคือถ้านาฬิกาเครื่องผิด ผู้ใช้จะเห็นเวลาที่ไม่ตรงกับที่ระบบบันทึก — ซึ่งเป็นเรื่องเล็กเมื่อเทียบกับการเรียงลำดับผิดใน 16.8</div><p>ทางที่ตรงกว่าคือให้เซิร์ฟเวอร์ส่งเวลามาด้วย</p><pre class="code-vs"><code>completedAt: DateTime.tryParse(json['completedAt'] ?? '') ?? DateTime.now(),</code></pre><p>ซึ่ง <code>ConfirmPackResponse.fromJson</code> ก็ทำแบบนั้นอยู่แล้ว — แต่เส้นทางนี้ไม่ได้ผ่าน <code>fromJson</code></p></section>
+
+<section id="section-3"><h2>3. สองเส้นทางที่จบไม่เหมือนกัน</h2><pre class="code-vs"><code>if (resp.packFinalized) {
+  setState(() {
+    _confirmResult = ConfirmPackResponse(...);
+    _selectedPartId = null;
+    _collectedSerials.remove(partId);
+    _collectedQty.remove(partId);
+    _expandedSerialPartIds.remove(partId);
+    _partScanCtrl.clear();
+    _serialScanCtrl.clear();
+    _state = _PackState.success;          // ← ไปหน้าสรุป
+  });
+  return;
+}
+
+setState(() {
+  _orderResp = resp;                       // ← อัปเดตรายการ
+  _selectedPartId = null;
+  _collectedSerials.remove(partId);
+  _collectedQty.remove(partId);
+  _expandedSerialPartIds.remove(partId);
+  _partScanCtrl.clear();
+  _serialScanCtrl.clear();
+});
+_partScanFocus.requestFocus();             // ← อยู่ที่เดิม สแกนต่อ</code></pre><table><thead><tr><th>ต่างกันตรงไหน</th><th>เส้นทางปิดกล่อง</th><th>เส้นทางปกติ</th></tr></thead><tbody>
+<tr><td>อัปเดต <code>_orderResp</code></td><td><strong>ไม่</strong></td><td>อัปเดต</td></tr>
+<tr><td>สร้าง <code>_confirmResult</code></td><td>สร้าง</td><td>ไม่</td></tr>
+<tr><td>เปลี่ยนสถานะ</td><td>ไป <code>success</code></td><td>อยู่ที่เดิม</td></tr>
+<tr><td>คืนโฟกัส</td><td>ไม่</td><td>คืน</td></tr>
+</tbody></table><p>อีกห้าบรรทัดกลางเหมือนกันทุกประการ — เป็นการล้างสินค้าที่เพิ่งยืนยันไป</p><pre class="code-vs"><code>_collectedSerials.remove(partId);      // ล้างเฉพาะสินค้าตัวนี้
+_collectedQty.remove(partId);
+_expandedSerialPartIds.remove(partId);</code></pre><div class="note"><strong>ล้างเฉพาะสินค้าที่ยืนยันไป ไม่ล้างทั้งหมด</strong> — จำเป็นเพราะ <code>_confirmCollectedPack</code> วนยืนยันหลายรายการติดกัน<br>ถ้าล้างทั้งหมด รายการที่ยังไม่ได้ยืนยันในรอบเดียวกันจะหายไป<br>รายละเอียดนี้เกิดจากการเจอปัญหาจริงแล้วแก้ ไม่ใช่จากการออกแบบล่วงหน้า</div><p>ห้าบรรทัดที่ซ้ำกันสองที่ควรแยกเป็นเมธอด</p><pre class="code-vs"><code>void _clearCollectedFor(String partId) {
+  _selectedPartId = null;
+  _collectedSerials.remove(partId);
+  _collectedQty.remove(partId);
+  _expandedSerialPartIds.remove(partId);
+  _partScanCtrl.clear();
+  _serialScanCtrl.clear();
+}</code></pre><p>ถ้าวันหนึ่งเพิ่มสถานะที่ต้องล้างอีกตัว จะได้ไม่ลืมที่ใดที่หนึ่ง</p></section>
+
+<section id="section-4"><h2>4. การยืนยันหลายรายการในรอบเดียว</h2><pre class="code-vs"><code>Future&lt;void&gt; _confirmCollectedPack() async {
+  final order = _orderResp;
+  if (order == null) return;
+
+  // Part มี S/N → ต้องสแกนครบ remaining ถึงจะ pack ได้
+  // Part ไม่มี S/N → กรอกจำนวนเท่าไหร่ก็ pack เท่านั้น (pack บางส่วนได้)
+  final readyParts = order.parts
+      .where((part) =&gt;
+          !part.isDone &amp;&amp;
+          part.remaining &gt; 0 &amp;&amp;
+          (part.serialRequire
+              ? _collectedCountFor(part) == part.remaining
+              : _collectedCountFor(part) &gt; 0))
+      .toList();
+
+  if (readyParts.isEmpty) {
+    showWarningSnackbar(context,
+        'กรุณาสแกน S/N หรือระบุจำนวนอย่างน้อย 1 รายการก่อนยืนยัน');
+    _serialScanFocus.requestFocus();
+    return;
+  }
+
+  for (final part in readyParts) {
+    await _confirmPart(part, _collectedCountFor(part));
+    if (!mounted || _state != _PackState.orderParts) return;
+  }
+}</code></pre><p>เงื่อนไขคัดกรองมีสามข้อ</p><table><thead><tr><th>เงื่อนไข</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td><code>!part.isDone</code></td><td>สินค้าที่แพ็กครบแล้ว</td></tr>
+<tr><td><code>part.remaining &gt; 0</code></td><td>ตาข่ายชั้นสอง เผื่อ <code>isDone</code> ไม่ตรง</td></tr>
+<tr><td>กฎตามชนิดสินค้า</td><td>ของที่ยังไม่พร้อม</td></tr>
+</tbody></table><p>กฎข้อสามคือหัวใจ</p><pre class="code-vs"><code>part.serialRequire
+    ? _collectedCountFor(part) == part.remaining    // ต้องครบเท่านั้น
+    : _collectedCountFor(part) &gt; 0                  // มีเท่าไรก็ได้</code></pre><table><thead><tr><th>สินค้า</th><th>แพ็กบางส่วนได้ไหม</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>มี S/N</td><td><strong>ไม่ได้</strong></td><td>ต้องรู้ว่าชิ้นไหนบ้างอยู่ในกล่อง</td></tr>
+<tr><td>ไม่มี S/N</td><td>ได้</td><td>นับจำนวนอย่างเดียว แบ่งหลายรอบได้</td></tr>
+</tbody></table><div class="note"><strong>เทียบกับ 17.10 ที่พบว่า <code>LoadToBasketScreen</code> ปล่อยให้โหลดบางส่วนได้แม้สินค้ามี S/N</strong><br>ที่นั่นปุ่ม “ถัดไป” ตรวจแค่ว่ามี S/N อย่างน้อยหนึ่งตัว<br>ที่นี่เข้มกว่าและถูกกว่า — และคอมเมนต์สองบรรทัดอธิบายเหตุผลไว้ให้ด้วย</div><p>การวนยืนยันทีละรายการมีข้อดีข้อเสีย</p><table><thead><tr><th></th><th>วนทีละรายการ (packing)</th><th>ส่งทีเดียว (picking, 18.14)</th></tr></thead><tbody>
+<tr><td>จำนวนคำขอ</td><td>เท่ากับจำนวนรายการ</td><td>1</td></tr>
+<tr><td>รู้ว่ารายการไหนล้มเหลว</td><td><strong>รู้</strong></td><td>ไม่รู้</td></tr>
+<tr><td>ล้มเหลวกลางทาง</td><td><strong>รายการก่อนหน้าถูกบันทึกแล้ว</strong></td><td>ไม่มีอะไรถูกบันทึก</td></tr>
+<tr><td>เวลาที่ผู้ใช้รอ</td><td>นานกว่า</td><td>สั้นกว่า</td></tr>
+</tbody></table><p>แถวที่สามเป็นทั้งข้อดีและข้อเสีย — งานที่ทำไปแล้วไม่เสีย แต่ระบบอยู่ในสถานะกลางทาง</p></section>
+
+<section id="section-5"><h2>5. เมื่อการวนหยุดกลางคัน</h2><pre class="code-vs"><code>for (final part in readyParts) {
+  await _confirmPart(part, _collectedCountFor(part));
+  if (!mounted || _state != _PackState.orderParts) return;
+}</code></pre><table><thead><tr><th>หยุดเพราะ</th><th>เกิดเมื่อ</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td><code>!mounted</code></td><td>ผู้ใช้ออกจากจอ</td><td>—</td></tr>
+<tr><td><code>_state != orderParts</code></td><td><strong>กล่องถูกปิดระหว่างวน</strong></td><td>หน้าสรุป</td></tr>
+</tbody></table><p>แถวที่สองเป็นกรณีปกติ ไม่ใช่ความผิดพลาด — เมื่อรายการสุดท้ายทำให้กล่องครบ <code>_confirmPart</code> จะพาไป <code>success</code> และการวนต้องหยุด</p><p>แต่มีกรณีที่ไม่ได้ตรวจ</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmPart(PackingPartItem part, int qty) async {
+  ...
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'สแกนไม่สำเร็จ');
+    return;                        // ← คืนค่าปกติ ไม่มีสัญญาณว่าล้มเหลว
+  }
+  ...
+}</code></pre><table><thead><tr><th>รายการที่ 3 จาก 5 ล้มเหลว</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เห็นกล่อง error</td><td>กดปิด</td></tr>
+<tr><td>การวนทำต่อ</td><td>รายการที่ 4 และ 5 ถูกยืนยัน</td></tr>
+<tr><td>ผู้ใช้เห็นผลสุดท้าย</td><td><strong>ไม่รู้ว่ารายการที่ 3 ไม่ผ่าน</strong></td></tr>
+</tbody></table><div class="note"><strong>ที่จริงเห็น</strong> — เพราะรายการที่ 3 จะยังแสดงว่ายังไม่ครบในรายการ<br>แต่ผู้ใช้ที่กดปิดกล่อง error แล้วเห็นรายการอื่นเปลี่ยนไป อาจคิดว่ากดสำเร็จหมด<br>และถ้าเน็ตมีปัญหา ทั้งสามรายการที่เหลืออาจล้มเหลวติดกัน = กดปิดกล่องสามครั้ง</div><pre class="code-vs"><code>// ให้ _confirmPart บอกผลลัพธ์ แล้วหยุดวนเมื่อล้มเหลว
+Future&lt;bool&gt; _confirmPart(PackingPartItem part, int qty) async {
+  ...
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'สแกนไม่สำเร็จ');
+    return false;
+  }
+  ...
+  return true;
+}</code></pre><pre class="code-vs"><code>var doneCount = 0;
+for (final part in readyParts) {
+  final ok = await _confirmPart(part, _collectedCountFor(part));
+  if (!mounted || _state != _PackState.orderParts) return;
+
+  if (!ok) {
+    // หยุดทันที — ถ้าเน็ตมีปัญหา รายการที่เหลือก็จะล้มเหลวเหมือนกัน
+    if (doneCount &gt; 0) {
+      showWarningSnackbar(
+        context,
+        'ยืนยันแล้ว $doneCount จาก ${readyParts.length} รายการ — '
+        'รายการที่เหลือยังไม่ถูกบันทึก',
+      );
+    }
+    return;
+  }
+  doneCount++;
+}</code></pre><p>ข้อความสรุปบอกผู้ใช้ว่าอยู่ตรงไหน — สำคัญเพราะระบบอยู่ในสถานะกลางทางจริง ๆ</p></section>
+
+<section id="section-6"><h2>6. หน้าสรุปที่ไม่มีทางย้อน</h2><pre class="code-vs"><code>case _PackState.success:
+  _resetAll();
+  break;</code></pre><p>กดย้อนกลับจากหน้าสรุป = เริ่มใหม่ทั้งหมด ไม่ใช่ถอยหนึ่งชั้น</p><p>ถูกต้อง เพราะกล่องถูกปิดไปแล้ว — ถอยกลับไปหน้าสินค้าไม่มีความหมาย</p><p>และมีปุ่มอีกทางที่ไม่ใช่ <code>_resetAll</code></p><pre class="code-vs"><code>// _buildSuccess มีปุ่มกลับไปหน้ารายการกล่อง
+onPressed: _refreshPackList,</code></pre><table><thead><tr><th>ทางออก</th><th>ไปไหน</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ปุ่มย้อนกลับ</td><td><code>scanPallet</code></td><td>จะไปทำพาเลทอื่น</td></tr>
+<tr><td>ปุ่มในหน้า</td><td><code>packList</code> (โหลดใหม่)</td><td>ยังมีกล่องอื่นบนพาเลทเดิม</td></tr>
+</tbody></table><p>สองทางที่ต่างกันจริงและทั้งคู่สมเหตุสมผล</p><p>ข้อความในหน้าสรุปบอกล่วงหน้าว่าควรเลือกทางไหน</p><pre class="code-vs"><code>message: resp.palletReleased
+    ? 'Pack สำเร็จ — Pallet เปล่าพร้อมใช้ใหม่'         // → ไปสแกนพาเลทใหม่
+    : 'Pack สำเร็จ (ยังเหลือ Pack อื่นใน Pallet)',      // → กลับไปรายการกล่อง</code></pre><div class="note"><strong>นี่คือรายละเอียดที่ทำให้ flow ลื่น</strong> — ข้อความไม่ได้แค่บอกว่าสำเร็จ แต่บอกว่าสถานการณ์ตอนนี้เป็นอย่างไร<br>ผู้ใช้จึงเลือกปุ่มถูกโดยไม่ต้องคิด<br>ตรงกับหลักเดียวกับข้อความยืนยันใน 18.3 ที่บอกว่า “AMR จะมารับทันที”</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>คำขอหนึ่งตอบได้แบบเดียว</td><td><code>scanPackPart</code> ตอบสองแบบตาม <code>packFinalized</code></td></tr>
+<tr><td>แอปไม่ควรสร้างข้อมูลขึ้นเอง</td><td>ได้ ถ้าไม่ส่งกลับเซิร์ฟเวอร์และมีข้อมูลพอ</td></tr>
+<tr><td>วนเรียก API ทีละรายการเป็นการออกแบบที่แย่</td><td>รู้ว่ารายการไหนล้มเหลว ซึ่งส่งทีเดียวไม่รู้</td></tr>
+<tr><td>วนต่อไปเมื่อรายการหนึ่งล้มเหลวดีกว่าหยุด</td><td>ถ้าเป็นปัญหาเน็ต รายการที่เหลือก็จะล้มเหลวเหมือนกัน</td></tr>
+<tr><td>ล้างข้อมูลทั้งหมดหลังยืนยัน</td><td>ต้องล้างเฉพาะรายการที่ยืนยันไป</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “กดยืนยันทีเดียวหลายรายการ แล้วเน็ตสะดุด ขึ้น error สามรอบติด กดปิดจนงง แล้วไม่รู้ว่าอันไหนสำเร็จบ้าง”</p><ol><li>ไล่ว่าเกิดอะไรขึ้นทีละขั้น</li><li>ผู้ใช้ต้องการรู้อะไร</li><li>ออกแบบทางแก้ที่ครบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ไล่ทีละขั้น</strong></p><pre class="code-vs"><code>ผู้ใช้สแกนครบ 5 รายการ แล้วกดยืนยัน
+  ▼
+_confirmCollectedPack → readyParts มี 5 ตัว
+  ▼
+วนรอบที่ 1: _confirmPart(A) → สำเร็จ → _orderResp อัปเดต
+วนรอบที่ 2: _confirmPart(B) → สำเร็จ
+วนรอบที่ 3: _confirmPart(C) → เน็ตสะดุด → กล่อง error
+              ผู้ใช้กดปิด → return (ไม่บอกว่าล้มเหลว)
+              การวนทำต่อ
+วนรอบที่ 4: _confirmPart(D) → เน็ตยังสะดุด → กล่อง error อีก
+วนรอบที่ 5: _confirmPart(E) → กล่อง error อีก
+  ▼
+ผู้ใช้กดปิดกล่องสามครั้ง แล้วเห็นรายการที่ A, B เปลี่ยนเป็นครบ
+                             ส่วน C, D, E ยังไม่ครบ</code></pre><p>ข้อมูลที่ต้องการอยู่บนหน้าจอแล้ว — แต่ผู้ใช้ต้องอ่านรายการทั้งหมดเพื่อหาว่าอันไหนไม่ผ่าน</p><p>และมีปัญหาซ้อน: <code>_confirmPart</code> ที่ล้มเหลว<strong>ไม่ล้าง</strong> <code>_collectedSerials</code> ของรายการนั้น (เพราะ <code>return</code> ก่อนถึงบรรทัดล้าง) ซึ่งถูกต้อง — S/N ที่สแกนไว้ยังอยู่ให้กดซ้ำได้</p><p><strong>ข้อ 2 — ผู้ใช้ต้องการรู้อะไร</strong></p><table><thead><tr><th>คำถามของผู้ใช้</th><th>ตอบได้จาก</th></tr></thead><tbody>
+<tr><td>อันไหนสำเร็จแล้วบ้าง</td><td>รายการบนจอ แต่ต้องไล่อ่าน</td></tr>
+<tr><td>ต้องกดซ้ำไหม</td><td>ไม่มีอะไรบอก</td></tr>
+<tr><td>กดซ้ำแล้วของจะซ้ำไหม</td><td><strong>ไม่มีอะไรบอก</strong></td></tr>
+<tr><td>ปัญหาคืออะไร</td><td>ข้อความใน error แต่ผ่านไปเร็ว</td></tr>
+</tbody></table><p>แถวที่สามสำคัญที่สุด — 7.10 เรียกว่าคำสั่งที่ไม่รู้ผล และเป็นสิ่งที่ผู้ใช้กลัวที่สุด</p><p>ที่นี่โชคดีที่ <code>scanPackPart</code> เพิ่ม <code>scannedQty</code> ตามที่ส่งไป ถ้าส่งซ้ำจะเกินและเซิร์ฟเวอร์น่าจะปฏิเสธ — แต่<strong>ต้องยืนยันกับทีมหลังบ้าน ไม่ใช่เดา</strong></p><p><strong>ข้อ 3 — ทางแก้ที่ครบ</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _confirmCollectedPack() async {
+  final order = _orderResp;
+  if (order == null) return;
+
+  final readyParts = order.parts.where((part) =&gt; ...).toList();
+  if (readyParts.isEmpty) { ... return; }
+
+  final failed = &lt;String&gt;[];
+  var doneCount = 0;
+
+  for (final part in readyParts) {
+    final ok = await _confirmPart(part, _collectedCountFor(part), silent: true);
+    if (!mounted || _state != _PackState.orderParts) return;
+
+    if (ok) {
+      doneCount++;
+      continue;
+    }
+
+    failed.add(part.partId);
+    // เน็ตมีปัญหา รายการที่เหลือก็จะล้มเหลวเหมือนกัน — หยุดดีกว่ากดปิดหลายรอบ
+    break;
+  }
+
+  if (failed.isEmpty) return;
+
+  await showDialog&lt;void&gt;(
+    context: context,
+    builder: (ctx) =&gt; AlertDialog(
+      title: const Text('ยืนยันไม่ครบ'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('สำเร็จ $doneCount จาก ${readyParts.length} รายการ'),
+          const SizedBox(height: 8),
+          Text('ยังไม่ได้บันทึก: ${failed.join(", ")} '
+               'และอีก ${readyParts.length - doneCount - failed.length} รายการ'),
+          const SizedBox(height: 12),
+          Text(
+            'S/N ที่สแกนไว้ยังอยู่ — กดยืนยันซ้ำได้เมื่อสัญญาณกลับมา',
+            style: TextStyle(fontSize: 13, color: AppTheme.textGrey(ctx)),
+          ),
+        ],
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () =&gt; Navigator.pop(ctx),
+          child: const Text('เข้าใจแล้ว'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><table><thead><tr><th>เปลี่ยนอะไร</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td><code>silent: true</code> ไม่ให้ <code>_confirmPart</code> เด้งกล่องเอง</td><td>ไม่ต้องกดปิดหลายรอบ</td></tr>
+<tr><td><code>break</code> เมื่อล้มเหลว</td><td>ไม่ยิงซ้ำทั้งที่รู้ว่าจะล้ม</td></tr>
+<tr><td>กล่องเดียวตอนจบ</td><td>สรุปครบในที่เดียว</td></tr>
+<tr><td>บอกว่า S/N ยังอยู่</td><td>ตอบคำถาม “ต้องสแกนใหม่ไหม”</td></tr>
+</tbody></table><p>และต้องแก้ <code>_confirmPart</code> ให้รับ <code>silent</code></p><pre class="code-vs"><code>Future&lt;bool&gt; _confirmPart(
+  PackingPartItem part,
+  int qty, {
+  bool silent = false,      // เรียกจากลูป → ให้ลูปสรุปทีเดียว
+}) async {
+  ...
+  if (!result.success) {
+    if (!silent) {
+      showErrorDialog(context, message: result.error ?? 'สแกนไม่สำเร็จ');
+    }
+    return false;
+  }
+  ...
+  return true;
+}</code></pre><div class="note"><strong>สิ่งที่ยังไม่ได้แก้และต้องคุยกับทีม .NET</strong> — คำถาม “กดซ้ำแล้วของจะซ้ำไหม”<br>ถ้า <code>scanPackPart</code> เพิ่ม <code>scannedQty</code> แบบสะสม การส่งซ้ำจะทำให้เกิน<br>ถ้าเซิร์ฟเวอร์ตรวจว่า S/N นั้นถูกสแกนไปแล้ว จะปฏิเสธเอง ซึ่งปลอดภัย<br><strong>ต้องรู้คำตอบก่อนถึงจะเขียนข้อความที่ถูกได้</strong> — ถ้าปลอดภัยให้บอก “กดซ้ำได้เลย” ถ้าไม่ ให้บอก “ตรวจรายการก่อนกดซ้ำ”</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>scanPackPart</code> ตอบสองแบบ — ปกติ หรือปิดกล่องพร้อมเลขติดตาม</li><li>สามฟิลด์ที่บอกการปิดกล่องมีค่าเริ่มต้นแบบเข้มงวด เดาผิดแล้วผู้ใช้แค่ติดขัด</li><li>แอปประกอบ <code>ConfirmPackResponse</code> ขึ้นเองเพราะคำตอบเป็นคนละคลาส</li><li><code>DateTime.now()</code> ที่นี่ปลอดภัยกว่าใน 16.8 เพราะไม่ได้ส่งกลับเซิร์ฟเวอร์</li><li>ล้างเฉพาะสินค้าที่ยืนยันไป ไม่ล้างทั้งหมด — จำเป็นเพราะวนหลายรายการ</li><li>กฎแพ็กบางส่วน: มี S/N ต้องครบ ไม่มี S/N ได้เท่าที่กรอก</li><li>วนยืนยันทีละรายการ ทำให้รู้ว่าอันไหนล้มเหลว แต่ระบบอยู่กลางทางได้</li><li><code>_confirmPart</code> ไม่คืนผลลัพธ์ ทำให้ลูปวนต่อทั้งที่ล้มเหลว</li><li>ข้อความในหน้าสรุปบอกสถานการณ์ ทำให้ผู้ใช้เลือกปุ่มถูกโดยไม่ต้องคิด</li></ul></div><p><strong>บทหน้า:</strong> โมเดลและ API ของ packing และฟิลด์ที่คำนวณจากสองแหล่ง</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

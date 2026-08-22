@@ -1,9 +1,272 @@
-<div class="note"><strong>อย่าอ่าน giant screen จากบรรทัดแรกถึงท้าย:</strong> PackingScreen มีมากกว่า 2,000 บรรทัด ให้สร้างแผนที่ state, commands, derived values และ render branches ก่อนอ่าน widget detail</div>
-<section><h2>1. Start from enum</h2><p><code>_PackState</code> มี scanPallet, packList, orderList, orderParts และ success ค้น switch ที่ render แต่ละ state และ method ที่ assign state เพื่อได้ transition graph ก่อน</p></section>
-<section><h2>2. Group state by role</h2><p>Infrastructure: API/controllers/focus; remote snapshots: pallet/pack/order/confirm; navigation context: current IDs/state; draft input: selectedPart, serial/qty maps และ expanded rows แยกกลุ่มแล้ว ownership ชัดขึ้น</p></section>
-<section><h2>3. Find command methods</h2><pre class="code-vs"><code>rg -n "Future&lt;void&gt; _|_state =|_api\." packing_screen.dart</code></pre><p>เริ่มที่ scan/open/confirm/refresh/reset แล้วค่อยตามไป model และ API อย่าเริ่มจากสี/spacing 1,000 บรรทัดกลางไฟล์</p></section>
-<section><h2>4. Mark pure calculations</h2><p><code>_collectedCountFor</code>, <code>_currentPart</code>, remaining และ allDone ควรเป็น pure logic ที่ย้ายออกมาทดสอบได้ ส่วน focus/dialog/snackbar เป็น presentation side effect</p></section>
-<section><h2>5. Pair state with reset</h2><p>ทุก draft field ต้องตอบว่า reset เมื่อเปิด order, ย้อนกลับ, pack finalized และ reset all ตรงไหน หากหาไม่เจอจะเกิด serial/qty จาก order ก่อนรั่วเข้า request ใหม่</p></section>
-<section><h2>6. Identify duplicate UI</h2><p>scanner cards, serial tables, status chips และ selection logic คล้าย PickingScreen มาก เป็นสัญญาณให้สกัด shared behavior แต่ต้องเริ่มจาก tests เพื่อไม่เปลี่ยน scanner focus/validation โดยไม่ตั้งใจ</p></section>
-<section><h2>7. Read async hazards</h2><p>วงกลมทุก await แล้วตรวจ mounted, stale response, loading overlap, sequential mutations และ timeout ambiguity โดยเฉพาะ <code>_confirmCollectedPack</code> ยิงหลาย part ทีละ request</p></section>
-<section><h2>8. Safe reading output</h2><div class="success">ก่อนแก้ giant screen ต้องมี state graph, data ownership table, API list, reset matrix และ characterization tests อย่างน้อย happy/error/back/retry จากนั้น refactor ทีละ seam ไม่ rewrite ทั้งไฟล์</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด packing/packing_screen.dart — ไฟล์ที่ใหญ่ที่สุดในโปรเจกต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.1, 18.11 (enum _PickState)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านไฟล์ 2,176 บรรทัดได้โดยไม่หลง และเห็นข้อจำกัดของ enum เมื่อสถานะมีข้อมูลผูกอยู่</div>
+
+<section><h2>1. 25 ฟิลด์แบ่งเป็นกลุ่ม</h2><pre class="code-vs"><code>// ── ค่าคงที่ (8) ──
+static const Color _packBorder = Color(0xFFDCE6F2);
+static const Color _packTextDark = Color(0xFF1F2937);
+static const Color _packTextMuted = Color(0xFF6B7280);
+static const Color _packChipBg = Color(0xFFEAF3FF);
+static const Color _packSuccess = Color(0xFF22A06B);
+static const double _packSerialHeaderHeight = 32;
+static const double _packSerialRowHeight = 42;
+static const int _packSerialVisibleRowLimit = 5;
+
+// ── ตัวควบคุม (8) + การเชื่อมต่อ (1) ──
+final _api = ApiService();
+final _scanCtrl = TextEditingController();
+final _scanFocus = FocusNode();
+final _partScanCtrl = TextEditingController();
+final _partScanFocus = FocusNode();
+final _serialScanCtrl = TextEditingController();
+final _serialScanFocus = FocusNode();
+final _qtyEntryCtrl = TextEditingController();
+final _qtyEntryFocus = FocusNode();
+
+// ── สถานะ (11) ──
+_PackState _state = _PackState.scanPallet;
+bool _loading = false;
+
+PackingPalletResponse? _palletResp;      // ข้อมูลชั้นที่ 1
+PackingDetailResponse? _packDetail;      // ข้อมูลชั้นที่ 2
+PackingOrderResponse? _orderResp;        // ข้อมูลชั้นที่ 3
+ConfirmPackResponse? _confirmResult;     // ผลลัพธ์ตอนจบ
+
+String _currentPackingId = '';
+String _currentPickOrderId = '';
+String? _selectedPartId;
+final Map&lt;String, List&lt;String&gt;&gt; _collectedSerials = {};
+final Map&lt;String, int&gt; _collectedQty = {};
+final Set&lt;String&gt; _expandedSerialPartIds = {};</code></pre><table><thead><tr><th>กลุ่ม</th><th>จำนวน</th></tr></thead><tbody>
+<tr><td>ค่าคงที่</td><td>8</td></tr>
+<tr><td>ตัวควบคุม + เชื่อมต่อ</td><td>9</td></tr>
+<tr><td><strong>สถานะจริง</strong></td><td><strong>12</strong></td></tr>
+</tbody></table><p>12 ตัว เท่ากับ <code>PickItemsScreen</code> พอดี (18.11) — และเรียงลำดับคล้ายกันมาก</p><p>สิ่งที่ต่างคือกลุ่มกลางสี่ตัว</p><pre class="code-vs"><code>PackingPalletResponse? _palletResp;      // ← ชั้นที่ 1
+PackingDetailResponse? _packDetail;      // ← ชั้นที่ 2
+PackingOrderResponse? _orderResp;        // ← ชั้นที่ 3
+ConfirmPackResponse? _confirmResult;     // ← ผลลัพธ์</code></pre><div class="note"><strong>สี่ฟิลด์นี้ผูกกับสถานะแบบหนึ่งต่อหนึ่ง</strong> — แต่ <code>enum</code> ไม่ได้บังคับความสัมพันธ์นั้นไว้<pre class="code-vs"><code>_state == packList    ต้องมี _palletResp
+_state == orderList   ต้องมี _palletResp + _packDetail
+_state == orderParts  ต้องมี ทั้งสาม
+_state == success     ต้องมี _confirmResult</code></pre>ถ้าสถานะกับข้อมูลไม่ตรงกัน จะพังตอนวาด — 19.3 จะดูว่าเกิดได้ไหม</div></section>
+
+<section><h2>2. อ่านไฟล์ใหญ่โดยไม่หลง</h2><p>วิธีที่ใช้ได้ผลกับไฟล์นี้คืออ่านตาม <code>enum</code> ไม่ใช่อ่านเรียงบรรทัด</p><pre class="code-vs"><code>enum _PackState { scanPallet, packList, orderList, orderParts, success }</code></pre><p>แล้วค้นหาชื่อแต่ละสถานะ</p><pre class="code-vs"><code>rg "_PackState.scanPallet" lib/screens/packing/packing_screen.dart</code></pre><table><thead><tr><th>สถานะ</th><th>เมธอดที่วาด</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td><code>scanPallet</code></td><td><code>_buildScanPallet()</code></td><td>830–877</td></tr>
+<tr><td><code>packList</code></td><td><code>_buildPackList()</code></td><td>878–978</td></tr>
+<tr><td><code>orderList</code></td><td><code>_buildOrderList()</code></td><td>979–1076</td></tr>
+<tr><td><code>orderParts</code></td><td><code>_buildOrderParts()</code></td><td>1077–1129</td></tr>
+<tr><td><code>success</code></td><td><code>_buildSuccess()</code></td><td>1873–1965</td></tr>
+</tbody></table><p>ห้าเมธอดรวม 400 บรรทัด จาก 2,176 — ที่เหลือคือ widget ย่อยที่แต่ละสถานะเรียกใช้</p><table><thead><tr><th>ส่วน</th><th>บรรทัด</th><th>สัดส่วน</th></tr></thead><tbody>
+<tr><td>ตรรกะ (API + สถานะ)</td><td>~330</td><td>15%</td></tr>
+<tr><td>วาดสถานะทั้งห้า</td><td>~400</td><td>18%</td></tr>
+<tr><td>widget ย่อยในไฟล์เดียวกัน</td><td>~1,050</td><td>48%</td></tr>
+<tr><td>คลาสย่อยท้ายไฟล์</td><td>~400</td><td>18%</td></tr>
+</tbody></table><div class="note"><strong>66% ของไฟล์เป็นส่วนที่วาดหน้าจอ</strong> — เป็นส่วนที่แตกออกเป็นไฟล์ได้ตรง ๆ แบบที่ picking ทำ<br>ถ้าแตกตามสถานะเหมือน <code>pick_items/widgets/</code> ไฟล์หลักจะเหลือราว 730 บรรทัด<br>ตัวเลขนี้ตอบว่าไฟล์นี้<strong>แตกได้และควรแตก</strong> — ต่างจาก <code>StationSheet</code> ที่เหลือแต่ตรรกะแล้ว</div></section>
+
+<section><h2>3. build ที่ตรวจครบเหมือน picking</h2><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  return PopScope(
+    canPop: _state == _PackState.scanPallet,
+    onPopInvokedWithResult: (didPop, _) {
+      if (didPop) return;
+      _handleBack();
+    },
+    child: Scaffold(
+      appBar: WmsAppBar(title: 'Packing', userName: widget.fullName),
+      ...
+    ),
+  );
+}</code></pre><p><code>canPop</code> ตรวจสถานะเดียว — ออกจากจอได้เฉพาะตอนอยู่หน้าแรก</p><table><thead><tr><th>อยู่สถานะ</th><th>กดย้อนกลับแล้ว</th></tr></thead><tbody>
+<tr><td><code>scanPallet</code></td><td>ออกจากจอ</td></tr>
+<tr><td>อื่น ๆ</td><td>ถอยหนึ่งชั้นผ่าน <code>_handleBack()</code></td></tr>
+</tbody></table><p>เข้มกว่า <code>PickItemsScreen</code> ที่ออกได้จากสองสถานะ (18.11)</p><p>แต่มีปัญหาเดียวกัน — <strong>ไม่ตรวจว่ามี S/N ค้างอยู่ไหม</strong></p><pre class="code-vs"><code>// ผู้ใช้อยู่ orderParts สแกน S/N ไป 15 ตัว → กดย้อนกลับ
+// → _handleBack() ล้าง _collectedSerials ทิ้งทั้งหมด</code></pre><pre class="code-vs"><code>case _PackState.orderParts:
+  ...
+  _collectedSerials.clear();      // ← ทิ้งเงียบ ๆ
+  _collectedQty.clear();
+  ...</code></pre><p>เป็นรูปแบบเดียวกันที่เจอครบห้าจอแล้ว: ScanPart, UnloadSession, LoadToBasket, PickItems และที่นี่</p></section>
+
+<section><h2>4. _handleBack ที่ตัดสินตามชั้น</h2><pre class="code-vs"><code>void _handleBack() {
+  setState(() {
+    switch (_state) {
+      case _PackState.packList:
+        _resetAll();                      // ← เรียก setState ซ้อน
+        break;
+      case _PackState.orderList:
+        _state = _PackState.packList;
+        _packDetail = null;
+        _currentPackingId = '';
+        break;
+      case _PackState.orderParts:
+        // ถ้า Pack มีหลาย Order กลับไป orderList แทน packList
+        if (_packDetail != null &amp;&amp; _packDetail!.orders.length &gt; 1) {
+          _state = _PackState.orderList;
+        } else {
+          _state = _PackState.packList;
+          _packDetail = null;
+          _currentPackingId = '';
+        }
+        _orderResp = null;
+        _currentPickOrderId = '';
+        _selectedPartId = null;
+        _collectedSerials.clear();
+        _collectedQty.clear();
+        _expandedSerialPartIds.clear();
+        _partScanCtrl.clear();
+        _serialScanCtrl.clear();
+        break;
+      case _PackState.success:
+        _resetAll();                      // ← เรียก setState ซ้อน
+        break;
+      default:
+        break;
+    }
+  });
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ถอยไป <code>orderList</code> เฉพาะเมื่อมีหลายใบสั่ง</td><td>ตรงกับที่ <code>_openPack</code> ข้าม <code>orderList</code> เมื่อมีใบเดียว</td></tr>
+<tr><td>ล้างข้อมูลของชั้นที่ออกมา</td><td>ไม่ให้ค้างไปชั้นบน</td></tr>
+<tr><td>ล้างช่องกรอกด้วย</td><td>ชั้นถัดไปเริ่มใหม่สะอาด</td></tr>
+</tbody></table><p>แต่มีปัญหาโครงสร้าง — <code>_resetAll()</code> เรียก <code>setState</code> ของตัวเอง</p><pre class="code-vs"><code>void _resetAll() {
+  setState(() {                    // ← setState ซ้อนใน setState
+    _palletResp = null;
+    ...
+  });
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _scanFocus.requestFocus();
+  });
+}</code></pre><div class="note"><strong>Flutter ยอมให้ทำได้</strong> — <code>setState</code> ซ้อนกันแค่ทำเครื่องหมายว่าต้องวาดใหม่สองครั้ง ไม่โยน exception<br>แต่อ่านยากและทำให้คนที่มาแก้ทีหลังไม่แน่ใจว่าอะไรอยู่ใน scope ไหน<br>ทางที่ตรงกว่าคือแยกส่วนที่เปลี่ยนค่าออกจากส่วนที่แจ้ง<pre class="code-vs"><code>void _resetFields() {          // ไม่มี setState
+  _palletResp = null;
+  ...
+}
+
+void _resetAll() {
+  setState(_resetFields);
+  WidgetsBinding.instance.addPostFrameCallback((_) =&gt; _scanFocus.requestFocus());
+}
+
+void _handleBack() {
+  switch (_state) {
+    case _PackState.packList:
+    case _PackState.success:
+      _resetAll();                // เรียกนอก setState
+      return;
+    ...
+  }
+  setState(() { ...ที่เหลือ... });
+}</code></pre></div><p>สังเกต <code>default: break;</code> ท้าย <code>switch</code></p><pre class="code-vs"><code>default:
+  break;</code></pre><p>ครอบ <code>scanPallet</code> ซึ่งเป็นสถานะเดียวที่เหลือ — แต่การใช้ <code>default</code> ทำให้<strong>เสียประโยชน์ของการตรวจว่าครบ</strong></p><table><thead><tr><th></th><th>มี <code>default</code></th><th>ระบุทุกสมาชิก</th></tr></thead><tbody>
+<tr><td>เพิ่มสถานะที่หก</td><td>ตกไปที่ <code>default</code> เงียบ</td><td><strong>คอมไพเลอร์บอก</strong></td></tr>
+</tbody></table><p>ต่างจาก <code>build()</code> ที่ใช้ <code>switch</code> แบบนิพจน์ซึ่งบังคับให้ครบ — และต่างจาก <code>_handleBack()</code> ของ <code>PickItemsScreen</code> ที่ระบุทั้งห้าสมาชิก (18.11)</p><pre class="code-vs"><code>// เขียนให้คอมไพเลอร์ช่วย
+case _PackState.scanPallet:
+  break;                    // อยู่หน้าแรกแล้ว ไม่ต้องทำอะไร</code></pre></section>
+
+<section><h2>5. ค่าเริ่มต้นที่รับมาจากภายนอก</h2><pre class="code-vs"><code>class PackingScreen extends StatefulWidget {
+  final String userId;
+  final String fullName;
+  final String? initialPalletId;      // ← รับพาเลทมาได้
+  ...
+}</code></pre><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (widget.initialPalletId != null &amp;&amp; widget.initialPalletId!.isNotEmpty) {
+      _scanCtrl.text = widget.initialPalletId!;
+      _scanPallet();                   // ← สแกนให้เลย
+    } else {
+      _scanFocus.requestFocus();
+    }
+  });
+}</code></pre><p>ถ้ามีพาเลทส่งมา จอจะข้ามการสแกนไปเลย</p><table><thead><tr><th>เข้าจาก</th><th><code>initialPalletId</code></th><th>ผู้ใช้ต้องทำ</th></tr></thead><tbody>
+<tr><td>เมนูหลัก</td><td><code>null</code></td><td>สแกนพาเลท</td></tr>
+<tr><td>จออื่นที่รู้พาเลทแล้ว</td><td>มีค่า</td><td>ไม่ต้องทำอะไร</td></tr>
+</tbody></table><p>ค้นทั้งโปรเจกต์ว่าใครส่งค่านี้มา</p><pre class="code-vs"><code>rg "PackingScreen\(" lib
+# home_screen.dart — ไม่ส่ง initialPalletId</code></pre><div class="note"><strong>ไม่มีใครส่งมาเลย</strong> — พารามิเตอร์นี้เตรียมไว้แต่ยังไม่ถูกใช้<br>เหมือน <code>PutawayResult.success</code> ใน 18.7 และ <code>lineIds</code> ที่รับหลายตัวแต่ส่งทีละหนึ่งใน 17.7<br>ไม่ผิด แต่ควรรู้ว่าเป็นทางที่เปิดไว้ — และถ้าไม่มีแผนจะใช้ ควรลบเพื่อไม่ให้คนอ่านสงสัย</div><p>ทางที่จะใช้ได้จริง: จอ picking ที่ส่งพาเลทไปแพ็ก (18.14) รู้รหัสพาเลทอยู่แล้ว</p><pre class="code-vs"><code>// แทนที่จะแค่ยิง sendToPack แล้วจบ
+Navigator.push(context, MaterialPageRoute(
+  builder: (_) =&gt; PackingScreen(
+    userId: widget.userId,
+    fullName: widget.fullName,
+    initialPalletId: palletId,      // ← ผู้ใช้ไม่ต้องสแกนซ้ำ
+  ),
+));</code></pre></section>
+
+<section><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ไฟล์ 2,176 บรรทัดต้องอ่านเรียงบรรทัด</td><td>อ่านตาม enum ห้าสถานะ</td></tr>
+<tr><td><code>enum</code> บังคับว่าข้อมูลต้องตรงกับสถานะ</td><td>บังคับแค่ว่าสถานะเป็นหนึ่งเดียว</td></tr>
+<tr><td><code>setState</code> ซ้อนกันจะโยน exception</td><td>ทำงานได้ แต่อ่านยาก</td></tr>
+<tr><td><code>default:</code> ใน switch ปลอดภัย</td><td>เสียการตรวจว่าครบ</td></tr>
+<tr><td>พารามิเตอร์ที่มีต้องถูกใช้</td><td><code>initialPalletId</code> ไม่มีใครส่ง</td></tr>
+</tbody></table></section>
+
+<section><h2>7. แบบฝึกหัด</h2><p>แตกไฟล์นี้ตามแบบของ <code>pick_items/widgets/</code></p><ol><li>ควรแตกเป็นกี่ไฟล์ และแต่ละไฟล์มีอะไร</li><li>ส่วนไหนที่แตกไม่ได้และต้องอยู่ในไฟล์หลัก</li><li>ทำอย่างไรให้แน่ใจว่าแตกแล้วไม่พัง ในเมื่อไม่มีเทสต์</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — แตกเป็นกี่ไฟล์</strong></p><pre class="code-vs"><code>packing/
+├─ packing_screen.dart              (~730)
+└─ widgets/
+    ├─ scan_pallet/
+    │   └─ packing_scan_pallet_card.dart      (~50)
+    ├─ pack_list/
+    │   ├─ packing_pack_list.dart             (~100)
+    │   └─ packing_pack_summary_card.dart     (~80)
+    ├─ order_list/
+    │   └─ packing_order_list.dart            (~100)
+    ├─ order_parts/
+    │   ├─ packing_scanner_card.dart          (~120)
+    │   ├─ packing_part_card.dart             (~230)
+    │   ├─ packing_serial_table.dart          (~160)
+    │   ├─ packing_list_header.dart           (~50)
+    │   └─ packing_bottom_action.dart         (~40)
+    ├─ success/
+    │   └─ packing_success_view.dart          (~95)
+    └─ shared/
+        ├─ packing_context_card.dart          (~80)
+        └─ packing_status_pill.dart           (~25)</code></pre><p>โฟลเดอร์ตรงกับสมาชิกของ enum เหมือนที่ 18.1 พบใน picking</p><p>และคลาส <code>_SerialSelectPage</code> ท้ายไฟล์ (400 บรรทัด) ย้ายเป็นไฟล์ของตัวเองได้เลย เพราะเป็นจอแยกอยู่แล้ว</p><p><strong>ข้อ 2 — แตกไม่ได้</strong></p><table><thead><tr><th>ส่วน</th><th>ทำไมต้องอยู่ในไฟล์หลัก</th></tr></thead><tbody>
+<tr><td>เมธอด API ทั้งเจ็ด</td><td>เปลี่ยนสถานะและข้อมูลของจอ</td></tr>
+<tr><td><code>_handleBack</code></td><td>รู้เรื่องทุกสถานะ</td></tr>
+<tr><td><code>_collectedCountFor</code></td><td>อ่านจากสอง <code>Map</code> ที่เป็นสถานะ</td></tr>
+<tr><td><code>_activatePart</code>, <code>_scanSerial</code>, <code>_addQty</code></td><td>แก้สถานะและย้ายโฟกัส</td></tr>
+<tr><td>ค่าคงที่ที่ widget ย่อยใช้</td><td>ต้องย้ายไปที่ที่ทุกไฟล์เห็น</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นงานที่ต้องทำก่อน</p><pre class="code-vs"><code>// packing/widgets/packing_style.dart
+class PackingStyle {
+  PackingStyle._();
+  static const Color border = Color(0xFFDCE6F2);
+  static const Color textDark = Color(0xFF1F2937);
+  static const Color textMuted = Color(0xFF6B7280);
+  static const Color chipBg = Color(0xFFEAF3FF);
+  static const Color success = Color(0xFF22A06B);
+  static const double serialHeaderHeight = 32;
+  static const double serialRowHeight = 42;
+  static const int serialVisibleRowLimit = 5;
+}</code></pre><div class="note"><strong>ค่าสีห้าตัวนี้ควรอยู่ใน <code>AppTheme</code> ตั้งแต่แรก</strong> — <code>_packSuccess = Color(0xFF22A06B)</code> ต่างจาก <code>AppTheme.success = Color(0xFF2E7D32)</code> ทั้งที่ความหมายเดียวกัน<br>และ <code>pick_items_screen.dart</code> มีค่าชุดเดียวกันชื่อ <code>_pickSuccess</code> — สีเดียวกันประกาศสองที่<br>เป็นรูปแบบเดียวกับที่ 18.6 พบเรื่องสีของประเภทพาเลทที่เขียนซ้ำสามที่</div><p><strong>ข้อ 3 — ทำอย่างไรให้ไม่พัง</strong></p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>1</td><td>ย้ายค่าคงที่ออกก่อน แล้วรัน <code>flutter analyze</code></td><td>เปลี่ยนน้อยที่สุด ตรวจได้ทันที</td></tr>
+<tr><td>2</td><td>ย้าย widget ทีละตัว โดย<strong>คัดลอกโค้ดไปตรง ๆ ไม่แก้อะไร</strong></td><td>ถ้าพังจะรู้ว่าพังเพราะการย้าย ไม่ใช่การแก้</td></tr>
+<tr><td>3</td><td>เปลี่ยนเป็นรับพารามิเตอร์แทนการอ่านฟิลด์ของ State</td><td>ขั้นที่เสี่ยงจริง</td></tr>
+<tr><td>4</td><td>ทดสอบด้วยมือทั้งห้าสถานะ</td><td>ไม่มีเทสต์ ต้องเดินเอง</td></tr>
+</tbody></table><p>ขั้นที่ 3 คือจุดที่พลาดได้จริง</p><pre class="code-vs"><code>// ก่อนย้าย — อ่านฟิลด์ของ State ได้ตรง ๆ
+Widget _buildPackItemCard(PackingPartItem part) {
+  final collected = _collectedCountFor(part);
+  final isSelected = _selectedPartId == part.partId;
+  final isExpanded = _expandedSerialPartIds.contains(part.partId);
+  ...
+}</code></pre><pre class="code-vs"><code>// หลังย้าย — ต้องรับทุกอย่างเข้ามา
+class PackingPartCard extends StatelessWidget {
+  const PackingPartCard({
+    super.key,
+    required this.part,
+    required this.collectedCount,      // แทน _collectedCountFor
+    required this.isSelected,          // แทน _selectedPartId
+    required this.isExpanded,          // แทน _expandedSerialPartIds
+    required this.onTap,
+    required this.onToggleSerials,
+    required this.onRemoveSerial,
+  });
+  ...
+}</code></pre><p><strong>วิธีเดินทดสอบด้วยมือให้ครบ</strong></p><table><thead><tr><th>เส้นทาง</th><th>ต้องทดสอบ</th></tr></thead><tbody>
+<tr><td>พาเลทที่มี Pack เดียว Order เดียว</td><td>ข้าม <code>orderList</code></td></tr>
+<tr><td>พาเลทที่มี Pack เดียว หลาย Order</td><td>ผ่าน <code>orderList</code></td></tr>
+<tr><td>สินค้าที่ต้องมี S/N</td><td>ช่อง S/N + ตาราง</td></tr>
+<tr><td>สินค้าที่ไม่ต้องมี S/N</td><td>ช่องจำนวน</td></tr>
+<tr><td>สแกนชิ้นสุดท้ายจนปิดกล่อง</td><td>ไป <code>success</code></td></tr>
+<tr><td>กดย้อนกลับจากทุกสถานะ</td><td>ถอยถูกชั้น</td></tr>
+</tbody></table><p>หกเส้นทางนี้ครอบคลุมทุกกิ่งของ enum และเป็นสิ่งที่<strong>ต้องเขียนไว้เป็นรายการก่อนเริ่มแก้</strong> ไม่ใช่นึกทีหลัง</p><div class="note"><strong>สิ่งที่ควรทำก่อนแตกไฟล์จริง ๆ</strong> — เขียนเทสต์ให้ส่วนที่เทสต์ได้ก่อน<br><code>_collectedCountFor</code> เป็นฟังก์ชันที่ขึ้นกับสอง <code>Map</code> เท่านั้น ดึงออกมาเป็นฟังก์ชันบริสุทธิ์แล้วเทสต์ได้ทันที<pre class="code-vs"><code>int collectedCountFor({
+  required bool serialRequire,
+  required List&lt;String&gt;? serials,
+  required int? qty,
+}) =&gt; serialRequire ? (serials?.length ?? 0) : (qty ?? 0);</code></pre>เทสต์สี่ข้อครอบคลุมทุกกิ่ง และเป็นตาข่ายชั้นแรกที่ได้มาฟรี ๆ ก่อนงานใหญ่</div></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li>25 ฟิลด์ เป็นสถานะจริง 12 — เท่ากับ <code>PickItemsScreen</code></li><li>สี่ฟิลด์ผูกกับสถานะแบบหนึ่งต่อหนึ่ง แต่ <code>enum</code> ไม่ได้บังคับความสัมพันธ์นั้น</li><li>อ่านไฟล์ 2,176 บรรทัดโดยค้นชื่อสมาชิกของ enum ทีละตัว</li><li>66% ของไฟล์เป็นส่วนวาดหน้าจอ ซึ่งแตกออกได้ตรง ๆ</li><li><code>canPop</code> เข้มกว่า picking แต่ไม่ตรวจว่ามี S/N ค้าง — รูปแบบที่เจอครบห้าจอแล้ว</li><li><code>_handleBack</code> เรียก <code>_resetAll()</code> ซึ่งมี <code>setState</code> ของตัวเอง</li><li><code>default:</code> ใน switch ทำให้เสียการตรวจว่าครบ</li><li><code>initialPalletId</code> เตรียมไว้แต่ไม่มีใครส่ง</li><li>ค่าสีถูกประกาศซ้ำกับ <code>pick_items_screen.dart</code> และกับ <code>AppTheme</code></li></ul></div><p><strong>บทหน้า:</strong> การเดินสี่ชั้นของ packing และการข้ามชั้นที่ทำให้เกิด <code>setState</code> ซ้อน</p></section>

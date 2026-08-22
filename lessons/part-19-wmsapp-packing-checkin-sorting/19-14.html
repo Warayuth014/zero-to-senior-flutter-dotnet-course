@@ -4,17 +4,252 @@
 <title>Safe Screen Refactor</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-14 · Real Codebase</span><h1>Safe Screen Refactor</h1><p>Part 19: wmsapp Outbound</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Freeze behavior</a></li><li><a href="#section-2">Extract pure policy</a></li><li><a href="#section-3">Introduce typed state</a></li><li><a href="#section-4">Move commands</a></li><li><a href="#section-5">Split widgets</a></li><li><a href="#section-6">Fix one boundary at a time</a></li><li><a href="#section-7">Add concurrency controls</a></li><li><a href="#section-8">Definition of done</a></li></ol></nav>
-<div class="note"><strong>Refactor giant screen ด้วย characterization tests:</strong> เป้าหมายไม่ใช่ทำไฟล์สั้นทันที แต่แยก business transitions ออกจาก rendering โดยรักษาพฤติกรรม scanner, partial commit และ navigation เดิม</div>
-<section id="section-1"><h2>1. Freeze behavior</h2><p>เขียน tests รอบ scan/open/back, serial/qty validation, auto-finalize, preview/commit, complete/dispatch และ SignalR ก่อนย้ายโค้ด บันทึกพฤติกรรมที่เป็น bug แยกจาก behaviorที่ต้องรักษา</p></section>
-<section id="section-2"><h2>2. Extract pure policy</h2><p>ย้าย readyParts, remaining/allDone, station tap decision, pipeline progress และ validation เป็น pure functions/value objects ก่อน เพราะเสี่ยงต่ำและ unit testง่าย</p></section>
-<section id="section-3"><h2>3. Introduce typed state</h2><pre class="code-vs"><code>sealed class PackingState {}
-ScanPallet | PackList | OrderList
-| OrderParts | Submitting | Success | Failure</code></pre><p>รวม dataที่จำเป็นในแต่ละ stateแทน nullable fieldsหลายตัว</p></section>
-<section id="section-4"><h2>4. Move commands</h2><p>สร้าง controller/store รับ repository interfaces และคืน typed effects เช่น ShowError/RequestFocus/Navigate อย่าให้ controllerถือ BuildContext หรือ TextEditingController</p></section>
-<section id="section-5"><h2>5. Split widgets</h2><p>แยก page ต่อ state, scanner card, part list, serial editor, success panel โดยรับ immutable data/callback อย่าย้าย logicซ้ำไปหลาย widgetเพียงเพื่อให้ไฟล์หลักสั้น</p></section>
-<section id="section-6"><h2>6. Fix one boundary at a time</h2><p>เริ่ม packing hierarchy → part draft → submit จากนั้น check-in orchestration และ sorting realtime แต่ละ PRต้อง build/testและเทียบ payloadเดิม หลีกเลี่ยง rewriteทั้ง 3 screensพร้อมกัน</p></section>
-<section id="section-7"><h2>7. Add concurrency controls</h2><p>repository/controllerควรมี request generation/cancellation, command lock, idempotency key และ authoritative refreshหลัง mutation UI loadingหนึ่ง booleanไม่พอเมื่อมีหลาย requestชนกัน</p></section>
-<section id="section-8"><h2>8. Definition of done</h2><div class="success">ไฟล์ widgetไม่มี API parsing/business transition, state combinationsผิดกฎหมายสร้างไม่ได้, all commandsมี typed error/retry policy, scanner focusมี widget tests และ payload/contract testsผ่านเหมือนก่อน refactor</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่แท้จริง</a></li><li><a href="#section-2">สี่ระดับความเสี่ยง</a></li><li><a href="#section-3">ระดับ 2 — ตาข่ายที่ได้มาฟรี</a></li><li><a href="#section-4">ระดับ 3 — แตก widget อย่างปลอดภัย</a></li><li><a href="#section-5">ระดับ 4 — เปลี่ยนลำดับ</a></li><li><a href="#section-6">ลำดับที่ควรทำทั้งโปรเจกต์</a></li><li><a href="#section-7">สิ่งที่ห้ามทำ</a></li><li><a href="#section-8">รายการเดินด้วยมือของแต่ละโดเมน</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–80 นาที</span><span>ลงมือทำ: ลองแก้จอจริงหนึ่งจุดตามขั้นตอนในบทนี้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.13, Part 14 (การทดสอบ), 16.11 (เทสต์ 0 ข้อ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> แก้จอ 2,000 บรรทัดในโปรเจกต์ที่ไม่มีเทสต์ โดยรู้ว่าตรงไหนเสี่ยงและตรงไหนไม่</div>
+
+<section id="section-1"><h2>1. ปัญหาที่แท้จริง</h2><p>16.11 พบว่า wmsapp มีเทสต์ 0 ข้อ และ 16.6 อธิบายว่าทำไม — <code>ApiService()</code> เป็น singleton ที่ฉีดของทดสอบไม่ได้</p><table><thead><tr><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>แก้อะไรก็ไม่มีอะไรบอกว่าพัง</td></tr>
+<tr><td>ต้องทดสอบด้วยมือทุกครั้ง</td></tr>
+<tr><td>ยิ่งจอใหญ่ ยิ่งต้องเดินหลายเส้นทาง</td></tr>
+</tbody></table><p>แต่ข้อสรุปที่ว่า “แก้ไม่ได้เลยจนกว่าจะมีเทสต์” ผิด</p><div class="note"><strong>สิ่งที่ทำได้คือแยกการเปลี่ยนแปลงตามความเสี่ยง</strong> — บางอย่างคอมไพเลอร์ตรวจให้ได้ บางอย่างเทสต์ได้ทันทีโดยไม่ต้องรื้อ และมีน้อยมากที่ต้องทดสอบด้วยมือจริง ๆ</div></section>
+
+<section id="section-2"><h2>2. สี่ระดับความเสี่ยง</h2><table><thead><tr><th>ระดับ</th><th>ประเภทการเปลี่ยน</th><th>ใครตรวจให้</th><th>ตัวอย่างจาก Part 16–19</th></tr></thead><tbody>
+<tr><td><strong>1</strong></td><td>เปลี่ยนชื่อ / ย้ายค่าคงที่ / ลบโค้ดตาย</td><td><code>flutter analyze</code></td><td>ย้ายสีไป <code>AppTheme</code> (19.2)</td></tr>
+<tr><td><strong>2</strong></td><td>ดึงตรรกะออกเป็นฟังก์ชันบริสุทธิ์</td><td><strong>เทสต์ที่เขียนใหม่</strong></td><td><code>allowedDestinations</code> (18.5)</td></tr>
+<tr><td><strong>3</strong></td><td>แตก widget / เปลี่ยนชนิดข้อมูล</td><td>คอมไพเลอร์ + เดินด้วยมือ</td><td>แตก <code>packing_screen</code> (19.2)</td></tr>
+<tr><td><strong>4</strong></td><td>เปลี่ยนลำดับ / เปลี่ยนพฤติกรรม</td><td><strong>เดินด้วยมือเท่านั้น</strong></td><td>แก้ <code>_openPack</code> (19.3)</td></tr>
+</tbody></table><p>สามระดับแรกทำได้ปลอดภัย — ระดับ 4 คือที่ต้องระวัง</p><pre class="code-vs"><code># ระดับ 1 — ตรวจได้ทันที
+flutter analyze --no-pub</code></pre><p>ในโปรเจกต์นี้ <code>analysis_options.yaml</code> เปิด <code>flutter_lints</code> ไว้โดยไม่ปิดกฎไหนเลย (16.11) — จึงจับได้มากกว่าที่คิด</p><table><thead><tr><th>สิ่งที่ analyze จับได้</th></tr></thead><tbody>
+<tr><td>ตัวแปรที่ไม่ถูกใช้หลังลบโค้ด</td></tr>
+<tr><td>import ที่ไม่จำเป็น</td></tr>
+<tr><td>ชนิดไม่ตรงหลังเปลี่ยนโมเดล</td></tr>
+<tr><td><code>switch</code> บน enum ที่ไม่ครบ</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. ระดับ 2 — ตาข่ายที่ได้มาฟรี</h2><p>ทุกบทใน Part 17–19 ชี้จุดที่ดึงออกมาเทสต์ได้ทันที</p><table><thead><tr><th>สิ่งที่ดึงได้</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>validateHost</code> / <code>validatePort</code></td><td>16.5</td></tr>
+<tr><td><code>Model.fromJson</code> ทุกตัว</td><td>17.9, 19.6, 19.9</td></tr>
+<tr><td><code>allowedDestinations</code></td><td>18.5</td></tr>
+<tr><td><code>checkSerial</code></td><td>19.4</td></tr>
+<tr><td><code>collectedCountFor</code></td><td>19.2</td></tr>
+<tr><td><code>OrderPipeline.blockedAt</code></td><td>19.9</td></tr>
+<tr><td><code>SortingStationView.cleared()</code></td><td>19.11</td></tr>
+</tbody></table><p>รูปแบบเดียวกันทุกครั้ง</p><pre class="code-vs"><code>// ก่อน — อยู่ในเมธอดของ State อ่านฟิลด์ตรง ๆ
+int _collectedCountFor(PackingPartItem part) =&gt; part.serialRequire
+    ? (_collectedSerials[part.partId]?.length ?? 0)
+    : (_collectedQty[part.partId] ?? 0);</code></pre><pre class="code-vs"><code>// หลัง — ฟังก์ชันระดับไฟล์ รับทุกอย่างเข้ามา
+int collectedCountFor({
+  required bool serialRequire,
+  required List&lt;String&gt;? serials,
+  required int? qty,
+}) =&gt; serialRequire ? (serials?.length ?? 0) : (qty ?? 0);</code></pre><pre class="code-vs"><code>// ในจอ — เรียกใช้ ไม่เปลี่ยนพฤติกรรม
+int _collectedCountFor(PackingPartItem part) =&gt; collectedCountFor(
+      serialRequire: part.serialRequire,
+      serials: _collectedSerials[part.partId],
+      qty: _collectedQty[part.partId],
+    );</code></pre><div class="note"><strong>การเปลี่ยนนี้ไม่เปลี่ยนพฤติกรรมเลย</strong> — เมธอดเดิมยังอยู่ ยังเรียกจากที่เดิม ผลลัพธ์เหมือนเดิมทุกกรณี<br>แต่ตอนนี้เทสต์ได้ และเทสต์นั้นจะยังใช้ได้แม้จะรื้อจอทั้งจอ</div><pre class="code-vs"><code>test('มี S/N → นับจากรายการ S/N', () {
+  expect(collectedCountFor(serialRequire: true, serials: ['A', 'B'], qty: 99), 2);
+});
+
+test('ไม่มี S/N → นับจากจำนวนที่กรอก', () {
+  expect(collectedCountFor(serialRequire: false, serials: ['A'], qty: 5), 5);
+});
+
+test('ยังไม่มีอะไร → 0', () {
+  expect(collectedCountFor(serialRequire: true, serials: null, qty: null), 0);
+  expect(collectedCountFor(serialRequire: false, serials: null, qty: null), 0);
+});</code></pre><p>สามเทสต์ครอบทุกกิ่ง และรันในไม่กี่มิลลิวินาที</p></section>
+
+<section id="section-4"><h2>4. ระดับ 3 — แตก widget อย่างปลอดภัย</h2><p>19.2 แบบฝึกหัดเสนอให้แตก <code>packing_screen.dart</code> เป็น 13 ไฟล์</p><p>ลำดับที่ปลอดภัย</p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ตรวจด้วย</th></tr></thead><tbody>
+<tr><td>1</td><td>ย้ายค่าคงที่ออกไปไฟล์ใหม่</td><td><code>analyze</code></td></tr>
+<tr><td>2</td><td><strong>คัดลอก</strong> widget ไปไฟล์ใหม่ ยังไม่ลบของเดิม</td><td>—</td></tr>
+<tr><td>3</td><td>เปลี่ยนพารามิเตอร์จากอ่านฟิลด์เป็นรับเข้ามา</td><td><code>analyze</code></td></tr>
+<tr><td>4</td><td>เปลี่ยนที่เรียกให้ใช้ตัวใหม่</td><td><code>analyze</code></td></tr>
+<tr><td>5</td><td>ลบของเดิม</td><td><code>analyze</code> จับตัวที่ไม่ถูกใช้</td></tr>
+<tr><td>6</td><td>เดินเส้นทางที่กระทบ</td><td>มือ</td></tr>
+</tbody></table><p>ขั้นที่ 3 คือจุดที่พลาดได้จริง</p><pre class="code-vs"><code>// ก่อน — อ่านฟิลด์ของ State ได้ตรง ๆ
+Widget _buildPackItemCard(PackingPartItem part) {
+  final collected = _collectedCountFor(part);
+  final isSelected = _selectedPartId == part.partId;
+  final isExpanded = _expandedSerialPartIds.contains(part.partId);
+  ...
+}</code></pre><pre class="code-vs"><code>// หลัง — ต้องรับทุกอย่าง และ<strong>ห้ามลืมตัวไหน</strong>
+class PackingPartCard extends StatelessWidget {
+  const PackingPartCard({
+    super.key,
+    required this.part,
+    required this.collectedCount,
+    required this.isSelected,
+    required this.isExpanded,
+    required this.onTap,
+    required this.onToggleSerials,
+    required this.onRemoveSerial,
+  });
+  ...
+}</code></pre><div class="note"><strong>ใช้ <code>required</code> ทุกตัว ไม่ใช้ค่าเริ่มต้น</strong> — ถ้าใส่ค่าเริ่มต้น เช่น <code>this.isSelected = false</code> แล้วลืมส่ง widget จะทำงานได้แต่ผิด<br>ถ้าเป็น <code>required</code> คอมไพเลอร์จะบอกทันที<br>นี่คือวิธีเปลี่ยนความเสี่ยงระดับ 3 ให้กลายเป็นระดับ 1</div><p>ขั้นที่ 6 ต้องรู้ว่าเดินอะไรบ้าง</p><pre class="code-vs"><code># หาว่า widget นี้ถูกใช้ในสถานะไหน
+rg -B20 "_buildPackItemCard" lib/screens/packing/packing_screen.dart | rg "_PackState"</code></pre></section>
+
+<section id="section-5"><h2>5. ระดับ 4 — เปลี่ยนลำดับ</h2><p>19.3 พบว่า <code>_openPack</code> เรียก <code>_openOrder</code> จากใน <code>setState</code></p><pre class="code-vs"><code>// ก่อน
+setState(() {
+  _currentPackingId = packingId;
+  _packDetail = result.data;
+  if (result.data!.orders.length == 1) {
+    _openOrder(result.data!.orders.first.pickOrderId);
+  } else {
+    _state = _PackState.orderList;
+  }
+});</code></pre><pre class="code-vs"><code>// หลัง
+setState(() {
+  _currentPackingId = packingId;
+  _packDetail = detail;
+  _state = _PackState.orderList;
+});
+if (detail.orders.length == 1) {
+  await _openOrder(detail.orders.first.pickOrderId);
+}</code></pre><table><thead><tr><th>สิ่งที่เปลี่ยน</th><th>คอมไพเลอร์จับไหม</th></tr></thead><tbody>
+<tr><td>ลำดับการเปลี่ยนสถานะ</td><td><strong>ไม่</strong></td></tr>
+<tr><td>จำนวนครั้งที่วาดใหม่</td><td>ไม่</td></tr>
+<tr><td>สถานะตอนที่คำขอล้มเหลว</td><td>ไม่</td></tr>
+</tbody></table><p>ทั้งสามข้อต้องเดินด้วยมือ — และต้องรู้ก่อนว่าจะเดินอะไร</p><pre class="code-vs"><code>รายการทดสอบสำหรับการแก้นี้
+1. กล่องที่มี Order เดียว → เข้าหน้าสินค้าโดยไม่ผ่านหน้ารายการ ✓
+2. กล่องที่มีหลาย Order → เห็นหน้ารายการ Order ✓
+3. กล่อง Order เดียว + ปิดเน็ตก่อนกด → ค้างที่ orderList ไม่ใช่ scanPallet ✓
+4. กดย้อนกลับจาก orderParts ของกล่อง Order เดียว → ไป packList ✓
+5. กดย้อนกลับจาก orderParts ของกล่องหลาย Order → ไป orderList ✓</code></pre><div class="note"><strong>ข้อ 3 คือเหตุผลที่แก้</strong> — และเป็นข้อที่ทดสอบยากที่สุดเพราะต้องจำลองความล้มเหลว<br>วิธีที่เร็วที่สุดคือปิด Wi-Fi ระหว่างที่กด ตามที่ 15.11 แนะนำ<br>ถ้าจำลองไม่ได้ ให้แก้ URL ในหน้า Settings เป็นพอร์ตที่ไม่มีอะไรฟังชั่วคราว</div></section>
+
+<section id="section-6"><h2>6. ลำดับที่ควรทำทั้งโปรเจกต์</h2><p>รวมสิ่งที่ Part 16–19 เสนอไว้ เรียงตามอัตราส่วนผลต่อความเสี่ยง</p><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>ระดับ</th><th>กระทบกี่จอ</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ใส่ <code>cacheWidth</code> ที่ <code>PartThumbnail</code></td><td>1</td><td><strong>12 จุด</strong></td><td>16.10</td></tr>
+<tr><td>2</td><td>แก้ <code>clearSession()</code> ไม่ให้ลบที่อยู่เซิร์ฟเวอร์</td><td>1</td><td>ทั้งแอป</td><td>16.4</td></tr>
+<tr><td>3</td><td>ย้าย <code>INTERNET</code> ไป main manifest</td><td>1</td><td>ทั้งแอป</td><td>16.11</td></tr>
+<tr><td>4</td><td>รวมสอง SignalR service</td><td>2</td><td>4 จอ</td><td>19.12</td></tr>
+<tr><td>5</td><td>เพิ่ม <code>onreconnected</code> + สถานะการเชื่อมต่อ</td><td>2</td><td>4 จอ</td><td>18.8</td></tr>
+<tr><td>6</td><td>เพิ่ม <code>asFailure()</code> แล้วส่ง <code>statusCode</code> ต่อครบ</td><td>1</td><td>20 จุด</td><td>16.7</td></tr>
+<tr><td>7</td><td>เพิ่ม <code>ApiFailureKind</code></td><td>3</td><td>ทั้งแอป</td><td>16.6</td></tr>
+<tr><td>8</td><td>ดึงกฎธุรกิจออกเป็นฟังก์ชันบริสุทธิ์</td><td>2</td><td>ทีละโดเมน</td><td>18.5, 19.4</td></tr>
+<tr><td>9</td><td>คืนตัวควบคุมที่สร้างในเมธอด</td><td>1</td><td>3 จุด</td><td>17.5, 17.8, 17.10</td></tr>
+<tr><td>10</td><td>บอกว่าไม่รู้ผลเมื่อคำสั่งล้มเหลว</td><td>4</td><td>ทุกจอ</td><td>15.11</td></tr>
+<tr><td>11</td><td>แก้สถานะที่ซ่อนอยู่เป็น enum/sealed</td><td>4</td><td>ScanPart, CheckIn</td><td>17.5, 19.7</td></tr>
+<tr><td>12</td><td>แตกไฟล์จอใหญ่</td><td>3</td><td>packing</td><td>19.2</td></tr>
+</tbody></table><div class="note"><strong>สามข้อแรกเป็นระดับ 1 และกระทบทั้งแอป</strong> — ทำได้ในครึ่งวันและแก้ปัญหาที่ผู้ใช้เจอจริง<br>ข้อ 12 อยู่ท้ายสุดไม่ใช่เพราะไม่สำคัญ แต่เพราะ<strong>ไม่ได้แก้ปัญหาที่ผู้ใช้เจอ</strong> — มันทำให้แก้ข้ออื่นง่ายขึ้นในอนาคต<br>การเรียงแบบนี้ต่างจากที่คนมักทำ ซึ่งคือเริ่มจาก “จัดระเบียบโค้ดก่อน”</div></section>
+
+<section id="section-7"><h2>7. สิ่งที่ห้ามทำ</h2><table><thead><tr><th>ห้าม</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>แก้หลายเรื่องในคอมมิตเดียว</td><td>พังแล้วไม่รู้ว่าเพราะข้อไหน</td></tr>
+<tr><td>เปลี่ยนชื่อพร้อมเปลี่ยนพฤติกรรม</td><td>diff อ่านไม่ออกว่าอะไรเปลี่ยนจริง</td></tr>
+<tr><td>แตกไฟล์พร้อมแก้บั๊ก</td><td>เหมือนกัน</td></tr>
+<tr><td><strong>“ปรับปรุงเล็กน้อย” ระหว่างย้ายโค้ด</strong></td><td>ตั้งใจย้าย 100 บรรทัด แต่เปลี่ยนไป 3 บรรทัดที่ไม่มีใครสังเกต</td></tr>
+<tr><td>แก้จอที่ยังไม่ได้อ่านครบ</td><td>สถานะที่ซ่อนอยู่มีจริง (17.5, 19.7)</td></tr>
+</tbody></table><p>แถวที่สี่คือกับดักที่พบบ่อยที่สุด</p><pre class="code-vs"><code>// ตั้งใจแค่ย้าย widget ออกไป
+// แต่ระหว่างย้ายเห็นว่าตรงนี้ควรใช้ ?? แทน !
+final label = part.itemDesc!;         // เดิม
+final label = part.itemDesc ?? '';    // "ปรับปรุงเล็กน้อย"</code></pre><table><thead><tr><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>ถ้าพัง จะไม่รู้ว่าเพราะการย้ายหรือเพราะบรรทัดนี้</td></tr>
+<tr><td>ถ้า <code>itemDesc</code> เคยเป็น null แล้วจอพัง — การแก้นี้ทำให้บั๊กหายไป<strong>โดยไม่มีใครรู้ว่ามีบั๊ก</strong></td></tr>
+</tbody></table><div class="note"><strong>วิธีที่ถูก:</strong> จดไว้ แล้วแก้ในคอมมิตแยก<pre class="code-vs"><code># คอมมิตที่ 1
+refactor(packing): move part card to its own file (no behaviour change)
+
+# คอมมิตที่ 2
+fix(packing): guard null itemDesc in part card</code></pre>คำว่า <em>no behaviour change</em> ในข้อความคอมมิตมีค่ามาก — คนที่มาไล่หาบั๊กทีหลังจะข้ามคอมมิตนั้นได้</div></section>
+
+<section id="section-8"><h2>8. รายการเดินด้วยมือของแต่ละโดเมน</h2><p>เขียนไว้ก่อนเริ่มแก้ ไม่ใช่นึกทีหลัง</p><pre class="code-vs"><code>Receiving
+  1. สแกน PO → เห็นรายการสินค้า
+  2. สแกน Part ที่มี S/N → สแกนครบ → ยืนยัน → ผูกพาเลท
+  3. สแกน Part ที่ไม่มี S/N → กรอกจำนวน → ยืนยัน
+  4. Part ที่มีหลาย condition → เห็น popup เลือก
+  5. ผูกพาเลทไม่สำเร็จ → รายการเข้าลิสต์ค้าง
+  6. กดย้อนกลับตอนโหมดผูกพาเลท → กลับโหมดสแกน</code></pre><pre class="code-vs"><code>Packing
+  1. พาเลทที่มี Pack เดียว Order เดียว → ข้ามหน้ารายการ Order
+  2. พาเลทที่มี Pack เดียว หลาย Order → ผ่านหน้ารายการ
+  3. สินค้าที่ต้องมี S/N → ช่อง S/N + ตาราง
+  4. สินค้าที่ไม่ต้องมี S/N → ช่องจำนวน
+  5. สแกนชิ้นสุดท้าย → ไปหน้าสรุป + เห็นเลขติดตาม
+  6. กดย้อนกลับจากทุกสถานะ → ถอยถูกชั้น</code></pre><pre class="code-vs"><code>Check-in
+  1. สแกนกล่องของช่องใหม่ → เห็น pipeline ทันที
+  2. สแกนกล่องของช่องเดิม → เห็นกล่องอื่นในช่อง
+  3. กดยืนยัน → เห็นปุ่มปริ้นใบส่งสินค้า
+  4. สแกนกล่องสุดท้าย → ช่องปิดและส่งขึ้นรถอัตโนมัติ
+  5. สแกนกล่องที่เช็คอินไปแล้ว → ถูกปฏิเสธ</code></pre><pre class="code-vs"><code>Sorting
+  1. เปิดจอ → เห็นสิบสถานีพร้อมสถานะ
+  2. แตะสถานี AVAILABLE → เมนูปิดใช้งาน
+  3. แตะสถานี BUSY → แผ่นรายละเอียด + รายการกล่อง
+  4. แตะสถานี DISABLED → เมนูเปิดใช้งาน + เหตุผล
+  5. Clear สถานีที่เต็ม → กลับเป็นว่าง และกริดอัปเดต
+  6. ลากลงรีเฟรช</code></pre><table><thead><tr><th>สิ่งที่ต้องทดสอบเพิ่มถ้าแตะเรื่องเครือข่าย</th></tr></thead><tbody>
+<tr><td>ปิด Wi-Fi กลางคำขอ แล้วดูข้อความ</td></tr>
+<tr><td>ปิดเซิร์ฟเวอร์ทดสอบ แล้วเปิดจอ</td></tr>
+<tr><td>เปิดจอค้างไว้ห้านาที แล้วกลับมาใช้</td></tr>
+</tbody></table><p>สามข้อนี้ตรงกับที่ 15.11 ระบุไว้ และเป็นสิ่งที่มักไม่มีใครทดสอบ</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ไม่มีเทสต์แปลว่าแก้ไม่ได้</td><td>สามในสี่ระดับตรวจได้โดยไม่ต้องมีเทสต์เดิม</td></tr>
+<tr><td>ต้องเขียนเทสต์ให้ครบก่อนแก้</td><td>เขียนเฉพาะส่วนที่จะดึงออกมาก็พอ</td></tr>
+<tr><td>จัดระเบียบโค้ดก่อน แล้วค่อยแก้บั๊ก</td><td>บั๊กที่ผู้ใช้เจออยู่ควรมาก่อน</td></tr>
+<tr><td>ปรับปรุงเล็กน้อยระหว่างย้ายโค้ดไม่เป็นไร</td><td>ทำให้ไล่หาสาเหตุไม่ได้</td></tr>
+<tr><td>คอมไพเลอร์จับได้ทุกอย่างถ้าเปลี่ยนชนิด</td><td>ลำดับและพฤติกรรมจับไม่ได้</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><p>เลือกหนึ่งข้อจากตารางในหัวข้อ 6 แล้ววางแผนทำจริง</p><ol><li>เขียนขั้นตอนที่จะทำ พร้อมระบุระดับความเสี่ยงของแต่ละขั้น</li><li>เขียนรายการเดินด้วยมือ</li><li>เขียนข้อความคอมมิตล่วงหน้า</li></ol><details><summary>แนวคำตอบ (ใช้ข้อ 6 — <code>asFailure()</code>)</summary><p><strong>ข้อ 1 — ขั้นตอน</strong></p><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>ระดับ</th><th>ตรวจด้วย</th></tr></thead><tbody>
+<tr><td>1</td><td>เพิ่มเมธอด <code>asFailure&lt;R&gt;()</code> ใน <code>ApiResult</code></td><td>1</td><td><code>analyze</code></td></tr>
+<tr><td>2</td><td>เขียนเทสต์ให้ <code>asFailure</code></td><td>2</td><td>เทสต์</td></tr>
+<tr><td>3</td><td>เปลี่ยน 20 จุดที่ทิ้ง <code>statusCode</code></td><td>1</td><td><code>analyze</code></td></tr>
+<tr><td>4</td><td>เดินเส้นทางที่แตะ</td><td>—</td><td>มือ</td></tr>
+</tbody></table><pre class="code-vs"><code>// ขั้นที่ 1 — ไม่แตะโค้ดเดิมเลย
+class ApiResult&lt;T&gt; {
+  ...
+  /// แปลงความล้มเหลวเป็นชนิดอื่นโดยพก statusCode ไปด้วยเสมอ
+  ///
+  /// ใช้แทน `ApiResult.error(response.error)` ในชั้น extension
+  /// เพื่อไม่ให้ statusCode หายระหว่างทาง (isNotFound จะใช้ได้)
+  ApiResult&lt;R&gt; asFailure&lt;R&gt;() =&gt;
+      ApiResult&lt;R&gt;.error(error, statusCode: statusCode);
+}</code></pre><pre class="code-vs"><code>// ขั้นที่ 2
+test('asFailure พก statusCode ไปด้วย', () {
+  final source = ApiResult&lt;Map&lt;String, dynamic&gt;&gt;.error('ไม่พบ', statusCode: 404);
+  final converted = source.asFailure&lt;POResponse&gt;();
+
+  expect(converted.success, isFalse);
+  expect(converted.error, 'ไม่พบ');
+  expect(converted.statusCode, 404);
+  expect(converted.isNotFound, isTrue);      // ← สิ่งที่ 16.7 บอกว่าใช้ไม่ได้
+});
+
+test('asFailure ไม่มี statusCode ก็ยังทำงาน', () {
+  final source = ApiResult&lt;Map&lt;String, dynamic&gt;&gt;.error('เน็ตหลุด');
+  final converted = source.asFailure&lt;POResponse&gt;();
+
+  expect(converted.statusCode, isNull);
+  expect(converted.isNotFound, isFalse);
+});</code></pre><pre class="code-vs"><code># ขั้นที่ 3 — หาทุกจุด
+rg -n "return ApiResult.error\(response.error\);" lib/services/api</code></pre><pre class="code-vs"><code>// เปลี่ยนทีละบรรทัด — สั้นลงด้วย
+- if (!response.success) return ApiResult.error(response.error);
++ if (!response.success) return response.asFailure();</code></pre><div class="note"><strong>ขั้นที่ 3 เป็นระดับ 1 เพราะคอมไพเลอร์ตรวจชนิดให้</strong> — <code>asFailure&lt;R&gt;()</code> ต้องอนุมานชนิดจากค่าที่คืน ถ้าอนุมานไม่ได้จะคอมไพล์ไม่ผ่าน<br>และพฤติกรรมเปลี่ยนแค่ทางเดียว: <code>statusCode</code> ที่เคยหายกลายเป็นมี ซึ่ง<strong>ไม่มีโค้ดไหนพึ่งพาการที่มันหาย</strong> (16.7 พบว่ายังไม่มีจอไหนใช้ <code>isNotFound</code> เลย)</div><p><strong>ข้อ 2 — รายการเดินด้วยมือ</strong></p><p>เนื่องจากพฤติกรรมที่เปลี่ยนคือ <code>statusCode</code> ที่เคยเป็น null กลายเป็นมีค่า และยังไม่มีใครอ่าน — ความเสี่ยงต่ำมาก</p><table><thead><tr><th>ต้องเดิน</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ทุกโดเมนที่แก้ อย่างละหนึ่งเส้นทางสำเร็จ</td><td>ยืนยันว่าไม่ได้พังตอนแปลงชนิด</td></tr>
+<tr><td>อย่างละหนึ่งเส้นทางล้มเหลว (สแกนรหัสมั่ว)</td><td><strong>ยืนยันว่าข้อความผิดพลาดยังเหมือนเดิม</strong></td></tr>
+</tbody></table><p>แถวที่สองสำคัญ — ถ้า <code>asFailure</code> เขียนผิดจนไม่พก <code>error</code> ไปด้วย ผู้ใช้จะเห็นข้อความว่าง</p><p>เทสต์ในขั้นที่ 2 จับข้อนี้ได้แล้ว แต่การเดินยืนยันว่าใช้ถูกที่</p><p><strong>ข้อ 3 — ข้อความคอมมิต</strong></p><pre class="code-vs"><code>คอมมิตที่ 1
+feat(api): add ApiResult.asFailure to carry statusCode across layers
+
+ชั้น extension ใน services/api/ แปลงความล้มเหลวด้วย
+ApiResult.error(response.error) ซึ่งทิ้ง statusCode ไป 20 จุด
+ทำให้ isNotFound ใช้ได้แค่ 23 จาก 43 จุดโดยไม่มีอะไรเตือน
+
+asFailure() พก statusCode ไปด้วยเสมอ และสั้นกว่าเดิม
+จึงไม่มีอะไรให้ลืม
+
+ยังไม่เปลี่ยนที่เรียก — คอมมิตถัดไป</code></pre><pre class="code-vs"><code>คอมมิตที่ 2
+refactor(api): use asFailure in all 20 places that dropped statusCode
+
+พฤติกรรมเปลี่ยนทางเดียว: statusCode ที่เคยเป็น null กลายเป็นมีค่า
+ยังไม่มีจอไหนอ่าน isNotFound จึงไม่กระทบสิ่งที่แสดงบนจอ
+
+โดเมนที่แก้: receiving (6), putaway (5), unload (3), upload (1),
+picking (5)
+
+เดินด้วยมือแล้ว: ทุกโดเมน อย่างละหนึ่งเส้นทางสำเร็จและหนึ่งล้มเหลว</code></pre><table><thead><tr><th>สิ่งที่ข้อความคอมมิตต้องบอก</th><th>อยู่ตรงไหน</th></tr></thead><tbody>
+<tr><td>ทำไมถึงแก้</td><td>ย่อหน้าแรก</td></tr>
+<tr><td>เปลี่ยนพฤติกรรมไหม</td><td>ย่อหน้าที่สอง</td></tr>
+<tr><td>ทดสอบอะไรไปแล้ว</td><td>บรรทัดสุดท้าย</td></tr>
+</tbody></table><div class="note"><strong>บรรทัด “เดินด้วยมือแล้ว” มีค่ามากในโปรเจกต์ที่ไม่มีเทสต์</strong> — เป็นบันทึกเดียวที่บอกว่าการเปลี่ยนนี้ถูกตรวจแค่ไหน<br>คนที่มาไล่หาบั๊กในอีกหกเดือนจะรู้ว่าควรสงสัยคอมมิตไหน<br>และถ้าเขียนไม่ได้ แปลว่ายังไม่ได้ทดสอบ — ซึ่งเป็นสัญญาณให้กลับไปทำก่อนกด push</div></details></section>
+
+<section id="section-11"><h2>11. สรุป</h2><div class="success"><ul><li>ไม่มีเทสต์ไม่ได้แปลว่าแก้ไม่ได้ — แยกการเปลี่ยนตามความเสี่ยงสี่ระดับ</li><li>ระดับ 1 ตรวจได้ด้วย <code>flutter analyze</code> ซึ่งเปิด lint ครบอยู่แล้ว</li><li>ระดับ 2 ดึงตรรกะออกเป็นฟังก์ชันบริสุทธิ์แล้วเทสต์ได้ทันที โดยไม่เปลี่ยนพฤติกรรม</li><li>ระดับ 3 ใช้ <code>required</code> ทุกพารามิเตอร์ เพื่อให้คอมไพเลอร์จับสิ่งที่ลืม</li><li>ระดับ 4 คือการเปลี่ยนลำดับ ซึ่งต้องเดินด้วยมือเท่านั้น</li><li>สามข้อแรกในลำดับที่ควรทำเป็นระดับ 1 และกระทบทั้งแอป</li><li>การแตกไฟล์อยู่ท้ายสุด เพราะไม่ได้แก้ปัญหาที่ผู้ใช้เจอ</li><li>ห้าม “ปรับปรุงเล็กน้อย” ระหว่างย้ายโค้ด</li><li>เขียนรายการเดินด้วยมือก่อนเริ่มแก้ ไม่ใช่นึกทีหลัง</li><li>ข้อความคอมมิตต้องบอกว่าเปลี่ยนพฤติกรรมไหม และทดสอบอะไรไปแล้ว</li></ul></div><p><strong>บทหน้า:</strong> ต่อทั้ง outbound เป็นเส้นเดียว สรุปสิ่งที่พบทั้ง Part และปิดกลุ่ม wmsapp</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

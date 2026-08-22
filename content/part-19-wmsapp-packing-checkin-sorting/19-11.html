@@ -1,14 +1,215 @@
-<div class="note"><strong>Sorting API แยก operations กับ test simulator:</strong> dashboard/station/toggle/clear เป็นงานจริง ส่วน available packs/create batch อยู่ใต้ test routes และไม่ควรเปิดใน production โดยไม่มี authorization</div>
-<section><h2>1. Operational endpoints</h2><pre class="code-vs"><code>GET  /sorting/stations
-GET  /sorting/stations/{stationId}
-POST /sorting/stations/toggle
-POST /sorting/stations/clear</code></pre></section>
-<section><h2>2. Dashboard model</h2><p><code>SortingDashboardData</code> มี stations, completedCount และ queuedCount Count เป็น server aggregate ไม่ควรคำนวณ completed/queued จาก 10 cards เพราะ queue อยู่นอก station</p></section>
-<section><h2>3. Station view</h2><p><code>SortingStationView</code> มี stationId, enabled, status, pallet/capacity/full/disableReason และ copyWith สำหรับ realtime patch แต่ nullable parametersทำให้ set palletId กลับ null ไม่ได้ชัด ควรใช้ sentinel/copy API ที่รองรับ clear</p></section>
-<section><h2>4. Station detail</h2><p>detail เพิ่ม cartons และ pendingCount; carton มี packingId, owner, weightGram, itemCount, sortedAt และ sequenceNo สำหรับตรวจลำดับ/น้ำหนักใน station</p></section>
-<section><h2>5. Test endpoints</h2><pre class="code-vs"><code>GET  /sorting/test/available-packs
-POST /sorting/test/create-batch
-{ operatorId, packingIds }</code></pre><p>response batch เป็น ASSIGNED พร้อม stationId หรือ QUEUED</p></section>
-<section><h2>6. Queue semantics</h2><p><code>CreateSortingBatchResponse.isQueued</code> derive จาก outcome String Batch size ต้องตรง packing IDs ที่ accepted และ partial reject policyต้อง explicitเพื่อไม่ให้ packหาย/ซ้ำใน queue</p></section>
-<section><h2>7. Parser/error debt</h2><p>invalid times fallback now, statuses/outcomes เป็น String และ toggle/clear ยังคืน dynamic map ควรใช้ enum+typed result+server time/version และคง statusCode/problem details ทุก endpoint</p></section>
-<section><h2>8. API tests</h2><div class="success">ทดสอบ 10 stations, disabled/full, carton sequence, ASSIGNED/QUEUED, duplicate packing IDs, no station, clear/toggle conflict และ production policyที่ปิด test routes</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด models/sorting/sorting_models.dart ทั้ง 199 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.10, 18.7 (copyWith)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน <code>copyWith</code> ที่ใช้กับเหตุการณ์เรียลไทม์ และเห็นกับดักของมันเมื่อฟิลด์เป็น nullable</div>
+
+<section><h2>1. หกคลาสและตัวช่วยหนึ่งตัว</h2><table><thead><tr><th>คลาส</th><th>บรรทัด</th><th>ใช้ที่</th></tr></thead><tbody>
+<tr><td><code>SortingDashboardData</code></td><td>20</td><td>จอหลัก</td></tr>
+<tr><td><code>SortingStationView</code></td><td>52</td><td>การ์ดสถานี + เหตุการณ์เรียลไทม์</td></tr>
+<tr><td><code>SortingStationDetail</code></td><td>38</td><td>แผ่นรายละเอียด</td></tr>
+<tr><td><code>SortingStationCarton</code></td><td>27</td><td>กล่องในสถานี</td></tr>
+<tr><td><code>AvailablePackForSorting</code></td><td>27</td><td><strong>จอทดสอบ</strong></td></tr>
+<tr><td><code>CreateSortingBatchResponse</code></td><td>20</td><td><strong>จอทดสอบ</strong></td></tr>
+</tbody></table><p>สองคลาสท้ายใช้เฉพาะ <code>TestSortingScreen</code> ที่เข้าจากเมนูซ่อน (16.3)</p><p>และมีตัวช่วยระดับไฟล์</p><pre class="code-vs"><code>DateTime? _parseDate(dynamic v) {
+  if (v == null) return null;
+  return DateTime.tryParse(v.toString());
+}</code></pre><table><thead><tr><th>เทียบกับที่อื่น</th><th>เขียนอย่างไร</th></tr></thead><tbody>
+<tr><td>picking (16.8)</td><td><code>DateTime.tryParse(json['createdAt'] ?? '') ?? DateTime.now()</code></td></tr>
+<tr><td>receiving (17.9)</td><td><code>json['createdAt'] != null ? DateTime.tryParse(...) ?? now : now</code></td></tr>
+<tr><td><strong>sorting</strong></td><td><code>_parseDate(json['sortedAt']) ?? DateTime.now()</code></td></tr>
+</tbody></table><div class="note"><strong>ตัวช่วยนี้ดีกว่าอีกสองแบบ</strong> — <code>v.toString()</code> ทนกว่า <code>?? ''</code> เพราะรับค่าที่ไม่ใช่สตริงได้<br>และการแยกเป็นฟังก์ชันทำให้แก้ที่เดียวได้ทั้งไฟล์<br>แต่ยังจบด้วย <code>?? DateTime.now()</code> ซึ่งเป็นค่าเริ่มต้นที่ 16.8 เตือนว่าอันตราย — ต่างกันตรงที่ <code>sortedAt</code> ใช้แสดงอย่างเดียว ไม่ได้ใช้เรียงลำดับ</div></section>
+
+<section><h2>2. copyWith ที่รับเฉพาะที่เปลี่ยนได้</h2><pre class="code-vs"><code>SortingStationView copyWith({
+  String? status,
+  String? palletId,
+  int? cartonsCount,
+  int? maxCapacity,
+  bool? isFull,
+  bool? enabled,
+}) =&gt;
+    SortingStationView(
+      stationId: stationId,           // ← ไม่ให้เปลี่ยน
+      enabled: enabled ?? this.enabled,
+      status: status ?? this.status,
+      palletId: palletId ?? this.palletId,
+      cartonsCount: cartonsCount ?? this.cartonsCount,
+      maxCapacity: maxCapacity ?? this.maxCapacity,
+      isFull: isFull ?? this.isFull,
+      disableReason: disableReason,   // ← ไม่ให้เปลี่ยน
+    );</code></pre><table><thead><tr><th>ฟิลด์</th><th>เปลี่ยนได้ไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>stationId</code></td><td><strong>ไม่</strong></td><td>เป็นตัวระบุ เปลี่ยนแล้วกลายเป็นสถานีอื่น</td></tr>
+<tr><td><code>disableReason</code></td><td><strong>ไม่</strong></td><td>เปลี่ยนพร้อม <code>enabled</code> ผ่านการโหลดใหม่</td></tr>
+<tr><td>อีกหกตัว</td><td>ได้</td><td>เปลี่ยนจากเหตุการณ์เรียลไทม์</td></tr>
+</tbody></table><p>ใช้ที่เดียวในทั้งโปรเจกต์</p><pre class="code-vs"><code>void _onCounterUpdated(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as int?;
+  if (stationId == null || !mounted) return;
+
+  setState(() {
+    final idx = _stations.indexWhere((s) =&gt; s.stationId == stationId);
+    if (idx &lt; 0) return;
+    _stations[idx] = _stations[idx].copyWith(
+      cartonsCount: data['current'] as int?,
+      maxCapacity: data['total'] as int?,
+      isFull: data['isFull'] as bool?,
+      palletId: data['palletId'] as String?,
+      status: 'BUSY',
+    );
+  });
+}</code></pre><div class="note"><strong>นี่คือสิ่งที่ 18.7 เสนอให้ putaway ทำ</strong> — ที่นั่นประกอบ <code>Map</code> ใหม่ด้วยมือและต้องจำเก็บ <code>items</code> ไว้เอง<br>ที่นี่ <code>copyWith</code> เก็บทุกฟิลด์ที่ไม่ได้ส่งมาให้อัตโนมัติ — ลืมไม่ได้</div></section>
+
+<section><h2>3. กับดักของ copyWith กับฟิลด์ nullable</h2><pre class="code-vs"><code>palletId: palletId ?? this.palletId,</code></pre><p>รูปแบบ <code>?? this.x</code> แปลว่า “ถ้าไม่ส่งมา ใช้ค่าเดิม”</p><p>แต่ <code>palletId</code> เป็น <code>String?</code> — จึงแยกไม่ออกระหว่างสองความหมาย</p><table><thead><tr><th>ผู้เรียกส่ง</th><th>ตั้งใจว่า</th><th>ได้ผล</th></tr></thead><tbody>
+<tr><td>ไม่ส่ง</td><td>ไม่เปลี่ยน</td><td>ค่าเดิม ✓</td></tr>
+<tr><td><code>palletId: 'PAL-7'</code></td><td>เปลี่ยนเป็นค่านี้</td><td>ค่าใหม่ ✓</td></tr>
+<tr><td><code>palletId: null</code></td><td><strong>ล้างค่า</strong></td><td><strong>ค่าเดิม ✗</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือกับดัก — <strong>ล้างค่าให้เป็น null ไม่ได้</strong></p><pre class="code-vs"><code>// เหตุการณ์ StationCleared ควรล้าง palletId
+_stations[idx] = _stations[idx].copyWith(
+  status: 'AVAILABLE',
+  palletId: null,        // ← ไม่มีผล พาเลทเดิมยังค้าง
+);</code></pre><div class="note"><strong>โค้ดปัจจุบันเลี่ยงปัญหานี้โดยไม่รู้ตัว</strong> — เหตุการณ์ที่ทำให้สถานีว่าง (<code>StationCleared</code>) ไม่ได้ใช้ <code>copyWith</code> แต่เรียก <code>_loadStations()</code> โหลดใหม่ทั้งชุด<pre class="code-vs"><code>void _onAnyStationEvent(Map&lt;String, dynamic&gt; _) {
+  // เปลี่ยนสถานะ + อาจมี station ใหม่ assign → reload ทั้งกริด
+  _loadStations();
+}</code></pre>คอมเมนต์อธิบายเหตุผลไว้ และเป็นการตัดสินใจที่ถูก — แต่ถ้าวันหนึ่งมีคนอยากประหยัดคำขอแล้วเปลี่ยนมาใช้ <code>copyWith</code> จะเจอบั๊กนี้ทันที</div><p>วิธีแก้ที่ใช้กันคือใช้ค่ากลาง</p><pre class="code-vs"><code>/// ตัวคั่นสำหรับ copyWith — บอกความต่างระหว่าง "ไม่ส่ง" กับ "ส่ง null"
+const _unset = Object();
+
+SortingStationView copyWith({
+  Object? palletId = _unset,
+  ...
+}) =&gt;
+    SortingStationView(
+      stationId: stationId,
+      palletId: identical(palletId, _unset) ? this.palletId : palletId as String?,
+      ...
+    );</code></pre><p>อ่านยากขึ้นมาก — และในกรณีนี้ไม่คุ้ม เพราะการโหลดใหม่ทั้งชุดทำงานได้ดีอยู่แล้ว</p><p>สิ่งที่ควรทำแทนคือ<strong>เขียนคอมเมนต์บอกข้อจำกัด</strong></p><pre class="code-vs"><code>/// สร้างสำเนาที่แก้เฉพาะฟิลด์ที่ส่งมา
+///
+/// ข้อจำกัด: ส่ง null เพื่อ "ล้างค่า" ไม่ได้ — จะถือว่าไม่เปลี่ยน
+/// ถ้าต้องล้าง (เช่นสถานีว่าง) ให้โหลดใหม่ด้วย _loadStations()
+SortingStationView copyWith({...})</code></pre></section>
+
+<section><h2>4. เหตุการณ์ที่อัปเดตทันทีกับที่โหลดใหม่</h2><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  _hub.onCounterUpdated(_onCounterUpdated);      // ← อัปเดตทันที
+  _hub.onStationFull(_onAnyStationEvent);        // ← โหลดใหม่
+  _hub.onStationCleared(_onAnyStationEvent);     // ← โหลดใหม่
+  _hub.onStationToggled(_onAnyStationEvent);     // ← โหลดใหม่
+  _hub.onBatchAssigned(_onAnyStationEvent);      // ← โหลดใหม่
+  _initSignalR();
+  _loadStations();
+}</code></pre><table><thead><tr><th>เหตุการณ์</th><th>ทำอะไร</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>StationCounterUpdated</code></td><td><code>copyWith</code> ทันที</td><td>เกิดบ่อย และเปลี่ยนแค่ตัวเลข</td></tr>
+<tr><td>อีกสี่ตัว</td><td>โหลดใหม่ทั้งชุด</td><td>เปลี่ยนโครงสร้าง อาจมีสถานีอื่นเปลี่ยนตาม</td></tr>
+</tbody></table><p>การแบ่งนี้สมเหตุสมผล</p><pre class="code-vs"><code>// ตัวนับเพิ่มขึ้นทีละกล่อง — อาจเกิดหลายครั้งต่อวินาที
+// ถ้าโหลดใหม่ทุกครั้งจะยิงคำขอถี่มาก
+_stations[idx] = _stations[idx].copyWith(cartonsCount: ..., isFull: ...);</code></pre><pre class="code-vs"><code>// batch ถูก assign — สถานีที่ว่างอาจกลายเป็น BUSY
+// และคิวที่รออาจลดลง → ตัวเลขสรุปเปลี่ยนด้วย
+_loadStations();</code></pre><div class="note"><strong>เทียบกับ putaway (18.4)</strong> ที่ทำทั้งสองอย่างพร้อมกัน — อัปเดตจากเหตุการณ์แล้วโหลดใหม่ตามมาทันที<pre class="code-vs"><code>// putaway
+setState(() { _stationStatus = {...}; });    // อัปเดตทันที
+_loadStationStatus();                         // แล้วโหลดใหม่</code></pre>ที่นั่นได้ทั้งการตอบสนองทันทีและข้อมูลครบ แต่ยิงคำขอทุกเหตุการณ์<br>ที่นี่เลือกอย่างใดอย่างหนึ่งตามชนิดเหตุการณ์ — ประหยัดกว่าแต่ตัวนับที่อัปเดตทันทีอาจไม่ตรงกับเซิร์ฟเวอร์ถ้าพลาดเหตุการณ์ไป</div><p>และมีการป้องกันเมื่อไม่พบสถานี</p><pre class="code-vs"><code>final idx = _stations.indexWhere((s) =&gt; s.stationId == stationId);
+if (idx &lt; 0) return;      // ← ยังไม่โหลด หรือสถานีถูกลบ</code></pre><p>เกิดได้ถ้าเหตุการณ์มาถึงก่อน <code>_loadStations()</code> แรกจะเสร็จ</p><table><thead><tr><th>ผล</th><th>เหมาะไหม</th></tr></thead><tbody>
+<tr><td>ทิ้งเหตุการณ์นั้นไป</td><td>ใช่ — การโหลดที่กำลังทำอยู่จะได้ข้อมูลล่าสุดอยู่แล้ว</td></tr>
+</tbody></table></section>
+
+<section><h2>5. สองคลาสที่ต่างกันแค่ nullable</h2><pre class="code-vs"><code>class SortingStationView {
+  final int? cartonsCount;      // ← nullable
+  final int? maxCapacity;
+  final bool? isFull;
+}
+
+class SortingStationDetail {
+  final int cartonsCount;       // ← ไม่ nullable
+  final int maxCapacity;
+  final bool isFull;
+}</code></pre><table><thead><tr><th>คลาส</th><th>ทำไมต่างกัน</th></tr></thead><tbody>
+<tr><td><code>View</code></td><td>สถานีที่ว่างไม่มีตัวเลขเหล่านี้</td></tr>
+<tr><td><code>Detail</code></td><td>เปิดดูรายละเอียดได้เฉพาะสถานีที่ <code>BUSY</code></td></tr>
+</tbody></table><p>สอดคล้องกับ <code>_openStation</code> ที่เปิดแผ่นรายละเอียดเฉพาะเมื่อ <code>BUSY</code> (19.10)</p><pre class="code-vs"><code>// View — ต้องตรวจก่อนใช้
+final isFull = s.isFull == true;
+
+// Detail — ใช้ได้เลย
+if (_detail!.isFull) { ... }</code></pre><div class="note"><strong>การให้ชนิดสะท้อนความจริงแบบนี้ถูกต้อง</strong> — ไม่ใช่การเขียนไม่สม่ำเสมอ<br>ต่างจากกรณีที่ 17.13 พบว่า <code>UnloadItem</code> กับ <code>UnloadedItem</code> ต่างกันแค่ชื่อจนสับสน<br>ที่นี่ชื่อ <code>View</code> กับ <code>Detail</code> บอกชัดว่าใช้คนละที่</div><p>ค่าเริ่มต้นก็ต่างกันตาม</p><pre class="code-vs"><code>// View — ไม่มีค่าเริ่มต้น ปล่อยเป็น null
+cartonsCount: json['cartonsCount'],
+
+// Detail — มีค่าเริ่มต้น เพราะต้องมีค่าเสมอ
+cartonsCount: json['cartonsCount'] ?? 0,</code></pre></section>
+
+<section><h2>6. โมเดลของจอทดสอบ</h2><pre class="code-vs"><code>class CreateSortingBatchResponse {
+  final String outcome;       // ASSIGNED | QUEUED
+  final int? stationId;
+  final int batchSize;
+  ...
+  bool get isQueued =&gt; outcome == 'QUEUED';
+}</code></pre><table><thead><tr><th><code>outcome</code></th><th><code>stationId</code></th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>ASSIGNED</code></td><td>มีค่า</td><td>ถูกจัดเข้าสถานีแล้ว</td></tr>
+<tr><td><code>QUEUED</code></td><td><code>null</code></td><td>ไม่มีสถานีว่าง เข้าคิวรอ</td></tr>
+</tbody></table><p>สองฟิลด์ผูกกัน — และชนิดไม่ได้บังคับ เหมือน <code>palletId</code>/<code>palletError</code> ใน 17.9</p><p><code>isQueued</code> เป็น getter ที่ตั้งชื่อให้เงื่อนไข — ทำถูก</p><pre class="code-vs"><code>// ผู้ใช้เห็นข้อความต่างกัน
+res.data!.isQueued
+    ? 'ไม่มีสถานีว่าง — เข้าคิวรอแล้ว'
+    : 'จัดเข้าสถานี ${res.data!.stationId} แล้ว'</code></pre><p>คลาสนี้กับ <code>AvailablePackForSorting</code> ใช้เฉพาะจอทดสอบ — และ endpoint ก็มีคำว่า <code>test</code></p><pre class="code-vs"><code>await _get('/sorting/test/available-packs');
+await _post('/sorting/test/create-batch', {...});</code></pre><div class="note"><strong>การใส่ <code>test</code> ใน path ทำให้ฝั่งเซิร์ฟเวอร์ปิดได้ง่ายเมื่อขึ้นระบบจริง</strong> — ต่างจากแผ่น “S/N สำหรับทดสอบ” (18.12, 19.4) ที่อยู่ในโค้ดแอปและต้องแก้แอปเพื่อปิด<br>เป็นวิธีจัดการเครื่องมือทดสอบที่ดีกว่า เพราะปิดที่เดียวได้ผลทุกเครื่อง</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>copyWith</code> ล้างค่าเป็น null ได้</td><td>ไม่ได้ ถ้าเขียนแบบ <code>?? this.x</code></td></tr>
+<tr><td>เหตุการณ์เรียลไทม์ทุกตัวควรจัดการเหมือนกัน</td><td>แบ่งตามว่าเปลี่ยนตัวเลขหรือเปลี่ยนโครงสร้าง</td></tr>
+<tr><td>สองคลาสที่ฟิลด์ต่างกันเป็นความไม่สม่ำเสมอ</td><td>ที่นี่สะท้อนความจริงว่าใช้คนละบริบท</td></tr>
+<tr><td>ฟิลด์ nullable สองตัวเป็นอิสระ</td><td><code>outcome</code> กับ <code>stationId</code> ผูกกัน</td></tr>
+<tr><td>เครื่องมือทดสอบต้องปิดที่แอป</td><td>ปิดที่ endpoint ได้ผลทุกเครื่อง</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมอยากลดคำขอโดยให้ <code>StationCleared</code> ใช้ <code>copyWith</code> แทนการโหลดใหม่</p><ol><li>จะเกิดอะไรขึ้นถ้าทำตรง ๆ</li><li>แก้อย่างไร</li><li>คุ้มไหมที่จะทำ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ทำตรง ๆ แล้วเกิดอะไร</strong></p><pre class="code-vs"><code>void _onStationCleared(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as int?;
+  if (stationId == null || !mounted) return;
+
+  setState(() {
+    final idx = _stations.indexWhere((s) =&gt; s.stationId == stationId);
+    if (idx &lt; 0) return;
+    _stations[idx] = _stations[idx].copyWith(
+      status: 'AVAILABLE',
+      palletId: null,          // ← ตั้งใจล้าง
+      cartonsCount: null,
+      isFull: false,
+    );
+  });
+}</code></pre><table><thead><tr><th>ฟิลด์</th><th>ตั้งใจ</th><th>ได้จริง</th></tr></thead><tbody>
+<tr><td><code>status</code></td><td>AVAILABLE</td><td>AVAILABLE ✓</td></tr>
+<tr><td><code>palletId</code></td><td>null</td><td><strong>ค่าเดิม ✗</strong></td></tr>
+<tr><td><code>cartonsCount</code></td><td>null</td><td><strong>ค่าเดิม ✗</strong></td></tr>
+<tr><td><code>isFull</code></td><td>false</td><td>false ✓</td></tr>
+</tbody></table><p>ผู้ใช้จะเห็นการ์ดที่บอกว่า <strong>“ว่าง”</strong> แต่ยังแสดงรหัสพาเลทและจำนวนกล่องของงานที่เพิ่งเคลียร์ไป</p><p>และการ์ดตัดสินใจจาก <code>status</code></p><pre class="code-vs"><code>// _StationCard
+final isBusy = s.status == 'BUSY';
+...
+isBusy ? _buildBusyRow(...) : _buildAvailableRow(stationLabel)</code></pre><p>โชคดีที่แถวว่างไม่แสดง <code>palletId</code> — ค่าที่ค้างจึงไม่ปรากฏบนจอ</p><p><strong>แต่จะปรากฏทันทีที่สถานีกลับเป็น <code>BUSY</code></strong> จากเหตุการณ์ถัดไป ก่อนที่ตัวนับจริงจะมาถึง</p><pre class="code-vs"><code>t=0  StationCleared  → status=AVAILABLE, palletId ค้าง 'PAL-3'
+t=5  BatchAssigned   → _loadStations() → ได้ข้อมูลจริง ✓</code></pre><p>ถ้า <code>BatchAssigned</code> ยังใช้ <code>_loadStations()</code> อยู่ ปัญหาจะถูกกลบ — แต่ถ้าเปลี่ยนตัวนั้นด้วยจะเห็นชัด</p><p><strong>ข้อ 2 — แก้อย่างไร</strong></p><p>ทางที่ตรงที่สุดคือเพิ่มเมธอดเฉพาะกิจ แทนที่จะทำ <code>copyWith</code> ให้ซับซ้อน</p><pre class="code-vs"><code>/// สถานีถูกเคลียร์ — ล้างข้อมูลงานทั้งหมด เหลือแต่ตัวระบุและการตั้งค่า
+SortingStationView cleared() =&gt; SortingStationView(
+      stationId: stationId,
+      enabled: enabled,
+      status: 'AVAILABLE',
+      palletId: null,
+      cartonsCount: null,
+      maxCapacity: maxCapacity,      // ความจุของสถานีไม่เปลี่ยน
+      isFull: false,
+      disableReason: disableReason,
+    );</code></pre><pre class="code-vs"><code>_stations[idx] = _stations[idx].cleared();</code></pre><table><thead><tr><th>ข้อดี</th><th>เทียบกับ copyWith ที่ใช้ <code>_unset</code></th></tr></thead><tbody>
+<tr><td>อ่านแล้วรู้ว่าทำอะไร</td><td><code>copyWith(palletId: null, ...)</code> อ่านไม่ออกว่าล้างหรือไม่เปลี่ยน</td></tr>
+<tr><td>บังคับให้คิดครบทุกฟิลด์</td><td>ลืมฟิลด์หนึ่งได้</td></tr>
+<tr><td>ไม่ต้องมี <code>Object?</code> กับ <code>identical</code></td><td>โค้ดอ่านง่ายกว่ามาก</td></tr>
+</tbody></table><div class="note"><strong>หลักที่ใช้ได้ทั่วไป:</strong> <code>copyWith</code> เหมาะกับ “แก้ทีละฟิลด์โดยไม่รู้ว่าจะแก้ตัวไหน”<br>ส่วนการเปลี่ยนสถานะที่มีความหมายชัด (เคลียร์, ปิดใช้งาน, รับงาน) ควรเป็นเมธอดที่ตั้งชื่อตามความหมาย<br>เมธอดแบบหลังยังเทสต์ได้ตรงกว่าด้วย<pre class="code-vs"><code>test('cleared() ล้างข้อมูลงานแต่เก็บความจุไว้', () {
+  final busy = SortingStationView(
+    stationId: 3, enabled: true, status: 'BUSY',
+    palletId: 'PAL-3', cartonsCount: 12, maxCapacity: 20, isFull: false,
+  );
+  final after = busy.cleared();
+
+  expect(after.status, 'AVAILABLE');
+  expect(after.palletId, isNull);
+  expect(after.cartonsCount, isNull);
+  expect(after.maxCapacity, 20);      // ← ความจุไม่หาย
+  expect(after.stationId, 3);
+});</code></pre></div><p><strong>ข้อ 3 — คุ้มไหม</strong></p><table><thead><tr><th>คำถาม</th><th>คำตอบ</th></tr></thead><tbody>
+<tr><td><code>StationCleared</code> เกิดบ่อยแค่ไหน</td><td>เมื่อผู้ใช้เคลียร์สถานี — ไม่กี่ครั้งต่อชั่วโมง</td></tr>
+<tr><td>ประหยัดคำขอได้เท่าไร</td><td>ไม่กี่ครั้งต่อชั่วโมงต่อเครื่อง</td></tr>
+<tr><td>เสี่ยงอะไร</td><td>ข้อมูลบนจอไม่ตรงถ้าเขียนพลาด</td></tr>
+</tbody></table><p><strong>ไม่คุ้ม</strong> — ต่างจาก <code>StationCounterUpdated</code> ที่เกิดทุกครั้งที่กล่องถูกวางลง</p><pre class="code-vs"><code>// เหตุผลที่ counter ใช้ copyWith
+สถานีหนึ่งรับ 20 กล่อง × 10 สถานี = 200 เหตุการณ์ต่อรอบ
+ถ้าโหลดใหม่ทุกครั้ง = 200 คำขอ</code></pre><pre class="code-vs"><code>// เหตุผลที่ cleared ไม่ต้อง
+เคลียร์สถานี = 10 ครั้งต่อรอบ
+โหลดใหม่ 10 ครั้ง = ไม่รู้สึก</code></pre><p><strong>หลักที่ใช้ตัดสิน:</strong> ใช้การอัปเดตทันทีเมื่อเหตุการณ์<strong>เกิดถี่</strong> และเปลี่ยน<strong>เฉพาะค่าที่มากับเหตุการณ์</strong></p><p>ถ้าเหตุการณ์ทำให้โครงสร้างเปลี่ยน (สถานีใหม่ถูกจัด คิวลด ตัวเลขสรุปเปลี่ยน) การโหลดใหม่ถูกกว่าและปลอดภัยกว่า</p><p>โค้ดปัจจุบันแบ่งไว้ถูกแล้ว — และคอมเมนต์ใน <code>_onAnyStationEvent</code> ก็อธิบายเหตุผลไว้</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>หกคลาส และสองคลาสท้ายใช้เฉพาะจอทดสอบ</li><li><code>_parseDate</code> เป็นตัวช่วยระดับไฟล์ที่ทนกว่าวิธีใน picking และ receiving</li><li><code>copyWith</code> ไม่ให้เปลี่ยน <code>stationId</code> และ <code>disableReason</code></li><li>รูปแบบ <code>?? this.x</code> ทำให้ล้างค่าเป็น null ไม่ได้</li><li>โค้ดเลี่ยงกับดักนั้นโดยให้เหตุการณ์ที่ต้องล้างค่าโหลดใหม่ทั้งชุด</li><li>แบ่งเหตุการณ์สองแบบ: อัปเดตทันทีเมื่อเปลี่ยนตัวเลข โหลดใหม่เมื่อเปลี่ยนโครงสร้าง</li><li><code>View</code> กับ <code>Detail</code> ต่างกันที่ nullable เพราะใช้คนละบริบท — ถูกต้อง</li><li><code>outcome</code> กับ <code>stationId</code> ผูกกันแต่ชนิดไม่บังคับ</li><li>endpoint ทดสอบมีคำว่า <code>test</code> ใน path — ปิดที่เซิร์ฟเวอร์ได้</li><li>การเปลี่ยนสถานะที่มีความหมายชัด ควรเป็นเมธอดที่ตั้งชื่อ ไม่ใช่ <code>copyWith</code></li></ul></div><p><strong>บทหน้า:</strong> SignalR ตัวที่สอง และการฟังซ้อนสองชั้นระหว่างจอกับแผ่นรายละเอียด</p></section>

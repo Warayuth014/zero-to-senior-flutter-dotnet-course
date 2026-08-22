@@ -1,12 +1,276 @@
-<div class="note"><strong>Preview แยก read decision จาก commit:</strong> scan Packing ID ครั้งแรกยังไม่เขียน DB แต่คืน slot/destination/items/progress เพื่อให้ operator ตรวจ ก่อนกด Check-IN จริง</div>
-<section><h2>1. Preview request</h2><pre class="code-vs"><code>POST /checkin/preview
-{ "packingId": packingId }</code></pre><p>แม้ใช้ POST endpoint นี้ประกาศว่าไม่มี side effect จึงสามารถเรียกซ้ำเพื่อ refresh decision ได้</p></section>
-<section><h2>2. Preview response</h2><p>มี owner/customer order, pack status, items/orders, pickOrderIds, slotId, isNewSlot, isAlreadyCheckedIn, dispatchDestination และ pipeline counters</p></section>
-<section><h2>3. Destination dialog</h2><p>dialog barrierDismissible=false แสดง destination/slot หรือคำเตือนสแกนซ้ำ ผู้ใช้กดรับทราบแล้ว UI จึงตั้ง pending pack แต่ยังไม่ commit</p></section>
-<section><h2>4. Existing vs new slot</h2><p>slot เดิมเรียก GET detail; slot ใหม่สร้าง synthetic CheckInSlotDetail status OPEN จาก counters ใน preview เพื่อแสดง pipeline ก่อนมี row จริงใน DB</p></section>
-<section><h2>5. Commit request</h2><pre class="code-vs"><code>POST /checkin/scan
-{ "packingId": packingId,
-  "operatorId": operatorId }</code></pre><p>response คืน slotId และ isReadyToComplete เท่านั้น จากนั้น UI refresh slot</p></section>
-<section><h2>6. Preview race</h2><p>ระหว่าง preview กับ commit pack อาจถูกอีกเครื่อง check-in หรือ slot เปลี่ยน Backend ต้อง validate/assign atomically และตอบผล authoritative; client มี local duplicate guardแต่ห้ามพึ่ง guard นี้</p></section>
-<section><h2>7. Pending state</h2><p><code>_pendingPack</code> คือ draft พร้อมปุ่มยืนยัน; isAlreadyCheckedIn ปิดปุ่ม การสแกน carton ใหม่ขณะมี pending อาจแทน draft เดิม จึงควร confirm discard หรือ serialize workflow</p></section>
-<section><h2>8. Preview/commit tests</h2><div class="success">ทดสอบ new/existing slot, already checked-in, destination null, preview stale, two-device race, timeout after commit และ scan ใหม่ทับ pending โดย carton ต้องถูกบันทึกไม่เกินหนึ่งครั้ง</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด checkin/checkin_screen.dart ทั้ง 1,441 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.6, 17.5 (สถานะที่ซ่อนอยู่), 18.11 (enum)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ไม่มี enum และเขียนเครื่องสถานะที่ซ่อนอยู่ออกมาได้</div>
+
+<section><h2>1. เจ็ดฟิลด์ที่ต้องคิดพร้อมกัน</h2><pre class="code-vs"><code>class _CheckInScreenState extends State&lt;CheckInScreen&gt; {
+  final _api = ApiService();
+  final _scanCtrl = TextEditingController();
+  final _scanFocus = FocusNode();
+
+  bool _loading = false;
+
+  // Pack ที่สแกนไว้รอกด Check-IN (ยังไม่เข้า DB)
+  PreviewCheckInResponse? _pendingPack;
+
+  // Pack ล่าสุดที่ Check-IN แล้ว ใช้แสดงปุ่มปริ้นใบส่งสินค้าแบบ mock
+  PreviewCheckInResponse? _deliveryNotePack;
+  DateTime? _deliveryNoteCreatedAt;
+
+  // Slot ที่กำลังดูอยู่ (null = ยังไม่ได้สแกน, อยู่หน้าเริ่ม)
+  CheckInSlotDetail? _slotDetail;
+}</code></pre><p>เจ็ดฟิลด์ น้อยกว่า packing สามเท่า — แต่<strong>อ่านยากกว่า</strong></p><table><thead><tr><th>ฟิลด์</th><th>คอมเมนต์บอกว่า</th></tr></thead><tbody>
+<tr><td><code>_pendingPack</code></td><td>สแกนแล้วรอกดยืนยัน ยังไม่เข้าฐานข้อมูล</td></tr>
+<tr><td><code>_deliveryNotePack</code></td><td>ยืนยันแล้ว ใช้แสดงปุ่มปริ้น</td></tr>
+<tr><td><code>_deliveryNoteCreatedAt</code></td><td>เวลาที่ยืนยัน</td></tr>
+<tr><td><code>_slotDetail</code></td><td><code>null</code> = อยู่หน้าเริ่ม</td></tr>
+</tbody></table><div class="note"><strong>คอมเมนต์สี่บรรทัดนี้มีค่ามาก</strong> — เพราะชื่อฟิลด์อย่างเดียวบอกไม่ได้ว่า <code>_pendingPack</code> ต่างจาก <code>_deliveryNotePack</code> อย่างไร ทั้งที่เป็นคลาสเดียวกัน<br>แต่การที่ต้องมีคอมเมนต์อธิบายก็เป็นสัญญาณว่า<strong>ชนิดข้อมูลไม่ได้บอกความหมายเอง</strong></div></section>
+
+<section><h2>2. เครื่องสถานะที่ซ่อนอยู่</h2><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  final onSlotPage =
+      _slotDetail != null ||
+      _pendingPack != null ||
+      _deliveryNotePack != null;
+  return PopScope(
+    canPop: !onSlotPage,
+    ...
+    child: ... onSlotPage ? _buildSlotDetail() : _buildScan(),
+  );
+}</code></pre><p>บรรทัดเดียวนี้แบ่งจอเป็นสองหน้า — แต่เงื่อนไขมีสามส่วน</p><p>ไล่ชุดค่าที่เป็นไปได้ตามชนิด</p><table><thead><tr><th><code>_slotDetail</code></th><th><code>_pendingPack</code></th><th><code>_deliveryNotePack</code></th><th>หมายถึง</th><th>เกิดจริงไหม</th></tr></thead><tbody>
+<tr><td>null</td><td>null</td><td>null</td><td>หน้าสแกน</td><td><strong>ใช่</strong></td></tr>
+<tr><td>มี</td><td>มี</td><td>null</td><td>สแกนแล้ว รอกดยืนยัน (ช่องมีอยู่แล้ว)</td><td><strong>ใช่</strong></td></tr>
+<tr><td>มี</td><td>null</td><td>มี</td><td>ยืนยันแล้ว แสดงปุ่มปริ้น</td><td><strong>ใช่</strong></td></tr>
+<tr><td>มี</td><td>null</td><td>null</td><td>ดูช่องเฉย ๆ</td><td>เกิดได้ถ้า <code>_openSlot</code> ล้มเหลวหลังยืนยัน</td></tr>
+<tr><td>null</td><td>มี</td><td>null</td><td>สแกนแล้วแต่โหลดช่องไม่ได้</td><td><strong>ใช่ — กรณีช่องใหม่ที่ preview ผิด</strong></td></tr>
+<tr><td>มี</td><td>มี</td><td>มี</td><td>??</td><td><strong>ไม่ควรเกิด</strong></td></tr>
+<tr><td>null</td><td>null</td><td>มี</td><td>??</td><td>ไม่ควรเกิด</td></tr>
+<tr><td>null</td><td>มี</td><td>มี</td><td>??</td><td>ไม่ควรเกิด</td></tr>
+</tbody></table><p>แปดชุดตามชนิด — ห้าชุดเกิดจริง สามชุดไม่ควรเกิด</p><div class="note"><strong>เทียบกับ packing ที่มี enum</strong> — ที่นั่นมีห้าสถานะและเป็นไปได้ห้าอย่างพอดี<br>ที่นี่มีห้าสถานะที่ตั้งใจ แต่ชนิดข้อมูลยอมให้เกิดแปดอย่าง<br>เป็นปัญหาเดียวกับ <code>ScanPartScreen</code> ใน 17.5 ที่ <code>_pendingLine</code> กับ <code>_scanningItem</code> มีค่าพร้อมกันได้</div></section>
+
+<section><h2>3. หน้าสองที่ประกอบจากสามการ์ด</h2><pre class="code-vs"><code>Widget _buildSlotDetail() {
+  final slot = _slotDetail;
+  final pending = _pendingPack;
+  final deliveryNote = _deliveryNotePack;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      // 1) Pack details card (บนสุด) — มีเฉพาะเมื่อมี pending
+      if (pending != null) ...[
+        _buildPendingPackCard(pending),
+        ...
+      ],
+      // 2) ใบส่งสินค้า — มีเฉพาะหลังยืนยัน
+      if (deliveryNote != null) ...[ ... ],
+      // 3) pipeline + รายการกล่อง — มีเฉพาะเมื่อโหลดช่องได้
+      if (slot != null) ...[ ... ],
+    ],
+  );
+}</code></pre><p>สามการ์ดที่แสดงตามฟิลด์ของตัวเอง — โครงเดียวกับ <code>_buildSessionBody()</code> ใน 17.12</p><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>เพิ่มการ์ดใหม่ง่าย</td><td>ต้องอ่านทุกบรรทัดถึงจะรู้ว่าสถานะหนึ่งแสดงอะไร</td></tr>
+<tr><td>ไม่มีโครง if/else ใหญ่</td><td><strong>ไม่มีที่ไหนเขียนว่ามีกี่สถานะ</strong></td></tr>
+</tbody></table><p>ผลของแถวล่าง: คนที่มาอ่านต้องประกอบตารางในหัวข้อ 2 ขึ้นเอง</p><pre class="code-vs"><code>// สิ่งที่ควรมีอยู่บนสุดของไฟล์
+/// สถานะของจอ Check-in
+/// - [Scanning]  ยังไม่ได้สแกน
+/// - [Pending]   สแกนแล้ว รอกดยืนยัน
+/// - [Confirmed] ยืนยันแล้ว แสดงใบส่งสินค้า
+sealed class CheckInState {}</code></pre></section>
+
+<section><h2>4. การสแกนที่ทำสามอย่างต่อกัน</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanCarton() async {
+  final packingId = _scanCtrl.text.trim().toUpperCase();
+  if (packingId.isEmpty) return;
+
+  setState(() =&gt; _loading = true);
+  final res = await _api.previewCheckIn(packingId);       // ← 1. preview
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'สแกนไม่สำเร็จ');
+    _scanCtrl.clear();
+    _scanFocus.requestFocus();
+    return;
+  }
+
+  final preview = res.data!;
+  _scanCtrl.clear();
+
+  // popup แจ้งปลายทาง
+  await _showDestinationDialog(preview);                   // ← 2. บังคับให้อ่าน
+  if (!mounted) return;
+
+  setState(() {
+    _pendingPack = preview;
+    _deliveryNotePack = null;
+    _deliveryNoteCreatedAt = null;
+    if (preview.isNewSlot) {
+      _slotDetail = _syntheticSlotFromPreview(preview);    // ← 3a. สร้างเอง
+    }
+  });
+  if (!preview.isNewSlot) {
+    await _openSlot(preview.slotId);                       // ← 3b. โหลดจริง
+  }
+  _scanFocus.requestFocus();
+}</code></pre><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th><th>เขียนฐานข้อมูลไหม</th></tr></thead><tbody>
+<tr><td>1</td><td>ถามว่ากล่องนี้ไปช่องไหน</td><td><strong>ไม่</strong></td></tr>
+<tr><td>2</td><td>เด้ง popup แจ้งปลายทาง</td><td>ไม่</td></tr>
+<tr><td>3</td><td>เตรียมข้อมูลช่อง</td><td>ไม่</td></tr>
+</tbody></table><p>ทั้งสามขั้นไม่แตะฐานข้อมูล — การเขียนเกิดตอนกดปุ่ม Check-IN เท่านั้น</p><div class="note"><strong>รูปแบบนี้เข้มกว่า 18.9</strong> — ที่นั่น preview เป็นทางเลือกที่คนเขียนใส่ไว้ ที่นี่เป็นขั้นบังคับที่มี endpoint แยก<br>เหมาะกับ check-in เพราะการยืนยันผิดช่องแปลว่าของขึ้นรถผิดคัน ซึ่งแก้ยากมาก</div><p>ขั้นที่ 3 แยกสองทาง</p><pre class="code-vs"><code>CheckInSlotDetail _syntheticSlotFromPreview(PreviewCheckInResponse p) {
+  return CheckInSlotDetail(
+    status: 'OPEN',
+    cartons: const [],           // ← ยังไม่มีกล่องในช่อง
+    customerOrderId: p.customerOrderId,
+    pipelineTotal: p.pipelineTotal,
+    pickDone: p.pickDone,
+    packDone: p.packDone,
+    sortingDone: p.sortingDone,
+    checkInDone: p.checkInDone,
+  );
+}</code></pre><table><thead><tr><th><code>isNewSlot</code></th><th>ทำอะไร</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>true</code></td><td>สร้างข้อมูลช่องขึ้นเองจาก preview</td><td>ช่องยังไม่มีในฐานข้อมูล ยิงไปก็ไม่เจอ</td></tr>
+<tr><td><code>false</code></td><td>ยิง <code>getCheckInSlot</code></td><td>ช่องมีอยู่แล้ว มีกล่องอื่นอยู่</td></tr>
+</tbody></table><p>คอมเมนต์อธิบายเหตุผลไว้</p><pre class="code-vs"><code>// ตั้ง pending pack แล้วโหลด slot เดิมถ้ามีจริงใน DB
+// ถ้า slot ใหม่ → สร้าง synthetic slot จาก preview เพื่อให้ pipeline card แสดงได้เลย</code></pre><p>คำว่า <em>synthetic</em> ในชื่อเมธอดบอกชัดว่าเป็นข้อมูลที่แอปสร้างขึ้น ไม่ได้มาจากเซิร์ฟเวอร์ — ตั้งชื่อได้ดี</p></section>
+
+<section><h2>5. popup ที่ปิดไม่ได้</h2><pre class="code-vs"><code>Future&lt;void&gt; _showDestinationDialog(PreviewCheckInResponse p) async {
+  await showDialog&lt;void&gt;(
+    context: context,
+    barrierDismissible: false,        // ← กดข้างนอกปิดไม่ได้
+    builder: (ctx) =&gt; AlertDialog(
+      title: Row(children: [
+        Icon(p.isAlreadyCheckedIn ? Icons.warning_amber_rounded : ...),
+        ...
+      ]),
+      ...
+    ),
+  );
+}</code></pre><p>บังคับให้ผู้ใช้อ่านปลายทางก่อน — เพราะนี่คือข้อมูลสำคัญที่สุดในหน้านี้</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>barrierDismissible: false</code></td><td>ผู้ใช้ที่กดพลาดไม่ข้ามข้อมูลสำคัญ</td></tr>
+<tr><td>ไอคอนเปลี่ยนตาม <code>isAlreadyCheckedIn</code></td><td>เตือนกรณีสแกนซ้ำ</td></tr>
+<tr><td><code>await</code> ก่อนทำต่อ</td><td>ไม่ให้หน้าจอเปลี่ยนขณะที่ยังอ่านอยู่</td></tr>
+</tbody></table><p>และมีการตรวจซ้ำตอนกดยืนยัน</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmCheckIn() async {
+  final pack = _pendingPack;
+  if (pack == null) return;
+
+  if (pack.isAlreadyCheckedIn) {
+    showErrorDialog(context, message: 'Pack ${pack.packingId} ถูก check-in ไปแล้ว');
+    return;
+  }
+  ...
+}</code></pre><div class="note"><strong>ตาข่ายสองชั้น</strong> — เตือนตอนสแกน และปฏิเสธตอนกด<br>จำเป็นเพราะ popup แค่แจ้ง ไม่ได้บังคับให้ผู้ใช้ยกเลิก — ผู้ใช้ที่กดปิดแล้วกด Check-IN ต่อจะถูกจับที่ด่านสอง<br>รูปแบบเดียวกับ 17.6 ที่ <code>_confirmPart</code> ตรวจซ้ำสิ่งที่ <code>_addSerial</code> ตรวจไปแล้ว</div><p>แต่ข้อมูล <code>isAlreadyCheckedIn</code> มาจาก preview ที่ยิงไปก่อนหน้า — อาจเก่าแล้ว</p><p>ถ้าคนอื่นเช็คอินกล่องเดียวกันระหว่างนั้น ด่านนี้จะไม่จับ และเซิร์ฟเวอร์ต้องเป็นคนปฏิเสธ</p><p>เหมือนที่ 18.10 สรุปไว้ — ชั้นในเครื่องช่วยให้รู้เร็ว ไม่ได้ป้องกัน</p></section>
+
+<section><h2>6. เจ็ดจุดที่แตะสถานะ</h2><pre class="code-vs"><code>rg "_pendingPack =|_slotDetail =|_deliveryNotePack =" lib/screens/checkin/checkin_screen.dart</code></pre><table><thead><tr><th>เมธอด</th><th>ตั้งอะไร</th></tr></thead><tbody>
+<tr><td><code>_scanCarton</code></td><td><code>_pendingPack</code>, ล้างสองตัว, อาจตั้ง <code>_slotDetail</code></td></tr>
+<tr><td><code>_openSlot</code></td><td><code>_slotDetail</code></td></tr>
+<tr><td><code>_confirmCheckIn</code></td><td>ล้าง <code>_pendingPack</code>, ตั้ง <code>_deliveryNotePack</code></td></tr>
+<tr><td><code>_backToScan</code></td><td>ล้างทั้งสี่</td></tr>
+</tbody></table><p>สี่เมธอด — น้อยกว่า packing ที่มีเจ็ด</p><p>แต่การหาต้องค้นสามคำ ไม่ใช่คำเดียว</p><table><thead><tr><th></th><th>packing</th><th>checkin</th></tr></thead><tbody>
+<tr><td>ค้นด้วย</td><td><code>_state = _PackState</code></td><td>สามคำแยกกัน</td></tr>
+<tr><td>อ่านแล้วรู้ว่าไปสถานะไหน</td><td><strong>รู้ทันที</strong></td><td>ต้องประกอบเอง</td></tr>
+<tr><td>ลืมตั้งฟิลด์หนึ่ง</td><td>เป็นไปไม่ได้</td><td><strong>เกิดได้</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>// _confirmCheckIn — ล้าง _pendingPack แต่ไม่ได้แตะ _slotDetail
+setState(() {
+  _pendingPack = null;
+  _deliveryNotePack = pack;
+  _deliveryNoteCreatedAt = DateTime.now();
+});
+await _openSlot(scanResult.slotId);      // ← โหลด _slotDetail แยกต่างหาก</code></pre><div class="note"><strong>ถ้า <code>_openSlot</code> ล้มเหลว</strong> จะได้ชุดค่า <code>(slot=ค่าเก่า, pending=null, note=มี)</code><br>ซึ่งเป็นแถวที่สี่ในตารางหัวข้อ 2 — ผู้ใช้เห็นใบส่งสินค้าพร้อมข้อมูลช่องที่ยังไม่อัปเดต<br>ไม่ร้ายแรง แต่ตัวเลขในการ์ด pipeline จะไม่รวมกล่องที่เพิ่งเช็คอิน</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ฟิลด์น้อยแปลว่าอ่านง่าย</td><td>เจ็ดฟิลด์ที่นี่อ่านยากกว่า 25 ฟิลด์ของ packing</td></tr>
+<tr><td>คอมเมนต์อธิบายฟิลด์แก้ปัญหาได้</td><td>ช่วยอ่าน แต่ไม่ได้ห้ามสถานะผิด</td></tr>
+<tr><td>preview เป็นขั้นตอนที่เพิ่มความช้า</td><td>ที่นี่ป้องกันของขึ้นรถผิดคัน</td></tr>
+<tr><td><code>isAlreadyCheckedIn</code> ป้องกันการเช็คอินซ้ำได้</td><td>ข้อมูลอาจเก่า เซิร์ฟเวอร์ต้องตรวจซ้ำ</td></tr>
+<tr><td>ข้อมูลที่แอปสร้างเองไม่ควรมี</td><td><code>_syntheticSlotFromPreview</code> จำเป็นเพราะช่องยังไม่มีในฐานข้อมูล</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>เขียนเครื่องสถานะของจอนี้ให้ชัด แล้วแปลงโค้ด</p><ol><li>ลิสต์สถานะที่ตั้งใจให้มี พร้อมข้อมูลที่แต่ละสถานะต้องมี</li><li>เขียนเป็น <code>sealed class</code></li><li>เทียบว่าแก้ปัญหาอะไรได้บ้าง และเหลืออะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สถานะที่ตั้งใจ</strong></p><table><thead><tr><th>สถานะ</th><th>ผู้ใช้เห็น</th><th>ข้อมูลที่ต้องมี</th></tr></thead><tbody>
+<tr><td>Scanning</td><td>ช่องสแกน</td><td>ไม่มี</td></tr>
+<tr><td>Pending</td><td>การ์ดกล่อง + pipeline + ปุ่ม Check-IN</td><td>preview + ข้อมูลช่อง</td></tr>
+<tr><td>Confirmed</td><td>ใบส่งสินค้า + pipeline</td><td>pack ที่ยืนยัน + เวลา + ข้อมูลช่อง</td></tr>
+</tbody></table><p>สามสถานะ ไม่ใช่แปด</p><p><strong>ข้อ 2 — sealed class</strong></p><pre class="code-vs"><code>/// สถานะของจอ Check-in — ถือค่าได้ทีละแบบ
+sealed class CheckInState {
+  const CheckInState();
+}
+
+/// ยังไม่ได้สแกนอะไร
+class CheckInScanning extends CheckInState {
+  const CheckInScanning();
+}
+
+/// สแกนแล้ว รอกดยืนยัน — slot อาจเป็นของจริงหรือสร้างขึ้นจาก preview
+class CheckInPending extends CheckInState {
+  const CheckInPending({required this.pack, required this.slot});
+  final PreviewCheckInResponse pack;
+  final CheckInSlotDetail slot;
+}
+
+/// ยืนยันแล้ว — แสดงใบส่งสินค้า
+class CheckInConfirmed extends CheckInState {
+  const CheckInConfirmed({
+    required this.pack,
+    required this.confirmedAt,
+    required this.slot,
+  });
+  final PreviewCheckInResponse pack;
+  final DateTime confirmedAt;
+  final CheckInSlotDetail slot;
+}</code></pre><pre class="code-vs"><code>CheckInState _state = const CheckInScanning();</code></pre><p>แล้ว <code>build()</code> ใช้ <code>switch</code> ที่คอมไพเลอร์ตรวจ</p><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  return PopScope(
+    canPop: _state is CheckInScanning,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) _backToScan();
+    },
+    child: Scaffold(
+      ...
+      child: switch (_state) {
+        CheckInScanning() =&gt; _buildScan(),
+        CheckInPending(:final pack, :final slot) =&gt;
+            _buildPendingView(pack: pack, slot: slot),
+        CheckInConfirmed(:final pack, :final confirmedAt, :final slot) =&gt;
+            _buildConfirmedView(pack: pack, at: confirmedAt, slot: slot),
+      },
+    ),
+  );
+}</code></pre><p>และการเปลี่ยนสถานะเขียนได้ตรง</p><pre class="code-vs"><code>Future&lt;void&gt; _scanCarton() async {
+  ...
+  final preview = res.data!;
+  _scanCtrl.clear();
+
+  await _showDestinationDialog(preview);
+  if (!mounted) return;
+
+  // ช่องใหม่ → สร้างจาก preview / ช่องเดิม → โหลดจริง
+  final slot = preview.isNewSlot
+      ? _syntheticSlotFromPreview(preview)
+      : await _loadSlotOrSynthetic(preview);
+  if (!mounted) return;
+
+  setState(() =&gt; _state = CheckInPending(pack: preview, slot: slot));
+  _scanFocus.requestFocus();
+}</code></pre><p>สังเกตว่า <code>_openSlot</code> ต้องเปลี่ยนเป็นคืนค่า ไม่ใช่ตั้ง <code>setState</code> เอง</p><pre class="code-vs"><code>/// โหลดข้อมูลช่อง — ถ้าโหลดไม่ได้ ใช้ข้อมูลจาก preview แทน
+/// เพื่อให้ผู้ใช้ยังทำงานต่อได้ ไม่ต้องเริ่มสแกนใหม่
+Future&lt;CheckInSlotDetail&gt; _loadSlotOrSynthetic(PreviewCheckInResponse p) async {
+  final res = await _api.getCheckInSlot(p.slotId);
+  if (res.success) return res.data!;
+
+  if (mounted) {
+    showWarningSnackbar(context, 'โหลดข้อมูลช่องไม่สำเร็จ — แสดงข้อมูลเท่าที่มี');
+  }
+  return _syntheticSlotFromPreview(p);
+}</code></pre><p><strong>ข้อ 3 — แก้อะไรได้ เหลืออะไร</strong></p><table><thead><tr><th>ปัญหา</th><th>แก้ได้ไหม</th></tr></thead><tbody>
+<tr><td>ชุดค่าที่ไม่ควรเกิดสามชุด</td><td><strong>แก้ได้</strong> — สร้างไม่ได้เลย</td></tr>
+<tr><td>ไม่มีที่ไหนเขียนว่ามีกี่สถานะ</td><td><strong>แก้ได้</strong> — อ่าน <code>sealed class</code></td></tr>
+<tr><td>ลืมตั้งฟิลด์หนึ่งตอนเปลี่ยนสถานะ</td><td><strong>แก้ได้</strong> — คอมไพเลอร์บังคับให้ครบ</td></tr>
+<tr><td><code>_openSlot</code> ล้มเหลวแล้วข้อมูลไม่อัปเดต</td><td><strong>แก้ได้</strong> — มีทางสำรอง</td></tr>
+<tr><td>ค้นหาจุดที่เปลี่ยนสถานะ</td><td><strong>แก้ได้</strong> — ค้น <code>_state =</code> คำเดียว</td></tr>
+<tr><td>preview อาจเก่าเมื่อคนอื่นเช็คอินก่อน</td><td><strong>แก้ไม่ได้</strong> — ต้องพึ่งเซิร์ฟเวอร์</td></tr>
+<tr><td>ทิ้ง <code>statusCode</code></td><td>แก้ไม่ได้ด้วยวิธีนี้ — เป็นเรื่องชั้น api</td></tr>
+</tbody></table><p>ห้าจากเจ็ด — และห้าข้อนั้นล้วนเป็นปัญหาที่รากอยู่ในจอ ตรงกับที่ 18.11 สรุปไว้</p><div class="note"><strong>ราคาที่จ่าย</strong> — ต้องแตะโค้ดราว 120 บรรทัด และไม่มีเทสต์รับ<br>19.14 จะพูดถึงวิธีทำงานแบบนี้ให้ปลอดภัย<br>แต่ก่อนอื่น: ดึง <code>_syntheticSlotFromPreview</code> ออกมาเป็นฟังก์ชันบริสุทธิ์แล้วเทสต์ได้ทันที — เป็นตาข่ายชั้นแรกที่ได้มาฟรี<pre class="code-vs"><code>test('synthetic slot ใช้ค่า pipeline จาก preview', () {
+  final slot = syntheticSlotFromPreview(_previewWith(pickDone: 3, packDone: 2));
+  expect(slot.status, 'OPEN');
+  expect(slot.cartons, isEmpty);
+  expect(slot.pickDone, 3);
+  expect(slot.packDone, 2);
+});</code></pre></div></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>เจ็ดฟิลด์ แต่สามตัวเป็น nullable ที่ประกอบกันเป็นโหมด</li><li>ชนิดข้อมูลยอมให้เกิดแปดชุดค่า ทั้งที่ตั้งใจให้มีสามสถานะ</li><li>คอมเมนต์สี่บรรทัดจำเป็นเพราะชื่อฟิลด์บอกความหมายไม่ได้</li><li><code>onSlotPage</code> รวมสามเงื่อนไขเป็นบรรทัดเดียวเพื่อแบ่งหน้า</li><li>หน้าที่สองประกอบจากสามการ์ดที่แสดงตามฟิลด์ของตัวเอง</li><li>preview เป็นขั้นบังคับที่มี endpoint แยก ไม่แตะฐานข้อมูล</li><li>ช่องใหม่สร้างข้อมูลขึ้นเองจาก preview — ชื่อ <code>synthetic</code> บอกชัด</li><li>popup ปิดไม่ได้ บังคับให้อ่านปลายทาง และมีตาข่ายชั้นสองตอนกดยืนยัน</li><li>ค้นจุดที่เปลี่ยนสถานะต้องค้นสามคำ ไม่ใช่คำเดียว</li></ul></div><p><strong>บทหน้า:</strong> การปิดช่องและส่งขึ้นรถอัตโนมัติ — สองคำสั่งที่ยิงต่อกันโดยผู้ใช้ไม่ได้กด</p></section>

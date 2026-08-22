@@ -1,9 +1,274 @@
-<div class="note"><strong>Packing มีลำดับชั้น 4 ระดับ:</strong> scan pallet เพื่อเลือก pack, เลือก order ใน pack แล้วจึงยืนยัน part การ refresh ต้องกลับไปยังระดับที่เหมาะกับผลของ server</div>
-<section><h2>1. Scan pallet</h2><p>trim+uppercase แล้วเรียก <code>scanPalletForPacking</code> หากสำเร็จเก็บ PackingPalletResponse และเปลี่ยนเป็น packList หาก fail ล้างช่องและคืน scanner focus</p></section>
-<section><h2>2. Pallet response</h2><p>มี pallet status/location และ <code>packs</code> แต่ละ PackingSummary มี packingId, status, เวลา และ order done count จึงแสดงทั้งงานที่กำลังทำและงานเสร็จบน pallet เดียวกัน</p></section>
-<section><h2>3. Open pack</h2><p><code>getPack(packingId)</code> คืน orders หากมีหนึ่ง order โค้ดเรียก <code>_openOrder</code> ทันที มิฉะนั้นเข้าสู่ orderList ระวังการเรียก async method ภายใน setState callback ควรแยก decision หลัง setState เพื่อ flow ชัด</p></section>
-<section><h2>4. Open order</h2><pre class="code-vs"><code>GET /packing/pack/{packingId}/order/{pickOrderId}</code></pre><p>response เป็น working snapshot ของ parts พร้อม scannedQty/remaining/availableSerials</p></section>
-<section><h2>5. Reset order draft</h2><p>เมื่อเปิด order ต้องล้าง selectedPart, serial/qty maps, expanded rows และ scanner text แล้วเปลี่ยน orderParts ก่อน request focus หลัง frame</p></section>
-<section><h2>6. Back navigation</h2><p>orderParts ย้อน orderList เมื่อ pack มีหลาย order มิฉะนั้นกลับ packList; success/reset กลับ scan pallet ทุก transition ล้าง context ที่ต่ำกว่าระดับปลายทาง</p></section>
-<section><h2>7. Refresh after success</h2><p><code>_refreshPackList</code> scan pallet เดิมใหม่ หาก pallet ถูก release/shipped endpoint อาจ fail แล้ว reset all; ถ้ายังมี pack อื่นจะกลับ packList ด้วย authoritative snapshot</p></section>
-<section><h2>8. Hierarchy tests</h2><div class="success">ทดสอบ pallet ไม่พบ, pack 0/1/หลาย orders, order load fail, back ทุก state, pallet released หลัง finalize และ request A/B สลับผล โดย ID/state ต้องไม่ผสมข้าม snapshot</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _scanPallet, _openPack, _openOrder, _refreshPackList</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.2, 4.10 (async กับ setState)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการเดินหลายชั้น และเห็นว่าการเรียก async ใน <code>setState</code> ทำอะไร</div>
+
+<section><h2>1. สี่ชั้นของข้อมูล</h2><pre class="code-vs"><code>Pallet (พาเลท)
+  └─ Pack (กล่องที่จะส่ง)
+       └─ Order (ใบสั่งของลูกค้า)
+            └─ Part (สินค้าแต่ละชนิด)</code></pre><table><thead><tr><th>ชั้น</th><th>endpoint</th><th>เก็บใน</th></tr></thead><tbody>
+<tr><td>Pallet</td><td><code>GET /packing/pallet/{id}</code></td><td><code>_palletResp</code></td></tr>
+<tr><td>Pack</td><td><code>GET /packing/pack/{id}</code></td><td><code>_packDetail</code></td></tr>
+<tr><td>Order</td><td><code>GET /packing/pack/{id}/order/{orderId}</code></td><td><code>_orderResp</code></td></tr>
+<tr><td>Part</td><td>อยู่ใน <code>_orderResp.parts</code></td><td>—</td></tr>
+</tbody></table><p>สามคำขอเพื่อไปถึงหน้าที่ทำงานจริง</p><div class="note"><strong>ทำไมไม่ส่งมาทีเดียว</strong> — พาเลทหนึ่งใบอาจมีหลายกล่อง แต่ละกล่องมีหลายใบสั่ง แต่ละใบสั่งมีหลายสินค้า<br>ถ้าส่งครบทุกชั้นในคำขอเดียว ข้อมูลจะใหญ่มากและส่วนใหญ่ไม่ถูกใช้ — ผู้ใช้ทำทีละกล่อง<br>การแบ่งเป็นสามคำขอจึงถูกต้อง แต่แลกมาด้วยการรอสามครั้ง</div></section>
+
+<section><h2>2. ชั้นที่ 1 — สแกนพาเลท</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanPallet() async {
+  final palletId = _scanCtrl.text.trim().toUpperCase();
+  if (palletId.isEmpty) return;
+
+  setState(() =&gt; _loading = true);
+  final result = await _api.scanPalletForPacking(palletId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'ไม่พบ Pallet');
+    _scanCtrl.clear();
+    _scanFocus.requestFocus();
+    return;
+  }
+
+  setState(() {
+    _palletResp = result.data;
+    _state = _PackState.packList;
+  });
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>trim().toUpperCase()</code></td><td>3.6</td></tr>
+<tr><td><code>if (!mounted) return;</code> ก่อน <code>setState</code></td><td>4.13</td></tr>
+<tr><td>ล้างช่องและคืนโฟกัสเมื่อล้มเหลว</td><td>3.9</td></tr>
+<tr><td>ตั้งข้อมูลกับสถานะพร้อมกัน</td><td>—</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — <code>_palletResp</code> กับ <code>_state</code> ถูกตั้งใน <code>setState</code> เดียวกัน</p><p>ทำให้ไม่มีเฟรมไหนที่สถานะเป็น <code>packList</code> แต่ <code>_palletResp</code> ยังเป็น null</p><p>แต่<strong>ไม่ล้างช่องเมื่อสำเร็จ</strong></p><pre class="code-vs"><code>ผู้ใช้สแกน PAL-001 → สำเร็จ → ช่องยังมี "PAL-001"
+  → กดย้อนกลับ → _resetAll() ล้างให้ ✓</code></pre><p>ที่นี่ปลอดภัยเพราะทางกลับล้างให้ — ต่างจาก 18.9 ที่ค่าค้างแล้วต่อกัน</p></section>
+
+<section><h2>3. ชั้นที่ 2 — เปิดกล่อง และการข้ามชั้น</h2><pre class="code-vs"><code>Future&lt;void&gt; _openPack(String packingId) async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.getPack(packingId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'โหลด Pack ไม่สำเร็จ');
+    return;
+  }
+
+  setState(() {
+    _currentPackingId = packingId;
+    _packDetail = result.data;
+    // ถ้ามี Order เดียว เข้า Order เลย
+    if (result.data!.orders.length == 1) {
+      _openOrder(result.data!.orders.first.pickOrderId);   // ← async ใน setState
+    } else {
+      _state = _PackState.orderList;
+    }
+  });
+}</code></pre><p>บรรทัดที่ทำเครื่องหมายไว้เรียกเมธอด async จากใน <code>setState</code></p><table><thead><tr><th>เกิดอะไรขึ้นตามลำดับ</th></tr></thead><tbody>
+<tr><td>1. <code>_openOrder(...)</code> ถูกเรียก แต่ไม่มีใคร <code>await</code></td></tr>
+<tr><td>2. บรรทัดแรกของมันคือ <code>setState(() =&gt; _loading = true)</code> — <strong><code>setState</code> ซ้อน</strong></td></tr>
+<tr><td>3. <code>setState</code> ชั้นนอกจบ Flutter ทำเครื่องหมายว่าต้องวาดใหม่</td></tr>
+<tr><td>4. <code>_openOrder</code> ยังทำงานต่อในเบื้องหลัง</td></tr>
+<tr><td>5. คำขอกลับมา → <code>setState</code> อีกครั้ง → <code>_state = orderParts</code></td></tr>
+</tbody></table><div class="note"><strong>ผลลัพธ์ถูกต้อง แต่มีช่วงที่สถานะไม่ตรงกับข้อมูล</strong><pre class="code-vs"><code>ระหว่างขั้นที่ 3 ถึง 5:
+  _state       = scanPallet (ค่าเดิม — ไม่มีใครเปลี่ยน)
+  _packDetail  = มีค่าแล้ว
+  _loading     = true</code></pre>จอจะวาด <code>_buildScanPallet()</code> โดยมีม่านโหลดทับ — ผู้ใช้เห็นหน้าสแกนพาเลทกระพริบก่อนไปหน้าสินค้า</div><p>เขียนให้ตรงกว่าได้โดยเอาการเรียก async ออกจาก <code>setState</code></p><pre class="code-vs"><code>Future&lt;void&gt; _openPack(String packingId) async {
+  ...
+  final detail = result.data!;
+
+  // มี Order เดียว → ข้ามหน้ารายการ Order ไปเลย
+  if (detail.orders.length == 1) {
+    setState(() {
+      _currentPackingId = packingId;
+      _packDetail = detail;
+    });
+    await _openOrder(detail.orders.first.pickOrderId);
+    return;
+  }
+
+  setState(() {
+    _currentPackingId = packingId;
+    _packDetail = detail;
+    _state = _PackState.orderList;
+  });
+}</code></pre><p>ตอนนี้การเรียก async อยู่นอก <code>setState</code> และมี <code>await</code> ซึ่งทำให้เห็นลำดับชัด</p></section>
+
+<section><h2>4. ชั้นที่ 3 — เปิดใบสั่ง</h2><pre class="code-vs"><code>Future&lt;void&gt; _openOrder(String pickOrderId) async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.getPackOrder(
+    packingId: _currentPackingId,
+    pickOrderId: pickOrderId,
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'โหลด Order ไม่สำเร็จ');
+    return;                        // ← ค้างอยู่สถานะเดิม
+  }
+
+  setState(() {
+    _orderResp = result.data;
+    _currentPickOrderId = pickOrderId;
+    _selectedPartId = null;
+    _collectedSerials.clear();
+    _collectedQty.clear();
+    _expandedSerialPartIds.clear();
+    _partScanCtrl.clear();
+    _serialScanCtrl.clear();
+    _state = _PackState.orderParts;
+  });
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _partScanFocus.requestFocus();
+  });
+}</code></pre><p><code>setState</code> ก้อนนี้ล้างสถานะของชั้นล่างทั้งหมดก่อนเข้า — ทำให้ไม่มีข้อมูลของใบสั่งก่อนหน้าค้าง</p><table><thead><tr><th>ล้างอะไร</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>_selectedPartId</code></td><td>สินค้าที่เลือกเป็นของใบสั่งก่อน</td></tr>
+<tr><td><code>_collectedSerials</code>, <code>_collectedQty</code></td><td>S/N ที่สแกนไว้เป็นของใบสั่งก่อน</td></tr>
+<tr><td><code>_expandedSerialPartIds</code></td><td>สถานะการขยายตาราง</td></tr>
+<tr><td>ช่องกรอกสองช่อง</td><td>เริ่มใหม่สะอาด</td></tr>
+</tbody></table><p>ครบ — และเป็นการล้างที่ตรงข้ามกับปัญหาที่ 17.5 พบใน <code>ScanPartScreen</code></p><p>แต่มีจุดที่ต้องระวัง</p><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(context, message: result.error ?? 'โหลด Order ไม่สำเร็จ');
+  return;
+}</code></pre><table><thead><tr><th>เรียกจาก</th><th>สถานะตอนล้มเหลว</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td><code>_buildOrderList</code> (ผู้ใช้แตะ)</td><td><code>orderList</code></td><td>กลับไปหน้ารายการใบสั่ง — ถูกต้อง</td></tr>
+<tr><td><code>_openPack</code> (ข้ามชั้น)</td><td><strong><code>scanPallet</code></strong></td><td><strong>กลับไปหน้าสแกนพาเลท</strong></td></tr>
+</tbody></table><p>แถวที่สองคือผลของการที่ <code>_openPack</code> ไม่ได้เปลี่ยนสถานะก่อนเรียก — ผู้ใช้ที่กดกล่องแล้วโหลดใบสั่งไม่สำเร็จ จะถูกพากลับไปเริ่มใหม่ทั้งหมด</p><p>ทั้งที่ <code>_packDetail</code> โหลดสำเร็จแล้วและควรอยู่ที่ <code>orderList</code> หรือ <code>packList</code></p><pre class="code-vs"><code>// แก้ให้ไปสถานะที่มีข้อมูลรองรับ ก่อนเรียกชั้นถัดไป
+setState(() {
+  _currentPackingId = packingId;
+  _packDetail = detail;
+  _state = _PackState.orderList;     // ← ตั้งไว้ก่อนเสมอ
+});
+if (detail.orders.length == 1) {
+  await _openOrder(detail.orders.first.pickOrderId);
+}</code></pre><p>ตอนนี้ถ้าโหลดใบสั่งล้มเหลว ผู้ใช้จะอยู่ที่ <code>orderList</code> ซึ่งมีข้อมูลครบและกดใหม่ได้</p></section>
+
+<section><h2>5. การกลับไปชั้นบนหลังแพ็กเสร็จ</h2><pre class="code-vs"><code>Future&lt;void&gt; _refreshPackList() async {
+  // reload pallet data แล้วกลับหน้า packList
+  setState(() =&gt; _loading = true);
+  final palletId = _palletResp!.palletId;
+  final result = await _api.scanPalletForPacking(palletId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    // pallet อาจ shipped ไปแล้ว
+    showErrorDialog(context, message: result.error ?? 'โหลดข้อมูลไม่สำเร็จ');
+    _resetAll();
+    return;
+  }
+
+  setState(() {
+    _palletResp = result.data;
+    _packDetail = null;
+    _currentPackingId = '';
+    _currentPickOrderId = '';
+    _orderResp = null;
+    _selectedPartId = null;
+    _collectedSerials.clear();
+    _collectedQty.clear();
+    _expandedSerialPartIds.clear();
+    _state = _PackState.packList;
+  });
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>โหลดพาเลทใหม่ ไม่ใช้ข้อมูลเก่า</td><td>กล่องที่เพิ่งแพ็กเสร็จต้องเปลี่ยนสถานะ</td></tr>
+<tr><td>คอมเมนต์บอกว่าพาเลทอาจถูกส่งไปแล้ว</td><td>อธิบายว่าทำไมต้อง <code>_resetAll()</code></td></tr>
+<tr><td>ล้างข้อมูลชั้นล่างทั้งหมด</td><td>กลับไปชั้นที่ 1</td></tr>
+</tbody></table><p>แถวกลางเป็นการจัดการที่ถูก — เมื่อกล่องสุดท้ายถูกแพ็ก พาเลทจะถูกปล่อยและสแกนไม่ได้อีก</p><pre class="code-vs"><code>message: resp.palletReleased
+    ? 'Pack สำเร็จ — Pallet เปล่าพร้อมใช้ใหม่'
+    : 'Pack สำเร็จ (ยังเหลือ Pack อื่นใน Pallet)',</code></pre><p>ข้อความบอกผู้ใช้ล่วงหน้าว่าพาเลทว่างแล้ว — ผู้ใช้จึงไม่แปลกใจเมื่อสแกนซ้ำแล้วไม่เจอ</p><div class="note"><strong>แต่ <code>_palletResp!</code> ใช้เครื่องหมายอัศเจรีย์</strong><pre class="code-vs"><code>final palletId = _palletResp!.palletId;</code></pre>เมธอดนี้เรียกจากหน้า <code>success</code> ซึ่ง <code>_palletResp</code> ต้องมีค่าเสมอตามเส้นทางปัจจุบัน — แต่ไม่มีอะไรบังคับไว้<br>เป็นรูปแบบเดียวกับ <code>_fullName!</code> ใน 16.3 และ <code>line.palletId!</code> ใน 17.9</div></section>
+
+<section><h2>6. เส้นทางทั้งหมดที่เปลี่ยนสถานะ</h2><table><thead><tr><th>เมธอด</th><th>จาก</th><th>ไป</th></tr></thead><tbody>
+<tr><td><code>_scanPallet</code></td><td><code>scanPallet</code></td><td><code>packList</code></td></tr>
+<tr><td><code>_openPack</code></td><td><code>packList</code></td><td><code>orderList</code> หรือผ่าน <code>_openOrder</code></td></tr>
+<tr><td><code>_openOrder</code></td><td>ที่ไหนก็ได้</td><td><code>orderParts</code></td></tr>
+<tr><td><code>_confirmPart</code></td><td><code>orderParts</code></td><td><code>success</code> (เมื่อปิดกล่อง)</td></tr>
+<tr><td><code>_refreshPackList</code></td><td><code>success</code></td><td><code>packList</code></td></tr>
+<tr><td><code>_resetAll</code></td><td>ที่ไหนก็ได้</td><td><code>scanPallet</code></td></tr>
+<tr><td><code>_handleBack</code></td><td>แต่ละสถานะ</td><td>ถอยหนึ่งชั้น</td></tr>
+</tbody></table><p>เจ็ดเมธอดที่แตะ <code>_state</code> — ค้นได้ด้วยคำสั่งเดียว</p><pre class="code-vs"><code>rg "_state = _PackState" lib/screens/packing/packing_screen.dart</code></pre><div class="note"><strong>นี่คือประโยชน์ที่ใหญ่ที่สุดของการใช้ <code>enum</code></strong> — ค้นคำเดียวได้ทุกจุดที่เปลี่ยนสถานะ<br>เทียบกับ <code>ScanPartScreen</code> ที่ต้องค้น <code>_pendingLine =</code> และ <code>_scanningItem =</code> แยกกัน แล้วยังต้องคิดเองว่าชุดค่าไหนหมายถึงโหมดอะไร<br>และเทียบกับ <code>CheckInScreen</code> (19.7) ที่ต้องค้นสามฟิลด์</div><p>วาดเป็นแผนภาพได้จากรายการนี้โดยไม่ต้องอ่าน <code>build()</code> เลย</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>เรียก async ใน <code>setState</code> ไม่ได้</td><td>ได้ แต่ทำให้มีช่วงที่สถานะไม่ตรงกับข้อมูล</td></tr>
+<tr><td>ล้มเหลวแล้วผู้ใช้อยู่ที่เดิมเสมอ</td><td>ขึ้นกับว่าสถานะถูกเปลี่ยนก่อนหรือหลัง</td></tr>
+<tr><td>สามคำขอเพื่อไปถึงหน้าทำงานเป็นการออกแบบที่ไม่ดี</td><td>ถูกต้องเมื่อข้อมูลแต่ละชั้นใหญ่</td></tr>
+<tr><td><code>enum</code> ทำให้หาจุดที่เปลี่ยนสถานะยาก</td><td>ตรงกันข้าม — ค้นคำเดียวเจอครบ</td></tr>
+<tr><td>โหลดใหม่หลังแพ็กเสร็จเป็นการเสียเวลา</td><td>จำเป็น เพราะสถานะกล่องเปลี่ยน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “กดเลือกกล่องแล้วเน็ตสะดุด แอปเด้งกลับไปหน้าสแกนพาเลท ต้องเริ่มใหม่”</p><ol><li>อธิบายว่าเกิดได้อย่างไร และเกิดเฉพาะกล่องแบบไหน</li><li>แก้อย่างไร</li><li>ยังมีที่อื่นในไฟล์นี้ที่มีปัญหาแบบเดียวกันไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เกิดได้อย่างไร</strong></p><pre class="code-vs"><code>ผู้ใช้อยู่ packList → แตะกล่อง PACK-007
+  ▼
+_openPack('PACK-007')
+  → getPack สำเร็จ
+  → setState { _packDetail = ..., }
+      → กล่องมี Order เดียว → _openOrder(...) ถูกเรียก
+                              แต่ _state ยังเป็น packList
+  ▼
+_openOrder → getPackOrder → เน็ตสะดุด → ล้มเหลว
+  → showErrorDialog → return
+  ▼
+_state ยังเป็น packList → ผู้ใช้เห็นหน้ารายการกล่อง</code></pre><p>เดี๋ยว — ที่นี่ยังอยู่ <code>packList</code> ซึ่งถูกต้อง ไม่ได้เด้งกลับไป <code>scanPallet</code></p><p>ต้องดูเส้นทางที่ทำให้ถึง <code>scanPallet</code></p><pre class="code-vs"><code>// _handleBack เมื่ออยู่ packList
+case _PackState.packList:
+  _resetAll();          // ← กลับไป scanPallet</code></pre><table><thead><tr><th>ผู้ใช้ทำ</th><th>ผล</th></tr></thead><tbody>
+<tr><td>เห็นกล่อง error แล้วกดปิด</td><td>อยู่ <code>packList</code></td></tr>
+<tr><td><strong>กดปุ่มย้อนกลับของเครื่องเพื่อปิดกล่อง</strong></td><td>กล่องปิด</td></tr>
+<tr><td>กดย้อนกลับอีกครั้ง</td><td><code>_handleBack()</code> → <code>_resetAll()</code> → <strong>กลับหน้าสแกนพาเลท</strong></td></tr>
+</tbody></table><p>ผู้ใช้ที่เคยชินกับการกดย้อนกลับสองครั้งเพื่อปิดกล่องแล้วถอย จะเจอเรื่องนี้</p><p>แต่มีอีกเส้นทางที่ตรงกว่า — เมื่อ <code>_openOrder</code> ถูกเรียกจาก <code>_openPack</code> แล้ว <strong>ผู้ใช้กดย้อนกลับระหว่างที่คำขอยังค้าง</strong></p><pre class="code-vs"><code>_openPack → setState → _openOrder เริ่ม (คำขอค้าง)
+  → _state ยังเป็น packList
+    → ผู้ใช้กดย้อนกลับ → canPop = false → _handleBack()
+      → case packList: _resetAll() → _state = scanPallet
+        → คำขอกลับมา → if (!mounted) ผ่าน (จอยังอยู่)
+          → setState { _state = orderParts }   ← เด้งไปหน้าสินค้าเอง!</code></pre><p>กรณีนี้ร้ายกว่า — ผู้ใช้กดย้อนกลับแล้วถูกพาไปหน้าสินค้าโดยไม่ได้ตั้งใจ</p><p><strong>เกิดเฉพาะกล่องที่มี Order เดียว</strong> เพราะเป็นเส้นทางเดียวที่เรียก <code>_openOrder</code> โดยที่สถานะยังไม่เปลี่ยน</p><p><strong>ข้อ 2 — แก้</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _openPack(String packingId) async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.getPack(packingId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'โหลด Pack ไม่สำเร็จ');
+    return;
+  }
+
+  final detail = result.data!;
+
+  // ตั้งสถานะให้ตรงกับข้อมูลที่มีก่อนเสมอ
+  // ถ้าโหลด Order ต่อไม่สำเร็จ ผู้ใช้จะอยู่ที่ orderList ซึ่งกดใหม่ได้
+  setState(() {
+    _currentPackingId = packingId;
+    _packDetail = detail;
+    _state = _PackState.orderList;
+  });
+
+  // Order เดียว → เข้าไปเลย ไม่ต้องให้ผู้ใช้แตะซ้ำ
+  if (detail.orders.length == 1) {
+    await _openOrder(detail.orders.first.pickOrderId);
+  }
+}</code></pre><p>และป้องกันไม่ให้คำตอบที่ค้างมาเปลี่ยนสถานะข้ามหน้า</p><pre class="code-vs"><code>Future&lt;void&gt; _openOrder(String pickOrderId) async {
+  final packingIdAtStart = _currentPackingId;
+  setState(() =&gt; _loading = true);
+  final result = await _api.getPackOrder(
+    packingId: packingIdAtStart,
+    pickOrderId: pickOrderId,
+  );
+  if (!mounted) return;
+
+  // ผู้ใช้ถอยออกไปแล้วระหว่างรอ — คำตอบนี้ล้าสมัย ทิ้งไป
+  if (_currentPackingId != packingIdAtStart) return;
+
+  setState(() =&gt; _loading = false);
+  ...
+}</code></pre><p>รูปแบบเดียวกับที่ 17.3 ใช้กับหมายเลขคำขอ — ที่นี่ใช้ <code>_currentPackingId</code> เป็นตัวระบุว่ายังเป็นงานเดิมไหม</p><p><strong>ข้อ 3 — ที่อื่นในไฟล์เดียวกัน</strong></p><table><thead><tr><th>เมธอด</th><th>มีปัญหาแบบเดียวกันไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td><code>_scanPallet</code></td><td>ไม่</td><td>ตั้งข้อมูลกับสถานะพร้อมกัน</td></tr>
+<tr><td><code>_openOrder</code> (เรียกจาก UI)</td><td>ไม่</td><td>ผู้ใช้อยู่ <code>orderList</code> ซึ่งมีข้อมูลรองรับ</td></tr>
+<tr><td><code>_confirmPart</code></td><td><strong>มีบางส่วน</strong></td><td>ผู้ใช้กดย้อนกลับระหว่างยืนยันได้</td></tr>
+<tr><td><code>_refreshPackList</code></td><td>ไม่</td><td>อยู่ <code>success</code> ซึ่ง <code>canPop</code> ยังปิด</td></tr>
+</tbody></table><pre class="code-vs"><code>// _confirmPart — ผู้ใช้กดย้อนกลับระหว่างที่คำขอค้าง
+Future&lt;void&gt; _confirmPart(PackingPartItem part, int qty) async {
+  ...
+  final result = await _api.scanPackPart(...);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+  ...
+  setState(() {
+    _orderResp = resp;              // ← ถ้าผู้ใช้ถอยไป packList แล้ว
+    ...                             //   ข้อมูลใบสั่งจะถูกตั้งใหม่โดยไม่มีใครดู
+  });
+}</code></pre><p>ที่นี่ไม่เด้งหน้า เพราะไม่ได้แตะ <code>_state</code> — แต่ข้อมูลจะไม่ตรงกับสถานะ</p><p>วิธีป้องกันเดียวกัน</p><pre class="code-vs"><code>if (_state != _PackState.orderParts) return;</code></pre><div class="note"><strong>หลักที่ได้:</strong> ทุกเมธอด async ที่จบด้วยการ <code>setState</code> ต้องตอบคำถามสองข้อ<ol><li>จอยังอยู่ไหม → <code>if (!mounted)</code></li><li><strong>ผู้ใช้ยังอยู่ที่เดิมไหม</strong> → เทียบสถานะหรือตัวระบุงาน</li></ol>ข้อสองถูกลืมบ่อยกว่ามาก และเป็นสิ่งที่ <code>enum</code> ช่วยให้เขียนได้ง่าย — เทียบค่าเดียวก็รู้</div></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>สี่ชั้น: พาเลท → กล่อง → ใบสั่ง → สินค้า และสามคำขอเพื่อไปถึงหน้าทำงาน</li><li><code>_scanPallet</code> ตั้งข้อมูลกับสถานะใน <code>setState</code> เดียวกัน — ไม่มีช่วงที่ไม่ตรง</li><li><code>_openPack</code> เรียก <code>_openOrder</code> จากใน <code>setState</code> ทำให้เกิด <code>setState</code> ซ้อน</li><li>และทำให้มีช่วงที่ <code>_state</code> ยังเป็นค่าเดิมขณะที่ข้อมูลเปลี่ยนไปแล้ว</li><li>ถ้าโหลดใบสั่งล้มเหลวจากเส้นทางนั้น ผู้ใช้ถูกพากลับไปสองชั้น</li><li><code>_openOrder</code> ล้างสถานะของชั้นล่างครบทุกตัวก่อนเข้า</li><li><code>_refreshPackList</code> โหลดใหม่และรับมือกรณีพาเลทถูกปล่อยไปแล้ว</li><li>เจ็ดเมธอดแตะ <code>_state</code> และค้นได้ด้วยคำเดียว</li><li>เมธอด async ที่จบด้วย <code>setState</code> ต้องตรวจทั้ง <code>mounted</code> และว่าผู้ใช้ยังอยู่ที่เดิม</li></ul></div><p><strong>บทหน้า:</strong> การสแกนสินค้าและ S/N ที่คัดลอกโครงมาจาก picking — พร้อมปัญหาที่คัดลอกมาด้วย</p></section>

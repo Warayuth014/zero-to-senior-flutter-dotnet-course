@@ -1,11 +1,394 @@
-<div class="note"><strong>Sorting SignalR เป็น invalidation + fast patch:</strong> มี 6 event channels แต่หน้าหลัก subscribe เพียงบางรายการ ดังนั้น event coverage ต้องตรวจคู่กับ dashboard counters</div>
-<section><h2>1. Hub lifecycle</h2><p><code>SortingSignalRService</code> เป็น singleton/ref-count ต่อ <code>/hubs/sorting</code> ด้วย automatic reconnect connect/disconnect ทำงานเหมือน Putaway hub</p></section>
-<section><h2>2. Event catalog</h2><pre class="code-vs"><code>StationCounterUpdated  StationFull
-StationCleared         StationToggled
-BatchQueued            BatchAssigned</code></pre><p>payload ถูก parse เป็น Map แล้ว broadcast ไป copy ของ listener list</p></section>
-<section><h2>3. Main subscriptions</h2><p>SortingScreen ฟัง counter/full/cleared/toggled/batchAssigned แต่ไม่ได้ฟัง <code>BatchQueued</code> ดังนั้น queuedCount อาจไม่เปลี่ยนจนมี eventอื่นหรือ manual refresh เป็น coverage gap ที่ควรแก้</p></section>
-<section><h2>4. Fast counter patch</h2><p>CounterUpdated หา stationIdแล้ว copyWith current/total/full/pallet/status BUSY ลด latency แต่ไม่อัปเดต global completed/queued จึงยังต้องมี aggregate eventหรือ REST reconcile</p></section>
-<section><h2>5. Detail subscriptions</h2><p>StationDetailSheet ฟัง counter/full เฉพาะ stationเดียวและเรียก GET detail ใหม่ มันไม่ connect/ref-countเองแต่พึ่ง parent screen connectionที่ยังอยู่หลัง bottom sheet</p></section>
-<section><h2>6. Reconnect gaps</h2><p>connect exception ถูก log แต่ UIไม่รู้, automatic reconnectไม่มี refresh callback และไม่มี event replay ควร expose connection state แล้ว reload dashboardเมื่อ reconnected พร้อม periodic reconciliation</p></section>
-<section><h2>7. Event schema</h2><p>Map casts เช่น stationId as int อาจ failถ้า JSON decoderให้ num/string และ malformed eventเงียบ ควรมี typed event parser, schema version, correlation ID และ telemetry ของ rejected payload</p></section>
-<section><h2>8. Realtime tests</h2><div class="success">fake hub ทดสอบ BatchQueued counter, queued→assigned, duplicate/out-of-order, detail+main listeners, reconnect refresh, two screens ref-count และ eventระหว่าง REST loadโดย versionล่าสุดต้องชนะ</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด services/sorting_signalr_service.dart และ _StationDetailSheet</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.11, 18.8 (SignalRService ตัวแรก), 12.7 (ref-count)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการฟังเหตุการณ์ซ้อนสองชั้น และเข้าใจว่าใครต้องเรียก <code>connect()</code></div>
+
+<section><h2>1. บริการตัวที่สอง</h2><p>18.8 อ่าน <code>SignalRService</code> ไปแล้ว — ตัวนี้โครงเดียวกันแต่มีจุดที่เขียนดีกว่า</p><pre class="code-vs"><code>class SortingSignalRService {
+  static final SortingSignalRService _instance = SortingSignalRService._internal();
+  factory SortingSignalRService() =&gt; _instance;
+  SortingSignalRService._internal();
+
+  HubConnection? _connection;
+  int _refCount = 0;
+
+  final List&lt;SortingCallback&gt; _counterUpdated = [];
+  final List&lt;SortingCallback&gt; _stationFull = [];
+  final List&lt;SortingCallback&gt; _stationCleared = [];
+  final List&lt;SortingCallback&gt; _stationToggled = [];
+  final List&lt;SortingCallback&gt; _batchQueued = [];
+  final List&lt;SortingCallback&gt; _batchAssigned = [];
+}</code></pre><table><thead><tr><th></th><th>SignalRService (18.8)</th><th>SortingSignalRService</th></tr></thead><tbody>
+<tr><td>hub</td><td><code>/hubs/putaway</code></td><td><code>/hubs/sorting</code></td></tr>
+<tr><td>เหตุการณ์</td><td>4</td><td>6</td></tr>
+<tr><td>บรรทัด</td><td>130</td><td><strong>105</strong></td></tr>
+<tr><td>ตัวช่วยสร้าง handler</td><td>ไม่มี</td><td><strong>มี</strong></td></tr>
+</tbody></table><p>เหตุการณ์มากกว่าแต่โค้ดสั้นกว่า — เพราะตัวช่วย</p><pre class="code-vs"><code>// helper: build handler ที่ broadcast ไปทุก listener ใน list
+void Function(List&lt;Object?&gt;?) _on(List&lt;SortingCallback&gt; listeners) =&gt; (args) {
+  final data = _parseArgs(args);
+  for (final cb in List.of(listeners)) {
+    cb(data);
+  }
+};</code></pre><pre class="code-vs"><code>_connection!.on('StationCounterUpdated', _on(_counterUpdated));
+_connection!.on('StationFull', _on(_stationFull));
+_connection!.on('StationCleared', _on(_stationCleared));
+_connection!.on('StationToggled', _on(_stationToggled));
+_connection!.on('BatchQueued', _on(_batchQueued));
+_connection!.on('BatchAssigned', _on(_batchAssigned));</code></pre><div class="note"><strong>ห้าบรรทัดแทนที่ 24 บรรทัด</strong> — ตัวแรกเขียนเมธอด <code>_onXxx</code> สี่ตัวที่เนื้อเหมือนกันทุกบรรทัด<br>และเพิ่มเหตุการณ์ใหม่ที่นี่ใช้สองบรรทัด (ประกาศ list + ลงทะเบียน) ส่วนตัวแรกใช้เก้าบรรทัด</div><p>แต่ยังมี <code>add</code>/<code>remove</code> ซ้ำสิบสองเมธอด</p><pre class="code-vs"><code>void onCounterUpdated(SortingCallback cb) =&gt; _counterUpdated.add(cb);
+void offCounterUpdated(SortingCallback cb) =&gt; _counterUpdated.remove(cb);
+
+void onStationFull(SortingCallback cb) =&gt; _stationFull.add(cb);
+void offStationFull(SortingCallback cb) =&gt; _stationFull.remove(cb);
+// ... อีกสี่คู่</code></pre><p>ตั้งชื่อ <code>on</code>/<code>off</code> สั้นกว่า <code>addXxxListener</code>/<code>removeXxxListener</code> ของตัวแรก — อ่านง่ายกว่าเมื่อเรียกติดกันหลายบรรทัด</p></section>
+
+<section><h2>2. ปัญหาที่ยังเหมือนเดิม</h2><table><thead><tr><th>ปัญหา (18.8)</th><th>ตัวนี้มีไหม</th></tr></thead><tbody>
+<tr><td>ต่อไม่ได้แล้วเขียน log อย่างเดียว</td><td><strong>มี</strong></td></tr>
+<tr><td>ไม่มี <code>onreconnected</code></td><td><strong>มี</strong></td></tr>
+<tr><td><code>disconnect()</code> ไม่จับ exception</td><td><strong>มี</strong></td></tr>
+<tr><td><code>_refCount++</code> ก่อนต่อจริง ไม่ลดเมื่อล้มเหลว</td><td><strong>มี</strong></td></tr>
+<tr><td>ไม่มีสถานะให้จอแสดง</td><td><strong>มี</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>try {
+  final serverUrl = await ApiService.resolveServerUrl();
+  final hubUrl = '$serverUrl/hubs/sorting';
+  ...
+  await _connection!.start();
+  dev.log('[Sorting SignalR] Connected to $hubUrl');
+} catch (e) {
+  dev.log('[Sorting SignalR] Connect error: $e');
+}</code></pre><div class="note"><strong>ห้าปัญหาถูกคัดลอกมาครบ</strong> — เป็นตัวอย่างเดียวกับที่ 19.4 พบระหว่าง packing กับ picking<br>ต่างกันตรงที่ที่นี่<strong>ผลกระทบหนักกว่า</strong> เพราะ <code>SortingScreen</code> ไม่มีตัวจับเวลาสำรอง และไม่โหลดใหม่เป็นระยะ<br>ถ้าต่อไม่ติดตั้งแต่แรก จอจะแสดงข้อมูลจากการโหลดครั้งเดียวตอนเปิดจอ ตลอดกะ</div><p>สิ่งที่ช่วยไว้คือ <code>RefreshIndicator</code></p><pre class="code-vs"><code>child: RefreshIndicator(
+  onRefresh: _loadStations,
+  ...
+)</code></pre><p>ผู้ใช้ที่สงสัยว่าข้อมูลค้างสามารถลากลงได้ — แต่ต้องรู้ก่อนว่าต้องทำ</p></section>
+
+<section><h2>3. ใครเป็นคนเรียก connect</h2><pre class="code-vs"><code>// SortingScreen — จอหลัก
+@override
+void initState() {
+  super.initState();
+  _hub.onCounterUpdated(_onCounterUpdated);
+  _hub.onStationFull(_onAnyStationEvent);
+  ...
+  _initSignalR();                    // ← เรียก connect()
+  _loadStations();
+}
+
+@override
+void dispose() {
+  _hub.offCounterUpdated(_onCounterUpdated);
+  ...
+  _hub.disconnect();                 // ← เรียก disconnect()
+  super.dispose();
+}</code></pre><pre class="code-vs"><code>// _StationDetailSheet — แผ่นรายละเอียด
+@override
+void initState() {
+  super.initState();
+  _hub.onCounterUpdated(_onLive);
+  _hub.onStationFull(_onLive);
+  _load();                           // ← ไม่เรียก connect()
+}
+
+@override
+void dispose() {
+  _hub.offCounterUpdated(_onLive);
+  _hub.offStationFull(_onLive);
+  super.dispose();                   // ← ไม่เรียก disconnect()
+}</code></pre><table><thead><tr><th></th><th>จอหลัก</th><th>แผ่นรายละเอียด</th></tr></thead><tbody>
+<tr><td>ลงทะเบียนผู้ฟัง</td><td>5 ตัว</td><td>2 ตัว</td></tr>
+<tr><td>เรียก <code>connect()</code></td><td><strong>ใช่</strong></td><td>ไม่</td></tr>
+<tr><td>เรียก <code>disconnect()</code></td><td><strong>ใช่</strong></td><td>ไม่</td></tr>
+</tbody></table><div class="note"><strong>นี่คือการใช้ ref-count ที่ถูกต้อง</strong> — แผ่นรายละเอียดเปิดได้เฉพาะจากจอหลัก ซึ่งต่ออยู่แล้ว<br>ถ้าแผ่นเรียก <code>connect()</code> ด้วย <code>_refCount</code> จะเป็น 2 แล้วลดกลับเป็น 1 เมื่อปิดแผ่น — ก็ยังทำงานถูก<br><strong>แต่การไม่เรียกก็ถูกเหมือนกัน และเรียบง่ายกว่า</strong> ตราบใดที่แผ่นไม่มีทางเปิดโดยไม่ผ่านจอหลัก</div><p>สิ่งที่ต้องระวัง</p><table><thead><tr><th>ถ้าวันหนึ่ง</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>มีคนเปิดแผ่นจากจออื่นที่ไม่ได้ต่อ</td><td><strong>ไม่ได้รับเหตุการณ์เลย</strong> เงียบ ๆ</td></tr>
+<tr><td>จอหลักถูกปิดขณะแผ่นยังเปิดอยู่</td><td>เกิดไม่ได้ — แผ่นอยู่บนจอหลัก</td></tr>
+</tbody></table><p>แถวแรกเป็นความเสี่ยงจริง และไม่มีอะไรเตือน — แผ่นจะทำงานได้ปกติแต่ตัวเลขไม่อัปเดต</p><pre class="code-vs"><code>// ทำให้แผ่นดูแลตัวเองได้ ไม่ต้องพึ่งว่าใครเปิด
+@override
+void initState() {
+  super.initState();
+  _hub.connect();                    // ref-count จัดการให้ ไม่ต่อซ้ำ
+  _hub.onCounterUpdated(_onLive);
+  _hub.onStationFull(_onLive);
+  _load();
+}
+
+@override
+void dispose() {
+  _hub.offCounterUpdated(_onLive);
+  _hub.offStationFull(_onLive);
+  _hub.disconnect();
+  super.dispose();
+}</code></pre><p>เพิ่มสองบรรทัด แล้วแผ่นทำงานได้ไม่ว่าจะเปิดจากที่ไหน — นี่คือเหตุผลที่ ref-count มีอยู่</p></section>
+
+<section><h2>4. การฟังซ้อนสองชั้น</h2><p>เมื่อแผ่นเปิดอยู่ มีผู้ฟังเจ็ดตัวลงทะเบียนพร้อมกัน</p><pre class="code-vs"><code>_counterUpdated: [_SortingScreen._onCounterUpdated, _StationDetailSheet._onLive]
+_stationFull:    [_SortingScreen._onAnyStationEvent, _StationDetailSheet._onLive]
+_stationCleared: [_SortingScreen._onAnyStationEvent]
+_stationToggled: [_SortingScreen._onAnyStationEvent]
+_batchAssigned:  [_SortingScreen._onAnyStationEvent]</code></pre><p>เหตุการณ์ <code>StationCounterUpdated</code> หนึ่งครั้งจึงเรียกสองที่</p><pre class="code-vs"><code>// จอหลัก — อัปเดตการ์ดในกริด
+void _onCounterUpdated(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as int?;
+  if (stationId == null || !mounted) return;
+  setState(() { ...copyWith... });
+}
+
+// แผ่น — โหลดรายละเอียดใหม่ถ้าเป็นสถานีที่กำลังดู
+void _onLive(Map&lt;String, dynamic&gt; data) {
+  final sid = data['stationId'] as int?;
+  if (sid == widget.stationId &amp;&amp; mounted) _load();
+}</code></pre><table><thead><tr><th>ผู้ฟัง</th><th>กรองอะไร</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>จอหลัก</td><td>ตรวจ <code>mounted</code></td><td>อัปเดตการ์ดในเครื่อง</td></tr>
+<tr><td>แผ่น</td><td><strong>ตรวจว่าเป็นสถานีที่กำลังดู</strong></td><td>ยิงคำขอโหลดใหม่</td></tr>
+</tbody></table><div class="note"><strong>การกรองของแผ่นสำคัญมาก</strong> — ถ้าไม่กรอง แผ่นจะโหลดใหม่ทุกครั้งที่สถานีไหนก็ได้มีกล่องเพิ่ม<br>สิบสถานีที่ทำงานพร้อมกัน = ยิงคำขอถี่มากทั้งที่ดูอยู่สถานีเดียว</div><p>แต่ยังมีจุดที่กินคำขอเกินจำเป็น</p><pre class="code-vs"><code>void _onLive(Map&lt;String, dynamic&gt; data) {
+  final sid = data['stationId'] as int?;
+  if (sid == widget.stationId &amp;&amp; mounted) _load();    // ← โหลดใหม่ทุกกล่อง
+}</code></pre><table><thead><tr><th>สถานีรับ 20 กล่อง</th><th>คำขอที่ยิง</th></tr></thead><tbody>
+<tr><td>จอหลัก</td><td>0 — ใช้ <code>copyWith</code></td></tr>
+<tr><td><strong>แผ่น</strong></td><td><strong>20</strong></td></tr>
+</tbody></table><p>แผ่นต้องโหลดใหม่เพราะแสดงรายการกล่องทีละใบ ซึ่ง <code>copyWith</code> ให้ไม่ได้</p><pre class="code-vs"><code>class SortingStationDetail {
+  ...
+  final List&lt;SortingStationCarton&gt; cartons;    // ← เหตุการณ์ไม่ส่งมา
+  final int pendingCount;
+}</code></pre><p>เป็นการแลกที่ยอมรับได้ เพราะผู้ใช้เปิดแผ่นดูไม่นาน — แต่ควรหน่วงถ้ากล่องมาถี่</p><pre class="code-vs"><code>Timer? _reloadDebounce;
+
+void _onLive(Map&lt;String, dynamic&gt; data) {
+  final sid = data['stationId'] as int?;
+  if (sid != widget.stationId || !mounted) return;
+
+  // กล่องอาจมาติดกันหลายใบ — รอให้นิ่งก่อนโหลดครั้งเดียว
+  _reloadDebounce?.cancel();
+  _reloadDebounce = Timer(const Duration(milliseconds: 400), () {
+    if (mounted) _load();
+  });
+}
+
+@override
+void dispose() {
+  _reloadDebounce?.cancel();      // ← ห้ามลืม
+  ...
+}</code></pre></section>
+
+<section><h2>5. แผ่นที่ตรวจ mounted แต่ไม่ตรวจอะไรเพิ่ม</h2><pre class="code-vs"><code>Future&lt;void&gt; _load() async {
+  setState(() =&gt; _loading = true);
+  final res = await _api.getSortingStation(widget.stationId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+  if (res.success) {
+    setState(() =&gt; _detail = res.data);
+  }
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>if (!mounted) return;</code> ก่อน <code>setState</code></td><td>แผ่นถูกปิดระหว่างรอได้</td></tr>
+<tr><td><code>widget.stationId</code> ไม่เปลี่ยน</td><td>ไม่ต้องตรวจว่ายังเป็นสถานีเดิม</td></tr>
+</tbody></table><p>ต่างจาก 19.3 ที่ <code>_openOrder</code> ต้องตรวจว่ายังเป็นกล่องเดิม — ที่นี่แผ่นผูกกับสถานีเดียวตลอดอายุ</p><p>แต่<strong>ล้มเหลวแล้วเงียบ</strong></p><pre class="code-vs"><code>if (res.success) {
+  setState(() =&gt; _detail = res.data);
+}
+// ไม่มี else</code></pre><table><thead><tr><th>เปิดแผ่นครั้งแรกแล้วโหลดไม่สำเร็จ</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td><code>_detail</code> ยังเป็น null</td><td>ตัวหมุนหายไป แล้วจอว่าง</td></tr>
+</tbody></table><pre class="code-vs"><code>child: _loading || _detail == null
+    ? ...ตัวหมุน...
+    : _buildContent(scroll),</code></pre><p>เงื่อนไขนี้ทำให้ตัวหมุน<strong>หมุนต่อไปเรื่อย ๆ</strong> เมื่อ <code>_detail</code> เป็น null และ <code>_loading</code> เป็น false</p><div class="note"><strong>ผู้ใช้จะเห็นตัวหมุนค้างโดยไม่มีอะไรบอกว่าล้มเหลว</strong> — ต้องปิดแผ่นแล้วเปิดใหม่เพื่อลอง<br>ปัญหาเดียวกับที่ 18.10 พบใน <code>PickingOrderDetailScreen</code> ที่โหลดล้มเหลวแล้วจอว่าง</div><pre class="code-vs"><code>String? _error;
+
+Future&lt;void&gt; _load() async {
+  setState(() {
+    _loading = true;
+    _error = null;
+  });
+  final res = await _api.getSortingStation(widget.stationId);
+  if (!mounted) return;
+  setState(() {
+    _loading = false;
+    if (res.success) {
+      _detail = res.data;
+    } else {
+      _error = res.error ?? 'โหลดข้อมูลสถานีไม่สำเร็จ';
+    }
+  });
+}</code></pre><pre class="code-vs"><code>child: _loading
+    ? ...ตัวหมุน...
+    : _error != null
+        ? ErrorState(message: _error!, onRetry: _load)     // widget จาก 16.9
+        : _detail == null
+            ? const SizedBox.shrink()
+            : _buildContent(scroll),</code></pre></section>
+
+<section><h2>6. การเคลียร์ที่แจ้งกลับไปจอหลัก</h2><pre class="code-vs"><code>Future&lt;void&gt; _clear() async {
+  final stationLabel = _formatSortingStationId(widget.stationId);
+  final confirm = await showConfirmDialog(
+    context,
+    title: 'Clear Station',
+    message: 'ส่ง ${_formatSortingPalletId(_detail!.palletId!)} ออกจาก $stationLabel\n'
+        'station จะกลับมาว่าง',
+    confirmLabel: 'Clear',
+  );
+  if (!confirm) return;
+
+  setState(() =&gt; _loading = true);
+  final res = await _api.clearSortingStation(
+    stationId: widget.stationId,
+    operatorId: widget.userId,
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Clear ไม่สำเร็จ');
+    return;
+  }
+  widget.onChanged();              // ← บอกจอหลักให้โหลดใหม่
+  if (mounted) Navigator.pop(context);
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ข้อความบอกว่าสถานีจะกลับมาว่าง</td><td>ผู้ใช้รู้ผลลัพธ์ก่อนกด</td></tr>
+<tr><td><code>onChanged()</code> ก่อน <code>pop</code></td><td>จอหลักเริ่มโหลดทันที ไม่ต้องรอแผ่นปิด</td></tr>
+<tr><td>ตรวจ <code>mounted</code> ก่อน <code>pop</code></td><td>แผ่นอาจถูกปิดไปแล้ว</td></tr>
+</tbody></table><p><code>onChanged</code> คือ <code>_loadStations</code> ของจอหลัก (19.10)</p><pre class="code-vs"><code>builder: (_) =&gt; _StationDetailSheet(
+  stationId: s.stationId,
+  userId: widget.userId,
+  onChanged: _loadStations,        // ← ส่งเมธอดของจอหลักเข้าไป
+),</code></pre><div class="note"><strong>รูปแบบนี้ตรงกว่าการรอผลจาก <code>Navigator.pop</code></strong> — ถ้าใช้ <code>pop(true)</code> แล้วจอหลักตรวจค่าที่คืนมา จะต้องจำตรวจทุกทางออก<br>เทียบกับ 17.2 ที่ใช้ <code>await Navigator.push(...)</code> แล้วโหลดใหม่ — วิธีนั้นโหลดทุกครั้งแม้ไม่มีอะไรเปลี่ยน<br>วิธีนี้โหลดเฉพาะเมื่อมีการเปลี่ยนจริง</div><p>แต่มีจุดที่ต้องระวัง</p><pre class="code-vs"><code>message: 'ส่ง ${_formatSortingPalletId(_detail!.palletId!)} ออกจาก $stationLabel\n'</code></pre><p>เครื่องหมายอัศเจรีย์สองตัวติดกัน — <code>_detail!</code> และ <code>palletId!</code></p><table><thead><tr><th>ปลอดภัยไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ปลอดภัยตามเส้นทางปัจจุบัน</td><td>ปุ่ม Clear แสดงเฉพาะเมื่อ <code>_detail</code> มีค่าและสถานี <code>BUSY</code></td></tr>
+<tr><td>แต่ไม่มีอะไรบังคับ</td><td>ถ้าเซิร์ฟเวอร์คืน <code>BUSY</code> โดยไม่มี <code>palletId</code> จะพัง</td></tr>
+</tbody></table><p>รูปแบบเดียวกับ <code>line.palletId!</code> ใน 17.9 และ <code>_palletResp!</code> ใน 19.3</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ทุก widget ที่ฟังเหตุการณ์ต้องเรียก <code>connect()</code></td><td>ไม่ ถ้าพ่อต่อไว้แล้ว — แต่เรียกก็ปลอดภัยเพราะ ref-count</td></tr>
+<tr><td>ผู้ฟังสองตัวรับเหตุการณ์เดียวกันแล้วชนกัน</td><td>ทำงานอิสระ ต่างคนต่างกรอง</td></tr>
+<tr><td>โหลดใหม่ทุกเหตุการณ์เป็นทางที่ปลอดภัยเสมอ</td><td>ยิง 20 คำขอเมื่อกล่องมา 20 ใบ</td></tr>
+<tr><td>ตัวหมุนที่หมุนอยู่แปลว่ากำลังโหลด</td><td>อาจแปลว่าโหลดล้มเหลวแล้ว <code>_detail</code> ยังเป็น null</td></tr>
+<tr><td>บริการตัวที่สองแก้ปัญหาของตัวแรกแล้ว</td><td>คัดลอกปัญหามาครบห้าข้อ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมอยากรวมสองบริการ SignalR เป็นตัวเดียว</p><ol><li>อะไรที่เหมือนกันและอะไรที่ต่าง</li><li>ออกแบบบริการที่รองรับหลาย hub</li><li>คุ้มไหม และควรทำเมื่อไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เหมือนและต่าง</strong></p><table><thead><tr><th>ส่วน</th><th>เหมือนไหม</th></tr></thead><tbody>
+<tr><td>singleton + ref-count</td><td><strong>เหมือน</strong></td></tr>
+<tr><td><code>connect()</code> / <code>disconnect()</code></td><td>เหมือน ต่างแค่ URL</td></tr>
+<tr><td><code>_parseArgs</code></td><td><strong>เหมือนทุกบรรทัด</strong></td></tr>
+<tr><td>การกระจายเหตุการณ์</td><td>เหมือน (ตัวที่สองมีตัวช่วย)</td></tr>
+<tr><td>รายชื่อเหตุการณ์</td><td><strong>ต่าง</strong> — 4 กับ 6</td></tr>
+<tr><td>ชนิดของ callback</td><td>เหมือน — <code>void Function(Map&lt;String, dynamic&gt;)</code></td></tr>
+</tbody></table><p>สิ่งเดียวที่ต่างจริงคือ URL กับรายชื่อเหตุการณ์</p><p><strong>ข้อ 2 — ออกแบบ</strong></p><pre class="code-vs"><code>typedef HubCallback = void Function(Map&lt;String, dynamic&gt; data);
+
+/// การเชื่อมต่อ SignalR หนึ่ง hub — จัดการ ref-count และการกระจายเหตุการณ์ให้
+class HubClient {
+  HubClient({required this.path, required this.eventNames});
+
+  final String path;                    // '/hubs/putaway'
+  final List&lt;String&gt; eventNames;        // ['StationDispatched', ...]
+
+  HubConnection? _connection;
+  int _refCount = 0;
+  final _listeners = &lt;String, List&lt;HubCallback&gt;&gt;{};
+
+  final status = ValueNotifier&lt;RealtimeStatus&gt;(RealtimeStatus.unknown);
+
+  Future&lt;void&gt; connect() async {
+    _refCount++;
+    if (_connection != null &amp;&amp;
+        _connection!.state != HubConnectionState.Disconnected) return;
+
+    status.value = RealtimeStatus.connecting;
+    try {
+      final serverUrl = await ApiService.resolveServerUrl();
+      _connection = HubConnectionBuilder()
+          .withUrl('$serverUrl$path')
+          .withAutomaticReconnect()
+          .build();
+
+      for (final name in eventNames) {
+        _connection!.on(name, (args) =&gt; _dispatch(name, args));
+      }
+
+      // แอปไม่รู้ว่าพลาดอะไรไประหว่างหลุด — ให้ทุกจอโหลดใหม่ (18.8)
+      _connection!.onreconnected(({connectionId}) {
+        status.value = RealtimeStatus.connected;
+        _dispatch(_reconnectedEvent, null);
+      });
+      _connection!.onreconnecting(({error}) =&gt; status.value = RealtimeStatus.connecting);
+      _connection!.onclose(({error}) =&gt; status.value = RealtimeStatus.disconnected);
+
+      await _connection!.start();
+      status.value = RealtimeStatus.connected;
+    } catch (e) {
+      status.value = RealtimeStatus.disconnected;
+      dev.log('[Hub $path] connect error: $e');
+    }
+  }
+
+  Future&lt;void&gt; disconnect() async {
+    _refCount--;
+    if (_refCount &gt; 0) return;
+    _refCount = 0;
+
+    final connection = _connection;
+    _connection = null;
+    status.value = RealtimeStatus.disconnected;
+    if (connection == null) return;
+    try {
+      await connection.stop();
+    } catch (e) {
+      dev.log('[Hub $path] stop error: $e');   // ตัดไม่ได้ก็ไม่ควรทำให้แอปพัง
+    }
+  }
+
+  void on(String event, HubCallback cb) =&gt;
+      _listeners.putIfAbsent(event, () =&gt; []).add(cb);
+
+  void off(String event, HubCallback cb) =&gt; _listeners[event]?.remove(cb);
+
+  static const _reconnectedEvent = '__reconnected';
+  void onReconnected(VoidCallback cb) =&gt; on(_reconnectedEvent, (_) =&gt; cb());
+
+  void _dispatch(String event, List&lt;Object?&gt;? args) {
+    final data = _parseArgs(args);
+    for (final cb in List.of(_listeners[event] ?? const [])) {
+      cb(data);
+    }
+  }
+
+  Map&lt;String, dynamic&gt; _parseArgs(List&lt;Object?&gt;? args) { ...เหมือนเดิม... }
+}</code></pre><pre class="code-vs"><code>// lib/services/hubs.dart
+final putawayHub = HubClient(
+  path: '/hubs/putaway',
+  eventNames: const [
+    'StationDispatched', 'PalletArrived', 'PalletReturned', 'LabelingCompleted',
+  ],
+);
+
+final sortingHub = HubClient(
+  path: '/hubs/sorting',
+  eventNames: const [
+    'StationCounterUpdated', 'StationFull', 'StationCleared',
+    'StationToggled', 'BatchQueued', 'BatchAssigned',
+  ],
+);</code></pre><pre class="code-vs"><code>// ในจอ
+@override
+void initState() {
+  super.initState();
+  sortingHub.on('StationCounterUpdated', _onCounterUpdated);
+  sortingHub.on('StationFull', _onAnyStationEvent);
+  sortingHub.onReconnected(_loadStations);      // ← ได้มาฟรี
+  sortingHub.connect();
+  _loadStations();
+}
+
+@override
+void dispose() {
+  sortingHub.off('StationCounterUpdated', _onCounterUpdated);
+  sortingHub.off('StationFull', _onAnyStationEvent);
+  sortingHub.disconnect();
+  super.dispose();
+}</code></pre><table><thead><tr><th>ได้อะไร</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>โค้ดลดจาก 235 เหลือ ~90</td><td>สองไฟล์เป็นไฟล์เดียว</td></tr>
+<tr><td><strong>แก้ห้าปัญหาพร้อมกัน</strong></td><td>สถานะ, onreconnected, จับ exception, log</td></tr>
+<tr><td>เพิ่ม hub ใหม่ = สามบรรทัด</td><td>ไม่ต้องคัดลอกไฟล์</td></tr>
+<tr><td>เทสต์ได้</td><td><code>_parseArgs</code> และ ref-count เป็นตรรกะบริสุทธิ์</td></tr>
+</tbody></table><p><strong>เสียอะไร</strong></p><table><thead><tr><th>เสีย</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ชื่อเหตุการณ์เป็นสตริง</td><td>พิมพ์ผิดไม่มีใครจับ</td></tr>
+<tr><td>ชนิดของ payload ยังเป็น <code>Map</code></td><td>เหมือนเดิม</td></tr>
+</tbody></table><pre class="code-vs"><code>// กันการพิมพ์ผิดด้วยค่าคงที่
+abstract final class SortingEvents {
+  static const counterUpdated = 'StationCounterUpdated';
+  static const stationFull = 'StationFull';
+  ...
+  static const all = [counterUpdated, stationFull, ...];
+}
+
+final sortingHub = HubClient(path: '/hubs/sorting', eventNames: SortingEvents.all);
+sortingHub.on(SortingEvents.counterUpdated, _onCounterUpdated);</code></pre><p><strong>ข้อ 3 — คุ้มไหม</strong></p><table><thead><tr><th>เหตุผลที่คุ้ม</th></tr></thead><tbody>
+<tr><td>ห้าปัญหาที่ 18.8 ชี้ ต้องแก้สองที่ถ้าไม่รวม</td></tr>
+<tr><td>ปัญหาที่ใหญ่ที่สุด (ไม่มี <code>onreconnected</code>) กระทบทั้งสี่จอ</td></tr>
+<tr><td>สองไฟล์ต่างกันแค่ URL กับรายชื่อ</td></tr>
+</tbody></table><table><thead><tr><th>ควรทำเมื่อไร</th></tr></thead><tbody>
+<tr><td><strong>ก่อนแก้ปัญหาทั้งห้าข้อ</strong> — ไม่ใช่หลัง</td></tr>
+</tbody></table><div class="note"><strong>ลำดับสำคัญ</strong> — ถ้าแก้ห้าปัญหาในสองไฟล์ก่อน จะเขียนโค้ดเดียวกันสองรอบ แล้วรวมทีหลังยังต้องเทียบว่าตรงกันไหม<br>รวมก่อนแล้วแก้ครั้งเดียว ได้ผลกับทั้งสี่จอพร้อมกัน<br>และการรวมนี้<strong>ไม่เปลี่ยนพฤติกรรม</strong> จึงทดสอบง่ายกว่าการแก้ปัญหา — ทำได้โดยเปิดทั้งสี่จอแล้วดูว่าเหตุการณ์ยังมาถึง</div><p>นี่คือกรณีที่ต่างจาก 19.4 ที่สรุปว่าการรวม picking กับ packing ยาก — ที่นั่นโมเดลคนละคลาส ที่นี่ต่างแค่ค่าคงที่</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>บริการตัวที่สองมีเหตุการณ์มากกว่าแต่โค้ดสั้นกว่า เพราะมีตัวช่วย <code>_on</code></li><li>ห้าปัญหาที่ 18.8 ชี้ ถูกคัดลอกมาครบ</li><li>ผลกระทบหนักกว่า เพราะจอ sorting ไม่มีตัวจับเวลาสำรอง</li><li>แผ่นรายละเอียดฟังเหตุการณ์แต่ไม่เรียก <code>connect()</code> — ถูกตราบใดที่เปิดจากจอหลักเท่านั้น</li><li>เพิ่ม <code>connect()</code>/<code>disconnect()</code> ในแผ่นจะปลอดภัยกว่าและ ref-count จัดการให้</li><li>ผู้ฟังเจ็ดตัวลงทะเบียนพร้อมกันเมื่อแผ่นเปิด และต่างคนต่างกรอง</li><li>แผ่นยิงคำขอทุกกล่องที่มาถึง — ควรหน่วงถ้ากล่องมาถี่</li><li>โหลดล้มเหลวแล้วตัวหมุนหมุนต่อไปเรื่อย ๆ โดยไม่บอกอะไร</li><li><code>onChanged</code> แจ้งจอหลักให้โหลดใหม่เฉพาะเมื่อมีการเปลี่ยนจริง</li><li>การรวมสองบริการคุ้ม และควรทำก่อนแก้ห้าปัญหา ไม่ใช่หลัง</li></ul></div><p><strong>บทหน้า:</strong> จออัปโหลดรูปของหัวหน้า — จอเดียวที่ส่งไฟล์ขึ้นเซิร์ฟเวอร์</p></section>

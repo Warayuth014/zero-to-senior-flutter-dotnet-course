@@ -4,18 +4,234 @@
 <title>Packing Models &amp; API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-06 · Real Codebase</span><h1>Packing Models &amp; API</h1><p>Part 19: wmsapp Outbound</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">API surface</a></li><li><a href="#section-2">Pallet models</a></li><li><a href="#section-3">Pack models</a></li><li><a href="#section-4">Order model</a></li><li><a href="#section-5">Part model</a></li><li><a href="#section-6">Parser pitfalls</a></li><li><a href="#section-7">URL and errors</a></li><li><a href="#section-8">Contract tests</a></li></ol></nav>
-<div class="note"><strong>Packing models คือสาม snapshots:</strong> pallet-level เลือก pack, pack-level เลือก order และ order-level ทำ part scan Response จาก mutation ยังบอกผล finalize ของ pack ด้วย</div>
-<section id="section-1"><h2>1. API surface</h2><pre class="code-vs"><code>GET  /packing/pallet/{palletId}
-GET  /packing/pack/{packingId}
-GET  /packing/pack/{packingId}/order/{pickOrderId}
-POST /packing/scan-part</code></pre></section>
-<section id="section-2"><h2>2. Pallet models</h2><p>PackingPalletResponse มี status/location/packs; PackingSummary มี orderCount/orderDoneCount และ <code>isDone</code> ที่ true เมื่อ status DONE หรือ doneCount≥count</p></section>
-<section id="section-3"><h2>3. Pack models</h2><p>PackingDetailResponse มี tracking/completedAt/orders และถือว่า done จาก status เท่านั้น ส่วน PackingOrderSummary บอก part progress ต่อ pick order</p></section>
-<section id="section-4"><h2>4. Order model</h2><p>PackingOrderResponse มี parts, status, packFinalized, trackingId, palletReleased ทำให้ response ของ scan เป็นทั้ง updated order snapshot และ domain event summary</p></section>
-<section id="section-5"><h2>5. Part model</h2><p>PackingPartItem คำนวณ <code>isDone</code> เมื่อ scannedQty≥requiredQty และ remaining ด้วย clamp มี serialRequire/availableSerials แต่ไม่มี lineId/lot/condition จึงจำกัดกรณี part ซ้ำ</p></section>
-<section id="section-6"><h2>6. Parser pitfalls</h2><p>required lists/fields cast ตรงและ invalid dates fallback now อาจ crash หรือซ่อน contract error ควร validate shape, nullable, unknown status และรายงาน malformed payload แบบสังเกตได้</p></section>
-<section id="section-7"><h2>7. URL and errors</h2><p>IDs ถูกต่อใน path โดยไม่ encode และทุก endpointรักษา statusCode ผ่าน ApiResult ควรใช้ Uri path segments พร้อม typed ProblemDetails เพื่อแยก conflict/not-found/auth/timeout</p></section>
-<section id="section-8"><h2>8. Contract tests</h2><div class="success">สร้าง fixtures ทุกระดับ รวม empty/malformed lists, unknown status, invalid dates, serial/nonserial, auto-finalize และ pallet release แล้ว round-trip กับ .NET DTO serialization</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">หกคลาสตามสี่ชั้น</a></li><li><a href="#section-2">คลาสที่ไม่มีใครเรียก fromJson</a></li><li><a href="#section-3">getter ที่คำนวณจากสองแหล่ง</a></li><li><a href="#section-4">clamp ที่ป้องกันค่าติดลบ</a></li><li><a href="#section-5">ระดับการป้องกันของโดเมนนี้</a></li><li><a href="#section-6">ฝั่ง API ที่ทำครบ</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด models/packing/packing_models.dart และ services/api/packing_api.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.5, 17.9 (โมเดล receiving), 18.7 (โมเดล putaway)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านโมเดลที่มี getter คำนวณ และเห็นว่าคลาสที่ไม่มีใครใช้ <code>fromJson</code> บอกอะไร</div>
+
+<section id="section-1"><h2>1. หกคลาสตามสี่ชั้น</h2><table><thead><tr><th>คลาส</th><th>ชั้น</th><th>มาจาก</th></tr></thead><tbody>
+<tr><td><code>PackingPalletResponse</code></td><td>1 พาเลท</td><td><code>GET /packing/pallet/{id}</code></td></tr>
+<tr><td><code>PackingSummary</code></td><td>1→2 สรุปกล่อง</td><td>อยู่ในตัวบน</td></tr>
+<tr><td><code>PackingDetailResponse</code></td><td>2 กล่อง</td><td><code>GET /packing/pack/{id}</code></td></tr>
+<tr><td><code>PackingOrderSummary</code></td><td>2→3 สรุปใบสั่ง</td><td>อยู่ในตัวบน</td></tr>
+<tr><td><code>PackingOrderResponse</code></td><td>3 ใบสั่ง</td><td><code>GET .../order/{id}</code> และ <code>POST /scan-part</code></td></tr>
+<tr><td><code>PackingPartItem</code></td><td>4 สินค้า</td><td>อยู่ในตัวบน</td></tr>
+<tr><td><code>ConfirmPackResponse</code></td><td>ผลลัพธ์</td><td><strong>ไม่มี endpoint ไหนคืน</strong></td></tr>
+</tbody></table><p>โครงสะท้อนสี่ชั้นตรง ๆ — แต่ละชั้นมีคลาสเต็มกับคลาสสรุปคู่กัน</p><pre class="code-vs"><code>PackingPalletResponse
+  └─ packs: List&lt;PackingSummary&gt;        ← สรุปพอให้แสดงรายการ
+       (แตะแล้วยิงใหม่ได้)
+       ▼
+PackingDetailResponse
+  └─ orders: List&lt;PackingOrderSummary&gt;  ← สรุปเหมือนกัน
+       ▼
+PackingOrderResponse
+  └─ parts: List&lt;PackingPartItem&gt;       ← ข้อมูลเต็ม เพราะเป็นชั้นที่ทำงาน</code></pre><div class="note"><strong>รูปแบบสรุป-แล้วดึงเต็มเป็นการออกแบบที่ถูก</strong> — ชั้นบนส่งแค่ที่พอแสดงรายการ ชั้นล่างส่งครบเมื่อผู้ใช้เลือก<br>เทียบกับ <code>PartLinesResponse</code> ใน 17.9 ที่ส่งทุกล็อตของทุกสภาพมาทีเดียว เพราะข้อมูลเล็กพอ</div></section>
+
+<section id="section-2"><h2>2. คลาสที่ไม่มีใครเรียก fromJson</h2><pre class="code-vs"><code>class ConfirmPackResponse {
+  ...
+  factory ConfirmPackResponse.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      ConfirmPackResponse(
+        packingId: json['packingId'],
+        status: json['status'],
+        trackingId: json['trackingId'],
+        palletShipped: json['palletShipped'] ?? false,
+        completedAt: DateTime.tryParse(json['completedAt'] ?? '') ?? DateTime.now(),
+        message: json['message'] ?? '',
+      );
+}</code></pre><pre class="code-vs"><code>rg "ConfirmPackResponse" lib
+# packing_models.dart — ที่ประกาศ
+# packing_screen.dart — สร้างด้วย constructor ปกติ (19.5)</code></pre><p><strong>ไม่มีใครเรียก <code>fromJson</code> เลย</strong> — 19.5 อธิบายว่าแอปสร้างขึ้นเองจาก <code>PackingOrderResponse</code></p><table><thead><tr><th>อ่านได้ว่า</th></tr></thead><tbody>
+<tr><td>เคยมี endpoint <code>POST /packing/confirm</code> ที่คืนคลาสนี้</td></tr>
+<tr><td>แล้วเปลี่ยนเป็น auto-finalize ที่ <code>scan-part</code></td></tr>
+<tr><td><code>fromJson</code> เหลือไว้เผื่อ หรือลืมลบ</td></tr>
+</tbody></table><div class="note"><strong>ร่องรอยแบบนี้บอกประวัติของโปรเจกต์</strong> — เจอ <code>confirmPickV2</code> ใน 18.1 ที่มี V2 แปลว่าเคยมี V1<br>และ <code>BasketScanResponse</code> กับ <code>GroupedUnloadItem</code> ใน 17.13 ที่ไม่มีใครใช้เลย<br>ทั้งสามกรณีคือโค้ดที่ยังอยู่เพราะไม่มีใครกล้าลบ — ซึ่ง git เก็บประวัติไว้ให้อยู่แล้ว</div><p>วิธีตรวจว่าลบได้ไหม</p><pre class="code-vs"><code># หาว่ามีใครเรียก fromJson ของคลาสนี้ไหม
+rg "ConfirmPackResponse.fromJson" lib
+# ไม่เจอ → ลบ factory ได้ แต่คลาสยังต้องอยู่</code></pre></section>
+
+<section id="section-3"><h2>3. getter ที่คำนวณจากสองแหล่ง</h2><pre class="code-vs"><code>class PackingSummary {
+  final String status;
+  final int orderCount;
+  final int orderDoneCount;
+  ...
+  bool get isDone =&gt;
+      status == 'DONE' || (orderCount &gt; 0 &amp;&amp; orderDoneCount &gt;= orderCount);
+}</code></pre><p>ตรวจสองอย่างด้วย <code>||</code> — สถานะจากเซิร์ฟเวอร์ หรือคำนวณจากตัวนับ</p><table><thead><tr><th>กรณี</th><th><code>status</code></th><th><code>orderDoneCount / orderCount</code></th><th><code>isDone</code></th></tr></thead><tbody>
+<tr><td>ปกติ</td><td>DONE</td><td>3/3</td><td>true</td></tr>
+<tr><td>ตัวนับครบแต่สถานะยังไม่อัปเดต</td><td>PACKING</td><td>3/3</td><td><strong>true</strong></td></tr>
+<tr><td>สถานะ DONE แต่ตัวนับไม่ครบ</td><td>DONE</td><td>2/3</td><td><strong>true</strong></td></tr>
+<tr><td><code>orderCount</code> เป็น 0</td><td>PACKING</td><td>0/0</td><td>false</td></tr>
+</tbody></table><p>แถวสุดท้ายคือเหตุผลที่ต้องมี <code>orderCount &gt; 0</code> — ถ้าไม่มี กล่องที่ยังไม่มีใบสั่งเลยจะถูกนับว่าเสร็จ (เพราะ <code>0 &gt;= 0</code>)</p><div class="note"><strong>การใช้ <code>||</code> ตรงนี้เป็นการเผื่อว่าเซิร์ฟเวอร์อาจส่งสถานะมาไม่ทัน</strong><br>แต่แลกมาด้วยการที่<strong>สองแหล่งขัดกันแล้วไม่มีใครรู้</strong> — แถวที่สองและสามจะได้ <code>true</code> ทั้งคู่<br>ถ้าอยากรู้ว่าข้อมูลไม่สอดคล้อง ต้องแยกออกมา<pre class="code-vs"><code>bool get isDone =&gt; status == 'DONE' || _allOrdersDone;
+bool get _allOrdersDone =&gt; orderCount &gt; 0 &amp;&amp; orderDoneCount &gt;= orderCount;
+
+/// สถานะกับตัวนับไม่ตรงกัน = ข้อมูลไม่สอดคล้อง ควรแจ้งทีมหลังบ้าน
+bool get hasInconsistentState =&gt; (status == 'DONE') != _allOrdersDone;</code></pre></div><p>สังเกตความไม่สม่ำเสมอในไฟล์เดียวกัน</p><pre class="code-vs"><code>class PackingSummary       { bool get isDone =&gt; status == 'DONE' || (...); }  // สองแหล่ง
+class PackingDetailResponse{ bool get isDone =&gt; status == 'DONE'; }            // แหล่งเดียว
+class PackingOrderSummary  { bool get isDone =&gt; status == 'DONE'; }            // แหล่งเดียว
+class PackingOrderResponse { bool get isDone =&gt; status == 'DONE'; }            // แหล่งเดียว
+class PackingPartItem      { bool get isDone =&gt; scannedQty &gt;= requiredQty; }   // คำนวณล้วน</code></pre><table><thead><tr><th>คลาส</th><th><code>isDone</code> มาจาก</th></tr></thead><tbody>
+<tr><td>3 คลาส</td><td>สถานะจากเซิร์ฟเวอร์</td></tr>
+<tr><td><code>PackingSummary</code></td><td>สถานะ <strong>หรือ</strong> ตัวนับ</td></tr>
+<tr><td><code>PackingPartItem</code></td><td>ตัวนับล้วน</td></tr>
+</tbody></table><p>ชื่อเดียวกันแต่คำนวณคนละแบบสามแบบ — คนอ่านต้องเปิดดูทุกครั้ง</p></section>
+
+<section id="section-4"><h2>4. clamp ที่ป้องกันค่าติดลบ</h2><pre class="code-vs"><code>class PackingPartItem {
+  final int requiredQty;
+  final int scannedQty;
+  ...
+  bool get isDone =&gt; scannedQty &gt;= requiredQty;
+  int get remaining =&gt; (requiredQty - scannedQty).clamp(0, requiredQty);
+}</code></pre><table><thead><tr><th><code>requiredQty</code></th><th><code>scannedQty</code></th><th>ไม่มี clamp</th><th>มี clamp</th></tr></thead><tbody>
+<tr><td>10</td><td>3</td><td>7</td><td>7</td></tr>
+<tr><td>10</td><td>10</td><td>0</td><td>0</td></tr>
+<tr><td>10</td><td><strong>12</strong></td><td><strong>-2</strong></td><td><strong>0</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายเกิดได้ถ้าสแกนเกิน หรือข้อมูลจากสองแหล่งไม่ตรง</p><p><code>remaining</code> ถูกใช้ในหลายที่ที่ค่าติดลบจะทำให้พฤติกรรมแปลก</p><pre class="code-vs"><code>// _scanSerial
+if (serials.length &gt;= part.remaining) { ...ครบแล้ว... }
+// ถ้า remaining เป็น -2 → 0 &gt;= -2 เป็นจริงทันที → สแกนไม่ได้เลย
+
+// _activatePart
+final remaining = part.remaining - already;
+_qtyEntryCtrl.text = remaining &gt; 0 ? '$remaining' : '0';
+
+// _confirmCollectedPack
+part.remaining &gt; 0 &amp;&amp; ...</code></pre><div class="note"><strong><code>clamp</code> ทำให้สามที่นี้ทำงานถูกโดยไม่ต้องตรวจเอง</strong> — เป็นการป้องกันที่จุดเดียวแทนที่จะกระจาย<br>รูปแบบเดียวกับ <code>isDone =&gt; qtyRemaining &lt;= 0</code> ใน 17.13 ที่ใช้ <code>&lt;=</code> เผื่อค่าติดลบ<br>แต่ที่นี่ดีกว่าตรงที่<strong>แก้ค่าให้ถูก</strong> ไม่ใช่แค่ตีความให้ถูก</div><p>ยังขาดสิ่งเดียว — ไม่มีอะไรบอกว่าข้อมูลผิด</p><pre class="code-vs"><code>int get remaining =&gt; (requiredQty - scannedQty).clamp(0, requiredQty);
+
+/// สแกนเกินที่ต้องการ = ข้อมูลไม่สอดคล้อง
+bool get isOverScanned =&gt; scannedQty &gt; requiredQty;</code></pre></section>
+
+<section id="section-5"><h2>5. ระดับการป้องกันของโดเมนนี้</h2><pre class="code-vs"><code>factory PackingPartItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt; PackingPartItem(
+  partId: json['partId'],                          // ← ไม่ป้องกัน
+  owner: json['owner'] ?? '',                      // ← กัน
+  brand: json['brand'] ?? '',                      // ← กัน
+  itemDesc: json['itemDesc'] ?? '',                // ← กัน
+  imageUrl: json['imageUrl'],
+  requiredQty: json['requiredQty'] ?? 0,           // ← กัน
+  scannedQty: json['scannedQty'] ?? 0,             // ← กัน
+  serialRequire: json['serialRequire'] ?? false,
+  availableSerials: (json['availableSerials'] as List?)
+          ?.map((e) =&gt; e.toString())
+          .toList() ??
+      const [],                                     // ← กัน
+);</code></pre><p>กันทุกฟิลด์ยกเว้น <code>partId</code> — ซึ่งเป็นระดับที่สูงที่สุดในทั้งโปรเจกต์</p><table><thead><tr><th>โดเมน</th><th>ฟิลด์คำอธิบาย (<code>owner</code>, <code>brand</code>, <code>itemDesc</code>)</th><th>บท</th></tr></thead><tbody>
+<tr><td>receiving</td><td><strong>ไม่กัน</strong> — ทั้ง PO เปิดไม่ได้</td><td>17.9</td></tr>
+<tr><td>unload</td><td>ไม่กัน</td><td>17.13</td></tr>
+<tr><td>basket</td><td>กัน</td><td>17.13</td></tr>
+<tr><td>putaway</td><td>ยืมจาก unload</td><td>18.7</td></tr>
+<tr><td><strong>packing</strong></td><td><strong>กัน</strong></td><td>ที่นี่</td></tr>
+</tbody></table><p>และ <code>availableSerials</code> ใช้ <code>e.toString()</code> ไม่ใช่ <code>e as String</code></p><pre class="code-vs"><code>// packing — ทนกว่า
+?.map((e) =&gt; e.toString()).toList()
+
+// unload (17.13) — พังถ้าไม่ใช่ String
+?.map((e) =&gt; e as String).toList()</code></pre><table><thead><tr><th>ถ้าเซิร์ฟเวอร์ส่งตัวเลขมาปน</th><th><code>toString()</code></th><th><code>as String</code></th></tr></thead><tbody>
+<tr><td><code>[123, "SN-1"]</code></td><td><code>["123", "SN-1"]</code></td><td><strong>TypeError</strong></td></tr>
+</tbody></table><div class="note"><strong>ทั้งสองแบบมีข้อดี</strong> — <code>toString()</code> ทนกว่า แต่ซ่อนปัญหา; <code>as String</code> พังทันทีแต่บอกว่าข้อมูลผิด<br>ในระบบที่ S/N เป็นสตริงเสมอตามสัญญา แบบหลังจับปัญหาได้เร็วกว่า<br>แต่ในระบบที่ผู้ใช้ทำงานอยู่หน้างาน การพังทั้งจอเพราะ S/N ตัวเดียวผิดชนิดไม่คุ้ม</div></section>
+
+<section id="section-6"><h2>6. ฝั่ง API ที่ทำครบ</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;PackingPalletResponse&gt;&gt; scanPalletForPacking(String palletId) async {
+  final response = await _get('/packing/pallet/$palletId');
+  if (!response.success) {
+    return ApiResult.error(response.error, statusCode: response.statusCode);
+  }
+  return ApiResult.success(PackingPalletResponse.fromJson(response.data!));
+}</code></pre><p>ทั้งสี่เมธอดส่ง <code>statusCode</code> ต่อ — ต่างจาก receiving, unload, upload, putaway ที่ทิ้งทั้งหมด</p><p>และมีคอมเมนต์อธิบายทุกเมธอด</p><pre class="code-vs"><code>/// Scan Pallet → ดึง list ของ Pack ที่ต้อง pack บน Pallet นี้
+/// ดึงรายละเอียด Pack → list ของ Order
+/// ดึง Order → list ของ Part + จำนวนที่สแกนแล้ว (per-pallet)
+/// สแกน Part (เพิ่ม scanned qty) — ส่ง serialNumbers ได้ (optional)
+/// Auto-finalize เมื่อทุก Detail ใน Pack เป็น DONE — response จะมี
+/// packFinalized=true + trackingId + palletReleased</code></pre><p>คอมเมนต์สองบรรทัดสุดท้ายมีค่ามาก — บอกพฤติกรรมที่ไม่เห็นจากลายเซ็นของเมธอด</p><p>แต่ยังต่อ path ด้วยสตริง</p><pre class="code-vs"><code>await _get('/packing/pallet/$palletId');
+await _get('/packing/pack/$packingId');
+await _get('/packing/pack/$packingId/order/$pickOrderId');</code></pre><p>สามจุด และรหัสพาเลทมาจากบาร์โค้ด — ปัญหาเดียวกับ 18.7</p><p>ส่วน body ทำถูก</p><pre class="code-vs"><code>final response = await _post('/packing/scan-part', {
+  'packingId': packingId,
+  'pickOrderId': pickOrderId,
+  'partId': partId,
+  'qty': qty,
+  'operatorId': operatorId,
+  if (serialNumbers != null &amp;&amp; serialNumbers.isNotEmpty)
+    'serialNumbers': serialNumbers,
+});</code></pre><div class="note"><strong>ต่างจากที่ 17.13 พบในสามไฟล์อื่น</strong><pre class="code-vs"><code>// receiving, unload, basket — ส่ง [] เสมอ
+'serialNumbers': serialNumbers ?? [],
+
+// packing — ไม่ส่งฟิลด์เลยถ้าว่าง
+if (serialNumbers != null &amp;&amp; serialNumbers.isNotEmpty) 'serialNumbers': serialNumbers,</code></pre>17.13 อธิบายว่าสองแบบนี้ต่างกันฝั่งเซิร์ฟเวอร์ — และคอมเมนต์ในสามไฟล์นั้นบอกว่า “backend รองรับทั้งคู่”<br>ถ้าจริง ทั้งสองแบบใช้ได้ แต่ความไม่สม่ำเสมอทำให้คนอ่านต้องตรวจทุกครั้ง</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>คลาสที่มี <code>fromJson</code> ต้องถูกสร้างจาก JSON</td><td><code>ConfirmPackResponse</code> ถูกสร้างด้วยมือ</td></tr>
+<tr><td><code>isDone</code> ในไฟล์เดียวกันคำนวณเหมือนกัน</td><td>สามแบบในห้าคลาส</td></tr>
+<tr><td><code>clamp</code> เป็นการซ่อนปัญหา</td><td>แก้ค่าให้ถูก แต่ควรมีทางรู้ว่าข้อมูลผิด</td></tr>
+<tr><td><code>toString()</code> กับ <code>as String</code> เหมือนกัน</td><td>ตัวแรกทน ตัวหลังจับปัญหาได้</td></tr>
+<tr><td>ส่ง <code>[]</code> กับไม่ส่งฟิลด์เหมือนกัน</td><td>ขึ้นกับฝั่งเซิร์ฟเวอร์</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียนเทสต์ให้โมเดลของโดเมนนี้ โดยเน้นสิ่งที่บทนี้ชี้ไว้</p><ol><li>เทสต์อะไรได้บ้าง และแต่ละข้อจับปัญหาอะไร</li><li>เขียนเทสต์ที่จับความไม่สม่ำเสมอของ <code>isDone</code></li><li>ถ้าเทสต์ผ่านหมด แปลว่าโมเดลนี้ถูกไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>เทสต์</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td><code>remaining</code> ไม่ติดลบเมื่อสแกนเกิน</td><td>ยืนยัน <code>clamp</code></td></tr>
+<tr><td><code>isDone</code> ของ <code>PackingSummary</code> ตรวจสองแหล่ง</td><td>บันทึกพฤติกรรมที่ต่างจากคลาสอื่น</td></tr>
+<tr><td><code>orderCount == 0</code> ไม่ถือว่าเสร็จ</td><td>ยืนยันเงื่อนไข <code>&gt; 0</code></td></tr>
+<tr><td>ฟิลด์คำอธิบายหายแล้วไม่พัง</td><td>ยืนยันการป้องกัน</td></tr>
+<tr><td><code>availableSerials</code> ที่มีตัวเลขปน</td><td>ยืนยัน <code>toString()</code></td></tr>
+<tr><td><code>packFinalized</code> ที่ไม่ส่งมา ได้ <code>false</code></td><td>สัญญาที่ 19.5 พึ่งพา</td></tr>
+</tbody></table><p><strong>ข้อ 2 — เทสต์ที่จับความไม่สม่ำเสมอ</strong></p><pre class="code-vs"><code>void main() {
+  group('isDone คำนวณคนละแบบในแต่ละคลาส', () {
+    test('PackingPartItem — จากตัวนับล้วน ไม่สนสถานะ', () {
+      final part = PackingPartItem.fromJson({
+        'partId': 'PT-1',
+        'requiredQty': 10,
+        'scannedQty': 10,
+      });
+      expect(part.isDone, isTrue);
+      expect(part.remaining, 0);
+    });
+
+    test('PackingPartItem — สแกนเกิน remaining ต้องเป็น 0 ไม่ใช่ติดลบ', () {
+      final part = PackingPartItem.fromJson({
+        'partId': 'PT-1',
+        'requiredQty': 10,
+        'scannedQty': 12,
+      });
+      expect(part.remaining, 0);
+      expect(part.isDone, isTrue);
+    });
+
+    test('PackingSummary — ตัวนับครบก็ถือว่าเสร็จ แม้สถานะยังไม่ DONE', () {
+      // พฤติกรรมนี้ต่างจากคลาสอื่นในไฟล์เดียวกันโดยตั้งใจ
+      final summary = PackingSummary.fromJson({
+        'packingId': 'PACK-1',
+        'status': 'PACKING',
+        'orderCount': 3,
+        'orderDoneCount': 3,
+      });
+      expect(summary.isDone, isTrue);
+    });
+
+    test('PackingSummary — ยังไม่มี Order ต้องไม่ถือว่าเสร็จ', () {
+      final summary = PackingSummary.fromJson({
+        'packingId': 'PACK-1',
+        'status': 'PACKING',
+        'orderCount': 0,
+        'orderDoneCount': 0,
+      });
+      expect(summary.isDone, isFalse);      // ← ถ้าลืม orderCount &gt; 0 จะล้ม
+    });
+
+    test('PackingDetailResponse — จากสถานะล้วน ไม่สนตัวนับ', () {
+      final detail = PackingDetailResponse.fromJson({
+        'packingId': 'PACK-1',
+        'palletId': 'PAL-1',
+        'status': 'PACKING',
+        'orders': [
+          {'pickOrderId': 'PO-1', 'status': 'DONE', 'partCount': 2, 'partDoneCount': 2},
+        ],
+      });
+      // ทุก Order เสร็จแล้ว แต่ isDone ยังเป็น false เพราะดูแค่ status
+      expect(detail.orders.every((o) =&gt; o.isDone), isTrue);
+      expect(detail.isDone, isFalse);
+    });
+  });
+}</code></pre><p>เทสต์สุดท้ายคือตัวที่มีค่าที่สุด — <strong>บันทึกว่าคลาสสองตัวในไฟล์เดียวกันตอบคำถามเดียวกันต่างกัน</strong></p><p>ถ้าวันหนึ่งมีคนแก้ให้เหมือนกัน เทสต์นี้จะล้มและบังคับให้ตัดสินใจอย่างตั้งใจ</p><p><strong>ข้อ 3 — เทสต์ผ่านแปลว่าถูกไหม</strong></p><p><strong>ไม่</strong> — เทสต์ยืนยันว่าโค้ดทำตามที่เขียนไว้ ไม่ได้ยืนยันว่าที่เขียนไว้ถูก</p><table><thead><tr><th>เทสต์ตอบได้</th><th>เทสต์ตอบไม่ได้</th></tr></thead><tbody>
+<tr><td><code>remaining</code> ไม่ติดลบ</td><td>เซิร์ฟเวอร์จะส่ง <code>scannedQty &gt; requiredQty</code> มาจริงไหม</td></tr>
+<tr><td><code>PackingSummary.isDone</code> ตรวจสองแหล่ง</td><td><strong>ควรตรวจสองแหล่งไหม</strong></td></tr>
+<tr><td>ฟิลด์ที่หายแล้วไม่พัง</td><td>ฟิลด์นั้นมีโอกาสหายไหม</td></tr>
+</tbody></table><p>แถวกลางคือคำถามที่ต้องถามทีม ไม่ใช่ตอบด้วยเทสต์</p><pre class="code-vs"><code>// คำถามที่ต้องถาม
+1. เซิร์ฟเวอร์อัปเดต status ของ Pack พร้อมกับ orderDoneCount เสมอไหม
+2. ถ้าไม่พร้อม ช่วงห่างนานแค่ไหน
+3. ถ้าพร้อมเสมอ เงื่อนไข || นั้นไม่จำเป็นและควรลบ</code></pre><div class="note"><strong>ข้อสรุปที่ใช้ได้ทั่วไป:</strong> เทสต์ที่บันทึกพฤติกรรมปัจจุบันมีค่าสองอย่าง — จับการเปลี่ยนแปลงที่ไม่ตั้งใจ และ<strong>ทำให้คำถามที่ต้องถามชัดขึ้น</strong><br>เทสต์ข้อสุดท้ายข้างบนไม่ได้บอกว่าอะไรถูก แต่บอกว่ามีสองคำตอบอยู่ในไฟล์เดียวกัน ซึ่งเป็นสิ่งที่ต้องเอาไปถาม<br>เจอรูปแบบนี้แล้วสามครั้ง: <code>PutawayResult.success</code> ที่ไม่มีใครอ่าน (18.7), <code>condition ?? 'FG'</code> ที่ต้องถามว่าคอลัมน์ NULL ได้ไหม (17.9) และที่นี่</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>หกคลาสตามสี่ชั้น ใช้รูปแบบสรุป-แล้วดึงเต็ม</li><li><code>ConfirmPackResponse.fromJson</code> ไม่มีใครเรียก — ร่องรอยของ endpoint ที่หายไป</li><li><code>isDone</code> คำนวณสามแบบในห้าคลาสของไฟล์เดียวกัน</li><li><code>PackingSummary.isDone</code> ตรวจสองแหล่งด้วย <code>||</code> — เผื่อสถานะมาไม่ทัน แต่ซ่อนความไม่สอดคล้อง</li><li><code>clamp(0, requiredQty)</code> แก้ค่าติดลบที่จุดเดียว ทำให้สามที่ที่ใช้ทำงานถูก</li><li>โดเมนนี้ป้องกันฟิลด์คำอธิบายครบ — สูงที่สุดในโปรเจกต์</li><li><code>e.toString()</code> ทนกว่า <code>e as String</code> แต่ซ่อนปัญหา</li><li>ทั้งสี่เมธอดส่ง <code>statusCode</code> ต่อ และมีคอมเมนต์อธิบายครบ</li><li>ส่ง <code>serialNumbers</code> เฉพาะเมื่อไม่ว่าง ต่างจากสามไฟล์อื่นที่ส่ง <code>[]</code> เสมอ</li></ul></div><p><strong>บทหน้า:</strong> Check-in — จอที่ไม่มี enum และมีสามฟิลด์ nullable ที่ประกอบกันเป็นโหมด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

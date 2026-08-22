@@ -1,11 +1,238 @@
-<div class="note"><strong>Part scan เลือกชนิด input:</strong> serial-controlled ต้องยืนยัน serial ทุกชิ้น ส่วน non-serial ระบุ qty ได้บางส่วน แต่ทั้งคู่ยังเป็น draft จนส่ง <code>scanPackPart</code></div>
-<section><h2>1. Activate part</h2><p>partId ต้องอยู่ใน order และยังไม่ done จากนั้น set selectedPart/ช่อง scan; serial item โฟกัส S/N ส่วน non-serial เติม remaining ลง qty field</p></section>
-<section><h2>2. Quantity draft</h2><p>qty ต้องเป็น int มากกว่า 0 และไม่เกิน <code>part.remaining</code> แล้วเก็บใน <code>_collectedQty[partId]</code> Non-serial อนุญาต partial packing จึงไม่บังคับเท่ากับ remaining</p></section>
-<section><h2>3. Serial draft</h2><p>serial ถูก uppercase, ห้ามซ้ำใน local list, ต้องอยู่ใน availableSerials และ count ไม่เกิน remaining จากนั้น clear/focus เพื่อ scan ต่อ</p></section>
-<section><h2>4. Serial completeness</h2><p>serial part พร้อม submit เมื่อ collected count เท่ากับ remaining เท่านั้น ต่างจาก non-serial ที่มากกว่า 0 ก็พร้อม เหตุผลคือ serial ทุกหน่วยต้องระบุ identity ต่อ request</p></section>
-<section><h2>5. Identity collision</h2><p>maps และ selection key ด้วย partId เช่นเดียวกับ Picking ถ้า order มี part เดียวกันหลาย lot/condition lines ข้อมูลจะชน และ payloadไม่มี lineId/lot ควรเพิ่ม inventory line identity ตลอด contract</p></section>
-<section><h2>6. Confirm payload</h2><pre class="code-vs"><code>POST /packing/scan-part
-{ packingId, pickOrderId, partId, qty,
-  operatorId, serialNumbers? }</code></pre><p>non-serial ส่ง empty list แต่ API omit field เมื่อ list ว่าง</p></section>
-<section><h2>7. Server validation</h2><p>backend ต้องตรวจ pack/order membership, remaining ล่าสุด, serial ownership/uniqueness และ status ใน transaction ไม่เชื่อ availableSerials หรือ qty จาก snapshot ฝั่ง client</p></section>
-<section><h2>8. Input tests</h2><div class="success">ทดสอบ wrong/done part, qty partial/zero/เกิน, duplicate/unknown serial, part หลาย lot, remove serial, double submit และ timeout หลัง commit โดยยอด scanned ต้องเพิ่มเพียงครั้งเดียว</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เทียบ _scanSerial ของ packing กับของ pick_items บรรทัดต่อบรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.3, 18.12 (การสแกนใน picking)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นว่าโค้ดที่คัดลอกมาพาปัญหามาด้วย และรู้วิธีหาคู่แฝดในโปรเจกต์</div>
+
+<section><h2>1. เมธอดที่เหมือนกันเกือบทุกบรรทัด</h2><pre class="code-vs"><code>// packing_screen.dart
+void _scanSerial() {
+  final partId = _partScanCtrl.text.trim().toUpperCase();
+  final serialNo = _serialScanCtrl.text.trim().toUpperCase();
+  if (partId.isEmpty) {
+    showWarningSnackbar(context, 'กรุณาสแกน Part ก่อน');
+    _partScanFocus.requestFocus();
+    return;
+  }
+  if (serialNo.isEmpty) {
+    showWarningSnackbar(context, 'กรุณาสแกน S/N');
+    _serialScanFocus.requestFocus();
+    return;
+  }
+  ...
+}</code></pre><pre class="code-vs"><code>// pick_items_screen.dart (18.12)
+void _scanSerial() {
+  final partId = _partScanCtrl.text.trim().toUpperCase();
+  final serialNo = _serialScanCtrl.text.trim().toUpperCase();
+  if (partId.isEmpty) {
+    showWarningSnackbar(context, 'กรุณาสแกน Part ก่อน');
+    _partScanFocus.requestFocus();
+    return;
+  }
+  ...
+}</code></pre><p>สิบสี่บรรทัดแรกเหมือนกันทุกตัวอักษร</p><table><thead><tr><th>ด่าน</th><th>picking</th><th>packing</th><th>ต่างกันไหม</th></tr></thead><tbody>
+<tr><td>1 เลือกสินค้าแล้วยัง</td><td>ตรวจ</td><td>ตรวจ</td><td>เหมือน</td></tr>
+<tr><td>2 กรอก S/N มาไหม</td><td>ตรวจ</td><td>ตรวจ</td><td>เหมือน</td></tr>
+<tr><td>3 สินค้าอยู่ในรายการไหม</td><td><code>_assignment.palletItems</code></td><td><code>_orderResp?.parts</code></td><td>แหล่งข้อมูล</td></tr>
+<tr><td><strong>4 สินค้าครบแล้วหรือยัง</strong></td><td><strong>ไม่มี</strong></td><td><strong>มี</strong></td><td><strong>packing มีเพิ่ม</strong></td></tr>
+<tr><td>5 สแกนซ้ำไหม</td><td>ตรวจ</td><td>ตรวจ</td><td>เหมือน</td></tr>
+<tr><td>6 S/N อยู่บนพาเลทไหม</td><td><code>availableSerials</code></td><td><code>availableSerials</code></td><td>เหมือน</td></tr>
+<tr><td>7 ครบจำนวนแล้วไหม</td><td><code>qtyToPickSuggested</code></td><td><code>remaining</code></td><td>ชื่อฟิลด์</td></tr>
+</tbody></table><p>packing เพิ่มด่านหนึ่ง</p><pre class="code-vs"><code>if (part.isDone) {
+  showWarningSnackbar(context, 'Part $partId แพ็คครบแล้ว');
+  _serialScanCtrl.clear();
+  _partScanFocus.requestFocus();
+  return;
+}</code></pre><div class="note"><strong>ด่านนี้จำเป็นเพราะ packing โหลดรายการสินค้าทั้งหมดของใบสั่ง รวมที่แพ็กเสร็จแล้ว</strong><br>ส่วน picking ได้เฉพาะสินค้าที่ต้องหยิบบนพาเลทนั้น จึงไม่มีของที่เสร็จแล้วปนมา<br>ความต่างมาจากฝั่งเซิร์ฟเวอร์ ไม่ใช่จากฝั่งแอป</div></section>
+
+<section><h2>2. ปัญหาที่คัดลอกมาด้วย</h2><p>18.12 พบว่า <code>_addQty</code> กับ <code>_activatePart</code> ใน picking ตีความข้อมูลเดียวกันคนละแบบ</p><pre class="code-vs"><code>// packing — _activatePart
+void _activatePart(PackingPartItem part) {
+  setState(() {
+    _selectedPartId = part.partId;
+    _partScanCtrl.text = part.partId;
+    if (!part.serialRequire) {
+      final already = _collectedQty[part.partId] ?? 0;
+      final remaining = part.remaining - already;         // ← หักที่ระบุไว้แล้ว
+      _qtyEntryCtrl.text = remaining &gt; 0 ? '$remaining' : '0';
+    }
+  });
+  ...
+}
+
+// packing — _addQty
+setState(() =&gt; _collectedQty[part.partId] = qty);          // ← แทนที่</code></pre><table><thead><tr><th>สถานการณ์</th><th>ช่องแสดง</th><th>ตรงกับที่ผู้ใช้คาดไหม</th></tr></thead><tbody>
+<tr><td>เลือกครั้งแรก ต้องแพ็ก 10</td><td>10</td><td>ตรง</td></tr>
+<tr><td>ระบุ 8 แล้วเลือกซ้ำ</td><td><strong>2</strong></td><td><strong>ไม่ตรง — ควรเป็น 8</strong></td></tr>
+<tr><td>ระบุครบ 10 แล้วเลือกซ้ำ</td><td>0 แล้วกดไม่ผ่าน</td><td>ไม่ตรง</td></tr>
+</tbody></table><p><strong>บั๊กเดียวกันเป๊ะ ในสองไฟล์</strong> — และแก้ที่หนึ่งไม่ได้แก้อีกที่</p><pre class="code-vs"><code>// แก้ทั้งสองไฟล์ให้เหมือนกัน
+final current = _collectedQty[part.partId];
+_qtyEntryCtrl.text = '${current ?? part.remaining}';</code></pre><div class="note"><strong>นี่คือต้นทุนที่แท้จริงของการคัดลอกโค้ด</strong> — ไม่ใช่แค่บรรทัดที่ซ้ำ แต่คือ<strong>บั๊กที่ต้องหาและแก้หลายที่</strong><br>คนที่แจ้งบั๊กจะแจ้งจากจอเดียว คนแก้จะแก้จอเดียว แล้วอีกจอยังผิดอยู่จนกว่าจะมีคนแจ้งอีกครั้ง</div></section>
+
+<section><h2>3. วิธีหาคู่แฝดในโปรเจกต์</h2><p>เมื่อสงสัยว่าโค้ดถูกคัดลอกมา ให้ค้นด้วยสตริงที่ไม่น่าซ้ำโดยบังเอิญ</p><pre class="code-vs"><code># ข้อความที่ผู้ใช้เห็น มักถูกคัดลอกมาด้วย
+rg "กรุณาสแกน Part ก่อน" lib
+# → pick_items_screen.dart
+# → packing_screen.dart</code></pre><table><thead><tr><th>ข้อความ</th><th>เจอที่</th></tr></thead><tbody>
+<tr><td>“กรุณาสแกน Part ก่อน”</td><td>picking, packing</td></tr>
+<tr><td>“กรุณาระบุจำนวน”</td><td>picking, packing</td></tr>
+<tr><td>“S/N ... สแกนไปแล้ว”</td><td>picking, packing</td></tr>
+<tr><td>“ไม่อยู่บน Pallet นี้สำหรับ Part”</td><td>picking, packing</td></tr>
+</tbody></table><p>และค้นชื่อเมธอดที่ตั้งชื่อคล้ายกัน</p><pre class="code-vs"><code>rg "_copyAndFillSerialForTest|_showAvailableSerialsSheet" lib
+# → pick_items_screen.dart
+# → packing_screen.dart</code></pre><div class="note"><strong>เจอคู่แฝดของแผ่น “S/N สำหรับทดสอบ” ด้วย</strong> — 18.12 ชี้ว่าแผ่นนี้ติดมากับ release และทำให้ยืนยันได้โดยไม่ต้องสแกนจริง<br>ตอนนี้รู้ว่ามี<strong>สองที่</strong> ไม่ใช่ที่เดียว — และการครอบด้วย <code>kDebugMode</code> ต้องทำทั้งสองที่</div><p>ค้นค่าคงที่ที่ประกาศซ้ำ</p><pre class="code-vs"><code>rg "Color\(0xFF22A06B\)" lib
+# → pick_items_screen.dart:  static const Color _pickSuccess
+# → packing_screen.dart:     static const Color _packSuccess</code></pre><p>สีเดียวกัน ชื่อต่างกัน ประกาศสองที่ — และทั้งคู่ไม่ใช่ <code>AppTheme.success</code></p></section>
+
+<section><h2>4. ตารางเทียบทั้งสองไฟล์</h2><table><thead><tr><th>สิ่งที่ซ้ำ</th><th>picking</th><th>packing</th></tr></thead><tbody>
+<tr><td>enum สถานะ</td><td><code>_PickState</code> 5</td><td><code>_PackState</code> 5</td></tr>
+<tr><td>นับจำนวนที่เก็บ</td><td><code>_pickedCountFor</code></td><td><code>_collectedCountFor</code></td></tr>
+<tr><td>Map ของ S/N</td><td><code>_pickedSerials</code></td><td><code>_collectedSerials</code></td></tr>
+<tr><td>Map ของจำนวน</td><td><code>_pickedQty</code></td><td><code>_collectedQty</code></td></tr>
+<tr><td>Set ของตารางที่ขยาย</td><td><code>_expandedSerialPartIds</code></td><td><code>_expandedSerialPartIds</code></td></tr>
+<tr><td>แบนเนอร์ดูทั้งหมด</td><td><code>_buildShowAllBanner</code></td><td><code>_buildPackShowAllBanner</code></td></tr>
+<tr><td>ตาราง S/N</td><td><code>_buildSerialTable</code></td><td><code>_buildPackSerialTable</code></td></tr>
+<tr><td>แผ่นทดสอบ</td><td><code>_showAvailableSerialsSheet</code></td><td><code>_showAvailableSerialsSheet</code></td></tr>
+<tr><td>คัดลอก S/N</td><td><code>_copyAndFillSerialForTest</code></td><td><code>_copyAndFillSerialForTest</code></td></tr>
+<tr><td>ค่าคงที่หน้าตา</td><td><code>_pick*</code> 8 ตัว</td><td><code>_pack*</code> 8 ตัว</td></tr>
+</tbody></table><p>สิบรายการ รวมกันราว 900 บรรทัดที่ซ้ำกันระหว่างสองไฟล์</p><table><thead><tr><th>ถ้ารวมเป็นของกลาง</th><th>ประหยัด</th></tr></thead><tbody>
+<tr><td>ค่าคงที่ 8 ตัว</td><td>~16 บรรทัด + สีตรงกัน</td></tr>
+<tr><td>ตาราง S/N</td><td>~160 บรรทัด</td></tr>
+<tr><td>แบนเนอร์ดูทั้งหมด</td><td>~50 บรรทัด</td></tr>
+<tr><td>แผ่นทดสอบ + คัดลอก</td><td>~200 บรรทัด</td></tr>
+<tr><td>ตัวนับจำนวน</td><td>~5 บรรทัด แต่<strong>แก้บั๊กที่เดียวได้</strong></td></tr>
+</tbody></table><div class="note"><strong>แต่การรวมไม่ง่ายอย่างที่ตัวเลขบอก</strong> — สองไฟล์ใช้โมเดลคนละคลาส<pre class="code-vs"><code>PickItemOnPallet   { partId, serialRequire, qtyToPickSuggested, availableSerials }
+PackingPartItem    { partId, serialRequire, remaining, availableSerials }</code></pre>ฟิลด์ที่บอกจำนวนชื่อต่างกัน (<code>qtyToPickSuggested</code> กับ <code>remaining</code>) จึงต้องมี interface หรือ adapter ก่อน<br>เป็นงานที่ทำได้แต่ต้องคิด ไม่ใช่แค่ย้ายไฟล์</div></section>
+
+<section><h2>5. ทางที่คุ้มที่สุดถ้าจะรวม</h2><p>เรียงตามอัตราส่วนประโยชน์ต่อความเสี่ยง</p><table><thead><tr><th>ลำดับ</th><th>รวมอะไร</th><th>ความเสี่ยง</th><th>ได้อะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ค่าคงที่หน้าตา</td><td>ต่ำมาก</td><td>สีตรงกัน แก้ที่เดียว</td></tr>
+<tr><td>2</td><td>แผ่น “S/N สำหรับทดสอบ”</td><td>ต่ำ</td><td>ครอบ <code>kDebugMode</code> ที่เดียว</td></tr>
+<tr><td>3</td><td>ตาราง S/N</td><td>ปานกลาง</td><td>~160 บรรทัด</td></tr>
+<tr><td>4</td><td>ตรรกะการสแกน</td><td><strong>สูง</strong></td><td>บั๊กแก้ที่เดียว</td></tr>
+</tbody></table><pre class="code-vs"><code>// ลำดับที่ 1 — lib/widgets/scan_style.dart
+class ScanStyle {
+  ScanStyle._();
+  static const Color border = Color(0xFFDCE6F2);
+  static const Color textDark = Color(0xFF1F2937);
+  static const Color textMuted = Color(0xFF6B7280);
+  static const Color chipBg = Color(0xFFEAF3FF);
+  static const Color success = Color(0xFF22A06B);
+  static const double serialHeaderHeight = 32;
+  static const double serialRowHeight = 42;
+  static const int serialVisibleRowLimit = 5;
+}</code></pre><p>ลำดับที่ 4 ต้องมีชั้นกลางก่อน</p><pre class="code-vs"><code>/// สิ่งที่ทั้ง picking และ packing ต้องรู้เพื่อสแกน S/N
+abstract interface class ScannableItem {
+  String get partId;
+  bool get serialRequire;
+  int get targetQty;                    // qtyToPickSuggested หรือ remaining
+  List&lt;String&gt; get availableSerials;
+}</code></pre><pre class="code-vs"><code>/// ผลของการตรวจ S/N หนึ่งครั้ง — ไม่แตะ UI ไม่แตะ state
+sealed class SerialScanResult {}
+class SerialAccepted extends SerialScanResult {}
+class SerialDuplicate extends SerialScanResult {}
+class SerialNotOnPallet extends SerialScanResult {}
+class SerialQuotaFull extends SerialScanResult {
+  SerialQuotaFull(this.limit);
+  final int limit;
+}
+
+SerialScanResult checkSerial({
+  required ScannableItem item,
+  required List&lt;String&gt; alreadyScanned,
+  required String serialNo,
+}) {
+  if (alreadyScanned.contains(serialNo)) return SerialDuplicate();
+  if (!item.availableSerials.contains(serialNo)) return SerialNotOnPallet();
+  if (alreadyScanned.length &gt;= item.targetQty) return SerialQuotaFull(item.targetQty);
+  return SerialAccepted();
+}</code></pre><div class="note"><strong>ฟังก์ชันนี้เทสต์ได้ทันที</strong> — รับข้อมูล คืนผลลัพธ์ ไม่แตะ <code>context</code> ไม่แตะ <code>setState</code><pre class="code-vs"><code>test('สแกนซ้ำต้องถูกปฏิเสธ', () {
+  final result = checkSerial(
+    item: _fakeItem(targetQty: 5, serials: ['SN-1', 'SN-2']),
+    alreadyScanned: ['SN-1'],
+    serialNo: 'SN-1',
+  );
+  expect(result, isA&lt;SerialDuplicate&gt;());
+});</code></pre>สี่เทสต์ครอบคลุมทั้งสองจอพร้อมกัน — และเป็นตาข่ายที่ต้องมีก่อนจะเริ่มรวมโค้ดจริง</div></section>
+
+<section><h2>6. สิ่งที่ต่างกันจริงและไม่ควรรวม</h2><table><thead><tr><th>เรื่อง</th><th>picking</th><th>packing</th></tr></thead><tbody>
+<tr><td>สถานะที่เข้าจอ</td><td><code>pickView</code> (ได้ข้อมูลมาแล้ว)</td><td><code>scanPallet</code> (ต้องสแกนก่อน)</td></tr>
+<tr><td>จำนวนชั้น</td><td>3</td><td>4</td></tr>
+<tr><td>ปลายทาง</td><td>ต้องสแกนพาเลทปลายทาง</td><td>ไม่มี — กล่องคือปลายทาง</td></tr>
+<tr><td>การจบงาน</td><td>ผู้ใช้เลือกว่าจะทำอะไรต่อ</td><td><strong>เซิร์ฟเวอร์ปิดกล่องให้เอง</strong></td></tr>
+<tr><td>รายการที่แสดง</td><td>เฉพาะที่ต้องหยิบ</td><td>ทั้งหมด รวมที่เสร็จแล้ว</td></tr>
+</tbody></table><p>แถวสุดท้ายสองแถวคือความต่างที่แท้จริง — และเป็นเหตุผลที่รวมทั้งเมธอดไม่ได้</p><p>19.5 จะดูแถวที่สี่เต็ม ๆ</p><p>สังเกตว่า <code>_confirmCollectedPack</code> ของ packing ไม่มีคู่ใน picking</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmCollectedPack() async {
+  final order = _orderResp;
+  if (order == null) return;
+
+  // Part มี S/N → ต้องสแกนครบ remaining ถึงจะ pack ได้
+  // Part ไม่มี S/N → กรอกจำนวนเท่าไหร่ก็ pack เท่านั้น (pack บางส่วนได้)
+  final readyParts = order.parts
+      .where((part) =&gt;
+          !part.isDone &amp;&amp;
+          part.remaining &gt; 0 &amp;&amp;
+          (part.serialRequire
+              ? _collectedCountFor(part) == part.remaining
+              : _collectedCountFor(part) &gt; 0))
+      .toList();
+  ...
+  for (final part in readyParts) {
+    await _confirmPart(part, _collectedCountFor(part));
+    if (!mounted || _state != _PackState.orderParts) return;
+  }
+}</code></pre><table><thead><tr><th>ต่างจาก <code>_confirmPick</code> ตรงไหน</th></tr></thead><tbody>
+<tr><td>picking ส่งทุกรายการในคำขอเดียว</td></tr>
+<tr><td>packing ส่ง<strong>ทีละรายการ</strong> วนไป</td></tr>
+</tbody></table><div class="note"><strong>บรรทัดที่ป้องกันไว้ดีมาก</strong><pre class="code-vs"><code>if (!mounted || _state != _PackState.orderParts) return;</code></pre>ตรวจทั้งสองข้อที่ 19.3 สรุปไว้ — จอยังอยู่ไหม และผู้ใช้ยังอยู่ที่เดิมไหม<br>จำเป็นเพราะระหว่างวน อาจมีรายการที่ทำให้กล่องถูกปิดและสถานะเปลี่ยนเป็น <code>success</code> ซึ่งต้องหยุดวนทันที</div><p>คอมเมนต์สองบรรทัดอธิบายกฎที่ต่างกันระหว่างสินค้าสองแบบ — เป็นคอมเมนต์ที่มีค่าเพราะเงื่อนไขข้างล่างอ่านยาก</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>โค้ดที่ซ้ำแค่เปลืองบรรทัด</td><td>บั๊กต้องแก้หลายที่</td></tr>
+<tr><td>รวมโค้ดที่เหมือนกันได้เลย</td><td>โมเดลคนละคลาส ต้องมีชั้นกลางก่อน</td></tr>
+<tr><td>ค้นหาโค้ดซ้ำต้องอ่านทีละไฟล์</td><td>ค้นข้อความที่ผู้ใช้เห็นเจอเร็วที่สุด</td></tr>
+<tr><td>สองเมธอดชื่อเดียวกันคือตัวเดียวกัน</td><td>อาจเป็นสำเนาที่แยกกันไปแล้ว</td></tr>
+<tr><td>วนเรียก API ทีละรายการช้ากว่าส่งทีเดียว</td><td>ช้ากว่า แต่รู้ว่ารายการไหนล้มเหลว</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมอยากครอบแผ่น “S/N สำหรับทดสอบ” ด้วย <code>kDebugMode</code> ตามที่ 18.12 เสนอ</p><ol><li>ต้องแก้กี่ที่ และหาได้อย่างไร</li><li>เขียนโค้ด</li><li>ถ้าทีมบอกว่ายังต้องใช้หน้างานตอนติดตั้ง ควรทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — หากี่ที่</strong></p><pre class="code-vs"><code>rg "_showAvailableSerialsSheet" lib
+# pick_items_screen.dart:368  void _showAvailableSerialsSheet() {
+# pick_items_screen.dart:...  onPressed: _showAvailableSerialsSheet,
+# packing_screen.dart:423     void _showAvailableSerialsSheet() {
+# packing_screen.dart:...     onPressed: _showAvailableSerialsSheet,</code></pre><p>สองไฟล์ สี่จุด — สองจุดที่ประกาศ และสองจุดที่เรียก</p><p>ต้องหาปุ่มที่เรียกด้วย เพราะการครอบต้องอยู่ที่ปุ่ม ไม่ใช่ที่เมธอด</p><pre class="code-vs"><code>rg -B5 "onPressed: _showAvailableSerialsSheet" lib</code></pre><p>และหา <code>_copyAndFillSerialForTest</code> ที่ใช้คู่กัน</p><table><thead><tr><th>ต้องแตะ</th><th>จำนวน</th></tr></thead><tbody>
+<tr><td>ปุ่มเปิดแผ่น</td><td>2</td></tr>
+<tr><td>เมธอดเปิดแผ่น</td><td>2 (ไม่ต้องแก้ ถ้าครอบที่ปุ่ม)</td></tr>
+<tr><td>ปุ่มคัดลอก S/N ในแผ่น</td><td>2 (อยู่ในแผ่นอยู่แล้ว)</td></tr>
+</tbody></table><p><strong>ข้อ 2 — โค้ด</strong></p><pre class="code-vs"><code>import 'package:flutter/foundation.dart' show kDebugMode;</code></pre><pre class="code-vs"><code>// เดิม
+IconButton(
+  icon: const Icon(Icons.science_outlined),
+  tooltip: 'S/N สำหรับทดสอบ',
+  onPressed: _showAvailableSerialsSheet,
+),
+
+// ใหม่ — หายไปทั้งปุ่มใน release ไม่ใช่แค่กดไม่ได้
+if (kDebugMode)
+  IconButton(
+    icon: const Icon(Icons.science_outlined),
+    tooltip: 'S/N สำหรับทดสอบ',
+    onPressed: _showAvailableSerialsSheet,
+  ),</code></pre><div class="note"><strong>ใช้ <code>if (kDebugMode)</code> ไม่ใช่ <code>onPressed: kDebugMode ? ... : null</code></strong><br>แบบหลังทำให้ปุ่มยังแสดงอยู่แต่กดไม่ได้ ซึ่งทำให้ผู้ใช้สงสัยว่าปุ่มนี้คืออะไร<br>15.1 อธิบายว่า <code>kDebugMode</code> เป็น <code>const</code> ดังนั้นใน release คอมไพเลอร์จะตัดทั้งก้อนออก — ไม่มีทั้งปุ่มและโค้ดที่เกี่ยวข้อง</div><p>และควรทำให้ลืมไม่ได้ในอนาคต</p><pre class="code-vs"><code>// lib/widgets/dev_only.dart
+/// ห่อ widget ที่ต้องมีเฉพาะตอนพัฒนา — ใน release จะหายไปทั้งก้อน
+class DevOnly extends StatelessWidget {
+  const DevOnly({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =&gt;
+      kDebugMode ? child : const SizedBox.shrink();
+}</code></pre><pre class="code-vs"><code>DevOnly(
+  child: IconButton(
+    icon: const Icon(Icons.science_outlined),
+    tooltip: 'S/N สำหรับทดสอบ',
+    onPressed: _showAvailableSerialsSheet,
+  ),
+),</code></pre><p>ค้น <code>DevOnly</code> ทั้งโปรเจกต์แล้วเห็นเครื่องมือทดสอบทั้งหมดในครั้งเดียว</p><p><strong>ข้อ 3 — ถ้ายังต้องใช้หน้างาน</strong></p><table><thead><tr><th>ทางเลือก</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ผูกกับบทบาท <code>SUPERVISOR</code></td><td>ใช้ได้เฉพาะคนที่ควรใช้</td><td>ต้องส่ง <code>role</code> ผ่านทุกชั้น</td></tr>
+<tr><td>ซ่อนในเมนู Dev Tools ที่มีอยู่แล้ว (16.3)</td><td>ที่เดียวรวมทุกเครื่องมือ</td><td>ต้องออกจากจอไปเปิด</td></tr>
+<tr><td>เปิดด้วยการกดค้างที่หัวข้อ</td><td>ไม่มีปุ่มให้กดโดน</td><td>ไม่มีใครรู้ถ้าไม่บอก</td></tr>
+</tbody></table><p>ทางที่ตรงกับที่โปรเจกต์นี้ทำอยู่แล้วคือทางที่สาม — 16.3 พบว่าเมนู Dev Tools เปิดด้วยการกดค้างที่รูปผู้ใช้</p><pre class="code-vs"><code>// เปิดแผ่นทดสอบด้วยการกดค้างที่หัวข้อ ไม่มีปุ่มให้กดโดน
+GestureDetector(
+  onLongPress: _showAvailableSerialsSheet,
+  child: const Text('รายการสินค้า', style: ...),
+),</code></pre><p>แต่ปัญหาที่ 18.12 ชี้ยังอยู่ — <strong>เครื่องมือนี้ทำให้ยืนยันได้โดยไม่ได้สแกนของจริง</strong></p><p>ถ้าจะเก็บไว้ ควรทำให้เห็นได้ว่าใช้ไป</p><pre class="code-vs"><code>Future&lt;void&gt; _copyAndFillSerialForTest(String partId, String serialNo) async {
+  ...
+  showWarningSnackbar(context, 'ใช้ S/N ทดสอบ — ตรวจว่าของจริงตรงกัน');
+}</code></pre><p>เปลี่ยนจากแถบเขียว (สำเร็จ) เป็นแถบเหลือง (เตือน) — ผู้ใช้และคนที่ยืนข้าง ๆ เห็นว่ากำลังใช้ทางลัด</p><div class="note"><strong>ข้อสรุปที่สำคัญกว่า:</strong> คำถามที่ต้องถามทีมไม่ใช่ “จะซ่อนอย่างไร” แต่คือ <strong>“ทำไมยังต้องใช้ตอนติดตั้ง”</strong><br>ถ้าคำตอบคือ “ข้อมูลทดสอบยังไม่มี S/N จริง” นั่นคือปัญหาของข้อมูลทดสอบ ไม่ใช่ของแอป — และควรแก้ที่นั่น</div></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>_scanSerial</code> ของสองไฟล์เหมือนกันสิบสี่บรรทัดแรกทุกตัวอักษร</li><li>packing เพิ่มด่านตรวจ <code>isDone</code> เพราะโหลดรายการทั้งหมดรวมที่เสร็จแล้ว</li><li>บั๊ก <code>_addQty</code> กับ <code>_activatePart</code> ที่ 18.12 พบ ถูกคัดลอกมาเป๊ะ</li><li>หาคู่แฝดได้เร็วที่สุดด้วยการค้นข้อความที่ผู้ใช้เห็น</li><li>แผ่น “S/N สำหรับทดสอบ” มีสองที่ ไม่ใช่ที่เดียว</li><li>สีเดียวกันประกาศสองที่ และทั้งคู่ไม่ใช่ <code>AppTheme</code></li><li>ราว 900 บรรทัดซ้ำกันระหว่างสองไฟล์</li><li>รวมยากเพราะโมเดลคนละคลาสและชื่อฟิลด์จำนวนต่างกัน</li><li><code>_confirmCollectedPack</code> ส่งทีละรายการและตรวจสถานะทุกรอบ</li></ul></div><p><strong>บทหน้า:</strong> การปิดกล่องอัตโนมัติที่เซิร์ฟเวอร์ตัดสิน และการประกอบผลลัพธ์ที่แอปทำเอง</p></section>

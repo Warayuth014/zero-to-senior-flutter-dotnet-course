@@ -4,19 +4,257 @@
 <title>Check-in Models &amp; API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-09 · Real Codebase</span><h1>Check-in Models &amp; API</h1><p>Part 19: wmsapp Outbound</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">API surface</a></li><li><a href="#section-2">Preview model</a></li><li><a href="#section-3">Preview items</a></li><li><a href="#section-4">Scan result</a></li><li><a href="#section-5">Slot model</a></li><li><a href="#section-6">Date/status parsing</a></li><li><a href="#section-7">Command responses</a></li><li><a href="#section-8">Contract lab</a></li></ol></nav>
-<div class="note"><strong>Check-in contract มีทั้ง carton และ pipeline:</strong> slot assignment อิง owner/customer order ขณะที่ counters สะท้อนความคืบหน้าข้าม Picking, Packing, Sorting และ Check-in</div>
-<section id="section-1"><h2>1. API surface</h2><pre class="code-vs"><code>POST /checkin/preview
-POST /checkin/scan
-GET  /checkin/slot/{slotId}
-POST /checkin/complete
-POST /checkin/dispatch</code></pre></section>
-<section id="section-2"><h2>2. Preview model</h2><p><code>PreviewCheckInResponse</code> รวม pack identity/content, slot decision, duplicate flag, destination และ counters ค่า <code>skuCount</code> derive จาก items.length ไม่ควรเก็บซ้ำ</p></section>
-<section id="section-3"><h2>3. Preview items</h2><p>PreviewCheckInItem มี partId, description, brand, imageUrl และ qty เหมาะกับ visual verification แต่ไม่มี lot/serial เพราะขั้นนี้ยืนยัน carton รวม ไม่ใช่แก้ inventory line</p></section>
-<section id="section-4"><h2>4. Scan result</h2><p><code>ScanCheckInResponse</code> คืน slotId กับ isReadyToComplete ขนาดเล็กและชัด แต่ timeout หลัง commit ต้องมี operation/query status เพื่อค้นผล ไม่ควรยิง scan ซ้ำโดยเดา</p></section>
-<section id="section-5"><h2>5. Slot model</h2><p><code>CheckInSlotDetail</code> มี status, cartons และ pipeline counters ส่วน carton มี packing/tracking/status/time/counts ทำให้ refresh หนึ่งครั้ง rebuild ทั้งหน้าได้</p></section>
-<section id="section-6"><h2>6. Date/status parsing</h2><p>scannedAt invalid fallback เป็น now และ status เป็น String ควรใช้ UTC timestamp ที่ parse failure สังเกตได้กับ enum ที่รองรับ unknown เพื่อไม่ทำ carton เสียดูเหมือนเพิ่งสแกน</p></section>
-<section id="section-7"><h2>7. Command responses</h2><p>complete/dispatch คืน void ทำให้ clientรู้เพียง success HTTP หากต้องแสดงสถานะ/version/dispatch destination ควรคืน typed result หรือตามด้วย GET slot อย่างบังคับ</p></section>
-<section id="section-8"><h2>8. Contract lab</h2><div class="success">fixture preview new/existing/duplicate, slot OPEN/READY/SHIPPED, malformed dates/status และ problem details 409 จาก concurrent scan/complete/dispatch แล้วทดสอบ Dart/.NET contract คู่กัน</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ห้าคลาสของโดเมน</a></li><li><a href="#section-2">ห้าตัวเลขที่ปรากฏสองคลาส</a></li><li><a href="#section-3">ระดับการป้องกัน</a></li><li><a href="#section-4">ฟิลด์ที่ยังไม่ถูกใช้</a></li><li><a href="#section-5">ฝั่ง API ที่สม่ำเสมอ</a></li><li><a href="#section-6">เทียบสามโดเมนของ Part นี้</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด models/checkin/checkin_models.dart และ services/api/checkin_api.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.8, 19.6 (โมเดล packing)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านโมเดลที่ฟิลด์เดียวกันปรากฏสองคลาส และเห็นว่า pipeline ห้าตัวเลขบอกอะไร</div>
+
+<section id="section-1"><h2>1. ห้าคลาสของโดเมน</h2><table><thead><tr><th>คลาส</th><th>มาจาก</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>PreviewCheckInResponse</code></td><td><code>POST /checkin/preview</code></td><td>ข้อมูลกล่องก่อนยืนยัน</td></tr>
+<tr><td><code>PreviewCheckInItem</code></td><td>อยู่ในตัวบน</td><td>สินค้าในกล่อง</td></tr>
+<tr><td><code>ScanCheckInResponse</code></td><td><code>POST /checkin/scan</code></td><td>ผลของการยืนยัน</td></tr>
+<tr><td><code>CheckInSlotDetail</code></td><td><code>GET /checkin/slot/{id}</code></td><td>ข้อมูลช่อง</td></tr>
+<tr><td><code>CheckInCartonItem</code></td><td>อยู่ในตัวบน</td><td>กล่องในช่อง</td></tr>
+</tbody></table><p><code>ScanCheckInResponse</code> มีสองฟิลด์เท่านั้น</p><pre class="code-vs"><code>class ScanCheckInResponse {
+  final String slotId;
+  final bool isReadyToComplete;
+}</code></pre><div class="note"><strong>คลาสเล็กที่สุดในโปรเจกต์ และเป็นคลาสที่สำคัญที่สุดคลาสหนึ่ง</strong> — <code>isReadyToComplete</code> เป็นตัวตัดสินว่าจะยิงคำสั่งที่ทำให้ของขึ้นรถหรือไม่ (19.8)<br>ขนาดของคลาสไม่ได้บอกความสำคัญ</div></section>
+
+<section id="section-2"><h2>2. ห้าตัวเลขที่ปรากฏสองคลาส</h2><pre class="code-vs"><code>// PreviewCheckInResponse
+final int pipelineTotal;
+final int pickDone;
+final int packDone;
+final int sortingDone;
+final int checkInDone;
+
+// CheckInSlotDetail — ห้าตัวเดียวกันเป๊ะ
+final int pipelineTotal;
+final int pickDone;
+final int packDone;
+final int sortingDone;
+final int checkInDone;</code></pre><p>ห้าฟิลด์ซ้ำในสองคลาส และมีค่าเริ่มต้นเหมือนกัน</p><pre class="code-vs"><code>this.pipelineTotal = 0,
+this.pickDone = 0,
+this.packDone = 0,
+this.sortingDone = 0,
+this.checkInDone = 0,</code></pre><table><thead><tr><th>ตัวเลข</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>pipelineTotal</code></td><td>ใบสั่งนี้มีกล่องทั้งหมดกี่กล่อง</td></tr>
+<tr><td><code>pickDone</code></td><td>หยิบเสร็จกี่กล่อง</td></tr>
+<tr><td><code>packDone</code></td><td>แพ็กเสร็จกี่กล่อง</td></tr>
+<tr><td><code>sortingDone</code></td><td>จัดเรียงเสร็จกี่กล่อง</td></tr>
+<tr><td><code>checkInDone</code></td><td>เช็คอินแล้วกี่กล่อง</td></tr>
+</tbody></table><p>ห้าตัวนี้แสดงความคืบหน้าของใบสั่งข้าม<strong>สี่โดเมนที่ Part 17–19 อ่านมา</strong></p><pre class="code-vs"><code>picking (Part 18) → packing (19.2) → sorting (19.10) → check-in (19.7)
+   pickDone          packDone         sortingDone        checkInDone</code></pre><div class="note"><strong>นี่คือจุดเดียวในทั้งแอปที่เห็นภาพรวมของงานหนึ่งใบ</strong> — ทุกจออื่นเห็นแค่โดเมนของตัวเอง<br>ผู้ใช้ที่ทำ check-in จึงเป็นคนเดียวที่รู้ว่าใบสั่งนี้ค้างอยู่ขั้นไหน<br>เป็นการออกแบบที่ถูก เพราะ check-in เป็นด่านสุดท้ายก่อนของขึ้นรถ</div><p>เหตุผลที่ต้องมีสองที่</p><table><thead><tr><th>คลาส</th><th>ใช้เมื่อ</th></tr></thead><tbody>
+<tr><td><code>PreviewCheckInResponse</code></td><td>ช่องยังไม่มีในฐานข้อมูล (19.7 <code>isNewSlot</code>)</td></tr>
+<tr><td><code>CheckInSlotDetail</code></td><td>ช่องมีอยู่แล้ว</td></tr>
+</tbody></table><pre class="code-vs"><code>CheckInSlotDetail _syntheticSlotFromPreview(PreviewCheckInResponse p) {
+  return CheckInSlotDetail(
+    status: 'OPEN',
+    cartons: const [],
+    customerOrderId: p.customerOrderId,
+    pipelineTotal: p.pipelineTotal,      // ← คัดลอกทีละตัว
+    pickDone: p.pickDone,
+    packDone: p.packDone,
+    sortingDone: p.sortingDone,
+    checkInDone: p.checkInDone,
+  );
+}</code></pre><p>เมธอดนี้มีอยู่เพราะฟิลด์ซ้ำ — ถ้าแยกออกเป็นคลาสเดียวจะไม่ต้องคัดลอก</p><pre class="code-vs"><code>class OrderPipeline {
+  const OrderPipeline({
+    this.total = 0,
+    this.pickDone = 0,
+    this.packDone = 0,
+    this.sortingDone = 0,
+    this.checkInDone = 0,
+  });
+
+  final int total;
+  final int pickDone;
+  final int packDone;
+  final int sortingDone;
+  final int checkInDone;
+
+  factory OrderPipeline.fromJson(Map&lt;String, dynamic&gt; json) =&gt; OrderPipeline(
+    total: json['pipelineTotal'] ?? 0,
+    pickDone: json['pickDone'] ?? 0,
+    packDone: json['packDone'] ?? 0,
+    sortingDone: json['sortingDone'] ?? 0,
+    checkInDone: json['checkInDone'] ?? 0,
+  );
+
+  /// ขั้นที่ยังทำไม่ครบขั้นแรก — ใช้บอกผู้ใช้ว่างานค้างตรงไหน
+  String? get blockedAt {
+    if (total == 0) return null;
+    if (pickDone &lt; total) return 'Picking';
+    if (packDone &lt; total) return 'Packing';
+    if (sortingDone &lt; total) return 'Sorting';
+    if (checkInDone &lt; total) return 'Check-in';
+    return null;
+  }
+}</code></pre><p>ได้ getter ที่ตอบคำถามที่ผู้ใช้อยากรู้จริง — <strong>“ทำไมใบสั่งนี้ยังไม่ครบ”</strong></p><p>ตอนนี้จอต้องคำนวณเองในส่วนที่วาด</p></section>
+
+<section id="section-3"><h2>3. ระดับการป้องกัน</h2><pre class="code-vs"><code>factory PreviewCheckInResponse.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+    PreviewCheckInResponse(
+      packingId: json['packingId'],                    // ← ไม่ป้องกัน
+      owner: json['owner'] ?? '',
+      customerOrderId: json['customerOrderId'],
+      packStatus: json['packStatus'] ?? '',
+      itemCount: json['itemCount'] ?? 0,
+      orderCount: json['orderCount'] ?? 0,
+      pickOrderIds: ((json['pickOrderIds'] ?? []) as List)
+          .map((e) =&gt; e.toString())
+          .toList(),
+      slotId: json['slotId'],                          // ← ไม่ป้องกัน
+      isNewSlot: json['isNewSlot'] ?? false,
+      isAlreadyCheckedIn: json['isAlreadyCheckedIn'] ?? false,
+      dispatchDestination: json['dispatchDestination'],
+      items: ((json['items'] ?? []) as List)
+          .map((e) =&gt; PreviewCheckInItem.fromJson(e))
+          .toList(),
+      pipelineTotal: json['pipelineTotal'] ?? 0,
+      ...
+    );</code></pre><table><thead><tr><th>ฟิลด์</th><th>ป้องกันไหม</th><th>สมเหตุสมผลไหม</th></tr></thead><tbody>
+<tr><td><code>packingId</code></td><td>ไม่</td><td>ใช่ — ไม่มีรหัสก็ไร้ความหมาย</td></tr>
+<tr><td><code>slotId</code></td><td>ไม่</td><td>ใช่ — ใช้ยิงคำสั่งต่อ</td></tr>
+<tr><td>ที่เหลือทั้งหมด</td><td><strong>ป้องกัน</strong></td><td>ใช่</td></tr>
+</tbody></table><p>ระดับเดียวกับ packing (19.6) — สูงที่สุดในโปรเจกต์</p><p>และใช้ <code>e.toString()</code> เหมือน packing</p><pre class="code-vs"><code>pickOrderIds: ((json['pickOrderIds'] ?? []) as List).map((e) =&gt; e.toString()).toList(),</code></pre><p>แต่ <code>CheckInSlotDetail</code> ป้องกันน้อยกว่าตัวอื่นในไฟล์เดียวกัน</p><pre class="code-vs"><code>factory CheckInSlotDetail.fromJson(Map&lt;String, dynamic&gt; json) =&gt; CheckInSlotDetail(
+  status: json['status'],                              // ← ไม่ป้องกัน
+  cartons: (json['cartons'] as List)                   // ← ไม่กัน null
+      .map((c) =&gt; CheckInCartonItem.fromJson(c))
+      .toList(),
+  ...
+);</code></pre><table><thead><tr><th>ถ้าเซิร์ฟเวอร์ไม่ส่ง <code>cartons</code></th></tr></thead><tbody>
+<tr><td><code>TypeError</code> — ช่องที่ยังไม่มีกล่องเลยจะทำให้จอพัง</td></tr>
+</tbody></table><div class="note"><strong>กรณีนี้เกิดได้จริง</strong> — ช่องที่เพิ่งถูกสร้างยังไม่มีกล่อง<br>โค้ดฝั่งจอเลี่ยงไว้ด้วยการสร้าง synthetic slot เมื่อ <code>isNewSlot</code> (19.7) แต่ถ้าเซิร์ฟเวอร์คืน <code>isNewSlot: false</code> กับช่องว่าง จะพังทันที<pre class="code-vs"><code>cartons: ((json['cartons'] as List?) ?? [])
+    .map((c) =&gt; CheckInCartonItem.fromJson(c as Map&lt;String, dynamic&gt;))
+    .toList(),</code></pre></div><p>เทียบกับ <code>PreviewCheckInResponse</code> ที่กันไว้ในบรรทัดคล้ายกัน</p><pre class="code-vs"><code>items: ((json['items'] ?? []) as List)      // ← กัน</code></pre><p>สองคลาสในไฟล์เดียวกันเขียนคนละแบบ — รูปแบบเดียวกับที่ 17.13 พบใน unload/basket</p></section>
+
+<section id="section-4"><h2>4. ฟิลด์ที่ยังไม่ถูกใช้</h2><pre class="code-vs"><code>final String? dispatchDestination;</code></pre><pre class="code-vs"><code>rg "dispatchDestination" lib
+# checkin_models.dart — ที่ประกาศและอ่านจาก JSON
+# checkin_screen.dart — ?</code></pre><p>ค้นแล้วพบว่าถูกใช้ในกล่อง popup แจ้งปลายทาง — <code>_showDestinationDialog</code></p><p>ต่างจาก <code>PutawayResult.success</code> (18.7) และ <code>ConfirmPackResponse.fromJson</code> (19.6) ที่ไม่มีใครใช้เลย</p><p>ส่วนฟิลด์ที่น่าสงสัยจริงคือ <code>packStatus</code></p><pre class="code-vs"><code>final String packStatus;
+...
+packStatus: json['packStatus'] ?? '',</code></pre><table><thead><tr><th>ค้นการใช้งาน</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>rg "packStatus" lib</code></td><td>เจอที่ประกาศและอ่าน แต่ไม่เจอในส่วนที่วาด</td></tr>
+</tbody></table><p>ค่าเริ่มต้นเป็นสตริงว่างจึงไม่พัง — แต่เป็นฟิลด์ที่โหลดมาแล้วทิ้ง</p><div class="note"><strong>วิธีตรวจว่าฟิลด์ถูกใช้จริง</strong><pre class="code-vs"><code># ค้นชื่อฟิลด์ แล้วดูว่ามีบรรทัดไหนอ่านค่าไปใช้บ้าง
+rg "\.packStatus" lib      # ← จุด นำหน้า = การอ่านค่า ไม่ใช่การประกาศ</code></pre>ถ้าเจอแค่ในไฟล์โมเดล แปลว่าไม่มีใครอ่าน<br>ทำครั้งเดียวกับทุกฟิลด์ของโมเดลใหญ่ จะรู้ว่าอะไรจำเป็นจริง</div></section>
+
+<section id="section-5"><h2>5. ฝั่ง API ที่สม่ำเสมอ</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;void&gt;&gt; completeCheckIn({
+  required String slotId,
+  required String operatorId,
+}) async {
+  final response = await _post('/checkin/complete', {
+    'slotId': slotId,
+    'operatorId': operatorId,
+  });
+  if (!response.success) {
+    return ApiResult.error(response.error, statusCode: response.statusCode);
+  }
+  return ApiResult.success(null);
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ทั้งห้าเมธอดส่ง <code>statusCode</code> ต่อ</td><td>จอแยก 404 จาก 500 ได้</td></tr>
+<tr><td>คืน <code>ApiResult&lt;void&gt;</code> เมื่อไม่มีข้อมูลกลับ</td><td>ตรงกับความจริง ไม่บังคับให้คืน <code>Map</code> เปล่า</td></tr>
+<tr><td>มีคอมเมนต์อธิบายทุกเมธอด</td><td>บอกสิ่งที่ลายเซ็นไม่บอก</td></tr>
+</tbody></table><pre class="code-vs"><code>/// Preview Pack ก่อน Check-IN (ไม่เขียน DB)
+/// สแกน Carton (PackingId) → assign Slot ตาม Owner
+/// ดึงรายละเอียด Slot (cartons ทั้งหมด + progress)
+/// Complete Slot → status=READY
+/// Dispatch Slot → ย้ายขึ้นรถ SHIPPED</code></pre><p>คอมเมนต์บรรทัดที่สองบอกกฎที่สำคัญ — <strong>ช่องถูกกำหนดตามเจ้าของสินค้า</strong></p><p>ผู้ใช้จึงไม่ได้เลือกช่องเอง และนี่คือเหตุผลที่ต้องมี popup แจ้งปลายทาง (19.7)</p><p>ส่วน path ทำถูกกว่าโดเมนอื่น</p><pre class="code-vs"><code>// สี่ในห้าเมธอดใช้ POST — ไม่มีค่าใน path
+await _post('/checkin/preview', {'packingId': packingId});
+await _post('/checkin/scan', {...});
+await _post('/checkin/complete', {...});
+await _post('/checkin/dispatch', {...});
+
+// เมธอดเดียวที่มีค่าใน path
+await _get('/checkin/slot/$slotId');</code></pre><div class="note"><strong>การส่งรหัสใน body แทน path เลี่ยงปัญหาการเข้ารหัสไปเลย</strong> — 17.9 และ 18.7 พบว่าการต่อสตริงใน path พังถ้ารหัสมีอักขระพิเศษ<br>ที่นี่มีจุดเดียวที่ต้องระวัง และ <code>slotId</code> มาจากเซิร์ฟเวอร์ ไม่ได้มาจากบาร์โค้ด จึงเสี่ยงน้อย</div></section>
+
+<section id="section-6"><h2>6. เทียบสามโดเมนของ Part นี้</h2><table><thead><tr><th></th><th>packing</th><th>checkin</th><th>sorting</th></tr></thead><tbody>
+<tr><td>ส่ง <code>statusCode</code> ต่อ</td><td>4/4</td><td>5/5</td><td>6/6</td></tr>
+<tr><td>คอมเมนต์ทุกเมธอด</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>ป้องกันฟิลด์คำอธิบาย</td><td>✓</td><td>✓</td><td>—</td></tr>
+<tr><td>กัน null ที่รายการ</td><td><strong>ไม่ครบ</strong></td><td><strong>ไม่ครบ</strong></td><td>✓</td></tr>
+<tr><td>รหัสใน path</td><td>3 จุด</td><td>1 จุด</td><td>1 จุด</td></tr>
+</tbody></table><p>สามโดเมนนี้เขียนตามข้อตกลงเดียวกันเกือบทั้งหมด — ต่างจากสี่โดเมนแรกที่ทิ้ง <code>statusCode</code> ทั้งหมด</p><p>แถวที่สี่เป็นสิ่งเดียวที่ยังไม่สม่ำเสมอ</p><pre class="code-vs"><code>// packing — ไม่กัน
+packs: (json['packs'] as List).map(...).toList(),
+orders: (json['orders'] as List).map(...).toList(),
+parts: (json['parts'] as List).map(...).toList(),
+
+// checkin — กันบางที่
+items: ((json['items'] ?? []) as List).map(...).toList(),      // กัน
+cartons: (json['cartons'] as List).map(...).toList(),          // ไม่กัน</code></pre><div class="note"><strong>รูปแบบที่เจอ: รายการที่ “ต้องมีเสมอ” ไม่กัน รายการที่ “อาจว่าง” กัน</strong><br>สมเหตุสมผลถ้าสัญญากับเซิร์ฟเวอร์ชัด — แต่ <code>cartons</code> ของช่องใหม่ควรว่างได้ และไม่ได้กัน<br>เป็นจุดที่ต้องยืนยันกับทีม .NET ว่า endpoint ส่ง <code>[]</code> หรือไม่ส่งฟิลด์เลย</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>คลาสเล็กแปลว่าไม่สำคัญ</td><td><code>ScanCheckInResponse</code> สองฟิลด์ตัดสินว่าของขึ้นรถไหม</td></tr>
+<tr><td>ฟิลด์ที่ซ้ำสองคลาสเป็นความผิดพลาด</td><td>จำเป็นเพราะสองแหล่งข้อมูล — แต่ควรแยกเป็นคลาสของตัวเอง</td></tr>
+<tr><td>โมเดลในไฟล์เดียวกันป้องกันเหมือนกัน</td><td><code>items</code> กัน <code>cartons</code> ไม่กัน</td></tr>
+<tr><td>ฟิลด์ที่อ่านจาก JSON ต้องถูกใช้</td><td><code>packStatus</code> โหลดมาแล้วทิ้ง</td></tr>
+<tr><td>ส่งรหัสใน path กับใน body เหมือนกัน</td><td>ใน body ไม่ต้องเข้ารหัส</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>แยก pipeline ห้าตัวเลขออกเป็นคลาสของตัวเอง</p><ol><li>ต้องแก้อะไรบ้าง</li><li>เขียนเทสต์ให้ <code>blockedAt</code></li><li>ได้อะไรเพิ่มนอกจากโค้ดสั้นลง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ต้องแก้อะไร</strong></p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>checkin_models.dart</code></td><td>เพิ่ม <code>OrderPipeline</code>, เปลี่ยนสองคลาสให้ถือ <code>pipeline</code></td></tr>
+<tr><td><code>checkin_screen.dart</code></td><td><code>_syntheticSlotFromPreview</code> สั้นลง, ส่วนที่วาด pipeline อ่านจากคลาสใหม่</td></tr>
+</tbody></table><pre class="code-vs"><code>class PreviewCheckInResponse {
+  ...
+  final OrderPipeline pipeline;      // แทนห้าฟิลด์
+
+  factory PreviewCheckInResponse.fromJson(Map&lt;String, dynamic&gt; json) =&gt;
+      PreviewCheckInResponse(
+        ...
+        pipeline: OrderPipeline.fromJson(json),   // อ่านห้าคีย์จาก json เดียวกัน
+      );
+}</code></pre><pre class="code-vs"><code>CheckInSlotDetail _syntheticSlotFromPreview(PreviewCheckInResponse p) {
+  return CheckInSlotDetail(
+    status: 'OPEN',
+    cartons: const [],
+    customerOrderId: p.customerOrderId,
+    pipeline: p.pipeline,          // ← บรรทัดเดียว แทนห้าบรรทัด
+  );
+}</code></pre><p>สังเกตว่า <code>OrderPipeline.fromJson(json)</code> รับ JSON ทั้งก้อน ไม่ใช่ก้อนย่อย — เพราะห้าคีย์อยู่ระดับบนสุด</p><p>ทำงานได้และไม่ต้องแก้ฝั่ง .NET</p><p><strong>ข้อ 2 — เทสต์</strong></p><pre class="code-vs"><code>void main() {
+  group('OrderPipeline.blockedAt', () {
+    test('ยังไม่มีข้อมูล → null', () {
+      expect(const OrderPipeline().blockedAt, isNull);
+    });
+
+    test('ค้างที่ picking', () {
+      const p = OrderPipeline(total: 5, pickDone: 3);
+      expect(p.blockedAt, 'Picking');
+    });
+
+    test('หยิบครบแล้ว ค้างที่ packing', () {
+      const p = OrderPipeline(total: 5, pickDone: 5, packDone: 2);
+      expect(p.blockedAt, 'Packing');
+    });
+
+    test('ครบทุกขั้น → null', () {
+      const p = OrderPipeline(
+        total: 5, pickDone: 5, packDone: 5, sortingDone: 5, checkInDone: 5,
+      );
+      expect(p.blockedAt, isNull);
+    });
+
+    test('ตัวเลขเกิน total ก็ยังถือว่าครบ', () {
+      // ข้อมูลไม่สอดคล้อง แต่ต้องไม่ทำให้แสดงผลผิด
+      const p = OrderPipeline(
+        total: 5, pickDone: 6, packDone: 5, sortingDone: 5, checkInDone: 5,
+      );
+      expect(p.blockedAt, isNull);
+    });
+
+    test('อ่านจาก JSON ที่ไม่มีคีย์เลย → ทุกค่าเป็น 0', () {
+      final p = OrderPipeline.fromJson({});
+      expect(p.total, 0);
+      expect(p.blockedAt, isNull);
+    });
+  });
+}</code></pre><p>เทสต์ที่สองจากท้ายสำคัญ — ยืนยันว่าใช้ <code>&lt;</code> ไม่ใช่ <code>!=</code></p><pre class="code-vs"><code>if (pickDone &lt; total) return 'Picking';      // ทน
+if (pickDone != total) return 'Picking';     // พังถ้าเกิน</code></pre><p>เป็นบทเรียนเดียวกับ <code>isDone =&gt; qtyRemaining &lt;= 0</code> ใน 17.13 และ <code>clamp</code> ใน 19.6</p><p><strong>ข้อ 3 — ได้อะไรเพิ่ม</strong></p><table><thead><tr><th>ได้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ฟังก์ชันบริสุทธิ์ที่เทสต์ได้</td><td>หกเทสต์รันในไม่กี่มิลลิวินาที</td></tr>
+<tr><td><code>blockedAt</code> ที่ตอบคำถามจริงของผู้ใช้</td><td>“ใบสั่งนี้ค้างตรงไหน”</td></tr>
+<tr><td>คัดลอกทีละฟิลด์หายไป</td><td>เพิ่มขั้นใหม่ไม่ต้องแก้สองที่</td></tr>
+<tr><td><strong>เห็นว่าห้าตัวเลขเป็นของชิ้นเดียวกัน</strong></td><td>ตอนนี้ดูเหมือนฟิลด์อิสระสิบตัว</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญที่สุด — และนำไปสู่ความสามารถใหม่</p><pre class="code-vs"><code>// ตอนนี้จอวาด pipeline เองด้วยการอ่านห้าฟิลด์
+Widget _buildPipelineCard(CheckInSlotDetail slot) { ... }
+
+// หลังแยก — widget รับ OrderPipeline ตัวเดียว
+PipelineCard(pipeline: slot.pipeline)</code></pre><p>แล้ว widget นี้ใช้ได้กับทั้งสองแหล่งโดยไม่ต้องรู้ว่ามาจากไหน</p><div class="note"><strong>และเปิดทางให้จออื่นใช้ด้วย</strong> — 19.9 ชี้ว่า check-in เป็นจุดเดียวที่เห็นภาพรวมของงาน<br>ถ้าฝั่ง .NET ส่ง pipeline มากับ endpoint ของ packing หรือ picking ด้วย จอเหล่านั้นจะแสดงได้ทันทีโดยใช้ widget เดียวกัน<br>เป็นตัวอย่างว่า<strong>การจัดกลุ่มข้อมูลให้ถูกทำให้ความสามารถใหม่ถูกกว่า</strong> ไม่ใช่แค่โค้ดสวยขึ้น</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ห้าคลาส และ <code>ScanCheckInResponse</code> ที่มีสองฟิลด์เป็นตัวตัดสินว่าของขึ้นรถไหม</li><li>ห้าตัวเลข pipeline ปรากฏซ้ำในสองคลาส และต้องคัดลอกทีละตัว</li><li>pipeline แสดงความคืบหน้าข้ามสี่โดเมน — จุดเดียวในแอปที่เห็นภาพรวม</li><li>ระดับการป้องกันสูงเท่า packing ยกเว้น <code>cartons</code> ที่ไม่กัน null</li><li>สองคลาสในไฟล์เดียวกันเขียน <code>as List</code> คนละแบบ</li><li><code>packStatus</code> โหลดมาแล้วไม่มีใครอ่าน</li><li>ทั้งห้าเมธอดส่ง <code>statusCode</code> ต่อ และมีคอมเมนต์ครบ</li><li>สี่ในห้าเมธอดใช้ POST ส่งรหัสใน body — เลี่ยงปัญหาการเข้ารหัส path</li><li>สามโดเมนของ Part นี้เขียนตามข้อตกลงเดียวกันเกือบทั้งหมด</li></ul></div><p><strong>บทหน้า:</strong> Sorting — จอที่ไม่ถือสถานะเอง และสิบสถานีที่เซิร์ฟเวอร์เป็นเจ้าของ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -1,17 +1,149 @@
-<div class="note"><strong>บทสรุป outbound:</strong> ความถูกต้องไม่ได้วัดแค่ว่าหน้าสำเร็จขึ้น แต่ packingId ต้องเคลื่อนผ่านทุกสถานะครั้งเดียว พร้อมยอด/serial/location ที่ตรวจย้อนหลังได้</div>
-<section><h2>1. Packing trace</h2><pre class="code-vs"><code>pallet → pack → order → part/serial
-→ scan-part(s) → packFinalized
-→ trackingId + palletReleased</code></pre><p>partial requestที่ commitแล้วต้องไม่ถูกส่งซ้ำเมื่อ batchถัดไป fail</p></section>
-<section><h2>2. Sorting trace</h2><pre class="code-vs"><code>DONE pack(s) → batch ASSIGNED/QUEUED
-→ station BUSY → counters/FULL
-→ clear → station AVAILABLE</code></pre><p>SignalRทำให้เร็ว แต่ REST/versionทำให้ถูก</p></section>
-<section><h2>3. Check-in trace</h2><pre class="code-vs"><code>preview packingId → slot decision
-→ scan commit → slot detail
-→ ready → complete → dispatch/SHIPPED</code></pre><p>complete failต้องหยุด dispatch และคง stateให้ retryได้</p></section>
-<section><h2>4. Image trace</h2><pre class="code-vs"><code>search part → pick/compress image
-→ multipart upload → server validate/store
-→ versioned URL → reload/cache refresh</code></pre></section>
-<section><h2>5. Invariants checklist</h2><ul><li>qty/serialไม่เกิน remaining</li><li>packingIdไม่อยู่สอง station/slotพร้อมกัน</li><li>disabled stationไม่รับ batch</li><li>SHIPPED ต้องผ่าน READY</li><li>mutation retryไม่เพิ่มผลซ้ำ</li></ul></section>
-<section><h2>6. Observability</h2><p>ใช้ correlation/operation ID เชื่อม pack scan, batch, station events, check-in และ dispatch พร้อม operator/device/server timestamp Log identifiers/countsได้แต่ไม่ log tokenหรือไฟล์ภาพดิบ</p></section>
-<section><h2>7. End-to-end tests</h2><p>รัน happy pathและ fault injection: network timeoutหลัง commit, duplicate scan, stationเต็ม/disabled, queue assignment, complete/dispatch conflict, reconnect eventหลุด และ image reject แล้วตรวจ DB stateกับ UI recovery</p></section>
-<section><h2>8. Capstone</h2><div class="success">ทำหนึ่ง outbound order ตั้งแต่ destination palletถึง SHIPPED พร้อม sequence diagram, state snapshots และ idempotency keys จากนั้นแก้ chain bug complete→dispatchด้วย typed resultและ testsพิสูจน์ว่า dispatchไม่เกิดเมื่อ complete fail</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ปิดกลุ่ม wmsapp และเตรียมเข้า Part 20</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.1–19.14 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็น wmsapp ทั้งโปรเจกต์เป็นภาพเดียว และมีรายการปัญหาที่เรียงลำดับแล้ว</div>
+
+<section><h2>1. เส้นทางของกล่องหนึ่งใบ</h2><p>Part 17–19 อ่านมาทีละโดเมน — ต่อกันแล้วได้เส้นเดียว</p><pre class="code-vs"><code>ผู้ขายส่งของมา
+  ▼
+Receiving (17)     สแกน PO → สแกน Part → S/N → ผูกพาเลท
+  ▼
+Putaway (18)       สแกนพาเลทที่สถานี → เลือกปลายทาง → AMR เก็บเข้า ASRS
+  ▼
+                   ── ของอยู่ในคลัง ──
+  ▼
+Picking (18)       รับงานหยิบ → สแกนพาเลทต้นทาง → หยิบทีละชิ้น
+                   → สแกนพาเลทปลายทาง → ส่งไปแพ็ก
+  ▼
+Packing (19)       สแกนพาเลท → เลือกกล่อง → เลือกใบสั่ง → สแกนสินค้า
+                   → กล่องปิดอัตโนมัติ + ได้เลขติดตาม
+  ▼
+Sorting (19)       กล่องถูกจัดเข้าสถานีตามปลายทาง
+  ▼
+Check-in (19)      สแกนกล่อง → ยืนยัน → ครบทุกกล่อง → ปิดช่อง + ขึ้นรถ
+  ▼
+ของถึงลูกค้า</code></pre><p>และมีเส้นทางย่อยที่ตัดเข้ามา</p><table><thead><tr><th>เส้นทาง</th><th>เกิดเมื่อ</th><th>บท</th></tr></thead><tbody>
+<tr><td>Unload → Basket</td><td>ถ่ายของจากพาเลทลงตะกร้า</td><td>17.10–17.13</td></tr>
+<tr><td>Prework</td><td>ของที่ต้องแปรรูปก่อนเก็บ</td><td>18.4</td></tr>
+<tr><td>Replenish</td><td>เติมสต็อกที่ชั้นวาง</td><td>18.5</td></tr>
+<tr><td>Pending Pallet</td><td>ผูกพาเลทไม่สำเร็จตอนรับของ</td><td>17.8</td></tr>
+<tr><td>Return Source</td><td>พาเลทต้นทางใช้ไม่ได้</td><td>18.15</td></tr>
+</tbody></table><div class="note"><strong>ห้าเส้นทางย่อยล้วนเกิดจาก “สิ่งที่ไม่เป็นไปตามแผน”</strong> — และทั้งหมดมีจอรองรับ<br>เป็นสิ่งที่ระบบคลังจริงต้องมี และเป็นเหตุผลที่แอปมี 80 จอ ไม่ใช่ 10 จอ</div><p>ตัวเลขห้าตัวใน <code>OrderPipeline</code> (19.9) ติดตามเส้นทางหลักนี้พอดี</p><pre class="code-vs"><code>pickDone → packDone → sortingDone → checkInDone
+   (18)      (19.2)     (19.10)       (19.7)</code></pre></section>
+
+<section><h2>2. ปัญหาที่ยืนยันแล้วใน Part 19</h2><table><thead><tr><th>#</th><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td><code>_openPack</code> เรียก async ใน <code>setState</code> → สถานะไม่ตรงกับข้อมูล</td><td>packing</td><td>19.3</td></tr>
+<tr><td>2</td><td>โหลดใบสั่งล้มเหลวจากเส้นทางนั้น → ถูกพากลับสองชั้น</td><td>packing</td><td>19.3</td></tr>
+<tr><td>3</td><td><code>_handleBack</code> เรียก <code>_resetAll()</code> ที่มี <code>setState</code> ซ้อน</td><td>packing</td><td>19.2</td></tr>
+<tr><td>4</td><td><code>default:</code> ใน switch ทำให้เสียการตรวจว่าครบ</td><td>packing</td><td>19.2</td></tr>
+<tr><td>5</td><td><code>canPop</code> ไม่ตรวจว่ามี S/N ค้าง</td><td>packing</td><td>19.2</td></tr>
+<tr><td>6</td><td>บั๊ก <code>_addQty</code>/<code>_activatePart</code> ถูกคัดลอกมาจาก picking</td><td>packing</td><td>19.4</td></tr>
+<tr><td>7</td><td>แผ่น “S/N สำหรับทดสอบ” มีสองที่ ทั้งคู่อยู่ใน release</td><td>packing, picking</td><td>19.4</td></tr>
+<tr><td>8</td><td><code>_confirmPart</code> ไม่คืนผล ลูปวนต่อทั้งที่ล้มเหลว</td><td>packing</td><td>19.5</td></tr>
+<tr><td>9</td><td><code>isDone</code> คำนวณสามแบบในห้าคลาสของไฟล์เดียว</td><td>packing models</td><td>19.6</td></tr>
+<tr><td>10</td><td><code>ConfirmPackResponse.fromJson</code> ไม่มีใครเรียก</td><td>packing models</td><td>19.6</td></tr>
+<tr><td>11</td><td>สามฟิลด์ nullable ประกอบกันเป็นแปดชุดค่า ตั้งใจสาม</td><td>checkin</td><td>19.7</td></tr>
+<tr><td>12</td><td><code>_autoDispatchSlot</code> ถูกยิงต่อแม้ <code>_autoCompleteSlot</code> ล้มเหลว</td><td>checkin</td><td>19.8</td></tr>
+<tr><td>13</td><td>ผู้ใช้เห็นกล่อง error สองครั้งติดโดยไม่มีใครประสาน</td><td>checkin</td><td>19.8</td></tr>
+<tr><td>14</td><td><code>dispatchCheckIn</code> ล้มเหลวแล้วไม่บอกว่าของอาจขึ้นรถไปแล้ว</td><td>checkin</td><td>19.8</td></tr>
+<tr><td>15</td><td><code>cartons</code> ไม่กัน null ทั้งที่ช่องใหม่ควรว่างได้</td><td>checkin models</td><td>19.9</td></tr>
+<tr><td>16</td><td><code>packStatus</code> โหลดมาแล้วไม่มีใครอ่าน</td><td>checkin models</td><td>19.9</td></tr>
+<tr><td>17</td><td><code>toggleSortingStation</code> ล้มเหลวแล้วไม่โหลดใหม่</td><td>sorting</td><td>19.10</td></tr>
+<tr><td>18</td><td><code>copyWith</code> ล้างค่าเป็น null ไม่ได้</td><td>sorting models</td><td>19.11</td></tr>
+<tr><td>19</td><td>ห้าปัญหาของ SignalR ตัวแรกถูกคัดลอกมาครบ</td><td>sorting hub</td><td>19.12</td></tr>
+<tr><td>20</td><td>แผ่นรายละเอียดยิงคำขอทุกกล่องที่มาถึง</td><td>sorting</td><td>19.12</td></tr>
+<tr><td>21</td><td>แผ่นโหลดล้มเหลวแล้วตัวหมุนหมุนต่อไปเรื่อย ๆ</td><td>sorting</td><td>19.12</td></tr>
+<tr><td>22</td><td><code>PartImageScreen</code> ไม่มีจอไหนเปิดเลย</td><td>supervisor</td><td>19.13</td></tr>
+<tr><td>23</td><td><code>as String</code> ที่ <code>itemDesc</code> พังตอนพิมพ์ค้นหา</td><td>supervisor</td><td>19.13</td></tr>
+<tr><td>24</td><td>เขียน thumbnail เอง 30 บรรทัดที่มีปัญหาเดียวกับ <code>PartThumbnail</code></td><td>supervisor</td><td>19.13</td></tr>
+</tbody></table></section>
+
+<section><h2>3. สิ่งที่ทำได้ดีใน Part 19</h2><table><thead><tr><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>enum _PackState</code> ทั้งที่ไม่แตกไฟล์เลย</td><td>packing</td><td>19.1</td></tr>
+<tr><td><code>_collectedCountFor</code> คำนวณแทนการเก็บซ้ำ</td><td>packing</td><td>19.2</td></tr>
+<tr><td><code>_openOrder</code> ล้างสถานะชั้นล่างครบทุกตัว</td><td>packing</td><td>19.3</td></tr>
+<tr><td>ล้างเฉพาะสินค้าที่ยืนยันไป ไม่ล้างทั้งหมด</td><td>packing</td><td>19.5</td></tr>
+<tr><td>กฎแพ็กบางส่วนต่างกันตามชนิดสินค้า พร้อมคอมเมนต์</td><td>packing</td><td>19.5</td></tr>
+<tr><td>ข้อความสรุปบอกสถานการณ์ ผู้ใช้เลือกปุ่มถูกเอง</td><td>packing</td><td>19.5</td></tr>
+<tr><td><code>clamp(0, requiredQty)</code> แก้ค่าติดลบที่จุดเดียว</td><td>packing models</td><td>19.6</td></tr>
+<tr><td>ป้องกันฟิลด์คำอธิบายครบ — สูงที่สุดในโปรเจกต์</td><td>packing, checkin</td><td>19.6, 19.9</td></tr>
+<tr><td>preview เป็นขั้นบังคับที่มี endpoint แยก</td><td>checkin</td><td>19.7</td></tr>
+<tr><td>popup ปิดไม่ได้ บังคับให้อ่านปลายทาง</td><td>checkin</td><td>19.7</td></tr>
+<tr><td><code>synthetic</code> ในชื่อเมธอดบอกว่าเป็นข้อมูลที่แอปสร้าง</td><td>checkin</td><td>19.7</td></tr>
+<tr><td>ให้เซิร์ฟเวอร์ตัดสิน <code>isReadyToComplete</code></td><td>checkin</td><td>19.8</td></tr>
+<tr><td>ช่องสแกนถูกล้างครบทุกทาง</td><td>checkin</td><td>19.8</td></tr>
+<tr><td>ทั้ง 15 endpoint ส่ง <code>statusCode</code> ต่อ</td><td>ทั้งสามโดเมน</td><td>19.1</td></tr>
+<tr><td>ส่งรหัสใน body แทน path</td><td>checkin</td><td>19.9</td></tr>
+<tr><td>สามสถานะสถานีแตะได้ทั้งหมด</td><td>sorting</td><td>19.10</td></tr>
+<tr><td>ข้อความยืนยันบอกว่างานที่ค้างไม่หาย</td><td>sorting</td><td>19.10</td></tr>
+<tr><td>ตัวเลขสรุปแบ่งถูก — บางตัวคำนวณ บางตัวจากเซิร์ฟเวอร์</td><td>sorting</td><td>19.10</td></tr>
+<tr><td><code>_loadStations</code> ถูกเรียกจากห้าทาง</td><td>sorting</td><td>19.10</td></tr>
+<tr><td><code>_parseDate</code> เป็นตัวช่วยที่ทนกว่าสองโดเมนก่อนหน้า</td><td>sorting models</td><td>19.11</td></tr>
+<tr><td>แบ่งเหตุการณ์: อัปเดตทันทีกับโหลดใหม่</td><td>sorting</td><td>19.11</td></tr>
+<tr><td>ตัวช่วย <code>_on</code> ลดโค้ดจาก 24 เหลือ 5 บรรทัด</td><td>sorting hub</td><td>19.12</td></tr>
+<tr><td><code>onChanged</code> แจ้งเฉพาะเมื่อมีการเปลี่ยนจริง</td><td>sorting</td><td>19.12</td></tr>
+<tr><td>ย่อรูปตั้งแต่ตอนเลือก</td><td>supervisor</td><td>19.13</td></tr>
+<tr><td>สามสัญญาณบอกว่ามีรูปหรือยัง</td><td>supervisor</td><td>19.13</td></tr>
+</tbody></table><p>ยี่สิบห้าข้อ เทียบกับปัญหา 24 ข้อ</p></section>
+
+<section><h2>4. ตารางกฎที่ไม่ตรงกัน — ฉบับสมบูรณ์</h2><p>17.14 เริ่มไว้ห้าแถว 18.16 เติมเป็นเก้า ตอนนี้ครบทั้งกลุ่ม</p><table><thead><tr><th>กฎ</th><th>ทำแบบ A</th><th>ทำแบบ B</th></tr></thead><tbody>
+<tr><td>เลือกล็อตเมื่อมีหลายล็อต</td><td>ScanPart: popup</td><td>Unload/LoadToBasket: เลือกตัวแรก</td></tr>
+<tr><td>จำพาเลทล่าสุด</td><td>ScanPart: มี + ตรวจสภาพ</td><td>PendingPallet: ไม่มี</td></tr>
+<tr><td>S/N ต้องครบก่อนยืนยัน</td><td>UnloadSession, Packing: ต้องครบ</td><td>LoadToBasket: มีอย่างน้อยหนึ่ง</td></tr>
+<tr><td>ล้างช่องสแกน</td><td>LoadToBasket, CheckIn: ทุกทาง</td><td>อีก 5 จอ: บางทาง</td></tr>
+<tr><td>ส่งพาเลท</td><td>OrdersList: preview + ยืนยัน</td><td>ReturnSource/SendToPack: กดแล้วส่ง</td></tr>
+<tr><td>แจ้งความสำเร็จ</td><td>ส่วนใหญ่: <code>showSuccessSnackbar</code></td><td>LoadToBasket/SendToPack: สร้างเอง</td></tr>
+<tr><td>สถานะที่กดไม่ได้</td><td>OrdersList, Sorting: อธิบาย</td><td>Putaway/Prework: <code>return;</code> เงียบ</td></tr>
+<tr><td>สีของประเภท/สถานะ</td><td><code>StatusBadge</code>: ตารางกลาง</td><td>putaway: ซ้ำสามที่</td></tr>
+<tr><td>ตรวจสภาพก่อนผูก/ส่ง</td><td>ScanPart: ตรวจ</td><td>DestScan: ไม่ตรวจ</td></tr>
+<tr><td><strong>ส่ง <code>statusCode</code> ต่อ</strong></td><td>packing/checkin/sorting/basket: ครบ</td><td>receiving/unload/upload/putaway: ทิ้งหมด</td></tr>
+<tr><td><strong>ส่ง <code>serialNumbers</code> ว่าง</strong></td><td>3 โดเมน: ส่ง <code>[]</code> เสมอ</td><td>packing: ไม่ส่งฟิลด์</td></tr>
+<tr><td><strong><code>isDone</code> คำนวณจาก</strong></td><td>สถานะจากเซิร์ฟเวอร์</td><td>ตัวนับ / ทั้งสองอย่าง</td></tr>
+<tr><td><strong>รูปย่อสินค้า</strong></td><td>12 จุด: <code>PartThumbnail</code></td><td>supervisor: เขียนเอง</td></tr>
+<tr><td><strong>สถานะของ flow</strong></td><td>Pick/Pack: <code>enum</code></td><td>ScanPart/CheckIn: ฟิลด์ nullable</td></tr>
+<tr><td><strong>เครื่องมือทดสอบ</strong></td><td>sorting: endpoint มี <code>test</code></td><td>pick/pack: อยู่ในโค้ดแอป</td></tr>
+</tbody></table><p>สิบห้าแถว — และหกแถวใหม่มาจาก Part 19</p><div class="note"><strong>ทุกแถวมีรากเดียวกัน</strong> — ตรรกะอยู่ในจอ ไม่มีที่กลางที่บังคับให้เหมือนกัน<br>สังเกตว่าแถวที่ทำถูกทั้งสองฝั่งคือแถวที่มีของกลาง (<code>StatusBadge</code>, <code>showSuccessSnackbar</code>, <code>PartThumbnail</code>) — และแม้แต่แถวนั้นก็ยังมีคนไม่ใช้<br>ตารางนี้คือวัตถุดิบของ Part 23</div></section>
+
+<section><h2>5. ภาพรวมของ wmsapp ทั้งโปรเจกต์</h2><table><thead><tr><th>โดเมน</th><th>ไฟล์</th><th>บรรทัด</th><th>enum</th><th>เรียลไทม์</th><th>บท</th></tr></thead><tbody>
+<tr><td>receiving</td><td>18</td><td>3,403</td><td>ไม่มี</td><td>ไม่มี</td><td>17</td></tr>
+<tr><td>unload</td><td>10</td><td>1,989</td><td>ไม่มี</td><td>ไม่มี</td><td>17</td></tr>
+<tr><td>putaway</td><td>26</td><td>2,378</td><td>ไม่มี</td><td>4 เหตุการณ์</td><td>18</td></tr>
+<tr><td>picking</td><td>15</td><td>3,483</td><td><strong>5 สถานะ</strong></td><td>ไม่มี</td><td>18</td></tr>
+<tr><td>packing</td><td>1</td><td>2,176</td><td><strong>5 สถานะ</strong></td><td>ไม่มี</td><td>19</td></tr>
+<tr><td>checkin</td><td>1</td><td>1,441</td><td>ไม่มี</td><td>ไม่มี</td><td>19</td></tr>
+<tr><td>sorting</td><td>1</td><td>1,030</td><td>ไม่ต้องมี</td><td>6 เหตุการณ์</td><td>19</td></tr>
+<tr><td>supervisor</td><td>1</td><td>352</td><td>ไม่มี</td><td>ไม่มี</td><td>19</td></tr>
+</tbody></table><p>รวม 73 ไฟล์ 16,252 บรรทัด — ที่เหลืออีก 37 ไฟล์คือ services, models, widgets, theme และจอทดสอบ</p><table><thead><tr><th>ข้อสังเกต</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>สองโดเมนที่มี enum</td><td>เป็นสองโดเมนที่มีขั้นตอนมากที่สุด</td></tr>
+<tr><td>สองโดเมนที่มีเรียลไทม์</td><td>เป็นสองโดเมนที่มีสถานีที่เปลี่ยนโดยผู้ใช้ไม่ได้กด</td></tr>
+<tr><td>จำนวนไฟล์กับความยากไม่สัมพันธ์กัน</td><td>packing 1 ไฟล์อ่านง่ายกว่า putaway 26 ไฟล์</td></tr>
+</tbody></table><div class="note"><strong>สามข้อนี้คือบทสรุปของทั้งกลุ่ม Part 16–19</strong><br>โครงสร้างที่ดีไม่ได้มาจากจำนวนไฟล์ แต่มาจาก<strong>การเลือกให้ชนิดข้อมูลสะท้อนความจริง</strong> — <code>enum</code> เมื่อมีขั้นตอน, ไม่มีเลยเมื่อสถานะอยู่ที่เซิร์ฟเวอร์</div></section>
+
+<section><h2>6. ลงมือทำ</h2><p>Part 20 จะเปิด <code>wms_absolute_mobile</code> — ทำแผนที่ล่วงหน้าด้วยวิธีของ 16.1</p><table><thead><tr><th>#</th><th>ต้องได้</th></tr></thead><tbody>
+<tr><td>1</td><td>นับไฟล์และบรรทัด แยกตามโฟลเดอร์</td></tr>
+<tr><td>2</td><td>อ่าน <code>main.dart</code> แล้วบอกว่าอะไรถูกตั้งค่าไว้ทั้งแอป</td></tr>
+<tr><td>3</td><td>หาว่ามีชั้นอะไรบ้างที่ wmsapp ไม่มี</td></tr>
+<tr><td>4</td><td>นับจำนวนเทสต์</td></tr>
+<tr><td>5</td><td>หาว่า <code>ApiService</code> ถูกสร้างกี่จุด</td></tr>
+<tr><td>6</td><td>ทำนายว่าปัญหาข้อไหนใน 15 แถวของตารางจะไม่มี</td></tr>
+</tbody></table><pre class="code-vs"><code># ข้อ 1
+Get-ChildItem -Recurse -Filter *.dart -Path lib | Measure-Object
+
+# ข้อ 3 — หาชั้นที่ wmsapp ไม่มี
+rg -l "abstract interface class|ChangeNotifier|Repository" lib
+
+# ข้อ 4
+Get-ChildItem -Recurse -Filter *_test.dart -Path test | Measure-Object
+
+# ข้อ 5
+rg "ApiService\(\)" lib --count-matches</code></pre><p><strong>ข้อ 6 สำคัญที่สุด</strong> — เขียนคำทำนายไว้ก่อนอ่าน แล้วเทียบตอนจบ Part 22</p></section>
+
+<section><h2>7. แบบทดสอบตัวเอง</h2><ol><li>packing มี enum ทั้งที่ไม่แตกไฟล์ — บอกอะไร (19.1)</li><li>ทำไม sorting ไม่ต้องมี enum (19.1)</li><li>อ่านไฟล์ 2,176 บรรทัดอย่างไรให้ไม่หลง (19.2)</li><li><code>default:</code> ใน switch เสียอะไรไป (19.2)</li><li>เรียก async ใน <code>setState</code> แล้วเกิดอะไร (19.3)</li><li>ทำไมโหลดใบสั่งล้มเหลวแล้วผู้ใช้ถูกพากลับสองชั้น (19.3)</li><li>หาคู่แฝดของโค้ดที่คัดลอกมาอย่างไร (19.4)</li><li>รวม picking กับ packing ยากตรงไหน (19.4)</li><li><code>scanPackPart</code> ตอบกี่แบบ (19.5)</li><li>ทำไมล้างเฉพาะสินค้าที่ยืนยันไป (19.5)</li><li>กฎแพ็กบางส่วนต่างกันอย่างไรระหว่างสินค้าสองแบบ (19.5)</li><li><code>isDone</code> ในไฟล์ packing คำนวณกี่แบบ (19.6)</li><li><code>clamp</code> ที่ <code>remaining</code> ป้องกันอะไร (19.6)</li><li>สามฟิลด์ nullable ของ checkin ให้กี่ชุดค่า และตั้งใจกี่ชุด (19.7)</li><li><code>synthetic slot</code> มีไว้ทำไม (19.7)</li><li>ปุ่ม Check-IN ยิงกี่คำสั่ง (19.8)</li><li>ทำไม <code>_autoDispatchSlot</code> ไม่ควรถูกยิงต่อ (19.8)</li><li>ห้าตัวเลข pipeline ติดตามอะไร (19.9)</li><li>ทำไม checkin ส่งรหัสใน body ปลอดภัยกว่า (19.9)</li><li>sorting ต่างจาก putaway หกข้อ อะไรบ้าง (19.10)</li><li><code>copyWith</code> ล้างค่าเป็น null ไม่ได้เพราะอะไร (19.11)</li><li>แบ่งเหตุการณ์เรียลไทม์สองแบบตามเกณฑ์อะไร (19.11)</li><li>ทำไมแผ่นรายละเอียดไม่ต้องเรียก <code>connect()</code> (19.12)</li><li>รวมสอง SignalR service ควรทำก่อนหรือหลังแก้ปัญหา (19.12)</li><li>ทำไม <code>PartImageScreen</code> ถึงไม่มีใครใช้ (19.13)</li><li>สี่ระดับความเสี่ยงของการแก้โค้ดคืออะไร (19.14)</li><li>ทำไมการแตกไฟล์ควรอยู่ท้ายสุด (19.14)</li><li>ห้าม “ปรับปรุงเล็กน้อย” ระหว่างย้ายโค้ดเพราะอะไร (19.14)</li></ol></section>
+
+<section><h2>8. ปิดกลุ่ม Part 16–19</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เข้าโปรเจกต์ 22,000 บรรทัดที่ไม่เคยเห็น แล้วทำแผนที่ได้ในหนึ่งวัน</li><li>อ่านไฟล์ 2,176 บรรทัดโดยไม่หลง ด้วยการอ่านตามเครื่องสถานะ</li><li>เขียนเครื่องสถานะที่ซ่อนอยู่ออกมาเป็นตาราง แล้วชี้ชุดค่าที่ไม่ควรเกิด</li><li>แยกปัญหาที่ยืนยันได้ ออกจากสิ่งที่ไม่ชอบ</li><li>หาโค้ดที่คัดลอกมาด้วยการค้นข้อความที่ผู้ใช้เห็น</li><li>ตัดสินได้ว่าเมื่อไรควรสร้างโมเดล เมื่อไรควรใช้ <code>enum</code> เมื่อไรไม่ต้องมีทั้งคู่</li><li>อ่านชั้นเรียลไทม์และชี้ได้ว่าเหตุการณ์หายไปตอนไหน</li><li>แยกการเปลี่ยนแปลงตามความเสี่ยงสี่ระดับ</li><li>วางแผนแก้จอใหญ่ในโปรเจกต์ที่ไม่มีเทสต์</li><li>รวมกฎที่ไม่ตรงกันเป็นตาราง 15 แถวที่ใช้ตัดสินใจต่อได้</li></ul></div><p><strong>สามบทเรียนที่ใหญ่ที่สุด</strong></p><table><thead><tr><th>บทเรียน</th><th>หลักฐาน</th></tr></thead><tbody>
+<tr><td>“ไฟล์ควรยาวแค่ไหน” เป็นคำถามที่ผิด</td><td>packing 1 ไฟล์อ่านง่ายกว่า putaway 26 ไฟล์</td></tr>
+<tr><td>ปัญหาที่รากอยู่ในจอแก้ได้ด้วยชนิดข้อมูล ที่รากอยู่ชั้นล่างแก้ไม่ได้</td><td><code>enum</code> แก้ได้ 4–5 ข้อ แต่ <code>statusCode</code> และ <code>outcomeUnknown</code> ยังอยู่</td></tr>
+<tr><td>กฎเดียวกันที่เขียนคนละที่จะไม่ตรงกันเสมอ</td><td>ตาราง 15 แถว</td></tr>
+</tbody></table><p><strong>Part ถัดไป</strong></p><table><thead><tr><th>Part</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>20</td><td><code>wms_absolute_mobile</code> — โครงหลัก การยืนยันตัวตน และการตั้งค่า</td></tr>
+<tr><td>21</td><td>รับสินค้า สต๊อก และการนับรอบ</td></tr>
+<tr><td>22</td><td>การจ่ายงานและการหยิบ</td></tr>
+<tr><td>23</td><td>เทียบสองโปรเจกต์ แล้วออกแบบชั้นที่รวมกฎ 15 แถวไว้</td></tr>
+</tbody></table><p>Part 20 จะเริ่มด้วยคำถามที่ต่อจากที่นี่โดยตรง</p><div class="note"><strong>“โปรเจกต์ที่มี store, มี repository และมีเทสต์ 92 ข้อ — ปัญหา 15 แถวหายไปกี่แถว และเหลืออะไร”</strong><br>คำตอบจะบอกว่าการแยกชั้นคุ้มแค่ไหนจริง ๆ — ไม่ใช่จากทฤษฎี แต่จากสองโปรเจกต์ที่แก้โจทย์เดียวกัน</div></section>

@@ -1,13 +1,143 @@
-<div class="note"><strong>Outbound ปลายทางเป็น pipeline:</strong> Picking ย้ายของเข้า destination pallet, Packing ยืนยันของใน carton, Sorting จัดเข้า station และ Check-in รวม carton ลง slot ก่อน dispatch ทุกช่วงมี identity/status ของตนเอง</div>
-<section><h2>1. End-to-end map</h2><pre class="code-vs"><code>picked pallet → Packing → carton/packingId
-→ Sorting station/batch → Check-in slot
-→ complete → dispatch/shipped</code></pre><p>แต่ละลูกศรเป็น server transaction ไม่ใช่แค่เปลี่ยนหน้าจอ</p></section>
-<section><h2>2. Packing identities</h2><p>palletId ครอบหลาย pack, packingId ครอบหลาย pick orders และ pickOrderId ครอบ parts การเปิดหน้าจอจึงไล่ pallet → pack → order → part ตามลำดับ ห้ามสลับ identity ระหว่างระดับ</p></section>
-<section><h2>3. Packing state machine</h2><pre class="code-vs"><code>scanPallet → packList → orderList → orderParts
-                    ↘ one order ────────┘
-orderParts → success</code></pre><p>เมื่อ pack มี order เดียว UI ข้าม orderList ได้</p></section>
-<section><h2>4. Check-in state</h2><p>ไม่มี enum แต่ state เกิดจาก <code>_pendingPack</code>, <code>_slotDetail</code> และ <code>_deliveryNotePack</code> ทำให้หลาย combination เป็นไปได้ ควรนิยาม Previewing/ReadyToCommit/Committed เป็น typed state</p></section>
-<section><h2>5. Sorting station states</h2><p>แต่ละ station เป็น AVAILABLE, BUSY หรือ DISABLED และ BUSY อาจ full Dashboard มี completed/queued counters แยกจาก station list จึงต้อง reconcile ทั้งระดับ global และราย station</p></section>
-<section><h2>6. Sources of truth</h2><p>Packing/Check-in refresh ผ่าน REST หลัง mutation ส่วน Sorting รับ SignalR เพื่อ update เร็วแล้ว reload REST ในหลาย event Snapshot ล่าสุดจาก backend ต้องชนะ local animation/derived state</p></section>
-<section><h2>7. Cross-stage invariants</h2><ul><li>Pack ก่อน sorting/check-in</li><li>serial อยู่ได้หนึ่ง location</li><li>slot complete ก่อน dispatch</li><li>station disabled ไม่รับ batch ใหม่</li><li>retry ห้ามเพิ่ม qty/carton ซ้ำ</li></ul></section>
-<section><h2>8. Trace exercise</h2><div class="success">เลือก packingId หนึ่งค่าแล้วจด pallet, orders, parts/serials, sorting station, slot และ final status ทุกช่วง พร้อม endpoint, operator และ idempotency boundary ของแต่ละ mutation</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด packing/, checkin/, sorting/</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 16–18<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นสามจอที่ไม่แตกไฟล์เลย และตอบคำถามที่ 18.16 ตั้งไว้</div>
+
+<section><h2>1. สามโดเมนที่เหลือ</h2><p>18.16 ถามว่า <strong>“จอที่ไม่มี enum และไม่แตกไฟล์เลย ถือสถานะกี่อย่าง และอ่านอย่างไรให้ไม่หลง”</strong></p><table><thead><tr><th>โดเมน</th><th>ไฟล์</th><th>บรรทัด</th><th>ไฟล์ใหญ่สุด</th><th>มี enum ไหม</th></tr></thead><tbody>
+<tr><td>packing</td><td>1</td><td>2,176</td><td>2,176</td><td><strong>มี — 5 สถานะ</strong></td></tr>
+<tr><td>checkin</td><td>1</td><td>1,441</td><td>1,441</td><td><strong>ไม่มี</strong></td></tr>
+<tr><td>sorting</td><td>1</td><td>1,030</td><td>1,030</td><td><strong>ไม่มี</strong></td></tr>
+</tbody></table><p>ทั้งสามเป็นไฟล์เดียว ไม่มีโฟลเดอร์ <code>widgets/</code> ไม่มี <code>shared/</code></p><p>แต่สมมติฐานที่ว่า “ไฟล์เดียว = ไม่มีโครง” ผิดทันทีที่เปิดไฟล์แรก</p><pre class="code-vs"><code>// packing_screen.dart บรรทัดที่ 11
+enum _PackState { scanPallet, packList, orderList, orderParts, success }</code></pre><div class="note"><strong>packing มี enum เหมือน <code>PickItemsScreen</code></strong> — ทั้งที่ไม่แตกไฟล์เลยสักไฟล์<br>เป็นหลักฐานตรงที่สุดว่า<strong>การแตกไฟล์กับการจัดการสถานะเป็นคนละเรื่อง</strong> ซึ่ง 18.16 สรุปไว้</div></section>
+
+<section><h2>2. เทียบสามจอ</h2><table><thead><tr><th></th><th>packing</th><th>checkin</th><th>sorting</th></tr></thead><tbody>
+<tr><td>บรรทัด</td><td>2,176</td><td>1,441</td><td>1,030</td></tr>
+<tr><td>คลาสในไฟล์</td><td>3</td><td>1</td><td>4</td></tr>
+<tr><td>enum สถานะ</td><td>5 สมาชิก</td><td>ไม่มี</td><td>ไม่มี</td></tr>
+<tr><td>ฟิลด์ใน State</td><td>25</td><td>7</td><td>5</td></tr>
+<tr><td>เรียลไทม์</td><td>ไม่มี</td><td>ไม่มี</td><td><strong>SignalR 6 เหตุการณ์</strong></td></tr>
+<tr><td>ตัวควบคุมช่องกรอก</td><td>8</td><td>2</td><td>0</td></tr>
+</tbody></table><p><code>checkin</code> กับ <code>sorting</code> ไม่มี enum แต่มีฟิลด์น้อยกว่ามาก — ซึ่งเปลี่ยนคำตอบ</p><table><thead><tr><th>จอ</th><th>คุมสถานะด้วย</th><th>จำนวนสถานะที่เป็นไปได้</th></tr></thead><tbody>
+<tr><td>packing</td><td><code>enum</code></td><td>5 (บังคับด้วยชนิด)</td></tr>
+<tr><td>checkin</td><td><code>_slotDetail != null</code> + <code>_pendingPack != null</code> + <code>_deliveryNotePack != null</code></td><td>2³ = 8 ตามชนิด</td></tr>
+<tr><td>sorting</td><td>สถานะของแต่ละสถานีจากเซิร์ฟเวอร์</td><td>ไม่มีสถานะของจอเอง</td></tr>
+</tbody></table><div class="note"><strong><code>sorting</code> เป็นกรณีที่น่าสนใจที่สุด</strong> — ไม่มี enum และไม่ต้องมี เพราะจอไม่ได้ถือสถานะของ flow เลย<br>มันแสดงสถานะของสิบสถานีที่เซิร์ฟเวอร์เป็นเจ้าของ แล้วอัปเดตตาม SignalR<br>เป็นตัวอย่างว่า<strong>ถ้าสถานะไม่ได้อยู่ที่แอป ก็ไม่ต้องมีเครื่องสถานะในแอป</strong></div></section>
+
+<section><h2>3. เส้นทางของ Packing</h2><pre class="code-vs"><code>HomeScreen กด "Packing"
+  ▼
+PackingScreen (2,176)   ← _PackState 5 สถานะ
+
+  scanPallet ──สแกนพาเลท──► packList ──เลือก Pack──► orderList
+                                │                        │
+                                │  Pack มี Order เดียว   │ เลือก Order
+                                │  → ข้าม orderList      ▼
+                                └──────────────────► orderParts
+                                                         │
+                                            สแกนครบทุก Order
+                                                         ▼
+                                                     success</code></pre><table><thead><tr><th>สถานะ</th><th>ผู้ใช้เห็นอะไร</th></tr></thead><tbody>
+<tr><td><code>scanPallet</code></td><td>ช่องสแกนพาเลท</td></tr>
+<tr><td><code>packList</code></td><td>รายการกล่องที่ต้องแพ็กบนพาเลทนั้น</td></tr>
+<tr><td><code>orderList</code></td><td>รายการใบสั่งในกล่องนั้น</td></tr>
+<tr><td><code>orderParts</code></td><td>รายการสินค้า + ช่องสแกน S/N</td></tr>
+<tr><td><code>success</code></td><td>สรุปว่าแพ็กเสร็จ + เลขติดตาม</td></tr>
+</tbody></table><p>ห้าชั้นซ้อนกัน: พาเลท → กล่อง → ใบสั่ง → สินค้า</p><p>ลึกกว่า picking (สามชั้น) และเป็นเหตุผลที่ไฟล์ใหญ่กว่า</p></section>
+
+<section><h2>4. เส้นทางของ Check-in</h2><pre class="code-vs"><code>HomeScreen กด "Check-in"
+  ▼
+CheckInScreen (1,441)   ← ไม่มี enum
+
+  สแกนกล่อง → previewCheckIn (ไม่เขียน DB)
+    ▼
+  popup แจ้งปลายทาง (บังคับให้อ่าน)
+    ▼
+  แสดงการ์ดกล่องที่รอ + pipeline
+    ▼
+  กด "Check-IN" → scanCheckIn
+    ├─ ครบทุกกล่องแล้ว → completeCheckIn + dispatchCheckIn อัตโนมัติ
+    └─ ยังไม่ครบ → รอสแกนกล่องถัดไป
+    ▼
+  แสดงปุ่มปริ้นใบส่งสินค้า</code></pre><p>รูปแบบ preview → ยืนยัน เหมือนที่ 18.9 ใช้ แต่ที่นี่ preview เป็นขั้นบังคับ ไม่ใช่ทางเลือก</p><pre class="code-vs"><code>/// Preview Pack ก่อน Check-IN (ไม่เขียน DB)
+Future&lt;ApiResult&lt;PreviewCheckInResponse&gt;&gt; previewCheckIn(String packingId)</code></pre></section>
+
+<section><h2>5. เส้นทางของ Sorting</h2><pre class="code-vs"><code>HomeScreen กด "Sorting"
+  ▼
+SortingScreen (1,030)   ← SignalR 6 เหตุการณ์
+  │  getSortingDashboard() → 10 สถานี + ตัวนับ
+  │
+  └─ แตะสถานี
+       ├─ DISABLED  → เมนูเปิดใช้งาน
+       ├─ AVAILABLE → เมนูปิดใช้งาน
+       └─ BUSY      → _StationDetailSheet
+                        │  getSortingStation(id)
+                        │  ฟัง SignalR เพิ่มเอง
+                        └─ Clear → clearSortingStation</code></pre><table><thead><tr><th>สถานะสถานี</th><th>แตะแล้วได้อะไร</th></tr></thead><tbody>
+<tr><td><code>AVAILABLE</code></td><td>เมนูให้ปิดใช้งาน</td></tr>
+<tr><td><code>BUSY</code></td><td>แผ่นรายละเอียด</td></tr>
+<tr><td><code>DISABLED</code></td><td>เมนูให้เปิดใช้งาน</td></tr>
+</tbody></table><div class="note"><strong>ทั้งสามสถานะแตะได้และได้ผลต่างกัน</strong> — ไม่มีกรณีที่แตะแล้ว <code>return;</code> เงียบ<br>ต่างจาก putaway (18.2, 18.4) ที่มีสามเงื่อนไขที่แตะแล้วไม่มีอะไรเกิด</div><p>สถานะเหล่านี้มาจากเซิร์ฟเวอร์ ไม่ใช่จากแอป</p><pre class="code-vs"><code>Future&lt;void&gt; _openStation(SortingStationView s) async {
+  if (s.status == 'DISABLED') { _showDisabledMenu(s); return; }
+  if (s.status == 'AVAILABLE') { _showAvailableMenu(s); return; }
+  // BUSY → open detail sheet
+  await showModalBottomSheet&lt;void&gt;(...);
+}</code></pre></section>
+
+<section><h2>6. endpoint ของสามโดเมน</h2><table><thead><tr><th>โดเมน</th><th>เมธอด</th><th>path</th></tr></thead><tbody>
+<tr><td rowspan="4">packing</td><td><code>scanPalletForPacking</code></td><td><code>GET /packing/pallet/{id}</code></td></tr>
+<tr><td><code>getPack</code></td><td><code>GET /packing/pack/{id}</code></td></tr>
+<tr><td><code>getPackOrder</code></td><td><code>GET /packing/pack/{id}/order/{orderId}</code></td></tr>
+<tr><td><code>scanPackPart</code></td><td><code>POST /packing/scan-part</code></td></tr>
+<tr><td rowspan="5">checkin</td><td><code>previewCheckIn</code></td><td><code>POST /checkin/preview</code></td></tr>
+<tr><td><code>scanCheckIn</code></td><td><code>POST /checkin/scan</code></td></tr>
+<tr><td><code>getCheckInSlot</code></td><td><code>GET /checkin/slot/{id}</code></td></tr>
+<tr><td><code>completeCheckIn</code></td><td><code>POST /checkin/complete</code></td></tr>
+<tr><td><code>dispatchCheckIn</code></td><td><code>POST /checkin/dispatch</code></td></tr>
+<tr><td rowspan="6">sorting</td><td><code>getSortingDashboard</code></td><td><code>GET /sorting/stations</code></td></tr>
+<tr><td><code>getSortingStation</code></td><td><code>GET /sorting/stations/{id}</code></td></tr>
+<tr><td><code>toggleSortingStation</code></td><td><code>POST /sorting/stations/toggle</code></td></tr>
+<tr><td><code>clearSortingStation</code></td><td><code>POST /sorting/stations/clear</code></td></tr>
+<tr><td><code>getAvailablePacksForSorting</code></td><td><code>GET /sorting/test/available-packs</code></td></tr>
+<tr><td><code>createSortingBatch</code></td><td><code>POST /sorting/test/create-batch</code></td></tr>
+</tbody></table><p>สองตัวสุดท้ายมีคำว่า <code>test</code> ใน path — เป็น endpoint สำหรับสร้างข้อมูลทดสอบ ซึ่งเรียกจาก <code>TestSortingScreen</code> ที่เข้าได้จากเมนูซ่อนใน 16.3</p><div class="note"><strong>ทั้งสิบห้า endpoint ในสามโดเมนนี้ส่ง <code>statusCode</code> ต่อครบทุกจุด</strong> — ต่างจาก receiving, unload, upload และ putaway ที่ทิ้งทั้งหมด (16.7, 18.7)<br>สามไฟล์นี้เขียนทีหลังและตามข้อตกลงที่ถูก</div></section>
+
+<section><h2>7. สิ่งที่ทั้งสามจอมีเหมือนกัน</h2><table><thead><tr><th>รูปแบบ</th><th>packing</th><th>checkin</th><th>sorting</th></tr></thead><tbody>
+<tr><td>โฟกัสด้วย <code>addPostFrameCallback</code></td><td>✓</td><td>✓</td><td>ไม่มีช่องสแกน</td></tr>
+<tr><td><code>if (!mounted) return;</code> ก่อน <code>setState</code></td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td><code>ApiService()</code> เป็นฟิลด์</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td><code>dispose()</code> ครบทุกตัวควบคุม</td><td>✓</td><td>✓</td><td>ไม่มีตัวควบคุม</td></tr>
+<tr><td>ล้มเหลวแล้วแสดงกล่อง</td><td>✓</td><td>✓</td><td>✓</td></tr>
+</tbody></table><p>ห้าข้อพื้นฐานทำครบทั้งสามจอ — ต่างจาก <code>StationSheet</code> ใน 18.3 ที่ลำดับ <code>mounted</code> ผิด</p><p>และมีรูปแบบที่เจอซ้ำจาก Part 18</p><pre class="code-vs"><code>// packing — เหมือน pick_items บรรทัดต่อบรรทัด
+int _collectedCountFor(PackingPartItem part) =&gt; part.serialRequire
+    ? (_collectedSerials[part.partId]?.length ?? 0)
+    : (_collectedQty[part.partId] ?? 0);</code></pre><pre class="code-vs"><code>// pick_items (18.11)
+int _pickedCountFor(PickItemOnPallet item) =&gt; item.serialRequire
+    ? (_pickedSerials[item.partId]?.length ?? 0)
+    : (_pickedQty[item.partId] ?? 0);</code></pre><p>เมธอดเดียวกันคนละชื่อ ในสองไฟล์ที่ห่างกัน — เป็นหลักฐานว่า <code>packing_screen.dart</code> ถูกเขียนโดยคัดลอกโครงจาก <code>pick_items_screen.dart</code></p><p>ผลที่ตามมา: <strong>ปัญหาเดียวกันถูกคัดลอกมาด้วย</strong> ซึ่ง 19.4 จะเจอ</p></section>
+
+<section><h2>8. ลำดับที่จะอ่านใน Part นี้</h2><table><thead><tr><th>บท</th><th>อ่านอะไร</th></tr></thead><tbody>
+<tr><td>19.2–19.3</td><td>Packing — enum ห้าสถานะ และการเดินสี่ชั้น</td></tr>
+<tr><td>19.4–19.5</td><td>การสแกนสินค้า และการปิดกล่องอัตโนมัติ</td></tr>
+<tr><td>19.6</td><td>โมเดลและ API ของ packing</td></tr>
+<tr><td>19.7–19.8</td><td>Check-in — preview ที่บังคับ และการปิดช่องอัตโนมัติ</td></tr>
+<tr><td>19.9</td><td>โมเดลและ API ของ checkin</td></tr>
+<tr><td>19.10–19.11</td><td>Sorting — จอที่ไม่ถือสถานะเอง</td></tr>
+<tr><td>19.12</td><td>SignalR ตัวที่สอง และการฟังซ้อนสองชั้น</td></tr>
+<tr><td>19.13</td><td>จออัปโหลดรูปของหัวหน้า</td></tr>
+<tr><td>19.14</td><td>วิธีแก้จอใหญ่โดยไม่พัง</td></tr>
+<tr><td>19.15</td><td>ต่อทั้ง outbound เป็นเส้นเดียวและสรุป</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>จากตัวเลขในบทนี้ ทำนายว่าจอไหนอ่านยากที่สุด และเพราะอะไร</li><li>ทำไม <code>sorting</code> ถึงไม่ต้องมี enum ทั้งที่มีสถานะสามแบบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><p>ถ้าดูแค่บรรทัด จะตอบว่า <code>packing</code> (2,176)</p><p>แต่เกณฑ์ที่ 18.16 สรุปไว้คือ <strong>“ต้องคิดถึงสถานะกี่อย่างพร้อมกัน”</strong></p><table><thead><tr><th>จอ</th><th>สถานะที่ต้องคิดพร้อมกัน</th><th>อ่านยากแค่ไหน</th></tr></thead><tbody>
+<tr><td>packing</td><td>1 (enum) + ข้อมูลของชั้นที่กำลังอยู่</td><td>ยาว แต่ไม่หลง</td></tr>
+<tr><td>checkin</td><td><strong>3 ฟิลด์ nullable ที่ประกอบกันเป็นโหมด</strong></td><td><strong>หลงง่ายที่สุด</strong></td></tr>
+<tr><td>sorting</td><td>0 — สถานะอยู่ที่เซิร์ฟเวอร์</td><td>ง่ายที่สุด</td></tr>
+</tbody></table><p><code>checkin</code> มีฟิลด์แค่ 7 ตัวแต่สามตัวเป็น nullable ที่ประกอบกันเป็นโหมด</p><pre class="code-vs"><code>PreviewCheckInResponse? _pendingPack;
+PreviewCheckInResponse? _deliveryNotePack;
+CheckInSlotDetail? _slotDetail;</code></pre><p>ตามชนิดแล้วมีแปดชุดค่าที่เป็นไปได้ — เหมือนปัญหาที่ 17.5 พบใน <code>ScanPartScreen</code></p><p>19.7 จะไล่ดูว่าชุดไหนเกิดจริงและชุดไหนไม่ควรเกิด</p><p><strong>ข้อ 2 — ทำไม sorting ไม่ต้องมี enum</strong></p><table><thead><tr><th>คำถาม</th><th>packing/picking</th><th>sorting</th></tr></thead><tbody>
+<tr><td>ใครเป็นเจ้าของสถานะ</td><td><strong>แอป</strong> — ผู้ใช้เดินผ่านขั้นตอน</td><td><strong>เซิร์ฟเวอร์</strong> — สถานีมีสถานะของมัน</td></tr>
+<tr><td>สถานะเปลี่ยนเพราะอะไร</td><td>ผู้ใช้กด</td><td>เหตุการณ์จากที่อื่น</td></tr>
+<tr><td>ถ้าปิดแอปแล้วเปิดใหม่</td><td>เริ่มใหม่จากขั้นแรก</td><td><strong>เห็นสถานะเดิม</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือความต่างที่แท้จริง — สถานะของสถานีไม่ได้อยู่ในเครื่องผู้ใช้เลย</p><pre class="code-vs"><code>// จอทำแค่แสดงและอัปเดตตามที่ได้รับ
+List&lt;SortingStationView&gt; _stations = [];
+int _completedCount = 0;
+int _queuedCount = 0;</code></pre><p>สามฟิลด์นี้เป็น<strong>สำเนาของสิ่งที่เซิร์ฟเวอร์รู้</strong> ไม่ใช่สถานะที่แอปเป็นเจ้าของ</p><div class="note"><strong>หลักที่ใช้ตัดสินได้ทั่วไป:</strong> ต้องมีเครื่องสถานะในแอปเมื่อ<strong>ผู้ใช้เดินผ่านขั้นตอนที่แอปเป็นคนจำ</strong><br>ถ้าสถานะทั้งหมดอยู่ที่เซิร์ฟเวอร์และแอปแค่แสดง สิ่งที่ต้องการคือการโหลดใหม่ให้ถูกจังหวะ ไม่ใช่ enum<br>สังเกตว่า <code>UnloadSessionSheet</code> (17.11) อยู่ตรงกลาง — สถานะการยืนยันอยู่ที่เซิร์ฟเวอร์ แต่ S/N ที่สแกนค้างอยู่ในเครื่อง จึงเสียงานได้เมื่อปิดแผ่น</div></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>สามโดเมนสุดท้ายเป็นไฟล์เดียวทั้งหมด รวม 4,647 บรรทัด</li><li><code>packing</code> มี enum ห้าสถานะทั้งที่ไม่แตกไฟล์เลย — พิสูจน์ว่าสองเรื่องนี้แยกกัน</li><li><code>checkin</code> ไม่มี enum และมีสามฟิลด์ nullable ที่ประกอบกันเป็นโหมด</li><li><code>sorting</code> ไม่มีสถานะของตัวเอง เพราะเซิร์ฟเวอร์เป็นเจ้าของ</li><li>packing เดินสี่ชั้น: พาเลท → กล่อง → ใบสั่ง → สินค้า</li><li>checkin ใช้ preview เป็นขั้นบังคับ ไม่ใช่ทางเลือก</li><li>sorting มีสามสถานะสถานีและทั้งสามแตะได้ ไม่มี <code>return;</code> เงียบ</li><li>ทั้งสิบห้า endpoint ส่ง <code>statusCode</code> ต่อครบ ต่างจากสี่โดเมนก่อนหน้า</li><li><code>packing_screen.dart</code> คัดลอกโครงมาจาก <code>pick_items_screen.dart</code></li></ul></div><p><strong>บทหน้า:</strong> เดินผ่านห้าสถานะของ Packing และดูว่าสี่ชั้นถูกจัดการอย่างไร</p></section>

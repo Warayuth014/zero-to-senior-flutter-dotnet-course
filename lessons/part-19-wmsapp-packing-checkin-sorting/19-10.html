@@ -4,17 +4,262 @@
 <title>Sorting State Machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">19-10 · Real Codebase</span><h1>Sorting State Machine</h1><p>Part 19: wmsapp Outbound</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Dashboard state</a></li><li><a href="#section-2">Station transitions</a></li><li><a href="#section-3">Tap dispatch</a></li><li><a href="#section-4">Toggle</a></li><li><a href="#section-5">Busy detail</a></li><li><a href="#section-6">Clear</a></li><li><a href="#section-7">Realtime reconciliation</a></li><li><a href="#section-8">FSM tests</a></li></ol></nav>
-<div class="note"><strong>Sorting dashboard เป็น state machine 10 stations:</strong> tap behavior เปลี่ยนตาม AVAILABLE/BUSY/DISABLED และ server events เปลี่ยน counters, capacity, queue และ assignment แบบ realtime</div>
-<section id="section-1"><h2>1. Dashboard state</h2><p>state มี stations list, completedCount, queuedCount และ loading โดย <code>getSortingDashboard</code> เป็น snapshot เริ่มต้น/refresh ส่วน SignalR เร่งการอัปเดตระหว่างเปิดหน้า</p></section>
-<section id="section-2"><h2>2. Station transitions</h2><pre class="code-vs"><code>AVAILABLE → BUSY → FULL/BUSY → clear → AVAILABLE
-AVAILABLE ↔ DISABLED
-queued batch → assigned เมื่อ station ว่าง</code></pre><p>FULL แสดงผ่าน isFull บน BUSY ไม่ใช่ status แยกใน model</p></section>
-<section id="section-3"><h2>3. Tap dispatch</h2><p>DISABLED เปิดเมนู enable; AVAILABLE เปิดเมนู disable; BUSY เปิด detail sheet กฎอยู่ใน <code>_openStation</code> จึงควรมี unknown status fallbackแทนให้ทุกค่าอื่นกลายเป็น BUSY โดยปริยาย</p></section>
-<section id="section-4"><h2>4. Toggle</h2><p>confirm dialog ส่ง stationId, enable, operatorId และ optional reason หลัง success reload dashboard Server ต้องห้าม disable station ที่ยัง BUSY ตาม policy หรือบอกผลที่ explicit</p></section>
-<section id="section-5"><h2>5. Busy detail</h2><p>sheet โหลด SortingStationDetail ที่มี pallet, cartons, capacity, pendingCount และ carton sequence พร้อมฟัง counter/full event เฉพาะ station เดียวแล้ว reload</p></section>
-<section id="section-6"><h2>6. Clear</h2><p>clear station ยืนยันส่ง pallet ออกจาก station แล้ว POST clear เมื่อสำเร็จแจ้ง parent reloadและปิด sheet ต้องตรวจ station full/ready และ concurrent assignment ใน backend</p></section>
-<section id="section-7"><h2>7. Realtime reconciliation</h2><p>CounterUpdated patch station ใน listทันที; full/cleared/toggled/batchAssigned reloadทั้ง dashboard หาก responseเก่ากลับหลัง eventใหม่อาจทับ state จึงต้องมี generation/version guard</p></section>
-<section id="section-8"><h2>8. FSM tests</h2><div class="success">ทดสอบทุก status/tap, full capacity, toggle/clear conflict, eventผิดลำดับ/ซ้ำ, stationไม่พบ, queued→assigned และ REST stale response โดย stateสุดท้ายต้องตรง server versionล่าสุด</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ห้าฟิลด์ที่เป็นสำเนาทั้งหมด</a></li><li><a href="#section-2">สามสถานะสถานีที่แตะได้ทั้งหมด</a></li><li><a href="#section-3">การยืนยันที่บอกผลลัพธ์</a></li><li><a href="#section-4">รายการที่ชื่อว่า Grid แต่เป็น Column</a></li><li><a href="#section-5">การ์ดที่แยกสามสถานะสี่แบบ</a></li><li><a href="#section-6">ตัวเลขสรุปที่คำนวณสองที่</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด sorting/sorting_screen.dart ทั้ง 1,030 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.9, 18.2 (ตารางสถานี putaway)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ไม่ถือสถานะของ flow เอง และเทียบกับจอสถานีของ putaway</div>
+
+<section id="section-1"><h2>1. ห้าฟิลด์ที่เป็นสำเนาทั้งหมด</h2><pre class="code-vs"><code>class _SortingScreenState extends State&lt;SortingScreen&gt; {
+  final _api = ApiService();
+  final _hub = SortingSignalRService();
+
+  bool _loading = false;
+  List&lt;SortingStationView&gt; _stations = [];
+  int _completedCount = 0;
+  int _queuedCount = 0;
+}</code></pre><p>ห้าฟิลด์ ไม่มีตัวควบคุมช่องกรอกเลย — น้อยที่สุดในทุกจอที่อ่านมา</p><table><thead><tr><th>ฟิลด์</th><th>เป็นอะไร</th></tr></thead><tbody>
+<tr><td><code>_loading</code></td><td>สถานะของจอ</td></tr>
+<tr><td><code>_stations</code></td><td><strong>สำเนาของสิ่งที่เซิร์ฟเวอร์รู้</strong></td></tr>
+<tr><td><code>_completedCount</code>, <code>_queuedCount</code></td><td>สำเนาเหมือนกัน</td></tr>
+</tbody></table><div class="note"><strong>ไม่มีสถานะของ flow เลย</strong> — ไม่มี “กำลังทำขั้นไหน” ไม่มี “เลือกอะไรไว้”<br>ผู้ใช้ไม่ได้เดินผ่านขั้นตอน แต่ดูภาพรวมแล้วแตะสิ่งที่ต้องจัดการ<br>19.1 สรุปไว้ว่านี่คือกรณีที่ไม่ต้องมี enum</div><p>เทียบกับจอสถานีของ putaway (18.2)</p><table><thead><tr><th></th><th>PutawayScreen</th><th>SortingScreen</th></tr></thead><tbody>
+<tr><td>สถานี</td><td>3 (ฝังในโค้ด)</td><td>10 (<strong>จากเซิร์ฟเวอร์</strong>)</td></tr>
+<tr><td>เก็บสถานะเป็น</td><td><code>Map&lt;String, Map&gt;</code> ดิบ</td><td><code>List&lt;SortingStationView&gt;</code> มีโมเดล</td></tr>
+<tr><td>ช่องสแกนสถานี</td><td>มี</td><td><strong>ไม่มี</strong></td></tr>
+<tr><td>แตะสถานีที่ไม่ว่าง</td><td><code>return;</code> เงียบ</td><td><strong>เปิดเมนูที่ทำอะไรได้</strong></td></tr>
+<tr><td>เรียลไทม์</td><td>4 เหตุการณ์</td><td>6 เหตุการณ์</td></tr>
+</tbody></table><p>สามแถวกลางคือความต่างที่สำคัญ — จอนี้เขียนทีหลังและแก้ปัญหาที่จอนั้นมี</p></section>
+
+<section id="section-2"><h2>2. สามสถานะสถานีที่แตะได้ทั้งหมด</h2><pre class="code-vs"><code>Future&lt;void&gt; _openStation(SortingStationView s) async {
+  if (s.status == 'DISABLED') {
+    _showDisabledMenu(s);       // ← เมนูเปิดใช้งาน
+    return;
+  }
+  if (s.status == 'AVAILABLE') {
+    _showAvailableMenu(s);      // ← เมนูปิดใช้งาน
+    return;
+  }
+  // BUSY → open detail sheet
+  await showModalBottomSheet&lt;void&gt;(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) =&gt; _StationDetailSheet(
+      stationId: s.stationId,
+      userId: widget.userId,
+      onChanged: _loadStations,
+    ),
+  );
+}</code></pre><table><thead><tr><th>สถานะ</th><th>ผู้ใช้ทำอะไรได้</th></tr></thead><tbody>
+<tr><td><code>AVAILABLE</code></td><td>ปิดใช้งานสถานี</td></tr>
+<tr><td><code>BUSY</code></td><td>ดูรายละเอียด / เคลียร์</td></tr>
+<tr><td><code>DISABLED</code></td><td>เปิดใช้งานกลับ</td></tr>
+</tbody></table><div class="note"><strong>ไม่มี <code>return;</code> เงียบสักจุด</strong> — ต่างจาก putaway ที่มีสามจุด (18.2, 18.4)<br>เหตุผลอยู่ที่การออกแบบ: ที่นี่ทุกสถานะมีสิ่งที่ผู้ใช้ทำได้ ไม่ใช่ “กดได้เมื่อว่างเท่านั้น”<br>เป็นตัวอย่างที่ 18.4 แบบฝึกหัดสรุปไว้ว่าควรทำ</div><p>เมนูที่แสดงเป็น <code>ListTile</code> รายการเดียว</p><pre class="code-vs"><code>void _showAvailableMenu(SortingStationView s) {
+  showModalBottomSheet&lt;void&gt;(
+    context: context,
+    builder: (ctx) =&gt; SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.toggle_off, ...),
+            title: const Text('ปิดใช้งาน Station'),
+            subtitle: Text(stationLabel),
+            onTap: () {
+              Navigator.pop(ctx);
+              _confirmToggle(s, enable: false);
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>Navigator.pop(ctx)</code> ก่อนทำงาน</td><td>เมนูปิดก่อน กล่องยืนยันจึงไม่ซ้อน</td></tr>
+<tr><td><code>subtitle</code> บอกชื่อสถานี</td><td>ยืนยันว่าแตะถูกใบ</td></tr>
+<tr><td>เมนูมีรายการเดียว</td><td>เปิดทางให้เพิ่มทีหลังโดยไม่เปลี่ยนโครง</td></tr>
+</tbody></table><p>เมนูของสถานะปิดบอกเหตุผลด้วย</p><pre class="code-vs"><code>subtitle: Text(
+  '$stationLabel${s.disableReason != null ? "  ·  เหตุผลปิด: ${s.disableReason}" : ""}',
+),</code></pre><p>ผู้ใช้ที่จะเปิดกลับจะเห็นว่าใครปิดไว้เพราะอะไร — ข้อมูลที่จำเป็นก่อนตัดสินใจ</p></section>
+
+<section id="section-3"><h2>3. การยืนยันที่บอกผลลัพธ์</h2><pre class="code-vs"><code>Future&lt;void&gt; _confirmToggle(SortingStationView s, {required bool enable}) async {
+  final stationLabel = _formatSortingStationId(s.stationId);
+  final confirm = await showConfirmDialog(
+    context,
+    title: enable ? 'เปิดใช้งาน Station' : 'ปิดใช้งาน Station',
+    message: '$stationLabel จะ ${enable ? "พร้อมรับ batch" : "หยุดรับ batch ใหม่"}',
+    confirmLabel: enable ? 'เปิดใช้งาน' : 'ปิดใช้งาน',
+    isDanger: !enable,
+  );
+  if (!confirm) return;
+
+  setState(() =&gt; _loading = true);
+  final res = await _api.toggleSortingStation(
+    stationId: s.stationId,
+    enable: enable,
+    operatorId: widget.userId,
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Toggle ไม่สำเร็จ');
+    return;
+  }
+  _loadStations();
+}</code></pre><table><thead><tr><th>รายละเอียด</th><th>ทำไมดี</th></tr></thead><tbody>
+<tr><td>ข้อความบอกว่าจะเกิดอะไร</td><td>“หยุดรับ batch ใหม่” ไม่ใช่ “ยืนยันหรือไม่”</td></tr>
+<tr><td><code>confirmLabel</code> เขียนการกระทำ</td><td>ผู้ใช้ที่ไม่อ่านเนื้อหาก็เห็นจากปุ่ม</td></tr>
+<tr><td><code>isDanger: !enable</code></td><td>ปุ่มแดงเมื่อจะปิด — การกระทำที่กระทบงาน</td></tr>
+<tr><td>โหลดใหม่หลังสำเร็จ</td><td>สถานะบนจอตรงกับความจริง</td></tr>
+</tbody></table><p>แถวที่สามใช้ <code>isDanger</code> ที่ <code>showConfirmDialog</code> มีอยู่แล้ว (16.9) — ตรงกับที่ 18.6 แบบฝึกหัดเสนอ</p><div class="note"><strong>คำว่า “หยุดรับ batch ใหม่” สำคัญกว่าที่เห็น</strong> — บอกว่าปิดสถานีแล้ว<strong>งานที่อยู่บนสถานีตอนนี้ไม่หายไป</strong><br>ถ้าเขียนว่า “ปิดสถานี” ผู้ใช้อาจกลัวว่าของที่ค้างอยู่จะหาย<br>เป็นหลักเดียวกับ “AMR จะมารับทันที” ใน 18.3</div><p>แต่ยังขาดสิ่งที่ 7.10 สอน</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(context, message: res.error ?? 'Toggle ไม่สำเร็จ');
+  return;                        // ← ไม่โหลดใหม่ ไม่บอกว่าอาจสำเร็จแล้ว
+}
+_loadStations();</code></pre><p>ถ้าเน็ตหลุดหลังเซิร์ฟเวอร์รับคำสั่ง ผู้ใช้จะเห็นว่าล้มเหลวและสถานะบนจอยังเป็นค่าเก่า</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(
+    context,
+    title: 'ไม่ทราบผล',
+    message: '${res.error ?? "เปลี่ยนสถานะไม่สำเร็จ"}\n\n'
+        'คำสั่งอาจส่งไปแล้ว — ดูสถานะสถานีที่โหลดใหม่ด้านล่าง',
+  );
+  _loadStations();               // ← โหลดใหม่ให้เลย
+  return;
+}</code></pre><p>การโหลดใหม่ตรงนี้แก้ปัญหาได้เกือบทั้งหมด — ผู้ใช้เห็นสถานะจริงทันทีหลังกดปิดกล่อง</p></section>
+
+<section id="section-4"><h2>4. รายการที่ชื่อว่า Grid แต่เป็น Column</h2><pre class="code-vs"><code>Widget _buildGrid() {
+  return Column(
+    children: [
+      for (var i = 0; i &lt; _stations.length; i++) ...[
+        _StationCard(
+          station: _stations[i],
+          onTap: () =&gt; _openStation(_stations[i]),
+        ),
+        if (i != _stations.length - 1) const SizedBox(height: 10),
+      ],
+    ],
+  );
+}</code></pre><p>สิบสถานีเรียงแนวตั้ง การ์ดละแถว — ไม่ใช่ตารางจริง</p><table><thead><tr><th></th><th>putaway (18.2)</th><th>sorting</th></tr></thead><tbody>
+<tr><td>ชื่อคลาส</td><td><code>PutawayStationGrid</code></td><td><code>_buildGrid</code></td></tr>
+<tr><td>ที่จริงเป็น</td><td><code>Row</code> — พังเมื่อเกินสามใบ</td><td><code>Column</code> — <strong>รองรับกี่ใบก็ได้</strong></td></tr>
+</tbody></table><p>ชื่อไม่ตรงทั้งคู่ แต่ของที่นี่ทนกว่า</p><p>และ <code>if (i != _stations.length - 1)</code> ไม่ใส่ช่องว่างหลังใบสุดท้าย — ต่างจาก <code>margin: bottom</code> ที่ 18.6 ชี้ว่ามีช่องว่างเกิน</p><div class="note">แนวตั้งเหมาะกับสิบสถานีที่มีข้อมูลเยอะต่อใบ — การ์ดแต่ละใบแสดงพาเลท จำนวนกล่อง และสถานะ ซึ่งใส่ในช่องแคบไม่พอ<br>ต่างจาก putaway ที่การ์ดมีแค่ชื่อสถานีกับพาเลท จึงเรียงแนวนอนได้</div></section>
+
+<section id="section-5"><h2>5. การ์ดที่แยกสามสถานะสี่แบบ</h2><pre class="code-vs"><code>class _StationCard extends StatelessWidget {
+  final SortingStationView station;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = station;
+    final stationLabel = _formatSortingStationId(s.stationId);
+
+    final isDisabled = s.status == 'DISABLED';
+    final isBusy = s.status == 'BUSY';
+    final isFull = s.isFull == true;
+
+    final accent = isDisabled ? Colors.grey : ...;
+    ...
+  }
+}</code></pre><table><thead><tr><th>ชุดค่า</th><th>แสดง</th></tr></thead><tbody>
+<tr><td><code>DISABLED</code></td><td>เทา + เหตุผลที่ปิด</td></tr>
+<tr><td><code>BUSY</code> + <code>isFull</code></td><td>เต็ม — ต้องเคลียร์</td></tr>
+<tr><td><code>BUSY</code></td><td>กำลังใช้งาน + ตัวนับ</td></tr>
+<tr><td><code>AVAILABLE</code></td><td>ว่าง</td></tr>
+</tbody></table><p>สามฟิลด์ให้สี่แบบ เพราะ <code>isFull</code> มีความหมายเฉพาะเมื่อ <code>BUSY</code></p><pre class="code-vs"><code>Widget _buildBusyRow(...)      // BUSY (รวม isFull)
+Widget _buildAvailableRow(String stationLabel)
+Widget _buildDisabledRow(SortingStationView s, String stationLabel)</code></pre><p>สามเมธอดในคลาสเดียว — และเป็น <code>StatelessWidget</code> จึงไม่มีสถานะให้ค้าง</p><p><code>isFull</code> เป็น <code>bool?</code> ไม่ใช่ <code>bool</code></p><pre class="code-vs"><code>final isFull = s.isFull == true;      // ← null ถือว่าไม่เต็ม</code></pre><table><thead><tr><th>เขียนแบบนี้</th><th>ผลเมื่อ <code>isFull</code> เป็น null</th></tr></thead><tbody>
+<tr><td><code>s.isFull == true</code></td><td><code>false</code> — ปลอดภัย</td></tr>
+<tr><td><code>s.isFull!</code></td><td><strong>พัง</strong></td></tr>
+<tr><td><code>s.isFull ?? false</code></td><td><code>false</code> — เหมือนกัน</td></tr>
+</tbody></table><p>สองแบบแรกได้ผลเดียวกัน — <code>== true</code> อ่านง่ายกว่าเมื่อไม่ต้องการค่า null</p></section>
+
+<section id="section-6"><h2>6. ตัวเลขสรุปที่คำนวณสองที่</h2><pre class="code-vs"><code>Widget _buildHeader() {
+  final busy = _stations.where((s) =&gt; s.status == 'BUSY').length;
+  final disabled = _stations.where((s) =&gt; s.status == 'DISABLED').length;
+  ...
+}</code></pre><p>สองตัวคำนวณจาก <code>_stations</code> — รูปแบบเดียวกับที่ 17.12 และ 18.9 ชม</p><p>แต่อีกสองตัวมาจากเซิร์ฟเวอร์</p><pre class="code-vs"><code>int _completedCount = 0;
+int _queuedCount = 0;
+...
+setState(() {
+  _stations = res.data!.stations;
+  _completedCount = res.data!.completedCount;
+  _queuedCount = res.data!.queuedCount;
+});</code></pre><table><thead><tr><th>ตัวเลข</th><th>มาจาก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>busy / disabled</td><td>คำนวณจากรายการ</td><td>ข้อมูลอยู่ในมือแล้ว</td></tr>
+<tr><td>completed / queued</td><td><strong>เซิร์ฟเวอร์</strong></td><td>นับจากข้อมูลที่แอปไม่มี</td></tr>
+</tbody></table><div class="note"><strong>การแบ่งนี้ถูกต้อง</strong> — จำนวนงานที่เสร็จแล้วและที่รอคิว เป็นข้อมูลนอกสิบสถานี แอปจึงคำนวณเองไม่ได้<br>ต่างจาก <code>PackingSummary.isDone</code> ใน 19.6 ที่คำนวณเองทั้งที่เซิร์ฟเวอร์ก็บอกมาแล้ว</div><p>ตัวเลขทั้งสี่อัปเดตเมื่อ <code>_loadStations()</code> ทำงาน — ซึ่งถูกเรียกจากสี่ที่</p><table><thead><tr><th>เรียกจาก</th><th>เมื่อ</th></tr></thead><tbody>
+<tr><td><code>initState</code></td><td>เปิดจอ</td></tr>
+<tr><td><code>_onAnyStationEvent</code></td><td>ได้รับเหตุการณ์ SignalR</td></tr>
+<tr><td><code>_confirmToggle</code></td><td>เปลี่ยนสถานะสำเร็จ</td></tr>
+<tr><td><code>onChanged</code> ของแผ่นรายละเอียด</td><td>เคลียร์สถานีสำเร็จ</td></tr>
+<tr><td><code>RefreshIndicator</code></td><td>ผู้ใช้ลากลง</td></tr>
+</tbody></table><p>ห้าทาง — ครบกว่าจอไหนในโปรเจกต์</p><pre class="code-vs"><code>child: RefreshIndicator(
+  onRefresh: _loadStations,
+  child: SingleChildScrollView(
+    physics: const AlwaysScrollableScrollPhysics(),   // ← จำเป็น (18.10)
+    ...
+  ),
+),</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ทุกจอต้องมีเครื่องสถานะ</td><td>จอที่แค่แสดงสถานะของเซิร์ฟเวอร์ไม่ต้องมี</td></tr>
+<tr><td>สถานะที่ทำอะไรไม่ได้ควรกดไม่ได้</td><td>ทุกสถานะที่นี่มีสิ่งที่ทำได้</td></tr>
+<tr><td><code>_buildGrid</code> ใช้ <code>GridView</code></td><td>เป็น <code>Column</code></td></tr>
+<tr><td><code>bool?</code> ต้องใช้ <code>!</code></td><td><code>== true</code> ปลอดภัยและอ่านง่าย</td></tr>
+<tr><td>ตัวเลขสรุปควรคำนวณเองทั้งหมด</td><td>บางตัวแอปไม่มีข้อมูลพอ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เทียบ <code>SortingScreen</code> กับ <code>PutawayScreen</code> (18.2) แล้วตอบ</p><ol><li>ปัญหาที่ 18.2 และ 18.4 พบ ข้อไหนไม่เกิดที่นี่ และเพราะอะไร</li><li>ปัญหาข้อไหนที่ยังเกิดทั้งสองจอ</li><li>ถ้าจะแก้ <code>PutawayScreen</code> ให้เหมือนจอนี้ ต้องทำอะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ปัญหาที่ไม่เกิด</strong></p><table><thead><tr><th>ปัญหาใน 18.2/18.4</th><th>เกิดที่นี่ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>แตะสถานีที่ไม่ว่างแล้ว <code>return;</code> เงียบ</td><td><strong>ไม่</strong></td><td>ทุกสถานะมีเมนู</td></tr>
+<tr><td><code>Row</code> ที่ล้นเมื่อเกินสามสถานี</td><td><strong>ไม่</strong></td><td>ใช้ <code>Column</code></td></tr>
+<tr><td>สถานีฝังในโค้ด เพิ่มต้องปล่อยแอปใหม่</td><td><strong>ไม่</strong></td><td>มาจากเซิร์ฟเวอร์</td></tr>
+<tr><td>ข้อความ “Supported stations” พิมพ์รายชื่อซ้ำ</td><td><strong>ไม่</strong></td><td>ไม่มีช่องสแกนสถานี</td></tr>
+<tr><td>สถานะสถานีเป็น <code>Map</code> ดิบ</td><td><strong>ไม่</strong></td><td>มี <code>SortingStationView</code></td></tr>
+<tr><td>ล้มเหลวแล้วเงียบ สถานีดูว่างทั้งที่ไม่ว่าง</td><td><strong>ไม่</strong></td><td><code>_loadStations</code> แสดงกล่อง error</td></tr>
+</tbody></table><p>หกข้อจากรายการของสองบทนั้น — และทั้งหมดเป็นผลของการที่<strong>จอนี้เขียนทีหลัง</strong></p><p>สังเกตว่าข้อที่สามกับสี่หายไปพร้อมกัน เพราะเป็นผลของการตัดสินใจเดียว: <strong>ให้เซิร์ฟเวอร์เป็นเจ้าของรายชื่อสถานี</strong></p><p>18.4 แบบฝึกหัดถามว่าคุ้มไหมที่จะย้ายรายชื่อสถานีไปเซิร์ฟเวอร์ — จอนี้คือคำตอบว่าทำแล้วได้อะไร</p><p><strong>ข้อ 2 — ปัญหาที่ยังเกิดทั้งสองจอ</strong></p><table><thead><tr><th>ปัญหา</th><th>ทั้งสองจอ</th><th>ราก</th></tr></thead><tbody>
+<tr><td>ต่อ SignalR ไม่ได้แล้วเงียบ</td><td><strong>เกิด</strong></td><td>บริการทั้งสองตัวเหมือนกัน (18.8)</td></tr>
+<tr><td>ไม่มี <code>onreconnected</code></td><td><strong>เกิด</strong></td><td>เหมือนกัน</td></tr>
+<tr><td>ล้มเหลวแล้วไม่บอกว่าอาจสำเร็จแล้ว</td><td><strong>เกิด</strong></td><td><code>ApiResult</code> ไม่มี <code>outcomeUnknown</code> (16.6)</td></tr>
+<tr><td>แอนิเมชันหรือสถานะที่ไม่ผูกกับความจริง</td><td>putaway เท่านั้น</td><td>—</td></tr>
+</tbody></table><p>สามข้อแรกมีรากอยู่นอกจอ — ตรงกับที่ 18.11 สรุปไว้ว่าปัญหาที่รากอยู่ชั้นล่างแก้ที่จอไม่ได้</p><p><strong>ข้อ 3 — แก้ PutawayScreen อย่างไร</strong></p><table><thead><tr><th>ลำดับ</th><th>ทำอะไร</th><th>ต้องแตะเซิร์ฟเวอร์ไหม</th></tr></thead><tbody>
+<tr><td>1</td><td>เปลี่ยน <code>Row</code> เป็น <code>Wrap</code> หรือ <code>Column</code></td><td>ไม่</td></tr>
+<tr><td>2</td><td>ให้ทุกสถานะมีสิ่งที่ทำได้ หรืออย่างน้อยบอกว่าทำไมกดไม่ได้</td><td>ไม่</td></tr>
+<tr><td>3</td><td>สร้าง <code>StationStatus</code> แทน <code>Map</code> ดิบ (18.7)</td><td>ไม่</td></tr>
+<tr><td>4</td><td>ย้ายรายชื่อสถานีไปเซิร์ฟเวอร์</td><td><strong>ต้อง</strong></td></tr>
+</tbody></table><p>สามข้อแรกทำได้ทันที และแก้ปัญหาสี่ข้อจากหกข้อในตารางแรก</p><pre class="code-vs"><code>// ข้อ 2 — แบบที่ sorting ทำ
+void _openStationPopup(StationInfo station) {
+  final busy = _stationStatus[station.id];
+
+  if (busy != null) {
+    // สถานีกำลังทำงาน — แสดงว่าทำอะไรอยู่ แทนที่จะเงียบ
+    showModalBottomSheet&lt;void&gt;(
+      context: context,
+      builder: (ctx) =&gt; SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(MdiIcons.robotIndustrialOutline, color: AppTheme.danger),
+              title: Text('${station.id} กำลังจ่ายพาเลท'),
+              subtitle: Text('${busy['palletId']} → ${busy['destination']}'),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('โหลดสถานะใหม่'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _loadStationStatus();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+    return;
+  }
+
+  showModalBottomSheet(... StationSheet ...);
+}</code></pre><p>ได้สองอย่าง — ผู้ใช้รู้ว่าสถานีทำอะไรอยู่ และมีทางโหลดใหม่ถ้าสงสัยว่าข้อมูลค้าง</p><div class="note"><strong>ข้อสรุปที่สำคัญกว่าตัวคำตอบ</strong><br>สองจอนี้ทำเรื่องเดียวกัน — แสดงสถานีแล้วให้ผู้ใช้จัดการ — แต่ทำต่างกันหกจุด<br>ไม่ใช่เพราะจอหนึ่งเขียนดีกว่า แต่เพราะ<strong>เขียนคนละเวลา และไม่มีที่ที่บันทึกว่าครั้งก่อนตัดสินใจอย่างไร</strong><br>นี่คือแถวใหม่ที่ต้องเติมเข้าตารางกฎที่ไม่ตรงกันใน 18.16 — และเป็นสิ่งที่ Part 23 จะแก้</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>ห้าฟิลด์ ไม่มีตัวควบคุมช่องกรอก และไม่มีสถานะของ flow เลย</li><li><code>_stations</code> เป็นสำเนาของสิ่งที่เซิร์ฟเวอร์รู้ ไม่ใช่สถานะที่แอปเป็นเจ้าของ</li><li>สามสถานะสถานีแตะได้ทั้งหมด — ไม่มี <code>return;</code> เงียบสักจุด</li><li>เมนูปิดก่อนแล้วค่อยเปิดกล่องยืนยัน</li><li>ข้อความยืนยันบอกผลลัพธ์ และใช้ <code>isDanger</code> กับการกระทำที่กระทบงาน</li><li>ล้มเหลวแล้วไม่โหลดใหม่ และไม่บอกว่าคำสั่งอาจไปถึงแล้ว</li><li><code>_buildGrid</code> เป็น <code>Column</code> ที่รองรับกี่สถานีก็ได้</li><li>ตัวเลขสรุปสองตัวคำนวณเอง สองตัวมาจากเซิร์ฟเวอร์ — แบ่งถูก</li><li><code>_loadStations</code> ถูกเรียกจากห้าทาง ครบกว่าจอไหนในโปรเจกต์</li><li>หกปัญหาของ <code>PutawayScreen</code> ไม่เกิดที่นี่ เพราะเขียนทีหลัง</li></ul></div><p><strong>บทหน้า:</strong> โมเดลของ sorting และ <code>copyWith</code> ที่ใช้กับเหตุการณ์เรียลไทม์</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

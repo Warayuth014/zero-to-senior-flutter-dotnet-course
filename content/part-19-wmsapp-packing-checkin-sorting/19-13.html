@@ -1,10 +1,290 @@
-<div class="note"><strong>Part image เป็น supervisor workflow:</strong> โหลด/search สินค้า, เลือกกล้องหรือ gallery, ลดขนาดภาพ แล้วส่ง multipart พร้อม partId ก่อน reload URL จาก server</div>
-<section><h2>1. Parts list</h2><p><code>getAllParts()</code> อ่าน <code>/upload/parts</code> เป็น dynamic maps แล้วเก็บ all/filtered lists Search match partId, itemDesc และ brand แบบ lowercase</p></section>
-<section><h2>2. Search state issue</h2><p><code>_loadParts</code> เรียก <code>_filterParts()</code> ภายใน setState และ filter เรียก setState อีกชั้น เป็น nested state mutationที่อ่านยาก ควรคำนวณ filtered listก่อนแล้ว setStateครั้งเดียว</p></section>
-<section><h2>3. Choose source</h2><p>bottom sheet คืน ImageSource.camera/gallery; cancel หยุด flow หลัง pick ใช้ maxWidth/maxHeight 1024 และ quality 85 เพื่อลด upload แต่ยังต้องตรวจ byte size/MIME หลังได้ไฟล์</p></section>
-<section><h2>4. Multipart upload</h2><pre class="code-vs"><code>POST /upload/part-image
-multipart file + field partId</code></pre><p>API รับ <code>dart:io File</code> จึงผูกกับ mobile/desktop และไม่รองรับ web โดยตรง</p></section>
-<section><h2>5. Server security</h2><p>.NET ต้องตรวจสิทธิ์ supervisor, part exists, MIME/magic bytes, size/dimensions, decode/re-encode, filename/storage path และ malware policy ห้ามเชื่อ extension หรือ client compression</p></section>
-<section><h2>6. URL construction</h2><p><code>getImageFullUrl</code> ตัดทุกข้อความ <code>/api</code> ด้วย replaceAllแล้วต่อ relative path ซึ่งเสี่ยงเมื่อ URL/path มีคำนี้ที่อื่น ควรใช้ Uri resolve กับ configured origin/CDN URL</p></section>
-<section><h2>7. Refresh/cache</h2><p>หลัง upload success โหลด parts ใหม่ แต่ image cache อาจยังแสดงรูปเก่าที่ URL เดิม ควรให้ serverคืน versioned URL/etag หรือ evict cache เฉพาะ assetนั้น</p></section>
-<section><h2>8. Upload tests</h2><div class="success">ทดสอบ cancel, permission denied, oversized/non-image/corrupt, network timeout, unauthorized, part deleted, cache refresh และ disposeระหว่าง picker/upload โดยห้าม setStateหลัง dispose</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด screens/supervisor/part_image_screen.dart ทั้ง 352 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.12, Part 13 (ไฟล์และรูป), 16.10 (PartThumbnail)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอเดียวที่ส่งไฟล์ขึ้นเซิร์ฟเวอร์ และเห็นว่าปัญหาของ <code>PartThumbnail</code> ถูกคัดลอกมาอีกที่</div>
+
+<section><h2>1. จอที่ไม่มีใครเปิด</h2><pre class="code-vs"><code>rg "PartImageScreen" lib
+# part_image_screen.dart — ที่ประกาศ</code></pre><p><strong>ไม่มีจอไหนเปิดจอนี้เลย</strong> — ไม่อยู่ในเมนูหลัก ไม่อยู่ในเมนูซ่อน (16.3)</p><table><thead><tr><th>เมนู Dev Tools มีอะไร (16.3)</th></tr></thead><tbody>
+<tr><td>Test Pick Order</td></tr>
+<tr><td>Test Sorting Batch</td></tr>
+</tbody></table><p>จอนี้เขียนเสร็จแล้วแต่ยังไม่ได้ต่อเข้าเมนู — เป็นร่องรอยแบบเดียวกับ <code>initialPalletId</code> ใน 19.2 และ <code>ConfirmPackResponse.fromJson</code> ใน 19.6</p><div class="note"><strong>แต่จอนี้ต่างจากสองกรณีนั้น</strong> — มันเป็นฟีเจอร์ที่ทำงานได้ครบและมีคุณค่า เพียงแค่ขาดปุ่มเข้า<br>สองบรรทัดในเมนูซ่อนก็ใช้งานได้ทันที<pre class="code-vs"><code>ListTile(
+  leading: Icon(MdiIcons.imageEditOutline, color: AppTheme.teal),
+  title: const Text('จัดการรูปสินค้า'),
+  subtitle: const Text('อัปโหลดรูป Part'),
+  onTap: () {
+    Navigator.pop(ctx);
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) =&gt; PartImageScreen(userId: _userId!, fullName: _fullName!),
+    ));
+  },
+),</code></pre></div><p>โฟลเดอร์ชื่อ <code>supervisor/</code> บอกเจตนาว่าเป็นงานของหัวหน้า — แต่ไม่มีการตรวจ <code>role</code> ที่ไหน (16.3 พบว่า <code>_role</code> ยังไม่ถูกใช้ตัดสินใจอะไรเลย)</p></section>
+
+<section><h2>2. โหลดทั้งหมดแล้วกรองในเครื่อง</h2><pre class="code-vs"><code>bool _loading = false;
+List&lt;Map&lt;String, dynamic&gt;&gt; _allParts = [];
+List&lt;Map&lt;String, dynamic&gt;&gt; _filteredParts = [];
+
+@override
+void initState() {
+  super.initState();
+  _loadParts();
+  _searchCtrl.addListener(_filterParts);     // ← กรองทุกครั้งที่พิมพ์
+}</code></pre><pre class="code-vs"><code>void _filterParts() {
+  final q = _searchCtrl.text.trim().toLowerCase();
+  setState(() {
+    if (q.isEmpty) {
+      _filteredParts = _allParts;
+    } else {
+      _filteredParts = _allParts.where((p) {
+        final partId = (p['partId'] as String).toLowerCase();
+        final desc = (p['itemDesc'] as String).toLowerCase();
+        final brand = (p['brand'] as String).toLowerCase();
+        return partId.contains(q) || desc.contains(q) || brand.contains(q);
+      }).toList();
+    }
+  });
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ค้นในเครื่อง</td><td>พิมพ์แล้วเห็นผลทันที ไม่รอเน็ต</td></tr>
+<tr><td>ค้นสามฟิลด์</td><td>รหัส คำอธิบาย ยี่ห้อ</td></tr>
+<tr><td><code>toLowerCase()</code> ทั้งสองฝั่ง</td><td>พิมพ์เล็กใหญ่ก็เจอ</td></tr>
+<tr><td><code>q.isEmpty</code> คืนรายการเดิม</td><td>ไม่สร้างสำเนาโดยไม่จำเป็น</td></tr>
+</tbody></table><p>16.10 ชี้ไว้แล้วว่ารูปแบบ “โหลดทั้งหมดแล้วกรองในเครื่อง” ดีจนถึงหลักพัน</p><p>และมีจุดที่พังได้</p><pre class="code-vs"><code>final desc = (p['itemDesc'] as String).toLowerCase();</code></pre><table><thead><tr><th>สินค้าที่ไม่มีคำอธิบาย</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td><code>itemDesc</code> เป็น null</td><td><strong><code>TypeError</code> ตอนพิมพ์ค้นหา</strong> ไม่ใช่ตอนเปิดจอ</td></tr>
+</tbody></table><div class="note"><strong>บั๊กที่โผล่ตอนพิมพ์ทำให้เดาสาเหตุยากมาก</strong> — ผู้ใช้จะบอกว่า “พิมพ์แล้วแอปพัง” ซึ่งฟังเหมือนปัญหาของช่องค้นหา<br>ที่จริงคือข้อมูลสินค้าตัวหนึ่งใน 500 ตัวไม่ครบ<pre class="code-vs"><code>final desc = (p['itemDesc'] as String? ?? '').toLowerCase();</code></pre></div><p>ปัญหานี้มีรากที่ 16.6 อธิบาย — <code>getAllParts</code> คืน <code>Map</code> ดิบ ไม่มีโมเดล</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;List&lt;Map&lt;String, dynamic&gt;&gt;&gt;&gt; getAllParts() async {
+  final response = await _get('/upload/parts');
+  if (!response.success) return ApiResult.error(response.error);
+  final items = response.data!['items'] as List;
+  return ApiResult.success(items.cast&lt;Map&lt;String, dynamic&gt;&gt;());
+}</code></pre><p>ถ้ามี <code>PartSummary</code> ที่กัน null ตอนแปลง ปัญหานี้จะไม่มี — เหมือนที่ 18.7 เสนอให้ putaway ทำ</p></section>
+
+<section><h2>3. เลือกรูปแล้วอัปโหลด</h2><pre class="code-vs"><code>Future&lt;void&gt; _pickAndUpload(Map&lt;String, dynamic&gt; part) async {
+  final source = await showModalBottomSheet&lt;ImageSource&gt;(
+    context: context,
+    builder: (_) =&gt; SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: Icon(MdiIcons.camera),
+            title: const Text('ถ่ายรูป'),
+            onTap: () =&gt; Navigator.pop(context, ImageSource.camera),
+          ),
+          ListTile(
+            leading: Icon(MdiIcons.imageMultipleOutline),
+            title: const Text('เลือกจากแกลเลอรี'),
+            onTap: () =&gt; Navigator.pop(context, ImageSource.gallery),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  if (source == null) return;
+
+  final picked = await _picker.pickImage(
+    source: source,
+    maxWidth: 1024,
+    maxHeight: 1024,
+    imageQuality: 85,
+  );
+  if (picked == null) return;
+
+  setState(() =&gt; _loading = true);
+  final result = await _api.uploadPartImage(
+    partId: part['partId'],
+    imageFile: File(picked.path),
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'อัปโหลดไม่สำเร็จ');
+    return;
+  }
+
+  showSuccessSnackbar(context, 'อัปโหลดรูป ${part['partId']} สำเร็จ');
+  await _loadParts();
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th><th>บท</th></tr></thead><tbody>
+<tr><td>ให้เลือกกล้องหรือแกลเลอรี</td><td>ถ่ายใหม่หรือใช้รูปที่มี</td><td>13.2</td></tr>
+<tr><td><code>source == null</code> แล้วออก</td><td>ผู้ใช้ปัดปิดเมนู</td><td>13.2</td></tr>
+<tr><td><code>picked == null</code> แล้วออก</td><td>ผู้ใช้ยกเลิกการถ่าย</td><td>13.2</td></tr>
+<tr><td>ย่อรูปตั้งแต่ตอนเลือก</td><td>ไม่ส่งไฟล์ใหญ่ขึ้นเน็ตคลัง</td><td>13.3</td></tr>
+<tr><td><code>if (!mounted)</code> ก่อน <code>setState</code></td><td>ผู้ใช้อาจออกจากจอระหว่างอัปโหลด</td><td>4.13</td></tr>
+<tr><td>โหลดรายการใหม่หลังสำเร็จ</td><td>รูปที่เพิ่งอัปขึ้นแสดงทันที</td><td>—</td></tr>
+</tbody></table><pre class="code-vs"><code>maxWidth: 1024,
+maxHeight: 1024,
+imageQuality: 85,</code></pre><div class="note"><strong>สามบรรทัดนี้คือจุดที่กำหนดขนาดไฟล์ทั้งระบบ</strong> — รูปทุกใบในแอปมาจากที่นี่<br>16.10 คำนวณไว้ว่า 1024×1024 ที่คลายในหน่วยความจำคือ 4.2 MB ต่อรูป<br>ขนาดไฟล์ที่ส่งจริงเล็กกว่ามาก (JPEG คุณภาพ 85 ราว 150–300 KB) — <strong>ปัญหาอยู่ที่ตอนแสดง ไม่ใช่ตอนส่ง</strong></div><p>สิ่งที่ยังไม่มี</p><table><thead><tr><th>ขาด</th><th>ผล</th><th>บท</th></tr></thead><tbody>
+<tr><td>ไม่ตรวจชนิดไฟล์</td><td><code>image_picker</code> คืนรูปเสมอ จึงไม่จำเป็น</td><td>13.9</td></tr>
+<tr><td>ไม่แสดงความคืบหน้า</td><td>ผู้ใช้เห็นแค่ม่านโหลด</td><td>13.7</td></tr>
+<tr><td>ไม่มี <code>Idempotency-Key</code></td><td>อัปซ้ำได้รูปซ้ำ</td><td>7.13</td></tr>
+<tr><td>ไม่บอกว่าไม่รู้ผล</td><td>อัปแล้วเน็ตหลุด ไม่รู้ว่าขึ้นหรือยัง</td><td>7.10, 13.8</td></tr>
+</tbody></table><p>ข้อสุดท้ายกระทบน้อยกว่าจออื่น เพราะ <code>_loadParts()</code> จะแสดงว่ารูปขึ้นหรือยัง — แต่เฉพาะเมื่อผู้ใช้ลองใหม่</p><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(
+    context,
+    title: 'ไม่ทราบผล',
+    message: '${result.error}\n\nรูปอาจอัปโหลดไปแล้ว — ดูรายการด้านหลังก่อนลองใหม่',
+  );
+  await _loadParts();      // ← โหลดใหม่ให้เลย ผู้ใช้เห็นทันที
+  return;
+}</code></pre></section>
+
+<section><h2>4. ปัญหาของ PartThumbnail ที่คัดลอกมา</h2><pre class="code-vs"><code>// part_image_screen.dart — เขียนเอง ไม่ได้ใช้ PartThumbnail
+ClipRRect(
+  borderRadius: BorderRadius.circular(8),
+  child: Container(
+    width: 56,
+    height: 56,
+    color: Colors.grey.shade100,
+    child: hasImg
+        ? FutureBuilder&lt;String&gt;(
+            future: _api.getImageFullUrl(imageUrl),      // ← ปัญหาที่ 1
+            builder: (_, snap) {
+              if (!snap.hasData) {
+                return const Center(child: SizedBox(
+                  width: 20, height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ));
+              }
+              return Image.network(
+                snap.data!,                              // ← ปัญหาที่ 2
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =&gt; Icon(MdiIcons.imageOff, ...),
+              );
+            },
+          )
+        : Icon(MdiIcons.cameraPlus, ...),
+  ),
+)</code></pre><p>สามสิบบรรทัดที่ทำเรื่องเดียวกับ <code>PartThumbnail</code> ทุกประการ — และมีปัญหาเดียวกันทั้งสองข้อ</p><table><thead><tr><th>ปัญหา (16.10)</th><th><code>PartThumbnail</code></th><th>ที่นี่</th></tr></thead><tbody>
+<tr><td><code>FutureBuilder</code> ใน <code>build</code></td><td>มี</td><td><strong>มี</strong></td></tr>
+<tr><td>ไม่มี <code>cacheWidth</code></td><td>มี</td><td><strong>มี</strong></td></tr>
+</tbody></table><div class="note"><strong>ที่นี่ผลหนักกว่า</strong> — 16.10 บอกว่าปัญหา <code>FutureBuilder</code> ทำให้รูปกระพริบตอนเลื่อนและตอนพิมพ์ค้นหา<br>จอนี้<strong>มีช่องค้นหาที่กรองทุกตัวอักษร</strong> — พิมพ์ห้าตัวอักษร = <code>build</code> ห้าครั้ง = รูปทุกใบสร้าง <code>Future</code> ใหม่ห้ารอบ<br>ผู้ใช้ที่พิมพ์ค้นหาจะเห็นรายการกระพริบตลอดเวลา</div><p>และรูปที่นี่ขนาด 56 — ใหญ่ที่สุดเท่ากับที่ <code>pallet_items_page</code> ใช้ (16.10)</p><pre class="code-vs"><code>// แก้ด้วยการใช้ widget ที่มีอยู่แล้ว
+PartThumbnail(imageUrl: imageUrl, size: 56),</code></pre><p>ลดโค้ด 30 บรรทัด และเมื่อแก้ <code>PartThumbnail</code> ตามที่ 16.10 เสนอ จอนี้ได้ไปด้วย</p><table><thead><tr><th>ต่างกันตรงไหน</th><th><code>PartThumbnail</code></th><th>ที่นี่</th></tr></thead><tbody>
+<tr><td>ไอคอนเมื่อไม่มีรูป</td><td><code>packageVariantClosed</code></td><td><strong><code>cameraPlus</code></strong></td></tr>
+<tr><td>ไอคอนเมื่อโหลดไม่ได้</td><td><code>packageVariantClosed</code></td><td><code>imageOff</code></td></tr>
+</tbody></table><p>ไอคอน <code>cameraPlus</code> สื่อว่า “แตะเพื่อถ่ายรูป” ซึ่งเหมาะกับจอนี้โดยเฉพาะ — เป็นเหตุผลที่พอฟังได้ว่าทำไมไม่ใช้ตัวกลาง</p><pre class="code-vs"><code>// แต่แก้ได้โดยเพิ่มพารามิเตอร์
+PartThumbnail(
+  imageUrl: imageUrl,
+  size: 56,
+  emptyIcon: MdiIcons.cameraPlus,      // ← เพิ่ม ค่าเริ่มต้นเป็นตัวเดิม
+),</code></pre></section>
+
+<section><h2>5. รายการที่บอกสถานะด้วยสามอย่าง</h2><pre class="code-vs"><code>final hasImg = imageUrl != null &amp;&amp; imageUrl.isNotEmpty;
+
+return Card(
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(12),
+    side: BorderSide(
+      color: hasImg ? AppTheme.success.withValues(alpha: 0.3) : Colors.grey.shade200,
+    ),
+  ),
+  child: InkWell(
+    onTap: () =&gt; _pickAndUpload(part),
+    ...
+  ),
+);</code></pre><table><thead><tr><th>สัญญาณ</th><th>มีรูป</th><th>ไม่มีรูป</th></tr></thead><tbody>
+<tr><td>ขอบการ์ด</td><td>เขียวจาง</td><td>เทา</td></tr>
+<tr><td>รูปย่อ</td><td>รูปจริง</td><td>ไอคอนกล้อง</td></tr>
+<tr><td>ไอคอนข้างรหัส</td><td>เครื่องหมายถูก</td><td>ไอคอนรูปขีดฆ่า</td></tr>
+</tbody></table><p>สามอย่างพร้อมกัน — ผู้ใช้ที่ต้องหาสินค้าที่ยังไม่มีรูปเห็นได้จากการเลื่อนผ่าน</p><p>และมีตัวนับสรุปบนหัว</p><pre class="code-vs"><code>final hasImage = _filteredParts.where((p) =&gt; p['imageUrl'] != null).length;
+final total = _filteredParts.length;</code></pre><pre class="code-vs"><code>Text('ทั้งหมด $total รายการ'),
+...Container(child: Text('มีรูป $hasImage')),
+...Container(child: Text('ยังไม่มี ${total - hasImage}')),</code></pre><div class="note"><strong>ตัวนับคำนวณจาก <code>_filteredParts</code> ไม่ใช่ <code>_allParts</code></strong> — เปลี่ยนตามคำค้นหา<br>ผู้ใช้ที่ค้น “BOSCH” จะเห็นว่าสินค้ายี่ห้อนั้นมีรูปกี่ตัว ซึ่งมีประโยชน์กว่าตัวเลขรวม<br>แต่ตัวเลข <code>hasImage</code> ใช้ <code>!= null</code> ขณะที่การ์ดใช้ <code>!= null &amp;&amp; isNotEmpty</code> — ถ้ามีสินค้าที่ <code>imageUrl</code> เป็นสตริงว่าง ตัวเลขกับการ์ดจะไม่ตรงกัน</div><pre class="code-vs"><code>bool _hasImage(Map&lt;String, dynamic&gt; p) {
+  final url = p['imageUrl'] as String?;
+  return url != null &amp;&amp; url.isNotEmpty;
+}
+
+final hasImage = _filteredParts.where(_hasImage).length;</code></pre><p>แล้วการ์ดใช้ฟังก์ชันเดียวกัน — ไม่มีทางไม่ตรง</p></section>
+
+<section><h2>6. ช่องค้นหาที่ไม่หน่วง</h2><pre class="code-vs"><code>_searchCtrl.addListener(_filterParts);</code></pre><p>กรองทุกครั้งที่ตัวอักษรเปลี่ยน</p><table><thead><tr><th>จำนวนสินค้า</th><th>งานต่อการพิมพ์หนึ่งตัว</th></tr></thead><tbody>
+<tr><td>200</td><td>วน 200 × เทียบสามฟิลด์ = 600 การเทียบ</td></tr>
+<tr><td>2,000</td><td>6,000 การเทียบ</td></tr>
+</tbody></table><p>การเทียบสตริงเร็วมาก — ที่หลักพันยังไม่รู้สึก</p><p><strong>สิ่งที่รู้สึกคือการวาดใหม่</strong></p><pre class="code-vs"><code>setState(() { _filteredParts = ...; });     // ← วาดรายการทั้งหมดใหม่</code></pre><p>รวมกับปัญหา <code>FutureBuilder</code> ในหัวข้อ 4 — รูปทุกใบที่เห็นบนจอสร้าง <code>Future</code> ใหม่ทุกตัวอักษร</p><pre class="code-vs"><code>Timer? _searchDebounce;
+
+@override
+void initState() {
+  super.initState();
+  _loadParts();
+  _searchCtrl.addListener(_onSearchChanged);
+}
+
+void _onSearchChanged() {
+  // ผู้ใช้พิมพ์ต่อเนื่อง — รอให้หยุดก่อนค่อยกรอง
+  _searchDebounce?.cancel();
+  _searchDebounce = Timer(const Duration(milliseconds: 250), _filterParts);
+}
+
+@override
+void dispose() {
+  _searchDebounce?.cancel();          // ← ห้ามลืม
+  _searchCtrl.removeListener(_onSearchChanged);
+  _searchCtrl.dispose();
+  super.dispose();
+}</code></pre><div class="note"><strong>แต่ควรแก้ <code>FutureBuilder</code> ก่อน</strong> — การหน่วงลดจำนวนครั้ง ส่วนการแก้ <code>FutureBuilder</code> ลดต้นทุนต่อครั้ง<br>ถ้าแก้อย่างหลังแล้ว การวาดใหม่จะถูกมากจนไม่ต้องหน่วง<br>เป็นหลักเดียวกับที่ 17.4 สรุปว่าให้แก้ที่ต้นทุนต่อครั้งก่อน</div><p>สังเกตว่า <code>dispose</code> ปัจจุบันไม่ได้ถอด listener</p><pre class="code-vs"><code>@override
+void dispose() {
+  _searchCtrl.dispose();
+  super.dispose();
+}</code></pre><table><thead><tr><th>ไม่ถอด listener แล้วรั่วไหม</th></tr></thead><tbody>
+<tr><td><strong>ไม่</strong> — <code>dispose()</code> ของ <code>TextEditingController</code> ล้างผู้ฟังทั้งหมดให้</td></tr>
+</tbody></table><p>จึงไม่ผิด — แต่ถ้ามีตัวจับเวลาเพิ่มเข้ามา ตัวนั้นต้องยกเลิกเอง</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>จอที่เขียนเสร็จแล้วต้องมีคนใช้</td><td>จอนี้ไม่มีทางเข้าเลย</td></tr>
+<tr><td>โฟลเดอร์ <code>supervisor/</code> แปลว่ามีการตรวจสิทธิ์</td><td>ไม่มีการตรวจ <code>role</code> ที่ไหน</td></tr>
+<tr><td>รูปใหญ่ทำให้อัปโหลดช้า</td><td>ย่อตั้งแต่ตอนเลือกแล้ว — ปัญหาอยู่ตอนแสดง</td></tr>
+<tr><td>เขียน thumbnail เองเพราะต้องการไอคอนต่าง</td><td>เพิ่มพารามิเตอร์ให้ตัวกลางก็พอ</td></tr>
+<tr><td>ค้นหาที่กรองทุกตัวอักษรช้าเพราะการเทียบสตริง</td><td>ช้าเพราะการวาดใหม่</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทำให้จอนี้ใช้งานได้จริง</p><ol><li>ต้องแก้อะไรบ้าง เรียงตามลำดับ</li><li>ควรจำกัดสิทธิ์อย่างไร</li><li>ถ้าสินค้ามีหลักหมื่น จะทำอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เรียงลำดับ</strong></p><table><thead><tr><th>ลำดับ</th><th>แก้อะไร</th><th>ต้นทุน</th><th>เหตุผลที่อยู่ตรงนี้</th></tr></thead><tbody>
+<tr><td>1</td><td>กัน null ที่ <code>itemDesc</code>, <code>owner</code>, <code>brand</code></td><td>3 บรรทัด</td><td><strong>พังได้จริง</strong></td></tr>
+<tr><td>2</td><td>เปลี่ยนมาใช้ <code>PartThumbnail</code></td><td>ลบ 30 บรรทัด</td><td>ได้การแก้ของ 16.10 มาฟรี</td></tr>
+<tr><td>3</td><td>เพิ่มปุ่มเข้าในเมนูซ่อน</td><td>10 บรรทัด</td><td>ทำให้ใช้ได้</td></tr>
+<tr><td>4</td><td>บอกว่าไม่รู้ผลเมื่ออัปโหลดล้มเหลว</td><td>5 บรรทัด</td><td>7.10</td></tr>
+<tr><td>5</td><td>รวมเงื่อนไข <code>_hasImage</code></td><td>5 บรรทัด</td><td>ตัวเลขกับการ์ดตรงกัน</td></tr>
+<tr><td>6</td><td>หน่วงช่องค้นหา</td><td>15 บรรทัด</td><td>ทำหลังข้อ 2 อาจไม่ต้องทำ</td></tr>
+</tbody></table><p>ข้อ 1 ต้องทำก่อนเพราะเป็นบั๊กที่ทำให้แอปพัง ส่วนข้อ 2 ให้ผลมากที่สุดต่อบรรทัดที่แตะ</p><pre class="code-vs"><code>// ข้อ 1
+String _text(Map&lt;String, dynamic&gt; p, String key) =&gt;
+    (p[key] as String? ?? '').toLowerCase();
+
+_filteredParts = _allParts.where((p) =&gt;
+    _text(p, 'partId').contains(q) ||
+    _text(p, 'itemDesc').contains(q) ||
+    _text(p, 'brand').contains(q)).toList();</code></pre><p><strong>ข้อ 2 — จำกัดสิทธิ์</strong></p><p>16.3 พบว่า <code>_role</code> ถูกอ่านจาก session แล้วแสดงบนการ์ดผู้ใช้ แต่ไม่ถูกใช้ตัดสินใจอะไร</p><table><thead><tr><th>ทางเลือก</th><th>ต้องแก้อะไร</th></tr></thead><tbody>
+<tr><td>ซ่อนปุ่มถ้าไม่ใช่ SUPERVISOR</td><td>เงื่อนไขเดียวใน <code>HomeScreen</code></td></tr>
+<tr><td>ให้จอตรวจเอง</td><td>ต้องส่ง <code>role</code> เข้าจอ</td></tr>
+<tr><td>ให้เซิร์ฟเวอร์ตรวจ</td><td>ต้องมี token จริง (16.4)</td></tr>
+</tbody></table><pre class="code-vs"><code>// ใน _openDevToolsMenu ของ HomeScreen
+if (_role == 'SUPERVISOR')
+  ListTile(
+    leading: Icon(MdiIcons.imageEditOutline, color: AppTheme.teal),
+    title: const Text('จัดการรูปสินค้า'),
+    onTap: () { ... },
+  ),</code></pre><div class="note"><strong>แต่นี่เป็นการซ่อนปุ่ม ไม่ใช่การจำกัดสิทธิ์</strong> — ใครก็ตามที่เรียก <code>POST /upload/part-image</code> ตรง ๆ ยังทำได้<br>16.4 อธิบายว่าเซิร์ฟเวอร์เชื่อ <code>operatorId</code> ที่แอปส่งมาโดยไม่ตรวจ<br>การจำกัดสิทธิ์จริงต้องรอการยืนยันตัวตนจริง ซึ่งเป็นงานหกข้อใน 16.4<br>ในเครือข่ายคลังปิด การซ่อนปุ่มพอสำหรับตอนนี้ — แต่ต้องรู้ว่าเป็นการซ่อน ไม่ใช่การป้องกัน</div><p><strong>ข้อ 3 — สินค้าหลักหมื่น</strong></p><table><thead><tr><th>ปัญหาที่จะเกิด</th><th>ตอนนี้</th><th>หมื่นรายการ</th></tr></thead><tbody>
+<tr><td>โหลดครั้งแรก</td><td>ทันที</td><td><strong>ช้ามาก + payload ใหญ่</strong></td></tr>
+<tr><td>หน่วยความจำ</td><td>ไม่รู้สึก</td><td>รายการ <code>Map</code> หมื่นตัว</td></tr>
+<tr><td>กรองต่อตัวอักษร</td><td>ไม่รู้สึก</td><td>30,000 การเทียบ</td></tr>
+<tr><td>รูปที่แสดง</td><td>เฉพาะที่เห็น (ListView.builder)</td><td>เหมือนเดิม ✓</td></tr>
+</tbody></table><p>แถวสุดท้ายไม่เป็นปัญหาเพราะใช้ <code>ListView.builder</code> อยู่แล้ว — ต่างจาก <code>po_items_list.dart</code> ใน 17.4</p><p>ทางแก้คือย้ายการค้นหาไปเซิร์ฟเวอร์</p><pre class="code-vs"><code>/// ค้นหาสินค้า — คืนไม่เกิน 50 รายการ
+Future&lt;ApiResult&lt;List&lt;PartSummary&gt;&gt;&gt; searchParts({
+  required String query,
+  bool? missingImageOnly,
+  int limit = 50,
+}) async {
+  final path = Uri(
+    path: '/upload/parts/search',
+    queryParameters: {
+      'q': query,
+      if (missingImageOnly == true) 'missingImage': 'true',
+      'limit': '$limit',
+    },
+  ).toString();
+  ...
+}</code></pre><pre class="code-vs"><code>void _onSearchChanged() {
+  _searchDebounce?.cancel();
+  // ค้นที่เซิร์ฟเวอร์ → ต้องหน่วง ไม่งั้นยิงทุกตัวอักษร
+  _searchDebounce = Timer(const Duration(milliseconds: 400), _search);
+}</code></pre><table><thead><tr><th>เปลี่ยนอะไร</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ไม่โหลดทั้งหมด</td><td>เปิดจอเร็ว</td></tr>
+<tr><td>ค้นที่เซิร์ฟเวอร์</td><td>ใช้ดัชนีของฐานข้อมูล</td></tr>
+<tr><td><strong>ต้องหน่วง</strong></td><td>ไม่ยิงทุกตัวอักษร</td></tr>
+<tr><td>เพิ่มตัวกรอง “ยังไม่มีรูป”</td><td>ตอบโจทย์งานจริงของหัวหน้า</td></tr>
+</tbody></table><div class="note"><strong>ตัวกรอง “ยังไม่มีรูป” สำคัญกว่าการค้นหาด้วยซ้ำ</strong> — งานของจอนี้คือไล่เติมรูปให้ครบ<br>ผู้ใช้ไม่ได้ค้นหาสินค้าตัวใดตัวหนึ่ง แต่ต้องการรายการที่ยังขาด<br>ตอนนี้ต้องเลื่อนหาเองจากขอบสีเทา — ซึ่งใช้ไม่ได้ที่หลักพันขึ้นไป</div><p><strong>ข้อสรุปที่ใหญ่กว่า:</strong> ก่อนแก้เรื่องประสิทธิภาพ ให้ถามว่า<strong>ผู้ใช้ใช้จอนี้ทำอะไร</strong></p><p>คำตอบ “ไล่เติมรูปให้ครบ” เปลี่ยนลำดับความสำคัญ — ตัวกรองสำคัญกว่าการหน่วงช่องค้นหา และการค้นที่เซิร์ฟเวอร์สำคัญกว่าการปรับแต่งการกรองในเครื่อง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>จอนี้ทำงานได้ครบแต่<strong>ไม่มีจอไหนเปิดเลย</strong> — ขาดแค่ปุ่มเข้า</li><li>โฟลเดอร์ <code>supervisor/</code> บอกเจตนา แต่ไม่มีการตรวจ <code>role</code></li><li>โหลดสินค้าทั้งหมดแล้วกรองในเครื่อง — ดีจนถึงหลักพัน</li><li><code>as String</code> ที่ <code>itemDesc</code> ทำให้พังตอนพิมพ์ค้นหา ไม่ใช่ตอนเปิดจอ</li><li>เลือกรูปได้ทั้งกล้องและแกลเลอรี และย่อตั้งแต่ตอนเลือก</li><li>เขียน thumbnail เอง 30 บรรทัดที่มีปัญหาเดียวกับ <code>PartThumbnail</code> ทั้งสองข้อ</li><li>ปัญหา <code>FutureBuilder</code> หนักกว่าที่อื่น เพราะช่องค้นหากรองทุกตัวอักษร</li><li>สามสัญญาณบอกว่ามีรูปหรือยัง แต่ตัวนับใช้เงื่อนไขต่างจากการ์ด</li><li>ค้นหาไม่หน่วง — แต่ควรแก้ <code>FutureBuilder</code> ก่อน</li><li>ก่อนแก้ประสิทธิภาพ ให้ถามว่าผู้ใช้ใช้จอนี้ทำอะไร</li></ul></div><p><strong>บทหน้า:</strong> วิธีแก้จอใหญ่โดยไม่พัง ในโปรเจกต์ที่ไม่มีเทสต์</p></section>

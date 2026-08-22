@@ -1,11 +1,276 @@
-<div class="note"><strong>Ready-to-complete เปิด command chain:</strong> scan carton สุดท้ายแล้ว UI เรียก complete ต่อ dispatch อัตโนมัติ แต่แต่ละขั้นอาจ fail แยกกันและต้องหยุด chain อย่างถูกต้อง</div>
-<section><h2>1. Slot detail</h2><p><code>GET /checkin/slot/{slotId}</code> คืน status, cartons, customerOrderId และ pipeline progress Slot detail เป็น authoritative snapshot หลัง commit</p></section>
-<section><h2>2. Carton records</h2><p>CheckInCartonItem มี packingId, trackingId, status, scannedAt, item/order counts รายการถูกแสดงซ้อนกันเพื่อเห็นสิ่งที่ check-in แล้วและเปิด delivery note mock</p></section>
-<section><h2>3. Ready flag</h2><p><code>ScanCheckInResponse.isReadyToComplete</code> บอกว่าครบทุก carton ตาม business rule ไม่ควรคำนวณจากจำนวน card ใน client เพราะ pipeline อาจเปลี่ยนจาก process อื่น</p></section>
-<section><h2>4. Complete command</h2><pre class="code-vs"><code>POST /checkin/complete
-{ slotId, operatorId }</code></pre><p>เปลี่ยน slot เป็น READY และควร reject เมื่อยังไม่ครบหรือ version stale</p></section>
-<section><h2>5. Dispatch command</h2><pre class="code-vs"><code>POST /checkin/dispatch
-{ slotId, operatorId }</code></pre><p>ย้ายขึ้นรถ/SHIPPED จึงต้องทำได้เฉพาะ READY และควรบันทึกปลายทาง/เวลา/actor</p></section>
-<section><h2>6. Current chain bug</h2><p><code>_autoCompleteSlot</code> แสดง error แต่ไม่คืน success/failure จากนั้น caller ยังเรียก dispatch ต่อ แม้ complete fail เช่นเดียวกับ dispatch failที่ workflow ยัง clear pending ควรให้แต่ละ commandคืน typed resultและหยุด chainเมื่อไม่สำเร็จ</p></section>
-<section><h2>7. Orchestration options</h2><p>ถ้า complete+dispatch ต้องสำเร็จร่วมกันให้ backend มี endpoint orchestration เดียว; ถ้าเป็นสองสถานะธุรกิจจริง UI ต้องแสดง READY ที่ retry dispatch ได้โดยไม่ complete ซ้ำ</p></section>
-<section><h2>8. Chain tests</h2><div class="success">ทดสอบ scan not-ready, complete fail, dispatch failหลัง complete, timeoutแต่ละขั้น, retryจาก READY และ duplicate commands โดย stateสุดท้ายห้าม SHIPPED เมื่อ completeไม่สำเร็จ</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _confirmCheckIn, _autoCompleteSlot, _autoDispatchSlot</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 19.7, 7.10 (คำสั่งที่ไม่รู้ผล), 19.5 (การวนเรียก API)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านคำสั่งที่ยิงต่อกันโดยผู้ใช้ไม่ได้กด และเห็นความเสี่ยงของการทำงานเงียบ</div>
+
+<section><h2>1. สามคำสั่งจากการกดปุ่มเดียว</h2><pre class="code-vs"><code>Future&lt;void&gt; _confirmCheckIn() async {
+  final pack = _pendingPack;
+  if (pack == null) return;
+
+  if (pack.isAlreadyCheckedIn) { ...ปฏิเสธ... }
+
+  setState(() =&gt; _loading = true);
+  final res = await _api.scanCheckIn(                    // ← 1
+    packingId: pack.packingId,
+    operatorId: widget.userId,
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Check-IN ไม่สำเร็จ');
+    return;
+  }
+
+  final scanResult = res.data!;
+
+  // ถ้าครบทุกกล่อง → auto complete + auto dispatch เงียบ ๆ
+  if (scanResult.isReadyToComplete) {
+    await _autoCompleteSlot(scanResult.slotId);          // ← 2
+    if (!mounted) return;
+    await _autoDispatchSlot(scanResult.slotId);          // ← 3
+    if (!mounted) return;
+  }
+
+  setState(() {
+    _pendingPack = null;
+    _deliveryNotePack = pack;
+    _deliveryNoteCreatedAt = DateTime.now();
+  });
+  await _openSlot(scanResult.slotId);                    // ← 4
+  _scanFocus.requestFocus();
+}</code></pre><table><thead><tr><th>ลำดับ</th><th>คำสั่ง</th><th>ผลทางกายภาพ</th></tr></thead><tbody>
+<tr><td>1</td><td><code>scanCheckIn</code></td><td>กล่องถูกบันทึกเข้าช่อง</td></tr>
+<tr><td>2</td><td><code>completeCheckIn</code></td><td>ช่องถูกปิด สถานะเป็น READY</td></tr>
+<tr><td>3</td><td><code>dispatchCheckIn</code></td><td><strong>ของขึ้นรถ สถานะเป็น SHIPPED</strong></td></tr>
+<tr><td>4</td><td><code>getCheckInSlot</code></td><td>โหลดใหม่เพื่อแสดง</td></tr>
+</tbody></table><p>ผู้ใช้กดปุ่มเดียว — เกิดสามคำสั่งที่เปลี่ยนข้อมูล</p><div class="note"><strong>คอมเมนต์บอกไว้ตรง ๆ ว่าทำเงียบ ๆ</strong><pre class="code-vs"><code>// ถ้าครบทุกกล่อง → auto complete + auto dispatch เงียบ ๆ</code></pre>เจตนาชัดเจน — ผู้ใช้ไม่ต้องกดสามครั้ง ระบบทำให้เอง<br>แต่คำสั่งที่สามทำให้ของขึ้นรถจริง ซึ่งเป็นการกระทำที่กลับไม่ได้</div></section>
+
+<section><h2>2. เงื่อนไขที่เซิร์ฟเวอร์ตัดสิน</h2><pre class="code-vs"><code>class ScanCheckInResponse {
+  final String slotId;
+  final bool isReadyToComplete;
+  ...
+}</code></pre><p>เซิร์ฟเวอร์บอกว่าครบทุกกล่องแล้วหรือยัง — แอปไม่ต้องนับเอง</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ให้เซิร์ฟเวอร์ตัดสิน</td><td>เซิร์ฟเวอร์รู้ว่าใบสั่งนี้มีกี่กล่องจริง</td></tr>
+<tr><td>แอปไม่เดาจาก <code>pipelineTotal</code></td><td>ข้อมูลที่แอปมีอาจไม่ครบ</td></tr>
+</tbody></table><p>ต่างจาก <code>PackingSummary.isDone</code> ใน 19.6 ที่คำนวณจากตัวนับเอง</p><pre class="code-vs"><code>// packing — คำนวณเอง เผื่อสถานะมาไม่ทัน
+bool get isDone =&gt; status == 'DONE' || (orderCount &gt; 0 &amp;&amp; orderDoneCount &gt;= orderCount);
+
+// checkin — เชื่อเซิร์ฟเวอร์อย่างเดียว
+if (scanResult.isReadyToComplete) { ... }</code></pre><p>ที่นี่ถูกกว่า เพราะผลของการเดาผิดคือ<strong>ของขึ้นรถทั้งที่ยังไม่ครบ</strong></p></section>
+
+<section><h2>3. สองเมธอดที่ล้มเหลวแล้วไม่หยุด</h2><pre class="code-vs"><code>Future&lt;void&gt; _autoCompleteSlot(String slotId) async {
+  final res = await _api.completeCheckIn(slotId: slotId, operatorId: widget.userId);
+  if (!mounted) return;
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Complete ไม่สำเร็จ');
+  }
+}
+
+Future&lt;void&gt; _autoDispatchSlot(String slotId) async {
+  final res = await _api.dispatchCheckIn(slotId: slotId, operatorId: widget.userId);
+  if (!mounted) return;
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Dispatch ไม่สำเร็จ');
+  }
+}</code></pre><p>ทั้งสองเมธอด<strong>ไม่คืนค่าอะไร</strong> — ผู้เรียกไม่รู้ว่าสำเร็จหรือไม่</p><pre class="code-vs"><code>if (scanResult.isReadyToComplete) {
+  await _autoCompleteSlot(scanResult.slotId);
+  if (!mounted) return;
+  await _autoDispatchSlot(scanResult.slotId);    // ← ยิงต่อแม้ขั้นก่อนล้มเหลว
+  if (!mounted) return;
+}</code></pre><table><thead><tr><th>ถ้า complete ล้มเหลว</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>ผู้ใช้เห็นกล่อง error</td><td>กดปิด</td></tr>
+<tr><td>dispatch ถูกยิงต่อ</td><td><strong>ช่องยังไม่ถูกปิด แต่สั่งส่งขึ้นรถ</strong></td></tr>
+<tr><td>เซิร์ฟเวอร์น่าจะปฏิเสธ</td><td>ผู้ใช้เห็นกล่อง error อีกครั้ง</td></tr>
+</tbody></table><div class="note"><strong>ผู้ใช้ต้องกดปิดกล่องสองครั้งติดกัน</strong> — และไม่มีข้อความไหนบอกว่าเกิดอะไรขึ้นจริง<br>ปัญหาเดียวกับที่ 19.5 พบใน <code>_confirmCollectedPack</code> ที่วนต่อทั้งที่ล้มเหลว<br>ต่างกันตรงที่<strong>ที่นี่คำสั่งที่สองขึ้นกับคำสั่งแรก</strong> — ถ้าปิดช่องไม่สำเร็จ ส่งขึ้นรถก็ไม่ควรทำ</div><pre class="code-vs"><code>Future&lt;bool&gt; _autoCompleteSlot(String slotId) async {
+  final res = await _api.completeCheckIn(slotId: slotId, operatorId: widget.userId);
+  if (!mounted) return false;
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'ปิดช่องไม่สำเร็จ');
+    return false;
+  }
+  return true;
+}</code></pre><pre class="code-vs"><code>if (scanResult.isReadyToComplete) {
+  final completed = await _autoCompleteSlot(scanResult.slotId);
+  if (!mounted) return;
+
+  // ปิดช่องไม่สำเร็จ → ยังไม่ควรสั่งส่งขึ้นรถ
+  if (completed) {
+    await _autoDispatchSlot(scanResult.slotId);
+    if (!mounted) return;
+  }
+}</code></pre></section>
+
+<section><h2>4. คำสั่งที่กลับไม่ได้และไม่รู้ผล</h2><p><code>dispatchCheckIn</code> ทำให้ของขึ้นรถ — และเมธอดนี้ไม่มีอะไรบอกผู้ใช้เมื่อไม่รู้ผล</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(context, message: res.error ?? 'Dispatch ไม่สำเร็จ');
+}</code></pre><table><thead><tr><th>เน็ตหลุดหลังเซิร์ฟเวอร์รับคำสั่ง</th><th>ผู้ใช้เห็น</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>ใช่</td><td>“Dispatch ไม่สำเร็จ”</td><td><strong>ของขึ้นรถไปแล้ว</strong></td></tr>
+</tbody></table><p>ผู้ใช้ที่เชื่อข้อความจะไปตามหาของ หรือสั่งซ้ำ</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(
+    context,
+    title: 'ไม่ทราบผล',
+    message: '${res.error ?? "ส่งขึ้นรถไม่สำเร็จ"}\n\n'
+        'คำสั่งอาจส่งไปแล้ว — ตรวจสถานะช่อง ${slotId} ก่อนสั่งซ้ำ',
+  );
+}</code></pre><p>และหลังจากนั้นควรโหลดสถานะช่องใหม่ให้เลย</p><pre class="code-vs"><code>await _openSlot(scanResult.slotId);      // ← มีอยู่แล้วในโค้ด</code></pre><div class="note"><strong>บรรทัดนี้ช่วยไว้โดยบังเอิญ</strong> — ผู้ใช้ที่เห็นข้อความล้มเหลวจะเห็นสถานะช่องที่โหลดใหม่ทันที<br>ถ้าช่องเป็น <code>SHIPPED</code> แปลว่าคำสั่งไปถึงจริง<br>แต่ไม่มีอะไรบอกผู้ใช้ให้ดูตรงนั้น — ข้อความควรชี้ไป</div></section>
+
+<section><h2>5. ปุ่มปริ้นที่แสดงหลังยืนยัน</h2><pre class="code-vs"><code>setState(() {
+  _pendingPack = null;
+  _deliveryNotePack = pack;              // ← เก็บ pack ที่เพิ่งยืนยัน
+  _deliveryNoteCreatedAt = DateTime.now();
+});</code></pre><p>สลับจาก “รอยืนยัน” เป็น “ยืนยันแล้ว” ในก้อนเดียว — ไม่มีเฟรมที่ทั้งสองตัวมีค่าพร้อมกัน</p><table><thead><tr><th>ก่อน</th><th>หลัง</th></tr></thead><tbody>
+<tr><td><code>_pendingPack</code> มีค่า</td><td><code>null</code></td></tr>
+<tr><td><code>_deliveryNotePack</code> เป็น null</td><td>มีค่า</td></tr>
+</tbody></table><p>เป็นการเปลี่ยนสถานะที่ถูกต้อง — แต่ 19.7 ชี้ว่าถ้าใช้ <code>sealed class</code> จะบังคับให้เป็นแบบนี้เสมอ</p><p>ใบส่งสินค้าเป็นของจำลอง</p><pre class="code-vs"><code>// Pack ล่าสุดที่ Check-IN แล้ว ใช้แสดงปุ่มปริ้นใบส่งสินค้าแบบ mock</code></pre><pre class="code-vs"><code>Widget _mockNoteHeader(PreviewCheckInResponse p, DateTime createdAt) { ... }
+String _deliveryNoteNo(PreviewCheckInResponse p, DateTime createdAt) { ... }</code></pre><p>ชื่อเมธอดมีคำว่า <code>mock</code> และคอมเมนต์บอกไว้ — เป็นวิธีทำของจำลองที่ถูกต้อง เหมือนที่ 16.4 ชมจอล็อกอิน</p><p>เลขที่ใบส่งสินค้าสร้างจากข้อมูลที่แอปมี</p><pre class="code-vs"><code>String _deliveryNoteNo(PreviewCheckInResponse p, DateTime createdAt) { ... }</code></pre><div class="note"><strong>เลขที่สร้างจากฝั่งแอปจะไม่ตรงกับที่ระบบจริงออกให้</strong> — ตอนนี้ไม่เป็นปัญหาเพราะเป็นของจำลอง<br>แต่ถ้าวันหนึ่งพิมพ์ออกมาจริงและเอาไปใช้อ้างอิง จะกลายเป็นเอกสารที่ไม่มีในระบบ<br>เมื่อต่อของจริง เลขต้องมาจากเซิร์ฟเวอร์ ไม่ใช่คำนวณในแอป</div></section>
+
+<section><h2>6. การกลับไปหน้าแรก</h2><pre class="code-vs"><code>void _backToScan() {
+  setState(() {
+    _slotDetail = null;
+    _pendingPack = null;
+    _deliveryNotePack = null;
+    _deliveryNoteCreatedAt = null;
+  });
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _scanFocus.requestFocus();
+  });
+}</code></pre><p>ล้างทั้งสี่ฟิลด์ — ครบ</p><p>แต่<strong>ไม่ล้างช่องสแกน</strong></p><pre class="code-vs"><code>// _scanCarton ล้างเองหลัง preview สำเร็จ
+final preview = res.data!;
+_scanCtrl.clear();</code></pre><p>และล้างเมื่อ preview ล้มเหลวด้วย — จึงว่างอยู่แล้วเมื่อถึง <code>_backToScan</code></p><table><thead><tr><th>ทางออกจาก <code>_scanCarton</code></th><th>ช่องถูกล้างไหม</th></tr></thead><tbody>
+<tr><td>ช่องว่าง</td><td>ไม่ต้อง</td></tr>
+<tr><td>preview ล้มเหลว</td><td><strong>ล้าง</strong></td></tr>
+<tr><td>preview สำเร็จ</td><td><strong>ล้าง</strong></td></tr>
+</tbody></table><p>ครบทุกทาง — ต่างจาก 18.9 และ 18.10 ที่ล้างบางทาง</p><p><code>PopScope</code> ใช้เงื่อนไขเดียวกับที่แบ่งหน้า</p><pre class="code-vs"><code>canPop: !onSlotPage,
+onPopInvokedWithResult: (didPop, _) {
+  if (didPop) return;
+  _backToScan();
+},</code></pre><p>อยู่หน้าที่สอง = กดย้อนกลับแล้วกลับหน้าแรก ไม่ออกจากจอ</p><div class="note"><strong>ไม่มีการเตือนเมื่อมี <code>_pendingPack</code> ค้าง</strong> — ผู้ใช้ที่สแกนแล้วยังไม่กดยืนยัน แล้วกดย้อนกลับ จะเสียการสแกนไป<br>ต่างจากกรณี S/N ตรงที่<strong>สแกนใหม่ใช้เวลาแค่วินาทีเดียว</strong> — ผลกระทบเล็กกว่ามาก<br>แต่ยังควรถามยืนยันถ้าจะให้ครบ</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ปุ่มเดียวยิงคำสั่งเดียว</td><td>ที่นี่ยิงได้ถึงสี่</td></tr>
+<tr><td>เมธอดที่ไม่คืนค่าแปลว่าไม่มีอะไรผิดพลาดได้</td><td>ทั้งสองเมธอด auto ล้มเหลวได้แต่ไม่บอกผู้เรียก</td></tr>
+<tr><td>คำสั่งที่ต่อกันจะหยุดเองเมื่ออันแรกล้ม</td><td>ต้องเขียนให้หยุดเอง</td></tr>
+<tr><td>“Dispatch ไม่สำเร็จ” แปลว่าของยังไม่ขึ้นรถ</td><td>อาจขึ้นไปแล้ว</td></tr>
+<tr><td>เลขที่เอกสารจากแอปใช้อ้างอิงได้</td><td>เป็นของจำลอง ไม่มีในระบบ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกนกล่องสุดท้าย กดยืนยัน แล้วขึ้น error สองรอบ พอกดปิดหมดแล้วดูสถานะช่อง กลายเป็น SHIPPED ทั้งที่บอกว่าไม่สำเร็จ”</p><ol><li>อธิบายว่าเกิดอะไรขึ้น</li><li>ข้อความที่ผู้ใช้ควรได้คืออะไร</li><li>ออกแบบทางแก้ที่ครบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เกิดอะไรขึ้น</strong></p><p>มีสองสถานการณ์ที่อธิบายได้</p><pre class="code-vs"><code>สถานการณ์ A — เน็ตสะดุดตอน complete แต่คำสั่งไปถึง
+  1. scanCheckIn สำเร็จ → isReadyToComplete = true
+  2. completeCheckIn → คำสั่งไปถึง แต่คำตอบไม่กลับมา → error #1
+  3. dispatchCheckIn → ยิงต่อ (ไม่ได้หยุด) → สำเร็จจริง
+                       แต่คำตอบไม่กลับมา → error #2
+  4. _openSlot → โหลดใหม่ → เห็น SHIPPED</code></pre><pre class="code-vs"><code>สถานการณ์ B — complete ล้มเหลวจริง แต่ dispatch ทำงานได้
+  1. scanCheckIn สำเร็จ
+  2. completeCheckIn ล้มเหลวจริง → error #1
+  3. dispatchCheckIn ยิงต่อ → เซิร์ฟเวอร์อาจ complete ให้เองแล้ว dispatch
+                             → error #2 จากอย่างอื่น
+  4. _openSlot → SHIPPED</code></pre><p>ทั้งสองกรณีมีสาเหตุร่วมกัน — <strong>ยิงคำสั่งที่สองต่อทั้งที่คำสั่งแรกล้มเหลว</strong></p><p>และผู้ใช้เห็น error สองครั้งเพราะสองเมธอดแสดงกล่องเอง โดยไม่มีใครประสานกัน</p><p><strong>ข้อ 2 — ข้อความที่ควรได้</strong></p><table><thead><tr><th>ผู้ใช้ต้องรู้</th><th>ปัจจุบันบอกไหม</th></tr></thead><tbody>
+<tr><td>กล่องถูกบันทึกแล้วหรือยัง</td><td>ไม่</td></tr>
+<tr><td>ช่องถูกปิดแล้วหรือยัง</td><td>ไม่</td></tr>
+<tr><td>ของขึ้นรถแล้วหรือยัง</td><td><strong>บอกผิด</strong></td></tr>
+<tr><td>ต้องทำอะไรต่อ</td><td>ไม่</td></tr>
+</tbody></table><p>สี่คำถาม และข้อความปัจจุบันตอบไม่ได้เลยสักข้อ</p><p><strong>ข้อ 3 — ทางแก้</strong></p><pre class="code-vs"><code>Future&lt;void&gt; _confirmCheckIn() async {
+  final pack = _pendingPack;
+  if (pack == null) return;
+  if (pack.isAlreadyCheckedIn) { ...ปฏิเสธ... }
+
+  setState(() =&gt; _loading = true);
+  final res = await _api.scanCheckIn(
+    packingId: pack.packingId,
+    operatorId: widget.userId,
+  );
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!res.success) {
+    showErrorDialog(
+      context,
+      title: 'ไม่ทราบผล',
+      message: '${res.error ?? "Check-IN ไม่สำเร็จ"}\n\n'
+          'กล่องอาจถูกบันทึกไปแล้ว — สแกนซ้ำเพื่อตรวจก่อนกดใหม่',
+    );
+    return;
+  }
+
+  final scanResult = res.data!;
+
+  // กล่องบันทึกแล้วแน่นอน — สลับสถานะก่อน ไม่ให้หายถ้าขั้นถัดไปล้ม
+  setState(() {
+    _pendingPack = null;
+    _deliveryNotePack = pack;
+    _deliveryNoteCreatedAt = DateTime.now();
+  });
+
+  if (scanResult.isReadyToComplete) {
+    await _finishSlot(scanResult.slotId);
+    if (!mounted) return;
+  }
+
+  await _openSlot(scanResult.slotId);
+  _scanFocus.requestFocus();
+}</code></pre><pre class="code-vs"><code>/// ปิดช่องแล้วส่งขึ้นรถ — สองคำสั่งที่ต้องทำตามลำดับ
+/// ล้มเหลวขั้นไหนก็หยุด แล้วสรุปให้ผู้ใช้ครั้งเดียว
+Future&lt;void&gt; _finishSlot(String slotId) async {
+  final completed = await _completeSlot(slotId);
+  if (!mounted) return;
+
+  if (!completed) {
+    await _showSlotIncompleteDialog(
+      slotId: slotId,
+      stage: 'ปิดช่อง',
+      hint: 'กล่องถูกบันทึกแล้ว แต่ช่องยังไม่ถูกปิด',
+    );
+    return;
+  }
+
+  final dispatched = await _dispatchSlot(slotId);
+  if (!mounted) return;
+
+  if (!dispatched) {
+    await _showSlotIncompleteDialog(
+      slotId: slotId,
+      stage: 'ส่งขึ้นรถ',
+      hint: 'ช่องถูกปิดแล้ว แต่ยังไม่ได้สั่งขึ้นรถ',
+    );
+  }
+}</code></pre><pre class="code-vs"><code>Future&lt;void&gt; _showSlotIncompleteDialog({
+  required String slotId,
+  required String stage,
+  required String hint,
+}) async {
+  await showDialog&lt;void&gt;(
+    context: context,
+    builder: (ctx) =&gt; AlertDialog(
+      title: Row(children: [
+        Icon(Icons.warning_amber_rounded, color: AppTheme.warning),
+        const SizedBox(width: 8),
+        Expanded(child: Text('$stage ไม่สำเร็จ')),
+      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(hint),
+          const SizedBox(height: 12),
+          Text(
+            'คำสั่งอาจส่งไปแล้ว — ดูสถานะช่อง $slotId ด้านล่างก่อนทำซ้ำ',
+            style: TextStyle(fontSize: 13, color: AppTheme.textGrey(ctx)),
+          ),
+        ],
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () =&gt; Navigator.pop(ctx),
+          child: const Text('เข้าใจแล้ว'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><table><thead><tr><th>เปลี่ยนอะไร</th><th>ตอบคำถามข้อไหน</th></tr></thead><tbody>
+<tr><td>สลับสถานะก่อนขั้นที่ 2–3</td><td>“กล่องถูกบันทึกแล้วหรือยัง”</td></tr>
+<tr><td>หยุดเมื่อ complete ล้มเหลว</td><td>ไม่ยิงคำสั่งที่ทำให้ของขึ้นรถโดยไม่ควร</td></tr>
+<tr><td>ระบุขั้นที่ล้มเหลวในหัวข้อ</td><td>“ช่องถูกปิดแล้วหรือยัง”</td></tr>
+<tr><td>บอกว่าคำสั่งอาจส่งไปแล้ว</td><td>“ของขึ้นรถแล้วหรือยัง”</td></tr>
+<tr><td>ชี้ให้ดูสถานะช่องด้านล่าง</td><td>“ต้องทำอะไรต่อ”</td></tr>
+<tr><td>กล่องเดียวไม่ใช่สองกล่อง</td><td>ไม่ต้องกดปิดหลายรอบ</td></tr>
+</tbody></table><div class="note"><strong>สิ่งที่ต้องยืนยันกับทีม .NET ก่อน</strong><ol><li><code>dispatchCheckIn</code> ทำงานได้ไหมถ้าช่องยังไม่ถูก complete</li><li>ถ้าสั่ง dispatch ซ้ำกับช่องที่ SHIPPED แล้ว จะเกิดอะไร</li><li>มี endpoint ให้ถามสถานะช่องแบบเบา ๆ ไหม</li></ol>ข้อสองสำคัญที่สุด — ถ้าเซิร์ฟเวอร์ปฏิเสธอย่างสุภาพ ข้อความสามารถบอกว่า “กดซ้ำได้ปลอดภัย” ซึ่งช่วยผู้ใช้มาก<br>ถ้าไม่รู้ ต้องเขียนข้อความแบบระวังไว้ก่อน ซึ่งทำให้ผู้ใช้ทำงานช้าลงโดยไม่จำเป็น</div><p><strong>ข้อสรุปที่ใหญ่กว่า:</strong> คำสั่งที่ทำงานเงียบ ๆ แทนผู้ใช้ ประหยัดการกดได้จริง — แต่เมื่อล้มเหลว ผู้ใช้จะไม่มีบริบทเลยว่าอะไรเกิดขึ้น เพราะเขาไม่ได้เป็นคนสั่ง</p><p>ยิ่งทำเงียบมาก ยิ่งต้อง<strong>สรุปให้ชัดเมื่อผิดพลาด</strong></p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>ปุ่มเดียวยิงได้ถึงสี่คำสั่ง สามในนั้นเปลี่ยนข้อมูล</li><li>เซิร์ฟเวอร์ตัดสินว่าครบทุกกล่องแล้วหรือยัง แอปไม่เดา</li><li><code>_autoCompleteSlot</code> และ <code>_autoDispatchSlot</code> ไม่คืนค่า ผู้เรียกไม่รู้ผล</li><li>คำสั่งที่สองถูกยิงต่อแม้คำสั่งแรกล้มเหลว</li><li>ผู้ใช้เห็นกล่อง error สองครั้งติดโดยไม่มีใครประสาน</li><li><code>dispatchCheckIn</code> ทำให้ของขึ้นรถ — ล้มเหลวแล้วไม่บอกว่าอาจไปถึงแล้ว</li><li>สลับ <code>_pendingPack</code> เป็น <code>_deliveryNotePack</code> ในก้อนเดียว</li><li>ใบส่งสินค้าเป็นของจำลอง และชื่อเมธอดบอกไว้ชัด</li><li>ช่องสแกนถูกล้างครบทุกทาง ต่างจากจออื่นใน Part 18</li><li>คำสั่งที่ทำเงียบแทนผู้ใช้ ต้องสรุปให้ชัดเมื่อผิดพลาด</li></ul></div><p><strong>บทหน้า:</strong> โมเดลและ API ของ checkin และฟิลด์ pipeline ที่มาจากห้าที่</p></section>
