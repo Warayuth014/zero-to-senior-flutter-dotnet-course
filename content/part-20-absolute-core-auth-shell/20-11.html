@@ -1,17 +1,209 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/connection_controller.dart</code> — singleton <code>ChangeNotifier</code> เป็น source of truth ของ profile list, active profile และผล probe ล่าสุด</div>
-<section><h2>1. State ที่ controller เป็นเจ้าของ</h2><p>controller ถือ profiles, active ID, connection status, last test result และ flag loaded โดยเปิด list แบบ immutable view ลดโอกาส callerแก้ collectionข้าม validation ทุก mutationผ่าน methodแล้ว persist/notify จึงตรวจ invariantได้จากจุดเดียว</p></section>
-<section><h2>2. Load และ self-healing</h2><pre class="code-vs"><code>read connection_profiles_v1
-→ decode snapshot
-→ ถ้าว่าง/เสีย: seed Default localhost:6191
-→ เลือก active profile
-→ persist snapshot ที่ valid
-→ loaded = true; notifyListeners()</code></pre><p>preferences failureถูกจับเพื่อให้ sessionยังเปิดได้ แต่ productionควร record diagnostic มิฉะนั้น profileหายซ้ำโดยไม่มีหลักฐาน</p></section>
-<section><h2>3. Save ไม่เท่ากับ Activate</h2><p><code>saveAsNew</code> เพิ่ม profileแต่ไม่แย่ง active profileเดิม ช่วยให้ผู้ใช้เตรียม serverใหม่โดยไม่กระทบงาน ส่วน <code>saveEdits</code> รักษา <code>createdAt</code> ของ rowเดิม และ <code>activate</code> ตรวจว่า idมีอยู่ก่อนสลับ การแยก commandทำให้ UIเสนอ “Save” กับ “Save &amp; Use” อย่างมีความหมาย</p></section>
-<section><h2>4. Delete invariant</h2><p>ห้ามลบ profileสุดท้าย หากลบ active profileต้องเลือก replacementหรือ fallbackเป็นรายการที่เหลือ แล้ว reset statusเป็น unknown ก่อน persist/notify เพราะผล probeเดิมเป็นของ URLเดิม การลบ inactive profileไม่ควรเปลี่ยนปลายทาง request</p></section>
-<section><h2>5. Status state machine</h2><pre class="code-vs"><code>unknown
-  → refreshStatus() → connecting
-  → probe ok        → connected + lastResult
-  → probe fail      → disconnected + lastResult</code></pre><p>การ notifyตอน connectingทำให้ dot/spinnerตอบสนองทันที และ notifyตอนจบทำให้ dialog/shell rebuildจาก stateเดียวกัน</p></section>
-<section><h2>6. Persistence policy</h2><p>mutation เปลี่ยน memoryก่อนแล้วเขียน preferences โดย swallow storage exception เพื่อไม่ทำให้แอปหยุด นี่คือ availability-first policy: sessionปัจจุบันใช้ค่าใหม่ได้ แต่ restartอาจย้อนกลับ หากต้องการรับประกันการตั้งค่า ควรคืน typed save resultให้ UIและเลือก rollbackหรือเตือนอย่างชัดเจน</p></section>
-<section><h2>7. Async race ที่ยังต้องระวัง</h2><p><code>refreshStatus</code> ยังไม่มี request generation/cancellation ถ้า probe A ช้าแล้วผู้ใช้ activate profile B จากนั้น probe Bจบก่อน A ผล Aที่มาช้าสามารถเขียน statusของ Bผิดได้ วิธีแก้คือจับ profile ID/base URLกับ generation ตอนเริ่ม และ commitผลเฉพาะเมื่อยังตรงกับ active generationล่าสุด</p></section>
-<section><h2>8. Controller tests</h2><div class="success">ทดสอบ load corrupt/empty, immutable list, add/edit/activate/delete, ห้ามลบตัวสุดท้าย, active replacement, persistence failure policy และ race A→B ด้วย completersที่ควบคุมลำดับผล ยืนยันจำนวน notifyและว่า stale resultไม่ทับ statusปัจจุบัน</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน lib/core/connection_controller.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.10, 4.6 (<code>ChangeNotifier</code>), 20.8 (singleton กับปัญหาในเทสต์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน controller ที่ถือ state ร่วมทั้งแอป และเข้าใจว่า <code>@visibleForTesting</code> แก้ปัญหาอะไร</div>
+
+<section><h2>1. คอมเมนต์หัวคลาสที่บอกทั้งสถาปัตยกรรม</h2><pre class="code-vs"><code>/// Single source of truth for saved server addresses, which one is in use, and
+/// whether it currently answers.
+///
+/// Same shape as [AppLanguageController]: a singleton [ChangeNotifier] loaded
+/// once in `main()` before `runApp`, then observed with `ListenableBuilder`.
+///
+/// Deliberately does NOT import `app_config.dart` — the dependency runs the
+/// other way (`AppConfig.apiBaseUrl` reads [activeBaseUrl]), and a cycle would
+/// make the startup order impossible to reason about.</code></pre><p>ย่อหน้าที่สามสำคัญที่สุด</p><pre class="code-vs"><code>AppConfig  ──import──→  ConnectionController      ✔ ทางเดียว
+AppConfig  ←──────────  ConnectionController      ✘ ห้าม</code></pre><div class="success"><strong>ทำไมวงจร import ถึงเป็นปัญหาจริง ไม่ใช่แค่เรื่องความสวยงาม</strong><br>Dart ยอมให้ import วนกันได้ — โค้ดจะคอมไพล์ผ่าน<br>แต่ <code>static final instance = ...</code> ถูกสร้างตอนถูกใช้ครั้งแรก และเมื่อสองไฟล์อ้างกันไปมา ลำดับการสร้างจะขึ้นอยู่กับว่าใครถูกแตะก่อน ซึ่งเปลี่ยนได้ตามการแก้โค้ดที่ไม่เกี่ยวข้อง<br>ผลคือบั๊กที่โผล่เฉพาะบางเส้นทางการเริ่มแอป และหายไปเมื่อเพิ่ม <code>print</code> เพื่อไล่หา<br>คอมเมนต์นี้จึงเป็นการ<strong>ประกาศกฎไว้กันคนที่มาทีหลังเผลอเพิ่ม import ที่ดูไม่มีพิษภัย</strong></div></section>
+
+<section><h2>2. state ทั้งห้าตัว</h2><pre class="code-vs"><code>final List&lt;ConnectionProfile&gt; _profiles = [];
+String? _activeId;
+ConnectionStatus _status = ConnectionStatus.unknown;
+ConnectionTestResult? _lastResult;
+bool _loaded = false;</code></pre><table><thead><tr><th>ฟิลด์</th><th>ตอบคำถามว่า</th></tr></thead><tbody>
+<tr><td><code>_profiles</code></td><td>มีเซิร์ฟเวอร์ที่บันทึกไว้อะไรบ้าง</td></tr>
+<tr><td><code>_activeId</code></td><td>ตอนนี้ใช้ตัวไหน</td></tr>
+<tr><td><code>_status</code></td><td>ต่อติดหรือไม่</td></tr>
+<tr><td><code>_lastResult</code></td><td>ผลตรวจครั้งล่าสุดคืออะไร</td></tr>
+<tr><td><code>_loaded</code></td><td>อ่านจากดิสก์แล้วหรือยัง</td></tr>
+</tbody></table><h3>เก็บ <code>_activeId</code> ไม่ใช่ <code>_active</code></h3><pre class="code-vs"><code>ConnectionProfile? get active {
+  if (_activeId == null) return null;
+  for (final profile in _profiles) {
+    if (profile.id == _activeId) return profile;
+  }
+  return null;
+}</code></pre><table><thead><tr><th>ถ้าเก็บวัตถุ</th><th>ที่ทำจริง — เก็บ id</th></tr></thead><tbody>
+<tr><td>แก้โปรไฟล์แล้ว <code>_active</code> ยังชี้ตัวเก่า</td><td>ค้นใหม่ทุกครั้ง ได้ตัวที่แก้แล้วเสมอ</td></tr>
+<tr><td>ต้องจำว่าต้องอัปเดตทั้งสองที่</td><td>มีที่เดียว</td></tr>
+</tbody></table><p>หลักเดียวกับ <code>apiBaseUrl</code> ใน 20.3 — <strong>อย่าเก็บสำเนาของสิ่งที่ค้นได้</strong></p><p><code>_profiles</code> มีไม่กี่รายการ การวนหาจึงไม่มีต้นทุนที่ต้องคิดถึง</p><h3><code>_loaded</code> กับคอมเมนต์ที่อธิบายผลข้างเคียงที่ตั้งใจ</h3><pre class="code-vs"><code>/// Null until [load] has run, which keeps `AppConfig` on its original
+/// hard-coded fallback in widget tests that never call [load].
+String? get activeBaseUrl =&gt; active?.baseUrl;</code></pre><p>ใน widget test ที่ไม่เรียก <code>load()</code> จะได้ <code>null</code> ซึ่งทำให้ <code>resolveBaseUrl</code> ตกไปใช้ค่าฝังมา — เทสต์จึงทำงานได้โดยไม่ต้องเตรียมอะไร</p></section>
+
+<section><h2>3. <code>load()</code></h2><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  String? raw;
+  try {
+    raw = await SharedPreferencesAsync().getString(_preferenceKey);
+  } catch (_) {
+    // Widget tests and unsupported platforms have no plugin registered.
+    raw = null;
+  }
+
+  final snapshot = decodeConnectionSnapshot(raw);
+  _profiles..clear()..addAll(snapshot.profiles);
+  _activeId = snapshot.activeId;
+
+  if (_profiles.isEmpty) {
+    final seed = seedConnectionProfile();
+    _profiles.add(seed);
+    _activeId = seed.id;
+    await _persist();
+  }
+
+  _loaded = true;
+  notifyListeners();
+}</code></pre><h3>เพาะโปรไฟล์แรกเมื่อยังไม่มีอะไร</h3><pre class="code-vs"><code>/// Reads saved profiles, seeding the pre-existing hard-coded address on a
+/// first run so an upgrading install keeps talking to the same server.</code></pre><div class="success"><strong>คิดถึงคนที่อัปเกรดจากรุ่นก่อนที่ยังไม่มีฟีเจอร์นี้</strong><br>ถ้าไม่เพาะ เปิดแอปมาจะไม่มีโปรไฟล์เลย → ต้องพิมพ์ที่อยู่เองก่อนถึงใช้ได้<br>เพาะด้วยที่อยู่เดิมที่ฝังมา → เปิดมาแล้วใช้ได้เหมือนเดิม ฟีเจอร์ใหม่เป็นของแถม<br><strong>กฎ:</strong> ฟีเจอร์ใหม่ไม่ควรทำให้ผู้ใช้เดิมต้องทำอะไรเพิ่มก่อนจะกลับมาทำงานได้</div><p>และคอมเมนต์อธิบายว่าเพาะทุกแพลตฟอร์มรวม Chrome — “one lane” เป็นหลักเดียวกับที่ <code>resolveBaseUrl</code> เอาสาขา <code>kIsWeb</code> ออก (20.3)</p><h3><code>catch (_)</code> ที่นี่กว้างกว่าที่ <code>AppLanguageController</code></h3><table><thead><tr><th>ไฟล์</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td><code>app_language.dart</code></td><td><code>on StateError</code></td></tr>
+<tr><td><code>connection_controller.dart</code></td><td><code>catch (_)</code></td></tr>
+</tbody></table><div class="warning"><strong>สองไฟล์ที่ทำงานเดียวกันแต่จับข้อยกเว้นคนละแบบ</strong><br>อันหลังจะกลืน <code>TypeError</code> หรือข้อผิดพลาดของโปรแกรมอื่น ๆ ไปด้วยโดยไม่มีร่องรอย<br>ในทางปฏิบัติผลเหมือนกัน (ทั้งคู่ตกไปใช้ค่าปริยาย) แต่อันแรกจะโยนต่อถ้ามีบั๊กจริง ซึ่งเป็นสิ่งที่ต้องการ<br>เป็นตัวอย่างเล็ก ๆ ของ “กฎเดียวเขียนสองแบบ” ในไฟล์ที่อยู่ห่างกันสองไฟล์ — เก็บไว้เทียบใน Part 23</div></section>
+
+<section><h2>4. สี่เมธอดที่แก้ข้อมูล</h2><table><thead><tr><th>เมธอด</th><th>ทำ</th><th>เปลี่ยนตัวที่ใช้อยู่ไหม</th></tr></thead><tbody>
+<tr><td><code>saveAsNew</code></td><td>เพิ่มโปรไฟล์</td><td><strong>ไม่</strong></td></tr>
+<tr><td><code>saveEdits</code></td><td>ทับตัวเดิมด้วย id เดียวกัน</td><td>ไม่</td></tr>
+<tr><td><code>activate</code></td><td>เปลี่ยนตัวที่ใช้</td><td>ใช่</td></tr>
+<tr><td><code>remove</code></td><td>ลบ</td><td>ถ้าลบตัวที่ใช้อยู่</td></tr>
+</tbody></table>
+
+<h3><code>saveAsNew</code> ไม่แย่งการเป็นตัวที่ใช้</h3><pre class="code-vs"><code>/// Adds [draft] as a new profile. Does not change which profile is active —
+/// saving and switching are separate actions by design.</code></pre><div class="success"><strong>เป็นการเลือกที่ถูกและมีเทสต์คุ้มไว้</strong> (<code>'a new draft is added without stealing the active profile'</code>)<br>ลองนึกภาพช่างที่กำลังทำงานอยู่กับเซิร์ฟเวอร์จริง แล้วบันทึกที่อยู่เครื่องทดสอบไว้เผื่อ<br>ถ้าการบันทึกสลับตัวใช้ไปด้วย งานที่ทำต่อจากนั้นจะไปลงเครื่องทดสอบโดยไม่มีใครรู้<br><strong>การกระทำหนึ่งครั้งควรมีผลอย่างเดียว</strong> — ถ้าผู้ใช้อยากสลับ ก็กดสลับอีกครั้ง ซึ่งชัดเจนกว่า</div>
+
+<h3><code>saveEdits</code> รักษาเวลาสร้างเดิม</h3><pre class="code-vs"><code>final saved = draft.copyWith(
+  createdAt: _profiles[index].createdAt,     // ของเดิม
+  updatedAt: DateTime.now(),                 // ของใหม่
+);</code></pre><p>และมีทางถอยที่สมเหตุสมผล</p><pre class="code-vs"><code>if (index &lt; 0) return saveAsNew(draft);</code></pre><p>ถ้าแก้โปรไฟล์ที่ถูกลบไปแล้วในอีกทาง จะกลายเป็นเพิ่มใหม่แทนที่จะเงียบหายไป</p>
+
+<h3><code>activate</code> ตรวจก่อนว่ามีจริง</h3><pre class="code-vs"><code>Future&lt;void&gt; activate(String id) async {
+  if (_profiles.every((p) =&gt; p.id != id)) return;
+  _activeId = id;
+  _status = ConnectionStatus.unknown;      // ← สำคัญ
+  await _persist();
+  notifyListeners();
+}</code></pre><div class="success"><strong>บรรทัดที่รีเซ็ต <code>_status</code> คือสิ่งที่แยกโค้ดที่คิดครบออกจากโค้ดที่คิดไม่ครบ</strong><br>ถ้าไม่รีเซ็ต จุดสถานะจะยังเขียวจากการตรวจเซิร์ฟเวอร์<strong>ตัวก่อน</strong><br>ผู้ใช้สลับไปเครื่องที่ปิดอยู่ แล้วเห็นจุดเขียว จึงเชื่อว่าใช้ได้<br>เป็นอาการเดียวกับบั๊กที่คอมเมนต์ใน <code>resolveBaseUrl</code> เล่าไว้ (20.3) — <strong>ตัวบ่งชี้ที่พูดถึงสิ่งที่ไม่ใช่ปัจจุบัน</strong><br><code>remove</code> ก็รีเซ็ตด้วยเหตุผลเดียวกันเมื่อลบตัวที่ใช้อยู่</div>
+
+<h3><code>remove</code> — ปฏิเสธการลบตัวสุดท้าย</h3><pre class="code-vs"><code>/// Refuses to remove the last profile: with none left there would be no
+/// address to fall back to and no way to type a new one in.
+Future&lt;bool&gt; remove(String id, {String? nextActiveId}) async {
+  if (_profiles.length &lt;= 1) return false;
+  ...
+  if (_activeId == id) {
+    final replacement = nextActiveId ?? _profiles.first.id;
+    _activeId = _profiles.any((p) =&gt; p.id == replacement)
+        ? replacement
+        : _profiles.first.id;
+    _status = ConnectionStatus.unknown;
+  }
+  ...
+  return true;
+}</code></pre><table><thead><tr><th>รายละเอียด</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>คืน <code>bool</code></td><td>จอต้องรู้ว่าลบสำเร็จไหม เพื่อบอกผู้ใช้</td></tr>
+<tr><td><code>nextActiveId</code> มาจากผู้เรียก</td><td>คอมเมนต์บอกว่า “ให้ตัวเลือกอยู่กับผู้ใช้”</td></tr>
+<tr><td>ตรวจว่า <code>replacement</code> มีจริง</td><td>กันผู้เรียกส่ง id ที่ไม่มี</td></tr>
+</tbody></table><p>เทสต์คุมทั้งสองกรณี: <code>'the only remaining profile cannot be deleted'</code> และ <code>'deleting the active profile asks which one takes over'</code></p></section>
+
+<section><h2>5. <code>refreshStatus</code></h2><pre class="code-vs"><code>/// Called on shell mount, when the app returns to the foreground, and after
+/// switching profiles — there is no polling timer, which would cost battery
+/// and radio on a handheld all day for a dot nobody is watching.
+Future&lt;ConnectionStatus&gt; refreshStatus({http.Client? client}) async {
+  // Resolved the same way requests are, so the dot can never report on a
+  // different server than the one the app is actually calling.
+  final url = resolveBaseUrl(activeBaseUrl);
+
+  _status = ConnectionStatus.connecting;
+  notifyListeners();                          // ① แจ้งระหว่างทาง
+
+  final result = await probeConnection(baseUrl: url, client: client);
+  _lastResult = result;
+  _status = result.ok
+      ? ConnectionStatus.connected
+      : ConnectionStatus.disconnected;
+  notifyListeners();                          // ② แจ้งผล
+  return _status;
+}</code></pre><h3>แจ้งสองครั้ง</h3><p>ครั้งแรกทำให้จุดกลายเป็นสถานะ “กำลังตรวจ” ทันที ผู้ใช้จึงเห็นว่ามีอะไรเกิดขึ้น — ไม่ใช่จุดที่ค้างอยู่จนกว่าผลจะมา</p><p>นี่คือเหตุผลที่ <code>ConnectionStatus</code> มีสี่ค่า ไม่ใช่ <code>bool</code></p><pre class="code-vs"><code>enum ConnectionStatus { unknown, connecting, connected, disconnected }</code></pre><table><thead><tr><th>ค่า</th><th>แปลว่า</th></tr></thead><tbody>
+<tr><td><code>unknown</code></td><td>ยังไม่เคยตรวจ / เพิ่งสลับโปรไฟล์</td></tr>
+<tr><td><code>connecting</code></td><td>กำลังตรวจอยู่</td></tr>
+<tr><td><code>connected</code></td><td>ตรวจแล้วต่อได้</td></tr>
+<tr><td><code>disconnected</code></td><td>ตรวจแล้วต่อไม่ได้</td></tr>
+</tbody></table><p>ถ้าใช้ <code>bool</code> จะแยก “ยังไม่เคยตรวจ” ออกจาก “ตรวจแล้วไม่ผ่าน” ไม่ได้ — ซึ่งเป็นสองสถานะที่ควรแสดงต่างกัน (4.14)</p><h3>ไม่มีตัวจับเวลา</h3><div class="success"><strong>คอมเมนต์ให้เหตุผลเชิงฮาร์ดแวร์ที่ตรงประเด็น</strong><br>ยิงทุก 30 วินาทีตลอดกะแปดชั่วโมง = 960 คำขอ เพื่อรักษาจุดเล็ก ๆ ที่ไม่มีใครมองให้เป็นปัจจุบัน<br>บนพีดีเอที่ต้องอยู่ได้ทั้งกะโดยไม่ชาร์จ วิทยุ Wi-Fi คือตัวกินแบตหลัก<br>ทางที่เลือกคือตรวจ<strong>ในจังหวะที่คำตอบมีค่า</strong> — เข้าแอป กลับมาจากพัก และหลังสลับโปรไฟล์<br>เทียบกับ <code>WarehouseStore</code> ที่<strong>มี</strong>ตัวจับเวลา 5 วินาที (20.14) — ความต่างคือสถานะของงานเปลี่ยนโดยที่ผู้ใช้ไม่ได้ทำอะไร ส่วนที่อยู่เซิร์ฟเวอร์ไม่เปลี่ยนเอง</div></section>
+
+<section><h2>6. <code>@visibleForTesting</code> สองตัว</h2><pre class="code-vs"><code>/// Publishes a status without running a probe, so UI bound to the dot can be
+/// tested for every state.
+@visibleForTesting
+void debugSetStatus(ConnectionStatus status) { ... }
+
+/// Puts the controller into a known state for tests without touching disk.
+@visibleForTesting
+void debugReset({List&lt;ConnectionProfile&gt; profiles = const [], String? activeId}) {
+  _profiles..clear()..addAll(profiles);
+  _activeId = activeId ?? (profiles.isEmpty ? null : profiles.first.id);
+  _status = ConnectionStatus.unknown;
+  _lastResult = null;
+  _loaded = profiles.isNotEmpty;
+  notifyListeners();
+}</code></pre><h3><code>@visibleForTesting</code> ทำอะไร</h3><p>เป็นคำสั่งถึง<strong>ตัววิเคราะห์</strong> ไม่ใช่คอมไพเลอร์ — ถ้ามีโค้ดใน <code>lib/</code> เรียกเมธอดนี้ จะขึ้นคำเตือน แต่โค้ดใน <code>test/</code> เรียกได้ปกติ</p><pre class="code-vs"><code>info: The member 'debugReset' can only be used within tests.</code></pre><div class="success"><strong>นี่คือคำตอบของปัญหาที่ 20.8 ทิ้งไว้</strong><br><code>AppLanguageController</code> เป็น singleton ที่ไม่มีทางรีเซ็ต เทสต์จึงต้อง <code>addTearDown</code> เองและอาจลืม<br><code>ConnectionController</code> เป็น singleton เหมือนกัน แต่มีทางออกที่ประกาศไว้ชัด<pre class="code-vs"><code>setUp(() {
+  ConnectionController.instance.debugReset(profiles: [profileA, profileB]);
+});</code></pre>เทสต์ 12 ข้อใน <code>connection_settings_sheet_test.dart</code> เขียนได้เพราะสองเมธอดนี้<br><strong>บทเรียน:</strong> ถ้าเลี่ยง singleton ไม่ได้ อย่างน้อยให้ทางกลับสู่สถานะที่รู้แน่ — และประกาศด้วย <code>@visibleForTesting</code> ว่าใครใช้ได้</div><h3>ราคาที่จ่าย</h3><table><thead><tr><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>เทสต์ตั้งสถานะได้ทุกแบบโดยไม่แตะดิสก์</td><td>โค้ดใน <code>lib/</code> มีเมธอดที่ไม่ได้ใช้ในงานจริง</td></tr>
+<tr><td>ทดสอบ UI ของทุกสถานะของจุดได้</td><td>ตัววิเคราะห์เตือนได้ แต่กันจริงไม่ได้ — ยังเรียกได้อยู่</td></tr>
+</tbody></table><p>คุ้ม เพราะทางเลือกคือไม่มีเทสต์เลย ซึ่งเป็นสถานะของ wmsapp</p></section>
+
+<section><h2>7. <code>_persist()</code> ที่กลืนความล้มเหลว</h2><pre class="code-vs"><code>Future&lt;void&gt; _persist() async {
+  try {
+    await SharedPreferencesAsync().setString(
+      _preferenceKey,
+      encodeConnectionSnapshot(_profiles, _activeId),
+    );
+  } catch (_) {
+    // Settings still apply for this session even if the write fails.
+  }
+}</code></pre><p>ทุกเมธอดที่แก้ข้อมูลเรียก <code>_persist()</code> แล้วค่อย <code>notifyListeners()</code></p><pre class="code-vs"><code>_profiles.add(saved);
+await _persist();          // เขียนก่อน
+notifyListeners();         // แจ้งทีหลัง</code></pre><div class="note"><strong>ลำดับตรงข้ามกับ <code>AppLanguageController.setLanguage</code></strong> ที่แจ้งก่อนบันทึก (20.8)<br>ต่างกันเพราะการเขียนที่นี่เร็ว (ไม่มีการรอเครือข่าย) และเป็นการกระทำที่ผู้ใช้กำลังรอผลอยู่แล้ว — เขากดปุ่ม “บันทึก”<br>ส่วนการสลับภาษาต้องเห็นผลทันที เพราะผู้ใช้คาดหวังว่าจอจะเปลี่ยนพร้อมนิ้ว<br>ทั้งสองลำดับถูกในบริบทของตัวเอง แต่<strong>ควรมีคอมเมนต์บอกว่าเลือกลำดับนี้เพราะอะไร</strong> ไม่งั้นคนอ่านจะคิดว่าเป็นความไม่สม่ำเสมอ</div><p>การกลืนความล้มเหลวถูกในบริบทนี้ — ถ้าเขียนดิสก์ไม่ได้ ผู้ใช้ยังทำงานต่อได้ในกะนี้ แค่ค่าจะไม่อยู่หลังปิดแอป</p><p>แต่<strong>ผู้ใช้ไม่ได้ถูกบอก</strong> ซึ่งเป็นข้อจำกัดที่ควรรู้ — เขาจะเจอเองตอนเปิดแอปครั้งหน้าแล้วค่าหาย</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>import วนกันระหว่างสอง singleton</td><td>ลำดับการสร้างเดาไม่ได้</td><td>ให้ทิศทางเดียว + คอมเมนต์กำกับ</td></tr>
+<tr><td>เก็บวัตถุที่เลือกแทน id</td><td>แก้แล้วยังชี้ตัวเก่า</td><td>เก็บ id แล้วค้น</td></tr>
+<tr><td>บันทึกแล้วสลับให้เลย</td><td>งานไปลงเครื่องผิดโดยไม่รู้</td><td>แยกบันทึกกับสลับ</td></tr>
+<tr><td>ไม่รีเซ็ตสถานะตอนสลับ</td><td>จุดเขียวของเซิร์ฟเวอร์ตัวก่อน</td><td>ตั้งเป็น <code>unknown</code></td></tr>
+<tr><td>ให้ลบโปรไฟล์สุดท้ายได้</td><td>ไม่มีที่อยู่ให้ใช้และพิมพ์ใหม่ไม่ได้</td><td>ปฏิเสธแล้วคืน false</td></tr>
+<tr><td>ใช้ <code>bool</code> แทนสถานะสี่ค่า</td><td>“ยังไม่ตรวจ” กับ “ตรวจแล้วไม่ผ่าน” เหมือนกัน</td><td>enum</td></tr>
+<tr><td>ยิงตรวจสถานะเป็นรอบตลอดวัน</td><td>แบตหมดก่อนจบกะ</td><td>ตรวจเมื่อคำตอบมีค่า</td></tr>
+<tr><td>singleton ที่รีเซ็ตไม่ได้</td><td>เทสต์ล้มตามลำดับการรัน</td><td><code>@visibleForTesting</code> + <code>debugReset</code></td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>ผู้ใช้มีสามโปรไฟล์ กำลังใช้ตัวที่สอง แล้วลบตัวที่สองโดยไม่เลือกตัวแทน — เดินตาม <code>remove</code> ทีละบรรทัด</li><li><code>_persist()</code> ล้มเงียบ ๆ — ออกแบบวิธีบอกผู้ใช้ โดยไม่ทำให้ทุกเมธอดยุ่งขึ้น</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>_profiles = [A, B, C], _activeId = 'B'
+remove('B', nextActiveId: null)
+
+length &lt;= 1 ?              → 3 ไม่ใช่ ไปต่อ
+indexWhere('B')            → 1
+removeAt(1)                → [A, C]
+_activeId == 'B' ?         → ใช่
+  replacement = null ?? _profiles.first.id  → 'A'
+  มี 'A' อยู่จริงไหม        → ใช่
+  _activeId = 'A'
+  _status = unknown
+_persist()
+notifyListeners()
+return true</code></pre><p>ผลคือ <code>[A, C]</code> ใช้ตัว A และจุดสถานะกลับไปเป็น “ยังไม่ทราบ”</p><div class="note"><strong>สังเกตว่าโค้ดยอมให้ <code>nextActiveId</code> เป็น null ได้</strong> ทั้งที่คอมเมนต์เขียนว่า “must be supplied by the caller when the active one is being removed”<br>คอมเมนต์บอกข้อตกลง แต่โค้ดไม่ได้บังคับ — มันมีทางถอยให้เงียบ ๆ<br>ในกรณีนี้ทางถอยสมเหตุสมผล (ใช้ตัวแรก) จึงไม่เป็นบั๊ก แต่<strong>คอมเมนต์กับโค้ดพูดไม่ตรงกัน</strong> คนอ่านที่เชื่อคอมเมนต์จะคิดว่าลืมส่งแล้วจะพัง<br>เขียนคอมเมนต์ให้ตรงจะดีกว่า: “ถ้าไม่ส่ง จะใช้โปรไฟล์แรกแทน — จอควรถามผู้ใช้ก่อน”</div><p><strong>ข้อ 2</strong></p><p>สิ่งที่ต้องเลี่ยงคือให้ทุกเมธอดคืน <code>bool</code> แล้วให้จอตรวจทีละที่</p><p>ทางที่พอดีคือ<strong>เพิ่ม state ตัวเดียวใน controller</strong> แล้วให้ UI ที่มีอยู่แล้วแสดงผล</p><pre class="code-vs"><code>bool _persistFailed = false;
+bool get persistFailed =&gt; _persistFailed;
+
+Future&lt;void&gt; _persist() async {
+  try {
+    await SharedPreferencesAsync().setString(...);
+    _persistFailed = false;
+  } catch (_) {
+    _persistFailed = true;    // ไม่ต้อง notify — ผู้เรียกทำอยู่แล้ว
+  }
+}</code></pre><p>แล้วในแผ่นตั้งค่า (20.13) ซึ่งฟัง controller อยู่แล้ว</p><pre class="code-vs"><code>if (controller.persistFailed)
+  const _Banner(text: 'บันทึกลงเครื่องไม่สำเร็จ — ค่าจะหายเมื่อปิดแอป'),</code></pre><table><thead><tr><th>ได้</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ไม่ต้องแก้ลายเซ็นเมธอดไหนเลย</td><td>ข้อมูลไหลผ่านทางที่มีอยู่แล้ว</td></tr>
+<tr><td>แสดงที่เดียว</td><td>ไม่กระจายการจัดการข้อผิดพลาดไปทุกจุดกด</td></tr>
+<tr><td>ทดสอบได้</td><td>เป็น getter ธรรมดา</td></tr>
+</tbody></table><div class="success"><strong>รูปแบบทั่วไปที่ได้จากข้อนี้</strong><br>เมื่อความล้มเหลว<strong>ไม่ได้ขัดขวางการกระทำ</strong> แต่<strong>ผู้ใช้ควรรู้</strong> อย่าเปลี่ยนให้การกระทำนั้นล้ม<br>ให้เก็บเป็นสถานะแล้วแสดงในที่ที่ผู้ใช้จะเห็นตอนที่มันสำคัญ<br>ต่างจากความล้มเหลวที่ขัดขวางจริง (ยืนยันงานไม่สำเร็จ) ซึ่งต้องหยุดและบอกทันที</div></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>คอมเมนต์หัวคลาสห้าม import <code>app_config.dart</code> เพื่อไม่ให้เกิดวงจรที่ทำให้ลำดับเริ่มแอปเดาไม่ได้</li><li>เก็บ <code>_activeId</code> ไม่ใช่วัตถุ — ค้นใหม่ทุกครั้งจึงได้ตัวที่แก้แล้วเสมอ</li><li><code>load()</code> เพาะโปรไฟล์แรกด้วยที่อยู่เดิม เพื่อให้คนที่อัปเกรดไม่ต้องทำอะไรเพิ่ม</li><li>บันทึกกับสลับเป็นคนละการกระทำโดยตั้งใจ</li><li><code>activate</code> และ <code>remove</code> รีเซ็ตสถานะเป็น <code>unknown</code> เพื่อไม่ให้จุดพูดถึงเซิร์ฟเวอร์ตัวก่อน</li><li>ปฏิเสธการลบโปรไฟล์สุดท้าย และคืน <code>bool</code> ให้จอบอกผู้ใช้ได้</li><li><code>ConnectionStatus</code> มีสี่ค่า แยก “ยังไม่ตรวจ” ออกจาก “ตรวจแล้วไม่ผ่าน”</li><li>ไม่มีตัวจับเวลา — ตรวจในจังหวะที่คำตอบมีค่า เพื่อประหยัดแบตของพีดีเอ</li><li><code>@visibleForTesting</code> + <code>debugReset()</code> คือทางออกของ singleton ที่เทสต์ต้องรีเซ็ต</li></ul></div><p><strong>บทหน้า:</strong> <code>connection_probe.dart</code> — การตรวจที่ไม่เชื่อรหัส 200</p></section>

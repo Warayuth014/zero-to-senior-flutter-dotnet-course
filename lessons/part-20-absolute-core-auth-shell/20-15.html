@@ -4,18 +4,169 @@
 <title>User Menu &amp; Tests</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">20-15 · Real Codebase</span><h1>User Menu &amp; Tests</h1><p>Part 20: Absolute Core &amp; Auth</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เมนูเดียวทั้ง shell</a></li><li><a href="#section-2">Reactive connection chip</a></li><li><a href="#section-3">จำกัดข้อมูลบน header</a></li><li><a href="#section-4">Popup semantics</a></li><li><a href="#section-5">Action routing</a></li><li><a href="#section-6">User Info เป็น live dialog</a></li><li><a href="#section-7">Tests ที่ล็อก invariant</a></li><li><a href="#section-8">Part 20 capstone</a></li></ol></nav>
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/ui/user_chip_menu.dart</code>, <code>lib/widgets/pda_status_bar.dart</code>, <code>test/user_menu_test.dart</code> — ปิด Part 20 ด้วยการ trace state จาก controllerไปสู่ UIและ tests</div>
-<section id="section-1"><h2>1. เมนูเดียวทั้ง shell</h2><p><code>UserChipMenu</code> ถูกวางใน headerของ <code>WarehouseShell</code> จุดเดียว ทุก operational screenจึงได้ user/connection/language/logout actionsเหมือนกันโดยไม่ copy widgetหรือ callback การรวมไว้ shellยังทำให้ session actionไม่ตกเป็นเจ้าของ feature screenใด screenหนึ่ง</p></section>
-<section id="section-2"><h2>2. Reactive connection chip</h2><p>widget ใช้ <code>ListenableBuilder</code> ฟัง <code>ConnectionController.instance</code> แล้วอ่าน active profile nameกับ status สี dotมาจาก mapping unknown/connecting/connected/disconnected ไม่ใช่ hard-coded green เมื่อ probe notify chipจึงเปลี่ยนโดยไม่ต้องให้ WarehouseStoreรู้ connection state</p></section>
-<section id="section-3"><h2>3. จำกัดข้อมูลบน header</h2><p>pillแสดง username, profile nameที่จำกัด 78pxและ ellipsis พร้อม status dot แต่ไม่แสดง IPเพราะจอ 390pxต้องเหลือพื้นที่ title/action ที่อยู่เต็มแสดงใน popup summaryหนึ่ง tapถัดไป นี่คือ progressive disclosure: ข้อมูลสำคัญทันทีสั้น ข้อมูลวินิจฉัยเต็มอยู่ใกล้มือ</p></section>
-<section id="section-4"><h2>4. Popup semantics</h2><p><code>PopupMenuButton</code> เปิดใต้ chipและใช้ Flutter barrierปิดเมื่อแตะข้างนอก header summaryเป็น item disabled แล้วมี User Info, Connection Settings, Language และ Sign Out แต่ละ itemสูงอย่างน้อย <code>PdaMetrics.minTapTarget</code> ส่วน logoutใช้สีแดงเพื่อแยก destructive session action</p></section>
-<section id="section-5"><h2>5. Action routing</h2><pre class="code-vs"><code>UserMenuAction.profile    → User Info dialog
-UserMenuAction.connection → Connection Settings sheet
-UserMenuAction.language   → languageController.toggle()
-UserMenuAction.logout     → confirmation → auth.logout → LoginScreen</code></pre><p>menuรายงาน enumกลับ shell แทนทำ side effectเอง ทำให้ presentation componentทดสอบได้และ shellเป็นผู้ถือ context/session dependencies</p></section>
-<section id="section-6"><h2>6. User Info เป็น live dialog</h2><p>dialogแสดง username, expiration และ active connection พร้อมปุ่มตรวจใหม่ เนื้อหาฟัง ConnectionController จึงอัปเดตผล probeใน dialogเดิม ไม่ต้องปิดเปิดใหม่ สิ่งนี้แสดง patternให้ modalที่มี async state: ownerอยู่นอก dialogและ dialog render snapshotล่าสุด</p></section>
-<section id="section-7"><h2>7. Tests ที่ล็อก invariant</h2><p><code>user_menu_test.dart</code> ยืนยันชื่อผู้ใช้/profileแสดงแต่ IPไม่กิน header, popupมีสี่ actionsและแสดง addressเต็ม, selectionส่ง enumแล้วปิด, tap outsideไม่เลือก, dotตามทุก controller statusด้วยสีที่ต่างกัน และ no-profileไม่ crash ส่วน settings testsครอบคลุม transactional editorจากบทก่อน</p></section>
-<section id="section-8"><h2>8. Part 20 capstone</h2><div class="success">Trace จากเปิดแอปจน logoutพร้อมหลักฐานไฟล์: startup load → effective URL → login contract → session/token → shell composition → connection resume probe → user menu/settings → profile switch policy → cleanup เขียนเพิ่มหนึ่ง integration testที่ loginด้วย fake transport, เข้า shell, เปลี่ยน statusทุกค่า, เปิดเมนู และ logoutโดยยืนยันว่า tokenกับ store lifecycleถูกล้างครบ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">UserChipMenu — ชิปเดียวสำหรับทั้งแอป</a></li><li><a href="#section-2">การออกจากระบบ</a></li><li><a href="#section-3">เทสต์ 101 ข้อ ใน 14 ไฟล์</a></li><li><a href="#section-4">ชื่อเทสต์ที่เขียนเป็นประโยค</a></li><li><a href="#section-5">คำตอบของคำถามจาก 19.15</a></li><li><a href="#section-6">สิ่งที่ Part นี้พบว่ายังทำไม่ครบ</a></li><li><a href="#section-7">ยี่สิบสิ่งที่ Part นี้ทำถูก</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป Part 20</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: รัน flutter test --no-pub แล้วอ่านชื่อเทสต์ทั้งหมด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.1–20.14 ทั้งหมด, 19.14 (สี่ระดับความเสี่ยง), 19.15 (ตาราง 15 แถว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านเทสต์ทั้งชุดเป็นเอกสาร และตอบคำถามที่ 19.15 ตั้งไว้ด้วยหลักฐาน</div>
+
+<section id="section-1"><h2>1. <code>UserChipMenu</code> — ชิปเดียวสำหรับทั้งแอป</h2><pre class="code-vs"><code>/// One widget for the whole app: the header is built in a single place
+/// (`_WarehouseShellState._header`), so every screen gets this without any
+/// screen owning a copy of the menu.
+///
+/// The chip shows the operator, the active profile's *name*, and a status dot —
+/// never the server address. A full IP does not fit next to a screen title on a
+/// 390px handheld; the address lives one tap away inside the menu instead.</code></pre><div class="success"><strong>ย่อหน้าแรกคือคำตอบของ 19.15 แถวหนึ่งพอดี</strong><br>ใน wmsapp แต่ละจอวาดแถบบนของตัวเอง เมนูที่ควรเหมือนกันจึงมีหลายสำเนาที่ไม่ตรงกัน<br>ที่นี่แถบบนถูกวาดที่เดียว เมนูจึงมีสำเนาเดียวโดยอัตโนมัติ — ไม่ต้องอาศัยวินัยของคนเขียน<br><strong>โครงสร้างที่บังคับผลลัพธ์ที่ถูก ดีกว่ากฎที่ทุกคนต้องจำ</strong></div><h3>สองฟังก์ชันระดับไฟล์</h3><pre class="code-vs"><code>Color connectionStatusColor(ConnectionStatus status) =&gt; switch (status) {
+  ConnectionStatus.connected =&gt; const Color(0xFF35C759),
+  ConnectionStatus.connecting =&gt; PdaColors.amber,
+  ConnectionStatus.disconnected =&gt; PdaColors.red,
+  ConnectionStatus.unknown =&gt; PdaColors.grey,
+};
+
+String connectionStatusLabel(ConnectionStatus status) =&gt; switch (status) { ... };</code></pre><p><code>switch</code> บน enum ที่ครอบคลุมครบทุกค่า — คอมไพเลอร์ตรวจให้ ถ้าเพิ่มค่าที่ห้าจะคอมไพล์ไม่ผ่านจนกว่าจะเติม</p><p>และเป็น<strong>ฟังก์ชันเดียว</strong> ที่ทั้งชิปและกล่องข้อมูลผู้ใช้ (<code>_showUserInfo</code> ใน 20.14) เรียกใช้ — สีกับข้อความจึงตรงกันเสมอ</p><div class="note"><strong>เทียบกับปัญหาสีใน 20.9</strong> — <code>PdaColors.green</code> กับ <code>AppColors.success</code> เป็นค่าเดียวกันสองชื่อ ซึ่งเป็นปัญหา<br>ที่นี่ตรงข้าม: สถานะสี่ค่ามีฟังก์ชันเดียวที่แปลงเป็นสี — ไม่มีจอไหนเลือกสีเอง<br>ความต่างคือ <strong>“ให้ชื่อกับค่า” ต่างจาก “ให้ฟังก์ชันตอบคำถาม”</strong> — อย่างหลังกันการตีความคนละแบบได้จริง</div><p>เทสต์คุมไว้ตรง ๆ: <code>'the status dot follows the controller, not a hard-coded colour'</code></p></section>
+
+<section id="section-2"><h2>2. การออกจากระบบ</h2><pre class="code-vs"><code>void _logout() {
+  widget.auth.logout();
+  Navigator.of(context).pushReplacement(
+    MaterialPageRoute(builder: (_) =&gt; LoginScreen(auth: widget.auth)),
+  );
+}</code></pre><p>เดินตามผลของสองบรรทัด</p><pre class="code-vs"><code>auth.logout()
+  ├─ _api.authToken = null      → ทุก repository หมดสิทธิ์พร้อมกัน
+  └─ _session = null            → ข้อมูลผู้ใช้หายจากหน่วยความจำ
+
+pushReplacement(LoginScreen)
+  └─ WarehouseShell ถูก dispose
+       ├─ removeObserver
+       ├─ ตัวจับเวลาสองตัวถูกยกเลิก
+       └─ store.dispose() → ตัวจับเวลา 5 วินาทีถูกยกเลิก</code></pre><div class="success"><strong>สี่บรรทัดที่สะอาดเพราะการตัดสินใจในบทก่อน ๆ</strong><table><thead><tr><th>สิ่งที่ไม่ต้องทำ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ล้าง token ในแต่ละ repository</td><td>ทั้งสี่ใช้ <code>ApiClient</code> ตัวเดียว (20.5)</td></tr>
+<tr><td>ลบข้อมูลผู้ใช้จากดิสก์</td><td>ไม่เคยเก็บลงดิสก์ (20.5)</td></tr>
+<tr><td>รีเซ็ต store ทีละฟิลด์</td><td>store ถูกทิ้งทั้งตัวพร้อมเปลือก</td></tr>
+<tr><td>ล้างกอง route</td><td>มีจอเดียวเสมอ (20.7)</td></tr>
+</tbody></table>เมื่อไล่ดูว่า “ทำไมโค้ดนี้ถึงสั้น” จะเจอว่าความสั้นมาจากโครงสร้าง ไม่ใช่จากการละเลย</div><p>สิ่งที่<strong>ไม่</strong>ถูกล้างคือค่าใน <code>ConnectionController</code> และ <code>AppLanguageController</code> — ถูกต้อง เพราะทั้งสองเป็นค่าของ<strong>เครื่อง</strong> ไม่ใช่ของผู้ใช้</p></section>
+
+<section id="section-3"><h2>3. เทสต์ 101 ข้อ ใน 14 ไฟล์</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>ทดสอบอะไร</th></tr></thead><tbody>
+<tr><td><code>connection_profile_test.dart</code></td><td>430</td><td>โปรไฟล์ การตรวจฟอร์ม การเก็บ การตรวจสถานะ</td></tr>
+<tr><td><code>pda_ui_test.dart</code></td><td>496</td><td>เลย์เอาต์บนขนาดจอจริง</td></tr>
+<tr><td><code>connection_settings_sheet_test.dart</code></td><td>278</td><td>แผ่นตั้งค่า</td></tr>
+<tr><td><code>picking_active_flow_test.dart</code></td><td>326</td><td>ขั้นตอนการหยิบ</td></tr>
+<tr><td><code>flow_navigation_test.dart</code></td><td>252</td><td>การพักงานและกลับมาทำต่อ</td></tr>
+<tr><td><code>scanner_layout_test.dart</code></td><td>225</td><td>ช่องสแกนที่ต้องอยู่กับที่</td></tr>
+<tr><td><code>conveyor_flow_ui_test.dart</code></td><td>177</td><td>สายพานสามตำแหน่ง</td></tr>
+<tr><td><code>user_menu_test.dart</code></td><td>141</td><td>ชิปผู้ใช้</td></tr>
+<tr><td><code>withdraw_layout_test.dart</code></td><td>109</td><td>จอเบิก</td></tr>
+<tr><td><code>agv_putaway_dialog_test.dart</code></td><td>93</td><td>กล่องสั่งงานหุ่นยนต์</td></tr>
+<tr><td><code>cycle_count_flow_test.dart</code></td><td>77</td><td>การนับรอบ</td></tr>
+<tr><td><code>pda_access_test.dart</code></td><td>67</td><td>สิทธิ์</td></tr>
+<tr><td><code>widget_test.dart</code></td><td>46</td><td>จอล็อกอินและภาษา</td></tr>
+<tr><td><code>inventory_status_test.dart</code></td><td>42</td><td>ป้ายสถานะสต๊อก</td></tr>
+<tr><td><code>fakes/fake_repositories.dart</code></td><td>411</td><td>ไม่ใช่เทสต์ — ของปลอมที่ทุกไฟล์ใช้</td></tr>
+</tbody></table><h3>เทสต์เหล่านี้อยู่ระดับไหน</h3><p>ใช้เกณฑ์จาก 19.14</p><table><thead><tr><th>ระดับ</th><th>คำอธิบาย</th><th>สัดส่วนโดยประมาณ</th></tr></thead><tbody>
+<tr><td>2 — ฟังก์ชันบริสุทธิ์</td><td><code>normalizeBasePath</code>, <code>validateConnectionInput</code>, <code>decodeConnectionSnapshot</code>, <code>PdaAccess</code></td><td>ราวหนึ่งในสาม</td></tr>
+<tr><td>3 — widget test ที่ประกอบของจริงกับของปลอม</td><td>เลย์เอาต์ ขั้นตอนการทำงาน แผ่นตั้งค่า</td><td>ราวสองในสาม</td></tr>
+<tr><td>4 — ต้องลองบนเครื่องจริง</td><td>เครื่องสแกน การสั่น พฤติกรรมของแป้นพิมพ์จริง</td><td>ไม่มีเทสต์ ตามที่ควรเป็น</td></tr>
+</tbody></table></section>
+
+<section id="section-4"><h2>4. ชื่อเทสต์ที่เขียนเป็นประโยค</h2><pre class="code-vs"><code>'a corrupt row is dropped without losing the others'
+'the dot probes exactly the address requests use'
+'switching profiles clears the old status instead of keeping it'
+'a 200 that is valid JSON but not the health payload is refused'
+'the sheet covers the bottom nav instead of squeezing it'
+'closing an untouched form does not ask anything'
+'the status dot follows the controller, not a hard-coded colour'
+'unknown or missing permission values fail closed'
+'Receiving keeps its scan input fixed while orders scroll'</code></pre><div class="success"><strong>สังเกตรูปแบบที่ซ้ำ: “ทำ X <em>แทนที่จะ</em> ทำ Y”</strong><br><code>instead of</code>, <code>not a hard-coded colour</code>, <code>without losing the others</code><br>ชื่อแบบนี้บันทึก<strong>ทางที่เกือบเลือกและเหตุผลที่ไม่เลือก</strong> ไม่ใช่แค่บอกว่าโค้ดทำอะไร<br>เมื่อเทสต์แดง คนแก้จะรู้ทันทีว่าตัวเองเพิ่งทำลายการตัดสินใจอะไร ไม่ใช่แค่รู้ว่ามีอะไรพัง<br><strong>นี่คือสิ่งที่ทำให้ชุดเทสต์เป็นเอกสารได้จริง</strong> — และเป็นทักษะที่ฝึกได้: เขียนชื่อเทสต์เป็นประโยคที่คนไม่รู้จักโค้ดอ่านแล้วเข้าใจว่าระบบสัญญาอะไรไว้</div><p>เทียบกับชื่อที่พบบ่อยกว่าและมีประโยชน์น้อยกว่า</p><table><thead><tr><th>ชื่อที่ไม่ช่วย</th><th>ชื่อที่ช่วย</th></tr></thead><tbody>
+<tr><td><code>'test decode'</code></td><td><code>'a corrupt row is dropped without losing the others'</code></td></tr>
+<tr><td><code>'status color works'</code></td><td><code>'the status dot follows the controller, not a hard-coded colour'</code></td></tr>
+<tr><td><code>'permission test'</code></td><td><code>'unknown or missing permission values fail closed'</code></td></tr>
+</tbody></table></section>
+
+<section id="section-5"><h2>5. คำตอบของคำถามจาก 19.15</h2><div class="note"><strong>“โปรเจกต์ที่มี store, มี repository และมีเทสต์ — ปัญหา 15 แถวหายไปกี่แถว และเหลืออะไร”</strong></div><p>ไล่ทีละแถวจากสิ่งที่อ่านมาใน Part นี้</p><table><thead><tr><th>#</th><th>กฎที่ wmsapp เขียนสองแบบ</th><th>ที่นี่</th><th>หลักฐาน</th></tr></thead><tbody>
+<tr><td>1</td><td>ส่ง <code>statusCode</code> ต่อจากชั้นเครือข่าย</td><td><strong>หาย</strong></td><td><code>ApiException</code> ตัวเดียวพก <code>int?</code> (20.4)</td></tr>
+<tr><td>2</td><td>สถานะของ flow เก็บที่ไหน</td><td><strong>หาย</strong></td><td>อยู่ใน <code>store.screen</code> ที่เดียว (20.14)</td></tr>
+<tr><td>3</td><td>เมนู/แถบบนของแต่ละจอ</td><td><strong>หาย</strong></td><td>เปลือกวาดที่เดียว (บทที่ 1)</td></tr>
+<tr><td>4</td><td>เครื่องมือทดสอบที่หลุดไปกับรุ่นจริง</td><td><strong>หาย</strong></td><td>ไม่มีจอทดสอบเลย</td></tr>
+<tr><td>5</td><td>สถานะที่กดไม่ได้</td><td>บางส่วน</td><td><code>_headerAction</code> ทำถูก แต่ <code>PdaButton</code> รับ null ไม่ได้ (20.13)</td></tr>
+<tr><td>6</td><td>สีของประเภท/สถานะ</td><td>บางส่วน</td><td>สถานะการเชื่อมต่อมีฟังก์ชันเดียว แต่ <code>green</code>/<code>success</code> ยังซ้ำ (20.9)</td></tr>
+<tr><td>7</td><td>การจับข้อยกเว้นตอนอ่านค่าที่เก็บไว้</td><td><strong>ยังมี</strong></td><td><code>on StateError</code> กับ <code>catch (_)</code> (20.11)</td></tr>
+<tr><td>8</td><td>กล่องยืนยันสำหรับการกระทำเดียวกัน</td><td>ยังไม่เกิด</td><td>มี <code>_ask</code> และ <code>_confirmExit</code> ที่รวมไว้แล้ว</td></tr>
+</tbody></table><p>อีกเจ็ดแถวที่เหลือ (เลือกล็อต, จำพาเลทล่าสุด, S/N ครบ, ตรวจสภาพ, ล้างช่องสแกน, แจ้งความสำเร็จ, รูปย่อ) เป็นเรื่องของโดเมนที่ Part 21 และ 22 จะไปดู</p><h3>สรุปคำตอบเท่าที่หลักฐานถึง</h3><div class="success"><strong>สี่แถวหายชัดเจน สองแถวหายบางส่วน หนึ่งแถวยังมีเหมือนเดิม</strong><br>และทั้งสี่แถวที่หาย หายด้วยเหตุผลเดียวกัน: <strong>มีที่กลางที่ทุกคนต้องผ่าน</strong><ul><li><code>ApiException</code> ตัวเดียว → ทุกจอได้ <code>statusCode</code> โดยไม่ต้องทำอะไร</li><li><code>store.screen</code> ตัวเดียว → ไม่มีจอไหนเก็บสถานะเอง</li><li><code>_header</code> ที่เดียว → ไม่มีจอไหนวาดเมนูเอง</li></ul>ไม่ใช่เพราะคนเขียนขยันกว่า แต่เพราะ<strong>ทางที่ผิดถูกทำให้เดินไม่ได้</strong></div><div class="warning"><strong>แต่คำทำนายจาก 20.1 ก็เป็นจริงด้วย</strong><br>20.1 ทำนายว่าปัญหาที่เกิดที่<strong>ชั้นการแสดงผล</strong> จะไม่หายไปแม้จะมี store<br>แถวที่ 5 และ 6 ยืนยันคำทำนายนั้น — <code>WarehouseStore</code> ไม่ได้เกี่ยวอะไรกับการที่ปุ่มไม่เป็นสีเทา หรือการที่สีมีสองชื่อ<br>และแถวที่ 7 แสดงว่า<strong>แม้แต่ในชั้น <code>core/</code> ที่สะอาดที่สุด ก็ยังมีของเดียวที่เขียนสองแบบได้</strong> ถ้าไม่มีอะไรบังคับ<br><strong>ข้อสรุป: มีที่กลางแก้ปัญหาได้เฉพาะเรื่องที่ถูกบังคับให้ผ่านที่กลางนั้น</strong> เรื่องที่ยังปล่อยให้แต่ละที่ตัดสินใจเอง จะยังไม่ตรงกันเหมือนเดิม</div></section>
+
+<section id="section-6"><h2>6. สิ่งที่ Part นี้พบว่ายังทำไม่ครบ</h2><table><thead><tr><th>#</th><th>เรื่อง</th><th>บท</th><th>ขนาดของการแก้</th></tr></thead><tbody>
+<tr><td>1</td><td><code>catch</code> ที่จอล็อกอินจับเฉพาะ <code>ApiException</code> — ข้อยกเว้นอื่นทำให้กดแล้วเงียบ</td><td>20.7</td><td>เล็ก</td></tr>
+<tr><td>2</td><td>ไม่มี <code>PopScope</code> ที่เปลือก — ปุ่มย้อนกลับหลุดออกทั้งอัน งานหาย</td><td>20.14</td><td>เล็ก</td></tr>
+<tr><td>3</td><td><code>_decode</code> ไม่ตรวจว่า 200 เป็น JSON จริง</td><td>20.4, 20.12</td><td>เล็ก</td></tr>
+<tr><td>4</td><td>ไม่มีเทสต์สำหรับ <code>connection_probe.dart</code></td><td>20.12</td><td>เล็ก</td></tr>
+<tr><td>5</td><td><code>PdaButton</code> รับ null ไม่ได้ ปุ่มที่ปิดจึงไม่เป็นสีเทา</td><td>20.13</td><td>กลาง</td></tr>
+<tr><td>6</td><td>คำถาม “ใช้ค่าใหม่ทันทีไหม” ให้ทางเลือกที่ไม่มีอยู่จริง</td><td>20.13</td><td>เล็ก</td></tr>
+<tr><td>7</td><td><code>expiration</code> ถูกอ่านมาแต่ไม่มีใครใช้</td><td>20.5</td><td>กลาง</td></tr>
+<tr><td>8</td><td>ไม่มีการกันการยิงซ้ำ (<code>Idempotency-Key</code>)</td><td>20.4</td><td>ต้องแก้ร่วมกับ .NET</td></tr>
+<tr><td>9</td><td>กลับมาจากพักแล้วไม่โหลดข้อมูลงานใหม่</td><td>20.14</td><td>เล็ก แต่ต้องตรวจ <code>loadAll()</code> ก่อน</td></tr>
+<tr><td>10</td><td><code>version</code> ถูกเขียนแต่ไม่ถูกอ่าน</td><td>20.10</td><td>ยังไม่ต้องทำ</td></tr>
+</tbody></table><p>เจ็ดในสิบเป็นการแก้ขนาดเล็ก และหกในนั้น<strong>มีเทสต์รองรับได้ทันทีเพราะโครงสร้างเปิดทางไว้แล้ว</strong> — ต่างจากรายการของ 19.15 ที่ส่วนใหญ่แก้ไม่ได้ถ้าไม่รื้อชั้นล่างก่อน</p></section>
+
+<section id="section-7"><h2>7. ยี่สิบสิ่งที่ Part นี้ทำถูก</h2><table><thead><tr><th>#</th><th>เรื่อง</th></tr></thead><tbody>
+<tr><td>1</td><td><code>main()</code> รอเฉพาะสิ่งที่คำขอแรกต้องใช้</td></tr>
+<tr><td>2</td><td>สร้าง dependency ที่รากเดียว ไม่มีจอไหนสร้าง <code>ApiClient</code> เอง</td></tr>
+<tr><td>3</td><td><code>apiBaseUrl</code> เป็น getter — สลับเซิร์ฟเวอร์ไม่ทำ token หาย</td></tr>
+<tr><td>4</td><td>ฟังก์ชันเดียวตอบทั้งคำขอและจุดสถานะ</td></tr>
+<tr><td>5</td><td>ที่อยู่เริ่มต้นอยู่บรรทัดเดียว</td></tr>
+<tr><td>6</td><td><code>ApiClient</code> รับ <code>http.Client</code> ได้ — ต้นทางของเทสต์ทั้งหมด</td></tr>
+<tr><td>7</td><td><code>statusCode</code> เป็น null เมื่อไม่รู้ผล แยกจาก 500</td></tr>
+<tr><td>8</td><td><code>toString()</code> ทำให้ทางที่เขียนง่ายที่สุดเป็นทางที่ถูก</td></tr>
+<tr><td>9</td><td>ยอมให้ล้มเฉพาะที่ <code>token</code> ที่ล้มแล้วรู้เรื่อง</td></tr>
+<tr><td>10</td><td>ไม่เก็บ session ลงดิสก์ เพราะเครื่องใช้ร่วมกัน</td></tr>
+<tr><td>11</td><td>สิทธิ์รับมาจากเซิร์ฟเวอร์ ไม่ตรวจชื่อบทบาทในแอป</td></tr>
+<tr><td>12</td><td><code>PdaAccess.fromJson</code> วนจาก enum — map ครบเสมอ</td></tr>
+<tr><td>13</td><td>ปุ่มตั้งค่าบนจอล็อกอินตัดวงจรที่ทำให้ตันได้</td></tr>
+<tr><td>14</td><td><code>tr()</code> ทำงานได้โดยไม่มี <code>BuildContext</code></td></tr>
+<tr><td>15</td><td>ไม่แปลข้อมูลที่ต้องตรงกับป้ายที่ชั้นวาง</td></tr>
+<tr><td>16</td><td>ธีมบังคับพื้นที่กด 48 พิกเซล</td></tr>
+<tr><td>17</td><td><code>fromJson</code> ของโปรไฟล์คืน null — แถวเสียหนึ่งไม่ทำให้เสียทั้งหมด</td></tr>
+<tr><td>18</td><td>ข้อความผิดพลาดบอกว่าค่านั้นควรไปช่องไหน</td></tr>
+<tr><td>19</td><td>ตัวตรวจสุขภาพอ่านตัว body ไม่เชื่อรหัส 200</td></tr>
+<tr><td>20</td><td><code>_isDirty</code> เป็นข้อเท็จจริงที่คำนวณ ไม่ใช่ธงที่ต้องจำตั้ง</td></tr>
+</tbody></table><p>รายการนี้ยาวกว่ารายการข้อบกพร่องสองเท่า และเป็นสิ่งที่ต้องบันทึกไว้ให้ครบพอ ๆ กัน — 16.1 ตั้งกฎไว้ว่า<strong>ทุกครั้งที่วิจารณ์โค้ดคนอื่น ต้องบอกด้วยว่ามันทำอะไรถูก</strong></p></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><ol><li>เลือกสามข้อจากรายการสิบข้อในบทที่ 6 แล้วเขียนเทสต์ที่จะแดงตอนนี้และเขียวหลังแก้</li><li>ถ้ามีเวลาแก้ได้แค่วันเดียว จะเลือกข้อไหนและเพราะอะไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>// (1) จอล็อกอินต้องมีข้อความเสมอเมื่อล็อกอินไม่สำเร็จ
+testWidgets('an unexpected reply still tells the operator something',
+    (tester) async {
+  final api = ApiClient(
+    // 200 แต่ไม่มี token → TypeError ใน AuthRepository
+    client: MockClient((_) async =&gt; http.Response('{"username":"x"}', 200)),
+  );
+  await tester.pumpWidget(MaterialApp(
+    home: LoginScreen(auth: AuthRepository(api))));
+  await tester.enterText(find.byType(TextFormField).first, 'EMP001');
+  await tester.enterText(find.byType(TextFormField).last, 'pw');
+  await tester.tap(find.byType(FilledButton));
+  await tester.pumpAndSettle();
+
+  expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
+});</code></pre><pre class="code-vs"><code>// (3) ApiClient ต้องไม่ตีความ HTML ว่าเป็นคำตอบว่าง
+test('a 200 carrying HTML is not treated as an empty result', () async {
+  final api = ApiClient(
+    client: MockClient((_) async =&gt; http.Response('&lt;html&gt;&lt;/html&gt;', 200)),
+  );
+  await expectLater(
+    () =&gt; api.post('/mobile_receiving_list', {}),
+    throwsA(isA&lt;ApiException&gt;()),
+  );
+});</code></pre><pre class="code-vs"><code>// (4) ตรึงตรรกะที่สำคัญที่สุดของตัวตรวจไว้
+test('a 200 carrying the Blazor page is not a healthy WMS', () async {
+  final result = await probeConnection(
+    baseUrl: 'http://host:6191',
+    client: MockClient((_) async =&gt; http.Response('&lt;!DOCTYPE html&gt;', 200)),
+  );
+  expect(result.ok, isFalse);
+  expect(result.message, contains('Base Path'));
+});</code></pre><p>ข้อ 4 จะ<strong>เขียวตั้งแต่แรก</strong> ต่างจากอีกสองข้อ — เพราะโค้ดถูกอยู่แล้ว แค่ไม่มีอะไรตรึงไว้</p><div class="note"><strong>เทสต์ที่เขียวตั้งแต่เขียนก็มีค่า</strong> เมื่อมันตรึงการตัดสินใจที่คนอาจ “ทำให้ง่ายขึ้น” ในอนาคต<br>19.14 เรียกเทสต์แบบนี้ว่า characterization test — บันทึกพฤติกรรมปัจจุบันไว้ก่อนจะแตะอะไร<br>ต่างกันตรงที่ที่นั่นบันทึกพฤติกรรมที่<strong>อาจผิด</strong> ส่วนที่นี่บันทึกพฤติกรรมที่<strong>ถูกและเปราะ</strong></div><p><strong>ข้อ 2 — เลือกอะไรถ้ามีวันเดียว</strong></p><p>จัดลำดับด้วยเกณฑ์สองข้อ: <strong>ผู้ใช้เสียหายแค่ไหน</strong> และ <strong>แก้ยากแค่ไหน</strong></p><table><thead><tr><th>ข้อ</th><th>ความเสียหาย</th><th>ความยาก</th><th>ลำดับ</th></tr></thead><tbody>
+<tr><td>(2) ปุ่มย้อนกลับ → งานที่ทำมาหาย</td><td><strong>สูงสุด</strong></td><td>เล็ก</td><td><strong>1</strong></td></tr>
+<tr><td>(1) กดล็อกอินแล้วเงียบ</td><td>สูง — เข้าใช้งานไม่ได้เลย</td><td>เล็ก</td><td><strong>2</strong></td></tr>
+<tr><td>(9) กลับมาแล้วตราแจ้งเก่า</td><td>กลาง — อาจไปหยิบงานที่คนอื่นเอาไปแล้ว</td><td>เล็ก แต่ต้องตรวจก่อน</td><td>3</td></tr>
+<tr><td>(3) HTML ถูกอ่านเป็นผลว่าง</td><td>กลาง — “ค้นหาแล้วไม่เจอ” ที่พาไปหาผิดที่</td><td>เล็ก</td><td>4</td></tr>
+<tr><td>(5) ปุ่มไม่เป็นสีเทา</td><td>ต่ำ</td><td>กลาง</td><td>—</td></tr>
+<tr><td>(8) กันยิงซ้ำ</td><td><strong>สูงสุดถ้าเกิด</strong></td><td>ต้องแก้ .NET ด้วย</td><td>ไม่จบในวันเดียว</td></tr>
+</tbody></table><p>เลือก <strong>(2), (1), (3)</strong> — ทั้งสามแก้ได้จริงในวันเดียวพร้อมเทสต์</p><div class="success"><strong>ข้อ (8) เป็นข้อที่ต้องพูดถึงแม้จะไม่ได้เลือก</strong><br>ความเสียหายสูงที่สุดในรายการ — สั่งงานซ้ำในคลังแปลว่ามีของเดินสองรอบและมีเอกสารเกิน<br>แต่แก้ฝ่ายเดียวไม่ได้ ต้องคุยกับคนดูแล .NET ก่อน<br><strong>วิธีจัดการที่ถูกคือเริ่มบทสนทนานั้นในวันนี้ ไม่ใช่รอจนมีเวลาแก้</strong> — งานที่ต้องรอคนอื่นควรถูกส่งออกไปก่อนงานที่ทำเองได้<br>นี่เป็นหลักการจัดลำดับที่ใช้ได้ทั่วไป: <strong>งานที่ถูกบล็อกให้เริ่มก่อน งานที่ทำเองได้ให้ทำทีหลัง</strong></div></details></section>
+
+<section id="section-9"><h2>9. สรุป Part 20</h2><div class="success"><ul><li>36 ไฟล์ 15,445 บรรทัด เทสต์ 101 ข้อ — เทียบกับ 110 ไฟล์ 22,095 บรรทัด และ 0 เทสต์</li><li>ชั้น <code>core/</code> 1,081 บรรทัดที่ไม่รู้จักธุรกิจเลย คือสิ่งที่ wmsapp ไม่มี</li><li>เทสต์ทั้งหมดเป็นไปได้เพราะบรรทัดเดียว: <code>ApiClient({http.Client? client})</code></li><li>สี่ในสิบห้าแถวของ 19.15 หายไปด้วยเหตุผลเดียวกัน — มีที่กลางที่ทุกคนต้องผ่าน</li><li>สองแถวหายบางส่วน หนึ่งแถวยังมี — ล้วนเป็นเรื่องที่ยังไม่ถูกบังคับให้ผ่านที่กลาง</li><li>ปัญหาที่พบใน Part นี้สิบข้อ เจ็ดข้อเป็นการแก้ขนาดเล็กที่มีเทสต์รองรับได้ทันที</li><li>ชื่อเทสต์ที่เขียนแบบ “ทำ X แทนที่จะทำ Y” บันทึกการตัดสินใจ ไม่ใช่แค่พฤติกรรม</li><li>ยี่สิบสิ่งที่โปรเจกต์นี้ทำถูก และควรบันทึกให้ครบพอ ๆ กับข้อบกพร่อง</li></ul></div><h3>คำถามที่ Part 21 ต้องตอบ</h3><div class="note"><strong>“<code>WarehouseStore</code> 1,756 บรรทัดกับ 70 เมธอด — ที่กลางที่ใหญ่ขนาดนี้ยังเป็นที่กลางอยู่ไหม หรือกลายเป็นไฟล์ที่ใหญ่ที่สุดที่ไม่มีใครกล้าแตะ”</strong></div><p><strong>Part หน้า:</strong> repository ทั้งสี่ ของปลอม 411 บรรทัด และการรับสินค้าที่พักงานกลางคันแล้วกลับมาทำต่อได้</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

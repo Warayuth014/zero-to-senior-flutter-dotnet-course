@@ -1,13 +1,170 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/auth_session.dart</code> — model เล็ก แต่กำหนดขอบเขตความปลอดภัยของทั้งแอป</div>
-<section><h2>1. Session เก็บอะไร</h2><p><code>AuthSession</code> ประกอบด้วย token, username, roles และ expiration ที่อาจไม่มีค่า มันเป็น snapshot จากผล login ไม่ใช่ผู้ตัดสินว่าผู้ใช้ยัง authenticated อยู่ เพราะ validity ต้องพิจารณาเวลา, issuer/audience, server profile และผลตอบกลับ 401 ด้วย</p></section>
-<section><h2>2. Owner สองชั้น</h2><p><code>AuthRepository.session</code> เก็บข้อมูลสำหรับ UI ส่วน <code>ApiClient.authToken</code> เก็บค่าเพื่อสร้าง Authorization header ทั้งสองต้องสอดคล้องกันเสมอ หากเขียน token ก่อน parse session สำเร็จ หรือ logout ล้างเพียงจุดเดียว จะเกิด authenticated transport กับ unauthenticated UI หรือกลับกัน</p></section>
-<section><h2>3. Lifecycle ปัจจุบัน</h2><pre class="code-vs"><code>app start → session = null
-login success → session + client token
-enter WarehouseShell → read username/expiration
-logout → clear session + token
-process killed → session lost → login again</code></pre><p>ไม่มี restore จาก disk ใน code นี้ การอ่านชื่อ class แล้วสรุปว่าจำ login ได้จึงผิด</p></section>
-<section><h2>4. Expiration มีแต่ยังไม่ enforce</h2><p>expiration ถูก parse และแสดงใน User Info แต่ยังไม่มี startup guard, pre-request check หรือ scheduler logout ดังนั้น token หมดอายุจริงจะถูกค้นพบเมื่อ server ตอบ 401 แนวทางที่ถูกต้องคือใช้ UTC, เผื่อ clock skew, ป้องกัน refresh พร้อมกันหลาย request และให้ server เป็น authority สุดท้าย</p></section>
-<section><h2>5. Roles ว่างหมายความว่าอะไร</h2><p>repository สร้าง roles เป็น list ว่าง จึงยังไม่ควรซ่อน/แสดงเมนูตาม role จาก model นี้ หาก backend ส่ง claims ใน JWT ต้องเลือกว่าจะ parse ฝั่ง clientเพื่อ UX หรือให้ endpoint <code>/me</code> คืน permission ที่ normalize แล้ว แต่ backend ต้องตรวจ authorization ซ้ำเสมอ UI guard ไม่ใช่ security boundary</p></section>
-<section><h2>6. Secure persistence ทางเลือก</h2><p>ถ้าต้องการจำ login อย่าใส่ token ใน <code>SharedPreferences</code> ใช้ platform secure storage, เก็บ refresh token ตาม policy, ผูก session กับ profile/issuer และ restore ก่อนเลือก home route การอ่าน storage ควร fail closed: decrypt/parse ไม่ได้ให้ล้างและกลับ login ไม่ใช้ token ที่ไม่ทราบที่มา</p></section>
-<section><h2>7. Server switch invariant</h2><p>session ควรบันทึก server identity หรือ profile ID ที่ออก token เมื่อ active profile เปลี่ยน ให้ล้าง sessionและ warehouse state ก่อนยิง request ไป host ใหม่ เว้นแต่มี explicit trust rule นี่แก้ทั้ง credential leakage และข้อมูลหน้าจอจากคลัง A ปะปนกับคลัง B</p></section>
-<section><h2>8. Session tests</h2><div class="success">สร้าง fake clock แล้วทดสอบ valid/near-expiry/expired, logout idempotent, restore ที่ corrupt, 401 พร้อมกันหลาย request, profile switch และ role parsing ยืนยันด้วยว่า token/password ไม่ปรากฏใน <code>toString</code>, logs หรือ error UI</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน lib/features/auth/pda_access.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.5, 6.5 (enhanced enum), 4.14 (สถานะที่สร้างผิดไม่ได้)<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตามรอย session ตั้งแต่ล็อกอินจนถูกทิ้ง และอ่านโมเดลสิทธิ์ 73 บรรทัดจนหมด</div>
+
+<section><h2>1. session เดินทางไปไหนบ้าง</h2><pre class="code-vs"><code>LoginScreen._submit()
+  └─ auth.login(id, pw)
+       ├─ _api.authToken = token          ← ①  token ผูกกับ client
+       └─ _session = session              ← ②  เก็บไว้ที่ repository
+
+  └─ pushReplacement(WarehouseShell(auth: widget.auth))
+                                             ↑ ส่ง repository ไม่ใช่ session
+
+WarehouseShell.initState()
+  └─ auth.session!.access                 ← ③  หยิบสิทธิ์
+  └─ auth.session!.username               ←     หยิบชื่อ
+  └─ WarehouseStore(username: ..., access: ...)
+
+HomeView
+  └─ store.access.canView(PdaFeature.picking)   ← ④ ตัดสินว่าวาดการ์ดไหม
+
+UserChipMenu → logout
+  └─ auth.logout()                        ← ⑤ ล้าง token + session
+  └─ pushReplacement(LoginScreen)</code></pre><p>สังเกตข้อ ② และ ③ — จอไม่ได้รับ <code>AuthSession</code> ตรง ๆ แต่รับ <code>AuthRepository</code> แล้วไปหยิบ session จากในนั้น</p><table><thead><tr><th>ถ้าส่ง <code>AuthSession</code></th><th>ที่ทำจริง: ส่ง <code>AuthRepository</code></th></tr></thead><tbody>
+<tr><td>จอได้ก้อนข้อมูลนิ่ง ๆ</td><td>จอได้ตัวที่ล็อกอิน/ออกได้ด้วย</td></tr>
+<tr><td>ล็อกเอาต์ต้องส่งฟังก์ชันเพิ่ม</td><td><code>auth.logout()</code> เรียกได้เลย</td></tr>
+<tr><td>ไม่มีทางแตะ <code>client</code></td><td><code>auth.client</code> ใช้สร้างชั้น API ได้</td></tr>
+</tbody></table><p>ราคาที่จ่ายคือจอต้องเขียน <code>auth.session!</code> พร้อมเครื่องหมายอัศเจรีย์ — ซึ่งจะพูดถึงในบทที่ 5</p></section>
+
+<section><h2>2. <code>PdaFeature</code> — enum ที่พก key</h2><pre class="code-vs"><code>enum PdaFeature {
+  receiving('/mobile/pda/receiving'),
+  inventoryIssue('/mobile/pda/inventory-issue'),
+  picking('/mobile/pda/picking'),
+  dispatch('/mobile/pda/dispatch'),
+  myTasks('/mobile/pda/my-tasks'),
+  agvMonitor('/mobile/pda/agv-monitor'),
+  inventoryControl('/mobile/pda/inventory-control'),
+  cycleCount('/mobile/pda/cycle-count');
+
+  const PdaFeature(this.key);
+  final String key;
+}</code></pre><p>รูปแบบ <strong>enhanced enum</strong> (D1.17, 6.5) — สมาชิกแต่ละตัวพกข้อมูลติดตัว</p><table><thead><tr><th>ฝั่ง Dart</th><th>ฝั่ง JSON จากเซิร์ฟเวอร์</th></tr></thead><tbody>
+<tr><td><code>PdaFeature.picking</code></td><td><code>"/mobile/pda/picking"</code></td></tr>
+</tbody></table><h3>ทำไม key เป็นเส้นทาง URL</h3><p>เพราะฝั่ง WMS เว็บใช้เส้นทางเป็นตัวระบุสิทธิ์ของเมนูอยู่แล้ว — พีดีเอยืมระบบเดิมมาใช้ ไม่ได้สร้างชื่อชุดใหม่</p><div class="note"><strong>ข้อดี</strong> — ผู้ดูแลตั้งสิทธิ์ในหน้าจัดการเดียวกับที่ใช้ตั้งสิทธิ์เว็บ ไม่ต้องเรียนคำศัพท์ชุดที่สอง<br><strong>ข้อเสีย</strong> — คำว่า “เส้นทาง” ทำให้เข้าใจผิดได้ว่าพีดีเอยิงไปที่ URL นี้ ทั้งที่ไม่เคยยิง มันเป็นแค่<strong>สตริงที่ใช้เป็นกุญแจ</strong><br>คอมเมนต์ในไฟล์เรียกมันว่า “stable permission key” ซึ่งเป็นคำที่ตรงกว่า</div><h3>ทำไมไม่ใช้ <code>name</code> ของ enum</h3><pre class="code-vs"><code>PdaFeature.picking.name   // → "picking"</code></pre><p>ใช้ได้ในทางเทคนิค แต่จะผูกชื่อฟิลด์ใน Dart เข้ากับข้อตกลงกับเซิร์ฟเวอร์ — เปลี่ยนชื่อตัวแปรใน Dart แล้วสิทธิ์พังทันที โดยที่คอมไพเลอร์ไม่เตือน</p><p>การประกาศ key แยกทำให้เปลี่ยนชื่อใน Dart ได้อย่างปลอดภัย</p></section>
+
+<section><h2>3. <code>PdaAccessLevel</code> — ระดับที่เรียงลำดับได้</h2><pre class="code-vs"><code>enum PdaAccessLevel {
+  none,
+  view,
+  operate,
+  fullControl;
+
+  static PdaAccessLevel parse(Object? value) =&gt;
+      switch (value?.toString().trim().toLowerCase()) {
+        'view' =&gt; PdaAccessLevel.view,
+        'operate' =&gt; PdaAccessLevel.operate,
+        'fullcontrol' || 'full-control' =&gt; PdaAccessLevel.fullControl,
+        _ =&gt; PdaAccessLevel.none,
+      };
+}</code></pre><table><thead><tr><th>ระดับ</th><th><code>index</code></th><th>ทำอะไรได้</th></tr></thead><tbody>
+<tr><td><code>none</code></td><td>0</td><td>ไม่เห็นเมนูเลย</td></tr>
+<tr><td><code>view</code></td><td>1</td><td>เปิดดูได้ แต่กดยืนยันไม่ได้</td></tr>
+<tr><td><code>operate</code></td><td>2</td><td>ทำงานปกติได้</td></tr>
+<tr><td><code>fullControl</code></td><td>3</td><td>ทำสิ่งที่ต้องระดับหัวหน้าได้</td></tr>
+</tbody></table><h3><code>parse</code> ที่ไม่มีวันโยน</h3><p>ค่าที่ไม่รู้จักตกเข้า <code>_ =&gt; none</code> — ไม่มีทางล้ม</p><div class="success"><strong>การเลือกค่าตกถังให้เป็น <code>none</code> ไม่ใช่ <code>view</code> คือการเลือกที่ปลอดภัย</strong><br>ถ้าเซิร์ฟเวอร์ส่งค่าใหม่ที่แอปรุ่นเก่ายังไม่รู้จัก แอปจะ<strong>ปิดฟีเจอร์ไว้ก่อน</strong> ไม่ใช่เปิดให้<br>ผู้ใช้อาจงงว่าเมนูหาย แต่ดีกว่าให้คนที่ไม่มีสิทธิ์เข้าไปยืนยันงานได้ — เรียกว่า <em>fail closed</em></div><h3>รูปแบบ <code>||</code> ใน pattern</h3><pre class="code-vs"><code>'fullcontrol' || 'full-control' =&gt; PdaAccessLevel.fullControl,</code></pre><p>สองสตริงนำไปสู่ผลเดียวกัน (Dart 3, D1.19) — รับได้ทั้งรูปแบบที่มีขีดและไม่มี</p><p>บวกกับ <code>.trim().toLowerCase()</code> ข้างหน้า ทำให้ <code>"FullControl"</code>, <code>" full-control "</code>, <code>"FULLCONTROL"</code> ได้ผลเหมือนกันหมด</p><div class="note"><strong>ความยืดหยุ่นนี้จำเป็นเมื่อสองระบบพัฒนากันคนละที</strong> — เหมือนกับที่ <code>_decode</code> ใน 20.4 ลองอ่านชื่อฟิลด์สามแบบ<br>ทางที่สะอาดกว่าคือตกลงรูปแบบเดียวให้แน่ แล้วลดเงื่อนไขลง — แต่ตราบใดที่ยังไม่ได้ตกลง การรับหลายรูปดีกว่าปิดฟีเจอร์ให้ผู้ใช้เพราะตัวพิมพ์ใหญ่เล็ก</div></section>
+
+<section><h2>4. <code>PdaAccess</code></h2><pre class="code-vs"><code>class PdaAccess {
+  const PdaAccess(this._levels);
+
+  factory PdaAccess.fromJson(Object? value) {
+    final raw = value is Map ? value : const &lt;Object?, Object?&gt;{};
+    return PdaAccess({
+      for (final feature in PdaFeature.values)
+        feature: PdaAccessLevel.parse(raw[feature.key]),
+    });
+  }
+
+  final Map&lt;PdaFeature, PdaAccessLevel&gt; _levels;
+
+  PdaAccessLevel level(PdaFeature feature) =&gt;
+      _levels[feature] ?? PdaAccessLevel.none;
+
+  bool canView(PdaFeature feature) =&gt; level(feature) != PdaAccessLevel.none;
+
+  bool canOperate(PdaFeature feature) =&gt;
+      level(feature).index &gt;= PdaAccessLevel.operate.index;
+
+  bool hasFullControl(PdaFeature feature) =&gt;
+      level(feature) == PdaAccessLevel.fullControl;
+
+  Map&lt;PdaFeature, PdaAccessLevel&gt; get levels =&gt; Map.unmodifiable(_levels);
+}</code></pre>
+
+<h3><code>fromJson</code> วนจาก enum ไม่ใช่จาก JSON</h3><pre class="code-vs"><code>for (final feature in PdaFeature.values)
+  feature: PdaAccessLevel.parse(raw[feature.key]),</code></pre><p>ทิศทางของการวนสำคัญมาก</p><table><thead><tr><th>วนจาก</th><th>ผลเมื่อ JSON ขาดฟีเจอร์</th><th>ผลเมื่อ JSON มีคีย์แปลกปลอม</th></tr></thead><tbody>
+<tr><td>JSON</td><td>ฟีเจอร์นั้นหายจาก map — ต้องจัดการ null ทุกที่</td><td>เข้ามาปนใน map</td></tr>
+<tr><td><strong>enum</strong> (ที่ทำจริง)</td><td>ได้ <code>none</code> — map ครบทุกฟีเจอร์เสมอ</td><td>ถูกเมินเงียบ ๆ</td></tr>
+</tbody></table><div class="success"><strong>ผลลัพธ์คือ <code>_levels</code> มีครบ 8 คีย์เสมอ ไม่ว่าเซิร์ฟเวอร์จะส่งอะไรมา</strong><br>รวมถึงกรณีส่ง <code>null</code> มาทั้งก้อน (บรรทัด <code>value is Map ? value : {}</code>)<br>เป็นรูปแบบเดียวกับ 4.14 — ทำให้สถานะที่ไม่ครบ<strong>สร้างไม่ได้</strong> แทนที่จะไปตรวจทีหลัง</div>
+
+<h3>สาม getter ที่ต่างกันตรงตัวเปรียบเทียบ</h3><pre class="code-vs"><code>canView        →  != none            (มากกว่า 0)
+canOperate     →  index &gt;= operate    (2 หรือ 3)
+hasFullControl →  == fullControl      (3 เท่านั้น)</code></pre><p>การใช้ <code>index</code> ได้ผลเพราะ enum เรียงจากน้อยไปมากโดยตั้งใจ</p><div class="warning"><strong>ข้อควรระวังของการพึ่ง <code>index</code></strong><br>ถ้ามีคนแทรกสมาชิกใหม่ผิดตำแหน่ง เช่น<pre class="code-vs"><code>enum PdaAccessLevel { none, view, audit, operate, fullControl }
+//                                    ↑ แทรกตรงนี้ปลอดภัย</code></pre>แต่ถ้าแทรกเป็น <code>{ none, operate, view, fullControl }</code> ตรรกะจะกลับด้านทันที<strong>โดยไม่มีอะไรเตือน</strong><br>ลำดับของ enum นี้จึงเป็นข้อตกลง ไม่ใช่แค่การจัดเรียง — ควรมีคอมเมนต์กำกับว่าห้ามสลับ และมีเทสต์ตรึงไว้<pre class="code-vs"><code>test('access levels stay ordered from least to most', () {
+  expect(PdaAccessLevel.values, [
+    PdaAccessLevel.none, PdaAccessLevel.view,
+    PdaAccessLevel.operate, PdaAccessLevel.fullControl,
+  ]);
+});</code></pre></div>
+
+<h3><code>Map.unmodifiable</code></h3><pre class="code-vs"><code>Map&lt;PdaFeature, PdaAccessLevel&gt; get levels =&gt; Map.unmodifiable(_levels);</code></pre><p>ให้ข้างนอกอ่านได้ (เมนูผู้ใช้เอาไปแสดงรายการสิทธิ์) แต่แก้ไม่ได้ — <code>levels[x] = y</code> จะโยนตอนรัน</p><p>ค่าใช้จ่ายคือสร้าง wrapper ใหม่ทุกครั้งที่อ่าน getter ซึ่งไม่มีผลกับการเรียกไม่กี่ครั้ง</p>
+
+<h3><code>const PdaAccess.unrestricted()</code></h3><pre class="code-vs"><code>/// Used by isolated widget/store tests that do not exercise authentication.
+const PdaAccess.unrestricted()
+  : _levels = const {
+      PdaFeature.receiving: PdaAccessLevel.fullControl,
+      ... ครบทั้ง 8 ตัว
+    };</code></pre><p>ตัวสร้างที่มีไว้เพื่อเทสต์โดยเฉพาะ พร้อมคอมเมนต์บอกตรง ๆ</p><pre class="code-vs"><code>WarehouseStore({
+  ...
+  this.access = const PdaAccess.unrestricted(),   // ค่าปริยาย
+});</code></pre><div class="note"><strong>ทำไมค่าปริยายเป็น “เปิดหมด” ไม่ใช่ “ปิดหมด”</strong><br>ดูขัดกับหลัก fail closed ในบทที่ 3 — แต่บริบทต่างกัน<ul><li><code>parse</code> จัดการ<strong>ข้อมูลจากเซิร์ฟเวอร์</strong> ซึ่งไม่น่าเชื่อถือ → ปิดไว้ก่อน</li><li>ค่าปริยายของ <code>WarehouseStore</code> จัดการ<strong>โค้ดที่โปรแกรมเมอร์เขียนเอง</strong> → ถ้าปิดหมด เทสต์ทุกตัวที่ไม่สนใจสิทธิ์จะต้องเขียนสิทธิ์เต็มก่อน</li></ul>ความเสี่ยงคือถ้ามีใครลืมส่ง <code>access</code> ในโค้ดจริง สิทธิ์จะเปิดหมด — ที่นี่มีที่สร้าง store จริงแค่ที่เดียวคือ <code>warehouse_shell.dart</code> จึงตรวจสอบได้ง่าย<pre class="code-vs"><code>rg "WarehouseStore\(" lib
+# warehouse_shell.dart:  ที่เดียว</code></pre></div></section>
+
+<section><h2>5. เทสต์ที่มีอยู่จริง</h2><pre class="code-vs"><code>test/pda_access_test.dart      4 เทสต์  67 บรรทัด</code></pre><p>ตัวอย่างชื่อเทสต์หนึ่งข้อจากไฟล์นั้น</p><pre class="code-vs"><code>'home only builds feature cards with View access'</code></pre><p>เทสต์นี้ไม่ได้ทดสอบ <code>PdaAccess</code> ตรง ๆ แต่ทดสอบ<strong>ผลที่ผู้ใช้เห็น</strong> — สร้าง store ที่มีสิทธิ์จำกัด แล้วยืนยันว่าการ์ดที่ไม่มีสิทธิ์ไม่ถูกวาด</p><div class="success"><strong>เป็นระดับที่ถูกสำหรับการทดสอบสิทธิ์</strong><br>เทสต์ที่ยืนยันว่า <code>canView</code> คืน <code>false</code> พิสูจน์แค่ว่าตัวเปรียบเทียบทำงาน<br>เทสต์ที่ยืนยันว่า<strong>การ์ดไม่โผล่</strong> พิสูจน์ว่าคนเขียนจอ<strong>เอาค่านั้นไปใช้จริง</strong> — ซึ่งเป็นจุดที่พลาดกันจริง ๆ<br>ใน wmsapp มี <code>_role</code> ที่คำนวณถูกต้องแต่ไม่มีใครใช้ (16.3) — เทสต์แบบนี้จะจับได้</div></section>
+
+<section><h2>6. สิ่งที่โมเดลสิทธิ์นี้ยังไม่ได้ทำ</h2><table><thead><tr><th>เรื่อง</th><th>สถานะ</th></tr></thead><tbody>
+<tr><td>ซ่อนเมนูตามสิทธิ์</td><td>ทำแล้ว มีเทสต์</td></tr>
+<tr><td>ปิดปุ่มยืนยันเมื่อมีแค่ <code>view</code></td><td>ทำบางจอ</td></tr>
+<tr><td>เซิร์ฟเวอร์ตรวจซ้ำ</td><td>อยู่นอกขอบเขตของแอป</td></tr>
+</tbody></table><div class="warning"><strong>ข้อสุดท้ายสำคัญที่สุดและมักถูกลืม</strong><br>การซ่อนเมนูในแอปคือ<strong>ความสะดวก</strong> ไม่ใช่<strong>ความปลอดภัย</strong><br>ใครก็ตามที่มี token สามารถยิงเส้นทางที่ถูกซ่อนได้โดยตรงด้วยเครื่องมือทั่วไป<br>ความปลอดภัยจริงต้องอยู่ที่ .NET — endpoint ต้องตรวจสิทธิ์เองทุกเส้น ไม่ว่าแอปจะซ่อนอะไรไว้<br>เมื่ออ่านโค้ดสิทธิ์ฝั่งแอป ให้ถามเสมอว่า “แล้วฝั่งเซิร์ฟเวอร์ตรวจด้วยหรือเปล่า”</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>ตรวจชื่อบทบาทในแอป</td><td>เพิ่มบทบาทแล้วต้อง build ใหม่</td><td>รับสิทธิ์ที่คำนวณแล้วจากเซิร์ฟเวอร์</td></tr>
+<tr><td>ใช้ <code>enum.name</code> เป็นคีย์กับเซิร์ฟเวอร์</td><td>rename ใน Dart แล้วสิทธิ์พังเงียบ</td><td>ประกาศ key แยก</td></tr>
+<tr><td>วน <code>fromJson</code> จาก JSON</td><td>ฟีเจอร์ที่ขาดกลายเป็น null</td><td>วนจาก <code>values</code></td></tr>
+<tr><td>ค่าไม่รู้จัก → เปิดสิทธิ์</td><td>คนไม่มีสิทธิ์ทำงานได้</td><td>ตกถังเป็น <code>none</code></td></tr>
+<tr><td>คืน <code>_levels</code> ตรง ๆ</td><td>ข้างนอกแก้สิทธิ์ได้</td><td><code>Map.unmodifiable</code></td></tr>
+<tr><td>คิดว่าซ่อนเมนู = ปลอดภัย</td><td>ยิงตรงยังทำได้</td><td>เซิร์ฟเวอร์ต้องตรวจ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><ol><li>เซิร์ฟเวอร์ส่ง <code>{"permissions": {"/mobile/pda/picking": "Operate", "/mobile/pda/unknown": "FullControl"}}</code> — เขียน <code>_levels</code> ที่ได้ออกมาให้ครบ</li><li>ต้องเพิ่มฟีเจอร์ที่เก้า — เขียนรายการทุกที่ที่ต้องแตะ และบอกว่าคอมไพเลอร์ช่วยตรงไหนบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>{
+  PdaFeature.receiving:        none,          // ไม่มีใน JSON
+  PdaFeature.inventoryIssue:   none,
+  PdaFeature.picking:          operate,       // "Operate" → toLowerCase → 'operate'
+  PdaFeature.dispatch:         none,
+  PdaFeature.myTasks:          none,
+  PdaFeature.agvMonitor:       none,
+  PdaFeature.inventoryControl: none,
+  PdaFeature.cycleCount:       none,
+}</code></pre><p>คีย์ <code>/mobile/pda/unknown</code> <strong>หายไปเฉย ๆ</strong> เพราะการวนใช้ <code>PdaFeature.values</code> เป็นตัวตั้ง</p><div class="note"><strong>การเมินเงียบนี้เป็นดาบสองคม</strong><br>ดี: แอปรุ่นเก่าไม่พังเมื่อเซิร์ฟเวอร์เพิ่มฟีเจอร์ใหม่<br>ไม่ดี: ถ้าคนพิมพ์คีย์ผิดฝั่งเซิร์ฟเวอร์ (<code>/mobile/pda/pickings</code>) จะไม่มีใครรู้ — ผู้ใช้แค่บอกว่า “เมนูหาย” แล้วไล่หาสาเหตุกันนาน<br>ทางช่วยที่ราคาถูก: ใน debug build ให้พิมพ์คีย์ที่ไม่รู้จักออก log<pre class="code-vs"><code>assert(() {
+  final known = {for (final f in PdaFeature.values) f.key};
+  final extra = raw.keys.map((k) =&gt; k.toString()).toSet().difference(known);
+  if (extra.isNotEmpty) debugPrint('PdaAccess: unknown keys $extra');
+  return true;
+}());</code></pre>บล็อกใน <code>assert</code> จะถูกตัดทิ้งทั้งหมดใน release build</div><p><strong>ข้อ 2 — เพิ่มฟีเจอร์ที่เก้า</strong></p><table><thead><tr><th>#</th><th>ที่ต้องแตะ</th><th>คอมไพเลอร์เตือนไหม</th></tr></thead><tbody>
+<tr><td>1</td><td>เพิ่มสมาชิกใน <code>PdaFeature</code></td><td>—</td></tr>
+<tr><td>2</td><td>เพิ่มบรรทัดใน <code>PdaAccess.unrestricted()</code></td><td><strong>เตือน</strong></td></tr>
+<tr><td>3</td><td><code>fromJson</code></td><td>ไม่ต้องแตะ — วนจาก <code>values</code> เอง</td></tr>
+<tr><td>4</td><td>เพิ่มการ์ดใน <code>HomeView</code></td><td>ไม่เตือน</td></tr>
+<tr><td>5</td><td>ตั้งสิทธิ์ฝั่ง .NET</td><td>ไม่เตือน</td></tr>
+</tbody></table><p>ข้อ 2 น่าสนใจ — <code>unrestricted()</code> เป็น <code>const</code> ที่ระบุครบทั้ง 8 ตัว ถ้าเพิ่ม enum แล้วไม่เพิ่มตรงนี้ จะยัง<strong>คอมไพล์ผ่าน</strong> เพราะ map ไม่ต้องครบ</p><p>แต่จะเจอตอนรันเทสต์: <code>level()</code> คืน <code>none</code> ฟีเจอร์ใหม่จึงไม่โผล่ใน widget test ที่ควรเห็น</p><p>ทางแก้ที่ดูน่าจะได้คือให้มันสร้างรายการเอง</p><pre class="code-vs"><code>PdaAccess.unrestricted()
+  : _levels = const {
+      for (final f in PdaFeature.values) f: PdaAccessLevel.fullControl,
+    };   // ← คอมไพล์ไม่ผ่าน</code></pre><div class="warning"><strong>ใช้ไม่ได้</strong> — Dart อนุญาต <code>if</code> ใน const collection แต่<strong>ไม่อนุญาต <code>for</code></strong><pre class="code-vs"><code>error: A collection literal in a constant context can't contain a 'for' element.</code></pre>ต้องเลือกอย่างใดอย่างหนึ่ง</div><table><thead><tr><th>ทาง</th><th>ได้</th><th>เสีย</th></tr></thead><tbody>
+<tr><td>เปลี่ยนเป็น <code>factory</code> ธรรมดาแล้วใช้ <code>for</code></td><td>ครบอัตโนมัติ</td><td>ไม่เป็น <code>const</code> อีกต่อไป จึงใช้เป็นค่าปริยายของพารามิเตอร์ไม่ได้</td></tr>
+<tr><td>คงรายการ 8 บรรทัดไว้ แล้วเพิ่มเทสต์ตรึง</td><td>ยัง <code>const</code></td><td>ต้องมีเทสต์คอยจับ</td></tr>
+</tbody></table><p>ค่าปริยายของ <code>WarehouseStore</code> เขียนว่า <code>this.access = const PdaAccess.unrestricted()</code> ซึ่งบังคับให้ต้องเป็น <code>const</code> — ทางที่สองจึงเป็นทางเดียวที่ไม่ต้องรื้อ</p><pre class="code-vs"><code>test('unrestricted really covers every feature', () {
+  const access = PdaAccess.unrestricted();
+  for (final feature in PdaFeature.values) {
+    expect(access.hasFullControl(feature), isTrue, reason: '${feature.name}');
+  }
+});</code></pre><div class="success"><strong>บทเรียนยังเหมือนเดิม แม้ทางแก้จะต่างจากที่คิดไว้ตอนแรก</strong><br>รายการที่ต้อง “อย่าลืมเติมให้ครบ” คือรายการที่วันหนึ่งจะไม่ครบ<br>ถ้าทำให้มันสร้างตัวเองไม่ได้ ก็ต้องมีอะไรมาจับแทน — เทสต์สี่บรรทัดถูกกว่าการไล่หาว่าทำไมเมนูใหม่ไม่โผล่ในเทสต์</div><p>ส่วนข้อ 4 และ 5 ไม่มีอะไรช่วยได้ — ต้องอาศัยรายการตรวจตอนเพิ่มฟีเจอร์ ซึ่งเป็นเนื้อหาของ Part 25</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>จอรับ <code>AuthRepository</code> ไม่ใช่ <code>AuthSession</code> — จึงล็อกเอาต์และสร้างชั้น API ได้จากตัวเดียวกัน</li><li><code>PdaFeature</code> พก key แยกจากชื่อตัวแปร — rename ใน Dart ได้โดยไม่กระทบสิทธิ์</li><li><code>PdaAccessLevel</code> เรียงจากน้อยไปมากโดยตั้งใจ <code>canOperate</code> จึงใช้ <code>index</code> เทียบได้</li><li>ลำดับของ enum เป็นข้อตกลง ควรมีเทสต์ตรึงไว้</li><li><code>parse</code> ตกถังเป็น <code>none</code> — fail closed สำหรับข้อมูลจากเซิร์ฟเวอร์</li><li><code>fromJson</code> วนจาก <code>PdaFeature.values</code> — map ครบ 8 คีย์เสมอ</li><li><code>unrestricted()</code> เปิดหมดเป็นค่าปริยายของ store เพราะเป็นเรื่องของโค้ดที่เราคุมเอง ไม่ใช่ข้อมูลภายนอก</li><li>เทสต์ทดสอบที่ระดับ “การ์ดไม่โผล่” ไม่ใช่ระดับ “getter คืน false”</li><li>การซ่อนเมนูคือความสะดวก ความปลอดภัยต้องอยู่ที่ .NET</li></ul></div><p><strong>บทหน้า:</strong> จอล็อกอิน 354 บรรทัด และปุ่มตั้งค่าที่ต้องมีอยู่ตรงนั้นเพราะเหตุผลเดียว</p></section>

@@ -1,21 +1,184 @@
-<div class="note"><strong>เป้าหมาย Part 20:</strong> อ่านแกนกลางของ <code>wms_absolute_mobile</code> จากการเปิดแอปจนถึง shell หลัง login ให้เห็นว่า configuration, HTTP, session, connection profile และ UI lifecycle ส่งต่อ state กันอย่างไร ก่อนลงรายละเอียด workflow คลังใน Part 21–22</div>
-<section><h2>1. เริ่มอ่านจาก composition root</h2><p>เปิด <code>lib/main.dart</code> ก่อน เพราะไฟล์นี้ตอบว่า object ใดอยู่ยาวเท่าแอป: <code>AppLanguageController</code> และ <code>ConnectionController</code> เป็น singleton, ส่วน <code>ApiClient</code> ถูกสร้างหนึ่งตัวแล้วส่งเข้า <code>AuthRepository</code> จากนั้น repository เดิมถูกส่งต่อจาก <code>LoginScreen</code> ไป <code>WarehouseShell</code> จึงรักษา Bearer token ตัวเดียวกันไว้ได้</p><pre class="code-vs"><code>main
-  ├─ load language + connection profiles
-  └─ WmsApp
-      └─ AuthRepository(ApiClient)
-          ├─ LoginScreen
-          └─ WarehouseShell
-              ├─ WarehouseStore
-              └─ ReceivingApi / TasksApi / InventoryApi / CycleCountApi</code></pre></section>
-<section><h2>2. แผนที่โฟลเดอร์</h2><ul><li><code>lib/core</code>: config, HTTP client, ภาษา, theme และ connection state ที่หลาย feature ใช้ร่วมกัน</li><li><code>lib/features/auth</code>: session, repository และหน้า login</li><li><code>lib/features/settings</code>: editor สำหรับ server profiles</li><li><code>lib/features/warehouse</code>: shell, store, models, screens และ operational UI</li><li><code>lib/api</code>: adapters ที่แปลง method ของ store เป็น HTTP contract</li><li><code>lib/widgets</code>: widget ระดับแอป เช่นแถบสถานะ PDA</li><li><code>test</code>: contract, state และ widget tests ที่ใช้ยืนยัน design intention</li></ul></section>
-<section><h2>3. เส้นทาง login ถึง API</h2><pre class="code-vs"><code>LoginScreen._submit()
-  → AuthRepository.login(username, password)
-  → ApiClient.post('/api/Authenticate/login', absolute: true)
-  → parse token/expiration
-  → client.authToken = token
-  → Navigator.pushReplacement(WarehouseShell)</code></pre><p>หลังเข้า shell, API adapters ทุกตัวรับ <code>widget.auth.client</code> ตัวเดิม จึงแนบ token เดิมโดยไม่ต้องส่ง token ผ่านทุก method นี่คือ shared transport state แบบง่าย แต่ทำให้ logout และการเปลี่ยน server ต้องคิดเป็นเหตุการณ์ระดับ session ไม่ใช่แค่เปลี่ยนหน้าจอ</p></section>
-<section><h2>4. ใครเป็นเจ้าของ state</h2><table><thead><tr><th>State</th><th>Owner</th><th>อายุ</th></tr></thead><tbody><tr><td>ภาษา</td><td><code>AppLanguageController</code></td><td>ข้ามการเปิดแอปด้วย preferences</td></tr><tr><td>profiles/server status</td><td><code>ConnectionController</code></td><td>ข้ามการเปิดแอป; status อยู่ใน memory</td></tr><tr><td>token/session</td><td><code>AuthRepository</code> + <code>ApiClient</code></td><td>เฉพาะ process ปัจจุบัน</td></tr><tr><td>warehouse workflow</td><td><code>WarehouseStore</code></td><td>ตั้งแต่เข้า shell ถึง logout</td></tr><tr><td>form/dialog</td><td>State ของ widget นั้น</td><td>จน widget dispose</td></tr></tbody></table></section>
-<section><h2>5. เส้นทาง configuration ถึง request</h2><p><code>ConnectionProfile</code> ทำหน้าที่ model และ validation, <code>ConnectionController</code> เลือก active profile และ persist, ส่วน <code>AppConfig.apiBaseUrl</code> อ่าน active URL ใหม่ทุกครั้งที่สร้าง request ดังนั้นการสลับ profile มีผลกับ request ถัดไปทันที โดยไม่สร้าง <code>ApiClient</code> ใหม่ ลำดับ precedence คือ compile-time override → active profile → <code>http://localhost:6191</code></p></section>
-<section><h2>6. เส้นทาง connection test แยกจาก business API</h2><p><code>ConnectionProbe</code> ใช้ client ของตัวเองยิง <code>/api/WMS/mobile_health</code> ไปยัง URL draft ได้ จึงกด Test ก่อน Save/Use ได้ และไม่ได้แนบ token โดยไม่จำเป็น มันไม่เชื่อแค่ HTTP 200 แต่ตรวจ JSON ว่า <code>service == "WMS"</code> และ <code>ok == true</code> เพราะ Blazor fallback อาจคืนหน้า HTML พร้อม 200 แม้ base path ผิด</p></section>
-<section><h2>7. Reading order ที่ลดการเดา</h2><ol><li><code>main.dart</code> เพื่อหา composition และ startup ordering</li><li><code>app_config.dart</code> → <code>connection_*.dart</code> เพื่อเข้าใจ URL</li><li><code>api_client.dart</code> → <code>auth_repository.dart</code> → <code>login_screen.dart</code> เพื่อ trace login</li><li><code>warehouse_shell.dart</code> เพื่อดู lifecycle และการประกอบ adapters/store</li><li>อ่าน test คู่กับ production file เพื่อจับ invariant ที่ comment ไม่ได้บอก</li></ol></section>
-<section><h2>8. แบบฝึก trace ก่อนลงลึก</h2><div class="success">วาด sequence diagram 2 เส้น: (A) เปิดแอป → โหลด profile → login → เข้า shell → โหลด badge และ (B) เปิด Connection Settings → ทดสอบ draft → Save &amp; Use → request ถัดไปใช้ URL ใหม่ ระบุ owner ของ state, await/unawaited, error boundary และจุดที่ token อาจไม่สอดคล้องกับ server ใหม่ให้ครบ</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิดโปรเจกต์ wms_absolute_mobile</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 16–19 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นโปรเจกต์ที่สองเป็นภาพเดียว และตอบคำถามที่ 19.15 ตั้งไว้</div>
+
+<section><h2>1. คำถามที่ Part นี้ตอบ</h2><p>19.15 ปิดกลุ่ม wmsapp ด้วยคำถาม</p><div class="note"><strong>“โปรเจกต์ที่มี store, มี repository และมีเทสต์ — ปัญหา 15 แถวหายไปกี่แถว และเหลืออะไร”</strong></div><p>ตัวเลขแรกที่ต้องเทียบ</p><table><thead><tr><th></th><th>wmsapp</th><th>wms_absolute_mobile</th></tr></thead><tbody>
+<tr><td>ไฟล์ใน <code>lib/</code></td><td>110</td><td><strong>36</strong></td></tr>
+<tr><td>บรรทัดใน <code>lib/</code></td><td>22,095</td><td><strong>15,445</strong></td></tr>
+<tr><td>ไฟล์เทสต์</td><td>1 (แม่แบบ)</td><td><strong>14</strong> + ไฟล์ของปลอม 1</td></tr>
+<tr><td>จำนวนเทสต์</td><td><strong>0</strong></td><td><strong>101</strong></td></tr>
+<tr><td>บรรทัดเทสต์</td><td>—</td><td>3,170</td></tr>
+</tbody></table><p>ไฟล์น้อยกว่าสามเท่า บรรทัดน้อยกว่าหนึ่งในสาม และมีเทสต์ 101 ข้อที่ผ่านทั้งหมด</p>
+<pre class="code-vs"><code>flutter test --no-pub
+# 00:16 +101: All tests passed!</code></pre><p>แต่ตัวเลขนี้ยังไม่ตอบคำถาม — ต้องดูว่าอะไรหายไปและอะไรเพิ่มมา</p></section>
+
+<section><h2>2. โครงโฟลเดอร์</h2><pre class="code-vs"><code>lib/                                        36 ไฟล์ 15,445 บรรทัด
+├─ main.dart                       (70)
+├─ core/                           ← ชั้นที่ไม่รู้จักธุรกิจ  1,081
+│   ├─ api_client.dart             (96)
+│   ├─ app_config.dart             (26)
+│   ├─ app_language.dart           (108)
+│   ├─ app_theme.dart              (155)
+│   ├─ connection_controller.dart  (202)
+│   ├─ connection_probe.dart       (146)
+│   └─ connection_profile.dart     (348)
+├─ api/                            ← ชั้นที่คุยกับเซิร์ฟเวอร์  1,084
+│   ├─ receiving_api.dart          (171)
+│   ├─ inventory_api.dart          (93)
+│   ├─ cycle_count_api.dart        (152)
+│   └─ tasks_api.dart              (668)
+├─ features/
+│   ├─ auth/                       (491)
+│   ├─ settings/                   (1,016)
+│   └─ warehouse/
+│       ├─ models/                 (581)
+│       ├─ screens/                (7,108)
+│       ├─ ui/                     (1,293)
+│       ├─ warehouse_shell.dart    (742)
+│       ├─ warehouse_store.dart    (1,756)  ★
+│       └─ workflow_definitions.dart (168)
+└─ widgets/pda_status_bar.dart     (55)</code></pre><p>เทียบกับ wmsapp ที่แบ่ง <code>screens/ models/ services/ widgets/</code> ตามชนิดไฟล์ (16.1)</p><table><thead><tr><th></th><th>wmsapp</th><th>absolute</th></tr></thead><tbody>
+<tr><td>แบ่งหลัก</td><td>ตามชนิดไฟล์</td><td><strong>ตามความรับผิดชอบ</strong></td></tr>
+<tr><td>ชั้นบนสุด</td><td><code>screens/</code> 83%</td><td><code>features/</code> 66%</td></tr>
+<tr><td>มี <code>core/</code></td><td>ไม่มี</td><td><strong>มี — 1,081 บรรทัด</strong></td></tr>
+<tr><td>มีชั้นระหว่างจอกับ API</td><td>ไม่มี</td><td><strong>มี — <code>warehouse_store.dart</code></strong></td></tr>
+</tbody></table><div class="note"><strong><code>core/</code> คือสิ่งที่ wmsapp ไม่มี</strong> — เจ็ดไฟล์ที่ไม่รู้จักคำว่า “พาเลท” หรือ “ใบสั่ง” เลย<br>ทำให้เห็นได้ทันทีว่าอะไรเป็นโครงพื้นฐานและอะไรเป็นเรื่องของคลัง<br>ใน wmsapp ทั้งสองอย่างปนกันใน <code>services/</code></div></section>
+
+<section><h2>3. ชั้นที่เพิ่มเข้ามา</h2><pre class="code-vs"><code>จอ (screens/)
+  ▼  อ่านและสั่งผ่าน
+WarehouseStore (ChangeNotifier)          ← ชั้นใหม่
+  ▼  เรียกผ่าน interface
+ReceivingRepository / TasksRepository /
+InventoryRepository / CycleCountRepository   ← ชั้นใหม่
+  ▼  ถูกทำจริงโดย
+ReceivingApi / TasksApi / ...             (api/)
+  ▼  ใช้
+ApiClient                                 (core/)
+  ▼
+HTTP → .NET</code></pre><p>เทียบกับ wmsapp</p><pre class="code-vs"><code>จอ (screens/)
+  ▼  สร้างเองด้วย ApiService()
+ApiService + extension                    (services/)
+  ▼
+HTTP → .NET</code></pre><table><thead><tr><th>ชั้นที่เพิ่ม</th><th>แก้ปัญหาอะไร</th><th>บทที่เจอปัญหา</th></tr></thead><tbody>
+<tr><td><code>WarehouseStore</code></td><td>ตรรกะไม่อยู่ในจอ กฎเดียวกันไม่กระจาย</td><td>17.14, 18.16, 19.15</td></tr>
+<tr><td><code>Repository</code> interface</td><td>สลับตัวปลอมในเทสต์ได้</td><td>16.6</td></tr>
+</tbody></table><pre class="code-vs"><code>abstract interface class ReceivingRepository {
+  Future&lt;ReceivingPage&gt; fetchOpen({String? q, int page = 1, int pageSize = 30});
+  Future&lt;List&lt;InboundReceiveTransaction&gt;&gt; fetchReceivedToday();
+  Future&lt;void&gt; receive({
+    required String detailId,
+    required String palletCode,
+    required double qty,
+  });
+  Future&lt;void&gt; validatePallet({...});
+}</code></pre><pre class="code-vs"><code>class ReceivingApi implements ReceivingRepository { ... }   // ของจริง
+class FakeReceivingRepository implements ReceivingRepository { ... }   // ในเทสต์</code></pre><div class="note"><strong>นี่คือคำตอบว่าทำไม wmsapp มีเทสต์ 0 ข้อ</strong> — 16.6 อธิบายว่า <code>ApiService()</code> เป็น singleton ที่จอสร้างเอง จึงฉีดของทดสอบไม่ได้<br>ที่นี่ store รับ repository ผ่านตัวสร้าง เทสต์จึงส่งของปลอมเข้าไปได้<pre class="code-vs"><code>WarehouseStore(
+  username: '0000',
+  receivingRepository: FakeReceivingRepository(openOrders: [...]),
+  tasksRepository: FakeTasksRepository(),
+  ...
+)</code></pre></div></section>
+
+<section><h2>4. จุดเริ่มที่ต่างกัน</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppLanguageController.instance.load();
+  // Must finish before the first request: AppConfig.apiBaseUrl falls back to the
+  // built-in address until the operator's active profile is in memory.
+  await ConnectionController.instance.load();
+
+  // Match the system status bar to the PDA bar so they read as one strip.
+  SystemChrome.setSystemUIOverlayStyle(_systemUiStyle);
+
+  runApp(WmsApp(auth: AuthRepository(ApiClient())));
+}</code></pre><table><thead><tr><th></th><th>wmsapp (16.2)</th><th>absolute</th></tr></thead><tbody>
+<tr><td><code>main()</code> เป็น async</td><td>เป็น แต่ไม่มี <code>await</code></td><td><strong>มี <code>await</code> สองตัว</strong></td></tr>
+<tr><td>โหลดอะไรก่อน <code>runApp</code></td><td>ไม่มี</td><td>ภาษา + ที่อยู่เซิร์ฟเวอร์</td></tr>
+<tr><td>สร้าง dependency ที่ราก</td><td>ไม่มี — จอสร้างเอง</td><td><strong><code>AuthRepository(ApiClient())</code></strong></td></tr>
+<tr><td>จำภาษาที่เลือก</td><td>ไม่ (ตรึงที่ไทย)</td><td><strong>จำ</strong></td></tr>
+</tbody></table><p>บรรทัดสุดท้ายของ <code>main()</code> คือสิ่งที่ 9.10 เรียกว่า <strong>composition root</strong></p><pre class="code-vs"><code>runApp(WmsApp(auth: AuthRepository(ApiClient())));</code></pre><p>ทุกอย่างที่แอปต้องใช้ถูกสร้างที่เดียวแล้วส่งต่อลงไป — ไม่มีจอไหนสร้าง <code>ApiClient</code> เอง</p><pre class="code-vs"><code>rg "ApiClient\(\)" lib
+# main.dart:30 — ที่เดียว</code></pre><div class="note">เทียบกับ 16.6 ที่นับได้ <code>ApiService()</code> <strong>26 ครั้งใน 22 ไฟล์</strong><br>ความต่างนี้คือเหตุผลเดียวที่ทำให้เทสต์เขียนได้ ไม่ใช่เรื่องของสไตล์</div></section>
+
+<section><h2>5. สามสิ่งที่ absolute มีและ wmsapp ไม่มี</h2><table><thead><tr><th>เรื่อง</th><th>absolute</th><th>wmsapp</th><th>บท</th></tr></thead><tbody>
+<tr><td><strong>การยืนยันตัวตนจริง</strong></td><td>ยิง <code>/api/Authenticate/login</code> ได้ token</td><td>mock 3 ผู้ใช้ รหัส 1234</td><td>16.4</td></tr>
+<tr><td><strong>สิทธิ์ตามฟีเจอร์</strong></td><td><code>PdaAccess</code> 8 ฟีเจอร์ 4 ระดับ</td><td><code>_role</code> ที่ไม่ถูกใช้</td><td>16.3</td></tr>
+<tr><td><strong>สลับเซิร์ฟเวอร์หลายตัว</strong></td><td>โปรไฟล์หลายอัน สลับได้</td><td>IP เดียว</td><td>16.5</td></tr>
+</tbody></table><pre class="code-vs"><code>enum PdaFeature {
+  receiving('/mobile/pda/receiving'),
+  inventoryIssue('/mobile/pda/inventory-issue'),
+  picking('/mobile/pda/picking'),
+  dispatch('/mobile/pda/dispatch'),
+  myTasks('/mobile/pda/my-tasks'),
+  agvMonitor('/mobile/pda/agv-monitor'),
+  inventoryControl('/mobile/pda/inventory-control'),
+  cycleCount('/mobile/pda/cycle-count');
+  ...
+}
+
+enum PdaAccessLevel { none, view, operate, fullControl; ... }</code></pre><p>สิทธิ์มาจากเซิร์ฟเวอร์ตอนล็อกอิน และคอมเมนต์อธิบายเหตุผลไว้</p><pre class="code-vs"><code>/// Role names are deliberately not checked in Flutter. WMS merges every role
+/// and returns the highest access level for each stable permission key; the PDA
+/// only consumes that effective result.</code></pre><div class="note"><strong>การไม่ตรวจชื่อบทบาทในแอปเป็นการตัดสินใจที่ถูก</strong> — ถ้าตรวจ การเพิ่มบทบาทใหม่ฝั่ง .NET จะต้องแก้แอปด้วย<br>ที่นี่เซิร์ฟเวอร์รวมทุกบทบาทแล้วส่งผลลัพธ์มาเป็นระดับสิทธิ์ต่อฟีเจอร์ — แอปแค่อ่าน</div></section>
+
+<section><h2>6. สิ่งที่ absolute ไม่มีและ wmsapp มี</h2><table><thead><tr><th>เรื่อง</th><th>ทำไมไม่มี</th></tr></thead><tbody>
+<tr><td>SignalR</td><td>ใช้การถามซ้ำทุก 5 วินาทีแทน (20.14)</td></tr>
+<tr><td>อัปโหลดรูป</td><td>ยังไม่มีฟีเจอร์นี้</td></tr>
+<tr><td>โดเมนแยกเป็นโฟลเดอร์</td><td>ทุกอย่างอยู่ใน <code>warehouse/</code> เดียว</td></tr>
+<tr><td>เมนูซ่อนสำหรับนักพัฒนา</td><td>ไม่มีจอทดสอบ</td></tr>
+</tbody></table><p>แถวที่สามน่าสังเกต — wmsapp มีเจ็ดโฟลเดอร์โดเมน ส่วนที่นี่มีโฟลเดอร์เดียว</p><pre class="code-vs"><code>features/warehouse/screens/
+├─ ops_views.dart        (2,362)  ★ ใหญ่ที่สุดในโปรเจกต์
+├─ outbound_views.dart   (1,024)
+├─ cycle_count_view.dart (1,009)
+├─ home_view.dart        (982)
+├─ receive_views.dart    (943)
+├─ task_views.dart       (750)
+└─ inventory_view.dart   (38)</code></pre><p>เจ็ดไฟล์ 7,108 บรรทัด — เฉลี่ย 1,015 ต่อไฟล์</p><table><thead><tr><th></th><th>wmsapp</th><th>absolute</th></tr></thead><tbody>
+<tr><td>ไฟล์จอ</td><td>80</td><td>7</td></tr>
+<tr><td>เฉลี่ยต่อไฟล์</td><td>230</td><td><strong>1,015</strong></td></tr>
+<tr><td>ไฟล์ใหญ่สุด</td><td>2,176</td><td>2,362</td></tr>
+</tbody></table><div class="note"><strong>ไฟล์จอที่นี่ใหญ่กว่าเฉลี่ยสี่เท่า</strong> — แต่จำนวนบรรทัดรวมน้อยกว่า<br>เพราะตรรกะย้ายไปอยู่ใน store แล้ว ไฟล์จอจึงเหลือแต่การวาด<br>19.15 สรุปไว้ว่า “ไฟล์ควรยาวแค่ไหน” เป็นคำถามที่ผิด — ที่นี่เป็นหลักฐานอีกชิ้น</div></section>
+
+<section><h2>7. ไลบรารีที่ใช้</h2><pre class="code-vs"><code>dependencies:
+  flutter: {sdk: flutter}
+  flutter_localizations: {sdk: flutter}
+  cupertino_icons: ^1.0.8
+  http: ^1.2.2
+  font_awesome_flutter: ^11.0.0
+  auto_size_text: ^3.0.0
+  flutter_svg: ^2.3.0
+  shared_preferences: ^2.5.5</code></pre><table><thead><tr><th></th><th>wmsapp (16.11)</th><th>absolute</th></tr></thead><tbody>
+<tr><td>จำนวน</td><td>9</td><td><strong>8</strong></td></tr>
+<tr><td>มีทั้งคู่</td><td colspan="2"><code>http</code>, <code>shared_preferences</code>, <code>flutter_localizations</code>, <code>cupertino_icons</code></td></tr>
+<tr><td>เฉพาะ wmsapp</td><td colspan="2"><code>signalr_netcore</code>, <code>image_picker</code>, <code>intl</code>, <code>material_design_icons_flutter</code></td></tr>
+<tr><td>เฉพาะ absolute</td><td colspan="2"><code>font_awesome_flutter</code>, <code>auto_size_text</code>, <code>flutter_svg</code></td></tr>
+</tbody></table><p>ทั้งสองโปรเจกต์ใช้ไลบรารีน้อยมาก และ<strong>ไม่มีตัวจัดการ state ตัวไหนเลย</strong></p><pre class="code-vs"><code>class WarehouseStore extends ChangeNotifier { ... }
+class ConnectionController extends ChangeNotifier { ... }
+class AppLanguageController extends ChangeNotifier { ... }</code></pre><p><code>ChangeNotifier</code> มาพร้อม Flutter — ไม่ต้องเพิ่มไลบรารี</p><div class="note"><strong>เป็นการเลือกที่สอดคล้องกับ 16.11</strong> — โปรเจกต์ที่มีไลบรารีน้อยอัปเกรด Flutter แล้วพังน้อยกว่า และคนใหม่ไม่ต้องเรียนของเพิ่ม<br>สิ่งที่ absolute ทำต่างคือ<strong>ใช้ของที่มีให้เต็มที่</strong> — <code>ChangeNotifier</code> + <code>ListenableBuilder</code> ทำงานเดียวกับที่ไลบรารี state management ทำ</div></section>
+
+<section><h2>8. ลำดับที่จะอ่านใน Part นี้</h2><table><thead><tr><th>บท</th><th>อ่านอะไร</th></tr></thead><tbody>
+<tr><td>20.2–20.4</td><td>จุดเริ่ม การตั้งค่า และตัวส่งคำขอ</td></tr>
+<tr><td>20.5–20.7</td><td>การยืนยันตัวตน สิทธิ์ และการเข้าสู่แอป</td></tr>
+<tr><td>20.8–20.9</td><td>ภาษาและธีม</td></tr>
+<tr><td>20.10–20.12</td><td>โปรไฟล์เซิร์ฟเวอร์ การเก็บ และการตรวจ</td></tr>
+<tr><td>20.13</td><td>แผ่นตั้งค่า 949 บรรทัด</td></tr>
+<tr><td>20.14</td><td>เปลือกแอปและวงจรชีวิต</td></tr>
+<tr><td>20.15</td><td>เมนูผู้ใช้ และเทสต์ 101 ข้อ</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>จากตัวเลขในบทนี้ ทำนายว่าปัญหาข้อไหนใน 15 แถวของ 19.15 จะไม่มีที่นี่</li><li>ทำนายว่าข้อไหนจะยังมีอยู่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — น่าจะไม่มี</strong></p><table><thead><tr><th>แถว (19.15)</th><th>เหตุผลที่ทำนายว่าหาย</th></tr></thead><tbody>
+<tr><td>เลือกล็อตเมื่อมีหลายล็อต</td><td>ตรรกะอยู่ใน store ที่เดียว</td></tr>
+<tr><td>จำพาเลทล่าสุด</td><td>เหมือนกัน</td></tr>
+<tr><td>S/N ต้องครบก่อนยืนยัน</td><td>เหมือนกัน</td></tr>
+<tr><td>ตรวจสภาพก่อนผูก/ส่ง</td><td>เหมือนกัน</td></tr>
+<tr><td>ส่ง <code>statusCode</code> ต่อ</td><td>มี <code>ApiException</code> ที่พก <code>statusCode</code> ตัวเดียว</td></tr>
+<tr><td>สถานะของ flow</td><td>อยู่ใน store ตัวเดียว ไม่กระจายตามจอ</td></tr>
+<tr><td>เครื่องมือทดสอบ</td><td>ไม่มีจอทดสอบเลย</td></tr>
+</tbody></table><p>เจ็ดแถว — และทั้งหมดมีเหตุผลเดียวกัน คือ<strong>มีที่กลาง</strong></p><p><strong>ข้อ 2 — น่าจะยังมี</strong></p><table><thead><tr><th>แถว</th><th>เหตุผลที่ทำนายว่ายังมี</th></tr></thead><tbody>
+<tr><td>ล้างช่องสแกน</td><td>อยู่ในจอ ไม่ใช่ store</td></tr>
+<tr><td>แจ้งความสำเร็จ</td><td>อยู่ในจอเหมือนกัน</td></tr>
+<tr><td>สถานะที่กดไม่ได้</td><td>เป็นเรื่องของการแสดงผล</td></tr>
+<tr><td>สีของประเภท/สถานะ</td><td>เหมือนกัน</td></tr>
+<tr><td>รูปย่อสินค้า</td><td>ไม่มีฟีเจอร์รูป จึงไม่นับ</td></tr>
+</tbody></table><p>สี่แถว — ล้วนเป็นเรื่องที่<strong>เกิดที่ชั้นการแสดงผล</strong> ซึ่ง store ไม่ได้ครอบคลุม</p><div class="note"><strong>คำทำนายที่สำคัญที่สุด</strong> — การมี store แก้ปัญหาเรื่อง<strong>กฎธุรกิจ</strong> แต่ไม่ได้แก้เรื่อง<strong>ความสม่ำเสมอของหน้าจอ</strong><br>ถ้าคำทำนายนี้ถูก จะแปลว่าต้องมีของกลางอีกชั้นสำหรับ UI ซึ่ง wmsapp มี (<code>common_widgets.dart</code>) และที่นี่ก็มี (<code>pda_widgets.dart</code> 917 บรรทัด)<br>เขียนคำทำนายนี้ไว้ แล้วเทียบตอนจบ Part 22</div><p><strong>สิ่งที่ต้องระวังตอนอ่าน</strong></p><p>สองโปรเจกต์นี้ทำโจทย์ที่<strong>ไม่เหมือนกันทั้งหมด</strong></p><table><thead><tr><th>wmsapp</th><th>absolute</th></tr></thead><tbody>
+<tr><td>7 โดเมน รวม packing/sorting/checkin</td><td>รับเข้า สต๊อก งานขนย้าย หยิบ นับรอบ</td></tr>
+<tr><td>มีหุ่นยนต์ AMR + SignalR</td><td>มี AGV แต่ใช้การถามซ้ำ</td></tr>
+</tbody></table><p>การเทียบจึงต้องเทียบ<strong>วิธีแก้ปัญหาเดียวกัน</strong> ไม่ใช่เทียบว่าใครมีฟีเจอร์มากกว่า</p><p>ตัวอย่างที่เทียบได้ตรง: การรับสินค้า (17 กับ 21), การหยิบ (18 กับ 22), การตั้งค่าเซิร์ฟเวอร์ (16.5 กับ 20.10–20.13)</p></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>36 ไฟล์ 15,445 บรรทัด และเทสต์ 101 ข้อ — เทียบกับ 110 ไฟล์ 22,095 บรรทัด และ 0 เทสต์</li><li>แบ่งตามความรับผิดชอบ ไม่ใช่ตามชนิดไฟล์ — มี <code>core/</code> ที่ไม่รู้จักธุรกิจเลย</li><li>เพิ่มสองชั้น: <code>WarehouseStore</code> และ repository interface</li><li><code>ApiClient()</code> ถูกสร้างที่เดียวใน <code>main()</code> เทียบกับ <code>ApiService()</code> 26 ครั้ง</li><li><code>main()</code> โหลดภาษาและที่อยู่เซิร์ฟเวอร์ก่อน <code>runApp</code></li><li>มีการยืนยันตัวตนจริง สิทธิ์ตามฟีเจอร์ และโปรไฟล์เซิร์ฟเวอร์หลายตัว</li><li>ไม่มี SignalR — ใช้การถามซ้ำแทน</li><li>ไฟล์จอใหญ่กว่าเฉลี่ยสี่เท่า แต่บรรทัดรวมน้อยกว่า เพราะตรรกะอยู่ใน store</li><li>ไลบรารีแปดตัว และไม่มีตัวจัดการ state — ใช้ <code>ChangeNotifier</code> ที่มากับ Flutter</li></ul></div><p><strong>บทหน้า:</strong> <code>main()</code> ที่รอสองอย่างก่อนเริ่ม และเหตุผลที่ลำดับนั้นสำคัญ</p></section>

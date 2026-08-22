@@ -4,22 +4,171 @@
 <title>Login Navigation</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">20-07 · Real Codebase</span><h1>Login Navigation</h1><p>Part 20: Absolute Core &amp; Auth</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Local UI state</a></li><li><a href="#section-2">Submit pipeline</a></li><li><a href="#section-3">Duplicate guard</a></li><li><a href="#section-4">Focus และ scanner/PDA ergonomics</a></li><li><a href="#section-5">ทำไมต้องเปิด Connection Settings ก่อน login</a></li><li><a href="#section-6">Navigation semantics</a></li><li><a href="#section-7">Error taxonomy ใน UI</a></li><li><a href="#section-8">Widget tests</a></li></ol></nav>
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/login_screen.dart</code> — หน้าจอเป็น orchestrator ของ form state, async login และ route replacement ไม่ใช่เจ้าของ HTTP contract</div>
-<section id="section-1"><h2>1. Local UI state</h2><p>หน้า login ถือ controllers ของ employee/password, focus node ของ password, flag <code>_submitting</code>, password visibility และข้อความ error ทั้งหมดเป็น state อายุสั้นที่ควรตายเมื่อออกจากหน้า ส่วน token/session อยู่ repository เพราะต้องอยู่ต่อถึง shell</p></section>
-<section id="section-2"><h2>2. Submit pipeline</h2><pre class="code-vs"><code>guard duplicate submit
-→ validate form
-→ unfocus keyboard
-→ set loading + clear old error
-→ await auth.login(...)
-→ if mounted: pushReplacement(WarehouseShell)
-→ ApiException: show inline message
-→ finally if mounted: stop loading</code></pre><p>ลำดับ clear error ก่อน request ทำให้ผู้ใช้ไม่เห็น error เก่าระหว่าง retry และ mounted checks ป้องกัน setState/navigation หลัง widget ถูกถอด</p></section>
-<section id="section-3"><h2>3. Duplicate guard</h2><p><code>_submitting</code> ถูกตรวจตั้งแต่ต้นและปิด action ระหว่างรอ ป้องกัน operator กดปุ่มหรือกด Enterซ้ำแล้วสร้าง request สองชุด Guard ที่ UI ช่วย UX แต่ backend login และ mutation สำคัญยังต้องรับมือ request ซ้ำเอง</p></section>
-<section id="section-4"><h2>4. Focus และ scanner/PDA ergonomics</h2><p>employee field ส่ง focus ไป password, password submit เรียก login และ loading stateลดการกดซ้ำ การ unfocus ก่อน network ทำให้ keyboard ไม่บัง error/dialog บนจอเล็ก Controllers กับ focus node ถูก dispose ครบเพื่อไม่รั่ว listener/native resources</p></section>
-<section id="section-5"><h2>5. ทำไมต้องเปิด Connection Settings ก่อน login</h2><p>ถ้า IP/port ผิด ผู้ใช้ย่อม login ไม่ได้ ดังนั้น settings เป็น recovery path ที่ต้องเข้าถึงได้ก่อนมี session การซ่อน settings ไว้ใน shell เท่านั้นสร้าง deadlock เชิง UX อย่างไรก็ตาม build ที่ pin URL ควรอธิบายชัดว่า runtime profile ถูก override ไม่ให้ผู้ใช้ลองแก้แล้วไม่เกิดผล</p></section>
-<section id="section-6"><h2>6. Navigation semantics</h2><p><code>pushReplacement</code> แทน push ทำให้ Back จาก shell ไม่กลับไปหน้าที่มี password form และ login success เก่า ตอน logout shell ก็ replacement กลับ login ทำให้หนึ่ง session มี root route เดียว หากใช้ named/router ในอนาคตยังต้องรักษา invariant นี้</p></section>
-<section id="section-7"><h2>7. Error taxonomy ใน UI</h2><p>inline error เหมาะกับ credential/business failure ที่ผู้ใช้แก้ input ได้ ส่วน connection/certificate/server configuration ควรมีข้อความและ action เปิด settings ได้ อย่าแสดง stack trace หรือ response body ดิบ และอย่าแปลงทุก failure เป็น “username/password ผิด” เพราะจะพาผู้ใช้แก้จุดผิด</p></section>
-<section id="section-8"><h2>8. Widget tests</h2><div class="success">ทดสอบ validation, focus/submit จาก keyboard, loading disables controls, double tap ส่ง requestเดียว, success replacement, failure แสดง inline และ retry ได้, dispose ระหว่าง requestไม่ throw, toggle password, language rebuild และเปิด connection settings ได้โดยยังไม่ login</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">state ทั้งหมดของจอนี้</a></li><li><a href="#section-2">_submit()</a></li><li><a href="#section-3">pushReplacement ไม่ใช่ push</a></li><li><a href="#section-4">ปุ่มตั้งค่าที่มุมขวาบน</a></li><li><a href="#section-5">รายละเอียดของฟอร์มที่ทำถูก</a></li><li><a href="#section-6">AnimatedSize รอบกล่องข้อผิดพลาด</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน lib/features/auth/login_screen.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.6, 5.4 (<code>pushReplacement</code>), 3.7 (<code>Form</code> + <code>validator</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอ 354 บรรทัดที่มี state 5 ตัว และชี้จุดที่ยังรับข้อผิดพลาดไม่ครบ</div>
+
+<section id="section-1"><h2>1. state ทั้งหมดของจอนี้</h2><pre class="code-vs"><code>final _formKey = GlobalKey&lt;FormState&gt;();
+final _employeeIdController = TextEditingController();
+final _passwordController = TextEditingController();
+final _passwordFocus = FocusNode();
+
+bool _submitting = false;
+bool _obscurePassword = true;
+String? _error;</code></pre><table><thead><tr><th>ฟิลด์</th><th>ประเภท</th><th>ต้อง dispose</th></tr></thead><tbody>
+<tr><td><code>_formKey</code></td><td>กุญแจเข้าถึง <code>FormState</code></td><td>ไม่</td></tr>
+<tr><td><code>_employeeIdController</code></td><td>ตัวคุมช่องข้อความ</td><td><strong>ต้อง</strong></td></tr>
+<tr><td><code>_passwordController</code></td><td>ตัวคุมช่องข้อความ</td><td><strong>ต้อง</strong></td></tr>
+<tr><td><code>_passwordFocus</code></td><td>ตัวคุมโฟกัส</td><td><strong>ต้อง</strong></td></tr>
+<tr><td><code>_submitting</code></td><td>กำลังส่งอยู่หรือไม่</td><td>ไม่</td></tr>
+<tr><td><code>_obscurePassword</code></td><td>ซ่อนรหัสผ่านหรือไม่</td><td>ไม่</td></tr>
+<tr><td><code>_error</code></td><td>ข้อความผิดพลาดล่าสุด</td><td>ไม่</td></tr>
+</tbody></table><pre class="code-vs"><code>@override
+void dispose() {
+  _employeeIdController.dispose();
+  _passwordController.dispose();
+  _passwordFocus.dispose();
+  super.dispose();
+}</code></pre><p>ครบทั้งสามตัว และ <code>super.dispose()</code> อยู่ท้ายสุดตามที่ 4.11 กำหนด</p><div class="success"><strong>เจ็ดฟิลด์ที่ไม่มีตัวไหนซ้ำซ้อนกัน</strong> — เทียบกับ 19.6 ที่จอเช็คอินของ wmsapp มีเจ็ดฟิลด์เหมือนกัน แต่สามตัวเป็น nullable ที่รวมกันได้แปดสถานะ ทั้งที่ตั้งใจให้มีแค่สาม<br>ความต่างคือที่นี่ทุกฟิลด์เป็นคำถามที่ตอบได้อิสระจากกัน: “กำลังส่งอยู่ไหม” ไม่เกี่ยวกับ “ซ่อนรหัสไหม”</div></section>
+
+<section id="section-2"><h2>2. <code>_submit()</code></h2><pre class="code-vs"><code>Future&lt;void&gt; _submit() async {
+  if (_submitting) return;                                       // ①
+  if (!(_formKey.currentState?.validate() ?? false)) return;      // ②
+
+  FocusScope.of(context).unfocus();                              // ③
+  setState(() {
+    _submitting = true;
+    _error = null;                                               // ④
+  });
+
+  try {
+    await widget.auth.login(
+      _employeeIdController.text.trim(),                          // ⑤
+      _passwordController.text,                                   // ⑥
+    );
+    if (!mounted) return;                                         // ⑦
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) =&gt; WarehouseShell(auth: widget.auth)),
+    );
+  } on ApiException catch (e) {                                   // ⑧
+    if (!mounted) return;
+    setState(() =&gt; _error = e.message);
+  } finally {
+    if (mounted) setState(() =&gt; _submitting = false);             // ⑨
+  }
+}</code></pre>
+
+<h3>① ยามกันกดซ้ำ</h3><p>บนพีดีเอที่ปุ่มตอบสนองช้า คนกดสองครั้งเป็นเรื่องปกติ — บรรทัดนี้กันการยิงล็อกอินซ้อน</p><p>สังเกตว่ามีการกันสองชั้น: บรรทัดนี้ และ <code>onPressed: _submitting ? null : _submit</code> ที่ตัวปุ่ม</p><div class="note"><strong>สองชั้นไม่ใช่ความซ้ำซ้อนที่ไร้ประโยชน์</strong><br>ชั้นที่ปุ่มทำให้ปุ่มเป็นสีเทา — สื่อสารกับผู้ใช้<br>ชั้นในเมธอดกันเส้นทางอื่นที่เรียกเข้ามา — ในไฟล์นี้คือ <code>onFieldSubmitted: (_) =&gt; _submit()</code> ที่ช่องรหัสผ่าน ซึ่งกดปุ่ม “เสร็จ” บนแป้นพิมพ์แล้วยิงได้โดยไม่ผ่านปุ่ม</div>
+
+<h3>② ตรวจฟอร์ม</h3><pre class="code-vs"><code>if (!(_formKey.currentState?.validate() ?? false)) return;</code></pre><p><code>validate()</code> เรียก <code>validator</code> ของทุกช่องในฟอร์ม แล้วให้ช่องที่ไม่ผ่านแสดงข้อความสีแดงเอง</p><p><code>?? false</code> กันกรณี <code>currentState</code> เป็น null (ฟอร์มยังไม่ถูกวาด) — ถือว่าไม่ผ่าน ปลอดภัยกว่า</p>
+
+<h3>③ ปิดแป้นพิมพ์</h3><p>บนจอพีดีเอที่เล็ก แป้นพิมพ์กินพื้นที่ครึ่งจอ — ปิดก่อนแล้วผู้ใช้จะเห็นตัวหมุนและข้อความผิดพลาด</p>
+
+<h3>④ ล้างข้อผิดพลาดเก่า</h3><p>ถ้าไม่ล้าง ผู้ใช้จะเห็นข้อความจากครั้งก่อนค้างอยู่ระหว่างที่กำลังลองใหม่ ทำให้คิดว่าครั้งนี้ก็ผิดอีก</p>
+
+<h3>⑤⑥ <code>trim()</code> รหัสพนักงาน แต่ไม่ trim รหัสผ่าน</h3><table><thead><tr><th>ช่อง</th><th>trim</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>รหัสพนักงาน</td><td><strong>ใช่</strong></td><td>เครื่องสแกนหรือแป้นพิมพ์อาจแถมช่องว่างมา และช่องว่างไม่มีความหมายในรหัส</td></tr>
+<tr><td>รหัสผ่าน</td><td><strong>ไม่</strong></td><td>ช่องว่างเป็นอักขระที่ถูกต้องในรหัสผ่าน — ตัดทิ้งคือแก้รหัสผ่านของผู้ใช้</td></tr>
+</tbody></table><div class="success">รายละเอียดเล็กที่หลายโปรเจกต์ทำผิด — <code>.trim()</code> ทั้งสองช่องเพราะเขียนติดมือ แล้วผู้ใช้ที่ตั้งรหัสผ่านลงท้ายด้วยเว้นวรรคจะล็อกอินไม่ได้ตลอดกาลโดยไม่มีใครหาสาเหตุเจอ</div>
+
+<h3>⑦ <code>if (!mounted) return;</code> ก่อนใช้ <code>context</code></h3><p>ระหว่างรอเซิร์ฟเวอร์ ผู้ใช้อาจปิดแอปหรือจอถูกถอดออก — ใช้ <code>context</code> ตอนนั้นจะพัง (4.12)</p>
+
+<h3>⑧ จับเฉพาะ <code>ApiException</code></h3><div class="warning"><strong>นี่คือช่องโหว่ของจอนี้</strong><br>20.5 ชี้ว่า <code>json['token'] as String</code> จะโยน <code>TypeError</code> ถ้าเซิร์ฟเวอร์ตอบ 200 แต่ไม่มี token<br><code>TypeError</code> ไม่ใช่ <code>ApiException</code> จึงหลุดผ่าน <code>catch</code> นี้ไป<br><strong>สิ่งที่ผู้ใช้เห็น:</strong> ตัวหมุนหยุด (เพราะ <code>finally</code> ทำงาน) แต่<strong>ไม่มีข้อความอะไรเลย</strong> และไม่ได้ไปไหน — เหมือนกดปุ่มแล้วไม่มีอะไรเกิดขึ้น<br>เป็นอาการที่หาสาเหตุยากที่สุดแบบหนึ่ง เพราะไม่มีร่องรอยให้ผู้ใช้รายงาน</div><p>ทางแก้</p><pre class="code-vs"><code>} on ApiException catch (e) {
+  if (!mounted) return;
+  setState(() =&gt; _error = e.message);
+} catch (_) {
+  if (!mounted) return;
+  setState(() =&gt; _error = tr(
+    'Sign-in failed. Please try again or check the server settings.',
+    'เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่หรือตรวจสอบค่าเซิร์ฟเวอร์',
+  ));
+}</code></pre><p>ข้อความกว้าง ๆ แต่<strong>มีข้อความ</strong> — ผู้ใช้รู้ว่าเกิดอะไรขึ้นและมีอะไรให้ลอง</p>
+
+<h3>⑨ <code>finally</code> ที่เช็ค <code>mounted</code></h3><pre class="code-vs"><code>} finally {
+  if (mounted) setState(() =&gt; _submitting = false);
+}</code></pre><p><code>finally</code> ทำงานทุกทาง รวมทางที่สำเร็จแล้วเปลี่ยนจอไปแล้ว — จึงต้องเช็ค <code>mounted</code></p><p>ในเส้นทางที่สำเร็จ <code>pushReplacement</code> ถอดจอนี้ออก <code>mounted</code> จึงเป็น false และไม่มีการ <code>setState</code> ที่ไร้ประโยชน์</p></section>
+
+<section id="section-3"><h2>3. <code>pushReplacement</code> ไม่ใช่ <code>push</code></h2><pre class="code-vs"><code>Navigator.of(context).pushReplacement(
+  MaterialPageRoute(builder: (_) =&gt; WarehouseShell(auth: widget.auth)),
+);</code></pre><table><thead><tr><th></th><th><code>push</code></th><th><code>pushReplacement</code></th></tr></thead><tbody>
+<tr><td>จอล็อกอินยังอยู่ในกอง</td><td>อยู่</td><td>ถูกถอดออก</td></tr>
+<tr><td>กดปุ่มย้อนกลับของเครื่อง</td><td>กลับไปหน้าล็อกอินที่ยังกรอกไว้</td><td>ออกจากแอป</td></tr>
+<tr><td>หน่วยความจำ</td><td>ค้างจอที่ไม่ใช้แล้ว</td><td>คืน</td></tr>
+</tbody></table><p>บนพีดีเอที่ใช้ร่วมกัน การกดย้อนกลับแล้วเจอหน้าล็อกอินที่ยังมีรหัสพนักงานคนก่อนค้างอยู่คือปัญหา — <code>pushReplacement</code> จึงถูก</p><p>ทางกลับก็เหมือนกัน — 20.15 จะเห็นว่าเมนูผู้ใช้ใช้ <code>pushReplacement</code> กลับมาที่ <code>LoginScreen</code> เช่นกัน กองจึงมีจอเดียวเสมอ</p></section>
+
+<section id="section-4"><h2>4. ปุ่มตั้งค่าที่มุมขวาบน</h2><pre class="code-vs"><code>// The server address has to be reachable from here: a wrong
+// IP fails every sign-in, and the header menu that normally
+// holds this only exists after a successful login.
+IconButton(
+  tooltip: tr('Connection Settings', 'ตั้งค่าการเชื่อมต่อ'),
+  icon: const Icon(Icons.settings_outlined),
+  onPressed: () =&gt; showConnectionSettings(context),
+),</code></pre><div class="success"><strong>คอมเมนต์นี้อธิบายวงจรอุบาทว์ที่ป้องกันไว้ได้พอดี</strong><pre class="code-vs"><code>ตั้ง IP ผิด → ล็อกอินไม่ได้ → เข้าไม่ถึงเมนูตั้งค่า → แก้ IP ไม่ได้
+      ↑                                                    │
+      └────────────────────────────────────────────────────┘</code></pre>ถ้าไม่มีปุ่มนี้ ทางออกเดียวคือถอนแอปแล้วติดตั้งใหม่<br>นี่เป็นตัวอย่างของ<strong>ฟีเจอร์ที่ดูเหมือนซ้ำซ้อนจนกว่าจะเข้าใจว่ามันกันอะไร</strong> — และเป็นเหตุผลที่คอมเมนต์แบบนี้มีค่ากว่าคอมเมนต์ที่บอกว่าโค้ดทำอะไร</div><p>ข้าง ๆ กันคือ <code>LanguageButton(compact: true)</code> ด้วยเหตุผลเดียวกัน — คนที่อ่านอังกฤษไม่ออกต้องสลับภาษาได้ก่อนล็อกอิน</p></section>
+
+<section id="section-5"><h2>5. รายละเอียดของฟอร์มที่ทำถูก</h2><table><thead><tr><th>สิ่งที่ทำ</th><th>ผลกับผู้ใช้พีดีเอ</th></tr></thead><tbody>
+<tr><td><code>autofocus: true</code> ที่ช่องแรก</td><td>สแกนบัตรได้ทันทีไม่ต้องแตะจอ</td></tr>
+<tr><td><code>textInputAction: next</code> + <code>onFieldSubmitted</code> ย้ายโฟกัส</td><td>สแกนเสร็จโฟกัสไปช่องรหัสผ่านเอง</td></tr>
+<tr><td><code>textInputAction: done</code> + <code>onFieldSubmitted: _submit</code></td><td>จบได้โดยไม่ต้องแตะปุ่ม</td></tr>
+<tr><td><code>autocorrect: false</code>, <code>TextCapitalization.none</code></td><td>รหัสพนักงานไม่ถูกแก้เป็นคำอื่น</td></tr>
+<tr><td><code>enabled: !_submitting</code> ทั้งสองช่อง</td><td>แก้ข้อความระหว่างส่งไม่ได้</td></tr>
+<tr><td>ปุ่มตาดู/ซ่อนรหัสผ่าน</td><td>พิมพ์ผิดแล้วตรวจได้ — สำคัญเมื่อสวมถุงมือ</td></tr>
+<tr><td><code>maxWidth: 420</code></td><td>ไม่ยืดเต็มจอบนเครื่องจอกว้าง</td></tr>
+<tr><td><code>SingleChildScrollView</code></td><td>แป้นพิมพ์ขึ้นมาแล้วไม่ล้น</td></tr>
+</tbody></table><p>ทั้งชุดนี้รวมกันแปลว่า<strong>ล็อกอินได้โดยไม่ต้องแตะจอเลย</strong> — สแกนบัตร ยิงรหัสผ่าน จบ</p><div class="note">17.5 อธิบายว่าทำไมการไม่ต้องแตะจอถึงสำคัญ: คนงานสวมถุงมือ มือถือกล่องอยู่ และจอเปียกได้<br>จอนี้ทำครบตั้งแต่จอแรกที่ผู้ใช้เจอ</div></section>
+
+<section id="section-6"><h2>6. <code>AnimatedSize</code> รอบกล่องข้อผิดพลาด</h2><pre class="code-vs"><code>AnimatedSize(
+  duration: const Duration(milliseconds: 180),
+  child: _error == null
+      ? const SizedBox(width: double.infinity)
+      : Container(... กล่องสีแดง ...),
+),</code></pre><p>เมื่อข้อความผิดพลาดโผล่ ฟอร์มจะสูงขึ้น — ถ้าเปลี่ยนทันทีปุ่มจะกระโดด และผู้ใช้ที่กำลังจะกดอาจกดโดนที่อื่น</p><p><code>AnimatedSize</code> ทำให้ขยายภายใน 180 มิลลิวินาที เร็วพอที่ไม่รู้สึกว่าช้า แต่ตาตามทัน</p><p>สังเกต <code>SizedBox(width: double.infinity)</code> ในกรณีไม่มีข้อผิดพลาด — กว้างเต็มแต่สูงศูนย์ ทำให้ <code>AnimatedSize</code> เปลี่ยนแค่ความสูง ไม่เปลี่ยนความกว้างไปด้วย</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>จับเฉพาะข้อยกเว้นชนิดเดียว</td><td>กดแล้วเงียบ ไม่มีข้อความ</td><td>มี <code>catch (_)</code> ปิดท้าย</td></tr>
+<tr><td><code>trim()</code> รหัสผ่าน</td><td>รหัสผ่านที่มีช่องว่างใช้ไม่ได้</td><td>trim เฉพาะรหัสพนักงาน</td></tr>
+<tr><td>ใช้ <code>push</code> ไปหน้าหลัก</td><td>กดย้อนกลับเจอฟอร์มคนก่อน</td><td><code>pushReplacement</code></td></tr>
+<tr><td>ไม่มีทางเข้าตั้งค่าก่อนล็อกอิน</td><td>ตั้ง IP ผิดแล้วตัน</td><td>ปุ่มตั้งค่าบนจอล็อกอิน</td></tr>
+<tr><td>ไม่ล้าง <code>_error</code> ก่อนยิงใหม่</td><td>ข้อความเก่าค้าง</td><td>ล้างใน <code>setState</code> แรก</td></tr>
+<tr><td><code>setState</code> ใน <code>finally</code> โดยไม่เช็ค <code>mounted</code></td><td>ข้อยกเว้นหลังเปลี่ยนจอ</td><td><code>if (mounted)</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><ol><li>ผู้ใช้กดปุ่มล็อกอินแล้วปิดจอทันที ระหว่างนั้นเซิร์ฟเวอร์ตอบสำเร็จ — เดินตามโค้ดว่าเกิดอะไรขึ้นตามลำดับ</li><li>เขียน widget test ที่พิสูจน์ว่าข้อผิดพลาดจากเซิร์ฟเวอร์ถูกแสดงบนจอ โดยไม่ต้องมีเซิร์ฟเวอร์จริง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>1. _submitting = true, จอวาดตัวหมุน
+2. await login() เริ่ม
+3. ผู้ใช้ปิดจอ → State ถูกถอด → mounted = false
+   dispose() ทำงาน ปล่อย controller ทั้งสาม
+4. เซิร์ฟเวอร์ตอบสำเร็จ → login() คืนค่า
+   _api.authToken ถูกตั้งแล้ว  ← สำเร็จจริง
+5. if (!mounted) return;  → ออกจาก try
+6. finally: if (mounted) → เป็น false ไม่ทำอะไร</code></pre><p>ไม่มีข้อยกเว้น ไม่มีการเข้าถึงของที่ปล่อยไปแล้ว</p><div class="note"><strong>แต่มีผลข้างเคียงที่น่าสังเกต</strong> — ในขั้นที่ 4 การล็อกอิน<strong>สำเร็จจริง</strong> และ token ถูกตั้งบน <code>ApiClient</code> ที่ยังมีชีวิตอยู่ใน <code>main()</code><br><code>AuthRepository._session</code> ก็มีค่าแล้ว<br>แต่ผู้ใช้กลับมาเจอจอล็อกอินอีกครั้ง เพราะไม่มีใครตรวจว่ามี session ค้างอยู่<br>ไม่ใช่บั๊กเรื่องความปลอดภัย (ยังต้องกรอกใหม่อยู่ดี) แต่เป็นโอกาสที่พลาดไป — เติมได้ง่ายมาก<pre class="code-vs"><code>// LoginScreen.initState
+if (widget.auth.session != null) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(...);
+  });
+}</code></pre>แต่ต้องคิดให้ครบก่อนทำ: เส้นทางที่มาจาก <strong>logout</strong> ก็ผ่าน <code>LoginScreen</code> เหมือนกัน — ถ้า <code>logout()</code> ล้าง session ไม่หมด โค้ดนี้จะเด้งกลับเข้าแอปทันที กลายเป็นล็อกเอาต์ไม่ได้<br>ตรวจแล้วว่า <code>logout()</code> ตั้ง <code>_session = null</code> จริง จึงปลอดภัย — แต่นี่คือประเภทของการเชื่อมโยงที่ต้องไล่ให้ครบก่อนเพิ่มโค้ดสั้น ๆ แบบนี้</div><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>testWidgets('a rejected sign-in shows the server message on screen',
+    (tester) async {
+  final api = ApiClient(
+    client: MockClient((_) async =&gt; http.Response(
+          '{"Message":"รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง"}',
+          401,
+        )),
+  );
+
+  await tester.pumpWidget(MaterialApp(
+    home: LoginScreen(auth: AuthRepository(api)),
+  ));
+
+  await tester.enterText(find.byType(TextFormField).first, 'EMP001');
+  await tester.enterText(find.byType(TextFormField).last, 'wrong');
+  await tester.tap(find.byType(FilledButton));
+  await tester.pumpAndSettle();
+
+  expect(find.text('รหัสพนักงานหรือรหัสผ่านไม่ถูกต้อง'), findsOneWidget);
+  expect(find.byType(WarehouseShell), findsNothing);
+});</code></pre><p>บรรทัดสุดท้ายสำคัญพอ ๆ กับบรรทัดก่อนหน้า — ยืนยันว่า<strong>ไม่ได้เข้าไป</strong> ไม่ใช่แค่ว่ามีข้อความขึ้น</p><p>เขียนได้เพราะสองอย่างที่มีอยู่แล้ว: <code>ApiClient</code> รับ client ได้ (20.4) และ <code>LoginScreen</code> รับ <code>AuthRepository</code> ผ่านตัวสร้าง (20.2)</p><p>ลองต่อยอด: เปลี่ยน mock ให้ตอบ <code>'{"username":"x"}'</code> พร้อมสถานะ 200 — จะเห็นอาการเงียบที่บทที่ 2 ข้อ ⑧ พูดถึงด้วยตาตัวเอง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>เจ็ดฟิลด์ที่ไม่ทับซ้อนกัน และ dispose ครบสามตัวที่ต้อง dispose</li><li>กันกดซ้ำสองชั้น — ที่ปุ่มเพื่อสื่อสาร ที่เมธอดเพื่อกันทางเข้าอื่น</li><li><code>trim()</code> รหัสพนักงานแต่ไม่ trim รหัสผ่าน</li><li><code>catch</code> จับเฉพาะ <code>ApiException</code> — ข้อยกเว้นอื่นทำให้กดแล้วเงียบ ควรเติม <code>catch (_)</code></li><li><code>finally</code> เช็ค <code>mounted</code> ก่อน <code>setState</code></li><li><code>pushReplacement</code> ทำให้กองมีจอเดียว กดย้อนกลับไม่เจอฟอร์มคนก่อน</li><li>ปุ่มตั้งค่าบนจอล็อกอินตัดวงจร “IP ผิด → ล็อกอินไม่ได้ → แก้ IP ไม่ได้”</li><li>ฟอร์มออกแบบให้ล็อกอินจบได้โดยไม่ต้องแตะจอ</li></ul></div><p><strong>บทหน้า:</strong> <code>AppLanguageController</code> และ <code>tr()</code> — สองภาษาโดยไม่ใช้ระบบแปลของ Flutter</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

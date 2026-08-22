@@ -1,13 +1,109 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/app_config.dart</code> — config ไม่ได้เก็บ active URL เป็นค่าคงที่ แต่ resolve ใหม่เมื่อ request ขอใช้</div>
-<section><h2>1. URL มีหลาย root</h2><p>โปรเจกต์มี base URL ของ server แล้วต่อ route ตาม contract: business API ส่วนใหญ่ใช้ prefix <code>/api/WMS</code>, login ใช้ absolute path <code>/api/Authenticate/login</code> และบางระบบอาจมี <code>/api/data</code> การรวมทุก endpoint ไว้ใต้ prefix เดียวจะสร้าง URL ผิดโดยเงียบ ๆ จึงต้องให้ call site ระบุชัดว่า path เป็น prefixed หรือ absolute</p></section>
-<section><h2>2. Precedence ของ base URL</h2><pre class="code-vs"><code>--dart-define=WMS_API_BASE_URL=...
-             ↓ ถ้าไม่มี
-ConnectionController.activeBaseUrl
-             ↓ ถ้ายังโหลด/ไม่มี
-http://localhost:6191</code></pre><p>compile-time override เหมาะกับ managed build/CI และถูก pin ไม่ให้ runtime setting หลอกผู้ใช้ว่าเปลี่ยน server ได้ ส่วน profile เหมาะกับเครื่องภาคสนามหลาย environment</p></section>
-<section><h2>3. Getter แทน cached field</h2><p><code>AppConfig.apiBaseUrl</code> เป็น getter ที่เรียก resolver ทุกครั้ง ดังนั้น Save &amp; Use profile ใหม่แล้ว request ถัดไปจะเห็น URL ใหม่ทันที แม้ <code>ApiClient</code> เป็น object เดิม หาก cache URL ตอน constructor ของ client การสลับ profile จะไม่เกิดผลจน restart หรือ recreate dependency graph</p></section>
-<section><h2>4. ประกอบ URL ที่ boundary เดียว</h2><pre class="code-vs"><code>baseUrl + (absolute ? '' : apiPrefix) + path</code></pre><p>caller ควรส่ง path ที่เริ่มด้วย slash ตาม convention เดียว และ <code>ConnectionProfile</code> ต้อง normalize base path ไม่ให้มี slash ท้ายซ้ำ การกระจาย string interpolation ไปทุก repository ทำให้เกิด <code>//api</code>, port หาย หรือ prefix ซ้ำได้ง่าย</p></section>
-<section><h2>5. Environment label ไม่ใช่ security policy</h2><p><code>production/development/custom</code> ใน profile ช่วยจัดหมวดและค่าเริ่มต้น แต่ protocol/host/port/basePath ต่างหากที่สร้าง URL อย่าใช้ label “production” เป็นหลักฐานว่า HTTPS ถูกบังคับ หรือใช้ label “development” เพื่อปิด certificate validation; validation/security ต้องผูกกับค่าจริงและ build policy</p></section>
-<section><h2>6. เปลี่ยน server กระทบ session</h2><p>เพราะ token ยังอยู่ใน <code>ApiClient</code> เมื่อ active URL เปลี่ยน request จะส่ง token เดิมไป server ใหม่ นี่อาจได้ 401 หรือร้ายกว่านั้นคือส่ง credential ข้าม environment แนวทางปลอดภัยคือ profile switch สำเร็จแล้ว invalidate session, กลับ login และล้าง feature state เว้นแต่ระบบพิสูจน์ว่า issuer/audience เดียวกัน</p></section>
-<section><h2>7. Contract tests ที่ควรมี</h2><ul><li>override ชนะ active profile และ fallback</li><li>base path <code>/gateway/wms</code> ต่อกับ prefix ได้ครั้งเดียว</li><li>login ไม่ถูกเติม <code>/api/WMS</code></li><li>business endpoint ถูกเติม prefix</li><li>สลับ active profile แล้ว client เดิมสร้าง URI ใหม่</li><li>ค่าที่มี slash/space ผิดรูปถูก reject ก่อนถึง HTTP</li></ul></section>
-<section><h2>8. แบบฝึก .NET boundary</h2><div class="success">เขียนตาราง endpoint อย่างน้อย 5 รายการ โดยมี Flutter call, URI เต็ม, HTTP method, request DTO และ .NET route จากนั้นเพิ่ม test ที่จับกรณี login ถูกต่อ prefix ผิดและกรณี base path ทำให้ <code>/api/api</code> ซ้ำ</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–55 นาที</span><span>ลงมือทำ: อ่าน lib/core/app_config.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.2, 16.5 (ที่อยู่เซิร์ฟเวอร์ของ wmsapp), 7.3 (URL ของ API)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายความต่างระหว่าง <code>static const</code> กับ <code>static get</code> ในบริบทที่มันสำคัญจริง</div>
+
+<section><h2>1. ไฟล์ทั้งไฟล์ 26 บรรทัด</h2><pre class="code-vs"><code>import 'connection_controller.dart';
+import 'connection_profile.dart';
+
+/// Static configuration for the PDA app.
+class AppConfig {
+  /// Port the WMS backend (Kestrel) listens on — see appsettings.json.
+  static const int backendPort = defaultServerPort;
+
+  /// Base URL of the WMS backend — see [resolveBaseUrl] for the order it is
+  /// worked out in.
+  ///
+  /// `ApiClient` calls this getter on every request rather than caching it, so
+  /// switching profiles redirects the whole app immediately — no client is
+  /// rebuilt and the bearer token on the live client survives untouched.
+  static String get apiBaseUrl =&gt;
+      resolveBaseUrl(ConnectionController.instance.activeBaseUrl);
+
+  /// PDA endpoints live on the shared WMS controller (api/WMS/mobile_*). Auth
+  /// uses the shared /api/Authenticate/login (called with absolute path).
+  static const String apiPrefix = '/api/WMS';
+
+  /// Shown in the status bar. Will become a per-device setting later.
+  // static const String deviceName = 'PDA-07';
+
+  static const String appTitle = 'ACETEC WMS v3';
+}</code></pre><p>ไฟล์เล็กที่สุดในโปรเจกต์ แต่มีอยู่บรรทัดหนึ่งที่ตัดสินสถาปัตยกรรม</p></section>
+
+<section><h2>2. บรรทัดที่สำคัญ: <code>get</code> ไม่ใช่ <code>const</code></h2><p>เทียบสองแบบ</p><pre class="code-vs"><code>// แบบที่เห็นบ่อย (และแบบที่ wmsapp ทำ)
+static const String apiBaseUrl = 'http://192.168.1.194:6191';
+
+// แบบที่ไฟล์นี้ทำ
+static String get apiBaseUrl =&gt;
+    resolveBaseUrl(ConnectionController.instance.activeBaseUrl);</code></pre><table><thead><tr><th></th><th><code>const</code></th><th><code>get</code></th></tr></thead><tbody>
+<tr><td>ค่าถูกคิดเมื่อไร</td><td>ตอนคอมไพล์ ครั้งเดียว</td><td><strong>ทุกครั้งที่อ่าน</strong></td></tr>
+<tr><td>เปลี่ยนระหว่างแอปทำงาน</td><td>ไม่ได้</td><td>ได้</td></tr>
+<tr><td>ค่าใช้จ่าย</td><td>ศูนย์</td><td>เรียกฟังก์ชันหนึ่งครั้ง</td></tr>
+</tbody></table><p>ผลของการเลือก <code>get</code> อยู่ในคอมเมนต์</p><div class="note">“<code>ApiClient</code> เรียก getter นี้ทุกคำขอแทนที่จะจำค่าไว้ ทำให้การสลับโปรไฟล์เปลี่ยนปลายทางทั้งแอปทันที — ไม่ต้องสร้าง client ใหม่ และ bearer token บน client ตัวเดิมยังอยู่ครบ”</div></section>
+
+<section><h2>3. ทำไม “ไม่ต้องสร้าง client ใหม่” ถึงสำคัญ</h2><p>ย้อนไปดู 20.2 — <code>ApiClient</code> ถูกสร้างครั้งเดียวใน <code>main()</code></p><pre class="code-vs"><code>runApp(WmsApp(auth: AuthRepository(ApiClient())));</code></pre><p>และ token เก็บอยู่<strong>บนตัว client</strong></p><pre class="code-vs"><code>class ApiClient {
+  String? authToken;   // ตั้งตอนล็อกอินสำเร็จ
+}</code></pre><p>ทีนี้ลองคิดว่าถ้า <code>apiBaseUrl</code> เป็น <code>const</code> จะสลับเซิร์ฟเวอร์อย่างไร</p><pre class="code-vs"><code>// ต้องสร้าง client ใหม่ทั้งตัว
+final newClient = ApiClient();       // ← authToken เป็น null แล้ว
+</code></pre><table><thead><tr><th>ทางเลือก</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>สร้าง client ใหม่</td><td>token หาย ผู้ใช้ต้องล็อกอินใหม่</td></tr>
+<tr><td>สร้างใหม่แล้วก๊อป token</td><td>ต้องจำว่ามีอะไรต้องก๊อปบ้าง — ลืมง่ายเมื่อเพิ่มฟิลด์</td></tr>
+<tr><td>ให้ที่อยู่เป็น getter</td><td><strong>ไม่ต้องแตะ client เลย</strong></td></tr>
+</tbody></table><div class="success"><strong>รูปแบบที่ควรจำ</strong><br>เมื่อมีค่าที่เปลี่ยนได้ระหว่างทำงาน ให้<strong>ค้นค่าตอนใช้</strong> อย่าฉีดค่าเข้าไปเก็บไว้ในของที่มีอายุยาว<br>เพราะของที่มีอายุยาวจะเริ่ม “ถือค่าที่ตกยุคแล้ว” และคุณจะต้องไล่ซิงก์มันตลอดไป</div><p>แต่ควรพูดถึงราคาที่จ่ายด้วย</p><table><thead><tr><th>สิ่งที่แลกมา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>AppConfig</code> ผูกกับ <code>ConnectionController</code></td><td>ไฟล์ที่ควรเป็นค่าคงที่ล้วน กลับ import singleton เข้ามา</td></tr>
+<tr><td>เทสต์ต้องรีเซ็ต controller</td><td>จึงมี <code>debugReset()</code> ให้ (20.11)</td></tr>
+<tr><td>ที่อยู่เปลี่ยนกลางคำขอชุดหนึ่งได้</td><td>ถ้าสลับโปรไฟล์ระหว่างที่มีคำขอค้างอยู่</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นความเสี่ยงจริง แต่เล็ก — การสลับโปรไฟล์เป็นการกระทำที่คนตั้งใจทำ ไม่ได้เกิดเอง</p></section>
+
+<section><h2>4. รากของ API มีสามอัน</h2><pre class="code-vs"><code>static const String apiPrefix = '/api/WMS';</code></pre><p>คอมเมนต์ในไฟล์ <code>connection_profile.dart</code> บอกไว้ชัดว่าแอปยิงสามราก</p><table><thead><tr><th>ราก</th><th>ใช้ทำอะไร</th><th>เรียกอย่างไร</th></tr></thead><tbody>
+<tr><td><code>/api/WMS</code></td><td>ทุกอย่างของพีดีเอ</td><td><code>post('/mobile_xxx', ...)</code></td></tr>
+<tr><td><code>/api/Authenticate</code></td><td>ล็อกอิน</td><td><code>post('/api/Authenticate/login', ..., absolute: true)</code></td></tr>
+<tr><td><code>/api/data</code></td><td>ตารางข้อมูลที่เว็บใช้ร่วมกัน</td><td><code>absolute: true</code></td></tr>
+</tbody></table><p>นี่คือเหตุผลที่ <code>apiPrefix</code> เป็น <code>const</code> ในขณะที่ <code>apiBaseUrl</code> เป็น <code>get</code></p><div class="note"><strong>เส้นแบ่งที่ชัด</strong><ul><li><strong>ที่อยู่เครื่อง</strong> — ผู้ใช้แก้ได้ เพราะแต่ละไซต์คนละเครื่อง</li><li><strong>เส้นทางของ API</strong> — ผู้ใช้แก้ไม่ได้ เพราะถูกกำหนดโดยโค้ดฝั่ง .NET</li></ul>คอมเมนต์ใน <code>normalizeBasePath</code> เขียนไว้ตรง ๆ ว่า “มันไม่ใช่ราก <code>/api</code> ของแอป — แอปยิงสามรากต่างกัน ส่วนนั้นจึงให้ผู้ใช้แก้ไม่ได้”</div></section>
+
+<section><h2>5. <code>resolveBaseUrl</code> — ลำดับความสำคัญสามชั้น</h2><pre class="code-vs"><code>/// Resolves the address the app talks to. First match wins:
+///   1. `--dart-define=WMS_API_BASE_URL` (a build pinned to one server)
+///   2. [activeBaseUrl], the profile the operator picked (null before load)
+///   3. the built-in default, only until a profile has been seeded
+String resolveBaseUrl(String? activeBaseUrl) {
+  if (_baseUrlOverride.isNotEmpty) return _baseUrlOverride;
+  if (activeBaseUrl != null && activeBaseUrl.isNotEmpty) return activeBaseUrl;
+  return 'http://$defaultServerHost:$defaultServerPort';
+}</code></pre><p>สามบรรทัด อ่านจบใน 10 วินาที และมีเอกสารบอกลำดับไว้ข้างบน</p><h3>ชั้นที่ 1 — <code>--dart-define</code></h3><pre class="code-vs"><code>const String _baseUrlOverride = String.fromEnvironment('WMS_API_BASE_URL');</code></pre><pre class="code-vs"><code>flutter run --dart-define=WMS_API_BASE_URL=http://192.168.1.50:6191</code></pre><p><code>String.fromEnvironment</code> อ่านค่าที่ส่งตอน<strong>คอมไพล์</strong> ไม่ใช่ตอนทำงาน — ถ้าไม่ส่งจะได้สตริงว่าง</p><h3>ชั้นที่ 2 — โปรไฟล์ที่ผู้ใช้เลือก</h3><p>มาจาก <code>ConnectionController</code> ที่โหลดใน <code>main()</code> (20.11)</p><h3>ชั้นที่ 3 — ค่าฝังมา</h3><pre class="code-vs"><code>const String defaultServerHost = 'localhost';
+const int defaultServerPort = 6191;</code></pre><p>คอมเมนต์บอกว่านี่คือ “ที่เดียวที่ที่อยู่เริ่มต้นอยู่” — ทั้ง <code>seedConnectionProfile()</code> และค่าตกกลับของ <code>AppConfig</code> อ่านจากตรงนี้ ย้ายเซิร์ฟเวอร์แล้วแก้บรรทัดเดียว</p><p>และเห็นได้ใน <code>AppConfig</code> เอง</p><pre class="code-vs"><code>static const int backendPort = defaultServerPort;   // ไม่ใช่ 6191 ที่พิมพ์ซ้ำ</code></pre></section>
+
+<section><h2>6. สองคอมเมนต์ที่บอกประวัติ</h2><h3>คอมเมนต์ที่บอกว่า “เคยมีทางที่สอง แล้วเอาออก”</h3><pre class="code-vs"><code>/// One path for every platform. There used to be a `kIsWeb` branch deriving the
+/// host from the page URL, but a saved profile does that job better and on
+/// every platform, so keeping a second mechanism only meant Chrome behaved
+/// differently from the handheld for no gain.</code></pre><h3>คอมเมนต์ที่บอกว่า “เคยมีสองที่ แล้วรวมเป็นที่เดียว”</h3><pre class="code-vs"><code>/// Lives here rather than in `AppConfig` so the *same* answer serves both the
+/// requests (`AppConfig.apiBaseUrl`) and the status probe. When each resolved
+/// its own way, a `--dart-define` build sent requests to one server while the
+/// header dot reported on another.</code></pre><div class="warning"><strong>บั๊กที่บรรยายในคอมเมนต์นี้คือบั๊กที่หลอกคนที่สุดแบบหนึ่ง</strong><br>จุดเขียว “เชื่อมต่อแล้ว” ขึ้นสวยงาม แต่คำขอจริงไปคนละเครื่อง<br>ผู้ใช้จะรายงานว่า “แอปบอกว่าต่อได้แต่ทำอะไรไม่ได้เลย” — และคนแก้จะไล่หาที่ผิดฝั่ง</div><div class="success"><strong>กฎที่ได้จากบั๊กนี้</strong><br><strong>ตัวบ่งชี้สถานะต้องถามคำถามเดียวกับที่งานจริงถาม</strong><br>ถ้าจุดสถานะคำนวณที่อยู่เอง มันกำลังทดสอบสิ่งที่ไม่มีใครใช้<br>ใช้กับทุกเรื่อง — จอแสดงสิทธิ์ต้องอ่านตัวแปรเดียวกับที่ปุ่มใช้ตัดสิน จอแสดงคิวต้องนับจากคิวเดียวกับที่คนงานหยิบ</div></section>
+
+<section><h2>7. บรรทัดที่ถูกคอมเมนต์ทิ้งไว้</h2><pre class="code-vs"><code>/// Shown in the status bar. Will become a per-device setting later.
+// static const String deviceName = 'PDA-07';</code></pre><p>โค้ดที่ถูกปิดไว้พร้อมคำอธิบายว่าจะกลับมาทำ</p><table><thead><tr><th>มุมที่ยอมรับได้</th><th>มุมที่ไม่ควร</th></tr></thead><tbody>
+<tr><td>บอกว่าเคยมีฟีเจอร์นี้และตั้งใจจะมีอีก</td><td>ไม่รู้ว่า “later” คือเมื่อไร</td></tr>
+<tr><td>มีคอมเมนต์อธิบาย ไม่ใช่โค้ดตายเปล่า ๆ</td><td>git เก็บประวัติให้อยู่แล้ว ลบทิ้งได้</td></tr>
+</tbody></table><p>ในโปรเจกต์นี้ยอมรับได้เพราะมีบรรทัดเดียวและมีคำอธิบาย — ถ้าเป็นบล็อก 40 บรรทัด ควรลบแล้วเปิด issue แทน</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td><code>const</code> สำหรับค่าที่ผู้ใช้เปลี่ยนได้</td><td>สลับแล้วไม่มีผลจนกว่าจะปิดแอป</td><td>ใช้ getter</td></tr>
+<tr><td>ให้ผู้ใช้แก้ราก <code>/api</code></td><td>404 ทุกเส้นทาง</td><td>ให้แก้แค่ที่อยู่เครื่อง</td></tr>
+<tr><td>จุดสถานะคำนวณที่อยู่แยกจากคำขอ</td><td>เขียวแต่ใช้ไม่ได้</td><td>ฟังก์ชันเดียวตอบทั้งคู่</td></tr>
+<tr><td>พิมพ์พอร์ตซ้ำหลายที่</td><td>ย้ายเซิร์ฟเวอร์แล้วลืมแก้ที่หนึ่ง</td><td>ค่าคงที่ตัวเดียว</td></tr>
+<tr><td>เก็บ token ใน client แล้วสร้าง client ใหม่</td><td>ถูกเด้งออกโดยไม่มีเหตุผล</td><td>อย่าสร้างใหม่ ให้ที่อยู่เป็น getter</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>ผู้ใช้ตั้ง Base Path เป็น <code>/api</code> — เขียน URL เต็มที่แอปจะยิงออกไป และอธิบายว่าทำไม <code>validateConnectionInput</code> ถึงห้ามไว้</li><li>ถ้าจะเพิ่มการเก็บ <code>deviceName</code> ต่อเครื่องจริง ๆ ควรเก็บที่ไหน และทำไมไม่ควรอยู่ใน <code>AppConfig</code></li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>baseUrl  = 'http://192.168.1.50:6191' + normalizeBasePath('/api')
+         = 'http://192.168.1.50:6191/api'
+
+URL เต็ม  = baseUrl + apiPrefix + path
+         = 'http://192.168.1.50:6191/api' + '/api/WMS' + '/mobile_receiving_list'
+         = http://192.168.1.50:6191/api/api/WMS/mobile_receiving_list
+                                    ~~~~~~~~ ซ้ำ</code></pre><p>404 ทุกเส้น และข้อความในตัวตรวจก็เขียนไว้ตรงตัว</p><pre class="code-vs"><code>'Leave this empty — the app already adds /api itself. Filling it in here '
+'makes every address /api/.../api/... and nothing will work.'</code></pre><div class="note"><strong>สังเกตว่าคอมเมนต์เหนือกฎนี้อธิบายว่าทำไมคนถึงพลาด</strong><br>“Easy mistake: the field looks like the place the API root belongs.”<br>ช่องชื่อ Base Path ดูเหมือนที่ที่ควรใส่ราก API — การตรวจที่ดีจึงไม่ใช่แค่ห้าม แต่บอกว่าควรใส่อะไรแทน</div><p><strong>ข้อ 2</strong></p><p>ควรอยู่ใน <code>ConnectionController</code> หรือคอนโทรลเลอร์คล้าย ๆ กันที่อ่าน/เขียน <code>SharedPreferences</code></p><table><thead><tr><th>เหตุผล</th><th>อธิบาย</th></tr></thead><tbody>
+<tr><td>ค่าต่างกันต่อเครื่อง</td><td><code>AppConfig</code> เก็บสิ่งที่เหมือนกันทุกเครื่อง</td></tr>
+<tr><td>ต้องอ่านจากดิสก์</td><td><code>AppConfig</code> ไม่มี <code>load()</code> และไม่ควรมี</td></tr>
+<tr><td>ต้องแจ้งเมื่อเปลี่ยน</td><td>แถบสถานะต้องวาดใหม่ — ต้องเป็น <code>ChangeNotifier</code></td></tr>
+</tbody></table><p>ทางที่ตรงที่สุดคือ<strong>เพิ่มลงในโปรไฟล์ที่มีอยู่แล้ว</strong> — เพิ่มฟิลด์ <code>deviceName</code> ใน <code>ConnectionProfile</code> พร้อม <code>toJson</code>/<code>fromJson</code> แล้วเปิดช่องในแผ่นตั้งค่า</p><pre class="code-vs"><code>// fromJson รองรับข้อมูลเก่าที่ไม่มีฟิลด์นี้อยู่แล้ว
+deviceName: raw['deviceName']?.toString() ?? '',</code></pre><p>ได้ของแถมคือ<strong>สลับโปรไฟล์แล้วชื่อเครื่องเปลี่ยนตาม</strong> ซึ่งสมเหตุสมผลถ้าพีดีเอเครื่องเดียวใช้ทดสอบหลายไซต์</p><div class="warning"><strong>แต่ถามก่อนทำ</strong> — “ชื่อเครื่อง” เป็นสมบัติของ<strong>เครื่อง</strong> หรือของ<strong>การเชื่อมต่อ</strong><br>ถ้าเป็นของเครื่อง การผูกไว้กับโปรไฟล์แปลว่าต้องพิมพ์ซ้ำทุกโปรไฟล์<br>ไม่มีคำตอบถูกจากโค้ด — ต้องถามคนใช้ว่าพีดีเอหนึ่งเครื่องยิงหลายเซิร์ฟเวอร์จริงหรือไม่<br>นี่คือคำถามที่ต้องถามก่อนเขียน ไม่ใช่หลังเขียน</div></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li><code>apiBaseUrl</code> เป็น <code>get</code> ไม่ใช่ <code>const</code> — สลับโปรไฟล์แล้วมีผลทันทีโดยไม่แตะ client และ token ไม่หาย</li><li>ค่าที่เปลี่ยนได้ระหว่างทำงาน ให้ค้นตอนใช้ อย่าฝากไว้กับของที่อายุยาว</li><li><code>apiPrefix</code> เป็น <code>const</code> เพราะเส้นทาง API ผู้ใช้แก้ไม่ได้ — แอปยิงสามราก</li><li><code>resolveBaseUrl</code> สามชั้น: <code>--dart-define</code> → โปรไฟล์ → ค่าฝังมา</li><li>ที่อยู่เริ่มต้นอยู่ที่เดียว — <code>defaultServerHost</code>/<code>defaultServerPort</code></li><li>ฟังก์ชันเดียวตอบทั้งคำขอและจุดสถานะ เพราะเคยแยกกันแล้วเจอบั๊ก “เขียวแต่ใช้ไม่ได้”</li><li>คอมเมนต์ในไฟล์นี้บันทึกทางที่เคยลองแล้วเอาออก ไม่ใช่แค่บอกว่าโค้ดทำอะไร</li></ul></div><p><strong>บทหน้า:</strong> <code>ApiClient</code> 96 บรรทัดกับ <code>ApiException</code> — และเหตุผลที่ <code>statusCode</code> ต้องเดินทางไปกับข้อผิดพลาด</p></section>

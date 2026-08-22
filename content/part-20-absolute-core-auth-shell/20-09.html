@@ -1,9 +1,153 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/app_theme.dart</code>, <code>lib/features/warehouse/ui/pda_colors.dart</code> และ <code>lib/widgets/pda_status_bar.dart</code> — design tokens สามระดับที่ไม่ควรใช้สลับหน้าที่กัน</div>
-<section><h2>1. Theme ระดับแอป</h2><p><code>AppTheme</code> ตั้ง Material 3, color scheme, typography, input/card/dialog/progress และ minimum button sizes ให้ login/settings/shared Material widgets มี baseline เดียวกัน การแก้ accessibility เช่น tap target หรือ text scale จึงทำที่ root ได้มากกว่าตามแก้ทุก screen</p></section>
-<section><h2>2. Operational tokens</h2><p><code>PdaColors</code> ตั้งชื่อสีตามความหมายในคลัง เช่น shell navy, electric blue, success/warning/error, muted surface และ borders ส่วน <code>PdaMetrics</code> มี screen padding, radius และ <code>minTapTarget = 48</code> ชื่อเชิง semantic ทำให้เปลี่ยน palette ได้โดยไม่ต้องรู้ hex ในทุก widget</p></section>
-<section><h2>3. สองชั้นไม่ใช่ duplication</h2><p>App theme ครอบ Material components ทั้งแอป ส่วน PDA tokens รองรับ dense operational screen และ status ที่ต้อง contrast ชัด หาก feature ใช้ <code>Colors.green</code> โดยตรงทุกจุด จะไม่รู้ว่า green หมายถึง connected, completed หรือ safe action และยากต่อ dark/high-contrast theme</p></section>
-<section><h2>4. Tap target กับ visual size</h2><p>ปุ่มบน handheld อาจวาด icon 20px แต่พื้นที่แตะต้องอย่างน้อย 48px เพราะผู้ใช้สวมถุงมือหรือเดินทำงาน <code>PdaMetrics.minTapTarget</code> และ theme constraints แยก hit area จาก graphic size จึงไม่ต้องขยาย icon จน layoutแน่น</p></section>
-<section><h2>5. Status bar สองโลก</h2><p><code>SystemChrome</code>/<code>AnnotatedRegion</code> คุม Android/iOS system overlay ส่วน <code>PdaStatusBar</code> เป็น <code>PreferredSizeWidget</code> สูงคงที่ใน Scaffold แสดง app identity/PDA หากแก้เพียง AppBar color แต่ไม่ตั้ง overlay icon brightness ข้อความระบบอาจอ่านไม่ออก</p></section>
-<section><h2>6. Responsive shell</h2><p>header ของ shell ใช้ <code>LayoutBuilder</code> ลดความสูงและซ่อน subtitle บน home เมื่อกว้างไม่เกิน 400px, จำกัดความกว้าง profile name และใช้ ellipsis หลักคือรักษา action สำคัญกับ title ก่อนรายละเอียด ไม่บีบทุกอย่างให้เล็กจนแตะไม่ได้</p></section>
-<section><h2>7. Semantic status ต้องไม่พึ่งสีอย่างเดียว</h2><p>connection dot มีสีต่างตาม unknown/connecting/connected/disconnected แต่เมนูยังแสดง label ด้วย ช่วยทั้ง color-vision deficiency และการ debug screenshot อย่าทำ hard-coded green เพราะสถานะ network เป็น data จาก controller ไม่ใช่ decoration</p></section>
-<section><h2>8. Visual test</h2><div class="success">ตรวจ 390×844 ที่ text scale 1.0/1.3, ไทย/อังกฤษ, keyboard เปิด, profile name ยาว และ connection ทุกสถานะ ทดสอบ tap targetอย่างน้อย 48px, ไม่มี overflow, system status iconอ่านได้ และ screenshot/golden แยก visual regression จาก business test</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน lib/core/app_theme.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.8, 2.11 (ธีมและ <code>ColorScheme</code>), 16.9 (ธีมของ wmsapp)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านธีมและบอกได้ว่าค่าไหนถูกตั้งเพราะพีดีเอ ไม่ใช่เพราะความสวย</div>
+
+<section><h2>1. สองไฟล์ที่ต้องอ่านคู่กัน</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>core/app_theme.dart</code></td><td>155</td><td>สีพื้นฐาน + <code>ThemeData</code></td></tr>
+<tr><td><code>features/warehouse/ui/pda_colors.dart</code></td><td>48</td><td>สีของโดเมนคลัง + ขนาดมาตรฐาน</td></tr>
+</tbody></table><p>การแยกนี้ตรงกับเส้นแบ่ง <code>core/</code> กับ <code>features/</code> ที่ 20.1 อธิบายไว้ — <code>app_theme</code> ไม่รู้จักคำว่า AGV หรือรถโฟล์คลิฟท์</p></section>
+
+<section><h2>2. <code>AppColors</code> — 15 สี</h2><pre class="code-vs"><code>/// Application-wide design tokens tuned for compact warehouse PDA screens.
+class AppColors {
+  static const Color statusBar = Color(0xFF031D37);
+  static const Color brand = Color(0xFF2468AE);
+  static const Color primary = Color(0xFF2E73B9);
+  static const Color primaryDark = Color(0xFF174D80);
+  static const Color primarySoft = Color(0xFFE9F3FF);
+  static const Color heading = Color(0xFF102A43);
+  static const Color subtitle = Color(0xFF60758A);
+  static const Color border = Color(0xFFD9E5EF);
+  static const Color divider = Color(0xFFE7EEF5);
+  static const Color danger = Color(0xFFD64545);
+  static const Color success = Color(0xFF1F9D62);
+  static const Color warning = Color(0xFFD78A13);
+  static const Color surface = Colors.white;
+  static const Color surfaceMuted = Color(0xFFF6F9FC);
+  static const Color pageBg = Color(0xFFEDF3F8);
+}</code></pre><p>ชื่อของแต่ละสีบอก<strong>หน้าที่</strong> ไม่ใช่<strong>สี</strong></p><table><thead><tr><th>ตั้งชื่อตามหน้าที่</th><th>ตั้งชื่อตามสี</th></tr></thead><tbody>
+<tr><td><code>danger</code></td><td><code>red</code></td></tr>
+<tr><td><code>subtitle</code></td><td><code>grey</code></td></tr>
+<tr><td><code>pageBg</code></td><td><code>lightBlue</code></td></tr>
+</tbody></table><div class="success"><strong>ความต่างจะเห็นตอนต้องเปลี่ยนสี</strong><br>ถ้าตั้งชื่อว่า <code>red</code> แล้ววันหนึ่งเปลี่ยนสีเตือนเป็นส้ม จะได้ตัวแปรชื่อ <code>red</code> ที่มีค่าเป็นสีส้ม<br>ถ้าตั้งชื่อว่า <code>danger</code> ก็แค่เปลี่ยนค่า ชื่อยังถูกอยู่</div><p>แต่มีข้อสังเกต — <code>pda_colors.dart</code> ไม่ได้ทำตามกฎเดียวกัน</p><pre class="code-vs"><code>static const green = AppColors.success;    // ชื่อตามสี
+static const red = AppColors.danger;
+static const amber = AppColors.warning;
+static const agv = Color(0xFF16845C);      // ชื่อตามหน้าที่
+static const fork = Color(0xFFB4770C);
+static const pick = Color(0xFFBD3E6B);</code></pre><div class="warning"><strong>ในไฟล์เดียวกันมีทั้งสองแบบปนกัน</strong><br><code>green</code> ชี้ไปที่ <code>success</code> ซึ่งแปลว่าไฟล์นี้รู้จักชื่อที่ถูกอยู่แล้ว แต่เลือกใช้ชื่อสีแทน<br>ผลที่ตามมา: จอที่ต้องการ “สีของสถานะสำเร็จ” บางที่เขียน <code>PdaColors.green</code> บางที่เขียน <code>AppColors.success</code> — ค่าเดียวกัน แต่ค้นหาเจอไม่ครบเมื่อจะเปลี่ยน<br>นี่คือรูปแบบเดียวกับ 15 แถวใน 19.15 ที่จะเก็บไว้เทียบใน Part 23 — <strong>ของเดียวมีสองชื่อ</strong></div></section>
+
+<section><h2>3. ค่าที่ถูกตั้งเพราะพีดีเอ</h2><pre class="code-vs"><code>return ThemeData(
+  useMaterial3: true,
+  colorScheme: scheme,
+  scaffoldBackgroundColor: AppColors.pageBg,
+  visualDensity: VisualDensity.standard,              // ①
+  materialTapTargetSize: MaterialTapTargetSize.padded, // ②
+  ...
+);</code></pre>
+
+<h3>① <code>VisualDensity.standard</code></h3><p>ปกติจะเขียน <code>VisualDensity.adaptivePlatformDensity</code> ซึ่งบีบระยะห่างให้แน่นขึ้นบนเดสก์ท็อป</p><p>ที่นี่ตรึงเป็น <code>standard</code> — ระยะห่างเท่ากันทุกที่ จอบนพีดีเอกับจอที่รันบนเครื่องพัฒนาจึงหน้าตาเหมือนกัน</p>
+
+<h3>② <code>MaterialTapTargetSize.padded</code></h3><p>บังคับให้พื้นที่กดของทุกปุ่มมีอย่างน้อย 48×48 พิกเซล แม้ตัวปุ่มจะเล็กกว่านั้น</p><p>สอดคล้องกับ <code>PdaMetrics.minTapTarget = 48.0</code> ในอีกไฟล์</p><div class="success"><strong>สองบรรทัดนี้คือหัวใจของธีมพีดีเอ</strong><br>คนงานสวมถุงมือ นิ้วหนากว่าปกติ และมักถือของอยู่มือเดียว<br>ปุ่มที่กดพลาดในคลังไม่ได้แค่ทำให้รำคาญ — มันแปลว่ายืนยันผิดใบ แล้วต้องมีคนไปตามแก้ในระบบ</div>
+
+<h3>ปุ่มที่สูงกว่าปกติ</h3><pre class="code-vs"><code>filledButtonTheme: FilledButtonThemeData(
+  style: FilledButton.styleFrom(
+    minimumSize: const Size.fromHeight(54),      // ← ปกติ 40
+    ...
+  ),
+),
+outlinedButtonTheme: OutlinedButtonThemeData(
+  style: OutlinedButton.styleFrom(
+    minimumSize: const Size.fromHeight(50),      // ← เตี้ยกว่าปุ่มหลัก
+    ...
+  ),
+),</code></pre><table><thead><tr><th>ปุ่ม</th><th>สูง</th><th>สื่อว่า</th></tr></thead><tbody>
+<tr><td><code>FilledButton</code></td><td>54</td><td>การกระทำหลัก — ยืนยัน, บันทึก</td></tr>
+<tr><td><code>OutlinedButton</code></td><td>50</td><td>ทางเลือกรอง — ยกเลิก, ย้อนกลับ</td></tr>
+</tbody></table><p>ความต่าง 4 พิกเซลไม่ได้ตั้งใจให้มองเห็น แต่ทำให้ปุ่มหลักเด่นกว่าเล็กน้อยแม้จะวางเรียงกัน</p><p>และ <code>Size.fromHeight</code> แปลว่ากำหนดแค่ความสูง ความกว้างปล่อยให้ยืดตามพื้นที่ — ปุ่มจึงเต็มความกว้างจอโดยอัตโนมัติ ซึ่งเป็นสิ่งที่ต้องการบนจอแคบ</p></section>
+
+<section><h2>4. ขนาดตัวอักษร</h2><pre class="code-vs"><code>headlineSmall:  22   w800
+titleLarge:     18   w800
+titleMedium:    15   w700
+bodyLarge:      14.5
+bodyMedium:     13.5
+bodySmall:      12.5   สี subtitle
+labelLarge:     14     w700
+labelMedium:    12.5   w700</code></pre><p>สังเกตสองอย่าง</p>
+
+<h3>ขนาดที่มีจุดทศนิยม</h3><p><code>14.5</code>, <code>13.5</code>, <code>12.5</code> — ไม่ใช่เลขกลม</p><p>ในสเกลมาตรฐานของ Material ค่าเหล่านี้คือ 16, 14, 12 — ที่นี่บีบลงเล็กน้อยเพื่อให้ข้อความยาว ๆ (ชื่อสินค้า, รหัสตำแหน่ง) ลงในบรรทัดเดียวบนจอแคบ</p><div class="note">การลดขนาดตัวอักษรบนจอเล็กเป็นดาบสองคม — อ่านยากขึ้นในที่แสงน้อย<br>ครึ่งพิกเซลเป็นการประนีประนอมที่พอดี ต่างจากการลดจาก 16 เหลือ 12 ซึ่งจะเห็นผลชัดกับคนสายตาไม่ดี<br>โปรเจกต์นี้ยังใช้ <code>auto_size_text</code> ในบางจอสำหรับข้อความที่ยาวเกินคาด (20.1) แทนที่จะลดขนาดฐานลงไปอีก</div>
+
+<h3>น้ำหนักตัวอักษรที่หนักกว่าปกติ</h3><p><code>w800</code> สำหรับหัวข้อ และ <code>w700</code> สำหรับป้าย — มาตรฐานคือ <code>w600</code>/<code>w500</code></p><p>ตัวหนาขึ้นอ่านง่ายกว่าในที่ที่แสงจ้าหรือจอมีรอยขีดข่วน ซึ่งเป็นสภาพของพีดีเอที่ใช้งานมาสักพัก</p>
+
+<h3><code>height</code> ที่ตั้งไว้ทุกตัว</h3><pre class="code-vs"><code>headlineSmall: TextStyle(..., height: 1.2),
+bodyLarge:     TextStyle(..., height: 1.4),</code></pre><p><code>height</code> คือระยะระหว่างบรรทัดเทียบกับขนาดตัวอักษร — ตั้งไว้ชัดเจนแทนที่จะปล่อยตามฟอนต์</p><p>ผลคือกล่องข้อความมีความสูงที่ทำนายได้ ซึ่งสำคัญเมื่อต้องจัดหลายบรรทัดในการ์ดที่มีที่จำกัด</p></section>
+
+<section><h2>5. ขอบมนสามระดับ</h2><pre class="code-vs"><code>cardTheme       → 16
+dialogTheme     → 20
+buttonTheme     → 14
+inputDecoration → 12  (ที่ _fieldBorder)</code></pre><p>เรียงจากใหญ่ไปเล็กตามขนาดของสิ่งที่ครอบ — กล่องใหญ่ขอบมนมาก กล่องเล็กขอบมนน้อย</p><p>ค่าเหล่านี้ซ้ำใน <code>PdaMetrics</code></p><pre class="code-vs"><code>class PdaMetrics {
+  static const screenPadding = 12.0;
+  static const cardRadius = 16.0;
+  static const controlRadius = 14.0;
+  static const minTapTarget = 48.0;
+}</code></pre><div class="warning"><strong>ค่าเดียวกันอยู่สองที่</strong> — <code>cardRadius = 16</code> ใน <code>PdaMetrics</code> และ <code>BorderRadius.circular(16)</code> ใน <code>cardTheme</code><br>ถ้าเปลี่ยนที่หนึ่งแล้วลืมอีกที่ การ์ดที่ใช้ <code>Card</code> จะไม่เหมือนการ์ดที่วาดเองด้วย <code>Container</code><br>แก้ได้ทันทีโดยให้ธีมอ่านจาก <code>PdaMetrics</code> — แต่จะต้องย้าย <code>PdaMetrics</code> ขึ้นมาที่ <code>core/</code> ก่อน เพราะตอนนี้มันอยู่ใต้ <code>features/</code> และ <code>core/</code> ไม่ควร import จาก <code>features/</code></div></section>
+
+<section><h2>6. <code>_fieldBorder</code> — ฟังก์ชันเล็กที่ตัดความซ้ำ</h2><pre class="code-vs"><code>OutlineInputBorder _fieldBorder(Color color, {double width = 1}) =&gt;
+    OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide(color: color, width: width),
+    );</code></pre><pre class="code-vs"><code>border:            _fieldBorder(AppColors.border),
+enabledBorder:     _fieldBorder(AppColors.border),
+focusedBorder:     _fieldBorder(AppColors.primary, width: 1.6),
+errorBorder:       _fieldBorder(AppColors.danger),
+focusedErrorBorder:_fieldBorder(AppColors.danger, width: 1.6),</code></pre><p>ห้าสถานะที่ต่างกันแค่สีกับความหนา — ถ้าเขียนเต็มจะเป็น 25 บรรทัดที่มี <code>circular(12)</code> ซ้ำห้าครั้ง</p><p>สังเกตว่า<strong>ช่องที่กำลังพิมพ์อยู่มีขอบหนากว่า</strong> (1.6 เทียบกับ 1.0) — บนพีดีเอที่ไม่มีเคอร์เซอร์กะพริบให้เห็นชัด ขอบหนาคือสัญญาณว่าสแกนไปแล้วจะลงช่องนี้</p></section>
+
+<section><h2>7. <code>PdaStatusBar</code> — แถบ 28 พิกเซล</h2><pre class="code-vs"><code>/// Dark strip across the top showing which app and which handheld this is.
+/// Sits directly under the system status bar and shares its colour, so the two
+/// read as one bar with the OS clock and battery on the right.
+class PdaStatusBar extends StatelessWidget implements PreferredSizeWidget {
+  static const double _height = 28;
+
+  @override
+  Size get preferredSize =&gt; const Size.fromHeight(_height);
+  ...
+}</code></pre><h3><code>implements PreferredSizeWidget</code></h3><p><code>Scaffold.appBar</code> รับเฉพาะ widget ที่บอกความสูงตัวเองได้ — การ implement interface นี้ทำให้ <code>PdaStatusBar</code> ใช้แทน <code>AppBar</code> ได้</p><pre class="code-vs"><code>Scaffold(
+  appBar: const PdaStatusBar(),
+  ...
+)</code></pre><h3>28 พิกเซล</h3><table><thead><tr><th></th><th>สูง</th></tr></thead><tbody>
+<tr><td><code>AppBar</code> มาตรฐาน</td><td>56</td></tr>
+<tr><td><code>PdaStatusBar</code></td><td><strong>28</strong></td></tr>
+</tbody></table><p>ครึ่งเดียว เพราะบนจอสูง 800 พิกเซล ทุก 28 พิกเซลที่ประหยัดได้คือหนึ่งแถวของรายการที่มองเห็นเพิ่ม</p><p>ทำได้เพราะแถบนี้<strong>ไม่มีปุ่ม</strong> — มีแค่ไอคอน ชื่อแอป และคำว่า PDA จึงไม่ต้องเผื่อพื้นที่กด 48 พิกเซล</p><h3>ต่อเนื่องกับแถบของระบบ</h3><pre class="code-vs"><code>gradient: LinearGradient(
+  colors: [AppColors.statusBar, Color(0xFF122D45)],
+),</code></pre><p><code>AppColors.statusBar</code> คือสีเดียวกับที่ <code>main.dart</code> ตั้งให้แถบสถานะของ Android (20.2) — สองแถบจึงกลมกลืนเป็นแถบเดียว โดยมีนาฬิกาและแบตเตอรี่ของระบบอยู่ด้านบน</p><h3><code>key: const ValueKey('pda-status-bar-surface')</code></h3><p>key ที่ใส่ไว้เพื่อให้เทสต์หาเจอ</p><pre class="code-vs"><code>find.byKey(const ValueKey('pda-status-bar-surface'))</code></pre><div class="note"><strong>การใส่ key เพื่อเทสต์เป็นการยอมให้เทสต์มีร่องรอยในโค้ดจริง</strong><br>ทางเลือกคือหาโดย <code>find.byType(PdaStatusBar)</code> ซึ่งไม่ต้องแตะโค้ดเลย<br>แต่ที่นี่ต้องการหา <code>Container</code> ข้างในเพื่อตรวจสี ไม่ใช่ตัว widget — จึงต้องมี key<br>ยอมรับได้เมื่อมีน้อยและตั้งชื่อชัด แต่ถ้าเริ่มมี key แบบนี้กระจายทุกไฟล์ แปลว่าเทสต์กำลังผูกกับโครงสร้างภายในมากเกินไป</div></section>
+
+<section><h2>8. เทียบกับ wmsapp</h2><table><thead><tr><th></th><th>wmsapp (16.9)</th><th>absolute</th></tr></thead><tbody>
+<tr><td>ไฟล์ธีม</td><td>324 บรรทัด</td><td>155 + 48</td></tr>
+<tr><td>Material</td><td>3</td><td>3</td></tr>
+<tr><td>โทนหลัก</td><td>น้ำเงิน</td><td>น้ำเงิน</td></tr>
+<tr><td>ตั้ง <code>materialTapTargetSize</code></td><td>ไม่</td><td><strong>ตั้ง</strong></td></tr>
+<tr><td>แถบบน</td><td><code>AppBar</code> 56</td><td>แถบเอง 28</td></tr>
+<tr><td>สีตั้งชื่อตามหน้าที่</td><td>ปนกัน</td><td>ปนกัน</td></tr>
+</tbody></table><p>แถวสุดท้ายคือปัญหาที่ทั้งสองโปรเจกต์มีเหมือนกัน — และ 19.15 นับ “สีของประเภท/สถานะ” เป็นหนึ่งใน 15 แถว</p><div class="warning"><strong>คำทำนายจาก 20.1 กำลังเป็นจริง</strong><br>20.1 ทำนายว่าปัญหาที่<strong>เกิดที่ชั้นการแสดงผล</strong> จะไม่หายไปแม้จะมี store<br>เรื่องสีเป็นข้อแรกที่ยืนยันคำทำนายนั้น — <code>WarehouseStore</code> ไม่ได้เกี่ยวอะไรกับการที่ <code>green</code> กับ <code>success</code> เป็นค่าเดียวกันสองชื่อ<br>เก็บไว้เทียบตอนจบ Part 22</div></section>
+
+<section><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>ตั้งชื่อสีตามสี</td><td>เปลี่ยนสีแล้วชื่อโกหก</td><td>ตั้งตามหน้าที่</td></tr>
+<tr><td>ค่าเดียวกันสองชื่อ</td><td>เปลี่ยนแล้วไม่ครบ</td><td>ชื่อเดียวต่อความหมาย</td></tr>
+<tr><td>ใช้ <code>adaptivePlatformDensity</code> บนพีดีเอ</td><td>หน้าตาต่างจากตอนพัฒนา</td><td><code>standard</code></td></tr>
+<tr><td>ไม่บังคับพื้นที่กดขั้นต่ำ</td><td>กดพลาดเมื่อสวมถุงมือ</td><td><code>padded</code> + 48 พิกเซล</td></tr>
+<tr><td>รัศมีขอบมนซ้ำหลายที่</td><td>การ์ดสองแบบไม่เหมือนกัน</td><td>ค่าคงที่ตัวเดียว</td></tr>
+<tr><td>ใช้ <code>AppBar</code> เต็มบนจอเล็ก</td><td>เสียพื้นที่ 28 พิกเซล</td><td>แถบเองที่ <code>implements PreferredSizeWidget</code></td></tr>
+</tbody></table></section>
+
+<section><h2>10. แบบฝึกหัด</h2><ol><li>ค้นหาทุกที่ที่ใช้ <code>PdaColors.green</code> กับ <code>AppColors.success</code> แล้วเสนอทางรวม</li><li>ธีมนี้ตั้ง <code>ColorScheme.light</code> ตายตัว — ถ้าต้องรองรับโหมดมืดสำหรับกะกลางคืน ต้องแก้อะไรบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>rg "PdaColors\.green|AppColors\.success" lib</code></pre><p>ทางรวมที่เจ็บน้อยที่สุดคือ<strong>ทำให้ชื่อที่ผิดหายไป โดยไม่ต้องแก้จุดเรียก</strong></p><pre class="code-vs"><code>// ขั้นที่ 1 — ทำเครื่องหมายว่าเลิกใช้
+@Deprecated('Use AppColors.success — colours are named by role, not by hue')
+static const green = AppColors.success;</code></pre><p>ตัววิเคราะห์จะขีดเส้นใต้ทุกจุดที่ใช้ โดยที่โค้ดยังทำงานได้ปกติ</p><pre class="code-vs"><code>// ขั้นที่ 2 — ทยอยแก้ตามที่ตัววิเคราะห์ชี้
+// ขั้นที่ 3 — ลบบรรทัดนั้นทิ้ง</code></pre><div class="success"><strong><code>@Deprecated</code> คือเครื่องมือสำหรับการเปลี่ยนที่ทำไม่จบในครั้งเดียว</strong><br>ต่างจากการลบทันทีตรงที่โค้ดไม่พังระหว่างทาง และต่างจากการปล่อยไว้ตรงที่มีแรงกดดันให้จบ<br>ใช้ได้กับทุกกรณีที่ 19.15 เรียกว่า “กฎเดียวเขียนสองแบบ” — เลือกแบบที่ถูก แล้วประกาศให้อีกแบบเป็นของเลิกใช้</div><p><strong>ข้อ 2 — โหมดมืด</strong></p><table><thead><tr><th>ต้องแก้</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>AppColors</code></td><td>ทุกค่าเป็น <code>const</code> ตายตัว ต้องมีชุดที่สอง</td></tr>
+<tr><td><code>buildAppTheme()</code></td><td>ต้องรับพารามิเตอร์ว่าสว่างหรือมืด</td></tr>
+<tr><td><code>MaterialApp</code></td><td>เพิ่ม <code>darkTheme</code> + <code>themeMode</code></td></tr>
+<tr><td>ทุกที่ที่เขียน <code>AppColors.xxx</code> ตรง ๆ</td><td><strong>งานหนักที่สุด</strong></td></tr>
+</tbody></table><p>ข้อสุดท้ายคือปัญหาจริง — โปรเจกต์นี้เรียก <code>AppColors</code> และ <code>PdaColors</code> โดยตรงเกือบทุกที่ ไม่ได้ผ่าน <code>Theme.of(context).colorScheme</code></p><pre class="code-vs"><code>// แบบที่ใช้อยู่ — ค่าคงที่ ไม่รู้จักธีมปัจจุบัน
+color: AppColors.heading
+
+// แบบที่รองรับโหมดมืด — อ่านจากธีมที่กำลังใช้
+color: Theme.of(context).colorScheme.onSurface</code></pre><div class="note"><strong>แต่ต้องถามก่อนว่าโหมดมืดคือคำตอบที่ถูกจริงหรือไม่</strong><br>ปัญหาของกะกลางคืนในคลังคือ<strong>จอสว่างจ้าแสบตา</strong> ซึ่งแก้ได้ด้วยการลดความสว่างของหน้าจอ<br>โหมดมืดแก้คนละปัญหา — มันช่วยเรื่องแบตเตอรี่กับความสบายตาในที่มืดสนิท ซึ่งคลังที่มีไฟส่องสว่างไม่ใช่<br>และมีข้อเสียชัดเจน: ข้อความสีขาวบนพื้นดำอ่านยากกว่าเมื่ออยู่ใต้ไฟจ้า<br><strong>คำตอบที่ตรงกว่าอาจเป็นปุ่มปรับความสว่างในแอป</strong> ซึ่งใช้เวลาไม่ถึงวัน เทียบกับการรื้อสีทั้งโปรเจกต์<br>นี่คือตัวอย่างของคำถามที่ต้องกลับไปถามคนใช้ ไม่ใช่ตัดสินจากโค้ด</div></details></section>
+
+<section><h2>11. สรุป</h2><div class="success"><ul><li>ธีมแยกสองไฟล์ตามเส้น <code>core/</code> กับ <code>features/</code></li><li>สีใน <code>AppColors</code> ตั้งชื่อตามหน้าที่ แต่ <code>PdaColors</code> ปนทั้งสองแบบ — ของเดียวสองชื่อ</li><li><code>VisualDensity.standard</code> + <code>MaterialTapTargetSize.padded</code> คือสองบรรทัดที่ทำให้ธีมนี้เป็นธีมพีดีเอ</li><li>ปุ่มหลัก 54 ปุ่มรอง 50 และกว้างเต็มโดยอัตโนมัติ</li><li>ตัวอักษรเล็กลงครึ่งพิกเซลและหนาขึ้นหนึ่งระดับจากมาตรฐาน</li><li>ช่องที่โฟกัสมีขอบหนา 1.6 เพราะพีดีเอไม่มีเคอร์เซอร์ที่เห็นชัด</li><li><code>PdaStatusBar</code> สูง 28 แทน 56 และ <code>implements PreferredSizeWidget</code></li><li>รัศมีขอบมนซ้ำระหว่างธีมกับ <code>PdaMetrics</code></li><li>ปัญหาเรื่องสียืนยันคำทำนายจาก 20.1 ว่า store ไม่ได้แก้ปัญหาชั้นการแสดงผล</li></ul></div><p><strong>บทหน้า:</strong> <code>ConnectionProfile</code> 348 บรรทัด — ฟีเจอร์ที่ wmsapp ไม่มีเลย และมีเทสต์ 37 ข้อ</p></section>

@@ -4,21 +4,205 @@
 <title>ApiClient &amp; ApiException</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">20-04 · Real Codebase</span><h1>ApiClient &amp; ApiException</h1><p>Part 20: Absolute Core &amp; Auth</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">หน้าที่และขอบเขต</a></li><li><a href="#section-2">Dependency injection ที่มีอยู่</a></li><li><a href="#section-3">Request pipeline</a></li><li><a href="#section-4">Success contract</a></li><li><a href="#section-5">Error translation</a></li><li><a href="#section-6">Token เป็น mutable transport state</a></li><li><a href="#section-7">Failure modes ที่ต้องรู้</a></li><li><a href="#section-8">Test matrix</a></li></ol></nav>
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/api_client.dart</code> — transport layer ที่รวม URL, JSON, timeout, Bearer token และการแปล HTTP error ไว้จุดเดียว</div>
-<section id="section-1"><h2>1. หน้าที่และขอบเขต</h2><p><code>ApiClient</code> ไม่ควรรู้ receiving หรือ task แต่รู้วิธีส่ง request ไป WMS: สร้าง URI, ตั้ง JSON headers, เติม Authorization, encode body, timeout, decode response และโยน <code>ApiException</code> ส่วน repository เป็นผู้รู้ endpoint กับ shape ของข้อมูล</p></section>
-<section id="section-2"><h2>2. Dependency injection ที่มีอยู่</h2><p>constructor รับ <code>http.Client</code> ได้ จึงใช้ mock client ใน unit test โดยไม่ยิง network จริง ถ้าไม่ส่งจะสร้าง client มาตรฐาน ข้อควรระวังคือ implementation ยังไม่มี public <code>close/dispose</code> ที่บอก ownership ชัด; เมื่อเพิ่ม streaming/connection pooling ควรกำหนดว่าใครปิด injected client และใครปิด owned client</p></section>
-<section id="section-3"><h2>3. Request pipeline</h2><pre class="code-vs"><code>resolve current base URL
-→ choose absolute or /api/WMS prefix
-→ Content-Type/Accept: application/json
-→ Authorization: Bearer &lt;token&gt; (ถ้ามี)
-→ jsonEncode(body)
-→ POST timeout 15s
-→ decode success or translate failure</code></pre></section>
-<section id="section-4"><h2>4. Success contract</h2><p>response body ที่ว่างหรือ decode ไม่ได้ตามกรณีที่รองรับจะกลับ map ว่าง แต่ payload ปกติต้องเป็น JSON object การ cast เป็น <code>Map&lt;String,dynamic&gt;</code> ทำให้ JSON array หรือ scalar เป็น contract mismatch ซึ่งควรถูกทดสอบที่ repository ถ้า endpoint คืนหลาย shape ควรมี method/decoder แบบ typed แทนขยาย dynamic ไปทั่วระบบ</p></section>
-<section id="section-5"><h2>5. Error translation</h2><p>เมื่อ status ไม่สำเร็จ client มองข้อความตามลำดับ <code>Message</code>, <code>message</code>, <code>msg</code> แล้ว fallback เป็นข้อความ HTTP code ก่อนโยน <code>ApiException(message, statusCode)</code> ขณะที่ <code>SocketException</code> และ <code>TimeoutException</code> ถูกแปลเป็นข้อความผู้ใช้ สิ่งนี้แยก transport failure ออกจาก business failure ได้บางส่วน แต่ exception type เดียวยังจำแนก retryability ไม่ละเอียด</p></section>
-<section id="section-6"><h2>6. Token เป็น mutable transport state</h2><p><code>authToken</code> ถูกตั้งหลัง login และล้างตอน logout ทำให้ทุก adapter ได้ header โดยอัตโนมัติ ความเรียบง่ายนี้แลกกับ coupling: request ที่กำลังวิ่งอาจใช้ token เก่า, เปลี่ยน server แล้วยังพก token และไม่มีกลไก serialize refresh token การขยาย production ควรใช้ request interceptor/token provider ที่อ่าน session snapshot อย่างมี policy</p></section>
-<section id="section-7"><h2>7. Failure modes ที่ต้องรู้</h2><ul><li><code>HandshakeException</code> และ certificate error ยังไม่ได้แปลเท่า probe</li><li><code>http.ClientException</code> หรือ invalid URI อาจหลุดเป็น raw error</li><li>JSON malformed/type cast error ไม่กลายเป็น domain-friendly contract error</li><li>มีเฉพาะ POST ใน client ปัจจุบัน; อย่าจำลอง GET ด้วย body</li><li>automatic retry ของ mutation อาจทำรายการซ้ำถ้าไม่มี idempotency key</li></ul></section>
-<section id="section-8"><h2>8. Test matrix</h2><div class="success">ใช้ mock client ยืนยัน URI/header/body สำหรับ absolute และ prefixed request, 2xx body ว่าง/object, 4xx ที่ใช้ key ข้อความทั้งสามแบบ, 500 non-JSON, timeout/socket, malformed success JSON และ token add/remove โดย test ต้องตรวจว่า error ไม่เผย token/password</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ทั้งไฟล์มีสี่ส่วน</a></li><li><a href="#section-2">ApiException</a></li><li><a href="#section-3">ตัวสร้างที่ฉีดของทดสอบได้</a></li><li><a href="#section-4">post()</a></li><li><a href="#section-5">_headers()</a></li><li><a href="#section-6">_decode() — ส่วนที่ละเอียดที่สุด</a></li><li><a href="#section-7">สามอย่างที่ไฟล์นี้ทำถูกและ wmsapp ไม่ได้ทำ</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน lib/core/api_client.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.3, 16.7 (<code>ApiService</code> ของ wmsapp), 7.6 (จัดการข้อผิดพลาด HTTP)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านตัวส่งคำขอ 96 บรรทัดจนหมด และชี้ได้ว่าอะไรที่ wmsapp พลาดไปสามข้อ</div>
+
+<section id="section-1"><h2>1. ทั้งไฟล์มีสี่ส่วน</h2><table><thead><tr><th>บรรทัด</th><th>ส่วน</th></tr></thead><tbody>
+<tr><td>11–19</td><td><code>ApiException</code></td></tr>
+<tr><td>22–41</td><td>ตัวสร้าง + <code>post()</code> ตอนต้น</td></tr>
+<tr><td>43–65</td><td>ยิงจริง + จับข้อผิดพลาดเครือข่าย</td></tr>
+<tr><td>67–95</td><td><code>_headers()</code> + <code>_decode()</code></td></tr>
+</tbody></table><p>มีเมธอดสาธารณะเดียวคือ <code>post()</code> — ไม่มี <code>get()</code> เลย ซึ่งเป็นเรื่องที่ต้องอธิบาย</p></section>
+
+<section id="section-2"><h2>2. <code>ApiException</code></h2><pre class="code-vs"><code>/// Raised when the backend answers with a non-success status or is unreachable.
+class ApiException implements Exception {
+  ApiException(this.message, {this.statusCode});
+
+  final String message;
+  final int? statusCode;
+
+  @override
+  String toString() =&gt; message;
+}</code></pre><p>เก้าบรรทัด และทุกบรรทัดมีเหตุผล</p><h3><code>implements Exception</code> ไม่ใช่ <code>extends</code></h3><p><code>Exception</code> ใน Dart เป็น interface ที่ไม่มีอะไรเลย — การ <code>implements</code> เป็นการประกาศเจตนาว่า “ของชิ้นนี้ตั้งใจให้ throw”</p><h3><code>statusCode</code> เป็น <code>int?</code></h3><table><thead><tr><th>สถานการณ์</th><th><code>statusCode</code></th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ตอบ 401</td><td>401</td></tr>
+<tr><td>เซิร์ฟเวอร์ตอบ 500</td><td>500</td></tr>
+<tr><td>ต่อไม่ติด</td><td><strong>null</strong></td></tr>
+<tr><td>หมดเวลารอ</td><td><strong>null</strong></td></tr>
+</tbody></table><p><code>null</code> จึงมีความหมายชัดเจน: <strong>คำขอไปไม่ถึงเซิร์ฟเวอร์ หรือไม่รู้ว่าถึงหรือเปล่า</strong></p><div class="note">19.12 เจอปัญหานี้ใน wmsapp — จอไม่รู้ว่าคำสั่งไปถึงหรือไม่ จึงขึ้น “ส่งไม่สำเร็จ” ทั้งที่งานเดินไปแล้ว<br>การมี <code>statusCode</code> เป็น null แยกจาก 500 คือขั้นแรกของการแก้ปัญหานั้น</div><h3><code>toString()</code> คืน <code>message</code> เฉย ๆ</h3><pre class="code-vs"><code>// ถ้าไม่ override
+'$error'   // → "Instance of 'ApiException'"
+
+// เมื่อ override
+'$error'   // → "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบสัญญาณหรือค่าเซิร์ฟเวอร์"</code></pre><p>ทำให้จอที่เขียน <code>catch (e) { showToast('$e'); }</code> ได้ข้อความที่อ่านรู้เรื่อง แม้จะเขียนแบบขี้เกียจ</p><div class="success"><strong>นี่คือการออกแบบให้ “ทางที่ง่ายที่สุด” เป็นทางที่ถูก</strong><br>ถ้า <code>toString()</code> ให้ผลแย่ คนก็จะเขียน <code>e is ApiException ? e.message : '...'</code> ทุกที่ แล้วมีที่ที่ลืม<br>เมื่อ <code>toString()</code> ให้ผลดี การเขียนแบบสั้นที่สุดก็ถูกอยู่แล้ว</div></section>
+
+<section id="section-3"><h2>3. ตัวสร้างที่ฉีดของทดสอบได้</h2><pre class="code-vs"><code>ApiClient({http.Client? client}) : _client = client ?? http.Client();
+
+final http.Client _client;</code></pre><p>อ่านว่า “ถ้ามีคนส่ง client มาก็ใช้ตัวนั้น ถ้าไม่ส่งก็สร้างของจริง”</p><table><thead><tr><th>ใครเรียก</th><th>ส่งอะไร</th></tr></thead><tbody>
+<tr><td><code>main()</code></td><td>ไม่ส่ง — ได้ <code>http.Client()</code> จริง</td></tr>
+<tr><td>เทสต์</td><td>ส่ง <code>MockClient</code> ที่ตอบตามสคริปต์</td></tr>
+</tbody></table><pre class="code-vs"><code>// รูปแบบในเทสต์
+final client = MockClient((request) async {
+  expect(request.url.path, '/api/WMS/mobile_receiving_list');
+  return http.Response('{"data": []}', 200);
+});
+final api = ApiClient(client: client);</code></pre><div class="warning"><strong>ความต่างจาก wmsapp ที่ใหญ่ที่สุดอยู่ตรงนี้</strong><pre class="code-vs"><code>// wmsapp — 16.6
+class ApiService {
+  static final ApiService _instance = ApiService._internal();
+  factory ApiService() =&gt; _instance;
+  final http.Client _client = http.Client();     // ← ตายตัว
+}</code></pre>ไม่มีทางใส่ของปลอมเข้าไปได้ — ต่อให้อยากเขียนเทสต์ก็เขียนไม่ได้<br>เทสต์ 101 ข้อของโปรเจกต์นี้ไม่ได้เกิดจากความขยัน แต่เกิดจาก<strong>ตัวสร้างสองบรรทัดนี้</strong></div></section>
+
+<section id="section-4"><h2>4. <code>post()</code></h2><pre class="code-vs"><code>/// POST JSON. [path] is appended to the mobile route group prefix, unless
+/// [absolute] is set — then it is used as-is after the base URL (for shared
+/// WMS endpoints like /api/Authenticate/login that aren't PDA-specific).
+Future&lt;Map&lt;String, dynamic&gt;&gt; post(
+  String path,
+  Map&lt;String, dynamic&gt; body, {
+  bool absolute = false,
+}) async {
+  final prefix = absolute ? '' : AppConfig.apiPrefix;
+  final uri = Uri.parse('${AppConfig.apiBaseUrl}$prefix$path');
+
+  late http.Response response;
+  try {
+    response = await _client
+        .post(uri, headers: _headers(), body: jsonEncode(body))
+        .timeout(_timeout);
+  } on SocketException {
+    throw ApiException(tr('Unable to connect to the server. ...', 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ...'));
+  } on TimeoutException {
+    throw ApiException(tr('The server did not respond. ...', 'เซิร์ฟเวอร์ไม่ตอบสนอง ...'));
+  }
+
+  return _decode(response);
+}</code></pre>
+
+<h3>ทำไมมีแต่ <code>post()</code></h3><p>ทุกอย่างในแอปนี้ยิงเป็น POST แม้กระทั่งการดึงรายการ</p><pre class="code-vs"><code>await _api.post('/mobile_receiving_list', {'q': query, 'page': page});</code></pre><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>พารามิเตอร์อยู่ในตัว JSON ไม่ต้อง encode ใส่ query string</td><td>ผิดหลัก REST</td></tr>
+<tr><td>ตัวส่งเหลือเมธอดเดียว</td><td>แคชระดับ HTTP ใช้ไม่ได้</td></tr>
+<tr><td>รหัสสินค้าที่มี <code>/</code> หรือ <code>#</code> ไม่พัง</td><td>ยิงซ้ำจากเบราว์เซอร์/พร็อกซีไม่ปลอดภัยตามนิยาม</td></tr>
+</tbody></table><div class="note"><strong>เป็นการเลือกที่ป้องกันปัญหาที่ 18.9 เจอจริง</strong> — wmsapp ต่อ URL ด้วยการแปะสตริง แล้วรหัสที่มีอักขระพิเศษทำให้เส้นทางเพี้ยน<br>ที่นี่ไม่มีอะไรอยู่ใน URL เลย ทุกค่าเดินทางในตัว JSON ปัญหานั้นจึงเป็นไปไม่ได้ตั้งแต่ต้น<br>ราคาที่จ่าย (แคชกับ REST) ไม่มีความหมายในแอปที่ยิงเซิร์ฟเวอร์ในวงแลนเดียวกันและต้องการข้อมูลสดเสมอ</div>
+
+<h3><code>late http.Response response;</code></h3><p>ประกาศไว้นอก <code>try</code> เพราะต้องใช้หลัง <code>try</code> — <code>late</code> บอกคอมไพเลอร์ว่า “มันจะมีค่าแน่นอนก่อนถูกอ่าน”</p><p>ถูกต้องเพราะทุกทางออกของ <code>try</code> ที่ไม่ได้ตั้งค่า จะ <code>throw</code> ไปเลย</p>
+
+<h3>สอง <code>catch</code> ที่แยกกัน</h3><table><thead><tr><th>ข้อยกเว้น</th><th>แปลว่า</th><th>บอกผู้ใช้ว่า</th></tr></thead><tbody>
+<tr><td><code>SocketException</code></td><td>ไปไม่ถึงเครื่องปลายทาง</td><td>ตรวจสัญญาณหรือค่าเซิร์ฟเวอร์</td></tr>
+<tr><td><code>TimeoutException</code></td><td>ถึงแล้วแต่ไม่ตอบใน 15 วินาที</td><td>ลองใหม่</td></tr>
+</tbody></table><p>สองอย่างนี้ต้องการการกระทำต่างกัน — อันแรกไป<strong>แก้ตั้งค่า</strong> อันที่สอง<strong>กดซ้ำ</strong></p><div class="warning"><strong>แต่มีข้อควรระวัง</strong> — <code>TimeoutException</code> ไม่ได้แปลว่างานไม่เกิด<br>เซิร์ฟเวอร์อาจรับคำสั่งไปทำแล้ว แค่ตอบกลับไม่ทัน<br>ข้อความ “กรุณาลองใหม่” จึงถูกสำหรับการ<strong>ดึงข้อมูล</strong> แต่อันตรายสำหรับการ<strong>สั่งงาน</strong> — กดซ้ำอาจได้งานสองใบ<br>14.7 เรียกสถานะนี้ว่า <em>outcome unknown</em> และเสนอ <code>Idempotency-Key</code> เป็นทางแก้ — โปรเจกต์นี้ยังไม่มี จะกลับมาที่ Part 22</div>
+
+<h3>15 วินาที</h3><pre class="code-vs"><code>static const Duration _timeout = Duration(seconds: 15);</code></pre><p>ค่าเดียวใช้กับทุกคำขอ ทั้งการดึงรายการและการยืนยันงาน</p><p>บนวงแลนของคลัง 15 วินาทีถือว่าใจกว้างพอสำหรับคำขอที่ช้าที่สุด และไม่นานจนคนคิดว่าแอปค้าง</p></section>
+
+<section id="section-5"><h2>5. <code>_headers()</code></h2><pre class="code-vs"><code>Map&lt;String, String&gt; _headers() =&gt; {
+  'Content-Type': 'application/json',
+  if (authToken != null) 'Authorization': 'Bearer $authToken',
+};</code></pre><p><strong>collection if</strong> ใน map literal (D1.14) — ถ้ายังไม่ล็อกอินก็ไม่มี header ตัวนี้เลย ไม่ใช่ส่ง <code>Bearer null</code></p><p>เรียกใหม่ทุกครั้งที่ยิง จึงหยิบ token ล่าสุดเสมอ — เป็นแนวคิดเดียวกับ getter ใน 20.3</p></section>
+
+<section id="section-6"><h2>6. <code>_decode()</code> — ส่วนที่ละเอียดที่สุด</h2><pre class="code-vs"><code>Map&lt;String, dynamic&gt; _decode(http.Response response) {
+  Map&lt;String, dynamic&gt;? json;
+  if (response.body.isNotEmpty) {
+    try {
+      json = jsonDecode(response.body) as Map&lt;String, dynamic&gt;;
+    } on FormatException {
+      json = null;                                      // ①
+    }
+  }
+
+  if (response.statusCode &gt;= 200 && response.statusCode &lt; 300) {
+    return json ?? &lt;String, dynamic&gt;{};                 // ②
+  }
+
+  final message =
+      json?['Message'] as String? ??                    // ③
+      json?['message'] as String? ??
+      json?['msg'] as String? ??
+      tr('An error occurred (${response.statusCode})',
+         'เกิดข้อผิดพลาด (${response.statusCode})');
+  throw ApiException(message, statusCode: response.statusCode);   // ④
+}</code></pre>
+
+<h3>① แปลง JSON ไม่ได้ก็ไม่ล้ม</h3><p>เมื่อเซิร์ฟเวอร์ตอบ HTML (หน้าข้อผิดพลาดของ IIS, หน้าล็อกอินของพร็อกซี) <code>jsonDecode</code> จะโยน <code>FormatException</code></p><p>ถ้าไม่จับ ผู้ใช้จะเห็น <code>FormatException: Unexpected character</code> ซึ่งไม่ช่วยอะไร — ที่นี่ตั้ง <code>json = null</code> แล้วไปต่อ สุดท้ายได้ข้อความ “เกิดข้อผิดพลาด (500)” ซึ่งอย่างน้อยบอกรหัสได้</p>
+
+<h3>② สำเร็จแต่ตัวว่าง</h3><pre class="code-vs"><code>return json ?? &lt;String, dynamic&gt;{};</code></pre><p>204 No Content หรือ 200 ที่ตัวว่าง จะได้ map ว่างแทนที่จะล้ม — คำสั่งที่ไม่คืนข้อมูล (เช่น ยืนยันงาน) จึงเรียกได้โดยไม่ต้องเช็ค null</p>
+
+<h3>③ ลองอ่านชื่อฟิลด์สามแบบ</h3><table><thead><tr><th>ชื่อ</th><th>มาจากไหน</th></tr></thead><tbody>
+<tr><td><code>Message</code></td><td>ASP.NET ทั่วไป (ตัวใหญ่ตามธรรมเนียม C#)</td></tr>
+<tr><td><code>message</code></td><td>เมื่อ .NET ตั้งค่าแปลงชื่อเป็น camelCase</td></tr>
+<tr><td><code>msg</code></td><td>เส้นทางที่คนเขียนเองแบบสั้น</td></tr>
+</tbody></table><div class="note"><strong>สามบรรทัดนี้เป็นหลักฐานว่าฝั่ง .NET ไม่ได้ตอบรูปแบบเดียวกันหมด</strong><br>ถ้าตอบเหมือนกันทั้งหมด บรรทัดเดียวก็พอ<br>ทางแก้ที่ถูกจริงคือ<strong>ทำให้ฝั่งเซิร์ฟเวอร์ตอบรูปเดียว</strong> แล้วลดเหลือบรรทัดเดียว — แต่ตราบใดที่ยังไม่ทำ การเผื่อไว้ตรงนี้ดีกว่าปล่อยให้ผู้ใช้เห็น “เกิดข้อผิดพลาด (400)” ทั้งที่เซิร์ฟเวอร์อุตส่าห์อธิบายมาแล้ว</div>
+
+<h3>④ ส่ง <code>statusCode</code> ติดไปด้วย</h3><pre class="code-vs"><code>throw ApiException(message, statusCode: response.statusCode);</code></pre><p>เทียบกับ wmsapp ที่ 19.12 ชี้ว่าโยนแค่ข้อความ ทำให้จอปลายทางแยก 401 ออกจาก 500 ไม่ได้</p><p>เมื่อมี <code>statusCode</code> จอจึงตัดสินใจต่างกันได้</p><pre class="code-vs"><code>on ApiException catch (e) {
+  if (e.statusCode == 401) {  /* เด้งกลับไปล็อกอิน */ }
+  else if (e.statusCode == null) { /* ไม่รู้ผล — อย่ากดซ้ำอัตโนมัติ */ }
+  else { /* แสดงข้อความ */ }
+}</code></pre></section>
+
+<section id="section-7"><h2>7. สามอย่างที่ไฟล์นี้ทำถูกและ wmsapp ไม่ได้ทำ</h2><table><thead><tr><th>เรื่อง</th><th>ที่นี่</th><th>wmsapp</th><th>ผลของการไม่ทำ</th></tr></thead><tbody>
+<tr><td>ฉีด <code>http.Client</code> ได้</td><td>ได้</td><td>ไม่ได้</td><td>เขียนเทสต์ไม่ได้เลย</td></tr>
+<tr><td><code>statusCode</code> ติดมากับ error</td><td>มี</td><td>ไม่มี</td><td>แยก 401 จาก 500 ไม่ได้</td></tr>
+<tr><td>ค่าทั้งหมดอยู่ในตัว body</td><td>ใช่</td><td>ต่อ URL ด้วยสตริง</td><td>รหัสที่มี <code>/</code> ทำให้เส้นทางเพี้ยน</td></tr>
+</tbody></table><p>และหนึ่งอย่างที่ยังขาดเหมือนกันทั้งคู่</p><div class="warning"><strong>ไม่มีการกันการยิงซ้ำ</strong> — ไม่มี <code>Idempotency-Key</code> และไม่มีการแยกว่าคำขอนี้ปลอดภัยที่จะลองใหม่หรือไม่<br>เมื่อหมดเวลารอตอนกด “ยืนยันรับสินค้า” แอปบอกให้ลองใหม่ ซึ่งอาจสร้างรายการซ้ำ<br>เป็นข้อจำกัดที่ต้องแก้ร่วมกับฝั่ง .NET — แอปฝ่ายเดียวทำไม่ได้</div></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>สร้าง <code>http.Client</code> ในคลาสตายตัว</td><td>เทสต์ไม่ได้</td><td>รับผ่านตัวสร้าง</td></tr>
+<tr><td>โยน error ที่ไม่มี <code>statusCode</code></td><td>ปลายทางแยกกรณีไม่ได้</td><td>พก <code>int?</code> ไปด้วย</td></tr>
+<tr><td>ไม่ override <code>toString()</code></td><td>ผู้ใช้เห็น “Instance of…”</td><td>คืน <code>message</code></td></tr>
+<tr><td><code>jsonDecode</code> โดยไม่จับ <code>FormatException</code></td><td>HTML ทำแอปล้ม</td><td>จับแล้วปล่อยเป็น null</td></tr>
+<tr><td>ไม่ตั้ง <code>timeout</code></td><td>หมุนค้างไม่จบ</td><td><code>.timeout(...)</code></td></tr>
+<tr><td>บอก “ลองใหม่” เมื่อหมดเวลาของคำสั่ง</td><td>อาจได้งานซ้ำ</td><td>แยกดึงข้อมูลกับสั่งงาน</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><ol><li>เซิร์ฟเวอร์ตอบ 200 พร้อมตัว body เป็น HTML — เดินตามโค้ดแล้วบอกว่าผู้เรียก <code>post()</code> ได้อะไร และปัญหาคืออะไร</li><li>เขียนเทสต์ที่พิสูจน์ว่า <code>statusCode</code> ถูกส่งต่อจริง โดยใช้ <code>MockClient</code></li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เดินตามโค้ด</strong></p><pre class="code-vs"><code>body ไม่ว่าง        → เข้า try
+jsonDecode('&lt;html&gt;...')  → FormatException
+                     → json = null
+statusCode 200      → เข้าเงื่อนไขสำเร็จ
+return json ?? {}   → คืน map ว่าง</code></pre><p>ผู้เรียกได้ <code>{}</code> โดย<strong>ไม่มีข้อผิดพลาดใด ๆ</strong></p><div class="warning"><strong>นี่คือกรณีที่แอบอันตราย</strong><br>ตัวแปลง (parser) ที่รับ map ว่างจะได้รายการว่าง แล้วจอขึ้น “ไม่พบข้อมูล” — ทั้งที่ความจริงคือ<strong>ยิงไปโดนหน้าเว็บ ไม่ใช่ API</strong><br>อาการที่ผู้ใช้เห็นคือ “ค้นหาแล้วไม่เจออะไรเลย” ซึ่งพาไปหาที่ผิดฝั่ง<br>เกิดได้จริงเมื่อ: ตั้ง Base Path ผิด, พร็อกซีคืนหน้าล็อกอิน, หรือชน <code>MapFallbackToPage</code> ของ Blazor</div><p>ทางแก้ที่พอดี</p><pre class="code-vs"><code>if (response.statusCode &gt;= 200 &amp;&amp; response.statusCode &lt; 300) {
+  if (json == null &amp;&amp; response.body.isNotEmpty) {
+    // ตอบ 200 แต่ไม่ใช่ JSON = ไม่ได้คุยกับ API
+    throw ApiException(
+      tr('The server replied with an unexpected format. Check the server settings.',
+         'เซิร์ฟเวอร์ตอบมาในรูปแบบที่ไม่ใช่ของ API ตรวจสอบค่าเซิร์ฟเวอร์'),
+      statusCode: response.statusCode,
+    );
+  }
+  return json ?? &lt;String, dynamic&gt;{};
+}</code></pre><p>เงื่อนไข <code>response.body.isNotEmpty</code> จำเป็น มิฉะนั้น 204 No Content จะกลายเป็นข้อผิดพลาด</p><div class="note"><strong>สังเกตว่า <code>connection_probe.dart</code> แก้ปัญหาเดียวกันนี้ไปแล้ว</strong> (20.12) — มันตรวจว่า <code>json['service'] == 'WMS'</code> ไม่ใช่แค่ดูรหัส 200<br>แปลว่าคนเขียนรู้จักปัญหานี้ แต่ป้องกันไว้เฉพาะตอนตรวจสถานะ ยังไม่ได้ป้องกันในเส้นทางคำขอปกติ<br>เป็นตัวอย่างของ<strong>บทเรียนที่เรียนแล้วแต่ยังไม่ได้ใช้ทั่วถึง</strong> — ตรงข้ามกับ 19.15 ที่เป็นกฎเดียวเขียนสองแบบ อันนี้คือกฎเดียวเขียนที่เดียวทั้งที่ควรเขียนสองที่</div><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:wms_absolute_mobile/core/api_client.dart';
+
+void main() {
+  test('a 400 reply keeps both the server message and the status code',
+      () async {
+    final api = ApiClient(
+      client: MockClient((_) async =&gt; http.Response(
+            '{"Message":"พาเลทถูกใช้แล้ว"}',
+            400,
+            headers: {'content-type': 'application/json'},
+          )),
+    );
+
+    await expectLater(
+      () =&gt; api.post('/mobile_receive', {'palletCode': 'P001'}),
+      throwsA(
+        isA&lt;ApiException&gt;()
+            .having((e) =&gt; e.message, 'message', 'พาเลทถูกใช้แล้ว')
+            .having((e) =&gt; e.statusCode, 'statusCode', 400),
+      ),
+    );
+  });
+
+  test('an unreachable server yields a null status code', () async {
+    final api = ApiClient(
+      client: MockClient((_) async =&gt; throw const SocketException('no route')),
+    );
+
+    await expectLater(
+      () =&gt; api.post('/mobile_receive', {}),
+      throwsA(isA&lt;ApiException&gt;().having((e) =&gt; e.statusCode, 'statusCode', isNull)),
+    );
+  });
+}</code></pre><p>เทสต์ที่สองสำคัญกว่าที่ดู — มันตรึงความหมายของ <code>null</code> ไว้ว่า “ไม่รู้ผล” ถ้ามีใครมาเติม <code>statusCode: 0</code> ในอนาคต เทสต์จะแดง</p><p>เขียนได้เพราะบรรทัดเดียวใน 20.4 ข้อ 3 — <code>ApiClient({http.Client? client})</code></p></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li>96 บรรทัด เมธอดสาธารณะเดียวคือ <code>post()</code> — ทุกอย่างยิง POST ค่าทั้งหมดอยู่ใน body</li><li><code>ApiClient({http.Client? client})</code> คือบรรทัดที่ทำให้เทสต์ 101 ข้อเป็นไปได้</li><li><code>ApiException</code> พก <code>int? statusCode</code> — null แปลว่าไม่รู้ว่าคำขอถึงหรือไม่</li><li><code>toString()</code> คืนข้อความ ทำให้ทางที่เขียนง่ายที่สุดเป็นทางที่ถูก</li><li>แยก <code>SocketException</code> กับ <code>TimeoutException</code> เพราะผู้ใช้ต้องทำคนละอย่าง</li><li><code>_decode</code> จับ <code>FormatException</code> ไว้ ไม่ให้ HTML ทำแอปล้ม</li><li>ลองอ่านชื่อฟิลด์ข้อความสามแบบ — หลักฐานว่าฝั่งเซิร์ฟเวอร์ยังตอบไม่เป็นรูปเดียว</li><li>ยังขาดการกันยิงซ้ำ และยังไม่ตรวจว่า 200 ที่ได้เป็น JSON จริงหรือไม่</li></ul></div><p><strong>บทหน้า:</strong> <code>AuthRepository</code> 46 บรรทัดที่ยิงล็อกอินจริง เทียบกับ mock สามผู้ใช้ของ wmsapp</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

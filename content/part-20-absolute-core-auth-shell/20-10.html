@@ -1,9 +1,245 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/connection_profile.dart</code> คู่กับ <code>test/connection_profile_test.dart</code> — model นี้เป็น anti-corruption layer ระหว่างข้อความที่ผู้ใช้กรอกกับ URL ที่ transport ใช้จริง</div>
-<section><h2>1. Profile เป็น typed configuration</h2><p>หนึ่ง profile มี id, name, environment, protocol, host, port, basePath, created/updated timestamps และคำนวณ <code>baseUrl</code> จากค่าที่ validate แล้ว การเก็บ URL stringก้อนเดียวจะจัดการแก้ port/protocol, duplicate, migration และแสดง field errorได้ยากกว่า</p></section>
-<section><h2>2. Normalize base path</h2><p>normalizer trim ช่องว่าง, ยุบ slash ซ้ำ, ให้ค่าว่างหรือ path ที่ขึ้นต้น slashและไม่มี slashท้าย ตัวอย่าง <code>///gateway//wms/</code> กลายเป็น <code>/gateway/wms</code> ก่อนต่อ route ทำให้ URL deterministic และ snapshotเทียบกันได้</p></section>
-<section><h2>3. Field validation</h2><ul><li>name และ host ต้องไม่ว่าง</li><li>host ห้ามมี scheme, slash, space หรือ colon/port</li><li>port ต้องเป็นเลข 1–65535</li><li>base path ห้ามเป็น URL เต็ม</li><li>base path ที่เริ่ม <code>/api</code> ถูกปฏิเสธ เพราะ app เติม API route เองและต้องกัน <code>/api/api</code></li></ul><p>error อยู่ระดับ field ทำให้ settings sheetชี้จุดแก้ได้ตรงกว่าปล่อยให้ <code>Uri.parse</code> หรือ socket failภายหลัง</p></section>
-<section><h2>4. JSON decode แบบ defensive</h2><p><code>fromJson</code> ทิ้ง row ที่ไม่ใช่ map, id/host ว่าง หรือ portนอกช่วง ใช้ defaultกับ enum/status/timestamp บางค่าแทน crashทั้งแอป หลักสำคัญคือข้อมูล persistedเป็น untrusted input: app versionเก่า, manual edit หรือ storage corruptionเกิดได้</p></section>
-<section><h2>5. Snapshot invariant</h2><p>profiles และ active selection ถูกเก็บใน JSON snapshot เดียว แต่ละ row มี flag <code>isActive</code> decoder เลือก true ตัวแรก ถ้าไม่มีใช้ profileแรก และ rawเสียคืน collectionว่าง จากนั้น controller seed default profile จึงรักษา invariant “เมื่อใช้งานได้ต้องมี active profileหนึ่งตัว”</p></section>
-<section><h2>6. Build override</h2><p><code>resolveBaseUrl</code> ให้ <code>WMS_API_BASE_URL</code> จาก dart-defineชนะ active profile และ built-in fallback พร้อม flag <code>isBaseUrlPinnedByBuild</code> UI ควรใช้ flag นี้อธิบายว่า profileไม่ใช่ effective URL ห้ามปล่อย previewบอกอย่างหนึ่งแต่ requestไปอีกอย่าง</p></section>
-<section><h2>7. Tests บอก design intention</h2><p><code>connection_profile_test.dart</code> ครอบคลุม normalization, validation, corrupt snapshot, active fallback, config precedence, controller save/edit/delete/activate และ probe payload จึงทำหน้าที่เป็น executable specification เมื่อ refactor ให้รักษา behaviorตาม testsก่อนเปลี่ยน implementation</p></section>
-<section><h2>8. Property-oriented exercise</h2><div class="success">เพิ่มชุด input หลายรูปแบบแล้วพิสูจน์ว่า normalizeสองครั้งได้ผลเดิม, baseUrlไม่มี double slashหลัง scheme, portไม่หลุดช่วง, decodeข้อมูลเสียไม่ throw และ encode→decodeรักษา active profileหนึ่งเดียว จากนั้นเพิ่ม migration testสำหรับ snapshot versionถัดไป</div></section>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน lib/core/connection_profile.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.3 (<code>resolveBaseUrl</code>), 6.7 (<code>copyWith</code>), 6.9 (<code>fromJson</code> ที่ไม่ล้ม)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านไฟล์ 348 บรรทัดที่มีเทสต์ 37 ข้อ และเข้าใจว่าทำไมไฟล์นี้ทดสอบได้ง่ายผิดปกติ</div>
+
+<section><h2>1. ไฟล์นี้มีอะไรบ้าง</h2><table><thead><tr><th>สิ่งที่ประกาศ</th><th>ชนิด</th></tr></thead><tbody>
+<tr><td><code>resolveBaseUrl</code></td><td>ฟังก์ชันบริสุทธิ์</td></tr>
+<tr><td><code>isBaseUrlPinnedByBuild</code></td><td>getter ระดับไฟล์</td></tr>
+<tr><td><code>defaultServerHost</code> / <code>defaultServerPort</code></td><td>ค่าคงที่</td></tr>
+<tr><td><code>ConnectionProtocol</code></td><td>enum + <code>parse</code></td></tr>
+<tr><td><code>ConnectionEnvironment</code></td><td>enum + <code>parse</code></td></tr>
+<tr><td><code>ConnectionStatus</code></td><td>enum</td></tr>
+<tr><td><code>normalizeBasePath</code></td><td>ฟังก์ชันบริสุทธิ์</td></tr>
+<tr><td><code>ConnectionProfile</code></td><td>คลาสข้อมูล</td></tr>
+<tr><td><code>ConnectionValidation</code></td><td>คลาสข้อมูล</td></tr>
+<tr><td><code>validateConnectionInput</code></td><td>ฟังก์ชันบริสุทธิ์</td></tr>
+<tr><td><code>seedConnectionProfile</code></td><td>ฟังก์ชัน</td></tr>
+<tr><td><code>newConnectionProfileId</code></td><td>ฟังก์ชัน</td></tr>
+<tr><td><code>ConnectionSnapshot</code></td><td>typedef (record)</td></tr>
+<tr><td><code>encode/decodeConnectionSnapshot</code></td><td>ฟังก์ชันบริสุทธิ์</td></tr>
+</tbody></table><div class="success"><strong>ไม่มี widget ไม่มี <code>BuildContext</code> ไม่มี <code>http</code> ไม่มี <code>SharedPreferences</code></strong><br>ทั้งไฟล์ import แค่ <code>dart:convert</code><br>นี่คือเหตุผลตรง ๆ ที่มันมีเทสต์ 37 ข้อ ในขณะที่ไฟล์ 1,024 บรรทัดอย่าง <code>outbound_views.dart</code> แทบไม่มีเลย — <strong>ฟังก์ชันบริสุทธิ์ทดสอบได้โดยไม่ต้องเตรียมอะไร</strong><br>19.14 เรียกสิ่งนี้ว่า “ระดับความเสี่ยงที่ 2” — โค้ดที่แยกออกมาเป็นฟังก์ชันบริสุทธิ์ได้ คือโค้ดที่เขียนเทสต์ได้ทันที</div></section>
+
+<section><h2>2. <code>normalizeBasePath</code> — สี่บรรทัดที่ทำงานหนัก</h2><pre class="code-vs"><code>String normalizeBasePath(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return '';
+  final collapsed = trimmed
+      .split('/')
+      .where((segment) =&gt; segment.isNotEmpty)
+      .join('/');
+  return collapsed.isEmpty ? '' : '/$collapsed';
+}</code></pre><p>สัญญาที่คอมเมนต์ประกาศไว้: ผลลัพธ์เป็น <code>''</code> หรือ <code>/something</code> ที่ไม่มีสแลชท้ายและไม่มีสแลชซ้อน</p><table><thead><tr><th>ใส่</th><th>ได้</th></tr></thead><tbody>
+<tr><td><code>''</code></td><td><code>''</code></td></tr>
+<tr><td><code>'  '</code></td><td><code>''</code></td></tr>
+<tr><td><code>'/'</code></td><td><code>''</code></td></tr>
+<tr><td><code>'wms'</code></td><td><code>'/wms'</code></td></tr>
+<tr><td><code>'/wms/'</code></td><td><code>'/wms'</code></td></tr>
+<tr><td><code>'//wms//api//'</code></td><td><code>'/wms/api'</code></td></tr>
+</tbody></table><p>เทคนิคที่ใช้คือ <strong>split แล้วทิ้งส่วนว่าง แล้ว join กลับ</strong> ซึ่งจัดการสแลชซ้อนได้ในตัว โดยไม่ต้องเขียนเงื่อนไขเป็นชั้น ๆ</p><div class="note"><strong>ทำไมต้องมีฟังก์ชันนี้เลย</strong><br>เพราะผลลัพธ์ถูกนำไปต่อสตริงตรง ๆ<pre class="code-vs"><code>String get baseUrl =&gt;
+    '${protocol.name}://$host:$port${normalizeBasePath(basePath)}';</code></pre>ถ้าไม่ normalize จะได้ <code>http://host:6191//wms/</code> แล้วต่อกับ <code>/api/WMS</code> กลายเป็น <code>//wms//api/WMS</code><br>เซิร์ฟเวอร์บางตัวยอม บางตัวไม่ยอม — และเมื่อไม่ยอม ข้อความผิดพลาดจะไม่บอกว่าเป็นเพราะสแลชเกิน</div></section>
+
+<section><h2>3. <code>ConnectionProfile</code></h2><pre class="code-vs"><code>class ConnectionProfile {
+  const ConnectionProfile({
+    required this.id,
+    required this.name,
+    required this.environment,
+    required this.protocol,
+    required this.host,
+    required this.port,
+    required this.basePath,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  ...
+  /// What every request gets prefixed with, e.g. `http://192.168.1.194:6191`.
+  String get baseUrl =&gt;
+      '${protocol.name}://$host:$port${normalizeBasePath(basePath)}';
+}</code></pre><h3>เก็บส่วนประกอบ ไม่เก็บผลลัพธ์</h3><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>เก็บ <code>baseUrl</code> เป็นฟิลด์</td><td>ต้องแยกกลับเป็นชิ้นตอนแก้ไข — และการแยก URL ให้ถูกทุกกรณีเป็นงานยาก</td></tr>
+<tr><td><strong>เก็บชิ้น แล้วคำนวณ</strong></td><td>ฟอร์มแก้ทีละช่องได้ตรง ๆ</td></tr>
+</tbody></table><p>เป็นรูปแบบเดียวกับ <code>apiBaseUrl</code> ใน 20.3 — <strong>อย่าเก็บสิ่งที่คำนวณได้</strong></p><h3><code>basePath</code> เก็บดิบ</h3><pre class="code-vs"><code>/// Raw value as typed; use [baseUrl] (or [normalizeBasePath]) to consume it.
+final String basePath;</code></pre><p>เก็บตามที่ผู้ใช้พิมพ์ ไม่ normalize ตอนเก็บ</p><div class="success"><strong>เหตุผล:</strong> ถ้า normalize ตอนเก็บ ผู้ใช้จะเปิดฟอร์มมาเจอข้อความที่ไม่เหมือนที่ตัวเองพิมพ์ ซึ่งชวนสับสนว่าระบบแก้อะไรให้<br>เก็บดิบแล้ว normalize ตอนใช้ = สิ่งที่เห็นคือสิ่งที่พิมพ์ และสิ่งที่ยิงคือสิ่งที่ถูก<br>คอมเมนต์บรรทัดเดียวบอกกฎการใช้งานไว้ชัด จึงไม่มีใครเผลอเอา <code>basePath</code> ไปต่อสตริงเอง</div><h3><code>copyWith</code> และข้อจำกัดที่มากับมัน</h3><pre class="code-vs"><code>ConnectionProfile copyWith({String? name, String? host, ...}) =&gt;
+    ConnectionProfile(
+      name: name ?? this.name,
+      host: host ?? this.host,
+      ...
+    );</code></pre><p>รูปแบบ <code>?? this.x</code> แปลว่า<strong>ตั้งค่าเป็น null ไม่ได้</strong> (6.7)</p><p>ที่นี่ไม่เป็นปัญหาเพราะไม่มีฟิลด์ไหนเป็น nullable — แต่ถ้าวันหนึ่งเพิ่ม <code>String? note</code> เข้ามา จะลบโน้ตด้วย <code>copyWith</code> ไม่ได้</p></section>
+
+<section><h2>4. <code>fromJson</code> ที่คืน null แทนที่จะโยน</h2><pre class="code-vs"><code>/// Returns null for a row that cannot be trusted rather than throwing — one
+/// bad entry must not cost the operator every other saved profile.
+static ConnectionProfile? fromJson(Object? raw) {
+  if (raw is! Map) return null;
+  final id = raw['id']?.toString();
+  final host = raw['host']?.toString();
+  final port = int.tryParse(raw['port']?.toString() ?? '');
+  if (id == null || id.isEmpty || host == null || host.isEmpty) return null;
+  if (port == null || port &lt; 1 || port &gt; 65535) return null;
+  ...
+}</code></pre><p>คอมเมนต์บอกเหตุผลไว้ตรง ๆ และมันถูก</p><pre class="code-vs"><code>// ใน decodeConnectionSnapshot
+for (final row in rows) {
+  final profile = ConnectionProfile.fromJson(row);
+  if (profile == null) continue;      // ข้ามแถวเสีย
+  profiles.add(profile);
+  ...
+}</code></pre><div class="success"><strong>ผลต่างที่ผู้ใช้เห็น</strong><table><thead><tr><th>ถ้าโยน</th><th>ที่ทำจริง — คืน null</th></tr></thead><tbody>
+<tr><td>โปรไฟล์เสียหนึ่งอัน → เสียทั้งหมด → กลับไปเป็นค่าปริยาย</td><td>เสียอันเดียว อีกสี่อันยังอยู่</td></tr>
+<tr><td>ผู้ใช้ต้องพิมพ์ที่อยู่ทุกเซิร์ฟเวอร์ใหม่</td><td>ผู้ใช้อาจไม่ทันสังเกตด้วยซ้ำ</td></tr>
+</tbody></table>กฎทั่วไป: <strong>เมื่ออ่านข้อมูลที่ผู้ใช้สะสมมา ให้รักษาส่วนที่ยังดีไว้เสมอ</strong></div><h3>ตัวถอยของแต่ละฟิลด์</h3><table><thead><tr><th>ฟิลด์</th><th>ขาดแล้ว</th></tr></thead><tbody>
+<tr><td><code>id</code></td><td><strong>ทิ้งแถว</strong> — ไม่มี id ก็อ้างถึงไม่ได้</td></tr>
+<tr><td><code>host</code></td><td><strong>ทิ้งแถว</strong> — ไม่มี host ก็ยิงไม่ได้</td></tr>
+<tr><td><code>port</code></td><td><strong>ทิ้งแถว</strong> ถ้าไม่ใช่ตัวเลข 1–65535</td></tr>
+<tr><td><code>name</code></td><td>ใช้ <code>host</code> แทน</td></tr>
+<tr><td><code>environment</code>, <code>protocol</code></td><td><code>parse</code> ตกถังเอง</td></tr>
+<tr><td><code>basePath</code></td><td><code>''</code></td></tr>
+<tr><td><code>createdAt</code></td><td><code>DateTime.now()</code></td></tr>
+<tr><td><code>updatedAt</code></td><td>ใช้ <code>createdAt</code></td></tr>
+</tbody></table><p>สามฟิลด์แรกคือสิ่งที่<strong>ขาดแล้วโปรไฟล์ไม่มีความหมาย</strong> ที่เหลือเป็นของประกอบที่เดาแทนได้</p><p>เป็นหลักเดียวกับ <code>token</code> ใน 20.5 — <strong>แยกให้ออกว่าอะไรคือแก่น อะไรคือของแถม</strong></p></section>
+
+<section><h2>5. <code>validateConnectionInput</code> — ตรวจก่อนสร้างวัตถุ</h2><pre class="code-vs"><code>/// Validates the raw text in the form. Kept separate from [ConnectionProfile]
+/// so the sheet can validate while the port is still an unparsable string.
+ConnectionValidation validateConnectionInput({
+  required String name,
+  required String host,
+  required String port,        // ← String ไม่ใช่ int
+  required String basePath,
+  required String Function(String english, String thai) translate,
+}) { ... }</code></pre><p>รับ <strong>สตริงทั้งหมด</strong> เพราะขณะที่ผู้ใช้กำลังพิมพ์ ช่องพอร์ตอาจมีค่าเป็น <code>"61"</code> หรือ <code>"abc"</code> ซึ่งยังสร้าง <code>ConnectionProfile</code> ไม่ได้</p><h3>พารามิเตอร์ <code>translate</code></h3><pre class="code-vs"><code>required String Function(String english, String thai) translate,</code></pre><p>ฟังก์ชันที่รับฟังก์ชัน — ผู้เรียกส่ง <code>tr</code> เข้ามา</p><pre class="code-vs"><code>validateConnectionInput(..., translate: tr)</code></pre><div class="note"><strong>ทำไมไม่เรียก <code>tr</code> ตรง ๆ ในตัวมันเอง</strong><br><code>tr</code> อ่านจาก singleton ที่มี state — ฟังก์ชันนี้จะไม่บริสุทธิ์อีกต่อไป และเทสต์จะขึ้นกับภาษาที่ค้างมาจากเทสต์ก่อนหน้า (ปัญหาที่ 20.8 เตือนไว้)<br>เมื่อรับเข้ามาเป็นพารามิเตอร์ เทสต์ส่งอะไรก็ได้<pre class="code-vs"><code>validateConnectionInput(
+  ..., translate: (en, th) =&gt; en,   // บังคับอังกฤษเสมอ
+);</code></pre>เทสต์ 37 ข้อในไฟล์นี้ไม่ขึ้นกับภาษาเลย เพราะบรรทัดเดียวนี้</div>
+
+<h3>กฎที่ตรวจ</h3><table><thead><tr><th>ช่อง</th><th>ห้าม</th><th>ข้อความบอกให้ไปทำอะไร</th></tr></thead><tbody>
+<tr><td>ชื่อ</td><td>ว่าง</td><td>ตั้งชื่อก่อน</td></tr>
+<tr><td>host</td><td>ว่าง</td><td>ใส่ IP หรือชื่อเครื่อง</td></tr>
+<tr><td>host</td><td>มี <code>://</code> หรือขึ้นต้นด้วย <code>http</code></td><td><strong>เลือกที่ช่อง Protocol</strong></td></tr>
+<tr><td>host</td><td>มี <code>/</code></td><td><strong>เส้นทางให้ใส่ที่ช่อง Base Path</strong></td></tr>
+<tr><td>host</td><td>มีช่องว่าง</td><td>ห้ามมีช่องว่าง</td></tr>
+<tr><td>host</td><td>มี <code>:</code></td><td><strong>พอร์ตให้ใส่ที่ช่อง Port</strong></td></tr>
+<tr><td>port</td><td>ไม่ใช่ตัวเลข / นอก 1–65535</td><td>บอกช่วงที่ถูก</td></tr>
+<tr><td>basePath</td><td>มี <code>://</code></td><td>นี่คือเส้นทาง ไม่ใช่ URL</td></tr>
+<tr><td>basePath</td><td>ขึ้นต้นด้วย <code>/api</code></td><td>อธิบายว่าทำไมถึงพัง</td></tr>
+</tbody></table><div class="success"><strong>สี่แถวที่เน้นไว้มีคุณสมบัติเดียวกัน: บอกว่าค่านั้นควรไปอยู่ที่ไหน</strong><br>ผู้ใช้ที่พิมพ์ <code>http://192.168.1.50:6191</code> ลงช่อง host ไม่ได้ทำผิดเพราะโง่ — เขาทำเพราะนั่นคือสิ่งที่เห็นในเบราว์เซอร์<br>ข้อความว่า “ที่อยู่ไม่ถูกต้อง” จะทำให้เขาลองพิมพ์ใหม่แบบเดิม<br>ข้อความว่า “ใส่เฉพาะที่อยู่ ไม่ต้องมี http:// (เลือกที่ช่อง Protocol)” จบเรื่องในครั้งเดียว<br><strong>ข้อความผิดพลาดที่ดีบอกการกระทำถัดไป ไม่ใช่บอกว่าผิด</strong></div><p>และคอมเมนต์ก่อนกฎ <code>/api</code> อธิบายว่าทำไมคนถึงพลาด</p><pre class="code-vs"><code>// The app appends /api/WMS, /api/data and /api/Authenticate itself, so an
+// /api here doubles up and every route 404s. Easy mistake: the field looks
+// like the place the API root belongs.</code></pre></section>
+
+<section><h2>6. <code>ConnectionSnapshot</code> — record ที่รวมสองอย่างไว้ด้วยกัน</h2><pre class="code-vs"><code>/// Everything persisted under one preferences key, so "exactly one active
+/// profile" is written and read atomically instead of drifting across keys.
+typedef ConnectionSnapshot = ({
+  List&lt;ConnectionProfile&gt; profiles,
+  String? activeId,
+});</code></pre><p><strong>record</strong> ของ Dart 3 (D1.20) — กลุ่มค่าที่มีชื่อฟิลด์ โดยไม่ต้องประกาศคลาส</p><p>คอมเมนต์อธิบายเหตุผลที่ต้องรวม</p><table><thead><tr><th>ถ้าแยกสองคีย์</th><th>ที่ทำจริง — คีย์เดียว</th></tr></thead><tbody>
+<tr><td>เขียนคีย์แรกสำเร็จ คีย์สองล้ม → activeId ชี้ไปโปรไฟล์ที่ไม่มี</td><td>เขียนทีเดียว สำเร็จหรือไม่สำเร็จทั้งก้อน</td></tr>
+</tbody></table><h3><code>encodeConnectionSnapshot</code></h3><pre class="code-vs"><code>String encodeConnectionSnapshot(
+  List&lt;ConnectionProfile&gt; profiles,
+  String? activeId,
+) =&gt; jsonEncode({
+  'version': 1,
+  'profiles': [
+    for (final profile in profiles)
+      profile.toJson(isActive: profile.id == activeId),
+  ],
+});</code></pre><p>สองอย่างที่น่าสังเกต</p><table><thead><tr><th>รายละเอียด</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>'version': 1</code></td><td>เผื่อเปลี่ยนรูปแบบในอนาคต — อ่านได้ว่าเป็นรุ่นไหน</td></tr>
+<tr><td><code>isActive</code> เก็บใน<strong>แต่ละแถว</strong></td><td>ไม่ต้องมีคีย์ <code>activeId</code> แยก</td></tr>
+</tbody></table><div class="warning"><strong>ข้อสังเกตเรื่อง <code>version</code></strong><br>เขียนลงไปแต่ <code>decodeConnectionSnapshot</code> <strong>ไม่ได้อ่าน</strong><pre class="code-vs"><code>final rows = decoded['profiles'];    // ข้าม version ไปเลย</code></pre>ตอนนี้ไม่มีผล เพราะมีรุ่นเดียว — แต่ตอนที่มีรุ่นสอง คนเขียนต้องไม่ลืมว่าข้อมูลรุ่นหนึ่งจะถูกอ่านด้วยตัวอ่านรุ่นสองโดยไม่มีการตรวจ<br>เป็นการเตรียมที่ทำครึ่งทาง: ฝั่งเขียนพร้อม ฝั่งอ่านยังไม่พร้อม<br>ไม่ใช่บั๊ก และตรงกับหลัก “อย่าออกแบบเผื่ออนาคต” — แต่ควรมีคอมเมนต์บอกว่าตั้งใจไม่อ่าน ไม่ใช่ลืม</div>
+
+<h3><code>decodeConnectionSnapshot</code> — รักษาข้อตกลงไว้ให้ได้</h3><pre class="code-vs"><code>/// Rebuilds the snapshot, dropping unreadable rows. `activeId` comes from the
+/// stored `isActive` flag and falls back to the first profile, so the invariant
+/// holds even if the stored file was hand-edited.
+ConnectionSnapshot decodeConnectionSnapshot(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return (profiles: [], activeId: null);
+
+  Object? decoded;
+  try {
+    decoded = jsonDecode(raw);
+  } on FormatException {
+    return (profiles: [], activeId: null);
+  }
+  if (decoded is! Map) return (profiles: [], activeId: null);
+
+  final rows = decoded['profiles'];
+  if (rows is! List) return (profiles: [], activeId: null);
+
+  final profiles = &lt;ConnectionProfile&gt;[];
+  String? activeId;
+  for (final row in rows) {
+    final profile = ConnectionProfile.fromJson(row);
+    if (profile == null) continue;
+    profiles.add(profile);
+    if (activeId == null &amp;&amp; row is Map &amp;&amp; row['isActive'] == true) {
+      activeId = profile.id;
+    }
+  }
+  if (profiles.isEmpty) return (profiles: [], activeId: null);
+  return (profiles: profiles, activeId: activeId ?? profiles.first.id);
+}</code></pre><p><strong>ข้อตกลง (invariant) ที่ฟังก์ชันนี้รับประกัน:</strong> ถ้ามีโปรไฟล์อย่างน้อยหนึ่ง จะมี <code>activeId</code> ที่ชี้ไปโปรไฟล์ที่มีอยู่จริงเสมอ</p><table><thead><tr><th>ข้อมูลที่เจอ</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td>ไม่มี <code>isActive</code> เลย</td><td>ใช้ตัวแรก</td></tr>
+<tr><td>มี <code>isActive</code> สองแถว</td><td>ใช้แถวแรกที่เจอ (<code>activeId == null &amp;&amp;</code>)</td></tr>
+<tr><td>แถวที่ <code>isActive</code> เสีย ถูกทิ้ง</td><td>ตกไปใช้ตัวแรกที่เหลือ</td></tr>
+<tr><td>JSON พัง</td><td>ว่างเปล่า → controller จะสร้างโปรไฟล์เริ่มต้นให้</td></tr>
+</tbody></table><div class="success"><strong>ทุกเส้นทางออกจากฟังก์ชันนี้ให้ผลที่ใช้งานได้</strong> ไม่มีทางไหนคืนสถานะที่ขัดแย้งกันเอง<br>เป็นรูปแบบเดียวกับ <code>PdaAccess.fromJson</code> ใน 20.6 ที่ประกันว่า map ครบ 8 คีย์เสมอ<br><strong>หลักร่วม:</strong> ให้ตัวแปลงเป็นด่านที่ข้อมูลผิดรูปเข้ามาไม่ได้ แล้วโค้ดที่เหลือทั้งหมดไม่ต้องระแวง</div></section>
+
+<section><h2>7. <code>newConnectionProfileId</code></h2><pre class="code-vs"><code>/// Unique enough for a device-local list; avoids pulling in a uuid package.
+String newConnectionProfileId([DateTime? now]) =&gt;
+    'p${(now ?? DateTime.now()).microsecondsSinceEpoch}';</code></pre><p>คอมเมนต์บอกขอบเขตของความถูกต้องไว้ชัด: <strong>ไม่ซ้ำพอสำหรับรายการในเครื่องเดียว</strong></p><table><thead><tr><th>เหมาะ</th><th>ไม่เหมาะ</th></tr></thead><tbody>
+<tr><td>รายการในเครื่อง คนกดทีละครั้ง</td><td>id ที่ต้องไม่ชนกับเครื่องอื่น</td></tr>
+<tr><td>ไม่ต้องเพิ่มไลบรารี</td><td>ระบบที่สร้าง id หลายอันในไมโครวินาทีเดียว</td></tr>
+</tbody></table><p>พารามิเตอร์ <code>now</code> ที่ใส่ได้ทำให้เทสต์คุมค่าได้ — เป็นเทคนิคเดียวกับ <code>seedConnectionProfile({DateTime? now})</code></p><div class="note"><strong>การรับ <code>DateTime? now</code> เป็นพารามิเตอร์เสริมคือวิธีที่ถูกที่สุดในการทำให้โค้ดที่ใช้เวลาทดสอบได้</strong><br>โค้ดจริงเรียกโดยไม่ส่ง เทสต์เรียกโดยส่งเวลาที่ตรึงไว้<br>ทางเลือกอื่น (ฉีดนาฬิกาเป็น service) ใหญ่กว่านี้มากและไม่คุ้มกับสองที่เรียก</div></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td><code>fromJson</code> โยนเมื่อแถวเสีย</td><td>โปรไฟล์เสียหนึ่ง เสียทั้งหมด</td><td>คืน null แล้วข้าม</td></tr>
+<tr><td>เก็บ URL เต็มเป็นฟิลด์</td><td>ต้องแยกกลับตอนแก้ไข</td><td>เก็บชิ้น คำนวณ</td></tr>
+<tr><td>normalize ตอนเก็บ</td><td>ผู้ใช้เห็นค่าที่ตัวเองไม่ได้พิมพ์</td><td>เก็บดิบ normalize ตอนใช้</td></tr>
+<tr><td>ตรวจฟอร์มด้วยชนิดที่แปลงแล้ว</td><td>ตรวจไม่ได้ระหว่างพิมพ์</td><td>รับสตริงแล้วตรวจ</td></tr>
+<tr><td>เรียก <code>tr</code> ในฟังก์ชันตรวจ</td><td>เทสต์ขึ้นกับภาษาที่ค้างมา</td><td>รับ <code>translate</code> เป็นพารามิเตอร์</td></tr>
+<tr><td>แยกรายการกับตัวที่เลือกคนละคีย์</td><td>ชี้ไปโปรไฟล์ที่ไม่มี</td><td>เขียนก้อนเดียว</td></tr>
+<tr><td>ข้อความผิดพลาดบอกแค่ว่าผิด</td><td>ผู้ใช้ลองใหม่แบบเดิม</td><td>บอกว่าค่านั้นควรไปอยู่ไหน</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>เขียนเทสต์สำหรับ <code>decodeConnectionSnapshot</code> ที่ครอบคลุมข้อตกลงในบทที่ 6 ให้ครบ</li><li>ผู้ใช้พิมพ์ host เป็น <code>192.168.1.50:6191</code> — เดินตาม <code>validateConnectionInput</code> แล้วบอกว่าได้ข้อความอะไร และมีกรณีไหนที่กฎชุดนี้ยังจับไม่ได้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>ConnectionProfile p(String id, {bool active = false}) =&gt; ...;
+
+group('decodeConnectionSnapshot keeps exactly one valid active profile', () {
+  test('null and empty input give an empty snapshot', () {
+    expect(decodeConnectionSnapshot(null).profiles, isEmpty);
+    expect(decodeConnectionSnapshot('   ').profiles, isEmpty);
+  });
+
+  test('malformed json does not throw', () {
+    expect(decodeConnectionSnapshot('{not json').activeId, isNull);
+  });
+
+  test('a row without isActive falls back to the first profile', () {
+    final raw = encodeConnectionSnapshot([p('a'), p('b')], null);
+    expect(decodeConnectionSnapshot(raw).activeId, 'a');
+  });
+
+  test('a broken row is dropped without losing the others', () {
+    final raw = jsonEncode({'version': 1, 'profiles': [
+      {'id': '', 'host': 'x', 'port': 1},          // id ว่าง
+      {'id': 'b', 'host': 'h', 'port': 6191, 'isActive': true},
+    ]});
+    final snap = decodeConnectionSnapshot(raw);
+    expect(snap.profiles.length, 1);
+    expect(snap.activeId, 'b');
+  });
+
+  test('when the active row is the broken one, the survivor takes over', () {
+    final raw = jsonEncode({'version': 1, 'profiles': [
+      {'id': 'a', 'host': 'h', 'port': 99999, 'isActive': true},  // พอร์ตเกิน
+      {'id': 'b', 'host': 'h', 'port': 6191},
+    ]});
+    final snap = decodeConnectionSnapshot(raw);
+    expect(snap.activeId, 'b');      // ข้อตกลงยังอยู่
+  });
+});</code></pre><p>เทสต์สุดท้ายคือตัวที่มีค่าที่สุด — มันตรึงประโยคในคอมเมนต์ (“the invariant holds even if the stored file was hand-edited”) ให้กลายเป็นสิ่งที่พิสูจน์ได้</p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>trimmedHost = '192.168.1.50:6191'
+  ว่างไหม            → ไม่
+  มี '://' ไหม        → ไม่
+  ขึ้นต้น 'http' ไหม  → ไม่
+  มี '/' ไหม          → ไม่
+  มีช่องว่างไหม        → ไม่
+  มี ':' ไหม          → ใช่  ←
+</code></pre><p>ได้ <code>'Port goes in the Port field'</code> / <code>'พอร์ตให้ใส่ที่ช่อง Port'</code></p><p><strong>กรณีที่ยังจับไม่ได้</strong></p><table><thead><tr><th>ผู้ใช้พิมพ์</th><th>ผ่านการตรวจ</th><th>ผลจริง</th></tr></thead><tbody>
+<tr><td><code>192.168.1</code></td><td>ผ่าน</td><td>ต่อไม่ติด</td></tr>
+<tr><td><code>192.168.1.999</code></td><td>ผ่าน</td><td>ต่อไม่ติด</td></tr>
+<tr><td><code>my server</code> (ตัด: มีช่องว่าง)</td><td>ไม่ผ่าน</td><td>—</td></tr>
+<tr><td><code>ล็อกอิน</code> (ภาษาไทย)</td><td>ผ่าน</td><td>ต่อไม่ติด</td></tr>
+</tbody></table><div class="note"><strong>แต่การไม่จับกรณีเหล่านี้เป็นการตัดสินใจที่ถูก ไม่ใช่ช่องโหว่</strong><br>กฎที่มีอยู่ทั้งหมดจับ<strong>ความสับสนเรื่องว่าค่าควรอยู่ช่องไหน</strong> ซึ่งเป็นความผิดพลาดที่ผู้ใช้แก้เองไม่ได้ถ้าไม่มีใครบอก<br>ส่วน <code>192.168.1.999</code> เป็น<strong>ที่อยู่ที่พิมพ์ผิด</strong> ซึ่งปุ่ม “ทดสอบการเชื่อมต่อ” (20.12) ตอบได้ตรงกว่าและแม่นกว่า — เพราะที่อยู่ที่ถูกรูปแบบทุกอย่างก็ยังต่อไม่ติดได้ถ้าเครื่องปิดอยู่<br><strong>หลักที่ได้:</strong> ให้การตรวจรูปแบบจับสิ่งที่รูปแบบบอกได้ และให้การทดสอบจริงจับสิ่งที่ต้องลองถึงจะรู้ — อย่าให้อันแรกพยายามทำงานของอันหลัง<br>การเขียน regex ตรวจ IP ที่นี่จะเพิ่มโค้ดที่ต้องดูแล แล้วยังตอบคำถามที่ผู้ใช้อยากรู้จริง ๆ ไม่ได้อยู่ดี</div></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>348 บรรทัดที่ import แค่ <code>dart:convert</code> — จึงมีเทสต์ 37 ข้อ</li><li><code>normalizeBasePath</code> ใช้ split/where/join จัดการสแลชซ้อนโดยไม่ต้องไล่เงื่อนไข</li><li><code>ConnectionProfile</code> เก็บส่วนประกอบ ไม่เก็บ URL ที่คำนวณได้</li><li><code>basePath</code> เก็บดิบตามที่พิมพ์ normalize ตอนใช้</li><li><code>fromJson</code> คืน null แทนโยน — แถวเสียหนึ่งไม่ทำให้เสียทั้งหมด</li><li>แยกให้ออกว่าฟิลด์ไหนคือแก่น (ทิ้งแถว) ฟิลด์ไหนเดาแทนได้</li><li><code>validateConnectionInput</code> รับสตริงล้วนและรับ <code>translate</code> เข้ามา จึงบริสุทธิ์และไม่ขึ้นกับภาษา</li><li>ข้อความผิดพลาดบอกว่าค่านั้นควรไปช่องไหน ไม่ใช่แค่บอกว่าผิด</li><li>เก็บทุกอย่างในคีย์เดียวเพื่อรักษาข้อตกลง “มีตัวที่เลือกอยู่หนึ่งตัวเสมอ”</li><li><code>decode</code> รับประกันว่าทุกทางออกให้สถานะที่ใช้ได้</li></ul></div><p><strong>บทหน้า:</strong> <code>ConnectionController</code> — singleton ที่มี <code>debugReset()</code> ให้เทสต์ใช้</p></section>

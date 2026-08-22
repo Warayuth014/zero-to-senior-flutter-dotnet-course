@@ -1,10 +1,220 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/warehouse/warehouse_shell.dart</code> และ <code>screens/home_view.dart</code> — shell เป็น composition/lifecycle boundary ของ session หลัง login ไม่ใช่เพียงกรอบ navigation</div>
-<section><h2>1. สร้าง store และ adapters</h2><p>ใน <code>initState</code> shell สร้าง <code>WarehouseStore</code> ด้วย username จาก session และ repositories <code>ReceivingApi</code>, <code>TasksApi</code>, <code>InventoryApi</code>, <code>CycleCountApi</code> ที่ใช้ auth clientตัวเดียว แล้วต่อ callbacksสำหรับ toast/flash นี่ทำให้ screenไม่ต้องรู้ tokenหรือสร้าง network dependencyเอง</p></section>
-<section><h2>2. Fire-and-forget อย่างตั้งใจ</h2><p><code>unawaited(store.loadAll())</code> เริ่มโหลดข้อมูล/badgesโดยไม่ blockเฟรมแรก และ <code>unawaited(ConnectionController.instance.refreshStatus())</code> probeตอนเข้า shell UIต้องรองรับ loading/errorภายใน store/controller เพราะ exceptionจาก fire-and-forgetห้ามหลุดเงียบ การใช้ <code>unawaited</code> เป็นการประกาศ lifecycle intent ไม่ใช่การละเลย error</p></section>
-<section><h2>3. App lifecycle กับวิทยุ/network</h2><p>shell implement <code>WidgetsBindingObserver</code> และ probeใหม่เมื่อ <code>AppLifecycleState.resumed</code> เพราะเครื่องอาจออก Wi-Fiหรือ server restartขณะ background ไม่มี repeating timerตลอดวัน จึงลด radio/battery cost แต่ให้ข้อมูลสดในจังหวะที่ผู้ใช้กำลังมอง</p></section>
-<section><h2>4. Cleanup symmetry</h2><pre class="code-vs"><code>initState: addObserver + create store + timersเมื่อใช้งาน
-dispose:   removeObserver + cancel toast/flash timers + store.dispose</code></pre><p>ทุก register/startต้องมี unregister/stopคู่กัน มิฉะนั้น logout/loginหลายรอบจะมี observer, polling หรือ callbackซ้ำและ setStateบน widgetที่ตายแล้ว</p></section>
-<section><h2>5. Screen state และ rendering</h2><p><code>store.screen</code> เลือก title/subtitle, body และ active bottom-nav mapping จาก source of truthเดียว <code>ListenableBuilder</code> rebuild shellเมื่อ store notify และ <code>AnimatedSwitcher</code> ใช้ <code>ValueKey(store.screen)</code> แยก identityของหน้าจอ child flows เช่น <code>recvorder/recvrun</code> mapกลับ Receivingใน nav</p></section>
-<section><h2>6. Operational feedback</h2><p>storeเรียก <code>onToast</code> และ <code>onFlash</code>; shellแสดง overlayชั่วคราวพร้อม haptic medium/heavyตาม success/error และ cancel timerเก่าก่อนเริ่มใหม่ ทำให้ scanติดกันไม่ปล่อย timerเก่ามาล้าง feedbackใหม่ ต้อง guard mountedใน callback timerและไม่ใช้สี/แรงสั่นเป็นข้อมูลช่องทางเดียว</p></section>
-<section><h2>7. Exit flow กับ logout คนละเรื่อง</h2><p>เมื่ออยู่ใน workflow headerมี Pause actionพร้อม confirm แล้วเรียก <code>store.exitFlow()</code> เพื่อกลับ listโดยรักษางานตาม domain ส่วน logoutล้าง authแล้ว replacementกลับ login ทั้งคู่ต้องไม่ใช้ navigator backแบบเดียวกัน เพราะ pauseยังอยู่ sessionเดิม แต่ logoutต้องทำลาย session scope</p></section>
-<section><h2>8. Lifecycle test</h2><div class="success">ฉีด fake store/repositories/probe แล้วทดสอบ loadครั้งเดียว, resume probe, paused/inactiveไม่ probe, disposeยกเลิก timers/observer/store, logout-loginไม่เพิ่ม listenerซ้ำ, child screen mapping/nav badges และ stale async resultไม่อัปเดต shellหลัง logout</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–75 นาที</span><span>ลงมือทำ: อ่าน lib/features/warehouse/warehouse_shell.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.11, 20.13, 4.13 (<code>WidgetsBindingObserver</code>), 16.12 (เปลือกของ wmsapp)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านเปลือกแอป 742 บรรทัดที่ประกอบทุกชั้นเข้าด้วยกัน และเข้าใจว่าทำไมไม่มีการ <code>push</code> จอเลย</div>
+
+<section><h2>1. เปลือกทำอะไรบ้าง</h2><table><thead><tr><th>หน้าที่</th><th>เมธอด</th></tr></thead><tbody>
+<tr><td>สร้าง store พร้อม repository ทั้งสี่</td><td><code>initState</code></td></tr>
+<tr><td>ตรวจสถานะเซิร์ฟเวอร์สองจังหวะ</td><td><code>initState</code>, <code>didChangeAppLifecycleState</code></td></tr>
+<tr><td>วาดแถบบน แถบล่าง และเลือกเนื้อหา</td><td><code>_header</code>, <code>_bottomNav</code>, <code>_body</code></td></tr>
+<tr><td>แสดงข้อความชั่วคราวและแฟลชสี</td><td><code>_showToast</code>, <code>_showFlash</code></td></tr>
+<tr><td>เมนูผู้ใช้และการออกจากระบบ</td><td><code>_onUserMenu</code>, <code>_logout</code></td></tr>
+</tbody></table><p>ไม่มีตรรกะธุรกิจแม้แต่บรรทัดเดียว — ทั้งหมดอยู่ใน <code>WarehouseStore</code></p></section>
+
+<section><h2>2. <code>initState</code> — จุดที่ทุกชั้นมาบรรจบ</h2><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  WidgetsBinding.instance.addObserver(this);
+  store = WarehouseStore(
+        username: widget.auth.session?.username ?? '0000',
+        receivingRepository: ReceivingApi(widget.auth.client),
+        tasksRepository: TasksApi(widget.auth.client),
+        inventoryRepository: InventoryApi(widget.auth.client),
+        cycleCountRepository: CycleCountApi(widget.auth.client),
+        access: widget.auth.session?.access ?? const PdaAccess({}),
+      )
+      ..onToast = _showToast
+      ..onFlash = _showFlash;
+  unawaited(store.loadAll()); // badges must be right on the first screen
+  // One probe on entry so the header dot reflects the server rather than a
+  // guess. No repeating timer — an all-day handheld should not spend radio
+  // on a status nobody is looking at.
+  unawaited(ConnectionController.instance.refreshStatus());
+}</code></pre>
+
+<h3>สี่ repository ที่ใช้ client ตัวเดียวกัน</h3><pre class="code-vs"><code>ReceivingApi(widget.auth.client)
+TasksApi(widget.auth.client)
+InventoryApi(widget.auth.client)
+CycleCountApi(widget.auth.client)</code></pre><p>เป็นผลของ <code>client</code> getter ใน 20.5 — ทั้งสี่ตัวมี token เดียวกัน และการสลับเซิร์ฟเวอร์กระทบทั้งสี่พร้อมกัน</p>
+
+<h3><code>const PdaAccess({})</code> เป็นทางถอย</h3><pre class="code-vs"><code>access: widget.auth.session?.access ?? const PdaAccess({}),</code></pre><div class="success"><strong>สังเกตว่าไม่ได้ใช้ <code>PdaAccess.unrestricted()</code></strong><br><code>PdaAccess({})</code> คือ map ว่าง ซึ่ง <code>level()</code> จะคืน <code>none</code> ทุกฟีเจอร์ (20.6)<br>ถ้าเข้ามาโดยไม่มี session — ซึ่งไม่ควรเกิด — ผู้ใช้จะไม่เห็นเมนูอะไรเลย แทนที่จะเห็นทุกเมนู<br>เป็น fail closed ที่ถูกต้อง และตรงข้ามกับค่าปริยายของ store ที่เป็น <code>unrestricted()</code> — เพราะที่นี่คือโค้ดจริง ไม่ใช่เทสต์</div>
+
+<h3><code>onToast</code> / <code>onFlash</code> — store พูดกับจอผ่าน callback</h3><pre class="code-vs"><code>WarehouseStore(...)
+  ..onToast = _showToast
+  ..onFlash = _showFlash;</code></pre><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>store เรียก <code>ScaffoldMessenger</code> เอง</td><td>ต้องมี <code>BuildContext</code> — store จะผูกกับ UI</td></tr>
+<tr><td>store เก็บข้อความไว้ให้จอมาอ่าน</td><td>ต้องจัดการว่าอ่านแล้วหรือยัง</td></tr>
+<tr><td><strong>callback ที่จอเสียบให้</strong></td><td>store ไม่รู้จัก Flutter เลย</td></tr>
+</tbody></table><p>รูปแบบนี้ทำให้ <code>WarehouseStore</code> ทดสอบได้โดยไม่ต้องมี widget — เทสต์เสียบ callback ที่เก็บข้อความลงลิสต์แล้วตรวจได้</p><pre class="code-vs"><code>final toasts = &lt;String&gt;[];
+store.onToast = (msg, {bool err = false}) =&gt; toasts.add(msg);</code></pre>
+
+<h3><code>unawaited</code> สองครั้ง</h3><p><code>initState</code> เป็น <code>void</code> จึง <code>await</code> ไม่ได้ — <code>unawaited</code> ประกาศว่า “ตั้งใจไม่รอ” ไม่ใช่ลืม</p><p>ผลคือจอวาดทันทีด้วยข้อมูลว่าง แล้วเติมเมื่อข้อมูลมา — ถูกต้องสำหรับหน้าแรกที่ต้องขึ้นเร็ว</p></section>
+
+<section><h2>3. ตรวจสถานะสองจังหวะ ไม่มีตัวจับเวลา</h2><pre class="code-vs"><code>/// The dot goes stale while the app is in the background — the handheld can
+/// leave Wi-Fi range, or the server can be restarted, and nothing tells the
+/// app. Re-checking on the way back is the one moment a fresh answer is both
+/// cheap and about to be looked at.
+@override
+void didChangeAppLifecycleState(AppLifecycleState state) {
+  if (state == AppLifecycleState.resumed) {
+    unawaited(ConnectionController.instance.refreshStatus());
+  }
+}</code></pre><table><thead><tr><th>จังหวะ</th><th>ทำไมคำตอบมีค่าตอนนั้น</th></tr></thead><tbody>
+<tr><td>เข้าแอป</td><td>ผู้ใช้กำลังจะเริ่มทำงาน</td></tr>
+<tr><td>กลับมาจากพัก</td><td>อาจออกนอกพื้นที่สัญญาณไปแล้ว</td></tr>
+<tr><td>หลังสลับโปรไฟล์ (20.13)</td><td>เปลี่ยนปลายทาง</td></tr>
+</tbody></table><div class="success"><strong>เทียบกับตัวจับเวลาที่ store มี</strong><pre class="code-vs"><code>// warehouse_store.dart
+_taskRefreshTimer = Timer.periodic(
+  const Duration(seconds: 5),
+  (_) =&gt; _refreshTaskStatus(),
+);</code></pre>สองการตัดสินใจที่ตรงข้ามกันในโปรเจกต์เดียว และทั้งคู่ถูก<table><thead><tr><th></th><th>สถานะเซิร์ฟเวอร์</th><th>สถานะงาน</th></tr></thead><tbody>
+<tr><td>เปลี่ยนเองโดยไม่มีใครทำอะไรไหม</td><td>แทบไม่</td><td><strong>เปลี่ยน — คนอื่นหยิบงาน หุ่นยนต์เดินถึง</strong></td></tr>
+<tr><td>ข้อมูลเก่าทำให้ทำงานผิดไหม</td><td>ไม่ (แค่จุดสี)</td><td><strong>ใช่ — เดินไปหยิบของที่คนอื่นหยิบไปแล้ว</strong></td></tr>
+</tbody></table><strong>เกณฑ์: ยิงเป็นรอบเมื่อข้อมูลเปลี่ยนโดยไม่มีใครบอก และการรู้ช้าทำให้ทำงานผิด</strong></div><p>เทียบกับ wmsapp ที่ใช้ SignalR (16.8) — วิธีนั้นดีกว่าในทางทฤษฎี (รู้ทันทีและไม่ยิงเปล่า) แต่แลกมาด้วยไลบรารีเพิ่มและข้อบกพร่องห้าข้อที่ 19.12 นับไว้ รวมถึงการไม่มี <code>onreconnected</code></p></section>
+
+<section><h2>4. การนำทางที่ไม่มี <code>push</code></h2><pre class="code-vs"><code>Widget _body() {
+  if (!store.canViewScreen(store.screen)) {
+    return Center(child: Text(tr(
+      'You do not have permission to access this menu',
+      'คุณไม่มีสิทธิ์เข้าใช้งานเมนูนี้')));
+  }
+  return switch (store.screen) {
+    'home'       =&gt; HomeView(store: store),
+    'receive'    =&gt; ReceiveView(store: store),
+    'recvorder'  =&gt; RecvOrderView(store: store),
+    'recvrun'    =&gt; RecvRunView(store: store),
+    'withdraw'   =&gt; WithdrawView(store: store),
+    'dispatch'   =&gt; DispatchView(store: store),
+    'tasks'      =&gt; TasksView(store: store),
+    'taskrun'    =&gt; TaskRunView(store: store),
+    'picking'    =&gt; PickingView(store: store),
+    'agv'        =&gt; AgvView(store: store),
+    'stock'      =&gt; InventoryView(store: store),
+    'cyclecount' =&gt; CycleCountView(store: store),
+    _            =&gt; HomeView(store: store),
+  };
+}</code></pre><p>ทั้งแอปมี route แค่สองอัน: <code>LoginScreen</code> และ <code>WarehouseShell</code> — สิบสองจอที่เหลือคือ<strong>ค่าของตัวแปร <code>store.screen</code></strong></p><table><thead><tr><th></th><th><code>Navigator.push</code></th><th>สลับด้วยตัวแปร</th></tr></thead><tbody>
+<tr><td>แถบบน/ล่าง</td><td>ต้องวาดใหม่ทุกจอ</td><td><strong>วาดครั้งเดียว อยู่ตลอด</strong></td></tr>
+<tr><td>สถานะของงานที่ค้าง</td><td>อยู่ใน State ของแต่ละจอ — หายเมื่อ pop</td><td><strong>อยู่ใน store — ไม่หาย</strong></td></tr>
+<tr><td>ปุ่มย้อนกลับของเครื่อง</td><td>ทำงานเอง</td><td><strong>ต้องจัดการเอง</strong></td></tr>
+<tr><td>ตรวจสิทธิ์</td><td>ต้องเช็คทุกจุดที่ push</td><td><strong>เช็คที่เดียวใน <code>_body</code></strong></td></tr>
+</tbody></table><div class="success"><strong>แถวที่สองคือเหตุผลหลัก</strong><br>งานในคลังเป็นขั้นตอนหลายสเต็ปที่ต้องพักได้ — คนงานอาจต้องไปช่วยงานอื่นกลางคัน<br>ถ้าแต่ละสเต็ปเป็น route ที่มี State ของตัวเอง การพักงานแปลว่าสถานะหาย<br>เมื่อสถานะอยู่ใน store ทั้งหมด การพักคือแค่เปลี่ยนค่า <code>screen</code> แล้วกลับมาทีหลัง — ซึ่งเป็นสิ่งที่ปุ่ม “พักงานชั่วคราว” ทำ<br>18.16 ชี้ว่า wmsapp กระจายสถานะไว้ในแต่ละจอ ทำให้ทำแบบนี้ไม่ได้</div><p>แถวที่สามคือราคาที่จ่าย — และเป็นข้อจำกัดที่ยังไม่ถูกแก้</p><div class="warning"><strong>ไม่มี <code>PopScope</code> ที่ระดับเปลือก</strong><br>กดปุ่มย้อนกลับของ Android ระหว่างอยู่ในขั้นตอนกลางคัน จะ <strong>pop <code>WarehouseShell</code> ทั้งอัน</strong><br>ผลคือกลับไปหน้าล็อกอิน — และเนื่องจาก <code>_logout()</code> ไม่ได้ถูกเรียก session จึงยังอยู่ แต่ <code>WarehouseShell</code> ถูก dispose ไปแล้ว พร้อม store ทั้งตัว<br>งานที่ค้างอยู่ในหน่วยความจำหายทั้งหมด<br>ทางแก้ตรงไปตรงมา: ครอบ <code>Scaffold</code> ด้วย <code>PopScope(canPop: store.screen == 'home', ...)</code> แล้วให้กลับไปจอก่อนหน้าแทน — ซึ่งเป็นตรรกะที่ <code>store.goBack</code> มีอยู่แล้ว</div></section>
+
+<section><h2>5. แถบบนที่เปลี่ยนตามบริบท</h2><pre class="code-vs"><code>final (title, sub) = _titleSub();</code></pre><p><code>_titleSub()</code> คืน <strong>record</strong> สองค่า และมีสองรูปแบบปนกันในเมธอดเดียว</p><pre class="code-vs"><code>switch (store.screen) {
+  case 'recvrun':                          // ← switch แบบเดิม
+    final l = store.line(store.detailId);
+    return ('${tr('Inbound Receiving', 'รับสินค้าเข้า')} · ${l?.productCode ?? ''}',
+            recvSteps[store.rStep].title);
+  case 'taskrun':
+    ...
+}
+return switch (store.screen) {              // ← switch expression
+  'home' =&gt; (tr('Operations Dashboard', 'เมนูหลัก'), ...),
+  'receive' =&gt; (...),
+  ...
+};</code></pre><div class="note"><strong>สองรูปแบบในเมธอดเดียวมีเหตุผล</strong><br>สองกรณีแรกต้องประกาศตัวแปรกลางทาง (<code>final l = ...</code>) ซึ่ง switch expression ทำไม่ได้<br>ที่เหลือเป็นการจับคู่ค่าตรง ๆ จึงเขียนเป็น expression ได้สั้นกว่า<br>อ่านสะดุดเล็กน้อย แต่ทางเลือกคือเขียนทั้งหมดเป็นแบบเดิมซึ่งยาวกว่ามาก</div><h3>ปุ่มซ้ายที่เปลี่ยนความหมาย</h3><pre class="code-vs"><code>_headerAction(
+  icon: onHome ? Icons.warehouse_rounded : Icons.arrow_back_ios_new_rounded,
+  tooltip: onHome ? 'WMS' : tr('Back', 'ย้อนกลับ'),
+  onTap: onHome ? null : store.goBack,
+),</code></pre><p>ที่หน้าหลักเป็นโลโก้ที่กดไม่ได้ ที่จออื่นเป็นปุ่มย้อนกลับ — ตำแหน่งเดียวกัน ผู้ใช้ไม่ต้องมองหา</p><p>และ <code>_headerAction</code> แสดงสถานะปิดด้วยความโปร่งใสที่ต่างกัน</p><pre class="code-vs"><code>color: Colors.white.withValues(alpha: onTap == null ? 0.10 : 0.15),</code></pre><p>ต่างจาก <code>PdaButton</code> ใน 20.13 ที่รับ null ไม่ได้จึงแสดงสถานะปิดไม่ได้ — ที่นี่ทำถูก</p><h3>จอแคบ</h3><pre class="code-vs"><code>final narrowHome = onHome &amp;&amp; constraints.maxWidth &lt;= 400;
+...
+if (sub.isNotEmpty &amp;&amp; !narrowHome) Text(sub, ...),</code></pre><p>บนจอกว้างไม่เกิน 400 พิกเซล บรรทัดรองที่หน้าหลักถูกซ่อน และแถบเตี้ยลงจาก 64 เหลือ 56</p><p>ทำเฉพาะที่หน้าหลัก เพราะบรรทัดรองที่นั่นเป็นคำโฆษณา (“คลังสินค้าอัจฉริยะ · REV 3.0”) ส่วนที่จออื่นเป็นข้อมูลจริงอย่างชื่อขั้นตอน</p></section>
+
+<section><h2>6. แถบล่างกับตราแจ้งจำนวน</h2><pre class="code-vs"><code>const active = {
+  'recvorder': 'receive',
+  'recvrun': 'receive',
+  'taskrun': 'tasks',
+  'picking': 'home',
+  'agv': 'home',
+  'stock': 'home',
+  'cyclecount': 'home',
+};
+final cur = active[store.screen] ?? store.screen;</code></pre><p>ตารางที่แปลง “จอที่กำลังอยู่” เป็น “ปุ่มที่ควรสว่าง” — เข้าไปในขั้นตอนรับสินค้าแล้วปุ่ม “รับเข้า” ยังสว่างอยู่</p><pre class="code-vs"><code>// Pending-work counts shown as a red badge on the relevant nav buttons.
+final badges = {
+  'receive': store.recvCount,
+  'dispatch': store.dispatchQ,
+  'tasks': store.mineCount,
+};</code></pre><p>เป็นเหตุผลที่ <code>initState</code> ต้องเรียก <code>store.loadAll()</code> ทันที — คอมเมนต์เขียนไว้ว่า “badges must be right on the first screen”</p><h3>รายการเมนูกรองตามสิทธิ์</h3><pre class="code-vs"><code>List&lt;(String, FaIconData, String)&gt; get _navItems =&gt; [
+  ('home', FontAwesomeIcons.house, tr('Home', 'หน้าหลัก')),
+  ('receive', FontAwesomeIcons.boxOpen, tr('Receiving', 'รับเข้า')),
+  ('withdraw', FontAwesomeIcons.dolly, tr('Issue', 'เบิก')),
+  ('dispatch', FontAwesomeIcons.route, tr('Dispatch', 'จัดส่ง')),
+  ('tasks', FontAwesomeIcons.truckFast, tr('My Tasks', 'งานของฉัน')),
+].where((item) =&gt; store.canViewScreen(item.$1)).toList();</code></pre><div class="success"><strong>สิทธิ์ถูกตรวจสองที่ และทั้งสองที่ผ่าน <code>store.canViewScreen</code> ตัวเดียวกัน</strong><table><thead><tr><th>ที่</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>_navItems</code></td><td>ปุ่มไม่โผล่</td></tr>
+<tr><td><code>_body</code></td><td>ถ้าเข้ามาได้ทางอื่น จะเห็นข้อความว่าไม่มีสิทธิ์</td></tr>
+</tbody></table>เป็นความซ้ำแบบเดียวกับด่านการลบใน 20.13 — คนละความรับผิดชอบ และที่สำคัญคือ<strong>คำตอบมาจากฟังก์ชันเดียวกัน</strong> จึงไม่มีทางไม่ตรงกัน<br>ถ้าแต่ละที่เขียนเงื่อนไขเอง นั่นถึงจะเป็นปัญหาที่ 19.15 พูดถึง</div><p>ราคาเล็ก ๆ ของการใช้ <code>Expanded</code> ในแถวคือ ปุ่มจะกว้างขึ้นเมื่อมีเมนูน้อย — ผู้ใช้ที่มีสิทธิ์สองเมนูจะเห็นปุ่มใหญ่ผิดปกติ ซึ่งใช้งานได้แต่ดูไม่เหมือนที่ออกแบบไว้</p></section>
+
+<section><h2>7. ข้อความชั่วคราวและแฟลชสี</h2><pre class="code-vs"><code>void _showFlash(bool ok) {
+  if (ok) {
+    unawaited(HapticFeedback.mediumImpact());
+  } else {
+    unawaited(HapticFeedback.heavyImpact());
+  }
+  setState(() =&gt; _flashColor = ok ? const Color(0x5228A745) : const Color(0x59E04B3F));
+  _flashTimer?.cancel();
+  _flashTimer = Timer(const Duration(milliseconds: 220), () {
+    if (mounted) setState(() =&gt; _flashColor = null);
+  });
+}</code></pre><p>ทั้งจอกลายเป็นสีเขียวหรือแดงจาง ๆ 220 มิลลิวินาที พร้อมการสั่นที่ต่างกัน</p><div class="success"><strong>ออกแบบมาสำหรับสภาพจริงในคลัง</strong><table><thead><tr><th>ช่องทาง</th><th>ใช้ได้เมื่อ</th></tr></thead><tbody>
+<tr><td>สีทั้งจอ</td><td>เห็นด้วยหางตาโดยไม่ต้องอ่าน</td></tr>
+<tr><td>การสั่น</td><td>ในที่เสียงดัง และเมื่อจออยู่ในมือ</td></tr>
+<tr><td>ข้อความ</td><td>เมื่อต้องการรายละเอียด</td></tr>
+</tbody></table>คนงานที่สแกนติดกันสิบชิ้นไม่ได้อ่านจอทุกครั้ง — เขาสแกนแล้วรอสัญญาณ<br>ความต่างระหว่าง <code>mediumImpact</code> กับ <code>heavyImpact</code> ทำให้แยกสำเร็จกับล้มเหลวได้โดยไม่ต้องมอง</div><p>สังเกต <code>IgnorePointer</code> รอบชั้นสี — ไม่งั้นแฟลชจะกินการกดของผู้ใช้ในช่วง 220 มิลลิวินาทีนั้น ซึ่งเป็นช่วงที่คนสแกนเร็ว ๆ กำลังจะกดพอดี</p><p>และ <code>_flashTimer?.cancel()</code> ก่อนตั้งใหม่ทุกครั้ง — สแกนรัวแล้วตัวจับเวลาไม่ทับกัน</p><p>ทั้งสองตัวจับเวลาถูกยกเลิกใน <code>dispose</code></p><pre class="code-vs"><code>@override
+void dispose() {
+  WidgetsBinding.instance.removeObserver(this);
+  _toastTimer?.cancel();
+  _flashTimer?.cancel();
+  store.dispose();
+  super.dispose();
+}</code></pre><p>ครบทั้งสี่อย่าง รวม <code>store.dispose()</code> ที่จะไปยกเลิกตัวจับเวลา 5 วินาทีข้างใน</p></section>
+
+<section><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>ให้ store เรียก <code>ScaffoldMessenger</code> เอง</td><td>store ผูกกับ UI ทดสอบไม่ได้</td><td>callback ที่จอเสียบให้</td></tr>
+<tr><td>ทางถอยของสิทธิ์เป็น “เปิดหมด”</td><td>คนไม่มีสิทธิ์เห็นทุกเมนู</td><td><code>const PdaAccess({})</code></td></tr>
+<tr><td>ตรวจสถานะเซิร์ฟเวอร์เป็นรอบ</td><td>แบตหมดก่อนจบกะ</td><td>ตรวจตอนเข้าและตอนกลับมา</td></tr>
+<tr><td>ไม่ยิงสถานะงานเป็นรอบ</td><td>หยิบของที่คนอื่นหยิบไปแล้ว</td><td>ตัวจับเวลาใน store</td></tr>
+<tr><td>สลับจอด้วยตัวแปรแต่ไม่จัดการปุ่มย้อนกลับ</td><td>กดแล้วหลุดออกทั้งเปลือก งานหาย</td><td><code>PopScope</code> ที่เปลือก</td></tr>
+<tr><td>ไม่ <code>cancel</code> ตัวจับเวลาก่อนตั้งใหม่</td><td>สแกนรัวแล้วแฟลชค้าง</td><td><code>?.cancel()</code> ทุกครั้ง</td></tr>
+<tr><td>ชั้นสีทับโดยไม่มี <code>IgnorePointer</code></td><td>กดไม่ติดช่วงสั้น ๆ</td><td>ครอบไว้</td></tr>
+<tr><td>ตรวจสิทธิ์สองที่ด้วยเงื่อนไขคนละชุด</td><td>เมนูซ่อนแต่เข้าได้ หรือกลับกัน</td><td>เรียกฟังก์ชันเดียวกัน</td></tr>
+</tbody></table></section>
+
+<section><h2>9. แบบฝึกหัด</h2><ol><li>เขียน <code>PopScope</code> ที่แก้ปัญหาปุ่มย้อนกลับ พร้อมบอกว่าต้องระวังอะไร</li><li>ผู้ใช้พักหน้าจอตอนอยู่กลางขั้นตอนรับสินค้า แล้วกลับมาอีกสิบนาที — ไล่ว่าเกิดอะไรขึ้นบ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  return PopScope(
+    canPop: store.screen == 'home' &amp;&amp; !store.inFlow,
+    onPopInvokedWithResult: (didPop, _) {
+      if (didPop) return;
+      store.goBack();
+    },
+    child: Scaffold(...),
+  );
+}</code></pre><table><thead><tr><th>ต้องระวัง</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>canPop</code> ต้องอ่านจาก store</td><td>ต้องอยู่ใน <code>ListenableBuilder</code> ไม่งั้นค่าไม่อัปเดตเมื่อเปลี่ยนจอ</td></tr>
+<tr><td>ที่หน้าหลักควรออกจากแอปได้</td><td>ไม่งั้นผู้ใช้ติดอยู่ในแอป</td></tr>
+<tr><td>ระหว่างอยู่ในขั้นตอน</td><td>ควรถามก่อน เหมือนปุ่ม ✕ ที่เรียก <code>_confirmExit</code></td></tr>
+</tbody></table><p>เวอร์ชันที่คิดครบกว่า</p><pre class="code-vs"><code>onPopInvokedWithResult: (didPop, _) {
+  if (didPop) return;
+  if (store.inFlow) {
+    unawaited(_confirmExit());   // ใช้ตัวเดิม ไม่เขียนกล่องใหม่
+  } else {
+    store.goBack();
+  }
+},</code></pre><div class="note"><strong>การเรียก <code>_confirmExit()</code> ที่มีอยู่แล้ว สำคัญกว่าที่ดู</strong><br>ถ้าเขียนกล่องยืนยันใหม่ จะได้ข้อความสองชุดสำหรับการกระทำเดียวกัน แล้ววันหนึ่งจะแก้แค่ชุดเดียว<br>นี่คือ 19.15 แถวที่ 8 (“แจ้งความสำเร็จ”) ในรูปแบบเดียวกันเป๊ะ — และหลีกเลี่ยงได้ด้วยการมองหาของที่มีอยู่ก่อนเขียนใหม่</div><p><strong>ข้อ 2 — พักหน้าจอสิบนาที</strong></p><pre class="code-vs"><code>พักหน้าจอ
+  didChangeAppLifecycleState(paused)   → ไม่ได้จัดการ ไม่มีอะไรเกิด
+  Timer.periodic ใน store              → Android อาจชะลอหรือหยุดชั่วคราว
+  state ทั้งหมดยังอยู่ใน store         → ไม่หาย
+
+กลับมา
+  didChangeAppLifecycleState(resumed)
+    → refreshStatus() → จุดสถานะถูกต้อง
+  Timer เดินต่อ → _refreshTaskStatus() ภายใน 5 วินาที
+  จอวาดด้วยข้อมูลใน store (อาจเก่าสิบนาที) ก่อนข้อมูลใหม่มาถึง</code></pre><table><thead><tr><th>สิ่งที่ถูก</th><th>สิ่งที่ยังขาด</th></tr></thead><tbody>
+<tr><td>จุดสถานะสดทันที</td><td>ข้อมูลงานยังเก่าอยู่ไม่เกิน 5 วินาที</td></tr>
+<tr><td>งานที่ค้างไม่หาย</td><td>ไม่มีการเรียก <code>store.loadAll()</code> ตอนกลับมา</td></tr>
+<tr><td>token ยังอยู่</td><td>ถ้า token หมดอายุระหว่างพัก จะรู้ตอนยิงครั้งถัดไปเป็น 401 (20.5)</td></tr>
+</tbody></table><div class="warning"><strong>ช่องว่างที่แท้จริงคือแถวที่สอง</strong><br>ผู้ใช้กลับมาเห็นตัวเลขตราแจ้งของสิบนาทีที่แล้วเป็นเวลาสั้น ๆ<br>ในคลังที่คนหลายคนหยิบงานจากคิวเดียวกัน สิบนาทีคือระยะที่งานเปลี่ยนมือได้หลายใบ<br>เติมได้บรรทัดเดียว<pre class="code-vs"><code>if (state == AppLifecycleState.resumed) {
+  unawaited(ConnectionController.instance.refreshStatus());
+  unawaited(store.loadAll());          // ← เติม
+}</code></pre>แต่ต้องตรวจก่อนว่า <code>loadAll()</code> ปลอดภัยที่จะเรียกซ้ำระหว่างที่ผู้ใช้อยู่กลางขั้นตอน — ถ้ามันรีเซ็ตอะไรที่กำลังกรอกอยู่ จะแก้ปัญหาหนึ่งแล้วสร้างอีกปัญหา<br>เป็นคำถามที่ต้องไปอ่าน <code>WarehouseStore.loadAll()</code> ก่อนตอบ ซึ่งเป็นเนื้อหาของ Part 21</div></details></section>
+
+<section><h2>10. สรุป</h2><div class="success"><ul><li>เปลือก 742 บรรทัดที่ไม่มีตรรกะธุรกิจ — ทั้งหมดอยู่ใน store</li><li><code>initState</code> สร้าง repository ทั้งสี่จาก <code>auth.client</code> ตัวเดียว</li><li>ทางถอยของสิทธิ์เป็น <code>PdaAccess({})</code> ที่ปิดทุกเมนู ไม่ใช่ <code>unrestricted()</code></li><li>store พูดกับจอผ่าน <code>onToast</code>/<code>onFlash</code> จึงไม่รู้จัก Flutter</li><li>สถานะเซิร์ฟเวอร์ตรวจสองจังหวะ ส่วนสถานะงานยิงทุก 5 วินาที — เกณฑ์คือข้อมูลเปลี่ยนเองไหมและรู้ช้าแล้วเสียหายไหม</li><li>สิบสองจอเป็นค่าของ <code>store.screen</code> ไม่ใช่ route — งานที่ค้างจึงไม่หายเมื่อสลับจอ</li><li>ยังไม่มี <code>PopScope</code> ที่เปลือก — ปุ่มย้อนกลับของเครื่องทำให้หลุดออกทั้งอัน</li><li>สิทธิ์ตรวจสองที่แต่ผ่านฟังก์ชันเดียวกัน จึงไม่มีทางไม่ตรงกัน</li><li>แฟลชสี + การสั่นสองระดับ สำหรับคนที่ไม่ได้มองจอทุกครั้งที่สแกน</li><li><code>dispose</code> ครบทั้ง observer ตัวจับเวลาสองตัว และ store</li></ul></div><p><strong>บทหน้า:</strong> เมนูผู้ใช้ การออกจากระบบ และการนับเทสต์ทั้ง 101 ข้อ — พร้อมคำตอบของคำถามจาก 19.15</p></section>

@@ -1,15 +1,161 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/auth/auth_repository.dart</code> — repository แปลง login use case ให้เป็น HTTP contract และเก็บ session ปัจจุบันใน memory</div>
-<section><h2>1. ทำไมไม่ยิง HTTP จาก LoginScreen</h2><p>หน้าจอควรดูแล input/loading/navigation ส่วน <code>AuthRepository</code> ดูแล endpoint, request field, response parsing และการผูก token กับ client เมื่อ backend เปลี่ยนชื่อ field หรือ route จึงแก้ที่ data boundary โดยไม่รื้อ widget</p></section>
-<section><h2>2. Contract ที่โค้ดใช้จริง</h2><pre class="code-vs"><code>POST /api/Authenticate/login   // absolute
-{
-  "Username": "operator",
-  "Password": "..."
-}
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน lib/features/auth/</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.4, 16.4 (ล็อกอินปลอมของ wmsapp), 12.5 (JWT)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เดินตามการล็อกอินตั้งแต่กดปุ่มจนได้ token และอธิบายว่าทำไมไฟล์นี้มี 46 บรรทัด</div>
 
-response → token, expiration</code></pre><p>ตัวพิมพ์ใหญ่ของ request key และ route นอก <code>/api/WMS</code> เป็นส่วนของ contract ต้องตรงกับ .NET DTO/controller ไม่ควรเปลี่ยนตาม style ของ Dart โดยไม่มี mapping</p></section>
-<section><h2>3. Parse แล้ว commit session</h2><p>repository รอ response, อ่าน token และ expiration, สร้าง <code>AuthSession</code> โดยใช้ username จาก input และ roles ว่าง แล้วตั้งทั้ง <code>client.authToken</code> กับ field session การ commit สองตำแหน่งนี้ต้องเกิดหลัง validation สำเร็จเท่านั้น ไม่เช่นนั้น UI อาจคิดว่า login fail แต่ transport มี token ครึ่งหนึ่ง</p></section>
-<section><h2>4. Repository เปิด client ให้ shell</h2><p><code>client</code> ถูก expose เพื่อให้ <code>WarehouseShell</code> สร้าง <code>ReceivingApi</code>, <code>TasksApi</code> และ adapters อื่นจาก transport เดิม วิธีนี้เหมาะกับ codebase ขนาดปัจจุบัน แต่ senior refactor อาจให้ composition root สร้าง adapters โดยตรง เพื่อลดการที่ auth repository กลายเป็น service locator</p></section>
-<section><h2>5. Logout ที่มีอยู่</h2><p><code>logout()</code> ล้าง session และ <code>authToken</code> แบบ synchronous แล้ว shell ใช้ <code>pushReplacement</code> กลับหน้า login สิ่งที่ยังต้องตรวจในระบบจริงคือ store/timer/stream ถูก dispose, cache ข้อมูลผู้ใช้ถูกล้าง และ server-side refresh token/revocation ถูกเรียกหรือไม่</p></section>
-<section><h2>6. Error path</h2><p><code>ApiException</code> จาก client ถูกส่งต่อให้ LoginScreen แสดง inline error ส่วน parse error เช่น token หายหรือ expiration ผิดรูปควรถูกแปลงเป็น auth contract error ที่เข้าใจได้ ปัจจุบันต้องอ่าน implementation/test เพื่อยืนยันพฤติกรรม อย่า catch ทุกอย่างแล้วแสดง “รหัสผ่านผิด” เพราะ network และ backend schema error ต้องแก้ต่างกัน</p></section>
-<section><h2>7. Security review</h2><ul><li>password อยู่เฉพาะ request และห้าม log</li><li>HTTP profile ส่ง credential แบบ cleartext; production ควรบังคับ HTTPS</li><li>token อยู่ memory จึงหายเมื่อปิดแอป ซึ่งปลอดภัยกว่า plain preferences แต่ UX ต้อง login ใหม่</li><li>roles ยังว่าง จึงยังใช้ client-side authorization ไม่ได้</li><li>expiration ถูกเก็บแต่ยังไม่มี enforcement/refresh</li></ul></section>
-<section><h2>8. Contract test ที่ควรเขียน</h2><div class="success">ฉีด fake <code>ApiClient</code> หรือ mock transport แล้วพิสูจน์ว่า endpoint เป็น absolute, payload casing ถูก, success ตั้ง session/token ครั้งเดียว, failure ไม่แตะ session เดิม, logout ล้างสองแหล่ง และ response ที่ token/expiration หายถูกปฏิเสธอย่างชัดเจน</div></section>
+<section><h2>1. ทั้งคลาส</h2><pre class="code-vs"><code>class AuthRepository {
+  AuthRepository(this._api);
+
+  final ApiClient _api;
+
+  /// The authenticated HTTP client (carries the bearer token after login) —
+  /// shared with the feature api layers (lib/api/*).
+  ApiClient get client =&gt; _api;
+
+  AuthSession? _session;
+  AuthSession? get session =&gt; _session;
+
+  Future&lt;AuthSession&gt; login(String employeeId, String password) async { ... }
+
+  void logout() {
+    _api.authToken = null;
+    _session = null;
+  }
+}</code></pre><p>สองฟิลด์ สองเมธอด สอง getter — และไม่มีอะไรเกี่ยวกับหน้าจอเลย</p></section>
+
+<section><h2>2. <code>login()</code> ทีละส่วน</h2><pre class="code-vs"><code>Future&lt;AuthSession&gt; login(String employeeId, String password) async {
+  // Shared WMS auth (Identity / AspNetUsers) — not a PDA-specific endpoint.
+  final json = await _api.post('/api/Authenticate/login', {          // ①
+    'Username': employeeId,
+    'Password': password,
+  }, absolute: true);
+
+  final roles = (json['roles'] as List&lt;dynamic&gt;? ?? const [])       // ②
+      .map((value) =&gt; value.toString())
+      .where((value) =&gt; value.isNotEmpty)
+      .toList(growable: false);
+
+  final session = AuthSession(
+    token: json['token'] as String,                                  // ③
+    username: json['username']?.toString().trim().isNotEmpty == true  // ④
+        ? json['username'].toString().trim()
+        : employeeId,
+    roles: roles,
+    access: PdaAccess.fromJson(json['permissions']),                 // ⑤
+    expiration: DateTime.tryParse(json['expiration']?.toString() ?? ''),  // ⑥
+  );
+
+  _api.authToken = session.token;                                    // ⑦
+  _session = session;
+  return session;
+}</code></pre>
+
+<h3>① <code>absolute: true</code></h3><p>ปกติ <code>post()</code> จะเติม <code>/api/WMS</code> ให้ — ล็อกอินไม่ใช่เส้นทางของพีดีเอ จึงต้องบอกให้ใช้เส้นทางตามที่เขียน</p><pre class="code-vs"><code>ปกติ       → http://host:6191/api/WMS/mobile_xxx
+absolute   → http://host:6191/api/Authenticate/login</code></pre><p>คอมเมนต์บอกว่านี่คือระบบยืนยันตัวตนของ WMS ที่เว็บใช้ร่วมกัน — ผู้ใช้คนเดียวกัน รหัสผ่านเดียวกัน ล็อกอินได้ทั้งเว็บและพีดีเอ</p>
+
+<h3>② อ่าน roles แบบไม่ยอมล้ม</h3><pre class="code-vs"><code>(json['roles'] as List&lt;dynamic&gt;? ?? const [])
+    .map((value) =&gt; value.toString())
+    .where((value) =&gt; value.isNotEmpty)
+    .toList(growable: false);</code></pre><table><thead><tr><th>ส่วน</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td><code>as List&lt;dynamic&gt;?</code></td><td>ไม่มีฟิลด์ หรือเป็น null</td></tr>
+<tr><td><code>?? const []</code></td><td>ได้รายการว่างแทนที่จะล้ม</td></tr>
+<tr><td><code>.toString()</code></td><td>ถ้าเซิร์ฟเวอร์ส่งตัวเลขมาก็ยังใช้ได้</td></tr>
+<tr><td><code>.where(isNotEmpty)</code></td><td>ทิ้งสตริงว่าง</td></tr>
+<tr><td><code>growable: false</code></td><td>ประกาศว่าลิสต์นี้เสร็จแล้ว ใครเผลอ <code>add</code> จะพังตอนรัน</td></tr>
+</tbody></table>
+
+<h3>③ <code>token</code> เป็นที่เดียวที่ยอมล้ม</h3><pre class="code-vs"><code>token: json['token'] as String,     // ไม่มี ? ไม่มี ??</code></pre><p>ถ้าไม่มี token จะโยน <code>TypeError</code></p><div class="success"><strong>นี่เป็นการเลือกที่ถูก ไม่ใช่การลืม</strong><br>ทุกฟิลด์อื่นมีทางถอย เพราะขาดไปแล้วยังทำงานต่อได้<br>แต่ session ที่ไม่มี token คือ session ที่ยิงอะไรไม่ได้เลย — การสร้างมันขึ้นมาแล้วให้ผู้ใช้เข้าไปเจอ 401 ทุกจอ แย่กว่าการบอกว่าล็อกอินไม่สำเร็จตั้งแต่แรก<br><strong>กฎ:</strong> ยอมล้มตรงที่ล้มแล้วรู้เรื่อง ดีกว่าไปล้มไกล ๆ ที่ไม่รู้ว่าเพราะอะไร</div><p>ข้อควรปรับปรุงเล็ก ๆ คือ <code>TypeError</code> ที่หลุดออกไปจะไม่ใช่ <code>ApiException</code> จอล็อกอินจึงเห็นเป็นข้อผิดพลาดคนละชนิด — จะกลับมาที่บทที่ 7</p>
+
+<h3>④ ชื่อผู้ใช้ที่มีทางถอย</h3><pre class="code-vs"><code>username: json['username']?.toString().trim().isNotEmpty == true
+    ? json['username'].toString().trim()
+    : employeeId,</code></pre><p>ถ้าเซิร์ฟเวอร์ไม่ส่งชื่อกลับมา ก็ใช้รหัสพนักงานที่พิมพ์เข้าไปแทน — แถบสถานะจะไม่ว่าง</p><p>สังเกตรูปแบบ <code>== true</code> ที่ท้าย: <code>?.</code> ทำให้ผลเป็น <code>bool?</code> ซึ่งใส่ใน <code>? :</code> ตรง ๆ ไม่ได้ การเทียบกับ <code>true</code> จึงแปลง null ให้เป็น false</p>
+
+<h3>⑤ สิทธิ์</h3><p><code>PdaAccess.fromJson</code> — บทที่ 6 ทั้งบท</p>
+
+<h3>⑥ วันหมดอายุที่ไม่มีใครใช้</h3><pre class="code-vs"><code>expiration: DateTime.tryParse(json['expiration']?.toString() ?? ''),</code></pre><pre class="code-vs"><code>rg "expiration" lib
+# auth_session.dart:17   final DateTime? expiration;
+# auth_repository.dart:35  expiration: DateTime.tryParse(...)</code></pre><div class="warning"><strong>เก็บไว้แต่ไม่มีใครอ่าน</strong> — แอปไม่รู้ว่า token หมดอายุเมื่อไร<br>สิ่งที่เกิดจริงเมื่อหมดอายุ: คำขอถัดไปได้ 401 → <code>ApiException(statusCode: 401)</code> → จอแสดงข้อความผิดพลาด<br>ผู้ใช้จะเห็น “เกิดข้อผิดพลาด (401)” กลางกะ โดยไม่รู้ว่าต้องล็อกอินใหม่<br>ข้อมูลที่จะแก้เรื่องนี้อยู่ในมือแล้ว แค่ยังไม่ได้ใช้ — เป็นงานที่ทำได้ทันทีและคุ้ม</div>
+
+<h3>⑦ ผูก token เข้ากับ client</h3><pre class="code-vs"><code>_api.authToken = session.token;</code></pre><p>ตั้งครั้งเดียว แล้วทุกคำขอหลังจากนี้มี <code>Authorization</code> header อัตโนมัติ (20.4)</p></section>
+
+<section><h2>3. <code>client</code> getter ที่เชื่อมทุกอย่างเข้าด้วยกัน</h2><pre class="code-vs"><code>/// The authenticated HTTP client (carries the bearer token after login) —
+/// shared with the feature api layers (lib/api/*).
+ApiClient get client =&gt; _api;</code></pre><p>ตามรอยว่าใครใช้</p><pre class="code-vs"><code>// warehouse_shell.dart
+ReceivingApi(widget.auth.client)
+TasksApi(widget.auth.client)
+InventoryApi(widget.auth.client)
+CycleCountApi(widget.auth.client)</code></pre><p>ทุกชั้น API ใช้ <code>ApiClient</code> <strong>ตัวเดียวกัน</strong> ที่สร้างใน <code>main()</code></p><pre class="code-vs"><code>main()
+  └─ ApiClient()  ────────────────┐  ตัวเดียวในทั้งแอป
+       └─ AuthRepository(...)     │
+            ├─ login() ตั้ง authToken
+            └─ client getter ─────┼─→ ReceivingApi
+                                  ├─→ TasksApi
+                                  ├─→ InventoryApi
+                                  └─→ CycleCountApi</code></pre><div class="success"><strong>ผลที่ได้ฟรีจากการมี client ตัวเดียว</strong><ul><li>ล็อกอินครั้งเดียว ทุกชั้น API มี token ทันที ไม่ต้องส่ง token ต่อ ๆ กัน</li><li><code>logout()</code> ตั้ง <code>authToken = null</code> ที่เดียว ทุกชั้นหมดสิทธิ์พร้อมกัน</li><li>สลับเซิร์ฟเวอร์ไม่กระทบ token เพราะที่อยู่เป็น getter (20.3)</li></ul>ถ้าแต่ละชั้นสร้าง client เอง ทั้งสามข้อจะกลายเป็นงานที่ต้องไล่ทำให้ครบ และจะมีที่ที่ลืม</div></section>
+
+<section><h2>4. <code>AuthSession</code> — 18 บรรทัด</h2><pre class="code-vs"><code>/// The signed-in user, as returned by /api/Authenticate/login.
+class AuthSession {
+  AuthSession({
+    required this.token,
+    required this.username,
+    required this.roles,
+    required this.access,
+    required this.expiration,
+  });
+
+  final String token;
+  final String username;
+  final List&lt;String&gt; roles;
+  final PdaAccess access;
+  final DateTime? expiration;
+}</code></pre><table><thead><tr><th>สิ่งที่มี</th><th>สิ่งที่ไม่มี</th></tr></thead><tbody>
+<tr><td>ฟิลด์ <code>final</code> ทั้งหมด</td><td><code>copyWith</code></td></tr>
+<tr><td><code>required</code> ทุกตัว รวม <code>expiration</code> ที่ nullable</td><td><code>toJson</code></td></tr>
+<tr><td>คอมเมนต์บอกว่ามาจากไหน</td><td><code>fromJson</code></td></tr>
+</tbody></table><h3>ไม่มี <code>fromJson</code> ทำไม</h3><p>เพราะการแปลงอยู่ใน <code>AuthRepository.login()</code> ซึ่งเป็น<strong>ที่เดียวที่มี JSON ก้อนนี้</strong></p><table><thead><tr><th>ทางเลือก</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>ใส่ <code>fromJson</code> ในโมเดล</td><td>โมเดลถูกแปลงจากหลายที่ / มีเทสต์ยิงที่ตัวแปลงตรง ๆ</td></tr>
+<tr><td>แปลงในตัวที่เรียก</td><td>แปลงที่เดียว และตัวแปลงต้องรู้บริบท</td></tr>
+</tbody></table><p>ที่นี่เข้าเงื่อนไขที่สอง — สังเกตว่าตัวถอยของ <code>username</code> ใช้ <code>employeeId</code> ซึ่งเป็น<strong>พารามิเตอร์ของ <code>login()</code></strong> ไม่ได้อยู่ใน JSON</p><pre class="code-vs"><code>username: ... : employeeId,     // ← ค่าจากนอก JSON</code></pre><p>ถ้าย้ายไปเป็น <code>AuthSession.fromJson(json)</code> จะทำแบบนี้ไม่ได้ ต้องกลายเป็น <code>AuthSession.fromJson(json, fallbackUsername: employeeId)</code> ซึ่งไม่ได้ดีขึ้น</p><h3>ไม่มี <code>toJson</code> ทำไม</h3><p>เพราะ session ไม่เคยถูกบันทึกลงดิสก์ — ปิดแอปแล้วต้องล็อกอินใหม่ทุกครั้ง</p><div class="note"><strong>เป็นการเลือกที่เหมาะกับพีดีเอในคลัง</strong><ul><li>เครื่องใช้ร่วมกันหลายคนต่อกะ — การจำผู้ใช้ไว้คือความเสี่ยงว่าคนถัดไปทำงานในนามคนก่อน</li><li>การบันทึกงานต้องผูกกับคนที่ทำจริง</li></ul>บนแอปผู้บริโภคจะตรงข้าม — การบังคับล็อกอินทุกครั้งคือความรำคาญ<br>คำตอบมาจากรูปแบบการใช้งาน ไม่ใช่จากหลักการทั่วไป</div></section>
+
+<section><h2>5. เทียบกับ wmsapp</h2><pre class="code-vs"><code>// wmsapp — 16.4
+final Map&lt;String, Map&lt;String, String&gt;&gt; _users = {
+  '1001': {'name': 'สมชาย', 'role': 'operator', 'pin': '1234'},
+  ...
+};</code></pre><table><thead><tr><th></th><th>wmsapp</th><th>absolute</th></tr></thead><tbody>
+<tr><td>ตรวจกับอะไร</td><td>map ในโค้ด</td><td>ฐานข้อมูล Identity ของ WMS</td></tr>
+<tr><td>รหัสผ่าน</td><td><code>1234</code> ทุกคน</td><td>ของจริง</td></tr>
+<tr><td>ได้ token</td><td>ไม่ได้</td><td>JWT</td></tr>
+<tr><td>สิทธิ์</td><td>เก็บ <code>_role</code> แต่ไม่ใช้</td><td><code>PdaAccess</code> ใช้จริง</td></tr>
+<tr><td>เพิ่มพนักงานใหม่</td><td>แก้โค้ดแล้ว build ใหม่</td><td>เพิ่มในระบบหลัง</td></tr>
+</tbody></table><p>แถวสุดท้ายคือความต่างที่กระทบการทำงานจริงมากที่สุด</p></section>
+
+<section><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>สร้าง client แยกต่อฟีเจอร์</td><td>ต้องส่ง token ต่อกันทุกที่</td><td>ใช้ตัวเดียว แชร์ผ่าน getter</td></tr>
+<tr><td>เก็บ session ลงดิสก์บนเครื่องที่ใช้ร่วมกัน</td><td>ทำงานในนามคนอื่น</td><td>อยู่ในหน่วยความจำ</td></tr>
+<tr><td>อ่าน token แบบมีทางถอย</td><td>เข้าแอปแล้วเจอ 401 ทุกจอ</td><td>ปล่อยให้ล้มตั้งแต่ล็อกอิน</td></tr>
+<tr><td>เก็บ <code>expiration</code> แต่ไม่ใช้</td><td>token หมดอายุกลางกะโดยไม่บอก</td><td>เช็คก่อนยิง แล้วพากลับไปล็อกอิน</td></tr>
+<tr><td>ตรวจชื่อบทบาทในแอป</td><td>เพิ่มบทบาทฝั่งเซิร์ฟเวอร์แล้วต้อง build ใหม่</td><td>ให้เซิร์ฟเวอร์ส่งสิทธิ์ที่คำนวณแล้วมา</td></tr>
+</tbody></table></section>
+
+<section><h2>7. แบบฝึกหัด</h2><ol><li>เขียนเทสต์ที่พิสูจน์ว่าเมื่อ <code>username</code> เป็นสตริงว่าง session จะใช้รหัสพนักงานแทน</li><li>ออกแบบวิธีใช้ <code>expiration</code> ให้เกิดประโยชน์ โดยแก้ให้น้อยที่สุด</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>test('a blank username falls back to the employee id typed at login', () async {
+  final api = ApiClient(
+    client: MockClient((_) async =&gt; http.Response(
+          '{"token":"t","username":"   ","roles":[],"permissions":{}}',
+          200,
+        )),
+  );
+
+  final session = await AuthRepository(api).login('EMP007', 'pw');
+
+  expect(session.username, 'EMP007');
+});</code></pre><p>ทดสอบกรณีช่องว่างล้วน ซึ่งเป็นกรณีที่ <code>.trim()</code> มีอยู่เพื่อจัดการ</p><p><strong>ข้อ 2 — สามระดับ</strong></p><table><thead><tr><th>ระดับ</th><th>ทำอะไร</th><th>ราคา</th></tr></thead><tbody>
+<tr><td>A</td><td>แสดงเวลาหมดอายุในเมนูผู้ใช้</td><td>แก้จอเดียว</td></tr>
+<tr><td>B</td><td>ก่อนยิงทุกครั้ง ถ้าเลยเวลาแล้วให้พากลับไปล็อกอิน</td><td>แก้ <code>ApiClient</code> + ทางเดินกลับ</td></tr>
+<tr><td>C</td><td>ต่ออายุ token อัตโนมัติ</td><td>ต้องมี refresh token ฝั่ง .NET</td></tr>
+</tbody></table><p>C เกินขอบเขตของแอปฝ่ายเดียว ส่วน B คุ้มที่สุด</p><pre class="code-vs"><code>// auth_session.dart
+bool get isExpired =&gt;
+    expiration != null &amp;&amp; DateTime.now().isAfter(expiration!);</code></pre><pre class="code-vs"><code>// auth_repository.dart — ให้ที่เดียวตอบว่า session ยังใช้ได้ไหม
+bool get hasValidSession =&gt; _session != null &amp;&amp; !_session!.isExpired;</code></pre><p>แล้วให้เปลือกแอปตรวจในสองจังหวะที่มีอยู่แล้ว</p><table><thead><tr><th>จังหวะ</th><th>ทำไมพอ</th></tr></thead><tbody>
+<tr><td>ตอนกลับมาจากพักหน้าจอ</td><td>มี <code>didChangeAppLifecycleState</code> อยู่แล้ว (20.14) และเป็นจังหวะที่หมดอายุบ่อยที่สุด</td></tr>
+<tr><td>เมื่อได้ 401</td><td>เป็นตาข่ายรับกรณีที่เซิร์ฟเวอร์เพิกถอน token ก่อนเวลา</td></tr>
+</tbody></table><div class="note"><strong>ทำไมไม่ตรวจใน <code>ApiClient.post()</code> ทุกครั้ง</strong><br><code>ApiClient</code> อยู่ใน <code>core/</code> ซึ่งไม่รู้จัก <code>AuthSession</code> — การให้มันรู้จักคือการลากธุรกิจเข้าไปในชั้นที่ตั้งใจให้สะอาด<br>และการตรวจ 401 ทำงานอยู่แล้วโดยไม่ต้องพึ่งนาฬิกาของเครื่อง ซึ่งบนพีดีเออาจตั้งเวลาไม่ตรง<br><strong>ประเด็นสุดท้ายสำคัญ</strong> — เวลาเครื่องเพี้ยนแล้วการเช็ค <code>isExpired</code> จะเด้งคนออกทั้งที่ token ยังดี ตัวจริงที่เชื่อได้คือ 401 จากเซิร์ฟเวอร์</div><p>สรุปว่า <strong>401 คือกลไกหลัก และ <code>expiration</code> เป็นแค่ตัวช่วยให้ข้อความอ่านรู้เรื่อง</strong> — ต่างจากที่เดาไว้ตอนแรกว่าจะใช้มันเป็นตัวตัดสิน</p></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li><code>AuthRepository</code> 46 บรรทัด — ไม่รู้จักหน้าจอเลย</li><li>ล็อกอินยิง <code>/api/Authenticate/login</code> ด้วย <code>absolute: true</code> ใช้ระบบเดียวกับเว็บ</li><li>ทุกฟิลด์มีทางถอย ยกเว้น <code>token</code> ที่ยอมล้ม — ล้มตรงที่รู้เรื่องดีกว่าล้มไกล</li><li><code>client</code> getter ทำให้ทุกชั้น API ใช้ <code>ApiClient</code> ตัวเดียวกัน ล็อกอิน/ออกครั้งเดียวมีผลทั้งแอป</li><li><code>AuthSession</code> ไม่มี <code>fromJson</code> เพราะแปลงที่เดียวและต้องใช้ค่าจากนอก JSON</li><li>ไม่มี <code>toJson</code> เพราะพีดีเอใช้ร่วมกันหลายคน ไม่ควรจำผู้ใช้</li><li><code>expiration</code> ถูกอ่านมาแต่ไม่มีใครใช้ — และตัวที่เชื่อได้จริงคือ 401 ไม่ใช่นาฬิกาเครื่อง</li></ul></div><p><strong>บทหน้า:</strong> <code>PdaAccess</code> — enum 8 ฟีเจอร์ 4 ระดับ และเหตุผลที่แอปตั้งใจไม่ดูชื่อบทบาท</p></section>

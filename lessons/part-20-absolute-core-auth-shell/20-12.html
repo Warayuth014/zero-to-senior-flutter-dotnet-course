@@ -4,15 +4,171 @@
 <title>Connection Probe</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">20-12 · Real Codebase</span><h1>Connection Probe</h1><p>Part 20: Absolute Core &amp; Auth</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Probe ใช้ URL draft</a></li><li><a href="#section-2">Health URI</a></li><li><a href="#section-3">ทำไม HTTP 200 ยัง failได้</a></li><li><a href="#section-4">Result แบบ typed</a></li><li><a href="#section-5">Error taxonomy</a></li><li><a href="#section-6">Resource ownership</a></li><li><a href="#section-7">Race และ cancellation</a></li><li><a href="#section-8">Contract test สำคัญที่สุด</a></li></ol></nav>
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/core/connection_probe.dart</code> — “server ตอบ” ไม่ได้แปลว่า “ตอบจาก WMS API ที่ถูกต้อง”</div>
-<section id="section-1"><h2>1. Probe ใช้ URL draft</h2><p><code>probeConnection(baseUrl)</code> รับ URLโดยตรงและสร้าง clientแยกจาก <code>ApiClient</code> จึงทดสอบสิ่งที่ผู้ใช้กำลังกรอกก่อน save/activate ได้ ไม่ต้องเปลี่ยน global active serverเพื่อทดลอง และไม่แนบ Bearer tokenไป health endpoint</p></section>
-<section id="section-2"><h2>2. Health URI</h2><pre class="code-vs"><code>{normalized baseUrl}/api/WMS/mobile_health</code></pre><p>ก่อนยิงต้อง parse URIและตรวจ scheme/host การปล่อย invalid addressถึง network layerทำให้ errorคลุมเครือกว่า field validation แต่ probeยังต้องป้องกันตัวเองเพราะอาจถูกเรียกจากที่อื่น</p></section>
-<section id="section-3"><h2>3. ทำไม HTTP 200 ยัง failได้</h2><p>Blazor/server fallback routeอาจคืน <code>index.html</code> พร้อม 200 เมื่อ base pathหรือ API routeผิด หาก probeตรวจเฉพาะ statusจะขึ้น dotเขียวหลอก โค้ดจึง decode JSON mapและต้องเห็น <code>service == "WMS"</code> กับ <code>ok == true</code> จึงถือว่าสำเร็จ</p></section>
-<section id="section-4"><h2>4. Result แบบ typed</h2><p><code>ConnectionTestResult</code> เก็บ ok, elapsedMs, message และ statusCode ทำให้ UIแสดงทั้ง outcomeกับ latencyโดยไม่ parse exception string ค่าที่คืนควรเป็น sanitized user message ส่วนรายละเอียด stack/host diagnosticsส่ง loggerแยกช่อง</p></section>
-<section id="section-5"><h2>5. Error taxonomy</h2><ul><li>2xx แต่ payloadผิด: ชี้ไปที่ Base Path/route</li><li>non-2xx: serverถึงแต่ endpointปฏิเสธ/ผิด</li><li>timeout 8 วินาที: serverช้าหรือ route/networkไม่ตอบ</li><li><code>HandshakeException</code>: HTTPS/certificate</li><li><code>SocketException</code>: DNS/IP/port/network</li><li><code>ClientException</code>: HTTP client/protocol</li></ul><p>ข้อความต่างกันช่วย operatorแก้ปัญหาตรงจุด</p></section>
-<section id="section-6"><h2>6. Resource ownership</h2><p>หาก callerไม่ inject client probeจะสร้างและปิด clientเองหลังจบ วิธีนี้ป้องกัน socket resourceรั่วในการกด Testหลายครั้ง เมื่อ injectเพื่อ testต้องกำหนดให้ชัดว่า probeไม่ปิด resourceของ caller หรือใช้ wrapperที่ encode ownershipใน API</p></section>
-<section id="section-7"><h2>7. Race และ cancellation</h2><p>กด Testซ้ำหรือสลับ profileระหว่าง probeอาจทำให้ผลเก่ามาถึงทีหลัง settings/controllerต้องใช้ busy guard, generation token หรือ cancellable operation การ timeoutช่วยจำกัดเวลารอแต่ไม่รับประกันว่า stale completionจะไม่ commit UI state</p></section>
-<section id="section-8"><h2>8. Contract test สำคัญที่สุด</h2><div class="success">จำลอง response 200 JSONถูก, 200 HTMLจาก Blazor fallback, 200 JSON serviceผิด/ok false, 404/500, malformed JSON, timeout, TLS และ socket error ตรวจ URIรวม base path, elapsed/status และยืนยันว่า owned clientถูก closeโดยไม่ส่ง Authorization header</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">ปัญหาที่ไฟล์นี้แก้</a></li><li><a href="#section-2">_isHealthPayload</a></li><li><a href="#section-3">ทำไมไม่ใช้ ApiClient</a></li><li><a href="#section-4">การจัดการ client ที่ยืมมากับที่สร้างเอง</a></li><li><a href="#section-5">ตรวจ URL ก่อนยิง</a></li><li><a href="#section-6">สี่ catch ที่แยกกันชัด</a></li><li><a href="#section-7">สามผลลัพธ์เมื่อยิงถึง</a></li><li><a href="#section-8">ข้อสังเกตที่ยังไม่ได้ทำ</a></li><li><a href="#section-9">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง–สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน lib/core/connection_probe.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.11, 20.4 (<code>_decode</code> ที่จับ <code>FormatException</code>), 12.9 (การเสิร์ฟ SPA/Blazor)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายว่าทำไมรหัส 200 ไม่ได้แปลว่าคุยกับ API ถูกตัว และเขียนตัวตรวจที่แยกออก</div>
+
+<section id="section-1"><h2>1. ปัญหาที่ไฟล์นี้แก้</h2><pre class="code-vs"><code>/// True only for the JSON `mobile_health` actually returns.
+///
+/// The status code alone proves nothing here: the WMS host is a Blazor app with
+/// `MapFallbackToPage("/_Host")`, so every unmatched path — including one built
+/// from a wrong Base Path — comes back 200 with the web page's HTML. Reading
+/// the body is the only way to tell "the API answered" from "the web app did".</code></pre><p>อธิบายเป็นภาพ</p><pre class="code-vs"><code>ผู้ใช้ตั้ง Base Path ผิดเป็น /wms
+
+ยิง  GET http://host:6191/wms/api/WMS/mobile_health
+
+.NET หาเส้นทางนี้ไม่เจอ
+  → ตกเข้า MapFallbackToPage("/_Host")
+  → ตอบ 200 พร้อม HTML ของหน้าเว็บ Blazor
+
+ถ้าตรวจแค่รหัส  → "เชื่อมต่อสำเร็จ"  ✔ (ผิด)
+ถ้าอ่านตัว body → "ไม่ใช่ WMS API"    ✘ (ถูก)</code></pre><div class="warning"><strong>ทำไมกับดักนี้ถึงหลอกได้ทุกครั้ง</strong><br><code>MapFallbackToPage</code> มีไว้ให้เว็บที่เปลี่ยนหน้าด้วย JavaScript ทำงานได้ — พิมพ์ <code>/orders/123</code> ในเบราว์เซอร์แล้วต้องได้หน้าเว็บ ไม่ใช่ 404<br>ผลข้างเคียงคือ<strong>ทุกเส้นทางที่ไม่รู้จักตอบ 200</strong> รวมเส้นทางที่พิมพ์ผิด<br>ตัวตรวจที่เชื่อรหัสจะบอกว่า “ใช้ได้” ทุกครั้งที่เครื่องเปิดอยู่ ไม่ว่าจะตั้งค่าถูกหรือผิด<br>เกิดกับ .NET ที่เสิร์ฟทั้ง API และเว็บจากโฮสต์เดียวกัน ซึ่งพบบ่อยมากในระบบภายในองค์กร</div></section>
+
+<section id="section-2"><h2>2. <code>_isHealthPayload</code></h2><pre class="code-vs"><code>bool _isHealthPayload(String body) {
+  try {
+    final json = jsonDecode(body);
+    return json is Map &amp;&amp; json['service'] == 'WMS' &amp;&amp; json['ok'] == true;
+  } catch (_) {
+    return false; // HTML, or anything else that is not our health payload
+  }
+}</code></pre><p>สามเงื่อนไขที่ต้องผ่านพร้อมกัน</p><table><thead><tr><th>เงื่อนไข</th><th>ตัดอะไรออก</th></tr></thead><tbody>
+<tr><td><code>json is Map</code></td><td>JSON ที่เป็นอาร์เรย์หรือตัวเลข</td></tr>
+<tr><td><code>json['service'] == 'WMS'</code></td><td>API อื่นที่บังเอิญตอบ JSON</td></tr>
+<tr><td><code>json['ok'] == true</code></td><td>WMS ที่ตอบว่าตัวเองไม่พร้อม</td></tr>
+</tbody></table><p>และ <code>catch</code> จับ HTML ที่ <code>jsonDecode</code> แปลงไม่ได้</p><div class="success"><strong>เงื่อนไขที่สองคือหัวใจ</strong><br>ในเครือข่ายองค์กร ที่อยู่หนึ่งอาจเป็น API ของระบบอื่นที่รันอยู่พอร์ตใกล้กัน<br>การถามว่า “คุณคือ WMS ใช่ไหม” ตรง ๆ แม่นกว่าการเดาจากรูปแบบคำตอบ<br><strong>หลักที่ใช้ได้ทั่วไป: ให้ตัวตรวจถามสิ่งที่มีแต่ระบบที่ถูกตัวเท่านั้นที่ตอบได้</strong></div><p>สังเกตว่าตัวเปรียบเทียบใช้ <code>== true</code> ไม่ใช่ <code>as bool</code></p><pre class="code-vs"><code>json['ok'] == true      // ถ้าเป็น null, "true", 1 → ได้ false ไม่ล้ม
+json['ok'] as bool      // ถ้าเป็น null → TypeError</code></pre><p>ในฟังก์ชันที่ต้องไม่ล้มไม่ว่าจะได้อะไรมา แบบแรกถูก</p></section>
+
+<section id="section-3"><h2>3. ทำไมไม่ใช้ <code>ApiClient</code></h2><pre class="code-vs"><code>/// Goes straight to `http.Client` instead of through `ApiClient` on purpose:
+/// `ApiClient` always resolves `AppConfig.apiBaseUrl`, i.e. the *active*
+/// profile, but "ทดสอบการเชื่อมต่อ" has to try whatever is currently typed in
+/// the form without disturbing the address the rest of the app is using.</code></pre><table><thead><tr><th>สถานการณ์</th><th>ที่อยู่ที่ต้องยิง</th></tr></thead><tbody>
+<tr><td>คำขอปกติ</td><td>โปรไฟล์ที่ใช้อยู่</td></tr>
+<tr><td>ปุ่ม “ทดสอบการเชื่อมต่อ” ในฟอร์ม</td><td><strong>สิ่งที่กำลังพิมพ์อยู่</strong> — ยังไม่ได้บันทึกด้วยซ้ำ</td></tr>
+<tr><td>จุดสถานะบนแถบบน</td><td>โปรไฟล์ที่ใช้อยู่</td></tr>
+</tbody></table><p>ถ้าใช้ <code>ApiClient</code> จะยิงได้แค่แบบแรก — ผู้ใช้จะต้องบันทึกและสลับไปใช้ก่อนถึงจะทดสอบได้ ซึ่งขัดกับจุดประสงค์ของปุ่มทดสอบทั้งหมด</p><p>และเป็นเหตุผลที่ <code>refreshStatus</code> ใน 20.11 ต้องเรียก <code>resolveBaseUrl</code> ด้วยตัวเอง</p><pre class="code-vs"><code>// connection_controller.dart
+final url = resolveBaseUrl(activeBaseUrl);
+final result = await probeConnection(baseUrl: url, client: client);</code></pre><div class="success">ฟังก์ชันนี้รับ <code>baseUrl</code> เป็นพารามิเตอร์ จึงรับใช้ทั้งสองกรณีได้<br>และเพราะทั้งสองทางผ่าน <code>resolveBaseUrl</code> ตัวเดียวกัน จุดสถานะจึงพูดถึงเซิร์ฟเวอร์เดียวกับที่คำขอไป — บั๊กที่คอมเมนต์ใน 20.3 เล่าไว้จึงเกิดซ้ำไม่ได้</div></section>
+
+<section id="section-4"><h2>4. การจัดการ client ที่ยืมมากับที่สร้างเอง</h2><pre class="code-vs"><code>final owned = client == null;
+final httpClient = client ?? http.Client();
+...
+} finally {
+  if (owned) httpClient.close();
+}</code></pre><p>รูปแบบสำคัญที่มีชื่อเรียกว่า <strong>ownership</strong></p><table><thead><tr><th>ใครสร้าง</th><th>ใครต้องปิด</th></tr></thead><tbody>
+<tr><td>ฟังก์ชันนี้ (ผู้เรียกไม่ส่งมา)</td><td><strong>ฟังก์ชันนี้</strong></td></tr>
+<tr><td>ผู้เรียก (เช่นเทสต์)</td><td>ผู้เรียก</td></tr>
+</tbody></table><div class="warning"><strong>ถ้าปิดของที่ยืมมาจะเกิดอะไร</strong><br>เทสต์ที่ส่ง <code>MockClient</code> เข้ามาเพื่อเรียกหลายครั้ง จะใช้ได้แค่ครั้งเดียว ครั้งที่สองจะได้ข้อผิดพลาดว่า client ถูกปิดแล้ว<br>อาการจะดูเหมือนบั๊กของเทสต์ ไม่ใช่ของโค้ดที่ทดสอบ — เสียเวลาหาสาเหตุมาก<br><strong>กฎ:</strong> ปิดเฉพาะสิ่งที่ตัวเองสร้าง — ใช้ได้กับ <code>http.Client</code>, ไฟล์, สตรีม, และ <code>TextEditingController</code></div><p>สังเกตว่ามีการปิดในสองที่ — ใน <code>finally</code> และในกรณี URL ผิดรูปที่ออกก่อนถึง <code>try</code></p><pre class="code-vs"><code>} on FormatException {
+  if (owned) httpClient.close();      // ← ทางออกก่อน try
+  return ConnectionTestResult(...);
+}</code></pre><p>เป็นความซ้ำที่จำเป็น เพราะ <code>finally</code> ตัวหลังยังไม่ครอบทางออกนั้น</p></section>
+
+<section id="section-5"><h2>5. ตรวจ URL ก่อนยิง</h2><pre class="code-vs"><code>Uri uri;
+try {
+  uri = Uri.parse('$baseUrl/api/WMS/mobile_health');
+  if (!uri.hasScheme || uri.host.isEmpty) throw const FormatException();
+} on FormatException {
+  ...
+  message: tr('The address is not a valid URL', 'ที่อยู่เซิร์ฟเวอร์ไม่ถูกต้อง'),
+}</code></pre><p><code>Uri.parse</code> ใจกว้างกว่าที่คิด — สตริงหลายอย่างที่ไม่ใช่ URL ก็แปลงผ่าน</p><table><thead><tr><th>ใส่</th><th><code>Uri.parse</code></th><th>ผ่านการตรวจเพิ่ม</th></tr></thead><tbody>
+<tr><td><code>http://host:6191/...</code></td><td>ผ่าน</td><td>ผ่าน</td></tr>
+<tr><td><code>hello/api/WMS/mobile_health</code></td><td><strong>ผ่าน</strong> (เป็นเส้นทางสัมพัทธ์)</td><td>ไม่ผ่าน — ไม่มี scheme</td></tr>
+<tr><td><code>http:///api/...</code></td><td><strong>ผ่าน</strong></td><td>ไม่ผ่าน — host ว่าง</td></tr>
+</tbody></table><p>สองเงื่อนไขที่เติมเข้าไปจึงจำเป็น — และการโยน <code>FormatException</code> เองแล้วให้ <code>catch</code> เดียวกันจัดการ ทำให้ไม่ต้องเขียนเส้นทางออกสองแบบ</p></section>
+
+<section id="section-6"><h2>6. สี่ <code>catch</code> ที่แยกกันชัด</h2><table><thead><tr><th>ข้อยกเว้น</th><th>ข้อความ</th><th>ผู้ใช้ต้องทำ</th></tr></thead><tbody>
+<tr><td><code>TimeoutException</code></td><td>ไม่ตอบใน 8 วินาที — ตรวจ IP และพอร์ต</td><td>ตรวจตัวเลข</td></tr>
+<tr><td><code>HandshakeException</code></td><td>ใบรับรอง HTTPS ไม่ผ่าน — ลองใช้ HTTP</td><td>สลับช่อง Protocol</td></tr>
+<tr><td><code>SocketException</code></td><td>ติดต่อที่อยู่นี้ไม่ได้ — ตรวจสัญญาณและเครื่อง</td><td>ตรวจ Wi-Fi / เครื่องเปิดไหม</td></tr>
+<tr><td><code>http.ClientException</code></td><td>เชื่อมต่อไม่สำเร็จ + ข้อความจริง</td><td>อ่านรายละเอียด</td></tr>
+</tbody></table><div class="success"><strong>ทุกข้อความบอกการกระทำถัดไป</strong> — หลักเดียวกับข้อความตรวจฟอร์มใน 20.10<br>โดยเฉพาะ <code>HandshakeException</code> ที่บอกตรง ๆ ว่า “ลองใช้ HTTP”<br>คนที่เจอปัญหาใบรับรองในเครือข่ายภายในมักไม่มีสิทธิ์แก้ใบรับรอง — ทางออกจริงคือใช้ HTTP ซึ่งข้อความนี้พูดออกมาแทนที่จะให้ผู้ใช้เดา</div><h3>เทียบกับ <code>ApiClient</code></h3><table><thead><tr><th></th><th><code>ApiClient</code> (20.4)</th><th><code>probeConnection</code></th></tr></thead><tbody>
+<tr><td>จำนวน catch</td><td>2</td><td>4</td></tr>
+<tr><td>timeout</td><td>15 วินาที</td><td><strong>8 วินาที</strong></td></tr>
+<tr><td>ผลลัพธ์</td><td>โยนข้อยกเว้น</td><td><strong>คืนวัตถุผลลัพธ์</strong></td></tr>
+</tbody></table><p>ทั้งสามแถวต่างกันด้วยเหตุผลเดียวกัน: <strong>ที่นี่ความล้มเหลวคือคำตอบ ไม่ใช่ข้อผิดพลาด</strong></p><pre class="code-vs"><code>class ConnectionTestResult {
+  final bool ok;
+  final int elapsedMs;
+  final String message;
+  final int? statusCode;
+}</code></pre><p>ผู้ใช้กดปุ่มทดสอบเพื่อ<strong>อยากรู้ว่าต่อไม่ติดหรือเปล่า</strong> — การต่อไม่ติดคือผลที่ถูกต้องของการทดสอบ ไม่ใช่ความผิดปกติ</p><p>และ 8 วินาทีสั้นกว่าเพราะผู้ใช้กำลังนั่งรอดูอยู่ ต่างจากคำขอปกติที่ทำงานเบื้องหลัง</p></section>
+
+<section id="section-7"><h2>7. สามผลลัพธ์เมื่อยิงถึง</h2><pre class="code-vs"><code>final code = response.statusCode;
+final reachedApi = code &gt;= 200 &amp;&amp; code &lt; 300;
+final isWms = reachedApi &amp;&amp; _isHealthPayload(response.body);</code></pre><table><thead><tr><th><code>reachedApi</code></th><th><code>isWms</code></th><th>ข้อความ</th></tr></thead><tbody>
+<tr><td>จริง</td><td>จริง</td><td>เชื่อมต่อสำเร็จ · 42 ms</td></tr>
+<tr><td>จริง</td><td><strong>เท็จ</strong></td><td><strong>เซิร์ฟเวอร์ตอบกลับ แต่ไม่ใช่ WMS API — ตรวจ Base Path</strong></td></tr>
+<tr><td>เท็จ</td><td>เท็จ</td><td>ตอบกลับ HTTP 404 — ไม่ใช่เซิร์ฟเวอร์ WMS</td></tr>
+</tbody></table><div class="success"><strong>แถวกลางคือทั้งหมดที่ไฟล์นี้มีอยู่เพื่อมัน</strong><br>ไม่ใช่แค่บอกว่าไม่ผ่าน แต่บอกว่า<strong>ให้ไปดูช่องไหน</strong><br>เพราะอาการ “ตอบ 200 แต่ไม่ใช่ API” มีสาเหตุที่พบบ่อยที่สุดเพียงอย่างเดียว คือ Base Path ผิด<br>ข้อความที่ชี้ตรงจุดเปลี่ยนการแก้ปัญหาจากครึ่งชั่วโมงเป็นครึ่งนาที</div><p>และแสดงเวลาที่ใช้ด้วย</p><pre class="code-vs"><code>final watch = Stopwatch()..start();
+...
+'Connected · ${watch.elapsedMilliseconds} ms'</code></pre><p>ตัวเลขนี้ช่วยแยก “ต่อได้แต่ช้ามาก” ออกจาก “ต่อได้ปกติ” — บนวงแลนควรได้ไม่กี่สิบมิลลิวินาที ถ้าได้ 3,000 แปลว่ามีปัญหาเครือข่ายที่จะกวนการทำงานทั้งวัน</p></section>
+
+<section id="section-8"><h2>8. ข้อสังเกตที่ยังไม่ได้ทำ</h2><table><thead><tr><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>ok</code> ของ <code>ConnectionTestResult</code> ไม่ถูกใช้ครบ</td><td><code>refreshStatus</code> ใช้แค่ <code>result.ok</code> ทิ้ง <code>message</code> ที่ละเอียดกว่าไว้ใน <code>_lastResult</code></td></tr>
+<tr><td>ไม่มีเทสต์เฉพาะไฟล์นี้</td><td>ไม่มี <code>connection_probe_test.dart</code> ทั้งที่รับ <code>client</code> ได้แล้ว</td></tr>
+</tbody></table><div class="warning"><strong>เรื่องที่สองน่าเสียดายที่สุดใน Part นี้</strong><br>ไฟล์นี้ออกแบบมาให้ทดสอบได้ครบ — รับ <code>baseUrl</code> รับ <code>client</code> รับ <code>timeout</code> และคืนวัตถุแทนที่จะโยน<br>ทุกเงื่อนไขทดสอบได้ด้วย <code>MockClient</code> ไม่กี่บรรทัด<br>แต่ตรรกะที่สำคัญที่สุด — การแยก “API ตอบ” ออกจาก “หน้าเว็บตอบ” — ยังไม่มีอะไรตรึงไว้<br>ถ้ามีใครแก้ <code>_isHealthPayload</code> ให้เชื่อรหัส 200 เพราะคิดว่าง่ายกว่า จะไม่มีอะไรเตือน และบั๊กจะกลับมาแบบเดิม</div><p>เทสต์ที่ควรมี</p><pre class="code-vs"><code>test('a 200 carrying the Blazor page is not a healthy WMS', () async {
+  final result = await probeConnection(
+    baseUrl: 'http://host:6191',
+    client: MockClient((_) async =&gt; http.Response(
+      '&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;body&gt;WMS&lt;/body&gt;&lt;/html&gt;', 200)),
+  );
+  expect(result.ok, isFalse);
+  expect(result.statusCode, 200);          // ยิงถึงจริง
+  expect(result.message, contains('Base Path'));
+});</code></pre><p>สามบรรทัดของ <code>expect</code> ตรึงข้อเท็จจริงสามอย่าง: ไม่ผ่าน, ยิงถึงแล้ว, และบอกผู้ใช้ให้ไปดูที่ไหน</p></section>
+
+<section id="section-9"><h2>9. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>ตรวจสุขภาพด้วยรหัส 200 อย่างเดียว</td><td>เขียวทั้งที่ตั้งค่าผิด</td><td>อ่านตัว body ด้วย</td></tr>
+<tr><td>ตรวจผ่าน client ที่ผูกกับที่อยู่ปัจจุบัน</td><td>ทดสอบค่าที่กำลังพิมพ์ไม่ได้</td><td>รับ <code>baseUrl</code> เป็นพารามิเตอร์</td></tr>
+<tr><td>ปิด client ที่ยืมมา</td><td>เทสต์ล้มในการเรียกครั้งที่สอง</td><td>ปิดเฉพาะที่สร้างเอง</td></tr>
+<tr><td>เชื่อ <code>Uri.parse</code> ว่าจะโยนเมื่อ URL ผิด</td><td>ยิงไปยัง URL ที่ไม่มีความหมาย</td><td>ตรวจ <code>hasScheme</code> และ <code>host</code></td></tr>
+<tr><td>ใช้ timeout เดียวกับคำขอปกติ</td><td>ผู้ใช้นั่งรอ 15 วินาที</td><td>สั้นกว่าเมื่อคนกำลังรอดู</td></tr>
+<tr><td>โยนข้อยกเว้นจากตัวตรวจ</td><td>ผู้เรียกต้อง try/catch เพื่อรับคำตอบปกติ</td><td>คืนวัตถุผลลัพธ์</td></tr>
+<tr><td><code>as bool</code> กับค่าจาก JSON</td><td>ล้มเมื่อได้ null</td><td><code>== true</code></td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><ol><li>เขียนชุดเทสต์สำหรับ <code>probeConnection</code> ให้ครอบคลุมทั้งเจ็ดเส้นทางที่คืนค่าได้</li><li><code>ApiClient._decode</code> ยังเชื่อรหัส 200 อยู่ (แบบฝึกหัด 20.4) — ควรเอาความรู้จากไฟล์นี้ไปใช้ที่นั่นหรือไม่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เจ็ดเส้นทาง</strong></p><table><thead><tr><th>#</th><th>เงื่อนไข</th><th>วิธีทำให้เกิดในเทสต์</th></tr></thead><tbody>
+<tr><td>1</td><td>URL ผิดรูป</td><td><code>baseUrl: 'not a url'</code></td></tr>
+<tr><td>2</td><td>สุขภาพดี</td><td>ตอบ <code>{"service":"WMS","ok":true}</code> 200</td></tr>
+<tr><td>3</td><td>200 แต่เป็น HTML</td><td>ตอบ HTML 200</td></tr>
+<tr><td>4</td><td>ไม่ใช่ 2xx</td><td>ตอบ 404</td></tr>
+<tr><td>5</td><td>หมดเวลา</td><td>mock ที่ <code>await Future.delayed</code> นานกว่า timeout</td></tr>
+<tr><td>6</td><td>ต่อไม่ติด</td><td>mock ที่ <code>throw SocketException</code></td></tr>
+<tr><td>7</td><td>ใบรับรองไม่ผ่าน</td><td>mock ที่ <code>throw HandshakeException</code></td></tr>
+</tbody></table><pre class="code-vs"><code>ConnectionTestResult probe(http.Response Function() reply) =&gt; ...;
+
+test('a healthy WMS answers ok with a round-trip time', () async {
+  final result = await probeConnection(
+    baseUrl: 'http://host:6191',
+    client: MockClient((_) async =&gt;
+        http.Response('{"service":"WMS","ok":true}', 200)),
+  );
+  expect(result.ok, isTrue);
+  expect(result.elapsedMs, greaterThanOrEqualTo(0));
+});
+
+test('a timeout is reported without throwing', () async {
+  final result = await probeConnection(
+    baseUrl: 'http://host:6191',
+    timeout: const Duration(milliseconds: 50),
+    client: MockClient((_) async {
+      await Future&lt;void&gt;.delayed(const Duration(seconds: 1));
+      return http.Response('{}', 200);
+    }),
+  );
+  expect(result.ok, isFalse);
+  expect(result.statusCode, isNull);     // ไม่มีใครตอบ
+});</code></pre><p>เทสต์ที่ 5 ใช้ <code>timeout</code> ที่ส่งเข้าไปได้ จึงรันจบใน 50 มิลลิวินาที ไม่ใช่ 8 วินาที — เป็นเหตุผลที่พารามิเตอร์นั้นควรเปิดให้ตั้งได้</p><p><strong>ข้อ 2</strong></p><p>คำตอบสั้น: <strong>ควร แต่ไม่ใช่ด้วยการก๊อป <code>_isHealthPayload</code> ไปวาง</strong></p><table><thead><tr><th>ทาง</th><th>ประเมิน</th></tr></thead><tbody>
+<tr><td>ก๊อปเงื่อนไข <code>service == 'WMS'</code> ไปใส่ <code>_decode</code></td><td><strong>ผิด</strong> — endpoint ปกติไม่ได้ตอบฟิลด์ <code>service</code></td></tr>
+<tr><td>ตรวจแค่ว่า “200 แล้วแปลง JSON ไม่ได้ = ไม่ใช่ API”</td><td><strong>ถูก</strong> — เป็นเงื่อนไขที่ใช้ได้กับทุก endpoint</td></tr>
+<tr><td>ไม่ทำอะไร ให้ตัวตรวจสถานะจับพอ</td><td>ไม่พอ — ผู้ใช้อาจไม่เคยกดปุ่มทดสอบ</td></tr>
+</tbody></table><p>สิ่งที่ควรย้ายไปคือ<strong>ความรู้</strong> ไม่ใช่<strong>โค้ด</strong></p><pre class="code-vs"><code>// api_client.dart — เงื่อนไขที่ใช้ได้กับทุกเส้นทาง
+if (json == null &amp;&amp; response.body.isNotEmpty) {
+  throw ApiException(
+    tr('The server replied with an unexpected format. Check the server settings.',
+       'เซิร์ฟเวอร์ตอบมาในรูปแบบที่ไม่ใช่ของ API ตรวจสอบค่าเซิร์ฟเวอร์'),
+    statusCode: response.statusCode,
+  );
+}</code></pre><div class="success"><strong>ความแตกต่างที่สำคัญ</strong><br><code>probeConnection</code> รู้ว่าคาดหวังคำตอบหน้าตาแบบไหนเป๊ะ ๆ เพราะยิง endpoint เดียวที่รู้จัก — ตรวจได้เข้มที่สุด<br><code>ApiClient</code> ยิงได้ทุก endpoint จึงตรวจได้แค่ว่า “เป็น JSON ไหม”<br><strong>ให้แต่ละชั้นตรวจให้เข้มเท่าที่ความรู้ของมันอนุญาต</strong> — ไม่ใช่คัดลอกการตรวจของชั้นที่รู้มากกว่าไปใช้ในชั้นที่รู้น้อยกว่า<br>การก๊อปตรง ๆ จะทำให้ทุกคำขอที่ไม่มีฟิลด์ <code>service</code> ล้มทันที ซึ่งคือทุกคำขอในแอป</div><p>และนี่เป็นตัวอย่างของสิ่งที่ 19.15 เตือนไว้จากอีกมุม — การเห็นโค้ดคล้ายกันสองที่แล้วรีบรวม ไม่ได้ดีกว่าเสมอไป ต้องดูก่อนว่ามันตอบคำถามเดียวกันจริงหรือไม่</p></details></section>
+
+<section id="section-11"><h2>11. สรุป</h2><div class="success"><ul><li>Blazor ที่มี <code>MapFallbackToPage</code> ตอบ 200 ให้ทุกเส้นทางที่ไม่รู้จัก — รหัสสถานะจึงพิสูจน์อะไรไม่ได้</li><li><code>_isHealthPayload</code> ตรวจ <code>service == 'WMS'</code> และ <code>ok == true</code> จากตัว body</li><li>ใช้ <code>== true</code> ไม่ใช่ <code>as bool</code> เพราะฟังก์ชันนี้ต้องไม่ล้ม</li><li>ไม่ผ่าน <code>ApiClient</code> เพราะต้องทดสอบที่อยู่ที่ยังพิมพ์อยู่ในฟอร์ม</li><li><code>owned</code> — ปิดเฉพาะ client ที่สร้างเอง</li><li>ตรวจ <code>hasScheme</code> และ <code>host</code> เพิ่ม เพราะ <code>Uri.parse</code> ใจกว้างเกินไป</li><li>สี่ <code>catch</code> ที่ทุกข้อความบอกการกระทำถัดไป</li><li>คืน <code>ConnectionTestResult</code> ไม่โยน เพราะการต่อไม่ติดคือคำตอบ ไม่ใช่ข้อผิดพลาด</li><li>timeout 8 วินาทีเพราะผู้ใช้นั่งรอดู</li><li>ไม่มีเทสต์สำหรับไฟล์นี้ ทั้งที่ออกแบบมาให้ทดสอบได้ครบ</li></ul></div><p><strong>บทหน้า:</strong> แผ่นตั้งค่า 1,016 บรรทัดที่ประกอบทุกอย่างใน Part นี้เข้าด้วยกัน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

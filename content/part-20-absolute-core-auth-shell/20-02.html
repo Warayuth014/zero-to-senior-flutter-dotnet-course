@@ -1,13 +1,140 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/main.dart</code> — startup ordering เป็นส่วนหนึ่งของ correctness เพราะ request แรกต้องเห็นภาษาและ active server ที่โหลดแล้ว</div>
-<section><h2>1. ทำไม main ต้องเป็น async</h2><p><code>WidgetsFlutterBinding.ensureInitialized()</code> ต้องมาก่อนเรียก plugin เช่น shared preferences และ system UI จากนั้น code รอ <code>AppLanguageController.instance.load()</code> กับ <code>ConnectionController.instance.load()</code> ก่อน <code>runApp</code> ผลคือเฟรมแรกไม่กระพริบจาก English/default server ไปเป็นค่าที่บันทึก และ request แรกไม่วิ่งไป localhost โดยบังเอิญ</p></section>
-<section><h2>2. Startup pipeline</h2><pre class="code-vs"><code>WidgetsFlutterBinding.ensureInitialized()
-await languageController.load()
-await connectionController.load()
-SystemChrome.setSystemUIOverlayStyle(...)
-runApp(WmsApp(auth: AuthRepository(client: ApiClient())))</code></pre><p>สอง load ปัจจุบันรันตามลำดับ ซึ่งอ่านง่ายและ deterministic หากจะใช้ <code>Future.wait</code> ต้องพิสูจน์ก่อนว่าไม่มี dependency ระหว่างกัน และยังต้องกำหนด failure policy ของแต่ละ future ให้ชัด</p></section>
-<section><h2>3. Fail-soft ไม่เท่ากับซ่อนทุก error</h2><p>controller ภายในจับ failure ของ preferences เพื่อให้แอปยังใช้ค่า default ได้ นี่เหมาะกับ PDA ที่ต้องเปิดใช้งานต่อ แต่ควรส่ง diagnostic แบบไม่เปิดเผย secret ไป logger ด้วย มิฉะนั้น storage เสียจะดูเหมือนผู้ใช้ไม่เคยตั้งค่า การ catch ควรอยู่ใกล้ boundary ที่รู้ fallback ไม่ใช่ครอบ <code>main</code> ทั้งก้อนแล้วปล่อย state ครึ่งโหลด</p></section>
-<section><h2>4. Composition ที่รักษา session</h2><p><code>WmsApp</code> รับ <code>AuthRepository</code> ที่ประกอบจาก <code>ApiClient</code> เพียงครั้งเดียว ไม่สร้าง client ใน <code>build</code> เพราะ build เรียกซ้ำได้ เมื่อ login เขียน token ลง client แล้ว shell และ API adapters จึงใช้ transport instance เดิม การย้าย object นี้เข้า local variable ของ build จะทำให้ token หายเมื่อ rebuild</p></section>
-<section><h2>5. ภาษาเป็น reactive root</h2><p><code>MaterialApp</code> อยู่ใน <code>ListenableBuilder</code> ที่ฟัง language controller เมื่อ toggle ภาษา root จะ rebuild พร้อม locale/delegates ส่วน feature widgets เรียก <code>tr(en, th)</code> จึงได้ข้อความใหม่ใน build รอบเดียวกัน อย่าเก็บข้อความแปลแล้วไว้ใน field ที่ไม่ rebuild เพราะจะเกิดภาษาเก่าปะปน</p></section>
-<section><h2>6. Edge-to-edge และ status area</h2><p>system status bar ถูกตั้ง transparent/สี icon ที่เหมาะสม และ <code>MaterialApp.builder</code> ห่อ child ด้วย <code>AnnotatedRegion</code>, แถบสีด้านบน และ <code>SafeArea</code> นี่ทำให้ login กับ shell ใช้นโยบาย platform chrome เดียวกัน ส่วน <code>PdaStatusBar</code> เป็น app bar ภายในแอป ไม่ใช่ system status bar—สองชั้นนี้มีหน้าที่คนละอย่าง</p></section>
-<section><h2>7. สิ่งที่ยังไม่มีใน bootstrap</h2><ul><li>restore token จาก secure storage และตรวจ expiration</li><li>global 401 handler หรือ refresh token</li><li>dependency container สำหรับสลับ fake/real implementations</li><li>startup error screen/telemetry เมื่อ initialization สำคัญล้มเหลว</li></ul><p>การสังเกตว่า “ยังไม่มี” สำคัญพอ ๆ กับอ่านสิ่งที่มี อย่าอนุมานจากชื่อ <code>AuthSession</code> ว่า session ถูก persist แล้ว</p></section>
-<section><h2>8. ทดสอบ startup อย่างไร</h2><div class="success">แยกฟังก์ชัน bootstrap ที่ inject preference adapters ได้ แล้วทดสอบว่า (1) connection load เสร็จก่อนสร้าง request (2) storage ล้มเหลวใช้ default ได้ (3) language ที่บันทึกถูกเลือกตั้งแต่เฟรมแรก และ (4) rebuild ภาษาไม่สร้าง <code>AuthRepository</code>/<code>ApiClient</code> ใหม่</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน lib/main.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.1, 16.2 (main ของ wmsapp), 4.9 (async/await)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบายว่าทำไม <code>main()</code> ต้องรอสองอย่างก่อน <code>runApp</code> และอะไรพังถ้าไม่รอ</div>
+
+<section><h2>1. ไฟล์ทั้งไฟล์</h2><p><code>lib/main.dart</code> ยาว 70 บรรทัด แบ่งเป็นสามส่วน</p><table><thead><tr><th>บรรทัด</th><th>ส่วน</th></tr></thead><tbody>
+<tr><td>1–11</td><td>import</td></tr>
+<tr><td>13–18</td><td>ค่าคงที่ของแถบสถานะระบบ</td></tr>
+<tr><td>20–31</td><td><code>main()</code></td></tr>
+<tr><td>33–70</td><td><code>WmsApp</code></td></tr>
+</tbody></table><p>ไม่มีตรรกะธุรกิจแม้แต่บรรทัดเดียว</p></section>
+
+<section><h2>2. main() ทีละบรรทัด</h2><pre class="code-vs"><code>Future&lt;void&gt; main() async {
+  WidgetsFlutterBinding.ensureInitialized();          // ①
+  await AppLanguageController.instance.load();        // ②
+  // Must finish before the first request: AppConfig.apiBaseUrl falls back to the
+  // built-in address until the operator's active profile is in memory.
+  await ConnectionController.instance.load();         // ③
+
+  // Match the system status bar to the PDA bar so they read as one strip.
+  SystemChrome.setSystemUIOverlayStyle(_systemUiStyle);   // ④
+
+  runApp(WmsApp(auth: AuthRepository(ApiClient())));      // ⑤
+}</code></pre>
+
+<h3>① <code>WidgetsFlutterBinding.ensureInitialized()</code></h3><p>Flutter มีตัวเชื่อมระหว่างโค้ด Dart กับระบบปฏิบัติการ — เรียกว่า <strong>binding</strong></p><p>ปกติ <code>runApp()</code> จะสร้าง binding ให้เอง แต่ถ้าจะใช้ปลั๊กอิน (เช่น <code>shared_preferences</code>) <strong>ก่อน</strong> <code>runApp()</code> ต้องสร้างเองก่อน</p><div class="warning"><strong>ลืมบรรทัดนี้แล้วจะเจอ</strong><pre class="code-vs"><code>Unhandled Exception: Binding has not yet been initialized.</code></pre>เป็นข้อความที่อ่านไม่รู้เรื่องเลยถ้าไม่เคยเจอ — จำไว้ว่า <strong>async ใน <code>main()</code> + ปลั๊กอิน = ต้องมีบรรทัดนี้</strong></div>
+
+<h3>② โหลดภาษา</h3><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  try {
+    final saved = await SharedPreferencesAsync().getString(_preferenceKey);
+    _language = saved == 'th' ? AppLanguage.thai : AppLanguage.english;
+  } on StateError {
+    // Widget tests and unsupported platforms may not register the plugin.
+    _language = AppLanguage.english;
+  }
+}</code></pre><p>อ่านจากที่เก็บของเครื่อง ถ้าอ่านไม่ได้ก็ใช้อังกฤษ</p>
+
+<h3>③ โหลดที่อยู่เซิร์ฟเวอร์</h3><p>คอมเมนต์เหนือบรรทัดนี้บอกเหตุผลไว้ตรง ๆ</p><div class="note">“ต้องเสร็จก่อนคำขอแรก เพราะ <code>AppConfig.apiBaseUrl</code> จะตกกลับไปใช้ที่อยู่ที่ฝังมากับตัวแอป จนกว่าโปรไฟล์ที่เลือกไว้จะอยู่ในหน่วยความจำ”</div>
+
+<h3>④ สีแถบสถานะ</h3><p>ทำให้แถบสถานะของ Android เป็นสีเดียวกับแถบของแอป — จะขยายในบทที่ 5</p>
+
+<h3>⑤ สร้างของทุกอย่างแล้วเริ่ม</h3><pre class="code-vs"><code>runApp(WmsApp(auth: AuthRepository(ApiClient())));</code></pre><p>อ่านจากในออกนอก</p><pre class="code-vs"><code>ApiClient()                        ← ตัวส่ง HTTP
+AuthRepository(ApiClient())        ← ตัวล็อกอิน ใช้ ApiClient
+WmsApp(auth: ...)                  ← แอป ใช้ AuthRepository</code></pre></section>
+
+<section><h2>3. ทำไมต้องรอ ไม่รอได้ไหม</h2><p>สมมติเขียนแบบไม่รอ</p><pre class="code-vs"><code>void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  AppLanguageController.instance.load();      // ไม่มี await
+  ConnectionController.instance.load();       // ไม่มี await
+  runApp(...);
+}</code></pre><p>โค้ดนี้<strong>คอมไพล์ผ่าน</strong> และ<strong>ส่วนใหญ่ทำงานได้</strong> — ซึ่งเป็นเหตุผลที่บั๊กแบบนี้หลุดไปถึงหน้างาน</p><p>ลำดับเหตุการณ์ที่เกิดจริง</p><table><thead><tr><th>เวลา</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>0 ms</td><td><code>load()</code> ทั้งสองตัวเริ่มอ่านดิสก์ แล้ว<strong>คืนค่าทันที</strong></td></tr>
+<tr><td>0 ms</td><td><code>runApp()</code> วาดจอล็อกอิน — ภาษายังเป็นอังกฤษ ที่อยู่ยังเป็นค่าฝังมา</td></tr>
+<tr><td>~15 ms</td><td>อ่านดิสก์เสร็จ ค่าจริงเข้ามา</td></tr>
+</tbody></table><div class="warning"><strong>ช่องว่าง 15 มิลลิวินาทีนั้นคือบั๊ก</strong><ul><li>ถ้าผู้ใช้กดปุ่มล็อกอินได้ทันในช่วงนั้น คำขอจะไป<strong>เซิร์ฟเวอร์ผิดตัว</strong></li><li>ถ้าเคยเลือกภาษาไทยไว้ จอจะแวบเป็นอังกฤษก่อนแล้วค่อยเปลี่ยน</li></ul>บนพีดีเอที่บูตช้ากว่ามือถือ ช่องว่างนี้กว้างกว่านั้น</div><p>เรื่องภาษาแค่ตาลาย แต่<strong>เรื่องที่อยู่เซิร์ฟเวอร์คือส่งข้อมูลผิดคลัง</strong> — นี่คือเหตุผลที่คอมเมนต์อยู่เหนือบรรทัด ③ ไม่ใช่บรรทัด ②</p></section>
+
+<section><h2>4. เทียบกับ wmsapp</h2><pre class="code-vs"><code>// wmsapp/lib/main.dart
+void main() async {
+  runApp(const MyApp());
+}</code></pre><table><thead><tr><th></th><th>wmsapp</th><th>absolute</th></tr></thead><tbody>
+<tr><td>ประกาศ <code>async</code></td><td>ใช่</td><td>ใช่</td></tr>
+<tr><td>มี <code>await</code></td><td><strong>ไม่มี</strong></td><td>สองตัว</td></tr>
+<tr><td>มี <code>ensureInitialized</code></td><td>ไม่มี</td><td>มี</td></tr>
+</tbody></table><div class="note"><code>async</code> ที่ไม่มี <code>await</code> ใน wmsapp เป็นร่องรอยว่า<strong>เคยมีอะไรอยู่ตรงนั้นแล้วถูกลบ</strong> หรือกำลังจะใส่แล้วไม่ได้ใส่<br>ตัววิเคราะห์ไม่เตือนเพราะไม่ผิด — แต่เป็นสัญญาณที่ควรสังเกตตอนอ่านโค้ดคนอื่น</div></section>
+
+<section><h2>5. WmsApp</h2><pre class="code-vs"><code>class WmsApp extends StatelessWidget {
+  const WmsApp({super.key, required this.auth});
+
+  final AuthRepository auth;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: AppLanguageController.instance,
+      builder: (context, _) =&gt; MaterialApp(
+        title: AppConfig.appTitle,
+        debugShowCheckedModeBanner: false,
+        theme: buildAppTheme(),
+        locale: AppLanguageController.instance.locale,
+        supportedLocales: const [Locale('en'), Locale('th')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        builder: (context, child) =&gt; ...,
+        home: LoginScreen(auth: auth),
+      ),
+    );
+  }
+}</code></pre><p>สังเกตสองอย่าง</p>
+
+<h3><code>ListenableBuilder</code> ครอบ <code>MaterialApp</code></h3><p>ปกติจะเห็น <code>ListenableBuilder</code> ครอบส่วนเล็ก ๆ ในจอ — ที่นี่ครอบทั้งแอป</p><pre class="code-vs"><code>ListenableBuilder(
+  listenable: AppLanguageController.instance,
+  builder: (context, _) =&gt; MaterialApp(...),
+)</code></pre><p>แปลว่า<strong>กดสลับภาษาที่ไหนก็ได้ ทั้งแอปวาดใหม่ทันที</strong> โดยไม่ต้องส่งอะไรผ่านทุกจอ</p><div class="note"><strong>ค่าใช้จ่ายของการวาดใหม่ทั้งแอปไม่สูงอย่างที่กลัว</strong> — Flutter เทียบ widget tree ใหม่กับของเดิม แล้ววาดเฉพาะที่ต่าง (4.4)<br>และการสลับภาษาเกิดวันละไม่กี่ครั้ง ไม่ใช่ทุกเฟรม</div>
+
+<h3><code>StatelessWidget</code> แต่เก็บ <code>auth</code></h3><p><code>WmsApp</code> ไม่มี state ของตัวเอง — <code>auth</code> เป็น <code>final</code> ที่รับมาแล้วส่งต่อลงไปให้ <code>LoginScreen</code> เท่านั้น</p><p>นี่คือรูปแบบที่ 9.10 เรียกว่า <strong>constructor injection</strong> — ของถูกสร้างข้างบนแล้วยื่นลงมา ไม่ใช่ให้ข้างล่างไปหยิบเอง</p><pre class="code-vs"><code>// ถ้าทำแบบ wmsapp
+class LoginScreen extends StatefulWidget {
+  final _api = ApiService();     // จอไปหยิบเอง — เทสต์เปลี่ยนไม่ได้
+}
+
+// ที่นี่
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key, required this.auth});
+  final AuthRepository auth;     // รับมา — เทสต์ส่งของปลอมได้
+}</code></pre></section>
+
+<section><h2>6. ส่วน edge-to-edge</h2><pre class="code-vs"><code>// Android edge-to-edge devices draw Flutter behind the native status
+// bar. Keep every route below that inset while painting the exposed
+// area with the same navy as the branded PDA strip.
+builder: (context, child) =&gt; AnnotatedRegion&lt;SystemUiOverlayStyle&gt;(
+  value: _systemUiStyle,
+  child: ColoredBox(
+    color: AppColors.statusBar,
+    child: SafeArea(
+      bottom: false,
+      child: child ?? const SizedBox.shrink(),
+    ),
+  ),
+),</code></pre><p>สามชั้นซ้อนกัน แต่ละชั้นแก้ปัญหาคนละอย่าง</p><table><thead><tr><th>ชั้น</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>AnnotatedRegion</code></td><td>บังคับสี/ความสว่างไอคอนแถบสถานะซ้ำ เผื่อ route ใหม่มาเปลี่ยนทับ</td></tr>
+<tr><td><code>ColoredBox</code></td><td>ทาสีพื้นที่ใต้แถบสถานะให้เป็นน้ำเงินเข้มเดียวกับแถบแอป</td></tr>
+<tr><td><code>SafeArea(bottom: false)</code></td><td>ดันเนื้อหาลงมาใต้แถบสถานะ แต่<strong>ไม่</strong>ดันขึ้นจากขอบล่าง</td></tr>
+</tbody></table><p><code>bottom: false</code> คือรายละเอียดที่คนมักพลาด — บนพีดีเอไม่มีแถบนำทางแบบท่าทางที่ขอบล่าง การเว้นขอบล่างจะกินพื้นที่ที่จอเล็กอยู่แล้วไปเปล่า ๆ</p><h3><code>child ?? const SizedBox.shrink()</code></h3><p><code>child</code> ของ <code>MaterialApp.builder</code> เป็น <code>Widget?</code> — เป็น null ได้ในบางจังหวะ</p><p>ถ้าเขียน <code>child!</code> แล้วมันเป็น null จริง แอปจะล้ม — ที่นี่ใส่กล่องว่างขนาดศูนย์แทน</p><div class="note"><strong>ทำไม <code>const SizedBox.shrink()</code> ไม่ใช่ <code>Container()</code></strong><br><code>SizedBox.shrink()</code> คือกล่องขนาด 0×0 ที่วาดอะไรไม่เลย และเป็น <code>const</code> ได้ — สร้างครั้งเดียวใช้ตลอด<br><code>Container()</code> ที่ไม่มีลูกจะกินพื้นที่เท่าที่พ่อให้ ซึ่งไม่ใช่สิ่งที่ต้องการ</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>ใช้ปลั๊กอินก่อน <code>ensureInitialized</code></td><td>“Binding has not yet been initialized”</td><td>เรียกเป็นบรรทัดแรก</td></tr>
+<tr><td>ลืม <code>await</code> ใน <code>main</code></td><td>ค่าเริ่มต้นแวบขึ้นมาก่อน</td><td>ใส่ <code>await</code></td></tr>
+<tr><td><code>await</code> ทุกอย่างใน <code>main</code></td><td>จอขาวนานตอนเปิดแอป</td><td>รอเฉพาะที่คำขอแรกต้องใช้</td></tr>
+<tr><td>สร้าง <code>ApiClient()</code> ในจอ</td><td>เทสต์ฉีดของปลอมไม่ได้</td><td>สร้างที่ <code>main</code> แล้วส่งลง</td></tr>
+<tr><td><code>child!</code> ใน <code>builder</code></td><td>ล้มเป็นบางครั้ง</td><td><code>child ?? const SizedBox.shrink()</code></td></tr>
+</tbody></table><div class="warning"><strong>แถวที่สามสำคัญไม่แพ้แถวที่สอง</strong><br>ทุก <code>await</code> ใน <code>main()</code> คือเวลาที่ผู้ใช้จ้องจอขาว<br>เกณฑ์ตัดสิน: <strong>ถ้าค่านั้นผิดแล้วคำขอแรกจะไปผิดที่ ให้รอ; ถ้าแค่หน้าตาไม่ตรง ให้โหลดทีหลังแล้วสั่งวาดใหม่</strong><br>โปรเจกต์นี้รอสองอย่าง — ที่อยู่เซิร์ฟเวอร์เข้าเกณฑ์แรกชัดเจน ส่วนภาษาถือว่ารอด้วยเพราะอ่านจากดิสก์เดียวกันและเร็วพอ ๆ กัน</div></section>
+
+<section><h2>8. แบบฝึกหัด</h2><ol><li>สร้างโปรเจกต์เปล่า เขียน <code>main()</code> ที่เรียก <code>SharedPreferencesAsync().getString('x')</code> โดย<strong>ไม่</strong>ใส่ <code>ensureInitialized</code> — อ่านข้อความผิดพลาดจริง</li><li>ในโปรเจกต์นี้ ลบ <code>await</code> หน้า <code>ConnectionController.instance.load()</code> แล้วอธิบายว่าต้องทำอย่างไรถึงจะเห็นบั๊กจริงบนเครื่อง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>Unhandled Exception: Binding has not yet been initialized.
+The "instance" getter on the ServicesBinding binding mixin is only available
+once that binding has been initialized.</code></pre><p>เติม <code>WidgetsFlutterBinding.ensureInitialized();</code> เป็นบรรทัดแรกแล้วหาย</p><p><strong>ข้อ 2 — ทำไมบั๊กนี้จับยาก</strong></p><p>ช่องว่างคือเวลาที่ใช้อ่านดิสก์ ซึ่งบนเครื่องพัฒนาเร็วมาก และคนกดล็อกอินไม่ทันอยู่แล้ว</p><p>วิธีทำให้เห็น</p><pre class="code-vs"><code>Future&lt;void&gt; load() async {
+  await Future&lt;void&gt;.delayed(const Duration(seconds: 3));   // ชั่วคราว
+  ...
+}</code></pre><p>แล้วรีบกดล็อกอินภายในสามวินาที — คำขอจะไปที่อยู่ที่ฝังมากับตัวแอป ไม่ใช่โปรไฟล์ที่เลือกไว้</p><p>ยืนยันได้จากบันทึกของเซิร์ฟเวอร์ หรือดักด้วย <code>http.Client</code> ปลอมที่พิมพ์ URI ออกมา</p><div class="note"><strong>บทเรียนที่กว้างกว่าบั๊กนี้</strong><br>บั๊กที่ขึ้นกับ<strong>จังหวะเวลา</strong> จะไม่โผล่บนเครื่องพัฒนา เพราะเครื่องพัฒนาเร็วและคนทดสอบไม่รีบ<br>มันโผล่บนเครื่องจริงที่ช้ากว่า กับผู้ใช้จริงที่กดเร็วกว่าเพราะทำงานเดิมทุกวัน<br>วิธีตรวจคือ<strong>ถ่วงเวลาให้ช้าลงชั่วคราว</strong> แล้วดูว่ามีหน้าต่างที่กดผิดจังหวะได้หรือไม่ — เทคนิคนี้ใช้ได้กับทุกเรื่องที่มี async</div><p><strong>ข้อสังเกตเพิ่ม</strong> — โปรเจกต์นี้ไม่มีจอ splash คั่น จอแรกที่ผู้ใช้เห็นคือจอล็อกอินเลย</p><p>แปลว่า<strong>ไม่มีที่ให้ซ่อนการโหลด</strong> ถ้ามีอะไรต้องโหลดนานกว่านี้ในอนาคต ต้องเลือกระหว่างจอขาวนานขึ้น หรือเพิ่มจอคั่น — แต่ตอนนี้ยังไม่ต้อง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>main.dart</code> 70 บรรทัด ไม่มีตรรกะธุรกิจเลย</li><li><code>ensureInitialized()</code> จำเป็นเมื่อใช้ปลั๊กอินก่อน <code>runApp()</code></li><li>รอสองอย่าง: ภาษา และที่อยู่เซิร์ฟเวอร์ — ตัวหลังมีคอมเมนต์บอกเหตุผลไว้</li><li>ไม่รอ = มีหน้าต่างที่คำขอแรกไปเซิร์ฟเวอร์ผิดตัว</li><li>เกณฑ์ว่าจะรออะไร: ผิดแล้วคำขอไปผิดที่ = รอ; แค่หน้าตา = โหลดทีหลัง</li><li><code>ListenableBuilder</code> ครอบทั้ง <code>MaterialApp</code> ทำให้สลับภาษาแล้วทั้งแอปเปลี่ยน</li><li><code>runApp(WmsApp(auth: AuthRepository(ApiClient())))</code> คือ composition root ที่เดียวของโปรเจกต์</li><li>สามชั้น <code>AnnotatedRegion</code>/<code>ColoredBox</code>/<code>SafeArea(bottom: false)</code> จัดการ edge-to-edge</li></ul></div><p><strong>บทหน้า:</strong> <code>AppConfig</code> 26 บรรทัดที่ทำให้สลับเซิร์ฟเวอร์ได้ทันทีโดยไม่ต้องล็อกอินใหม่</p></section>

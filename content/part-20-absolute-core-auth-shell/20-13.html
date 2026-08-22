@@ -1,13 +1,241 @@
-<div class="note"><strong>ไฟล์หลัก:</strong> <code>lib/features/settings/connection_settings_sheet.dart</code> และ widget tests — bottom sheet นี้เป็น transactional editor ไม่ใช่ form ที่แก้ global stateทุกครั้งที่พิมพ์</div>
-<section><h2>1. Route-level bottom sheet</h2><p><code>showConnectionSettings(context)</code> เปิด modal bottom sheetเหนือ Scaffold จึงไม่บีบ body/bottom navigation และใช้ scroll/insetsรับ keyboardบนจอ 390×844 ได้ การวาง panelไว้ใน bodyจะเปลี่ยน layoutทั้ง shellและสร้าง overflowตอน keyboardเปิด</p></section>
-<section><h2>2. Draft state แยกจาก controller</h2><p>TextEditingControllers, editing ID, environment/protocol และ validation stateอยู่ใน sheet ระหว่างพิมพ์ <code>ConnectionController.active</code> ยังไม่เปลี่ยน จนกด save/apply จึง commit ช่วยให้ Cancel/Discardทำงานจริงและ requestปัจจุบันไม่สลับ hostทุก keystroke</p></section>
-<section><h2>3. Live preview ไม่ใช่ effective URL เสมอ</h2><p>draftถูกประกอบเป็น URL previewทันทีให้เห็น protocol/host/port/basePath แต่ถ้า build pin <code>WMS_API_BASE_URL</code> ต้องแสดงข้อจำกัดว่า requestจริงใช้ override มิฉะนั้นผู้ใช้จะเชื่อ previewผิด การแยก “draft URL”, “saved active URL” และ “effective URL” เป็นสาม labelช่วยลดความสับสน</p></section>
-<section><h2>4. Test ก่อน Save</h2><pre class="code-vs"><code>validate fields
-→ build draft profile
-→ probeConnection(draft.baseUrl)
-→ render result/latency
-→ ยังไม่เปลี่ยน active profile</code></pre><p>direct probeทำให้ตรวจเครื่องใหม่ได้ปลอดภัย และผลต้องผูกกับ snapshotของ draftตอนกด หากผู้ใช้แก้ fieldหลังผลสำเร็จควรทำให้ผลเก่ากลายเป็น stale/ถูกล้าง</p></section>
-<section><h2>5. Command ต่างความหมาย</h2><ul><li><strong>Save Changes:</strong> แก้ profileเดิมในที่เดิม</li><li><strong>Save as Profile:</strong> เพิ่มรายการใหม่โดยไม่แย่ง active</li><li><strong>Save &amp; Use:</strong> validate/save แล้ว activate</li><li><strong>Duplicate:</strong> ทำ draftใหม่จากค่าปัจจุบันและแก้ชื่อซ้ำ</li><li><strong>Delete:</strong> ห้ามตัวสุดท้าย; activeต้องเลือกตัวรับช่วง</li></ul></section>
-<section><h2>6. Unsaved-change guard</h2><p>sheetเก็บ snapshotหลัง load/reset แล้วเทียบกับค่าปัจจุบัน เมื่อกด close/drag/backพร้อมการแก้ไขจึงถาม Discard หาก untouchedปิดทันที Guardต้องครอบทุก exit path ไม่ใช่เฉพาะปุ่ม X และหลัง saveสำเร็จต้องอัปเดต baseline ไม่ให้ถามทั้งที่ไม่มีงานค้าง</p></section>
-<section><h2>7. Tests ที่ยืนยัน UX contract</h2><p><code>connection_settings_sheet_test.dart</code> ตรวจ active profile/preview, live typing, overlayไม่ดัน bottom nav, invalid inline errors, schemeใน hostถูกปฏิเสธ, edit in place, newไม่ activate, discard guard, delete invariants และ keyboard layout นี่คือตัวอย่าง test behaviorแทน test private method</p></section>
-<section><h2>8. Production hardening</h2><div class="success">เพิ่ม generationกัน stale probe, แสดง persistence failure, invalidate sessionเมื่อ Save &amp; Useข้าม server, block duplicate actionระหว่าง busy, redact credentialใน URLถ้าอนาคตรองรับ และเขียน widget testสำหรับ build-pinned URL, rapid test, storage failureกับ system back gesture</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 65–80 นาที</span><span>ลงมือทำ: อ่าน lib/features/settings/connection_settings_sheet.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 20.10–20.12, 5.9 (<code>showModalBottomSheet</code>), 5.11 (<code>PopScope</code>)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอ 1,016 บรรทัดที่มีเทสต์ 12 ข้อ และเข้าใจว่าทำไม “ยังไม่ได้บันทึก” ถึงเป็นข้อเท็จจริง ไม่ใช่ธง</div>
+
+<section><h2>1. ทำไมเป็นแผ่นเลื่อนขึ้น ไม่ใช่จอ</h2><pre class="code-vs"><code>/// A modal bottom sheet, not a panel inside the page: the shell puts the header
+/// and the bottom navigation outside its body, so anything drawn in the body
+/// would squeeze the dashboard instead of covering it. A route-level sheet
+/// floats above both and its barrier blocks the screen behind, which is what
+/// "work only in settings while it is open" needs.</code></pre><table><thead><tr><th>ทางเลือก</th><th>ปัญหา</th></tr></thead><tbody>
+<tr><td>แผงในตัวเนื้อหา</td><td>แถบบนกับแถบล่างของเปลือกยังอยู่ แผงจะบีบเนื้อหาแทนที่จะคลุม</td></tr>
+<tr><td>จอใหม่ (<code>push</code>)</td><td>ต้องออกแบบแถบบนใหม่ทั้งชุด</td></tr>
+<tr><td><strong>แผ่นระดับ route</strong></td><td>ลอยเหนือทุกอย่าง และฉากหลังกันการกดข้างหลัง</td></tr>
+</tbody></table><pre class="code-vs"><code>showModalBottomSheet&lt;void&gt;(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  isDismissible: true,
+  // Drag-to-close pops the route directly and would slip past the unsaved
+  // changes guard; the ✕ button and the barrier both go through it.
+  enableDrag: false,
+  backgroundColor: Colors.transparent,
+  barrierColor: Colors.black.withValues(alpha: 0.45),
+  builder: (_) =&gt; const ConnectionSettingsSheet(),
+);</code></pre><div class="success"><strong><code>enableDrag: false</code> คือรายละเอียดที่แสดงว่าคนเขียนไล่ทางออกจนครบ</strong><br>การลากปิดเรียก <code>pop</code> โดยตรง ไม่ผ่าน <code>maybePop</code> — จึงข้าม <code>PopScope</code> ที่กันการแก้ไขที่ยังไม่บันทึกไปเลย<br>ปิดการลากแล้วเหลือสามทางออก (ปุ่ม ✕, ปุ่มยกเลิก, กดฉากหลัง) ที่<strong>ผ่านด่านเดียวกันทั้งหมด</strong><br>ทางเลือกอื่นคือปล่อยลากได้แล้วยอมให้มีรูรั่ว หรือเขียนด่านซ้ำสองที่ — ทั้งคู่แย่กว่า</div></section>
+
+<section><h2>2. state สิบสองตัว</h2><pre class="code-vs"><code>final _name = TextEditingController();
+final _host = TextEditingController();
+final _port = TextEditingController();
+final _basePath = TextEditingController();
+
+String? _editingId;                            // null = โปรไฟล์ใหม่
+ConnectionEnvironment _environment = ...;
+ConnectionProtocol _protocol = ...;
+
+ConnectionValidation _validation = const ConnectionValidation();
+bool _showErrors = false;
+bool _testing = false;
+bool _busy = false;
+ConnectionTestResult? _testResult;
+
+String _baseline = '';</code></pre><p>จัดกลุ่มก่อนอ่านเมธอด (16.10)</p><table><thead><tr><th>กลุ่ม</th><th>ฟิลด์</th></tr></thead><tbody>
+<tr><td>ค่าที่ผู้ใช้กรอก</td><td>4 controller + <code>_environment</code> + <code>_protocol</code></td></tr>
+<tr><td>กำลังแก้อันไหน</td><td><code>_editingId</code></td></tr>
+<tr><td>ผลการตรวจ</td><td><code>_validation</code>, <code>_showErrors</code></td></tr>
+<tr><td>กำลังทำอะไรอยู่</td><td><code>_testing</code>, <code>_busy</code></td></tr>
+<tr><td>ผลการทดสอบ</td><td><code>_testResult</code></td></tr>
+<tr><td>เทียบว่าแก้อะไรไปบ้าง</td><td><code>_baseline</code></td></tr>
+</tbody></table><h3><code>_testing</code> กับ <code>_busy</code> แยกกัน</h3><table><thead><tr><th>ธง</th><th>เมื่อไร</th><th>ปุ่มที่ถูกปิด</th></tr></thead><tbody>
+<tr><td><code>_testing</code></td><td>กำลังตรวจการเชื่อมต่อ</td><td>ปุ่มทดสอบเปลี่ยนข้อความ</td></tr>
+<tr><td><code>_busy</code></td><td>กำลังบันทึก/สลับ</td><td><strong>ทุกปุ่ม</strong></td></tr>
+</tbody></table><p>ต่างกันจริง — ระหว่างทดสอบยังกดบันทึกได้ แต่ระหว่างบันทึกกดอะไรไม่ได้เลย</p></section>
+
+<section><h2>3. <code>_fingerprint</code> — “ยังไม่ได้บันทึก” ที่เป็นข้อเท็จจริง</h2><pre class="code-vs"><code>/// Snapshot of the form as it was loaded, so "unsaved changes" is a fact
+/// rather than a flag someone has to remember to set.
+String _baseline = '';
+
+String get _fingerprint =&gt;
+    '${_name.text}|${_host.text}|${_port.text}|${_basePath.text}'
+    '|${_environment.name}|${_protocol.name}';
+
+bool get _isDirty =&gt; _fingerprint != _baseline;</code></pre><table><thead><tr><th>วิธีที่พบบ่อย</th><th>วิธีที่นี่</th></tr></thead><tbody>
+<tr><td><code>bool _isDirty = false;</code> แล้วตั้งเป็น true ทุกที่ที่แก้ค่า</td><td>คำนวณจากค่าจริงทุกครั้งที่อ่าน</td></tr>
+<tr><td>เพิ่มช่องใหม่แล้วลืมตั้งธง → ปิดแล้วงานหาย</td><td>เพิ่มช่องใหม่ต้องเติมใน <code>_fingerprint</code> ซึ่งอยู่ที่เดียว</td></tr>
+<tr><td>ผู้ใช้แก้แล้วแก้กลับเป็นค่าเดิม → ยังถือว่าแก้</td><td>ตรงกันแล้วถือว่าไม่ได้แก้ ถูกต้องกว่า</td></tr>
+</tbody></table><div class="success"><strong>นี่คือรูปแบบเดียวกับที่ 18.5 เสนอไว้และ wmsapp ไม่ได้ทำ</strong><br>สถานะที่<strong>คำนวณได้จากข้อมูลจริง</strong> ไม่ควรเก็บเป็นตัวแปรแยก เพราะตัวแปรแยกจะไม่ตรงกับความจริงในวันที่มีใครลืมอัปเดต<br>คอมเมนต์บรรทัดเดียวสรุปหลักการนี้ได้: <em>“a fact rather than a flag someone has to remember to set”</em></div><p>และ <code>_afterLoad()</code> รีเซ็ตทุกอย่างที่ผูกกับค่าชุดเดิม</p><pre class="code-vs"><code>void _afterLoad() {
+  _baseline = _fingerprint;      // ค่าที่โหลดมาคือค่าอ้างอิงใหม่
+  _showErrors = false;
+  _testResult = null;
+  _validation = const ConnectionValidation();
+}</code></pre></section>
+
+<section><h2>4. ผลการทดสอบที่หายไปเมื่อค่าเปลี่ยน</h2><pre class="code-vs"><code>void _onFormChanged() {
+  setState(() {
+    // A result belongs to the values it was measured with.
+    _testResult = null;
+    if (_showErrors) _validation = _validate();
+  });
+}</code></pre><div class="success"><strong>คอมเมนต์บรรทัดเดียวที่อธิบายกฎที่ลึกกว่าที่เห็น</strong><br>ถ้าไม่ล้าง: ผู้ใช้กดทดสอบได้เขียว → แก้พอร์ตเป็นเลขผิด → จอยังโชว์ “เชื่อมต่อสำเร็จ” จากค่าชุดก่อน → กดบันทึกและใช้งานด้วยความมั่นใจ<br>เป็นอาการเดียวกับที่ <code>activate</code> ใน 20.11 รีเซ็ต <code>_status</code> — และเป็นอาการเดียวกับบั๊กที่ <code>resolveBaseUrl</code> เล่าไว้ใน 20.3<br><strong>สามที่ในโปรเจกต์เดียวที่แก้ปัญหาเดียวกัน: ผลลัพธ์เก่าต้องไม่พูดแทนค่าใหม่</strong></div><h3><code>_showErrors</code> — ตรวจแต่ยังไม่แสดง</h3><pre class="code-vs"><code>if (_showErrors) _validation = _validate();</code></pre><p>ข้อความผิดพลาดจะไม่โผล่จนกว่าผู้ใช้จะกดปุ่มครั้งแรก</p><table><thead><tr><th>ถ้าแสดงตั้งแต่แรก</th><th>ที่ทำจริง</th></tr></thead><tbody>
+<tr><td>เปิดฟอร์มเปล่ามาเจอสีแดงสี่ช่อง</td><td>สะอาดจนกว่าจะลองส่ง</td></tr>
+<tr><td>พิมพ์ตัวแรกแล้วยังแดงอยู่ (ยังไม่ครบ)</td><td>—</td></tr>
+</tbody></table><p>แต่<strong>หลังจากกดครั้งแรกแล้ว</strong> ข้อความจะอัปเดตสด ๆ ตามที่พิมพ์ — ซึ่งเป็นสิ่งที่ต้องการ เพราะผู้ใช้กำลังแก้อยู่</p></section>
+
+<section><h2>5. สามปุ่มบันทึกที่ทำไม่เหมือนกัน</h2><table><thead><tr><th>เมธอด</th><th>บันทึก</th><th>ตรวจการเชื่อมต่อ</th><th>สลับไปใช้</th><th>ปิดแผ่น</th></tr></thead><tbody>
+<tr><td><code>_saveAsNew</code></td><td>เพิ่มใหม่</td><td>ไม่</td><td>ไม่</td><td>ไม่</td></tr>
+<tr><td><code>_saveChanges</code></td><td>ทับตัวเดิม</td><td>ไม่</td><td>ถามถ้าเป็นตัวที่ใช้อยู่</td><td>ไม่</td></tr>
+<tr><td><code>_saveAndApply</code></td><td>บันทึก</td><td><strong>ใช่</strong></td><td><strong>ใช่</strong></td><td>ถ้าสำเร็จ</td></tr>
+</tbody></table>
+
+<h3><code>_saveAndApply</code> — ตรวจก่อนสลับ</h3><pre class="code-vs"><code>// Checked before switching: if it cannot be reached, the operator decides
+// whether to move the whole app onto it — the app is never silently left
+// pointing at a dead server.
+final result = await probeConnection(baseUrl: saved.baseUrl);</code></pre><p>เมื่อต่อไม่ได้ ผู้ใช้ได้สามทางเลือก</p><pre class="code-vs"><code>AlertDialog(
+  title: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้',
+  content: '${saved.baseUrl}\n\n${result.message}',
+  actions: [
+    'กลับไปแก้ค่า'              → edit  : แผ่นยังเปิด ค่ายังอยู่
+    'บันทึกไว้ก่อน ยังไม่ใช้'    → keep  : ปิดแผ่น ไม่สลับ
+    'ใช้งานทั้งที่ต่อไม่ได้'      → force : สลับแล้วปิด
+  ],
+)</code></pre><div class="success"><strong>ทางเลือกที่สามคือสิ่งที่ทำให้ฟีเจอร์นี้ใช้ได้จริงในคลัง</strong><br>ช่างที่กำลังตั้งเครื่องใหม่ อาจตั้งค่าให้พีดีเอ<strong>ก่อน</strong>ที่เซิร์ฟเวอร์จะถูกเปิด<br>ระบบที่ปฏิเสธการบันทึกที่อยู่ที่ยังต่อไม่ได้ จะบังคับให้เขากลับมาทำใหม่ทีหลัง<br>สิ่งที่ต้องมีคือ<strong>ให้ผู้ใช้รู้ว่ากำลังทำอะไร</strong> ไม่ใช่<strong>ห้ามไม่ให้ทำ</strong><br>และเนื้อหาในกล่องแสดง <code>baseUrl</code> เต็ม ๆ พร้อมข้อความจาก 20.12 — ผู้ใช้มีข้อมูลครบก่อนตัดสินใจ</div><p>สังเกตคอมเมนต์ตอนสลับสำเร็จ</p><pre class="code-vs"><code>await _controller.activate(saved.id);
+// Nothing is rebuilt here: ApiClient re-reads the base URL per request,
+// so the bearer token obtained at login stays attached.
+unawaited(_controller.refreshStatus());</code></pre><p>เป็นผลตรงของการเลือกใน 20.3 — เปลี่ยนเซิร์ฟเวอร์กลางกะโดยไม่ต้องล็อกอินใหม่</p><p>และ <code>unawaited(...)</code> แปลว่า “ตั้งใจไม่รอ” — จอปิดไปเลย ปล่อยให้การตรวจสถานะทำงานเบื้องหลัง ตัววิเคราะห์จึงไม่เตือนเรื่อง future ที่ไม่ได้ await</p></section>
+
+<section><h2>6. ชื่อซ้ำ — ปัญหาที่คนมักไม่คิดถึง</h2><pre class="code-vs"><code>/// A name already in use is ambiguous, so the operator picks what they meant.
+/// Returns null when they back out.
+Future&lt;ConnectionProfile?&gt; _resolveDuplicateName(
+  ConnectionProfile draft, {
+  required bool allowOverwrite,
+}) async { ... }</code></pre><table><thead><tr><th>ผู้เรียก</th><th><code>allowOverwrite</code></th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>_saveAsNew</code></td><td><code>true</code></td><td>ผู้ใช้อาจตั้งใจทับของเดิม</td></tr>
+<tr><td><code>_saveChanges</code></td><td><code>false</code></td><td>กำลังแก้ตัวหนึ่งอยู่ ไม่ควรกลืนอีกตัว</td></tr>
+<tr><td><code>_saveAndApply</code></td><td><code>true</code></td><td>เหมือน <code>_saveAsNew</code></td></tr>
+</tbody></table><p>และมี <code>_uniqueName</code> ที่เสนอชื่อใหม่ให้</p><pre class="code-vs"><code>String _uniqueName(String base) {
+  final taken = _controller.profiles.map((p) =&gt; p.name.trim().toLowerCase()).toSet();
+  for (var i = 2; i &lt; 100; i++) {
+    final candidate = '$base ($i)';
+    if (!taken.contains(candidate.toLowerCase())) return candidate;
+  }
+  return '$base ${DateTime.now().millisecondsSinceEpoch}';
+}</code></pre><p>“Office” → “Office (2)” → “Office (3)” และมีทางถอยเมื่อวนครบ 100 รอบ</p><div class="note"><strong>การเทียบชื่อใช้ <code>trim().toLowerCase()</code> ทุกที่</strong> — “Office” กับ “office ” ถือว่าชื่อเดียวกัน<br>ถูกต้อง เพราะสองชื่อนี้แยกไม่ออกด้วยตาบนจอเล็ก การยอมให้มีทั้งคู่คือการสร้างความสับสน<br>แต่<strong>เก็บตามที่พิมพ์</strong> — ผู้ใช้ตั้ง “Office” ก็เห็น “Office” ไม่ใช่ “office”<br>หลักเดียวกับ <code>basePath</code> ใน 20.10: เปรียบเทียบแบบผ่อนปรน เก็บแบบตรงไปตรงมา</div></section>
+
+<section><h2>7. ลบโปรไฟล์ — สามด่าน</h2><pre class="code-vs"><code>Future&lt;void&gt; _deleteProfile() async {
+  ...
+  if (_controller.profiles.length &lt;= 1) {         // ① ตัวสุดท้าย
+    await _ask(title: 'ลบไม่ได้', ..., confirm: null);
+    return;
+  }
+
+  final confirmed = await _ask(                    // ② ยืนยัน
+    title: 'ลบ Profile',
+    body: 'ต้องการลบ "${profile.name}" ใช่หรือไม่',
+    confirm: 'ลบ', danger: true,
+  );
+  if (confirmed != true || !mounted) return;
+
+  // Removing the profile in use means something else has to take over, and
+  // that choice belongs to the operator rather than to whatever sorts first.
+  String? next;
+  if (_controller.isActive(profile)) {             // ③ เลือกตัวแทน
+    next = await _pickReplacement(profile.id);
+    if (next == null || !mounted) return;
+  }
+
+  await _controller.remove(profile.id, nextActiveId: next);
+  ...
+}</code></pre><p>ด่านที่ ① ซ้ำกับกฎใน <code>ConnectionController.remove</code> ที่คืน <code>false</code></p><table><thead><tr><th>ชั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>controller</td><td>ปฏิเสธ — รักษาข้อตกลงของข้อมูล</td></tr>
+<tr><td>จอ</td><td>อธิบายว่าทำไม — สื่อสารกับผู้ใช้</td></tr>
+</tbody></table><div class="success"><strong>ความซ้ำนี้ต่างจากความซ้ำที่ 19.15 ตำหนิ</strong><br>19.15 พูดถึงกฎธุรกิจเดียวกันที่<strong>เขียนคนละแบบสองที่</strong> แล้ววันหนึ่งจะไม่ตรงกัน<br>ที่นี่คือ<strong>กฎเดียวกัน แต่คนละความรับผิดชอบ</strong> — ชั้นข้อมูลรับประกันว่าไม่พัง ชั้นจอทำให้ผู้ใช้เข้าใจ<br>ถ้าเอาด่านในจอออก ผู้ใช้กดลบแล้วไม่มีอะไรเกิดขึ้น ซึ่งแย่กว่า<br>ถ้าเอาด่านใน controller ออก โค้ดอื่นที่เรียกจากที่อื่นจะทำข้อมูลพังได้<br><strong>เกณฑ์แยก:</strong> ถามว่าถ้าลบอันหนึ่งออก อีกอันยังทำงานถูกต้องไหม — ถ้าใช่ทั้งคู่ นั่นคือความซ้ำที่ควรรวม</div><p>และ <code>_pickReplacement</code> แสดงรายการให้เลือกพร้อม <code>host:port</code> ใต้ชื่อ — ผู้ใช้เห็นว่าแต่ละตัวชี้ไปไหนก่อนเลือก</p></section>
+
+<section><h2>8. <code>PopScope</code> — ด่านเดียวสำหรับสามทางออก</h2><pre class="code-vs"><code>PopScope(
+  // Covers the ✕ button, the system back gesture and a tap on the barrier —
+  // all three route through maybePop, so unsaved edits are guarded once.
+  canPop: !_isDirty,
+  onPopInvokedWithResult: (didPop, _) async {
+    if (didPop) return;
+    final discard = await _confirmDiscard();
+    if (!discard || !context.mounted) return;
+    Navigator.of(context).pop();
+  },
+  child: ...
+)</code></pre><table><thead><tr><th><code>_isDirty</code></th><th><code>canPop</code></th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>false</td><td>true</td><td>ปิดทันที ไม่ถามอะไร</td></tr>
+<tr><td>true</td><td>false</td><td>ไม่ปิด แล้วเรียก callback มาถาม</td></tr>
+</tbody></table><p><code>if (didPop) return;</code> ป้องกันการทำงานซ้ำเมื่อ route ถูกปิดไปแล้วจริง ๆ</p><p>และ <code>context.mounted</code> (ไม่ใช่แค่ <code>mounted</code>) เพราะกำลังใช้ <code>context</code> หลัง <code>await</code></p><p>เทสต์คุมทั้งสองทาง</p><pre class="code-vs"><code>'closing with unsaved edits asks before discarding them'
+'closing an untouched form does not ask anything'</code></pre><div class="note">ข้อที่สองสำคัญไม่แพ้ข้อแรก — ถามทุกครั้งแม้ไม่ได้แก้อะไร คือการรบกวนที่ทำให้ผู้ใช้เรียนรู้ที่จะกด “ทิ้ง” โดยไม่อ่าน<br>แล้ววันที่แก้จริงก็จะกดทิ้งโดยไม่อ่านเหมือนกัน</div></section>
+
+<section><h2>9. รายละเอียดของเลย์เอาต์</h2><pre class="code-vs"><code>Padding(
+  // Lifts the whole sheet above the keyboard so the action bar stays put.
+  padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+  child: ConstrainedBox(
+    // 92% of what is left after the keyboard, so the sheet keeps a strip
+    // of barrier visible above it instead of reading as a full screen.
+    constraints: BoxConstraints(
+      maxHeight: (media.size.height - media.viewInsets.bottom) * 0.92,
+    ),
+    child: ... Column(children: [
+      _title(),
+      // Only the fields scroll; the buttons below never move.
+      Flexible(child: ListView(...)),
+      _actions(),
+    ]),
+  ),
+)</code></pre><table><thead><tr><th>เทคนิค</th><th>แก้ปัญหาอะไร</th></tr></thead><tbody>
+<tr><td><code>viewInsets.bottom</code> เป็น padding</td><td>แป้นพิมพ์ขึ้นมาแล้วปุ่มไม่ถูกบัง</td></tr>
+<tr><td>สูงสุด 92%</td><td>เห็นฉากหลังเป็นแถบบาง ๆ ผู้ใช้รู้ว่านี่คือแผ่นที่ปิดได้</td></tr>
+<tr><td><code>Flexible</code> รอบ <code>ListView</code></td><td>เฉพาะช่องกรอกเลื่อน หัวเรื่องกับปุ่มอยู่กับที่</td></tr>
+</tbody></table><p>โครงสร้างสามส่วนนี้ (หัวคงที่ / กลางเลื่อน / ท้ายคงที่) เป็นรูปแบบที่ควรจำ — ปุ่มยืนยันที่เลื่อนหายไปกับเนื้อหาคือปัญหา UX ที่พบบ่อยที่สุดในแผ่นแบบนี้</p><p>และมีเทสต์คุมไว้: <code>'fits a 390x844 PDA screen with the keyboard open'</code></p><h3>ปุ่มที่เปลี่ยนตามสถานะ</h3><pre class="code-vs"><code>/// Which buttons appear follows the state: a draft can only be added, an
+/// existing profile can only be updated.
+_isNew
+    ? tr('Save as Profile', 'บันทึกเป็น Profile')
+    : tr('Save Changes', 'บันทึกการเปลี่ยนแปลง')</code></pre><p>ปุ่มเดียวที่เปลี่ยนความหมาย ดีกว่าสองปุ่มที่ต้องเดาว่าอันไหนใช่</p><h3>รูปแบบ <code>onTap: _busy ? () {} : () =&gt; ...</code></h3><pre class="code-vs"><code>onTap: _busy ? () {} : () =&gt; unawaited(_saveAndApply()),</code></pre><div class="warning"><strong>ส่งฟังก์ชันว่างแทน <code>null</code></strong><br>แปลว่า <code>PdaButton</code> รับ <code>VoidCallback</code> ที่ไม่ยอมรับ null — ปุ่มจึงไม่รู้ว่าตัวเองถูกปิดอยู่ และ<strong>ไม่แสดงสีเทา</strong><br>ผลคือระหว่างกำลังบันทึก ปุ่มยังดูกดได้ แต่กดแล้วไม่มีอะไรเกิดขึ้น<br>ข้อความบนปุ่มเปลี่ยนเป็น “กำลังทำงาน...” จึงพอสื่อสารได้บ้าง แต่ปุ่มอื่นในแถวเดียวกันไม่ได้เปลี่ยนอะไรเลย<br>แก้ที่ถูกคือให้ <code>PdaButton.onTap</code> เป็น <code>VoidCallback?</code> แล้วส่ง null — ซึ่งจะได้สถานะปิดที่เห็นได้ฟรีจากธีม (20.9 ตั้ง <code>disabledBackgroundColor</code> ไว้แล้ว)<br>เป็นตัวอย่างของ<strong>ข้อจำกัดในชั้น widget ที่ทำให้จอเขียนสิ่งที่ถูกไม่ได้</strong> — ตรงกับสิ่งที่ 18.16 สรุปไว้</div></section>
+
+<section><h2>10. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>ผิด</th><th>อาการ</th><th>ถูก</th></tr></thead><tbody>
+<tr><td>เก็บ <code>_isDirty</code> เป็นธง</td><td>เพิ่มช่องแล้วลืมตั้ง งานหาย</td><td>คำนวณจากลายนิ้วมือของฟอร์ม</td></tr>
+<tr><td>ปล่อยลากปิดได้</td><td>ข้ามด่านการยืนยัน</td><td><code>enableDrag: false</code></td></tr>
+<tr><td>ไม่ล้างผลทดสอบเมื่อค่าเปลี่ยน</td><td>เขียวของค่าชุดก่อน</td><td>ล้างใน listener</td></tr>
+<tr><td>แสดงข้อความผิดพลาดตั้งแต่เปิด</td><td>ฟอร์มเปล่าเต็มไปด้วยสีแดง</td><td><code>_showErrors</code> หลังกดครั้งแรก</td></tr>
+<tr><td>สลับไปเซิร์ฟเวอร์ที่ต่อไม่ได้เงียบ ๆ</td><td>แอปตายทั้งเครื่อง</td><td>ตรวจก่อน แล้วให้ผู้ใช้เลือก</td></tr>
+<tr><td>ห้ามบันทึกที่อยู่ที่ยังต่อไม่ได้</td><td>ตั้งค่าล่วงหน้าไม่ได้</td><td>เตือนแล้วให้ตัดสินใจ</td></tr>
+<tr><td>เลือกตัวแทนให้เองเมื่อลบตัวที่ใช้</td><td>ไปโผล่เซิร์ฟเวอร์ที่ไม่ได้ตั้งใจ</td><td>ให้ผู้ใช้เลือก</td></tr>
+<tr><td>ปุ่มยืนยันอยู่ในส่วนที่เลื่อน</td><td>แป้นพิมพ์ขึ้นแล้วหาปุ่มไม่เจอ</td><td>หัว/กลางเลื่อน/ท้ายคงที่</td></tr>
+</tbody></table></section>
+
+<section><h2>11. แบบฝึกหัด</h2><ol><li>ผู้ใช้เปิดแผ่น แก้พอร์ต กดทดสอบได้เขียว แล้วแก้ host ต่อ แล้วกดปิด — ไล่ลำดับ state ทั้งหมด</li><li><code>_saveChanges</code> ถาม “ใช้ค่าใหม่ทันทีไหม” แต่ <code>_saveAsNew</code> ไม่ถาม — ถูกต้องหรือไม่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>เปิดแผ่น
+  initState → _loadProfile(active) → _afterLoad()
+  _baseline = 'Office|192.168.1.50|6191||development|http'
+  _isDirty = false
+
+แก้พอร์ตเป็น 6192
+  _onFormChanged → _testResult = null
+  (_showErrors ยังเป็น false จึงไม่ตรวจ)
+  _isDirty = true      ← ลายนิ้วมือต่างจาก baseline
+
+กดทดสอบ
+  _draft() → _showErrors = true, ผ่านการตรวจ
+  _testing = true → probeConnection → _testResult = ok
+  _testing = false
+
+แก้ host เป็น 192.168.1.51
+  _onFormChanged → _testResult = null      ← ผลเขียวหายทันที
+  _showErrors เป็น true แล้ว → _validation = _validate()
+
+กดปิด (✕)
+  maybePop → PopScope: canPop = !_isDirty = false
+  → onPopInvokedWithResult(didPop: false)
+  → _confirmDiscard() → กล่อง 'ทิ้งการแก้ไข?'</code></pre><p>จุดสำคัญคือบรรทัดที่ทำเครื่องหมายไว้ — ถ้าไม่มีการล้าง <code>_testResult</code> ผู้ใช้จะเห็นการ์ดเขียวของ <code>192.168.1.50</code> อยู่ใต้ฟอร์มที่ตอนนี้เขียนว่า <code>.51</code></p><p><strong>ข้อ 2</strong></p><p>ถูกต้อง และเหตุผลมาจากความหมายของสองการกระทำ</p><table><thead><tr><th></th><th><code>_saveChanges</code></th><th><code>_saveAsNew</code></th></tr></thead><tbody>
+<tr><td>แก้อะไร</td><td>โปรไฟล์ที่มีอยู่</td><td>สร้างอันใหม่</td></tr>
+<tr><td>อาจกระทบตัวที่ใช้อยู่ไหม</td><td><strong>ได้ ถ้าแก้ตัวที่กำลังใช้</strong></td><td>ไม่ — ของใหม่ไม่มีใครใช้</td></tr>
+<tr><td>ต้องถามไหม</td><td>ต้อง</td><td>ไม่ต้อง</td></tr>
+</tbody></table><p>กรณีที่ <code>_saveChanges</code> ต้องถามคือ: ผู้ใช้กำลังใช้ “Office” แล้วแก้ IP ของ “Office” — ค่าใหม่จะมีผลกับคำขอถัดไปทันทีอยู่แล้ว (เพราะ <code>apiBaseUrl</code> เป็น getter ที่อ่านสด, 20.3)</p><pre class="code-vs"><code>if (_controller.isActive(saved)) {
+  final useNow = await _ask(title: 'ใช้ค่าใหม่ทันทีไหม?', ...);
+  if (useNow == true &amp;&amp; mounted) {
+    await _controller.refreshStatus();
+  }
+}</code></pre><div class="warning"><strong>แต่ตรงนี้มีสิ่งที่คำถามกับผลลัพธ์ไม่ตรงกัน</strong><br>คำถามคือ “ให้ใช้ค่าที่แก้ทันทีเลยไหม”<br>สิ่งที่เกิดเมื่อตอบ “ใช้ทันที” คือ <code>refreshStatus()</code> — แค่<strong>ตรวจสถานะใหม่</strong><br>สิ่งที่เกิดเมื่อตอบ “ยกเลิก” คือ<strong>ไม่ทำอะไร</strong> — แต่คำขอถัดไปก็ยังใช้ค่าใหม่อยู่ดี<br>เพราะค่าถูกบันทึกลงโปรไฟล์ที่กำลังใช้ไปแล้วก่อนถึงคำถามนี้</div><p>แปลว่าคำถามนี้<strong>ให้ทางเลือกที่ไม่มีอยู่จริง</strong> — ตอบอะไรก็ใช้ค่าใหม่เหมือนกัน ต่างแค่จุดสถานะจะถูกอัปเดตหรือไม่</p><p>ทางแก้มีสองแนว</p><table><thead><tr><th>แนว</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>แก้คำถามให้ตรงกับสิ่งที่ทำ</td><td>เปลี่ยนเป็น “ตรวจการเชื่อมต่อกับค่าใหม่เลยไหม” — เล็กและตรง</td></tr>
+<tr><td>แก้พฤติกรรมให้ตรงกับคำถาม</td><td>ต้องมีทางไม่ให้ค่าใหม่มีผล ซึ่งขัดกับการที่เพิ่งบันทึกทับไปแล้ว</td></tr>
+</tbody></table><p>แนวแรกถูก และควรทำ — <strong>คำถามที่ให้ทางเลือกลวงแย่กว่าไม่ถามเลย</strong> เพราะผู้ใช้จะเชื่อว่าตัวเองควบคุมบางอย่างอยู่</p><div class="note"><strong>ข้อสังเกตของบทนี้ทั้งบท</strong><br>จอ 1,016 บรรทัดนี้คิดครบเกือบทุกทางออก — สามทางเลือกเมื่อต่อไม่ติด, ชื่อซ้ำ, ตัวแทนเมื่อลบ, ด่านเดียวสำหรับสามทางปิด<br>สิ่งที่ยังไม่ตรงมีสองจุดเล็ก ๆ: ปุ่มที่ปิดแล้วไม่เป็นสีเทา และคำถามที่ให้ทางเลือกลวง<br>ทั้งสองไม่ใช่เรื่องของตรรกะ แต่เป็นเรื่องของ<strong>สิ่งที่ผู้ใช้เชื่อว่ากำลังเกิดขึ้น</strong> — ซึ่งเป็นชั้นที่ตรวจด้วยการอ่านโค้ดอย่างเดียวไม่พอ ต้องลองใช้จริง</div></details></section>
+
+<section><h2>12. สรุป</h2><div class="success"><ul><li>แผ่นระดับ route เพราะต้องคลุมทั้งแถบบนและแถบล่างของเปลือก</li><li><code>enableDrag: false</code> ทำให้ทุกทางออกผ่านด่านเดียวกัน</li><li><code>_isDirty</code> คำนวณจากลายนิ้วมือของฟอร์ม ไม่ใช่ธงที่ต้องจำตั้ง</li><li>ผลการทดสอบถูกล้างทันทีที่ค่าเปลี่ยน — ผลเก่าต้องไม่พูดแทนค่าใหม่</li><li>ข้อความผิดพลาดโผล่หลังกดครั้งแรก แล้วอัปเดตสดหลังจากนั้น</li><li>สามปุ่มบันทึกทำคนละอย่าง และมีปุ่มเดียวที่สลับเซิร์ฟเวอร์</li><li>ต่อไม่ได้แล้วยังใช้ได้ ถ้าผู้ใช้เลือกเอง — เตือน ไม่ใช่ห้าม</li><li>ชื่อซ้ำเทียบแบบผ่อนปรน แต่เก็บตามที่พิมพ์</li><li>ด่านการลบซ้ำกับ controller โดยตั้งใจ เพราะคนละความรับผิดชอบ</li><li>โครงหัวคงที่/กลางเลื่อน/ท้ายคงที่ ทำให้ปุ่มไม่หายไปกับแป้นพิมพ์</li><li>ปุ่มที่ปิดยังไม่เป็นสีเทา เพราะ <code>PdaButton</code> ไม่รับ null</li></ul></div><p><strong>บทหน้า:</strong> <code>WarehouseShell</code> — เปลือกที่สร้าง store และตัดสินใจว่าจะถามเซิร์ฟเวอร์เมื่อไร</p></section>
