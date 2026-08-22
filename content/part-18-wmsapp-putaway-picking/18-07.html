@@ -1,14 +1,302 @@
-<div class="note"><strong>Putaway API มี read models แบบ dynamic มากเกินไป:</strong> pallet/confirm มี typed model แต่ station และ prework status ยังเป็น Map จึงเสีย compile-time safety ตรง flow realtime ที่ซับซ้อนที่สุด</div>
-<section><h2>1. Endpoint inventory</h2><pre class="code-vs"><code>GET  /putaway/station-status
-GET  /putaway/scan-pallet/{palletId}?stationId=...
-POST /putaway/confirm
-GET  /putaway/prework-station-status
-POST /putaway/prework-return-pallet</code></pre></section>
-<section><h2>2. Scan response</h2><p><code>PutawayPalletInfo</code> parse items ด้วย UnloadItem และ default suggestedDestination=ASRS, message ว่าง แต่ required fields cast โดยตรงจึง throw หาก payload missing/wrong type</p></section>
-<section><h2>3. Confirm payload</h2><pre class="code-vs"><code>{ stationId, palletId, destination,
-  operatorId, wrappingRequired }</code></pre><p><code>PutawayResult</code> คืน success, palletId, stationId, destination และ message เพื่อยืนยัน command ที่ server รับจริง</p></section>
-<section><h2>4. Station status debt</h2><p>ทั้ง getStationStatus และ getPreworkStationStatus คืน <code>List&lt;Map&lt;String,dynamic&gt;&gt;</code> ทำให้ field palletStatus/cutItems/destination ถูก cast ใน widget ควรสร้าง StationStatus DTO และ enum แยก normal/prework</p></section>
-<section><h2>5. URL construction risk</h2><p><code>scanPalletForPutaway</code> ต่อ palletId ใน path และ stationId ใน query ด้วย string โดยตรง ต่างจาก Picking ที่ใช้ <code>Uri.encodeQueryComponent</code> ควรใช้ Uri builder เพื่อ encode ทุก segment/query อย่างสม่ำเสมอ</p></section>
-<section><h2>6. Error propagation</h2><p>service คืน <code>ApiResult.error</code> แต่บาง method ไม่ส่ง statusCode ต่อ ทำให้ UI แยก 409 conflict, 404 และ timeout ไม่ได้ Contract ควรรักษา code/problem details ถึง domain layer</p></section>
-<section><h2>7. Parsing hardening</h2><p>ตรวจ list/map shape, number coercion, unknown status/destination, nullable message และ malformed item พร้อมเก็บ raw transport DTO ไว้ที่ boundary ไม่ปล่อย dynamic เข้า widget</p></section>
-<section><h2>8. Contract lab</h2><div class="success">สร้าง JSON fixtures ของ station empty/busy, PW in-transit/cut-complete, pallet PW/FG และ confirm conflict แล้วทดสอบ Dart parser คู่กับ .NET response serialization รวมถึง ID ที่มีอักขระต้อง encode</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด models/putaway/putaway_models.dart และ services/api/putaway_api.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.6, 16.7 (extension), 17.9 (โมเดล receiving)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เทียบข้อมูลที่มีโมเดลกับที่ไม่มี และตัดสินได้ว่าเมื่อไรควรสร้างโมเดล</div>
+
+<section><h2>1. โดเมนที่มีโมเดลน้อยที่สุด</h2><table><thead><tr><th>โดเมน</th><th>ไฟล์โมเดล</th><th>บรรทัด</th><th>คลาส</th></tr></thead><tbody>
+<tr><td>picking</td><td>1</td><td>387</td><td>8</td></tr>
+<tr><td>receiving</td><td>1</td><td>264</td><td>7</td></tr>
+<tr><td>packing</td><td>1</td><td>203</td><td>—</td></tr>
+<tr><td><strong>putaway</strong></td><td>1</td><td><strong>49</strong></td><td><strong>2</strong></td></tr>
+</tbody></table><p>สองคลาสเท่านั้น และคลาสหนึ่งยืมของจากโดเมนอื่น</p><pre class="code-vs"><code>import '../unload/unload_models.dart';
+
+class PutawayPalletInfo {
+  final String palletId;
+  final String type;
+  final String status;
+  final String suggestedDestination;
+  final List&lt;UnloadItem&gt; items;      // ← ยืมจาก unload
+  final String message;
+  ...
+}</code></pre><div class="note"><strong>การยืม <code>UnloadItem</code> ถูกต้อง</strong> — ของบนพาเลทมีรูปร่างเดียวกันไม่ว่าจะดูจากมุมของ unload หรือ putaway<br>ถ้าสร้าง <code>PutawayItem</code> ที่มีฟิลด์เหมือนกันเป๊ะ จะกลายเป็นโค้ดซ้ำที่ต้องแก้สองที่ทุกครั้งที่ฝั่ง .NET เพิ่มฟิลด์<br>สิ่งที่ควรระวัง: ถ้าวันหนึ่งสองมุมมองต้องการฟิลด์ต่างกัน ต้องแยก — ไม่ใช่เพิ่มฟิลด์ที่ฝั่งหนึ่งไม่ใช้</div><p>เทียบกับ 17.13 ที่พบว่า <code>UnloadItem</code> กับ <code>UnloadedItem</code> ต่างกันแค่ <code>ed</code> — ที่นั่นเป็นสองสิ่งที่ต่างกันจริงและควรตั้งชื่อให้ต่างกว่านี้ ส่วนที่นี่เป็นสิ่งเดียวกันจริง ๆ</p></section>
+
+<section><h2>2. ข้อมูลที่ไม่มีโมเดล</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;List&lt;Map&lt;String, dynamic&gt;&gt;&gt;&gt; getStationStatus() async {
+  final response = await _get('/putaway/station-status');
+  if (!response.success) return ApiResult.error(response.error);
+
+  final items = response.data!['items'] as List;
+  return ApiResult.success(items.cast&lt;Map&lt;String, dynamic&gt;&gt;());
+}
+
+Future&lt;ApiResult&lt;List&lt;Map&lt;String, dynamic&gt;&gt;&gt;&gt; getPreworkStationStatus() async {
+  final response = await _get('/putaway/prework-station-status');
+  if (!response.success) return ApiResult.error(response.error);
+
+  final stations = (response.data!['stations'] as List).cast&lt;Map&lt;String, dynamic&gt;&gt;();
+  return ApiResult.success(stations);
+}</code></pre><p>สอง endpoint ที่คืน <code>Map</code> ดิบ ไม่แปลงเป็นคลาส</p><p>ผลคือทุกที่ที่ใช้ต้อง cast เอง</p><pre class="code-vs"><code>// putaway_screen.dart
+map[station['stationId'] as String] = station;
+
+// putaway_station_grid.dart
+busyPalletId: stationStatus[stations[i].id]?['palletId'] as String?,
+busyDestination: stationStatus[stations[i].id]?['destination'] as String?,
+
+// putaway_prework_screen.dart
+final palletId = info?['palletId'] as String?;
+final palletStatus = info?['palletStatus'] as String?;
+final cutItems = (info?['cutItems'] as List?)?.cast&lt;Map&lt;String, dynamic&gt;&gt;() ?? [];</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>พิมพ์ชื่อคีย์ผิดไม่มีใครจับ</td><td><code>'palletID'</code> จะได้ <code>null</code> เงียบ ๆ</td></tr>
+<tr><td>ไม่รู้ว่ามีคีย์อะไรบ้าง</td><td>ต้องดู JSON จริงหรือโค้ดฝั่ง .NET</td></tr>
+<tr><td>cast กระจายทุกที่</td><td>เปลี่ยนชนิดฟิลด์ต้องแก้ทุกจุด</td></tr>
+<tr><td>ค่าที่ไม่มีกลายเป็น null</td><td>แยก “ไม่มีคีย์” จาก “คีย์มีแต่ค่าเป็น null” ไม่ได้</td></tr>
+</tbody></table><p>ค้นดูว่ามีคีย์อะไรบ้างจากการใช้งานจริง</p><table><thead><tr><th>คีย์</th><th>ชนิด</th><th>ใช้ที่</th></tr></thead><tbody>
+<tr><td><code>stationId</code></td><td><code>String</code></td><td>ทำเป็นคีย์ของ <code>Map</code></td></tr>
+<tr><td><code>palletId</code></td><td><code>String?</code></td><td>แสดงบนการ์ด</td></tr>
+<tr><td><code>destination</code></td><td><code>String?</code></td><td>แสดงบนการ์ด</td></tr>
+<tr><td><code>items</code></td><td><code>List</code></td><td>เก็บไว้ตอนอัปเดตจากเหตุการณ์</td></tr>
+<tr><td><code>palletStatus</code></td><td><code>String?</code></td><td>เฉพาะ prework</td></tr>
+<tr><td><code>cutItems</code></td><td><code>List</code></td><td>เฉพาะ prework</td></tr>
+</tbody></table><p>หกคีย์ กระจายอยู่ในสี่ไฟล์ และไม่มีที่ไหนเขียนรวมไว้</p></section>
+
+<section><h2>3. ทำไมถึงไม่มีโมเดล และควรมีไหม</h2><p>เหตุผลที่พอเข้าใจได้</p><table><thead><tr><th>เหตุผล</th><th>หนักแน่นไหม</th></tr></thead><tbody>
+<tr><td>ใช้แค่สามสี่คีย์ ไม่คุ้มสร้างคลาส</td><td>พอฟังได้ตอนมีสองคีย์</td></tr>
+<tr><td>ข้อมูลถูกส่งต่อเป็นก้อนโดยไม่แตะไส้ใน</td><td>จริงบางส่วน — <code>_handleStationDispatched</code> ประกอบ <code>Map</code> ใหม่</td></tr>
+<tr><td>ฟิลด์อาจเปลี่ยนบ่อย</td><td><strong>ตรงข้าม</strong> — ยิ่งเปลี่ยนบ่อยยิ่งต้องมีที่เดียวที่รู้</td></tr>
+</tbody></table><p>เหตุผลที่ควรมี</p><pre class="code-vs"><code>class StationStatus {
+  const StationStatus({
+    required this.stationId,
+    this.palletId,
+    this.destination,
+    this.items = const [],
+    this.palletStatus,
+    this.cutItems = const [],
+  });
+
+  final String stationId;
+  final String? palletId;
+  final String? destination;
+  final List&lt;UnloadItem&gt; items;
+  final String? palletStatus;                 // prework เท่านั้น
+  final List&lt;Map&lt;String, dynamic&gt;&gt; cutItems;  // prework เท่านั้น
+
+  factory StationStatus.fromJson(Map&lt;String, dynamic&gt; json) =&gt; StationStatus(
+    stationId: json['stationId'],
+    palletId: json['palletId'],
+    destination: json['destination'],
+    items: ((json['items'] as List?) ?? [])
+        .map((e) =&gt; UnloadItem.fromJson(e as Map&lt;String, dynamic&gt;))
+        .toList(),
+    palletStatus: json['palletStatus'],
+    cutItems: ((json['cutItems'] as List?) ?? []).cast&lt;Map&lt;String, dynamic&gt;&gt;(),
+  );
+
+  bool get isBusy =&gt; palletId != null;
+  bool get isInTransit =&gt; palletStatus == 'IN_TRANSIT';
+
+  StationStatus copyWith({String? palletId, String? destination}) =&gt; StationStatus(
+    stationId: stationId,
+    palletId: palletId ?? this.palletId,
+    destination: destination ?? this.destination,
+    items: items,                              // เก็บไว้เสมอ
+    palletStatus: palletStatus,
+    cutItems: cutItems,
+  );
+}</code></pre><table><thead><tr><th>ได้อะไร</th><th>ตรงไหน</th></tr></thead><tbody>
+<tr><td>คีย์ทั้งหมดอยู่ที่เดียว</td><td>อ่านไฟล์เดียวรู้ครบ</td></tr>
+<tr><td><code>isBusy</code> / <code>isInTransit</code></td><td>แทนที่จะเทียบสตริงในสามไฟล์</td></tr>
+<tr><td><code>copyWith</code> ที่เก็บ <code>items</code> ให้เสมอ</td><td>แทนโค้ดกระจายสามบรรทัดใน 18.4</td></tr>
+<tr><td>เทสต์ได้</td><td><code>fromJson</code> เป็นฟังก์ชันบริสุทธิ์</td></tr>
+</tbody></table><p>ดูว่า <code>_handleStationDispatched</code> จะสั้นลงแค่ไหน</p><pre class="code-vs"><code>// ก่อน (18.4)
+setState(() {
+  _stationStatus = {
+    ..._stationStatus,
+    stationId: {
+      ...?_stationStatus[stationId],
+      'stationId': stationId,
+      'palletId': data['palletId'],
+      'destination': data['destination'],
+      'items': _stationStatus[stationId]?['items'] ?? const [],
+    },
+  };
+});
+
+// หลัง
+setState(() {
+  final current = _stationStatus[stationId] ?? StationStatus(stationId: stationId);
+  _stationStatus = {
+    ..._stationStatus,
+    stationId: current.copyWith(
+      palletId: data['palletId'] as String?,
+      destination: data['destination'] as String?,
+    ),
+  };
+});</code></pre><div class="note"><strong>จุดที่ควรตัดสินใจ:</strong> เมื่อ <code>Map</code> ดิบถูกอ่านจากมากกว่าสองไฟล์ หรือเมื่อต้องเขียนโค้ดประกอบ <code>Map</code> ใหม่ด้วยมือ<br>ที่นี่ครบทั้งสองข้อ — อ่านจากสี่ไฟล์ และมีการประกอบใหม่ในสองจอ</div></section>
+
+<section><h2>4. PutawayResult ที่มีฟิลด์ชื่อ success</h2><pre class="code-vs"><code>class PutawayResult {
+  final bool success;         // ← ชื่อชนกับ ApiResult.success
+  final String palletId;
+  final String stationId;
+  final String destination;
+  final String message;
+
+  factory PutawayResult.fromJson(Map&lt;String, dynamic&gt; json) =&gt; PutawayResult(
+    success: json['success'] ?? true,
+    palletId: json['palletId'],
+    stationId: json['stationId'],
+    destination: json['destination'],
+    message: json['message'],
+  );
+}</code></pre><p>ตอนใช้จะมี <code>success</code> สองชั้น</p><pre class="code-vs"><code>final result = await _api.confirmPutaway(...);
+if (!result.success) { ... }              // ← ของ ApiResult
+// result.data!.success                   // ← ของ PutawayResult</code></pre><table><thead><tr><th>ชั้น</th><th><code>success</code> หมายถึง</th></tr></thead><tbody>
+<tr><td><code>ApiResult</code></td><td>คำขอสำเร็จไหม (HTTP + JSON แปลงได้)</td></tr>
+<tr><td><code>PutawayResult</code></td><td>เซิร์ฟเวอร์บอกว่างานสำเร็จไหม</td></tr>
+</tbody></table><p>สองชั้นนี้ต่างกันจริง — เหมือน <code>palletError</code> ใน 17.7 ที่บอกว่าคำขอสำเร็จแต่งานล้มเหลว</p><p>แต่<strong>ไม่มีใครอ่านชั้นที่สอง</strong></p><pre class="code-vs"><code>// station_sheet.dart
+final result = await _api.confirmPutaway(...);
+...
+if (!result.success) {
+  showErrorDialog(context, message: result.error!);
+  return;
+}
+
+if (!mounted) return;
+Navigator.pop(context);
+widget.onConfirmed();          // ← ไม่เคยดู result.data!.success</code></pre><p>ถ้าเซิร์ฟเวอร์ตอบ 200 พร้อม <code>{"success": false, "message": "สถานีถูกใช้งานอยู่"}</code> แอปจะปิดแผ่นและถือว่าสำเร็จ</p><pre class="code-vs"><code>success: json['success'] ?? true,     // ← ไม่ส่งมา = ถือว่าสำเร็จ</code></pre><p>ค่าเริ่มต้นเป็น <code>true</code> ซึ่งเป็นแบบผ่อนปรนตามที่ 17.9 อธิบาย — เดาผิดแล้วปล่อยผ่าน</p><div class="note"><strong>ต้องยืนยันกับฝั่ง .NET ก่อนตัดสิน</strong> — ถ้า endpoint นี้ตอบ 4xx เมื่อล้มเหลวเสมอ ฟิลด์ <code>success</code> ก็ไม่จำเป็นและควรลบทิ้ง<br>ถ้าตอบ 200 พร้อม <code>success: false</code> ได้ นี่คือบั๊กที่ทำให้ผู้ใช้คิดว่าสั่งสำเร็จทั้งที่ไม่<br><strong>ฟิลด์ที่ประกาศไว้แต่ไม่มีใครอ่านคือคำถามเสมอ</strong> — ไม่ใช่ว่าไม่จำเป็น แต่แปลว่ายังไม่รู้ว่าจำเป็นไหม</div><p>ถ้าจำเป็น ต้องอ่านทั้งสองชั้น</p><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(context, message: result.error!);
+  return;
+}
+
+final putaway = result.data!;
+if (!putaway.success) {
+  showErrorDialog(context, message: putaway.message);
+  return;
+}</code></pre></section>
+
+<section><h2>5. ฟิลด์ที่ไม่ป้องกัน</h2><pre class="code-vs"><code>factory PutawayPalletInfo.fromJson(Map&lt;String, dynamic&gt; json) =&gt; PutawayPalletInfo(
+  palletId: json['palletId'],                          // ไม่ป้องกัน
+  type: json['type'],                                  // ไม่ป้องกัน
+  status: json['status'],                              // ไม่ป้องกัน
+  suggestedDestination: json['suggestedDestination'] ?? 'ASRS',
+  items: (json['items'] as List).map((i) =&gt; UnloadItem.fromJson(i)).toList(),
+  message: json['message'] ?? '',
+);</code></pre><table><thead><tr><th>ฟิลด์</th><th>ถ้าไม่มี</th><th>ร้ายแรงไหม</th></tr></thead><tbody>
+<tr><td><code>palletId</code></td><td><code>TypeError</code></td><td>สมเหตุสมผล — ไม่มีรหัสก็ไร้ความหมาย</td></tr>
+<tr><td><code>type</code></td><td><code>TypeError</code></td><td>สมเหตุสมผล — กฎปลายทางขึ้นกับตัวนี้</td></tr>
+<tr><td><code>status</code></td><td><code>TypeError</code></td><td>ก้ำกึ่ง — ใช้แค่แสดงบนการ์ด</td></tr>
+<tr><td><code>items</code></td><td><code>TypeError</code></td><td><strong>ควรกัน</strong> — พาเลทว่างเป็นไปได้</td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นจุดที่เสี่ยงสุด</p><pre class="code-vs"><code>items: (json['items'] as List).map(...)      // ไม่มี ?? []</code></pre><p>ถ้าเซิร์ฟเวอร์ไม่ส่ง <code>items</code> เมื่อพาเลทว่าง จะพังทันทีตอนสแกน — และข้อความที่ผู้ใช้เห็นคือ <code>เกิดข้อผิดพลาด: type 'Null' is not a subtype of type 'List'</code></p><pre class="code-vs"><code>items: ((json['items'] as List?) ?? [])
+    .map((i) =&gt; UnloadItem.fromJson(i as Map&lt;String, dynamic&gt;))
+    .toList(),</code></pre><p>สังเกตว่า <code>UnloadItem.fromJson(i)</code> ไม่ได้ cast <code>i</code> — เป็นจุดเดียวกับที่ 16.8 ชี้ว่าทำให้ข้อผิดพลาดไกลจากสาเหตุ</p><p>ส่วน <code>suggestedDestination ?? 'ASRS'</code> เป็นค่าเริ่มต้นที่ปลอดภัย</p><table><thead><tr><th>ถ้าเดาผิด</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ค่าที่แนะนำผิด</td><td>ผู้ใช้เลือกใหม่เองได้ (ตัวเลือกยังแสดงอยู่)</td></tr>
+</tbody></table><p>ต่างจาก <code>condition ?? 'FG'</code> ใน 17.9 ที่เดาผิดแล้วของเสียผ่านไปเป็นของดี — ที่นี่แค่แนะนำผิด ผู้ใช้ยังตัดสินใจเอง</p></section>
+
+<section><h2>6. path ที่ต่อสตริงโดยไม่เข้ารหัส</h2><pre class="code-vs"><code>Future&lt;ApiResult&lt;PutawayPalletInfo&gt;&gt; scanPalletForPutaway(
+  String palletId, {
+  String? stationId,
+}) async {
+  final query = stationId != null ? '?stationId=$stationId' : '';
+  final response = await _get('/putaway/scan-pallet/$palletId$query');
+  ...
+}</code></pre><p>ทั้งรหัสพาเลทและรหัสสถานีถูกต่อเข้า path ตรง ๆ</p><table><thead><tr><th>ค่า</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td><code>PAL-001</code></td><td>ทำงานได้</td></tr>
+<tr><td><code>PAL 001</code> (มีช่องว่าง)</td><td><strong>path พัง</strong></td></tr>
+<tr><td><code>PAL/001</code></td><td><strong>กลายเป็นคนละ path</strong></td></tr>
+<tr><td><code>PAL#001</code></td><td><strong>ทุกอย่างหลัง # หายไป</strong></td></tr>
+</tbody></table><p>รหัสสถานีปลอดภัยเพราะมาจากค่าคงที่ในโค้ด แต่รหัสพาเลทมาจากสิ่งที่ผู้ใช้สแกน</p><pre class="code-vs"><code>final path = Uri(
+  path: '/putaway/scan-pallet/$palletId',
+  queryParameters: {if (stationId != null) 'stationId': stationId},
+).toString();</code></pre><div class="note"><strong>ระวัง:</strong> ใส่ <code>palletId</code> ใน <code>path:</code> ของ <code>Uri</code> ยังไม่ปลอดภัยเต็มที่ เพราะ <code>Uri</code> ไม่เข้ารหัสขีดทับใน path<br>ที่ปลอดภัยจริงคือ<pre class="code-vs"><code>final encoded = Uri.encodeComponent(palletId);
+final path = Uri(
+  path: '/putaway/scan-pallet/$encoded',
+  queryParameters: {if (stationId != null) 'stationId': stationId},
+).toString();</code></pre>ส่วน query parameter <code>Uri</code> จัดการให้ครบ</div><p>ทั้งห้าเมธอดในไฟล์นี้ทิ้ง <code>statusCode</code> — เหมือน receiving และ unload</p><pre class="code-vs"><code>if (!response.success) return ApiResult.error(response.error);</code></pre><p>รวมกับที่ 16.7 นับไว้ ตอนนี้เจอโดเมนที่ทิ้งทั้งหมดสี่โดเมน: receiving, unload, upload, putaway</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ยืมโมเดลจากโดเมนอื่นไม่ดี</td><td>ถูกต้องถ้าเป็นสิ่งเดียวกันจริง</td></tr>
+<tr><td><code>Map</code> ดิบเบากว่าโมเดล</td><td>ต่างกันไม่ได้วัดได้ แต่เสียการตรวจของคอมไพเลอร์</td></tr>
+<tr><td>ฟิลด์ที่มีอยู่ต้องถูกใช้</td><td><code>PutawayResult.success</code> ไม่มีใครอ่าน</td></tr>
+<tr><td><code>ApiResult.success</code> กับ <code>PutawayResult.success</code> เหมือนกัน</td><td>ชั้นละความหมาย</td></tr>
+<tr><td>ต่อ path ด้วยสตริงพอถ้าค่ามาจากบาร์โค้ด</td><td>บาร์โค้ดมีอักขระพิเศษได้</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>สร้าง <code>StationStatus</code> แล้วเปลี่ยนโค้ดที่ใช้ <code>Map</code> ดิบทั้งหมด</p><ol><li>ต้องแตะกี่ไฟล์ และแต่ละไฟล์เปลี่ยนอะไร</li><li>เขียนเทสต์ที่จับปัญหาที่บทนี้ชี้ไว้</li><li>การเปลี่ยนนี้คุ้มไหม เมื่อเทียบกับการปล่อยไว้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ไฟล์ที่ต้องแตะ</strong></p><table><thead><tr><th>ไฟล์</th><th>เปลี่ยนอะไร</th><th>ขนาด</th></tr></thead><tbody>
+<tr><td><code>models/putaway/putaway_models.dart</code></td><td>เพิ่มคลาส <code>StationStatus</code></td><td>~45 บรรทัดใหม่</td></tr>
+<tr><td><code>services/api/putaway_api.dart</code></td><td>สอง endpoint คืน <code>List&lt;StationStatus&gt;</code></td><td>4 บรรทัด</td></tr>
+<tr><td><code>putaway_screen.dart</code></td><td>ชนิดของ <code>_stationStatus</code> + <code>_handleStationDispatched</code></td><td>~10 บรรทัด</td></tr>
+<tr><td><code>putaway_prework_screen.dart</code></td><td>เหมือนกัน + <code>_openStationPopup</code></td><td>~15 บรรทัด</td></tr>
+<tr><td><code>putaway_station_grid.dart</code></td><td>เอา cast ออก</td><td>3 บรรทัด</td></tr>
+<tr><td><code>prework_receive_column.dart</code></td><td>ชนิดของพารามิเตอร์</td><td>2 บรรทัด</td></tr>
+<tr><td><code>prework_send_column.dart</code></td><td>เหมือนกัน</td><td>2 บรรทัด</td></tr>
+</tbody></table><p>เจ็ดไฟล์ ราว 80 บรรทัด และ<strong>คอมไพเลอร์จะบอกทุกจุดที่ต้องแก้</strong> — เปลี่ยนชนิดแล้วรัน <code>flutter analyze</code> จะได้รายการครบ</p><pre class="code-vs"><code>// api — สั้นลงและปลอดภัยขึ้น
+Future&lt;ApiResult&lt;List&lt;StationStatus&gt;&gt;&gt; getStationStatus() async {
+  final response = await _get('/putaway/station-status');
+  if (!response.success) {
+    return ApiResult.error(response.error, statusCode: response.statusCode);
+  }
+  final items = (response.data!['items'] as List? ?? [])
+      .map((e) =&gt; StationStatus.fromJson(e as Map&lt;String, dynamic&gt;))
+      .toList();
+  return ApiResult.success(items);
+}</code></pre><pre class="code-vs"><code>// grid — cast หายไปหมด
+StationCard(
+  station: stations[i],
+  isDispatching: stationStatus[stations[i].id]?.isBusy ?? false,
+  busyPalletId: stationStatus[stations[i].id]?.palletId,
+  busyDestination: stationStatus[stations[i].id]?.destination,
+  onTap: () =&gt; onStationTap(stations[i]),
+)</code></pre><p><strong>ข้อ 2 — เทสต์</strong></p><pre class="code-vs"><code>void main() {
+  group('StationStatus.fromJson', () {
+    test('สถานีว่าง — ไม่มี palletId', () {
+      final s = StationStatus.fromJson({'stationId': 'STN-1'});
+      expect(s.stationId, 'STN-1');
+      expect(s.palletId, isNull);
+      expect(s.isBusy, isFalse);
+      expect(s.items, isEmpty);      // ไม่ส่ง items มา ต้องไม่พัง
+    });
+
+    test('สถานีกำลังทำงาน', () {
+      final s = StationStatus.fromJson({
+        'stationId': 'STN-2',
+        'palletId': 'PAL-007',
+        'destination': 'ASRS',
+        'items': [
+          {'lineId': 1, 'partId': 'PT-1', 'owner': 'A', 'brand': 'B',
+           'itemDesc': 'x', 'qty': 5, 'condition': 'FG'},
+        ],
+      });
+      expect(s.isBusy, isTrue);
+      expect(s.items, hasLength(1));
+      expect(s.items.first.qty, 5);
+    });
+
+    test('พาเลทกำลังถูกขนมา', () {
+      final s = StationStatus.fromJson({
+        'stationId': 'PW-STN-1',
+        'palletStatus': 'IN_TRANSIT',
+      });
+      expect(s.isInTransit, isTrue);
+      expect(s.isBusy, isFalse);      // ยังไม่ถึง ยังไม่ถือว่าทำงานอยู่
+    });
+
+    test('copyWith เก็บ items ไว้เสมอ', () {
+      // เหตุการณ์ SignalR ไม่ส่ง items มา — ต้องไม่ทำให้ของหาย (18.4)
+      final before = StationStatus.fromJson({
+        'stationId': 'STN-1',
+        'items': [
+          {'lineId': 1, 'partId': 'PT-1', 'owner': 'A', 'brand': 'B',
+           'itemDesc': 'x', 'qty': 3, 'condition': 'FG'},
+        ],
+      });
+      final after = before.copyWith(palletId: 'PAL-009', destination: 'ASRS');
+
+      expect(after.palletId, 'PAL-009');
+      expect(after.items, hasLength(1));      // ← ข้อสำคัญ
+    });
+  });
+}</code></pre><p>เทสต์สุดท้ายจับปัญหาที่ 18.4 อธิบายไว้ — โค้ดปัจจุบันเก็บ <code>items</code> ไว้ด้วยบรรทัดที่จำง่ายลืมง่าย พอย้ายเข้า <code>copyWith</code> แล้วเทสต์ยืนยันได้</p><p><strong>ข้อ 3 — คุ้มไหม</strong></p><table><thead><tr><th>ปล่อยไว้</th><th>เปลี่ยน</th></tr></thead><tbody>
+<tr><td>ไม่ต้องทำอะไร</td><td>80 บรรทัด เจ็ดไฟล์</td></tr>
+<tr><td>พิมพ์คีย์ผิดรู้ตอนรัน</td><td>คอมไพเลอร์จับ</td></tr>
+<tr><td>ต้องอ่านสี่ไฟล์เพื่อรู้ว่ามีคีย์อะไร</td><td>อ่านไฟล์เดียว</td></tr>
+<tr><td>เทสต์ไม่ได้</td><td>เทสต์สี่ข้อรันในไม่กี่มิลลิวินาที</td></tr>
+<tr><td>โค้ดประกอบ <code>Map</code> ใหม่กระจายสองจอ</td><td><code>copyWith</code> ที่เดียว</td></tr>
+</tbody></table><p><strong>คุ้ม</strong> — และเหตุผลที่หนักที่สุดไม่ใช่เรื่องความสวยงาม แต่คือแถวสุดท้าย</p><p>โค้ดที่ประกอบ <code>Map</code> ใหม่ด้วยมือใน 18.4 มีบรรทัดที่ต้องจำ</p><pre class="code-vs"><code>'items': _stationStatus[stationId]?['items'] ?? const [],</code></pre><p>บรรทัดนี้มีอยู่เพราะเคยมีบั๊กที่ของหายไปตอนได้รับเหตุการณ์ — และมันปรากฏสองที่ (สองจอ) ถ้ามีคนเพิ่มจอที่สามแล้วลืม บั๊กเดิมจะกลับมา</p><p><code>copyWith</code> ทำให้ลืมไม่ได้ เพราะเป็นพฤติกรรมของคลาสไม่ใช่ของผู้เรียก</p><div class="note"><strong>หลักที่ใช้ตัดสินได้ทั่วไป:</strong> เมื่อพบว่ามีโค้ดที่ “ต้องจำเขียนให้ครบ” อยู่หลายที่ นั่นคือสัญญาณว่าควรย้ายเข้าไปอยู่ในสิ่งที่ลืมไม่ได้ — คลาส ฟังก์ชัน หรือชนิดข้อมูล<br>เจอรูปแบบนี้แล้วสามครั้งในคอร์ส: <code>asFailure()</code> ใน 16.7, <code>allowedDestinations()</code> ใน 18.5 และ <code>copyWith</code> ที่นี่</div></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>putaway มีโมเดลน้อยที่สุด — 49 บรรทัด สองคลาส และยืม <code>UnloadItem</code> จาก unload</li><li>การยืมถูกต้อง เพราะของบนพาเลทเป็นสิ่งเดียวกันไม่ว่าดูจากมุมไหน</li><li>สถานะสถานีเป็น <code>Map</code> ดิบ อ่านจากสี่ไฟล์ และไม่มีที่ไหนเขียนรวมว่ามีคีย์อะไรบ้าง</li><li>ควรสร้างโมเดลเมื่อ <code>Map</code> ถูกอ่านจากมากกว่าสองไฟล์ หรือต้องประกอบใหม่ด้วยมือ</li><li><code>PutawayResult.success</code> มีอยู่แต่ไม่มีใครอ่าน — ฟิลด์ที่ไม่ถูกใช้คือคำถามเสมอ</li><li>ค่าเริ่มต้น <code>success ?? true</code> เป็นแบบผ่อนปรน</li><li><code>items</code> ไม่กัน null — พาเลทว่างจะทำให้สแกนพัง</li><li>path ต่อสตริงทั้งรหัสพาเลทและสถานี ทั้งที่รหัสพาเลทมาจากบาร์โค้ด</li><li>โค้ดที่ “ต้องจำเขียนให้ครบ” หลายที่ ควรย้ายเข้าไปอยู่ในสิ่งที่ลืมไม่ได้</li></ul></div><p><strong>บทหน้า:</strong> <code>SignalRService</code> — ref-count ที่นับผิดได้ และเหตุการณ์ที่หายไประหว่างหลุด</p></section>

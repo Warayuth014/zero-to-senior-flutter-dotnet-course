@@ -1,12 +1,154 @@
-<div class="note"><strong>Operator ต้องเห็นสิ่งที่จะเคลื่อนก่อนยืนยัน:</strong> pallet summary, items, lot และยอดรวมเป็น safety check ส่วน wrapping toggle เปลี่ยนเส้นทางเครื่องจักรจริง</div>
-<section><h2>1. PutawayPalletInfo</h2><p>model มี palletId, type, status, suggestedDestination, items และ message โดย items reuse <code>UnloadItem</code> ทำให้ putaway ผูกกับ model ของอีก domain ซึ่งสะดวกแต่ coupling สูง</p></section>
-<section><h2>2. Pallet info card</h2><p><code>StationPalletInfoCard</code> แสดง identity/type/status และเปิด <code>PalletItemsPage</code> เมื่อกดดูสินค้า หน้าที่ card คือสรุป ไม่ควรคำนวณ business eligibility แทน service</p></section>
-<section><h2>3. Items page</h2><p>หน้า detail แสดง partId, description, owner/brand, lot, image และ qty ของทุก <code>UnloadItem</code> พร้อม summary จำนวนรายการและผลรวม qty ช่วย operator ตรวจ pallet ก่อนส่ง</p></section>
-<section><h2>4. Aggregate correctness</h2><pre class="code-vs"><code>totalQty = items.fold&lt;int&gt;(
-  0,
-  (sum, item) =&gt; sum + item.qty,
-);</code></pre><p>หากหน่วยรองรับทศนิยม int จะไม่พอ และรายการ duplicate part+lot ต้องตัดสินว่าควรรวมหรือแสดง line แยก</p></section>
-<section><h2>5. Wrapping toggle</h2><p><code>StationWrappingToggle</code> เป็น controlled widget รับ value/onChanged เจ้าของ state อยู่ StationSheet ทำให้ destination change สามารถล้าง flag ได้ใน transition เดียว</p></section>
-<section><h2>6. Fixed ASRS</h2><p>send prework station ไม่แสดง destination selector แต่ยังแสดง wrapping toggle เพราะ fixedDestination คือ ASRS ส่วน station ที่ไม่มี fixed destination แสดง toggle ภายใน selector เมื่อ ASRS ถูกเลือก</p></section>
-<section><h2>7. Stale pallet details</h2><p>ระหว่างเปิด items page pallet อาจถูกอีกเครื่องเปลี่ยนสถานะ ข้อมูลหน้านี้เป็น snapshot จึงต้อง validate ตอน confirm และควรแสดง loadedAt/version หากความสดสำคัญ</p></section>
-<section><h2>8. UI tests</h2><div class="success">ทดสอบ empty items, image error, long Thai/English description, lot null, qty aggregate, FG/PW color, wrapping reset เมื่อเปลี่ยน destination และ fixed-ASRS toggle บนหน้าจอ PDA</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–55 นาที</span><span>ลงมือทำ: เปิด station_pallet_info_card.dart, station_wrapping_toggle.dart, pallet_items_page.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.5, 16.9 (widget กลาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการ์ดที่แสดงข้อมูลและปุ่มลัด และเห็นจุดที่ข้อความบนหน้าจอฝังค่าไว้แทนที่จะอ่านจากข้อมูลจริง</div>
+
+<section><h2>1. การ์ดข้อมูลพาเลท</h2><pre class="code-vs"><code>class StationPalletInfoCard extends StatelessWidget {
+  final PutawayPalletInfo pallet;
+  final bool hasFixedDestination;
+  final VoidCallback onViewItems;
+  ...
+}</code></pre><p>รับสามอย่าง: ข้อมูล เงื่อนไขหนึ่งข้อ และ callback</p><pre class="code-vs"><code>InfoRow(label: 'สถานะ', value: pallet.status),
+InfoRow(
+  label: 'ปลายทาง',
+  value: hasFixedDestination ? 'ASRS (convert PW-&gt;FG)' : 'เลือกด้านล่าง',
+),
+InfoRow(label: 'สินค้า', value: '${pallet.items.length} รายการ'),</code></pre><p>ใช้ <code>InfoRow</code> จาก <code>common_widgets.dart</code> (16.9) — ป้ายกำกับกว้าง 110 เท่ากันทุกแถว ค่าชิดซ้ายตรงกัน</p><p>แต่แถวกลางมีปัญหา</p><pre class="code-vs"><code>value: hasFixedDestination ? 'ASRS (convert PW-&gt;FG)' : 'เลือกด้านล่าง',</code></pre><table><thead><tr><th>ปัญหา</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ค่า <code>'ASRS'</code> ถูกฝังไว้</td><td>ที่จริงมาจาก <code>station.fixedDestination</code> ซึ่งอาจไม่ใช่ ASRS</td></tr>
+<tr><td>คำว่า <code>convert PW-&gt;FG</code> ถูกฝัง</td><td>เป็นผลลัพธ์ของสถานีฝั่งส่ง ไม่ใช่ของทุกสถานีที่มีปลายทางตายตัว</td></tr>
+<tr><td><code>hasFixedDestination</code> เป็น <code>bool</code></td><td>เสียข้อมูลว่าปลายทางคืออะไร</td></tr>
+</tbody></table><p>ที่ผ่านมาไม่พังเพราะ<strong>สถานีเดียวที่มี <code>fixedDestination</code> คือฝั่งส่ง และปลายทางคือ ASRS</strong> — แต่ 18.3 แบบฝึกหัดแสดงว่าถ้าเพิ่มสถานี QC ที่ปลายทางเป็น <code>QC</code> การ์ดจะบอกผู้ใช้ว่าจะส่งไป ASRS</p><pre class="code-vs"><code>// รับค่าจริงแทน bool — ไม่มีทางบอกผิด
+final String? fixedDestination;
+...
+InfoRow(
+  label: 'ปลายทาง',
+  value: fixedDestination ?? 'เลือกด้านล่าง',
+),</code></pre><div class="note"><strong>รูปแบบที่เจอซ้ำ:</strong> ส่ง <code>bool</code> เข้ามาแทนค่าจริง แล้วประกอบข้อความเอง<br>เกิดจากการที่ตอนเขียนมีแค่กรณีเดียว จึงดูเหมือนไม่ต่างกัน — แต่ <code>bool</code> ตอบได้แค่ “มีไหม” ส่วนค่าจริงตอบได้ว่า “คืออะไร” ซึ่งเป็นสิ่งที่หน้าจอต้องแสดง</div></section>
+
+<section><h2>2. ปุ่มที่บอกจำนวนซ้ำ</h2><pre class="code-vs"><code>InfoRow(label: 'สินค้า', value: '${pallet.items.length} รายการ'),
+...
+OutlinedButton.icon(
+  onPressed: onViewItems,
+  icon: Icon(MdiIcons.eyeOutline, size: 18),
+  label: Text('ดูสินค้าใน Pallet (${pallet.items.length})'),
+  ...
+)</code></pre><p>จำนวนเดียวกันแสดงสองที่ห่างกันไม่กี่บรรทัด</p><table><thead><tr><th>ไม่ผิด เพราะ</th><th>แต่</th></tr></thead><tbody>
+<tr><td>ทั้งสองอ่านจาก <code>pallet.items.length</code> เดียวกัน — ไม่มีทางไม่ตรง</td><td>กินพื้นที่บนจอเล็กโดยไม่ได้ข้อมูลเพิ่ม</td></tr>
+</tbody></table><p>ต่างจากกรณีที่ 17.5 พบใน <code>ScanPartScreen</code> ที่จำนวนถูกเก็บสองที่และซิงก์ด้วยมือ — ที่นั่นเป็นบั๊กรอเกิด ที่นี่แค่ซ้ำ</p><p>เอาแถว <code>InfoRow</code> ออกได้เลย เพราะปุ่มบอกอยู่แล้วและบอกด้วยว่าแตะได้</p></section>
+
+<section><h2>3. สวิตช์ที่กดได้สองที่</h2><pre class="code-vs"><code>return GestureDetector(
+  onTap: () =&gt; onChanged(!value),           // ← แตะทั้งแถว
+  child: AnimatedContainer(
+    ...
+    child: Row(
+      children: [
+        Icon(...),
+        Expanded(child: Column(...)),
+        Switch(
+          value: value,
+          onChanged: onChanged,             // ← หรือแตะที่สวิตช์
+          activeThumbColor: AppTheme.primary,
+        ),
+      ],
+    ),
+  ),
+);</code></pre><p>แตะที่ไหนก็ได้ในแถว หรือแตะที่สวิตช์โดยตรง</p><div class="note"><strong>นี่คือสิ่งที่จำเป็นบน PDA</strong> — สวิตช์ Material มีขนาดจับราว 40×40 พิกเซล ซึ่งต่ำกว่าเกณฑ์ 48 ที่ <code>AppTheme.touchTarget</code> ตั้งไว้ (16.2)<br>การทำให้ทั้งแถวแตะได้ทำให้พื้นที่จับกลายเป็นเต็มความกว้าง ซึ่งกดโดนง่ายกว่ามากเมื่อใส่ถุงมือ</div><p>แต่มีกับดักที่ต้องรู้</p><pre class="code-vs"><code>onTap: () =&gt; onChanged(!value),      // สลับค่า
+onChanged: onChanged,                 // Switch ส่งค่าใหม่มาเอง</code></pre><table><thead><tr><th>ผู้ใช้แตะ</th><th>เรียกอะไร</th><th>ผลลัพธ์</th></tr></thead><tbody>
+<tr><td>ที่แถว</td><td><code>onChanged(!value)</code></td><td>สลับ</td></tr>
+<tr><td>ที่สวิตช์</td><td><code>onChanged(ค่าใหม่จาก Switch)</code></td><td>สลับ</td></tr>
+</tbody></table><p>ทั้งสองทางได้ผลเดียวกันเพราะ <code>Switch</code> ส่งค่าตรงข้ามมาให้อยู่แล้ว — ถ้าเขียนผิดเป็น <code>onChanged: (_) =&gt; onChanged(!value)</code> ก็ยังทำงานได้ แต่จะพังถ้ามีวิธีสั่งค่าจากที่อื่น</p><p>สังเกตว่า <code>GestureDetector</code> ครอบ <code>Switch</code> อยู่ — การแตะที่สวิตช์จะถูก <code>Switch</code> จับก่อน ไม่ทะลุไปถึง <code>GestureDetector</code> จึงไม่สลับสองครั้ง</p><p>ข้อความในสวิตช์บอกทั้งสิ่งที่ทำและเหตุผล</p><pre class="code-vs"><code>Text('พันสินค้า (Wrapping Machine)')      // ทำอะไร
+Text('พัน Pallet ก่อนนำเข้า ASRS')        // เมื่อไรและทำไม</code></pre><p>บรรทัดที่สองอธิบายว่าทำไมสวิตช์นี้ถึงมีเฉพาะตอนเลือก ASRS — ผู้ใช้ไม่ต้องเดา</p></section>
+
+<section><h2>4. สีที่บอกประเภทพาเลท</h2><p>รูปแบบเดียวกันปรากฏสามที่</p><pre class="code-vs"><code>// station_pallet_info_card.dart
+final isFG = pallet.type == 'FG';
+final typeColor = isFG ? AppTheme.success : AppTheme.warning;
+
+// pallet_items_page.dart
+final isFG = type == 'FG';
+final typeColor = isFG ? AppTheme.success : AppTheme.warning;
+
+// station_destination_selector.dart
+final isPW = palletType == 'PW';
+final headerColor = isPW ? AppTheme.warning : AppTheme.primary;</code></pre><table><thead><tr><th>ไฟล์</th><th>FG ได้สี</th><th>PW ได้สี</th></tr></thead><tbody>
+<tr><td><code>station_pallet_info_card</code></td><td>เขียว</td><td>เหลือง</td></tr>
+<tr><td><code>pallet_items_page</code></td><td>เขียว</td><td>เหลือง</td></tr>
+<tr><td><code>station_destination_selector</code></td><td><strong>น้ำเงิน</strong></td><td>เหลือง</td></tr>
+</tbody></table><p>สองที่แรกตรงกัน ที่สามไม่ตรง — FG ได้สีน้ำเงินแทนเขียว</p><p>ผู้ใช้ที่สแกนพาเลท FG จะเห็นป้ายสีเขียวบนการ์ด แล้วหัวข้อตัวเลือกปลายทางเป็นสีน้ำเงินทันทีข้างล่าง</p><div class="note"><strong>เทียบกับ <code>StatusBadge</code> ใน 16.9</strong> ซึ่งเป็นตารางแปลงสถานะเป็นสีที่อยู่ที่เดียวและทุกจอใช้ร่วมกัน<br>ประเภทพาเลทไม่มีตารางแบบนั้น จึงถูกเขียนซ้ำสามที่และไม่ตรงกันหนึ่งที่<pre class="code-vs"><code>// ควรอยู่ใน putaway/shared/
+Color palletTypeColor(String type) =&gt; switch (type) {
+  'FG' =&gt; AppTheme.success,
+  'PW' =&gt; AppTheme.warning,
+  _ =&gt; AppTheme.purple,        // ไม่รู้จัก = เห็นชัดว่ามีอะไรใหม่
+};</code></pre></div><p>สังเกตว่า <code>StatusBadge</code> รองรับ <code>'FG'</code> และ <code>'PW'</code> อยู่แล้ว</p><pre class="code-vs"><code>Color get _color =&gt; switch (status.toUpperCase()) {
+  'FG' =&gt; AppTheme.success,
+  'PW' =&gt; AppTheme.warning,
+  ...</code></pre><p>ป้ายประเภทในการ์ดจึงใช้ <code>StatusBadge(pallet.type)</code> ได้เลย แทนที่จะสร้าง <code>Container</code> เอง — ได้สีที่ตรงกับทุกจอฟรี และโค้ดสั้นลง 15 บรรทัด</p></section>
+
+<section><h2>5. ข้อความจากเซิร์ฟเวอร์ที่แสดงเมื่อมี</h2><pre class="code-vs"><code>if (pallet.message.isNotEmpty) ...[
+  const SizedBox(height: 4),
+  Text(
+    pallet.message,
+    style: TextStyle(color: AppTheme.textGrey(context), fontSize: 12),
+  ),
+],</code></pre><p><code>message</code> มาจากเซิร์ฟเวอร์และถูกกันไว้ในโมเดล</p><pre class="code-vs"><code>message: json['message'] ?? '',</code></pre><p>ค่าเริ่มต้นเป็นสตริงว่าง แล้วหน้าจอตรวจ <code>isNotEmpty</code> ก่อนแสดง — ผลคือถ้าเซิร์ฟเวอร์ไม่ส่งอะไรมา ไม่มีช่องว่างลอยบนจอ</p><table><thead><tr><th>วิธีเก็บ</th><th>วิธีตรวจ</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>String</code> + <code>?? ''</code></td><td><code>isNotEmpty</code></td><td>ทำงานได้ทั้งกรณีไม่ส่งและส่งค่าว่าง</td></tr>
+<tr><td><code>String?</code></td><td><code>!= null</code></td><td>พลาดกรณีที่ส่ง <code>''</code> มา</td></tr>
+</tbody></table><p>แบบแรกทนกว่าและใช้ที่นี่ถูกต้อง — ตรงกับที่ 16.5 พบใน <code>getCustomBase()</code> ที่ตรวจทั้ง null และว่าง</p><p>ช่องนี้เป็นทางที่เซิร์ฟเวอร์บอกอะไรเพิ่มได้โดยไม่ต้องแก้แอป เช่น “พาเลทนี้ค้างมา 3 วัน” หรือ “มีของหมดอายุใน 7 วัน”</p></section>
+
+<section><h2>6. จอดูของบนพาเลท</h2><pre class="code-vs"><code>Text('ประเภท $type • ${items.length} รายการ • '
+     'รวม ${items.fold&lt;int&gt;(0, (sum, i) =&gt; sum + i.qty)} ชิ้น')</code></pre><p>สามตัวเลขในบรรทัดเดียว คั่นด้วยจุดกลาง</p><table><thead><tr><th>ตัวเลข</th><th>ตอบคำถาม</th></tr></thead><tbody>
+<tr><td>ประเภท</td><td>ของแบบไหน</td></tr>
+<tr><td>จำนวนรายการ</td><td>ต้องดูกี่บรรทัด</td></tr>
+<tr><td>จำนวนชิ้นรวม</td><td>ของเยอะแค่ไหนจริง ๆ</td></tr>
+</tbody></table><p>ตัวสุดท้ายคือสิ่งที่ 17.12 ชี้ว่า <code>UnloadSessionSheet</code> ขาดไป — ที่นั่นแถบความคืบหน้านับรายการอย่างเดียว</p><p>ที่นี่แสดงทั้งสองอย่าง ซึ่งเป็นทางที่ 17.12 แบบฝึกหัดสรุปว่าดีที่สุด</p><pre class="code-vs"><code>ListView.separated(
+  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+  itemCount: items.length,
+  separatorBuilder: (_, __) =&gt; const SizedBox(height: 10),
+  itemBuilder: (context, index) { ... },
+)</code></pre><p><code>ListView.separated</code> ต่างจาก <code>ListView.builder</code> ตรงที่จัดการช่องว่างระหว่างแถวให้</p><table><thead><tr><th></th><th><code>.separated</code></th><th><code>.builder</code> + margin</th></tr></thead><tbody>
+<tr><td>ช่องว่างท้ายรายการสุดท้าย</td><td>ไม่มี</td><td><strong>มี</strong> ถ้าใส่ <code>margin: bottom</code></td></tr>
+<tr><td>เปลี่ยนตัวคั่นเป็นเส้น</td><td>แก้ที่เดียว</td><td>ต้องแก้ในทุกแถว</td></tr>
+</tbody></table><p>เทียบกับ <code>PoItemsList</code> ใน 17.4 ที่ใช้ <code>margin: EdgeInsets.only(bottom: 8)</code> ในทุกแถว — จะมีช่องว่างเกินท้ายรายการเสมอ</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ส่ง <code>bool</code> เข้ามาแทนค่าจริงก็พอ</td><td><code>bool</code> ตอบได้แค่ “มีไหม” ไม่ได้ “คืออะไร”</td></tr>
+<tr><td><code>Switch</code> มีขนาดจับพอบน PDA</td><td>~40 พิกเซล ต่ำกว่าเกณฑ์ 48</td></tr>
+<tr><td>ครอบ <code>Switch</code> ด้วย <code>GestureDetector</code> ทำให้สลับสองครั้ง</td><td><code>Switch</code> จับการแตะไว้เอง ไม่ทะลุ</td></tr>
+<tr><td>สีของประเภทเดียวกันตรงกันทุกจอ</td><td>FG ได้เขียวสองที่ น้ำเงินหนึ่งที่</td></tr>
+<tr><td><code>ListView.builder</code> กับ <code>.separated</code> เหมือนกัน</td><td>ช่องว่างท้ายรายการต่างกัน</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “พาเลท FG กับ PW ดูคล้ายกันไปหมด บางทีสแกนผิดแล้วไม่รู้ตัวจนกดยืนยัน”</p><ol><li>ตอนนี้มีสัญญาณอะไรบอกประเภทบ้าง และทำไมยังไม่พอ</li><li>แก้อย่างไรโดยไม่เพิ่มขั้นตอนให้ผู้ใช้</li><li>ควรเพิ่มการยืนยันไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สัญญาณที่มีอยู่</strong></p><table><thead><tr><th>ที่</th><th>สัญญาณ</th><th>เด่นแค่ไหน</th></tr></thead><tbody>
+<tr><td>การ์ดข้อมูลพาเลท</td><td>ป้ายเล็กมุมขวา สีเขียว/เหลือง ตัวอักษร 13</td><td>เล็ก</td></tr>
+<tr><td>หัวข้อตัวเลือกปลายทาง</td><td>ข้อความ “Pallet ประเภท FG” + สี</td><td>ปานกลาง แต่<strong>สีไม่ตรงกับการ์ด</strong></td></tr>
+<tr><td>ตัวเลือกที่แสดง</td><td>PW เห็น Prework, FG เห็น Replenish</td><td>ต้องรู้กฎถึงจะสังเกต</td></tr>
+<tr><td>กล่องยืนยัน</td><td><strong>ไม่บอกประเภทเลย</strong></td><td>ไม่มี</td></tr>
+</tbody></table><p>สาเหตุที่ยังไม่พอมีสามข้อ</p><ol><li>ป้ายประเภทเล็กและอยู่มุมขวาซึ่งไม่ใช่ที่ที่สายตาไป</li><li>สีไม่สม่ำเสมอ ทำให้สมองไม่จำว่า “เขียว = FG”</li><li>กล่องยืนยันซึ่งเป็นด่านสุดท้าย ไม่มีข้อมูลนี้เลย</li></ol><p><strong>ข้อ 2 — แก้โดยไม่เพิ่มขั้นตอน</strong></p><p>เริ่มจากทำสีให้ตรงกันก่อน เพราะเป็นการแก้ที่ถูกที่สุดและได้ผลทันที</p><pre class="code-vs"><code>// putaway/shared/models/putaway_rules.dart
+Color palletTypeColor(String type) =&gt; switch (type) {
+  'FG' =&gt; AppTheme.success,
+  'PW' =&gt; AppTheme.warning,
+  _ =&gt; AppTheme.purple,
+};</code></pre><p>แล้วใช้ทั้งสามที่ — ตอนนี้ FG เป็นเขียวทุกจอ</p><p>ต่อมาทำให้ป้ายเด่นขึ้นโดยใช้ของที่มีอยู่</p><pre class="code-vs"><code>// แทนที่ Container ที่เขียนเอง 15 บรรทัด
+StatusBadge(pallet.type, fontSize: 15),</code></pre><p><code>StatusBadge</code> มี <code>fontSize</code> ให้ปรับอยู่แล้ว (16.9) และรู้จัก FG/PW อยู่แล้ว</p><p>สุดท้ายเติมประเภทเข้ากล่องยืนยัน ซึ่งเป็นจุดที่ได้ผลมากที่สุด</p><pre class="code-vs"><code>// ใน _confirmPutaway ของ StationSheet
+message = 'เก็บ Pallet ${_pallet!.palletId} (ประเภท ${_pallet!.type})\n'
+    'ที่ ${widget.station.id} -&gt; $destLabel$wrappingNote\n\n'
+    '${_wrappingRequired ? "จะเข้า Wrapping Machine ก่อน" : "AMR จะมารับทันที"}';</code></pre><table><thead><tr><th>แก้อะไร</th><th>ผู้ใช้ต้องทำเพิ่มไหม</th></tr></thead><tbody>
+<tr><td>สีตรงกันทุกจอ</td><td>ไม่</td></tr>
+<tr><td>ป้ายใหญ่ขึ้น</td><td>ไม่</td></tr>
+<tr><td>กล่องยืนยันบอกประเภท</td><td>ไม่ — อ่านสิ่งที่มีอยู่แล้ว</td></tr>
+</tbody></table><p><strong>ข้อ 3 — ควรเพิ่มการยืนยันไหม</strong></p><p>มีกล่องยืนยันอยู่แล้ว คำถามคือควรทำให้เข้มขึ้นไหม เช่นให้พิมพ์ประเภทซ้ำ</p><table><thead><tr><th>เข้มขึ้น</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ให้เลือกประเภทซ้ำในกล่อง</td><td>ผิดยาก</td><td><strong>ทุกครั้งที่ทำถูกก็ต้องทำ</strong></td></tr>
+<tr><td>เตือนเฉพาะเมื่อสถานีมี <code>allowedType</code></td><td>ตรงจุด</td><td>สถานีปกติไม่ได้ประโยชน์</td></tr>
+<tr><td>ไม่เพิ่ม แค่แสดงให้ชัด</td><td>ไม่ช้าลง</td><td>ยังผิดได้ถ้าผู้ใช้ไม่อ่าน</td></tr>
+</tbody></table><p><strong>คำตอบขึ้นกับว่าสแกนผิดแล้วเสียหายแค่ไหน</strong></p><table><thead><tr><th>ถ้า</th><th>ควร</th></tr></thead><tbody>
+<tr><td>สั่งผิดแล้วยกเลิกได้ง่าย</td><td>แค่แสดงให้ชัด</td></tr>
+<tr><td>สั่งผิดแล้วหุ่นยนต์ขนไปที่ผิดและเอากลับยาก</td><td>เพิ่มการยืนยัน</td></tr>
+</tbody></table><p>ในกรณีของ putaway ที่ AMR มารับพาเลททันทีหลังยืนยัน (ตามข้อความในกล่อง) การสั่งผิดแปลว่าของถูกขนไปผิดที่จริง ๆ</p><p>ทางที่สมดุลคือเตือนเฉพาะเมื่อผู้ใช้กำลังจะทำสิ่งที่ผิดปกติ</p><pre class="code-vs"><code>// เตือนเฉพาะกรณีที่ประเภทกับปลายทางไม่เข้าคู่กันตามปกติ
+final isUnusual = _pallet!.type == 'PW' &amp;&amp; dest == 'ASRS';
+
+final confirm = await showConfirmDialog(
+  context,
+  title: title,
+  message: message,
+  confirmLabel: 'ยืนยัน',
+  isDanger: isUnusual,      // ปุ่มเป็นสีแดง ทำให้ต้องอ่านก่อนกด
+);</code></pre><p><code>showConfirmDialog</code> มี <code>isDanger</code> อยู่แล้ว (16.9) — เปลี่ยนปุ่มเป็นสีแดงโดยไม่เพิ่มขั้นตอน</p><p><strong>ข้อสรุป:</strong> ก่อนจะเพิ่มขั้นตอนให้ผู้ใช้ ให้ตรวจก่อนว่าสิ่งที่มีอยู่ถูกใช้เต็มที่แล้วหรือยัง — ที่นี่มีป้ายประเภท มีสี มีกล่องยืนยัน และมี <code>isDanger</code> ครบทุกอย่าง แค่ไม่ได้ใช้ให้ตรงกัน</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>การ์ดใช้ <code>InfoRow</code> จาก widget กลาง ทำให้ป้ายกำกับตรงกันทุกแถว</li><li>ส่ง <code>hasFixedDestination</code> เป็น <code>bool</code> แล้วฝังคำว่า ASRS ไว้ — จะบอกผิดถ้ามีปลายทางแบบอื่น</li><li>จำนวนรายการแสดงสองที่ ไม่ผิดเพราะอ่านจากแหล่งเดียว แต่ซ้ำ</li><li>สวิตช์แตะได้ทั้งแถว เพราะ <code>Switch</code> เล็กกว่าเกณฑ์ 48 พิกเซล</li><li>สีของประเภทพาเลทเขียนซ้ำสามที่ และไม่ตรงกันหนึ่งที่</li><li><code>StatusBadge</code> รู้จัก FG/PW อยู่แล้ว ใช้แทนได้เลย</li><li><code>message</code> จากเซิร์ฟเวอร์แสดงเมื่อไม่ว่าง — ช่องที่เพิ่มข้อมูลได้โดยไม่แก้แอป</li><li><code>ListView.separated</code> จัดการช่องว่างระหว่างแถวให้ ไม่มีช่องว่างเกินท้ายรายการ</li></ul></div><p><strong>บทหน้า:</strong> โมเดลและ API ของ putaway และคำถามว่าทำไมสถานะสถานีถึงไม่มีโมเดล</p></section>

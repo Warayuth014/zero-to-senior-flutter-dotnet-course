@@ -4,17 +4,239 @@
 <title>Picking Session</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-11 · Real Codebase</span><h1>Picking Session</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Compatibility route</a></li><li><a href="#section-2">Five states</a></li><li><a href="#section-3">Initial assignment</a></li><li><a href="#section-4">Session state</a></li><li><a href="#section-5">Reset boundary</a></li><li><a href="#section-6">Back navigation</a></li><li><a href="#section-7">Error classification bug</a></li><li><a href="#section-8">Reducer refactor</a></li></ol></nav>
-<div class="note"><strong>Picking session จริงอยู่ใน PickItemsScreen:</strong> <code>PickingSessionScreen</code> เป็น backward-compatible redirect ส่วน state machine 5 สถานะควบคุมวงจรหลาย source pallets</div>
-<section id="section-1"><h2>1. Compatibility route</h2><p>Home route เดิมเปิด <code>PickingSessionScreen</code> ซึ่งใช้ post-frame callback แล้ว <code>pushReplacement</code> ไป OrdersList การเก็บ redirect ลด breaking change แต่ควรถอดเมื่อ callers migrate ครบ</p></section>
-<section id="section-2"><h2>2. Five states</h2><pre class="code-vs"><code>scanSource ↔ pickView → scanDest → afterPick
-     ↑                       │
-     └──── returnSource ← assign failure</code></pre><p>widget render body ด้วย switch บน enum ทำให้ state ที่เป็นไปได้เห็นชัดกว่าหลาย boolean</p></section>
-<section id="section-3"><h2>3. Initial assignment</h2><p>detail screen assign source ก่อน push จึงเริ่ม PickItemsScreen ที่ <code>pickView</code> พร้อม <code>initialAssignment</code> ไม่เริ่ม scanSource ส่วน scanSource ใช้รอบถัดไปของ order</p></section>
-<section id="section-4"><h2>4. Session state</h2><p>เก็บ pickOrderId, assignment, destination pallet, last result, return pallet และ local selection/serial/qty maps Destination ถูกเก็บข้าม source เพื่อเติม pallet เดิมต่อได้</p></section>
-<section id="section-5"><h2>5. Reset boundary</h2><p><code>_resetPickedSerials()</code> ล้าง selection, serial, qty, expanded rows และ input แล้วสร้าง serial list ต่อ part ใน assignment ใหม่ ต้องเรียกทุกครั้งที่เปลี่ยน source เพื่อไม่ส่งยอดเดิมซ้ำ</p></section>
-<section id="section-6"><h2>6. Back navigation</h2><p>PopScope อนุญาต pop เฉพาะ initial pickView; scanDest ย้อนกลับ pickView, returnSource ย้อนไป scanSource และ afterPick ไม่ทำอะไร ปิดทางย้อนที่อาจทำ command ซ้ำ แต่หลังสำเร็จควรมี exit path ที่ชัด</p></section>
-<section id="section-7"><h2>7. Error classification bug</h2><p>เมื่อ <code>assignPickStation</code> fail จาก scanSource โค้ดทุก error พาไป returnSource พร้อมข้อความ “ไม่มีสินค้าที่ต้อง Pick” แม้สาเหตุอาจเป็น network/401/500 ควร branch ตาม typed error และ return เฉพาะ domain outcome no-needed-items</p></section>
-<section id="section-8"><h2>8. Reducer refactor</h2><div class="success">กำหนด event SourceScanned, AssignmentLoaded, PartActivated, DestScanned, PickConfirmed, ReturnRequested และ state immutable พร้อม transition tests รวม invalid transitions เช่น confirm ซ้ำขณะ loading</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">บรรทัดที่เปลี่ยนทุกอย่าง</a></li><li><a href="#section-2">build ที่คอมไพเลอร์ตรวจว่าครบ</a></li><li><a href="#section-3">สถานะที่เหลืออีก 15 ตัว</a></li><li><a href="#section-4">ทางเดินระหว่างสถานะ</a></li><li><a href="#section-5">ปุ่มย้อนกลับที่รู้ว่าอยู่สถานะไหน</a></li><li><a href="#section-6">เลือกสินค้าได้ทีละชิ้น</a></li><li><a href="#section-7">ตัวจัดการช่องกรอกห้าคู่</a></li><li><a href="#section-8">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-9">แบบฝึกหัด</a></li><li><a href="#section-10">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–80 นาที</span><span>ลงมือทำ: เปิด picking/pick_items/pick_items_screen.dart — ไฟล์ที่ใหญ่เป็นอันดับสามของโปรเจกต์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.10, 17.5 (ScanPartScreen), 6.13 (ชนิดข้อมูลที่ห้ามสถานะผิด)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นความต่างระหว่างเครื่องสถานะที่เขียนไว้ชัดกับที่ซ่อนอยู่ และรู้ว่ามันเปลี่ยนอะไรบ้าง</div>
+
+<section id="section-1"><h2>1. บรรทัดที่เปลี่ยนทุกอย่าง</h2><pre class="code-vs"><code>enum _PickState {
+  scanSource,
+  pickView,
+  scanDest,
+  afterPick,
+  returnSource,
+}</code></pre><p>ห้าบรรทัดนี้คือความต่างที่ใหญ่ที่สุดระหว่างไฟล์นี้กับ <code>ScanPartScreen</code></p><table><thead><tr><th></th><th><code>ScanPartScreen</code> (17.5)</th><th><code>PickItemsScreen</code></th></tr></thead><tbody>
+<tr><td>บรรทัด</td><td>1,727</td><td>1,599</td></tr>
+<tr><td>สถานะ</td><td>3 โหมด <strong>ที่ต้องอ่าน <code>build()</code> แล้วประกอบเอง</strong></td><td>5 สถานะ <strong>ที่เขียนไว้บรรทัดที่ 23</strong></td></tr>
+<tr><td>คุมด้วย</td><td><code>_pendingLine != null</code> + <code>_scanningItem != null</code></td><td><code>_PickState _state</code> ตัวเดียว</td></tr>
+<tr><td>สถานะที่ขัดแย้งกัน</td><td><strong>สร้างได้</strong> (17.5 ข้อ 2)</td><td><strong>สร้างไม่ได้</strong></td></tr>
+<tr><td>คอมไพเลอร์ช่วย</td><td>ไม่</td><td>ช่วย</td></tr>
+</tbody></table><p>แถวที่สี่คือผลที่ตามมาโดยตรง — ฟิลด์เดียวถือค่าได้ทีละแบบ ไม่มีทางเป็นสองสถานะพร้อมกัน</p><pre class="code-vs"><code>_PickState _state = _PickState.pickView;</code></pre><p>เทียบกับที่ 17.5 ข้อ 3 เสนอว่าควรทำ — ที่นี่ทำแล้วจริง</p></section>
+
+<section id="section-2"><h2>2. build ที่คอมไพเลอร์ตรวจว่าครบ</h2><pre class="code-vs"><code>Expanded(
+  child: switch (_state) {
+    _PickState.scanSource =&gt; _buildScanSource(),
+    _PickState.pickView =&gt; _buildPickView(),
+    _PickState.scanDest =&gt; _buildScanDest(),
+    _PickState.afterPick =&gt; _buildAfterPick(),
+    _PickState.returnSource =&gt; _buildReturnSource(),
+  },
+),</code></pre><p><code>switch</code> ที่เป็นนิพจน์บน <code>enum</code> ต้องครบทุกสมาชิก — ถ้าเพิ่มสถานะที่หกแล้วลืมเพิ่มบรรทัด <strong>คอมไพล์ไม่ผ่าน</strong></p><table><thead><tr><th></th><th><code>switch</code> บน enum</th><th><code>if</code> ซ้อนกัน</th></tr></thead><tbody>
+<tr><td>ลืมกรณีหนึ่ง</td><td>คอมไพล์ไม่ผ่าน</td><td>ตกไปที่ else เงียบ ๆ</td></tr>
+<tr><td>อ่านแล้วรู้ว่ามีกี่กรณี</td><td>รู้ทันที</td><td>ต้องไล่</td></tr>
+<tr><td>เพิ่มกรณีใหม่</td><td>คอมไพเลอร์บอกทุกที่ที่ต้องแก้</td><td>ต้องหาเอง</td></tr>
+</tbody></table><div class="note"><strong>เทียบกับสิ่งที่ 18.3 และ 18.5 พบ</strong> — ที่นั่นใช้ <code>isPW ? A : B</code> และ <code>_ =&gt; 'Prework'</code> ซึ่งทำให้ค่าที่ไม่รู้จักตกไปที่ทางเลือกหนึ่งเงียบ ๆ<br>ที่นี่ไม่มีทางเกิดเพราะ <code>enum</code> มีสมาชิกจำกัดและคอมไพเลอร์รู้ว่ามีกี่ตัว</div><p>และชื่อโฟลเดอร์ widget ตรงกับสมาชิกของ enum</p><pre class="code-vs"><code>widgets/scan_source/    ← _PickState.scanSource
+widgets/pick_view/      ← _PickState.pickView
+widgets/scan_dest/      ← _PickState.scanDest
+widgets/after_pick/     ← _PickState.afterPick
+widgets/return_source/  ← _PickState.returnSource</code></pre><p>คนที่เปิดโฟลเดอร์ <code>widgets/</code> จะเห็นทันทีว่า flow มีกี่ขั้น โดยไม่ต้องเปิดไฟล์เลย</p></section>
+
+<section id="section-3"><h2>3. สถานะที่เหลืออีก 15 ตัว</h2><p><code>enum</code> คุมว่าจอแสดงอะไร แต่ยังมีข้อมูลที่ต้องจำ</p><pre class="code-vs"><code>// ── ค่าคงที่ของหน้าตา (8) ──
+static const Color _pickBorder = Color(0xFFDCE6F2);
+static const Color _pickTextDark = Color(0xFF1F2937);
+...
+static const int _pickSerialVisibleRowLimit = 5;
+
+// ── ตัวควบคุมช่องกรอก (10) ──
+final _sourceScanCtrl = TextEditingController();
+final _sourceScanFocus = FocusNode();
+final _destScanCtrl = TextEditingController();
+final _destScanFocus = FocusNode();
+final _partScanCtrl = TextEditingController();
+final _partScanFocus = FocusNode();
+final _serialScanCtrl = TextEditingController();
+final _serialScanFocus = FocusNode();
+final _qtyEntryCtrl = TextEditingController();
+final _qtyEntryFocus = FocusNode();
+
+// ── การเชื่อมต่อ (1) ──
+final _api = ApiService();
+
+// ── สถานะจริง (9) ──
+_PickState _state = _PickState.pickView;
+bool _loading = false;
+late String _pickOrderId;
+late AssignPickStationResponse _assignment;
+String? _destPalletId;
+ConfirmPickResponse? _lastResult;
+String? _returnPalletId;
+final Set&lt;String&gt; _selectedPartIds = {};
+final Map&lt;String, List&lt;String&gt;&gt; _pickedSerials = {};
+final Map&lt;String, int&gt; _pickedQty = {};
+final Set&lt;String&gt; _expandedSerialPartIds = {};</code></pre><table><thead><tr><th>กลุ่ม</th><th>จำนวน</th></tr></thead><tbody>
+<tr><td>ค่าคงที่</td><td>8</td></tr>
+<tr><td>ตัวควบคุม</td><td>10</td></tr>
+<tr><td>การเชื่อมต่อ</td><td>1</td></tr>
+<tr><td><strong>สถานะจริง</strong></td><td><strong>12</strong></td></tr>
+</tbody></table><p>12 ตัว เทียบกับ 16 ของ <code>ScanPartScreen</code> — ใกล้กัน แต่ตัวหนึ่งในนั้นคุมทั้งหมด</p><p>สังเกตว่า <code>_pickedSerials</code> กับ <code>_pickedQty</code> เก็บของสองแบบสำหรับสินค้าคนละชนิด</p><pre class="code-vs"><code>/// จำนวนที่หยิบแล้วของ part นี้ — จาก S/N ที่สแกน (ถ้า require) หรือจำนวนที่กรอกตรง (ถ้าไม่ require)
+int _pickedCountFor(PickItemOnPallet item) =&gt; item.serialRequire
+    ? (_pickedSerials[item.partId]?.length ?? 0)
+    : (_pickedQty[item.partId] ?? 0);</code></pre><div class="note"><strong>นี่แก้ปัญหาที่ 17.5 พบใน <code>ScanPartScreen</code></strong> — ที่นั่นจำนวนถูกเก็บใน <code>_qtyController</code> แล้วต้องซิงก์กับ <code>_serialNumbers</code> ด้วยมือทุกจุด<br>ที่นี่ไม่มีการซิงก์เลย เพราะ <code>_pickedCountFor</code> คำนวณจากแหล่งที่ถูกต้องตามชนิดสินค้า — ไม่มีทางไม่ตรง</div></section>
+
+<section id="section-4"><h2>4. ทางเดินระหว่างสถานะ</h2><pre class="code-vs"><code>┌─────────────┐  สแกนพาเลทต้นทางสำเร็จ   ┌──────────┐
+│ scanSource  │ ────────────────────────► │ pickView │◄── เริ่มที่นี่
+└─────────────┘                            └────┬─────┘
+      ▲                                         │ กดยืนยันหยิบ
+      │                                         ▼
+      │                                   ┌──────────┐
+      │                              ┌────│ scanDest │ (ข้ามถ้ารู้พาเลทปลายทางแล้ว)
+      │                              │    └──────────┘
+      │                              │ confirmPick สำเร็จ
+      │                              ▼
+      │                        ┌───────────┐
+      │◄───────────────────────│ afterPick │
+      │   คืนพาเลท / ส่งไปแพ็ก  └───────────┘
+      │
+┌─────┴──────────┐
+│ returnSource   │◄── สแกนพาเลทต้นทางไม่สำเร็จ
+└────────────────┘</code></pre><p>เข้าจอที่ <code>pickView</code> เพราะพาเลทถูกจัดสถานีมาแล้วจากจอก่อนหน้า (18.10)</p><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  _pickOrderId = widget.pickOrderId;
+  _assignment = widget.initialAssignment;    // ← ได้ข้อมูลมาแล้ว
+  _resetPickedSerials();
+}</code></pre><p>ทางเข้าสู่ <code>returnSource</code> น่าสนใจ</p><pre class="code-vs"><code>Future&lt;void&gt; _scanSourcePallet() async {
+  ...
+  final result = await _api.assignPickStation(palletId: palletId, pickOrderId: _pickOrderId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    setState(() {
+      _returnPalletId = palletId;
+      _state = _PickState.returnSource;     // ← ล้มเหลว → เสนอทางออกแทน
+    });
+    return;
+  }
+  ...
+}</code></pre><table><thead><tr><th>วิธีทั่วไป</th><th>วิธีนี้</th></tr></thead><tbody>
+<tr><td>แสดงกล่อง error แล้วให้ผู้ใช้เดาว่าทำอะไรต่อ</td><td><strong>พาไปหน้าที่มีทางออกให้</strong></td></tr>
+</tbody></table><div class="note"><strong>นี่คือการออกแบบที่ดีมากและหายาก</strong> — พาเลทที่ยิงแล้วเซิร์ฟเวอร์ไม่ให้หยิบ มักเป็นพาเลทที่ต้องส่งกลับ<br>แทนที่จะบอกว่า “ทำไม่ได้” แล้วปล่อยผู้ใช้ยืนงง จอพาไปหน้าที่ถามว่า “จะส่งพาเลทนี้กลับไหม”<br>เทียบกับ 18.9 ที่ทำสิ่งเดียวกันด้วย preview — ทีมนี้คิดเรื่องนี้อย่างเป็นระบบ</div></section>
+
+<section id="section-5"><h2>5. ปุ่มย้อนกลับที่รู้ว่าอยู่สถานะไหน</h2><pre class="code-vs"><code>void _handleBack() {
+  switch (_state) {
+    case _PickState.scanDest:
+      setState(() =&gt; _state = _PickState.pickView);    // กลับไปแก้ของที่เลือก
+      break;
+    case _PickState.afterPick:
+      break;                                            // ← ไม่ให้ย้อน
+    case _PickState.returnSource:
+      _goToScanSource();                                // ไปสแกนใบใหม่
+      break;
+    case _PickState.scanSource:
+    case _PickState.pickView:
+      Navigator.pop(context);                           // ออกจากจอ
+      break;
+  }
+}</code></pre><pre class="code-vs"><code>return PopScope(
+  canPop: _state == _PickState.pickView &amp;&amp;
+      _assignment == widget.initialAssignment,
+  onPopInvokedWithResult: (didPop, _) {
+    if (!didPop) _handleBack();
+  },
+  child: Scaffold(...),
+);</code></pre><table><thead><tr><th>สถานะ</th><th>กดย้อนกลับแล้ว</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>scanDest</code></td><td>กลับไป <code>pickView</code></td><td>ยังไม่ได้ยืนยัน แก้ของที่เลือกได้</td></tr>
+<tr><td><code>afterPick</code></td><td><strong>ไม่มีอะไรเกิด</strong></td><td>หยิบไปแล้ว ย้อนกลับไม่ได้</td></tr>
+<tr><td><code>returnSource</code></td><td>ไปสแกนใบใหม่</td><td>ไม่อยากส่งคืนก็สแกนใบอื่น</td></tr>
+<tr><td><code>scanSource</code></td><td>ออกจากจอ</td><td>ยังไม่ได้เริ่มอะไร</td></tr>
+<tr><td><code>pickView</code></td><td>ออกจากจอ</td><td>ดูเงื่อนไข <code>canPop</code> เพิ่ม</td></tr>
+</tbody></table><p>เงื่อนไข <code>canPop</code> มีสองส่วน</p><pre class="code-vs"><code>_state == _PickState.pickView &amp;&amp; _assignment == widget.initialAssignment</code></pre><p>ส่วนที่สองตรวจว่า<strong>ยังเป็นพาเลทใบเดิมที่เข้ามาหรือเปล่า</strong> — ถ้าผู้ใช้สแกนพาเลทใบใหม่ระหว่างทาง จะออกจากจอตรง ๆ ไม่ได้</p><div class="note"><strong>แต่ยังขาดเรื่องที่ 17.7 ชี้ไว้</strong> — ไม่ได้ตรวจว่ามี S/N ที่สแกนค้างอยู่ไหม<pre class="code-vs"><code>// ผู้ใช้สแกน S/N ไป 12 ตัวใน pickView แล้วกดย้อนกลับ
+// → canPop = true (ยังเป็นพาเลทเดิม) → ออกจากจอ → S/N หายหมด</code></pre>รูปแบบเดียวกับที่เจอใน <code>ScanPartScreen</code>, <code>UnloadSessionSheet</code> และ <code>LoadToBasketScreen</code> — <strong>เจอครบสี่จอแล้ว</strong></div><pre class="code-vs"><code>bool get _hasUnconfirmedWork =&gt;
+    _pickedSerials.values.any((s) =&gt; s.isNotEmpty) || _pickedQty.isNotEmpty;
+
+canPop: _state == _PickState.pickView &amp;&amp;
+    _assignment == widget.initialAssignment &amp;&amp;
+    !_hasUnconfirmedWork,</code></pre></section>
+
+<section id="section-6"><h2>6. เลือกสินค้าได้ทีละชิ้น</h2><pre class="code-vs"><code>final Set&lt;String&gt; _selectedPartIds = {};
+
+PickItemOnPallet? get _currentItem {
+  if (_selectedPartIds.length != 1) return null;      // ← ต้องเลือกพอดีหนึ่ง
+  final partId = _selectedPartIds.first;
+  return _assignment.palletItems.where((i) =&gt; i.partId == partId).firstOrNull;
+}</code></pre><p>ใช้ <code>Set</code> ทั้งที่เลือกได้ทีละหนึ่ง</p><pre class="code-vs"><code>void _activatePart(String partId) {
+  ...
+  setState(() {
+    _selectedPartIds
+      ..clear()
+      ..add(partId);          // ← ล้างแล้วใส่ตัวเดียว
+    ...
+  });
+}</code></pre><table><thead><tr><th>ทำไมใช้ <code>Set</code></th></tr></thead><tbody>
+<tr><td>ใช้เป็นตัวกรองรายการด้วย — <code>_buildShowAllBanner()</code> โผล่เมื่อมีการเลือก</td></tr>
+<tr><td>เผื่อไว้ให้เลือกหลายตัวในอนาคต</td></tr>
+</tbody></table><p><code>_currentItem</code> คืน <code>null</code> เมื่อไม่ได้เลือกพอดีหนึ่ง ซึ่งทำให้ผู้เรียกต้องตรวจ</p><pre class="code-vs"><code>void _addQty() {
+  final item = _currentItem;
+  if (item == null) {
+    showWarningSnackbar(context, 'กรุณาสแกน Part ก่อน');
+    _partScanFocus.requestFocus();
+    return;
+  }
+  ...
+}</code></pre><p>สังเกตว่าใช้ <code>firstOrNull</code> ไม่ใช่ <code>firstWhere</code> — ต่างจาก <code>_currentScannedItem()</code> ใน <code>UnloadSessionSheet</code> (17.12) ที่ประกาศคืน nullable แต่ใช้ <code>firstWhere</code> ซึ่งโยนได้</p><p>ที่นี่ชนิดที่ประกาศตรงกับพฤติกรรมจริง</p></section>
+
+<section id="section-7"><h2>7. ตัวจัดการช่องกรอกห้าคู่</h2><table><thead><tr><th>คู่</th><th>ใช้ในสถานะ</th><th>รับอะไร</th></tr></thead><tbody>
+<tr><td><code>_sourceScan</code></td><td><code>scanSource</code></td><td>รหัสพาเลทต้นทาง</td></tr>
+<tr><td><code>_partScan</code></td><td><code>pickView</code></td><td>รหัสสินค้า</td></tr>
+<tr><td><code>_serialScan</code></td><td><code>pickView</code></td><td>S/N ทีละตัว</td></tr>
+<tr><td><code>_qtyEntry</code></td><td><code>pickView</code></td><td>จำนวน (สินค้าที่ไม่มี S/N)</td></tr>
+<tr><td><code>_destScan</code></td><td><code>scanDest</code></td><td>รหัสพาเลทปลายทาง</td></tr>
+</tbody></table><p>ห้าคู่ = สิบวัตถุ และถูกคืนครบใน <code>dispose()</code></p><p>การย้ายโฟกัสระหว่างสถานะใช้ <code>addPostFrameCallback</code></p><pre class="code-vs"><code>void _goToScanDestOrConfirm() {
+  if (_destPalletId != null) {
+    _confirmPick(_destPalletId!);      // ← รู้ปลายทางแล้ว ข้ามขั้น
+    return;
+  }
+
+  setState(() {
+    _state = _PickState.scanDest;
+    _destScanCtrl.clear();
+  });
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _destScanFocus.requestFocus();     // ← รอให้ช่องถูกวาดก่อน
+  });
+}</code></pre><div class="note"><strong>จำเป็นเพราะช่องปลายทางเพิ่งถูกสร้างตอนเปลี่ยนสถานะ</strong> — ถ้าเรียก <code>requestFocus()</code> ทันทีใน <code>setState</code> ช่องยังไม่มีอยู่<br>รูปแบบเดียวกับที่ 18.10 ใช้ใน <code>initState</code> และเป็นสิ่งที่ต้องทำทุกครั้งที่โฟกัสไปยังช่องที่เพิ่งโผล่</div><p>บรรทัดแรกของเมธอดนี้เป็นรายละเอียดที่ประหยัดเวลาผู้ใช้มาก</p><pre class="code-vs"><code>if (_destPalletId != null) {
+  _confirmPick(_destPalletId!);
+  return;
+}</code></pre><p>ผู้ใช้ที่หยิบของหลายรอบลงพาเลทปลายทางเดียวกัน จะสแกนปลายทางแค่ครั้งแรก — รอบต่อไปกดยืนยันแล้วจบเลย</p><p>เป็นแนวคิดเดียวกับ <code>_lastPalletId</code> ใน <code>ScanPartScreen</code> (17.5) แต่ที่นี่ข้ามทั้งสถานะไปเลย</p></section>
+
+<section id="section-8"><h2>8. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ไฟล์ใหญ่แปลว่าอ่านยากเสมอ</td><td>ที่นี่ใหญ่แต่มีโครงชัดกว่า <code>ScanPartScreen</code></td></tr>
+<tr><td><code>enum</code> เป็นแค่เรื่องความเรียบร้อย</td><td>ทำให้สถานะที่ขัดแย้งกันสร้างไม่ได้</td></tr>
+<tr><td><code>switch</code> กับ <code>if</code> ซ้อนกันเหมือนกัน</td><td>คอมไพเลอร์ตรวจ <code>switch</code> บน enum ว่าครบ</td></tr>
+<tr><td>ล้มเหลวแล้วต้องแสดง error เท่านั้น</td><td>พาไปสถานะที่มีทางออกให้ดีกว่า</td></tr>
+<tr><td><code>requestFocus()</code> หลัง <code>setState</code> ได้เลย</td><td>ต้องรอเฟรมถัดไป</td></tr>
+</tbody></table></section>
+
+<section id="section-9"><h2>9. แบบฝึกหัด</h2><p>เทียบ <code>PickItemsScreen</code> กับ <code>ScanPartScreen</code> แล้วตอบ</p><ol><li>ถ้าจะเพิ่มสถานะที่หก (เช่น <code>confirmingWithSupervisor</code>) แต่ละจอต้องแก้อะไร</li><li>ปัญหาที่ 17.5 พบใน <code>ScanPartScreen</code> ข้อไหนบ้างที่ไม่เกิดที่นี่ และเพราะอะไร</li><li>ปัญหาข้อไหนที่ยังเกิดทั้งสองจอ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เพิ่มสถานะที่หก</strong></p><table><thead><tr><th></th><th><code>PickItemsScreen</code></th><th><code>ScanPartScreen</code></th></tr></thead><tbody>
+<tr><td>ประกาศสถานะ</td><td>เพิ่มสมาชิกใน <code>enum</code> 1 บรรทัด</td><td>เพิ่มฟิลด์ใหม่ หรือคิดเงื่อนไขใหม่จากฟิลด์เดิม</td></tr>
+<tr><td>หา build ที่ต้องแก้</td><td><strong>คอมไพเลอร์บอก</strong></td><td>ต้องอ่าน <code>build()</code> ทั้งหมดเอง</td></tr>
+<tr><td>ปุ่มย้อนกลับ</td><td><strong>คอมไพเลอร์บอก</strong> (switch ใน <code>_handleBack</code>)</td><td>ต้องหาเอง</td></tr>
+<tr><td>ตรวจว่าไม่ชนกับสถานะอื่น</td><td>ไม่ต้อง — เป็นไปไม่ได้</td><td><strong>ต้องไล่ทุกเงื่อนไข</strong></td></tr>
+<tr><td>เสี่ยงพลาด</td><td>ต่ำ</td><td>สูง</td></tr>
+</tbody></table><p>สองแถวกลางคือประโยชน์ที่จับต้องได้ที่สุด — เพิ่มสมาชิก enum แล้วรัน <code>flutter analyze</code> จะได้รายการจุดที่ต้องแก้ครบ</p><pre class="code-vs"><code>error: The type '_PickState' is not exhaustively matched by the switch cases
+  since it doesn't match '_PickState.confirmingWithSupervisor'.</code></pre><p>ข้อความนี้ปรากฏสองที่ (ใน <code>build</code> และ <code>_handleBack</code>) ซึ่งคือทุกที่ที่ต้องแก้จริง</p><p><strong>ข้อ 2 — ปัญหาที่ไม่เกิดที่นี่</strong></p><table><thead><tr><th>ปัญหาใน 17.5</th><th>เกิดที่นี่ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>สองสถานะมีค่าพร้อมกัน</td><td><strong>ไม่</strong></td><td><code>enum</code> ถือค่าได้ทีละแบบ</td></tr>
+<tr><td>จำนวนเก็บสองที่ต้องซิงก์เอง</td><td><strong>ไม่</strong></td><td><code>_pickedCountFor()</code> คำนวณจากแหล่งที่ถูกต้อง</td></tr>
+<tr><td>ไม่มีทางยกเลิกการเลือกสินค้า</td><td><strong>ไม่</strong></td><td>มีแบนเนอร์ “ดูทั้งหมด” ที่ล้าง <code>_selectedPartIds</code></td></tr>
+<tr><td>โหมดที่ซ่อนอยู่ ต้องอ่าน build เพื่อรู้</td><td><strong>ไม่</strong></td><td>อยู่บรรทัดที่ 23</td></tr>
+</tbody></table><p>สี่ข้อจากรายการของ 17.5 ไม่เกิดที่นี่ — และสามข้อแรกเป็นผลโดยตรงจากข้อสุดท้าย</p><p>สังเกตว่าไม่ใช่เพราะจอนี้เล็กกว่าหรือง่ายกว่า — จอนี้มีห้าสถานะ ส่วนอีกจอมีสาม</p><p><strong>ข้อ 3 — ปัญหาที่ยังเกิดทั้งสองจอ</strong></p><table><thead><tr><th>ปัญหา</th><th>ทั้งสองจอ</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>S/N ที่สแกนค้างหายเมื่อออกจากจอ</td><td><strong>เกิด</strong></td><td>สถานะอยู่ในเครื่อง ไม่ได้ส่งไปเซิร์ฟเวอร์</td></tr>
+<tr><td>ล้มเหลวแล้วไม่บอกว่าไม่รู้ผล</td><td><strong>เกิด</strong></td><td><code>ApiResult</code> ไม่มี <code>outcomeUnknown</code> (16.6)</td></tr>
+<tr><td>ทิ้ง <code>statusCode</code></td><td><strong>เกิด</strong></td><td>ชั้น api ทิ้งบางเมธอด (16.7)</td></tr>
+<tr><td><code>ApiService()</code> สร้างในจอ</td><td><strong>เกิด</strong></td><td>singleton (16.6)</td></tr>
+</tbody></table><p><strong>ข้อสรุปที่สำคัญที่สุด</strong></p><p>สี่ข้อที่ยังเกิดทั้งสองจอ ล้วนมีรากอยู่<strong>นอกจอ</strong> — ที่ชั้น <code>ApiResult</code> และที่การตัดสินใจว่าสถานะจะอยู่ฝั่งไหน</p><p>ส่วนสี่ข้อที่หายไป ล้วนมีรากอยู่<strong>ในจอ</strong> — และแก้ได้ด้วยการเปลี่ยนวิธีถือสถานะ</p><div class="note"><strong>บทเรียนที่ใช้ได้กับทุกโปรเจกต์:</strong> การใช้ <code>enum</code> แทนฟิลด์ <code>bool</code>/nullable หลายตัว แก้ปัญหาได้ทั้งกลุ่มในครั้งเดียว — ไม่ใช่เพราะเขียนสวยกว่า แต่เพราะ<strong>ทำให้สถานะที่ผิดสร้างไม่ได้</strong><br>แต่มันแก้ได้เฉพาะปัญหาที่เกิดในจอ ปัญหาที่รากอยู่ชั้นล่างต้องแก้ที่ชั้นล่าง — ซึ่ง Part 23 จะทำ</div></details></section>
+
+<section id="section-10"><h2>10. สรุป</h2><div class="success"><ul><li><code>enum _PickState</code> ห้าสมาชิกคือความต่างที่ใหญ่ที่สุดจาก <code>ScanPartScreen</code></li><li>ฟิลด์เดียวถือค่าได้ทีละแบบ — สถานะที่ขัดแย้งกันสร้างไม่ได้</li><li><code>switch</code> บน enum ทำให้คอมไพเลอร์ตรวจว่าครบทุกกรณี</li><li>ชื่อโฟลเดอร์ widget ตรงกับสมาชิกของ enum ทั้งห้า</li><li>สถานะจริง 12 ตัว และ <code>_pickedCountFor()</code> คำนวณจำนวนแทนการเก็บซ้ำ</li><li>สแกนพาเลทต้นทางไม่สำเร็จ → พาไปสถานะที่มีทางออกให้ ไม่ใช่แค่แสดง error</li><li><code>_handleBack()</code> ตัดสินตามสถานะ และ <code>afterPick</code> ย้อนกลับไม่ได้</li><li><code>canPop</code> ตรวจว่ายังเป็นพาเลทเดิม แต่ไม่ตรวจว่ามี S/N ค้าง</li><li>ข้ามสถานะ <code>scanDest</code> ได้เมื่อรู้ปลายทางแล้ว</li><li>ปัญหาที่รากอยู่ในจอหายไปด้วย enum ปัญหาที่รากอยู่ชั้นล่างยังอยู่</li></ul></div><p><strong>บทหน้า:</strong> การสแกนพาเลทต้นทางและการเลือกสินค้าทีละชิ้นบนพาเลท</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

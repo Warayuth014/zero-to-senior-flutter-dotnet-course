@@ -1,13 +1,253 @@
-<div class="note"><strong>Orders list เป็น operational inbox:</strong> แสดง WAITING/PICKING และมี pallet routing panel แยกต่างหาก ผู้ใช้ต้องเห็นชัดว่า action ใดเปิด order และ action ใดส่ง pallet</div>
-<section><h2>1. Load orders</h2><p><code>getPickOrdersList()</code> อ่าน <code>/picking/orders-list</code> แล้วเก็บ <code>List&lt;PickOrderListItem&gt;</code> พร้อม loading overlay หาก fail แสดง dialog แต่รายการเก่าอาจยังอยู่ จึงควรบอกว่า stale</p></section>
-<section><h2>2. Status semantics</h2><p><code>PickOrderListItem</code> มี helper <code>isWaiting</code>/<code>isPicking</code> จาก String status รายการ WAITING เปิด dialog “รอ Robot” ส่วน PICKING จึงเปิด detail unknown status ควรมี behavior ที่ explicit</p></section>
-<section><h2>3. Summary and cards</h2><p>หน้าจอนับ waiting/picking จาก list เดียวกับ card และแสดง partCount, totalRequiredQty, palletCount, owner/customerOrderId/createdAt จึงเป็น derived UI ไม่ควรมี counter state แยก</p></section>
-<section><h2>4. Open and refresh</h2><p>เมื่อ detail route pop กลับมา <code>_load()</code> ใหม่เพื่อสะท้อนงานที่ pick ไปแล้ว การเรียกแบบไม่ await ทำได้แต่ควรจัด error/loading และ generation เมื่อผู้ใช้ pull refresh ซ้อนกัน</p></section>
-<section><h2>5. Return preview</h2><pre class="code-vs"><code>scan pallet
-→ GET return-pallet-preview/{id}
-→ canReturn + destination + reason
-→ user confirms
-→ POST return-pallet</code></pre><p>preview ไม่มี side effect และให้ server เป็นผู้ตัดสิน routing</p></section>
-<section><h2>6. Preview is not reservation</h2><p>ระหว่าง preview กับ execute สถานะ pallet อาจเปลี่ยน จึงต้อง validate ซ้ำตอน POST และตอบ 409 หาก decision ไม่ใช้แล้ว UI ควร refresh preview ไม่ retry destination เก่าอัตโนมัติ</p></section>
-<section><h2>7. WAITING activation</h2><p>API มี <code>notifyArrival()</code> สำหรับ robot simulator เปลี่ยน WAITING→PICKING และ assign pallets แต่หน้ารายการปัจจุบันเพียงแจ้งให้รอ จึงต้องรู้ว่า activation มาจาก external process ไม่ใช่ tap card</p></section>
-<section><h2>8. List tests</h2><div class="success">ทดสอบ empty/error/stale, WAITING dialog, PICKING navigation+refresh, unknown status, preview denied, preview/execute conflict, cancel confirmation และ scanner focus คืนหลังทุก path</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด picking/orders_list/picking_orders_list_screen.dart ทั้ง 571 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.8, 17.3 (จอค้นหา), 7.10 (คำสั่งที่ไม่รู้ผล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ทำสองงานพร้อมกัน และเห็นรูปแบบ preview แล้วค่อยสั่งจริง</div>
+
+<section><h2>1. จอเดียวที่ทำสองเรื่อง</h2><pre class="code-vs"><code>Column(
+  children: [
+    // ── บนสุด: สรุปตัวเลข (ตรึงไว้) ──
+    Padding(child: _buildSummary(waitingCount, pickingCount)),
+
+    // ── กลาง: รายการงานหยิบ (เลื่อนได้) ──
+    Expanded(
+      child: RefreshIndicator(onRefresh: _load, child: ListView(...)),
+    ),
+
+    // ── ล่างสุด: ช่องสแกนพาเลทเพื่อส่งกลับ (ตรึงไว้) ──
+    _buildSendPalletPanel(),
+  ],
+)</code></pre><p>สามส่วนที่ทำงานคนละเรื่อง</p><table><thead><tr><th>ส่วน</th><th>เรื่อง</th><th>เกี่ยวกันไหม</th></tr></thead><tbody>
+<tr><td>สรุป + รายการ</td><td>งานหยิบที่รออยู่</td><td rowspan="2"><strong>ไม่เกี่ยวกันเลย</strong></td></tr>
+<tr><td>ช่องสแกนล่าง</td><td>ส่งพาเลทกลับ ASRS หรือไปแพ็ก</td></tr>
+</tbody></table><p>คอมเมนต์บนหัวไฟล์อธิบายไว้ตรง ๆ</p><pre class="code-vs"><code>// หน้า 1 ของ Picking flow:
+//   - Sticky top: summary (Waiting/Picking/รวม)
+//   - Scrollable middle: รายการ Pick Orders (WAITING + PICKING)
+//   - Sticky bottom: ส่ง Pallet → ASRS / ZONE_PACK / PICK</code></pre><div class="note"><strong>ทำไมสองเรื่องถึงอยู่จอเดียว</strong> — เพราะเป็นสองสิ่งที่ผู้ใช้ทำสลับกันตลอดกะ<br>หยิบของจนพาเลทต้นทางว่าง → ส่งพาเลทกลับ → รับงานใหม่<br>ถ้าแยกเป็นสองจอ ผู้ใช้ต้องเดินไปมาระหว่างจอทุกครั้ง — ตรงกับหลักที่ 5.6 สอนว่าจัดจอตามงานที่ผู้ใช้ทำ ไม่ใช่ตามชนิดข้อมูล</div><p>โครง <code>Column</code> + <code>Expanded</code> ตรงกลาง ทำให้ส่วนบนและล่างตรึงอยู่กับที่ขณะที่ตรงกลางเลื่อนได้ — สำคัญเพราะช่องสแกนต้องพร้อมใช้ตลอดเวลา</p></section>
+
+<section><h2>2. สรุปตัวเลขที่คำนวณใน build</h2><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  final waitingCount = _orders.where((o) =&gt; o.isWaiting).length;
+  final pickingCount = _orders.where((o) =&gt; o.isPicking).length;
+  ...
+}</code></pre><p>คำนวณจาก <code>_orders</code> ตัวเดียว — รูปแบบเดียวกับที่ 17.12 ชมใน <code>UnloadSessionSheet</code></p><pre class="code-vs"><code>_statTile('Waiting', waiting, AppTheme.primary, MdiIcons.robotIndustrialOutline),
+_statTile('Picking', picking, AppTheme.warning, Icons.local_shipping_outlined),
+_statTile('รวม', _orders.length, AppTheme.success, MdiIcons.formatListChecks),</code></pre><table><thead><tr><th>ป้าย</th><th>สี</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td>Waiting</td><td>น้ำเงิน</td><td>รอหุ่นยนต์ขนพาเลทมา</td></tr>
+<tr><td>Picking</td><td>เหลือง</td><td>พาเลทถึงแล้ว หยิบได้</td></tr>
+<tr><td>รวม</td><td>เขียว</td><td>ทั้งหมด</td></tr>
+</tbody></table><p>ตัวเลข <code>Picking</code> คือสิ่งที่ผู้ใช้ทำได้ทันที — ควรเด่นที่สุด แต่ได้สีเหลืองซึ่งในโปรเจกต์นี้หมายถึง “ระวัง” (16.9)</p><p>และ <code>รวม</code> ได้สีเขียวซึ่งหมายถึง “สำเร็จ” ทั้งที่เป็นแค่ผลบวก</p><div class="note"><strong>สีถูกเลือกให้ต่างกันเพื่อแยกสามช่อง ไม่ได้เลือกตามความหมาย</strong><br>ในจอนี้ไม่เสียหายเพราะมีป้ายกำกับอยู่ แต่ทำให้ผู้ใช้ที่คุ้นกับสีจากจออื่นตีความผิดได้<br>ตรงกับที่ 17.2 พบว่าสีแดงถูกใช้ทั้งกับ “มีงานรอ” และ “ผิดพลาด”</div></section>
+
+<section><h2>3. งานที่ยังกดไม่ได้</h2><pre class="code-vs"><code>Future&lt;void&gt; _openOrder(PickOrderListItem o) async {
+  if (o.isWaiting) {
+    _showWaitingDialog(o);          // ← ยังไม่พร้อม อธิบายแทน
+    return;
+  }
+  await Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) =&gt; PickingOrderDetailScreen(...)),
+  );
+  _load();                          // ← กลับมาแล้วโหลดใหม่
+}</code></pre><pre class="code-vs"><code>void _showWaitingDialog(PickOrderListItem o) {
+  showDialog&lt;void&gt;(
+    context: context,
+    builder: (ctx) =&gt; AlertDialog(
+      title: Row(children: [
+        Icon(MdiIcons.robotIndustrialOutline, color: AppTheme.primary, size: 24),
+        const SizedBox(width: 8),
+        const Expanded(child: Text('รอ Robot', ...)),
+      ]),
+      content: Column(children: [
+        Text(o.pickOrderId, ...),
+        Text('Robot กำลังขน pallet ของ order นี้มา\n'
+             'รอ status เปลี่ยนเป็น PICKING แล้วค่อยเริ่มเก็บของ'),
+      ]),
+      actions: [TextButton(onPressed: () =&gt; Navigator.pop(ctx), child: const Text('รับทราบ'))],
+    ),
+  );
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ยังกดได้ ไม่ปิดปุ่ม</td><td>ผู้ใช้ได้คำอธิบาย ไม่ใช่ความเงียบ</td></tr>
+<tr><td>บอกว่ากำลังรออะไร</td><td>“Robot กำลังขน pallet มา”</td></tr>
+<tr><td>บอกว่าจะรู้ได้อย่างไรว่าพร้อม</td><td>“รอ status เปลี่ยนเป็น PICKING”</td></tr>
+</tbody></table><div class="note"><strong>นี่คือสิ่งที่ 18.2 และ 18.4 พบว่าฝั่ง putaway ยังไม่ทำ</strong> — ที่นั่นแตะสถานีที่ไม่ว่างแล้ว <code>return;</code> เงียบ<br>จอนี้เจอปัญหาแบบเดียวกันแล้วแก้ด้วยกล่องอธิบาย ซึ่งเป็นทางที่ 18.4 แบบฝึกหัดสรุปว่าควรทำ</div><p>แต่ยังขาดสิ่งที่สำคัญที่สุด — <strong>ไม่มีอะไรบอกเมื่อสถานะเปลี่ยนเป็น PICKING</strong></p><pre class="code-vs"><code>ผู้ใช้กดงานที่ Waiting → เห็นกล่อง "รอ Robot" → กดรับทราบ
+  → ต้องดึงลงรีเฟรชเองเรื่อย ๆ เพื่อดูว่าเปลี่ยนหรือยัง</code></pre><p>ฝั่ง putaway มี SignalR ที่ยิง <code>PalletArrived</code> เมื่อพาเลทถึง (18.1) แต่จอนี้ไม่ได้ฟัง</p><table><thead><tr><th>ทางเลือก</th><th>ต้นทุน</th></tr></thead><tbody>
+<tr><td>ฟัง <code>PalletArrived</code> จาก hub เดิม</td><td>ต้องยืนยันว่า hub ยิงเหตุการณ์ของ picking ด้วยไหม</td></tr>
+<tr><td>โหลดใหม่เป็นระยะ</td><td>ทำได้ทันที ไม่ต้องแตะฝั่งเซิร์ฟเวอร์</td></tr>
+</tbody></table><pre class="code-vs"><code>Timer? _pollTimer;
+
+@override
+void initState() {
+  super.initState();
+  _load();
+  // มีงานที่รอหุ่นยนต์อยู่ → ถามซ้ำเป็นระยะจนกว่าจะพร้อม
+  _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    if (_orders.any((o) =&gt; o.isWaiting)) _load();
+  });
+}
+
+@override
+void dispose() {
+  _pollTimer?.cancel();
+  ...
+}</code></pre><p>เงื่อนไข <code>any((o) =&gt; o.isWaiting)</code> ทำให้ไม่ยิงเมื่อไม่มีอะไรให้รอ — ตรงกับหลักของ 12.1 ที่ว่าความถี่ต้องมาจากสิ่งที่กำลังรอจริง</p></section>
+
+<section><h2>4. รูปแบบ preview แล้วค่อยสั่ง</h2><p>ช่องสแกนล่างทำงานสามขั้น</p><pre class="code-vs"><code>Future&lt;void&gt; _sendPallet() async {
+  final palletId = _sendPalletCtrl.text.trim().toUpperCase();
+  if (palletId.isEmpty) {
+    showErrorDialog(context, message: 'กรุณาใส่ Pallet ID');
+    _sendPalletFocus.requestFocus();
+    return;
+  }
+
+  // ── 1) Preview ──
+  setState(() =&gt; _loading = true);
+  final preview = await _api.previewReturnPallet(palletId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!preview.success) { ... return; }
+
+  final info = preview.data!;
+  if (!info.canReturn) {
+    showErrorDialog(context, message: info.reason);
+    _sendPalletFocus.requestFocus();
+    return;
+  }
+
+  // ── 2) Show popup confirm ──
+  final dest = info.destination!;
+  ...
+  final confirmed = await showDialog&lt;bool&gt;(...);
+  if (confirmed != true || !mounted) {
+    _sendPalletFocus.requestFocus();
+    return;
+  }
+
+  // ── 3) Execute ──
+  setState(() =&gt; _loading = true);
+  final ok = await _api.returnPallet(palletId: palletId, destination: dest);
+  ...
+}</code></pre><p>คอมเมนต์แบ่งขั้นไว้ชัด และ endpoint ฝั่งเซิร์ฟเวอร์บอกไว้ว่าไม่มีผลข้างเคียง</p><pre class="code-vs"><code>/// Preview ก่อนคืน pallet — เช็คว่าสแกนได้ไหม + จะส่งไปไหน (ไม่มี side effect)
+Future&lt;ApiResult&lt;ReturnPalletPreview&gt;&gt; previewReturnPallet(String palletId)</code></pre><table><thead><tr><th>ขั้น</th><th>ได้อะไร</th><th>ปลอดภัยไหม</th></tr></thead><tbody>
+<tr><td>1 preview</td><td>ส่งได้ไหม และจะไปไหน</td><td>อ่านอย่างเดียว ยิงซ้ำได้</td></tr>
+<tr><td>2 ยืนยัน</td><td>ผู้ใช้เห็นปลายทางก่อนตัดสิน</td><td>ไม่ยิงอะไร</td></tr>
+<tr><td>3 สั่งจริง</td><td>พาเลทถูกส่ง</td><td><strong>มีผลข้างเคียง</strong></td></tr>
+</tbody></table><div class="note"><strong>ทำไมรูปแบบนี้สำคัญ</strong> — ปลายทางถูกตัดสินโดยเซิร์ฟเวอร์ ไม่ใช่ผู้ใช้<pre class="code-vs"><code>/// - ถ้าไม่ระบุ → backend ตัดสินใจเอง:
+///   - PACKED → ZONE_PACK
+///   - อื่นๆ (PICKING/AVAILABLE) → ASRS</code></pre>ถ้าไม่มี preview ผู้ใช้จะสแกนแล้วพาเลทหายไปที่ใดที่หนึ่งโดยไม่รู้ล่วงหน้า<br>preview ทำให้ผู้ใช้เห็นก่อนว่า “พาเลทนี้จะไป ZONE PACK” แล้วค่อยยืนยัน</div><p>ปุ่มในกล่องยืนยันปรับตามปลายทาง</p><pre class="code-vs"><code>final destLabel = dest == 'ZONE_PACK' ? 'ZONE PACK' : dest;
+final destIcon = dest == 'ZONE_PACK' ? MdiIcons.truckDeliveryOutline : MdiIcons.warehouse;
+final btnText = dest == 'ZONE_PACK' ? 'ส่งไป ZONE PACK' : 'ส่งกลับ ASRS';</code></pre><p>ปุ่มบอกสิ่งที่จะเกิด ไม่ใช่คำว่า “ยืนยัน” — ผู้ใช้ที่กดเร็วโดยไม่อ่านเนื้อหาก็ยังเห็นจากปุ่ม</p><p>สามบรรทัดนี้เป็นเงื่อนไขสองทางอีกครั้ง — ทุกอย่างที่ไม่ใช่ <code>ZONE_PACK</code> จะถูกเรียกว่า ASRS แม้ปลายทางจะเป็นอย่างอื่น</p></section>
+
+<section><h2>5. สิ่งที่ขาดในขั้นที่ 3</h2><pre class="code-vs"><code>final ok = await _api.returnPallet(palletId: palletId, destination: dest);
+if (!mounted) return;
+setState(() =&gt; _loading = false);
+
+if (!ok.success) {
+  showErrorDialog(context, message: ok.error ?? 'ส่ง $palletId → $destLabel ไม่สำเร็จ');
+  _sendPalletFocus.requestFocus();
+  return;
+}
+
+showSuccessSnackbar(context, '📦 ส่ง $palletId → $destLabel แล้ว');
+_sendPalletCtrl.clear();
+_sendPalletFocus.requestFocus();</code></pre><p>สั่งไม่สำเร็จ → แสดงข้อความ → ให้ผู้ใช้ลองใหม่</p><p>แต่การส่งพาเลทเป็นคำสั่งที่<strong>ไม่รู้ผล</strong>เมื่อเน็ตหลุด — คำสั่งอาจไปถึงแล้ว หุ่นยนต์อาจกำลังมา แต่แอปบอกว่าล้มเหลว</p><table><thead><tr><th>ผู้ใช้ทำ</th><th>ถ้าคำสั่งไปถึงแล้วจริง</th></tr></thead><tbody>
+<tr><td>สแกนซ้ำแล้วส่งอีกครั้ง</td><td>preview จะบอกว่า <code>canReturn = false</code> เพราะพาเลทถูกส่งไปแล้ว</td></tr>
+</tbody></table><p>โชคดีที่ preview ป้องกันไว้โดยบังเอิญ — ผู้ใช้ที่ลองซ้ำจะถูกปฏิเสธที่ขั้น 1 แทนที่จะสั่งซ้ำจริง</p><div class="note"><strong>แต่ข้อความที่ได้จะสับสน</strong> — ผู้ใช้เห็น “ส่งไม่สำเร็จ” แล้วสแกนซ้ำ แล้วเห็นข้อความจาก <code>info.reason</code> ที่บอกว่าพาเลทนี้ส่งไม่ได้<br>ทั้งที่ความจริงคือ “ส่งไปแล้ว” ซึ่งเป็นสิ่งที่ผู้ใช้ต้องการรู้</div><pre class="code-vs"><code>if (!ok.success) {
+  showErrorDialog(
+    context,
+    title: 'ไม่ทราบผล',
+    message: '${ok.error}\n\n'
+        'คำสั่งอาจส่งไปแล้ว — สแกน $palletId ซ้ำเพื่อตรวจสถานะก่อนสั่งใหม่',
+  );
+  _sendPalletFocus.requestFocus();
+  return;
+}</code></pre><p>ข้อความนี้ทำให้การสแกนซ้ำกลายเป็น<strong>การตรวจสอบ</strong> ไม่ใช่การลองใหม่ — ซึ่งตรงกับสิ่งที่ preview ทำจริง</p><p>ตรงกับข้อ 4 ของ 15.11: รู้ว่าคำสั่งไหนไม่รู้ผล และบอกผู้ใช้</p></section>
+
+<section><h2>6. ช่องสแกนที่ไม่ล้างเมื่อผิด</h2><pre class="code-vs"><code>showSuccessSnackbar(context, '📦 ส่ง $palletId → $destLabel แล้ว');
+_sendPalletCtrl.clear();          // ← ล้างเฉพาะเมื่อสำเร็จ
+_sendPalletFocus.requestFocus();</code></pre><p>ทุกทางที่ล้มเหลวคืนโฟกัสแต่ไม่ล้างช่อง</p><table><thead><tr><th>สถานการณ์</th><th>ค่าในช่อง</th><th>ผู้ใช้สแกนใหม่แล้ว</th></tr></thead><tbody>
+<tr><td>สำเร็จ</td><td>ว่าง</td><td>ได้ค่าใหม่</td></tr>
+<tr><td><strong>ล้มเหลว</strong></td><td><strong>ค่าเดิม</strong></td><td><strong>ได้ค่าเดิมต่อค่าใหม่</strong></td></tr>
+</tbody></table><pre class="code-vs"><code>ผู้ใช้สแกน PAL-001 → ไม่สำเร็จ → ช่องยังมี "PAL-001"
+  → สแกน PAL-002 → ช่องกลายเป็น "PAL-001PAL-002"
+    → preview ล้มเหลวเพราะไม่มีพาเลทชื่อนี้</code></pre><p>เทียบกับ <code>LoadToBasketScreen</code> ใน 17.10 ที่ล้างทันทีหลังอ่านค่า</p><pre class="code-vs"><code>void _onScanPart() {
+  final partId = _scanCtrl.text.trim().toUpperCase();
+  _scanCtrl.clear();          // ← ล้างทันที ทุกทางออกได้ฟรี
+  if (partId.isEmpty) return;
+  ...</code></pre><p>วิธีนั้นทนกว่า เพราะไม่ต้องจำไปล้างในทุกทางออก — และในจอนี้มีทางออกที่ล้มเหลวถึงห้าทาง</p><pre class="code-vs"><code>Future&lt;void&gt; _sendPallet() async {
+  final palletId = _sendPalletCtrl.text.trim().toUpperCase();
+  _sendPalletCtrl.clear();       // ← ย้ายมาบรรทัดนี้
+  if (palletId.isEmpty) {
+    showErrorDialog(context, message: 'กรุณาใส่ Pallet ID');
+    _sendPalletFocus.requestFocus();
+    return;
+  }
+  ...</code></pre><p>แต่มีข้อแลก — ผู้ใช้ที่พิมพ์เองแล้วผิดจะต้องพิมพ์ใหม่ทั้งหมด</p><p>บน PDA ที่ใช้เครื่องสแกนเป็นหลัก การล้างทันทีคุ้มกว่า เพราะการสแกนใหม่ใช้เวลาเท่าเดิม</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>จอควรทำเรื่องเดียว</td><td>ควรทำตามงานที่ผู้ใช้ทำสลับกัน</td></tr>
+<tr><td>preview เป็นขั้นตอนที่เกินความจำเป็น</td><td>ที่นี่จำเป็น เพราะปลายทางตัดสินโดยเซิร์ฟเวอร์</td></tr>
+<tr><td>สั่งไม่สำเร็จ = ไม่มีอะไรเกิดขึ้น</td><td>อาจไปถึงแล้ว ผู้ใช้ต้องตรวจก่อนสั่งซ้ำ</td></tr>
+<tr><td>คืนโฟกัสแล้วสแกนใหม่ได้เลย</td><td>ต้องล้างช่องด้วย ไม่งั้นค่าต่อกัน</td></tr>
+<tr><td>งานที่ยังไม่พร้อมควรปิดปุ่ม</td><td>ควรกดได้แล้วอธิบาย</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>หัวหน้ากะบอกว่า “คนงานยืนรอหน้าจอนี้ คอยดึงรีเฟรชทุกสิบวินาทีเพื่อดูว่างานพร้อมหรือยัง เสียเวลามาก”</p><ol><li>อาการนี้เกิดจากอะไร</li><li>เสนอทางแก้สามระดับ</li><li>ทำไมการโหลดถี่ขึ้นอย่างเดียวไม่พอ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><table><thead><tr><th>ข้อเท็จจริง</th><th>ผล</th></tr></thead><tbody>
+<tr><td>งานเริ่มที่สถานะ <code>WAITING</code></td><td>ผู้ใช้ทำอะไรไม่ได้</td></tr>
+<tr><td>เปลี่ยนเป็น <code>PICKING</code> เมื่อหุ่นยนต์ขนพาเลทมาถึง</td><td>เป็นเหตุการณ์ที่ผู้ใช้ไม่ได้ทำ</td></tr>
+<tr><td>จอโหลดใหม่เฉพาะตอนเปิดและตอนดึงลง</td><td><strong>ผู้ใช้ต้องถามเอง</strong></td></tr>
+<tr><td>ไม่มี SignalR ในจอนี้</td><td>ไม่มีอะไรบอกเมื่อเปลี่ยน</td></tr>
+</tbody></table><p>ตรงกับหลักของ 12.1 พอดี — <strong>ข้อมูลที่เปลี่ยนโดยที่ผู้ใช้ไม่ได้กด คือกรณีที่ต้องผลักข้อมูลมาหา ไม่ใช่ให้ผู้ใช้ถาม</strong></p><p>ฝั่ง putaway ตัดสินใจแบบนี้ถูกแล้ว (มี SignalR) ส่วนจอนี้มีความต้องการเดียวกันแต่ไม่ได้ทำ</p><p><strong>ข้อ 2 — สามระดับ</strong></p><table><thead><tr><th>ระดับ</th><th>ทำอะไร</th><th>ต้องแตะเซิร์ฟเวอร์ไหม</th><th>ความสด</th></tr></thead><tbody>
+<tr><td>1</td><td>โหลดใหม่ทุก 30 วินาที เฉพาะเมื่อมีงาน <code>WAITING</code></td><td>ไม่</td><td>ช้าสุด 30 วิ</td></tr>
+<tr><td>2</td><td>เพิ่ม + แจ้งเตือนเมื่อมีงานเปลี่ยนเป็น <code>PICKING</code></td><td>ไม่</td><td>เท่าเดิม แต่ผู้ใช้ไม่ต้องจ้อง</td></tr>
+<tr><td>3</td><td>ฟัง SignalR</td><td><strong>ต้อง</strong></td><td>ทันที</td></tr>
+</tbody></table><p>ระดับ 2 คุ้มที่สุด เพราะแก้อาการที่หัวหน้าเล่ามาโดยตรง — <strong>คนงานยืนจ้องจอ</strong></p><pre class="code-vs"><code>Timer? _pollTimer;
+Set&lt;String&gt; _knownPickingIds = {};
+
+@override
+void initState() {
+  super.initState();
+  _load();
+  _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    // ถามซ้ำเฉพาะเมื่อมีอะไรให้รอ — ไม่มีงานรอ ก็ไม่ต้องถาม
+    if (_orders.any((o) =&gt; o.isWaiting)) _load();
+  });
+}
+
+@override
+void dispose() {
+  _pollTimer?.cancel();
+  _sendPalletCtrl.dispose();
+  _sendPalletFocus.dispose();
+  super.dispose();
+}
+
+Future&lt;void&gt; _load() async {
+  ...
+  if (!res.success) { ... return; }
+
+  final orders = res.data!;
+  final nowPicking = orders.where((o) =&gt; o.isPicking).map((o) =&gt; o.pickOrderId).toSet();
+  final newlyReady = nowPicking.difference(_knownPickingIds);
+
+  setState(() {
+    _orders = orders;
+    _knownPickingIds = nowPicking;
+  });
+
+  // งานที่เพิ่งพร้อม — บอกด้วยเสียงสั่น ผู้ใช้ไม่ต้องจ้องจอ
+  if (newlyReady.isNotEmpty &amp;&amp; mounted) {
+    showSuccessSnackbar(
+      context,
+      newlyReady.length == 1
+          ? 'งาน ${newlyReady.first} พร้อมหยิบแล้ว'
+          : 'มีงานพร้อมหยิบ ${newlyReady.length} รายการ',
+    );
+  }
+}</code></pre><p><code>showSuccessSnackbar</code> สั่นเบาให้ด้วย (16.9) — ผู้ใช้ที่ทำอย่างอื่นอยู่จะรู้สึกได้</p><p>ต้องตรวจอย่างหนึ่ง: ครั้งแรกที่โหลด <code>_knownPickingIds</code> ว่าง ทำให้ทุกงานที่ <code>PICKING</code> ถูกนับเป็น “เพิ่งพร้อม”</p><pre class="code-vs"><code>bool _firstLoadDone = false;
+...
+if (newlyReady.isNotEmpty &amp;&amp; _firstLoadDone &amp;&amp; mounted) { ... }
+_firstLoadDone = true;</code></pre><p><strong>ข้อ 3 — ทำไมโหลดถี่ขึ้นอย่างเดียวไม่พอ</strong></p><table><thead><tr><th>ถ้าโหลดทุก 5 วินาทีแต่ไม่แจ้งเตือน</th></tr></thead><tbody>
+<tr><td>ผู้ใช้<strong>ยังต้องจ้องจอ</strong>อยู่ดี เพราะไม่รู้ว่าเมื่อไรจะเปลี่ยน</td></tr>
+<tr><td>กินแบตมากขึ้นหกเท่า</td></tr>
+<tr><td>20 เครื่อง × 12 ครั้ง/นาที = 240 คำขอ/นาที</td></tr>
+</tbody></table><p>อาการที่หัวหน้าเล่าคือ “ยืนรอหน้าจอ” — ปัญหาไม่ใช่ข้อมูลช้า แต่คือ<strong>ผู้ใช้ไม่มีทางรู้โดยไม่มอง</strong></p><p>การแจ้งเตือนแก้อาการนั้นได้แม้ข้อมูลจะช้า 30 วินาที เพราะคนงานเดินไปทำอย่างอื่นได้แล้ว</p><div class="note"><strong>หลักที่ใช้ได้ทั่วไป:</strong> เมื่อผู้ใช้บ่นว่าต้องคอยรีเฟรช ให้ถามก่อนว่าเขาต้องการ<strong>ข้อมูลที่สดกว่า</strong> หรือ<strong>ไม่ต้องคอยดู</strong><br>สองอย่างนี้แก้คนละวิธี และอย่างที่สองมักเป็นสิ่งที่ต้องการจริง</div></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>จอเดียวทำสองเรื่องที่ไม่เกี่ยวกัน เพราะผู้ใช้ทำสลับกันตลอดกะ</li><li><code>Column</code> + <code>Expanded</code> ตรงกลาง ทำให้ช่องสแกนตรึงอยู่ล่างเสมอ</li><li>ตัวเลขสรุปคำนวณจาก <code>_orders</code> ตัวเดียว แต่สีถูกเลือกให้ต่างกัน ไม่ได้เลือกตามความหมาย</li><li>งานที่ยัง <code>WAITING</code> ยังกดได้ แล้วอธิบายด้วยกล่อง — ดีกว่าที่ฝั่ง putaway ทำ</li><li>แต่ไม่มีอะไรบอกเมื่อสถานะเปลี่ยน ผู้ใช้ต้องดึงรีเฟรชเอง</li><li>การส่งพาเลทใช้รูปแบบ preview → ยืนยัน → สั่งจริง เพราะปลายทางตัดสินโดยเซิร์ฟเวอร์</li><li>ปุ่มยืนยันบอกสิ่งที่จะเกิด ไม่ใช่คำว่า “ยืนยัน”</li><li>สั่งไม่สำเร็จแล้วไม่บอกว่าอาจไปถึงแล้ว — preview ป้องกันไว้โดยบังเอิญ</li><li>ช่องสแกนล้างเฉพาะเมื่อสำเร็จ ทำให้ค่าต่อกันเมื่อล้มเหลว</li></ul></div><p><strong>บทหน้า:</strong> หน้าที่สองของ picking — รายละเอียดงานและการตรวจพาเลทก่อนเข้าจอหยิบ</p></section>

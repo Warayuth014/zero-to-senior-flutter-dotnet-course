@@ -4,16 +4,216 @@
 <title>Station State</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-03 · Real Codebase</span><h1>Station State</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">StationCard lifecycle</a></li><li><a href="#section-2">Normal vs dispatching</a></li><li><a href="#section-3">Sheet state</a></li><li><a href="#section-4">Station policies</a></li><li><a href="#section-5">Scan transition</a></li><li><a href="#section-6">Confirm transition</a></li><li><a href="#section-7">Async lifecycle bug</a></li><li><a href="#section-8">Refactor</a></li></ol></nav>
-<div class="note"><strong>StationSheet คือ command form:</strong> StationCard แสดง normal/dispatching state ส่วน sheet รับ pallet, ตรวจ station policy และสร้าง confirm command ที่สมบูรณ์</div>
-<section id="section-1"><h2>1. StationCard lifecycle</h2><p><code>AnimationController</code> เริ่ม repeat เมื่อ isDispatching และ <code>didUpdateWidget</code> start/stop/reset เมื่อสถานะเปลี่ยน ก่อน dispose controller เสมอ จึงไม่ทิ้ง ticker หลังออกหน้า</p></section>
-<section id="section-2"><h2>2. Normal vs dispatching</h2><p>normal content แสดง station, pallet/destination และ affordance; dispatching content เปลี่ยนสีเป็น danger พร้อมลูกศร animated และข้อความ AMR ตาม receive/send role ภาพเคลื่อนไหวเป็น presentation ไม่ใช่ timer ของงานจริง</p></section>
-<section id="section-3"><h2>3. Sheet state</h2><p>state หลักคือ pallet controller, <code>PutawayPalletInfo?</code>, loading scan/confirm, selected destination และ wrapping flag ส่วน effective destination ให้ fixedDestination ของ station ชนะค่าที่ผู้ใช้เลือก</p></section>
-<section id="section-4"><h2>4. Station policies</h2><p><code>allowedType</code> จำกัดชนิด pallet, <code>fixedDestination</code> ล็อกปลายทาง และ <code>pwRole</code> เปลี่ยนความหมายหน้าจอ receive/send กติกาเหล่านี้ต้อง validate ซ้ำใน .NET เพราะ client ถูกแก้ request ได้</p></section>
-<section id="section-5"><h2>5. Scan transition</h2><pre class="code-vs"><code>empty → loadingPallet → palletLoaded
-                    ↘ error/typeMismatch</code></pre><p>request ส่ง palletId และ stationId ให้ backend ตรวจ location/availability ก่อน UI นำ response มาเลือก suggestedDestination</p></section>
-<section id="section-6"><h2>6. Confirm transition</h2><p>dialog อธิบาย destination และ wrapping จากนั้น <code>confirmPutaway</code> ส่ง operatorId เมื่อสำเร็จ pop sheet แล้วให้ parent refresh ห้ามถือว่าปิด sheet เท่ากับ AMR ขนเสร็จ เพราะ dispatch/arrival เป็นสถานะถัดไป</p></section>
-<section id="section-7"><h2>7. Async lifecycle bug</h2><p>ในโค้ดจริงบางจุดเรียก <code>setState</code> หลัง await ก่อนตรวจ <code>mounted</code> เช่นปิด loading ใน scan/confirm หาก sheet ถูกปิดระหว่าง request อาจเกิด setState after dispose ควรตรวจ mounted ก่อน setState ทุกครั้ง</p></section>
-<section id="section-8"><h2>8. Refactor</h2><div class="success">สร้าง sealed state Loading/Ready/Submitting/Error และ inject PutawayRepository; ให้ StationPolicy คำนวณ allowed destinations/wrapping แยกจาก widget แล้วเขียน test policy โดยไม่ต้อง pump bottom sheet</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คลาสเล็กที่ควบคุมทุกอย่าง</a></li><li><a href="#section-2">เงื่อนไขที่กระจายอยู่</a></li><li><a href="#section-3">บั๊ก setState หลัง await</a></li><li><a href="#section-4">การตรวจประเภทพาเลทฝั่งแอป</a></li><li><a href="#section-5">ข้อความยืนยันสามแบบ</a></li><li><a href="#section-6">ปุ่มที่หมุนผิดตัว</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด shared/widgets/station/station_sheet.dart และ shared/models/station_info.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.2, 4.13 (mounted กับ async)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน widget ที่ปรับพฤติกรรมตามค่าที่รับเข้ามา และหาบั๊ก <code>setState</code> หลัง <code>await</code> ได้</div>
+
+<section id="section-1"><h2>1. คลาสเล็กที่ควบคุมทุกอย่าง</h2><pre class="code-vs"><code>enum PWRole { none, receive, send }
+
+class StationInfo {
+  final String id;
+  final String label;
+  final Color color;
+  final IconData icon;
+  final String? allowedType;         // รับพาเลทประเภทไหนได้
+  final String? fixedDestination;    // ปลายทางตายตัว หรือ null = ให้เลือก
+  final PWRole pwRole;               // บทบาทในสถานีแปรรูป
+
+  const StationInfo({...});
+}</code></pre><p>20 บรรทัด แต่สามฟิลด์ท้ายเปลี่ยนพฤติกรรมของ <code>StationSheet</code> ทั้งแผ่น</p><table><thead><tr><th>สถานี</th><th><code>allowedType</code></th><th><code>fixedDestination</code></th><th><code>pwRole</code></th></tr></thead><tbody>
+<tr><td>STN-1..3</td><td><code>null</code></td><td><code>null</code></td><td><code>none</code></td></tr>
+<tr><td>PW-STN-1, 3, 5</td><td><code>'PW'</code></td><td><code>null</code></td><td><code>receive</code></td></tr>
+<tr><td>PW-STN-2, 4, 6</td><td><code>'PW'</code></td><td><code>'ASRS'</code></td><td><code>send</code></td></tr>
+</tbody></table><p>สามชุดนี้ทำให้แผ่นเดียวทำงานได้สามแบบ โดยไม่ต้องมีสามคลาส</p><div class="note"><strong>นี่คือรูปแบบที่ 1.13 เรียกว่าปรับพฤติกรรมด้วยข้อมูล ไม่ใช่ด้วยการสืบทอด</strong><br>ถ้าใช้การสืบทอด จะได้ <code>NormalStationSheet</code>, <code>PWSendStationSheet</code>, <code>PWReceiveStationSheet</code> ที่มีโค้ดซ้ำกัน 80%<br>ราคาที่จ่ายคือต้องอ่าน <code>if</code> หลายที่ในไฟล์เดียว — ซึ่งจัดการได้ถ้ามีไม่กี่จุด</div></section>
+
+<section id="section-2"><h2>2. เงื่อนไขที่กระจายอยู่</h2><p>ค้น <code>widget.station</code> ในไฟล์นี้เจอเงื่อนไขที่ตัดสินหน้าตาและพฤติกรรมหกจุด</p><pre class="code-vs"><code>// 1. บทบาท — เปลี่ยนคำที่ใช้
+bool get _isReceive =&gt; widget.station.pwRole == PWRole.receive;
+
+// 2. ปลายทาง — ใช้ค่าตายตัวถ้ามี
+String get _effectiveDestination =&gt;
+    widget.station.fixedDestination ?? _selectedDestination;
+
+// 3. ตรวจประเภทพาเลทตอนสแกน
+if (widget.station.allowedType != null &amp;&amp;
+    pallet.type != widget.station.allowedType) { ... }
+
+// 4. ข้อความยืนยัน — สามแบบ
+final isSendStation = widget.station.fixedDestination != null;
+
+// 5. แสดงตัวเลือกปลายทางเฉพาะเมื่อไม่มีค่าตายตัว
+if (widget.station.fixedDestination == null) ...[ StationDestinationSelector(...) ],
+
+// 6. แสดงตัวเลือกพันฟิล์มเฉพาะเมื่อปลายทางเป็น ASRS ตายตัว
+if (widget.station.fixedDestination == 'ASRS') ...[ StationWrappingToggle(...) ],</code></pre><table><thead><tr><th>จุด</th><th>ตัดสินอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ปุ่มเขียนว่า “เรียก Pallet” หรือ “ค้นหา Pallet”</td></tr>
+<tr><td>2</td><td>ส่งปลายทางอะไรไปเซิร์ฟเวอร์</td></tr>
+<tr><td>3</td><td>รับพาเลทประเภทนี้ได้ไหม</td></tr>
+<tr><td>4</td><td>ข้อความในกล่องยืนยัน</td></tr>
+<tr><td>5, 6</td><td>แสดงตัวเลือกอะไรบ้าง</td></tr>
+</tbody></table><p>สองฟิลด์แรกถูกทำเป็น getter ซึ่งช่วยมาก — อ่าน <code>_isReceive</code> เข้าใจกว่า <code>widget.station.pwRole == PWRole.receive</code></p><p>แต่มีจุดหนึ่งที่เงื่อนไขไม่สอดคล้องกัน</p><pre class="code-vs"><code>// จุดที่ 4 ใช้ fixedDestination != null
+final isSendStation = widget.station.fixedDestination != null;
+
+// แต่ pwRole ก็บอกเรื่องเดียวกัน
+widget.station.pwRole == PWRole.send</code></pre><table><thead><tr><th>สถานี</th><th><code>fixedDestination != null</code></th><th><code>pwRole == send</code></th></tr></thead><tbody>
+<tr><td>STN-1..3</td><td>false</td><td>false</td></tr>
+<tr><td>PW-STN-1, 3, 5</td><td>false</td><td>false</td></tr>
+<tr><td>PW-STN-2, 4, 6</td><td><strong>true</strong></td><td><strong>true</strong></td></tr>
+</tbody></table><p>ตอนนี้ตรงกันทุกแถว — แต่ไม่มีอะไรบังคับไว้ ถ้าวันหนึ่งมีสถานีปกติที่ปลายทางตายตัว สองเงื่อนไขจะแยกกันทันที และโค้ดจะทำงานไม่ตรงกับที่ตั้งใจ</p></section>
+
+<section id="section-3"><h2>3. บั๊ก setState หลัง await</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanPallet() async {
+  ...
+  final result = await _api.scanPalletForPutaway(palletId, stationId: widget.station.id);
+  setState(() =&gt; _loadingPallet = false);       // ← ก่อนตรวจ mounted
+  if (!mounted) return;                          // ← ตรวจทีหลัง
+  ...
+}</code></pre><p>สองบรรทัดนี้สลับกัน ทุกจอที่ผ่านมาเขียนแบบตรงข้าม</p><pre class="code-vs"><code>// รูปแบบที่ถูก — ใช้ในทุกจอของ Part 17
+if (!mounted) return;
+setState(() =&gt; _loading = false);</code></pre><table><thead><tr><th>สถานการณ์</th><th>ผลของโค้ดปัจจุบัน</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ปัดแผ่นลงระหว่างที่คำขอค้าง</td><td><code>setState</code> ถูกเรียกบน State ที่ถูกถอดแล้ว</td></tr>
+<tr><td>Flutter ตอบสนอง</td><td>โยน <code>FlutterError</code> ที่บอกว่า <em>setState() called after dispose()</em></td></tr>
+</tbody></table><p>เกิดได้จริงเพราะแผ่นนี้ปัดปิดได้ตลอด — ต่างจาก <code>UnloadSessionSheet</code> ใน 17.11 ที่มี <code>PopScope</code> กันไว้ระหว่างโหลด</p><pre class="code-vs"><code>// UnloadSessionSheet มี
+bool get _canDismiss =&gt; !_loading &amp;&amp; !_returning;
+return PopScope(canPop: _canDismiss, ...);
+
+// StationSheet ไม่มี PopScope เลย</code></pre><p>จุดเดียวกันปรากฏสองครั้งในไฟล์นี้</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmPutaway() async {
+  ...
+  final result = await _api.confirmPutaway(...);
+  setState(() =&gt; _loadingConfirm = false);      // ← เหมือนกัน
+  if (!mounted) return;
+  ...
+}</code></pre><div class="note"><strong>ทำไมถึงยังไม่มีใครแจ้ง</strong> — ข้อผิดพลาดนี้ปรากฏเฉพาะในโหมด debug ที่คอนโซล ส่วนใน release <code>setState</code> บน State ที่ตายแล้วจะไม่ทำอะไรเลย ไม่พังและไม่มีอะไรแสดง<br>15.10 อธิบายว่าความล้มเหลวแบบนี้ไม่ใช่ crash และจะไม่ปรากฏในรายงาน — จึงหาไม่เจอจนกว่าจะมีคนอ่านโค้ด</div><p>แก้ได้ด้วยการสลับสองบรรทัด และควรเพิ่ม <code>PopScope</code> ด้วย</p><pre class="code-vs"><code>final result = await _api.confirmPutaway(...);
+if (!mounted) return;
+setState(() =&gt; _loadingConfirm = false);</code></pre><pre class="code-vs"><code>return PopScope(
+  // กำลังสั่ง putaway อยู่ — ปิดแผ่นตอนนี้ผู้ใช้จะไม่รู้ผล
+  canPop: !_loadingConfirm,
+  child: Container(...),
+);</code></pre></section>
+
+<section id="section-4"><h2>4. การตรวจประเภทพาเลทฝั่งแอป</h2><pre class="code-vs"><code>final pallet = result.data!;
+
+if (widget.station.allowedType != null &amp;&amp;
+    pallet.type != widget.station.allowedType) {
+  showErrorDialog(
+    context,
+    message: '${widget.station.id} รับเฉพาะ Pallet ประเภท ${widget.station.allowedType}\n'
+        'Pallet นี้เป็นประเภท ${pallet.type}',
+  );
+  return;
+}</code></pre><p>เซิร์ฟเวอร์คืนข้อมูลพาเลทมาสำเร็จแล้ว แต่แอปปฏิเสธเอง — เหมือนด่านที่หกใน 17.6</p><table><thead><tr><th>ข้อความบอก</th><th>ผู้ใช้ทำอะไรต่อได้</th></tr></thead><tbody>
+<tr><td>สถานีนี้รับประเภทไหน</td><td>รู้ว่าต้องหาพาเลทแบบไหน</td></tr>
+<tr><td>พาเลทที่สแกนเป็นประเภทไหน</td><td>รู้ว่าต้องเอาไปสถานีไหนแทน</td></tr>
+</tbody></table><p>ครบตามหลักที่ 10.7 และ 17.6 ใช้ — บอกทั้งที่คาดหวังและที่ได้จริง</p><p>แต่มีคำถามที่ต้องถาม: ทำไมส่ง <code>stationId</code> ไปแล้วเซิร์ฟเวอร์ไม่ปฏิเสธเอง</p><pre class="code-vs"><code>final query = stationId != null ? '?stationId=$stationId' : '';
+final response = await _get('/putaway/scan-pallet/$palletId$query');</code></pre><table><thead><tr><th>ถ้าเซิร์ฟเวอร์ตรวจ</th><th>ถ้าแอปตรวจ (ตอนนี้)</th></tr></thead><tbody>
+<tr><td>กฎอยู่ที่เดียว ทุกไคลเอนต์ได้เหมือนกัน</td><td>เว็บกับแอปอาจตรวจไม่เหมือนกัน</td></tr>
+<tr><td>ข้อความมาจากเซิร์ฟเวอร์</td><td>ข้อความปรับให้เหมาะกับหน้าจอได้</td></tr>
+<tr><td>ต้องยิงเน็ตถึงจะรู้</td><td>รู้ทันทีจากข้อมูลที่มีแล้ว</td></tr>
+</tbody></table><p>ที่นี่ยิงไปแล้วอยู่ดี จึงไม่ได้ประหยัดคำขอ — การตรวจฝั่งแอปได้ประโยชน์แค่ข้อความที่อ่านง่ายกว่า</p><div class="note"><strong>สิ่งที่ต้องระวังเมื่อกฎอยู่ฝั่งแอปเท่านั้น:</strong> ถ้าเซิร์ฟเวอร์ไม่ตรวจซ้ำ คนที่เรียก API ตรง ๆ จะข้ามกฎนี้ได้<br>ในเครือข่ายคลังปิดความเสี่ยงต่ำ แต่ควรรู้ว่ากฎ “สถานีนี้รับพาเลทประเภทนี้” มีอยู่ที่เดียวคือในโค้ดฝั่งแอป — เหมือนที่ 16.4 พบเรื่อง <code>operatorId</code></div></section>
+
+<section id="section-5"><h2>5. ข้อความยืนยันสามแบบ</h2><pre class="code-vs"><code>String title;
+String message;
+if (isSendStation) {
+  title = 'ยืนยันส่ง Pallet ไป ASRS';
+  final wrappingNote = _wrappingRequired ? '\nผ่าน Wrapping Machine ก่อน' : '';
+  message = 'ส่ง ${_pallet!.palletId} ไปเก็บที่ ASRS$wrappingNote\n\n'
+      '${_wrappingRequired ? 'จะส่งเข้า Wrapping Machine ก่อน' : 'AMR จะมารับทันที'}';
+} else if (dest == 'REPLENISH') {
+  title = 'ยืนยัน Replenish';
+  message = 'ส่ง Pallet ${_pallet!.palletId}\n'
+      'ที่ ${widget.station.id} -&gt; $destLabel\n\n'
+      'AMR จะรับ Pallet ไปเติมสต็อก Rack';
+} else {
+  title = 'ยืนยัน Putaway';
+  ...
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>บอกว่าจะเกิดอะไรขึ้นต่อ</td><td>“AMR จะมารับทันที” — ผู้ใช้รู้ว่าต้องถอยห่าง</td></tr>
+<tr><td>ระบุรหัสพาเลท</td><td>ยืนยันว่าจะสั่งกับตัวที่ตั้งใจ</td></tr>
+<tr><td>ระบุปลายทาง</td><td>ยืนยันว่าเลือกถูก</td></tr>
+</tbody></table><p>ข้อความที่บอกผลลัพธ์ทางกายภาพเป็นสิ่งที่ขาดไม่ได้ในคลังที่มีหุ่นยนต์ — ต่างจากแอปทั่วไปที่ “ยืนยันการบันทึก” ก็พอ</p><p>จุดที่ซ้ำซ้อน</p><pre class="code-vs"><code>final wrappingNote = _wrappingRequired ? '\nผ่าน Wrapping Machine ก่อน' : '';
+message = '...$wrappingNote\n\n'
+    '${_wrappingRequired ? 'จะส่งเข้า Wrapping Machine ก่อน' : 'AMR จะมารับทันที'}';</code></pre><p>เมื่อ <code>_wrappingRequired</code> เป็น true ผู้ใช้จะเห็นข้อความเรื่อง Wrapping Machine <strong>สองครั้ง</strong>ในกล่องเดียว</p><pre class="code-vs"><code>ส่ง PAL-001 ไปเก็บที่ ASRS
+ผ่าน Wrapping Machine ก่อน
+
+จะส่งเข้า Wrapping Machine ก่อน</code></pre><p>เขียนใหม่ให้บอกครั้งเดียวและตรงกว่า</p><pre class="code-vs"><code>message = 'ส่ง ${_pallet!.palletId} ไปเก็บที่ ASRS\n\n'
+    '${_wrappingRequired ? 'จะเข้า Wrapping Machine ก่อน แล้ว AMR จะรับต่อ' : 'AMR จะมารับทันที'}';</code></pre></section>
+
+<section id="section-6"><h2>6. ปุ่มที่หมุนผิดตัว</h2><pre class="code-vs"><code>PrimaryButton(
+  label: _isReceive ? 'เรียก Pallet' : 'ค้นหา Pallet',
+  icon: _isReceive ? MdiIcons.trayArrowDown : Icons.search,
+  loading: _isReceive ? _loadingConfirm : _loadingPallet,    // ← ตรงนี้
+  onPressed: _scanPallet,
+),</code></pre><p>ปุ่มนี้เรียก <code>_scanPallet</code> เสมอ แต่แสดงตัวหมุนจาก <code>_loadingConfirm</code> เมื่อเป็นสถานีฝั่งรับ</p><table><thead><tr><th>สถานี</th><th>กดปุ่มแล้วเรียก</th><th>ตัวหมุนดูจาก</th><th>ตรงกันไหม</th></tr></thead><tbody>
+<tr><td>ปกติ / ฝั่งส่ง</td><td><code>_scanPallet</code></td><td><code>_loadingPallet</code></td><td>ตรง</td></tr>
+<tr><td><strong>ฝั่งรับ</strong></td><td><code>_scanPallet</code></td><td><strong><code>_loadingConfirm</code></strong></td><td><strong>ไม่ตรง</strong></td></tr>
+</tbody></table><p>ผลที่ผู้ใช้เจอบนสถานีฝั่งรับ</p><pre class="code-vs"><code>กด "เรียก Pallet"
+  → _scanPallet() เริ่ม, _loadingPallet = true
+    → แต่ปุ่มดู _loadingConfirm ซึ่งยังเป็น false
+      → ปุ่มไม่หมุน ไม่ถูกปิด
+        → ผู้ใช้กดซ้ำได้ระหว่างรอ</code></pre><p>และ <code>_scanPallet()</code> ไม่มีการกันซ้ำที่ต้นทาง</p><pre class="code-vs"><code>Future&lt;void&gt; _scanPallet() async {
+  final palletId = _palletController.text.trim().toUpperCase();
+  if (palletId.isEmpty) { ... }
+  // ไม่มี if (_loadingPallet) return;
+  setState(() { _loadingPallet = true; _pallet = null; });
+  ...</code></pre><p>ผู้ใช้ที่กดสามครั้งจะยิงคำขอสามครั้ง และคำตอบที่กลับมาทีหลังชนะ — ปัญหาเดียวกับ 17.3</p><div class="note"><strong>บั๊กนี้น่าจะมาจากการคัดลอกโค้ด</strong> — บรรทัด <code>loading:</code> คงเคยถูกต้องตอนที่สถานีฝั่งรับใช้ปุ่มเดียวกันยืนยัน แล้วพอแยก flow ออกไป บรรทัดนี้ไม่ได้ถูกแก้ตาม<br>วิธีจับบั๊กแบบนี้: <strong>ดูว่า <code>onPressed</code> กับ <code>loading</code> อ้างเรื่องเดียวกันไหม</strong> ถ้าไม่ตรง แปลว่ามีอะไรผิด</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>widget เดียวทำงานแบบเดียว</td><td>แผ่นนี้ทำงานสามแบบตามค่าที่รับเข้ามา</td></tr>
+<tr><td><code>setState</code> หลัง <code>await</code> ปลอดภัยถ้ามี <code>mounted</code> อยู่ใกล้</td><td>ต้องอยู่<strong>ก่อน</strong> <code>setState</code></td></tr>
+<tr><td>ข้อผิดพลาดที่ไม่แสดงใน release แปลว่าไม่มี</td><td>ไม่แสดงเฉย ๆ แต่โค้ดยังผิด</td></tr>
+<tr><td>ปุ่มที่ส่ง <code>loading</code> เข้าไปแล้วปลอดภัย</td><td>ต้องส่งตัวที่ตรงกับงานที่ปุ่มทำ</td></tr>
+<tr><td>กฎที่แอปตรวจ เซิร์ฟเวอร์ตรวจด้วย</td><td>ต้องยืนยัน ไม่ใช่สมมติ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมอยากเพิ่มสถานีแบบใหม่ — <strong>สถานีตรวจสอบ</strong> ที่รับพาเลทประเภทไหนก็ได้ แต่ปลายทางต้องเป็น <code>QC</code> เสมอ และห้ามพันฟิล์ม</p><ol><li>ต้องเพิ่มอะไรใน <code>StationInfo</code></li><li>ต้องแก้อะไรใน <code>StationSheet</code></li><li>วิธีนี้จะยังใช้ได้ไหมเมื่อมีสถานีแบบที่ห้า หก เจ็ด</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — <code>StationInfo</code></strong></p><p>ลองใช้ฟิลด์ที่มีอยู่ก่อน</p><pre class="code-vs"><code>StationInfo(
+  id: 'QC-STN-1',
+  label: 'ตรวจสอบ',
+  color: const Color(0xFF7B1FA2),
+  icon: MdiIcons.magnify,
+  allowedType: null,           // รับทุกประเภท ✓
+  fixedDestination: 'QC',      // ปลายทางตายตัว ✓
+  pwRole: PWRole.none,
+)</code></pre><p>ได้สองข้อแรกฟรี — ไม่ต้องเพิ่มฟิลด์</p><p>แต่ข้อสาม (ห้ามพันฟิล์ม) ยังไม่ได้ เพราะเงื่อนไขปัจจุบันคือ</p><pre class="code-vs"><code>if (widget.station.fixedDestination == 'ASRS') ...[
+  StationWrappingToggle(...),
+],</code></pre><p><code>QC</code> ไม่ใช่ <code>ASRS</code> จึงไม่แสดงตัวเลือกพันฟิล์มอยู่แล้ว — <strong>ได้ทั้งสามข้อโดยไม่ต้องแก้อะไรเลย</strong></p><p>แต่มีจุดที่ต้องตรวจ</p><pre class="code-vs"><code>final destLabel = switch (dest) {
+  'ASRS' =&gt; 'ASRS',
+  'REPLENISH' =&gt; 'Replenish Station',
+  _ =&gt; 'Prework',                    // ← QC จะกลายเป็น "Prework"
+};</code></pre><p>กล่องยืนยันจะบอกผู้ใช้ว่าส่งไป Prework ทั้งที่ส่งไป QC — เป็นบั๊กแบบเดียวกับที่ 16.9 พบใน <code>StatusBadge</code> ที่ค่าไม่รู้จักตกลง <code>_ =&gt;</code> เงียบ ๆ</p><pre class="code-vs"><code>final destLabel = switch (dest) {
+  'ASRS' =&gt; 'ASRS',
+  'REPLENISH' =&gt; 'Replenish Station',
+  'PREWORK' =&gt; 'Prework',
+  'QC' =&gt; 'สถานีตรวจสอบ',
+  _ =&gt; dest,                          // ไม่รู้จัก = แสดงค่าดิบ ดีกว่าเดาผิด
+};</code></pre><p><strong>ข้อ 2 — แก้อะไรใน <code>StationSheet</code></strong></p><table><thead><tr><th>จุด</th><th>ต้องแก้ไหม</th></tr></thead><tbody>
+<tr><td><code>destLabel</code></td><td><strong>ต้อง</strong> — ไม่งั้นบอกผู้ใช้ผิด</td></tr>
+<tr><td>ข้อความยืนยันสามแบบ</td><td>ควร — ตอนนี้ QC จะตกไป else ที่บอกว่า “ยืนยัน Putaway”</td></tr>
+<tr><td><code>isSendStation</code></td><td><strong>ต้องระวัง</strong> — <code>fixedDestination != null</code> จะเป็น true ทำให้ QC ใช้ข้อความของสถานีส่ง ASRS</td></tr>
+</tbody></table><p>แถวสุดท้ายคือกับดักที่หัวข้อ 2 เตือนไว้ — <code>isSendStation</code> ตั้งชื่อว่า “สถานีส่ง” แต่คำนวณจาก “มีปลายทางตายตัว” ซึ่งตอนนี้ตรงกันโดยบังเอิญ</p><pre class="code-vs"><code>// ตอนนี้ QC จะได้ข้อความว่า "ยืนยันส่ง Pallet ไป ASRS" ซึ่งผิด
+final isSendStation = widget.station.fixedDestination != null;</code></pre><p>แก้ให้ตรงกับชื่อ</p><pre class="code-vs"><code>final isSendStation = widget.station.pwRole == PWRole.send;</code></pre><p><strong>ข้อ 3 — จะใช้ได้ถึงเมื่อไร</strong></p><table><thead><tr><th>จำนวนแบบสถานี</th><th>วิธีปัจจุบัน</th></tr></thead><tbody>
+<tr><td>3 (ตอนนี้)</td><td>ทำงานได้ดี</td></tr>
+<tr><td>4–5</td><td>เริ่มมี <code>if/else</code> ซ้อนหลายชั้นในข้อความยืนยัน</td></tr>
+<tr><td>6+</td><td><strong>อ่านยากมาก</strong> — ต้องไล่หกจุดในไฟล์เพื่อรู้ว่าสถานีแบบหนึ่งทำอะไรบ้าง</td></tr>
+</tbody></table><p>จุดที่ควรเปลี่ยนวิธีคือเมื่อ<strong>ต้องไล่หลายจุดในไฟล์เพื่อตอบว่าสถานีแบบนี้ทำอะไร</strong></p><p>ทางที่ทนกว่าคือย้ายพฤติกรรมเข้าไปอยู่กับข้อมูล</p><pre class="code-vs"><code>class StationBehavior {
+  const StationBehavior({
+    required this.scanButtonLabel,
+    required this.scanButtonIcon,
+    required this.confirmTitle,
+    required this.destinationLabel,
+    this.allowedType,
+    this.fixedDestination,
+    this.allowWrapping = false,
+    this.allowDestinationChoice = true,
+  });
+  ...
+}</code></pre><pre class="code-vs"><code>const _qcStation = StationBehavior(
+  scanButtonLabel: 'ค้นหา Pallet',
+  scanButtonIcon: Icons.search,
+  confirmTitle: 'ยืนยันส่งตรวจสอบ',
+  destinationLabel: 'สถานีตรวจสอบ',
+  fixedDestination: 'QC',
+  allowWrapping: false,
+  allowDestinationChoice: false,
+);</code></pre><p>ตอนนี้เพิ่มสถานีแบบใหม่ = เพิ่มค่าคงที่หนึ่งตัว ไม่ต้องแตะ <code>StationSheet</code> เลย และตอบได้ทันทีว่าสถานีแบบไหนทำอะไรโดยอ่านที่เดียว</p><div class="note"><strong>แต่อย่าเพิ่งทำตอนนี้</strong> — ที่สามแบบ วิธีปัจจุบันอ่านง่ายกว่าและโค้ดน้อยกว่า การเพิ่มชั้นนามธรรมก่อนที่จะมีปัญหาจริงคือสิ่งที่ทำให้โค้ดอ่านยากขึ้นโดยไม่ได้อะไร<br>สิ่งที่ควรทำตอนนี้คือแก้ <code>destLabel</code> กับ <code>isSendStation</code> ให้ถูก แล้วจดไว้ว่าถ้าถึงห้าแบบเมื่อไรให้กลับมาที่นี่</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>StationInfo</code> 20 บรรทัด แต่สามฟิลด์ท้ายทำให้แผ่นเดียวทำงานได้สามแบบ</li><li>ปรับพฤติกรรมด้วยข้อมูล ไม่ใช่การสืบทอด — เลี่ยงโค้ดซ้ำ 80%</li><li>เงื่อนไขกระจายหกจุดในไฟล์ สองจุดถูกทำเป็น getter ที่อ่านง่าย</li><li><code>isSendStation</code> ตั้งชื่อไม่ตรงกับสิ่งที่คำนวณ — ตรงกันโดยบังเอิญเท่านั้น</li><li><code>setState</code> ถูกเรียกก่อนตรวจ <code>mounted</code> สองจุด — สลับกับทุกจอใน Part 17</li><li>ไม่มี <code>PopScope</code> กันการปิดแผ่นระหว่างที่คำขอค้าง</li><li>แอปตรวจประเภทพาเลทเอง กฎมีอยู่ที่เดียวคือฝั่งแอป</li><li>ข้อความยืนยันบอกผลลัพธ์ทางกายภาพ ซึ่งจำเป็นในคลังที่มีหุ่นยนต์</li><li>ปุ่มสแกนดูตัวหมุนจาก <code>_loadingConfirm</code> ผิดตัวเมื่อเป็นสถานีฝั่งรับ</li></ul></div><p><strong>บทหน้า:</strong> จอ Prework ที่มีสองฝั่ง สถานะสองชุด และแอนิเมชันที่คุมด้วยตัวจับเวลาซ้อนกัน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

@@ -4,18 +4,165 @@
 <title>Send to Packing</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-16 · Real Codebase</span><h1>Send to Packing</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Send endpoint</a></li><li><a href="#section-2">Current UI behavior</a></li><li><a href="#section-3">Business decision</a></li><li><a href="#section-4">Success transition</a></li><li><a href="#section-5">End-to-end trace</a></li><li><a href="#section-6">Observability</a></li><li><a href="#section-7">Refactor roadmap</a></li><li><a href="#section-8">Capstone</a></li></ol></nav>
-<div class="note"><strong>ส่ง destination ไป PACK คือ handoff สุดท้าย:</strong> action นี้ปิดช่วง Picking และเปิดช่วง Packing จึงต้องอิง order readiness ไม่ใช่เพียงมี destPalletId</div>
-<section id="section-1"><h2>1. Send endpoint</h2><pre class="code-vs"><code>POST /picking/send-to-pack/{palletId}</code></pre><p><code>sendToPack</code> คืน dynamic map และ UI อ่าน message เมื่อสำเร็จ ควรมี typed response ที่ระบุ pallet status/location และ order handoff</p></section>
-<section id="section-2"><h2>2. Current UI behavior</h2><p>afterPick แสดงปุ่มส่ง PACK เมื่อ <code>_destPalletId != null</code> ทั้งกรณี order complete และยังมี remaining items ดังนั้น client ไม่ได้บังคับ readiness จาก <code>isPickOrderComplete</code></p></section>
-<section id="section-3"><h2>3. Business decision</h2><p>ถ้าห้ามส่งก่อนครบ ปุ่มต้อง enable เฉพาะ complete และ backend reject เสมอ; ถ้าอนุญาต partial shipment ต้องมี explicit partial handoff, order split และ audit ไม่ควรเกิดจากปุ่มเดียวที่ความหมายคลุมเครือ</p></section>
-<section id="section-4"><h2>4. Success transition</h2><p>เมื่อ API สำเร็จ UI แสดง message, clear destination แล้วกลับ scanSource แต่ถ้า order complete ควรพิจารณากลับ orders list แทน เพื่อไม่เปิดรับ source ใหม่ของงานที่ปิดแล้ว</p></section>
-<section id="section-5"><h2>5. End-to-end trace</h2><pre class="code-vs"><code>WAITING → PICKING
-source pallets → confirm-pick(s) → order complete
-destination pallet → send-to-pack → ZONE_PACK
-→ Packing flow</code></pre><p>แต่ละลูกศรต้องมี server status/version และ actor ที่ตรวจย้อนหลังได้</p></section>
-<section id="section-6"><h2>6. Observability</h2><p>log correlationId, pickOrderId, source/dest pallets, station, operator, item/serial counts และ outcome โดยไม่ log token Metrics สำคัญคือ pick cycle time, conflict/retry, shortage และ premature pack rejection</p></section>
-<section id="section-7"><h2>7. Refactor roadmap</h2><p>เพิ่ม typed station/picking DTO, line identity, immutable workflow controller, typed domain errors, unified return coordinator, request generation guard, idempotency key และ explicit pack readiness ตามลำดับความเสี่ยง</p></section>
-<section id="section-8"><h2>8. Capstone</h2><div class="success">สร้าง integration scenario order ที่ใช้ source 2 pallets และ destination เดิม: รอบแรก remaining, คืน source, รอบสอง complete, ส่ง PACK จากนั้นจำลอง timeout/duplicate/conflict และพิสูจน์ว่า inventory รวม, serial ownership และ order status ถูกต้องเพียงครั้งเดียว</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คำตอบของคำถามที่ตั้งไว้</a></li><li><a href="#section-2">ภาพรวมทั้งสองโดเมน</a></li><li><a href="#section-3">ปัญหาที่ยืนยันแล้ว</a></li><li><a href="#section-4">สิ่งที่ทำได้ดีและต้องรักษาไว้</a></li><li><a href="#section-5">รวมตารางกฎที่ไม่ตรงกัน</a></li><li><a href="#section-6">ลงมือทำ</a></li><li><a href="#section-7">แบบทดสอบตัวเอง</a></li><li><a href="#section-8">สรุปท้าย Part 18</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: ทำแผนที่ Packing/Check-in/Sorting ด้วยตัวเองก่อนเข้า Part 19</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.1–18.15 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> ตอบคำถามที่ 17.1 ตั้งไว้ และมีรายการปัญหาที่ยืนยันแล้วของทั้งสองโดเมน</div>
+
+<section id="section-1"><h2>1. คำตอบของคำถามที่ตั้งไว้</h2><p>17.1 ถามว่า <strong>“การแตกไฟล์ช่วยอะไรได้จริงบ้าง และช่วยอะไรไม่ได้”</strong></p><table><thead><tr><th></th><th>putaway (26 ไฟล์)</th><th>picking (15 ไฟล์)</th></tr></thead><tbody>
+<tr><td>เฉลี่ยต่อไฟล์</td><td>91</td><td>232</td></tr>
+<tr><td>ไฟล์ใหญ่สุด</td><td>317</td><td>1,599</td></tr>
+<tr><td>สถานะที่เขียนไว้ชัด</td><td><strong>ไม่มี</strong></td><td><strong>enum 5 สมาชิก</strong></td></tr>
+<tr><td>สถานะที่ขัดแย้งกันสร้างได้ไหม</td><td>ได้ (เช่น <code>isSendStation</code> ที่ไม่ตรงกับ <code>pwRole</code>)</td><td><strong>ไม่ได้</strong></td></tr>
+<tr><td>อ่านแล้วรู้ว่ามีกี่โหมด</td><td>ต้องไล่ <code>if</code> หกจุด (18.3)</td><td><strong>อ่านบรรทัดที่ 23</strong></td></tr>
+</tbody></table><div class="note"><strong>คำตอบ:</strong> การแตกไฟล์ช่วยเรื่อง<strong>ปริมาณที่ต้องอ่านต่อครั้ง</strong> แต่ไม่ช่วยเรื่อง<strong>จำนวนสถานะที่ต้องคิดถึงพร้อมกัน</strong><br>สิ่งที่ช่วยเรื่องหลังคือการทำให้สถานะเป็นชนิดข้อมูลที่ถือค่าได้ทีละแบบ — ซึ่ง <code>picking</code> ทำและ <code>putaway</code> ไม่ได้ทำ</div><p>ผลที่วัดได้: 18.11 นับปัญหาสี่ข้อจากรายการของ 17.5 ที่ไม่เกิดใน <code>PickItemsScreen</code> ทั้งที่ไฟล์ใหญ่กว่า <code>StationSheet</code> ห้าเท่า</p></section>
+
+<section id="section-2"><h2>2. ภาพรวมทั้งสองโดเมน</h2><pre class="code-vs"><code>Putaway
+  HomeScreen
+    ├─ "Putaway for Receive"
+    │    ▼
+    │  PutawayScreen (168) ─── SignalR 4 เหตุการณ์
+    │    │  getStationStatus()
+    │    └─ StationSheet (317)
+    │         scanPalletForPutaway → เลือกปลายทาง → confirmPutaway
+    │
+    └─ "Putaway for Prework"
+         ▼
+       PutawayPreworkScreen (306) ─── SignalR เดียวกัน
+         │  getStationStatus() + getPreworkStationStatus()
+         ├─ ฝั่งรับ → PreworkReceiveSheet (152)
+         └─ ฝั่งส่ง → StationSheet (ตัวเดียวกัน)</code></pre><pre class="code-vs"><code>Picking
+  HomeScreen → PickingSessionScreen (38) → เด้งต่อ
+    ▼
+  PickingOrdersListScreen (571)
+    │  getPickOrdersList()
+    │  + ช่องสแกนล่าง: previewReturnPallet → returnPallet
+    ▼
+  PickingOrderDetailScreen (497)
+    │  getPickOrderDetailFull()
+    │  ตรวจในเครื่อง → assignPickStation
+    ▼
+  PickItemsScreen (1,599) ─── enum _PickState
+
+    scanSource ──สำเร็จ──► pickView ──ยืนยัน──► scanDest ──► afterPick
+        ▲                      │                              │
+        │                      └── รู้ปลายทางแล้ว ────────────┘
+        │                                                     │
+        └────────────── returnSource ◄──ล้มเหลว──┘   คืนพาเลท/ส่งแพ็ก</code></pre></section>
+
+<section id="section-3"><h2>3. ปัญหาที่ยืนยันแล้ว</h2><table><thead><tr><th>#</th><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td><code>setState</code> ถูกเรียกก่อนตรวจ <code>mounted</code> สองจุด</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>2</td><td>ไม่มี <code>PopScope</code> กันปิดแผ่นระหว่างคำขอค้าง</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>3</td><td>ปุ่มสแกนดูตัวหมุนผิดตัวเมื่อเป็นสถานีฝั่งรับ</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>4</td><td><code>isSendStation</code> คำนวณจากสิ่งที่ไม่ตรงกับชื่อ</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>5</td><td>ข้อความยืนยันบอกเรื่องพันฟิล์มสองครั้ง</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>6</td><td>แอนิเมชันคืนพาเลทจบตามเวลา ไม่ใช่ตามความจริง</td><td>Prework</td><td>18.4</td></tr>
+<tr><td>7</td><td>สามเงื่อนไขที่เปิดแผ่นไม่ได้ <code>return</code> เงียบทั้งหมด</td><td>Prework, Putaway</td><td>18.2, 18.4</td></tr>
+<tr><td>8</td><td>กฎ “PW ไป Prework / FG ไป Replenish” ฝังในเงื่อนไขของ widget</td><td>destination selector</td><td>18.5</td></tr>
+<tr><td>9</td><td>สีของประเภทพาเลทเขียนซ้ำสามที่ ไม่ตรงกันหนึ่งที่</td><td>putaway</td><td>18.6</td></tr>
+<tr><td>10</td><td>ส่ง <code>bool</code> แทนค่าจริง แล้วฝังคำว่า ASRS ในข้อความ</td><td>pallet info card</td><td>18.6</td></tr>
+<tr><td>11</td><td>สถานะสถานีเป็น <code>Map</code> ดิบ อ่านจากสี่ไฟล์</td><td>putaway</td><td>18.7</td></tr>
+<tr><td>12</td><td><code>PutawayResult.success</code> มีอยู่แต่ไม่มีใครอ่าน</td><td>putaway models</td><td>18.7</td></tr>
+<tr><td>13</td><td><code>items</code> ไม่กัน null — พาเลทว่างทำให้สแกนพัง</td><td>putaway models</td><td>18.7</td></tr>
+<tr><td>14</td><td>ต่อ path ด้วยสตริงทั้งที่รหัสมาจากบาร์โค้ด</td><td>putaway api</td><td>18.7</td></tr>
+<tr><td>15</td><td>ต่อ SignalR ไม่ได้แล้วเงียบ ไม่มีอะไรบอกผู้ใช้</td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td>16</td><td>ไม่มี <code>onreconnected</code> — เหตุการณ์ที่พลาดหายถาวร</td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td>17</td><td><code>disconnect()</code> ไม่จับ exception จาก <code>stop()</code></td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td>18</td><td>งาน <code>WAITING</code> ไม่มีอะไรบอกเมื่อพร้อม ผู้ใช้ต้องยืนรีเฟรช</td><td>orders list</td><td>18.9</td></tr>
+<tr><td>19</td><td>ช่องสแกนล้างเฉพาะเมื่อสำเร็จ ทำให้ค่าต่อกัน</td><td>orders list, order detail</td><td>18.9, 18.10</td></tr>
+<tr><td>20</td><td>คืนโฟกัสไม่ครบทุกทางออก</td><td>order detail, pick items</td><td>18.10, 18.12</td></tr>
+<tr><td>21</td><td>โหลดล้มเหลวแล้วจอว่างเปล่า ไม่มีทางลองใหม่</td><td>order detail</td><td>18.10</td></tr>
+<tr><td>22</td><td><code>Colors.grey</code> แทน <code>AppTheme.textGrey</code> หลายจุด</td><td>order detail</td><td>18.10</td></tr>
+<tr><td>23</td><td><code>canPop</code> ไม่ตรวจว่ามี S/N ค้างอยู่</td><td>pick items</td><td>18.11</td></tr>
+<tr><td>24</td><td><code>_addQty</code> แทนที่ค่า แต่ <code>_activatePart</code> คำนวณที่เหลือ</td><td>pick items</td><td>18.12</td></tr>
+<tr><td>25</td><td>แผ่น “S/N สำหรับทดสอบ” ติดมากับ release</td><td>pick items</td><td>18.12</td></tr>
+<tr><td>26</td><td>ยุบ “ไม่มีพาเลทว่าง” กับ “ถามไม่ได้” เป็นกรณีเดียว</td><td>dest scan card</td><td>18.13</td></tr>
+<tr><td>27</td><td>ไม่คัดลอกรายการ S/N ก่อนส่ง</td><td>pick items</td><td>18.13</td></tr>
+<tr><td>28</td><td>ยืนยันไม่สำเร็จแล้วไม่บอกว่าอาจบันทึกแล้ว</td><td>pick items</td><td>18.14</td></tr>
+<tr><td>29</td><td>สามทางส่งพาเลทป้องกันสามระดับ</td><td>picking</td><td>18.14</td></tr>
+<tr><td>30</td><td>ข้อความสาเหตุตายตัว ทั้งที่ล้มเหลวได้ห้าสาเหตุ</td><td>return source card</td><td>18.15</td></tr>
+</tbody></table><p>เรียงตามผลกระทบ</p><table><thead><tr><th>ระดับ</th><th>ข้อ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><strong>ทำให้ผู้ใช้สั่งผิด</strong></td><td>30, 28</td><td>ข้อมูลผิดนำไปสู่คำสั่งที่กลับไม่ได้</td></tr>
+<tr><td>ข้อมูลบนจอไม่ตรงความจริง</td><td>15, 16, 6</td><td>ผู้ใช้ตัดสินใจจากสิ่งที่เห็น</td></tr>
+<tr><td>ผู้ใช้ติดขัด/เสียเวลา</td><td>7, 18, 19, 20, 21</td><td>เกิดทุกวัน</td></tr>
+<tr><td>ข้ามการตรวจสอบได้</td><td>25</td><td>ข้อมูลในระบบไม่ตรงกับของจริง</td></tr>
+<tr><td>พังได้ในบางเงื่อนไข</td><td>1, 13, 14, 17, 27</td><td>ยังไม่เกิดแต่จะเกิด</td></tr>
+<tr><td>ผิดเงียบเมื่อข้อมูลเปลี่ยน</td><td>4, 8, 9, 10, 12, 26</td><td>กฎที่ไม่ได้บังคับไว้</td></tr>
+<tr><td>สับสน/ไม่สม่ำเสมอ</td><td>2, 3, 5, 11, 22, 23, 24, 29</td><td>ทำงานได้แต่ควรแก้</td></tr>
+</tbody></table></section>
+
+<section id="section-4"><h2>4. สิ่งที่ทำได้ดีและต้องรักษาไว้</h2><table><thead><tr><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>enum _PickState</code> ทำให้สถานะที่ขัดแย้งกันสร้างไม่ได้</td><td>pick items</td><td>18.11</td></tr>
+<tr><td><code>switch</code> บน enum ให้คอมไพเลอร์ตรวจว่าครบ</td><td>pick items</td><td>18.11</td></tr>
+<tr><td>ชื่อโฟลเดอร์ widget ตรงกับสมาชิกของ enum ทั้งห้า</td><td>pick items</td><td>18.1</td></tr>
+<tr><td><code>_pickedCountFor()</code> คำนวณแทนการเก็บซ้ำ</td><td>pick items</td><td>18.11</td></tr>
+<tr><td>ล้มเหลวแล้วพาไปสถานะที่มีทางออก ไม่ใช่แค่แสดง error</td><td>pick items</td><td>18.11</td></tr>
+<tr><td>รูปแบบ preview → ยืนยัน → สั่งจริง</td><td>orders list</td><td>18.9</td></tr>
+<tr><td>ปุ่มยืนยันบอกสิ่งที่จะเกิด ไม่ใช่คำว่า “ยืนยัน”</td><td>orders list</td><td>18.9</td></tr>
+<tr><td>งานที่ยังไม่พร้อมยังกดได้ แล้วอธิบายด้วยกล่อง</td><td>orders list</td><td>18.9</td></tr>
+<tr><td>ตรวจในเครื่องก่อนยิงเน็ต</td><td>order detail, pick items</td><td>18.10, 18.12</td></tr>
+<tr><td>สแกน S/N ไม่ต้องยิงเน็ตเลย</td><td>pick items</td><td>18.12</td></tr>
+<tr><td>แตะชิปแล้วเติมช่อง ไม่ยืนยันทันที</td><td>dest scan card</td><td>18.13</td></tr>
+<tr><td>ตรวจว่าปลายทางไม่ใช่ต้นทาง</td><td>pick items</td><td>18.13</td></tr>
+<tr><td>มีสองทางยกเลิกการเลือก และทางหนึ่งมองเห็นได้</td><td>pick items</td><td>18.12</td></tr>
+<tr><td>ref-count กันสองจอปิดการเชื่อมต่อทับกัน</td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td><code>List.of()</code> ก่อนวนกระจายเหตุการณ์</td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td>ตัวถอดรหัสไม่โยน exception</td><td>SignalRService</td><td>18.8</td></tr>
+<tr><td>ตัวจับเวลาตรวจทั้ง <code>mounted</code> และว่ายังเป็นงานเดิม</td><td>Prework</td><td>18.4</td></tr>
+<tr><td>อัปเดตจากเหตุการณ์ทันที แล้วโหลดของจริงตามมา</td><td>Prework, Putaway</td><td>18.4</td></tr>
+<tr><td><code>didUpdateWidget</code> เทียบค่าเก่าก่อนสั่ง <code>repeat()</code></td><td>station card</td><td>18.2</td></tr>
+<tr><td>ปรับพฤติกรรมด้วยข้อมูล ไม่ใช่การสืบทอด</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>ยืม <code>UnloadItem</code> แทนสร้างคลาสซ้ำ</td><td>putaway models</td><td>18.7</td></tr>
+<tr><td>ข้อความยืนยันบอกผลลัพธ์ทางกายภาพ</td><td>StationSheet</td><td>18.3</td></tr>
+<tr><td>ปุ่มปลายทางบอกทั้งรหัสและผลลัพธ์</td><td>dest button</td><td>18.5</td></tr>
+<tr><td>สวิตช์แตะได้ทั้งแถว</td><td>wrapping toggle</td><td>18.6</td></tr>
+</tbody></table><p>ยี่สิบสี่ข้อ และสี่ข้อแรกล้วนเป็นผลจากการตัดสินใจเดียว — ใช้ <code>enum</code> คุมสถานะ</p></section>
+
+<section id="section-5"><h2>5. รวมตารางกฎที่ไม่ตรงกัน</h2><p>17.14 เริ่มตารางนี้ไว้ ตอนนี้เติมจาก Part 18</p><table><thead><tr><th>กฎ</th><th>ทำแบบ A</th><th>ทำแบบ B</th></tr></thead><tbody>
+<tr><td>เลือกล็อตเมื่อมีหลายล็อต</td><td>ScanPart: popup ให้เลือก</td><td>UnloadSession/LoadToBasket: เลือกตัวแรก</td></tr>
+<tr><td>จำพาเลทล่าสุด</td><td>ScanPart: มี + ตรวจสภาพ</td><td>PendingPallet: ไม่มี</td></tr>
+<tr><td>S/N ต้องครบก่อนยืนยัน</td><td>UnloadSession: ต้องครบ</td><td>LoadToBasket: มีอย่างน้อยหนึ่ง</td></tr>
+<tr><td>ล้างช่องสแกน</td><td>LoadToBasket: ล้างทันที</td><td>อีก 4 จอ: ล้างบางทางออก</td></tr>
+<tr><td><strong>ส่งพาเลท</strong></td><td>OrdersList: preview + ยืนยัน</td><td>ReturnSource/SendToPack: กดแล้วส่งเลย</td></tr>
+<tr><td><strong>แจ้งความสำเร็จ</strong></td><td>ส่วนใหญ่: <code>showSuccessSnackbar</code></td><td>LoadToBasket/SendToPack: สร้างเอง ไม่มีการสั่น</td></tr>
+<tr><td><strong>สถานะที่กดไม่ได้</strong></td><td>OrdersList: กดได้แล้วอธิบาย</td><td>Putaway/Prework: <code>return;</code> เงียบ</td></tr>
+<tr><td><strong>สีของประเภท/สถานะ</strong></td><td><code>StatusBadge</code>: ตารางกลาง</td><td>putaway: เขียนซ้ำสามที่</td></tr>
+<tr><td><strong>ตรวจสภาพก่อนผูก/ส่ง</strong></td><td>ScanPart: ตรวจ</td><td>DestScan: ไม่ตรวจ</td></tr>
+</tbody></table><p>เก้าแถว และห้าแถวใหม่มาจาก Part 18</p><div class="note"><strong>ทุกแถวมีรากเดียวกัน</strong> — ตรรกะอยู่ในจอ ไม่มีที่กลางที่บังคับให้เหมือนกัน<br>สังเกตว่าแถวที่ทำถูกทั้งสองฝั่งคือแถวที่มีของกลางอยู่แล้ว (<code>StatusBadge</code>, <code>showSuccessSnackbar</code>) — และแม้แต่แถวนั้นก็ยังมีคนไม่ใช้<br>Part 23 จะกลับมาที่ตารางนี้</div></section>
+
+<section id="section-6"><h2>6. ลงมือทำ</h2><p>ทำแผนที่โดเมนที่ Part 19 จะอ่าน — <strong>Packing</strong> (2,176 บรรทัดในไฟล์เดียว), <strong>Check-in</strong> (1,441) หรือ <strong>Sorting</strong> (1,030)</p><table><thead><tr><th>#</th><th>ต้องได้</th></tr></thead><tbody>
+<tr><td>1</td><td>จัดกลุ่มฟิลด์ใน State แบบ 17.5 แล้วนับว่าเป็นสถานะจริงกี่ตัว</td></tr>
+<tr><td>2</td><td>หาว่ามี <code>enum</code> คุมสถานะไหม ถ้าไม่มี ให้เขียนเครื่องสถานะที่ซ่อนอยู่ออกมา</td></tr>
+<tr><td>3</td><td>รายการ endpoint ที่ใช้</td></tr>
+<tr><td>4</td><td>จุดที่ <code>return;</code> เงียบโดยไม่บอกผู้ใช้</td></tr>
+<tr><td>5</td><td>จุดที่ <code>setState</code> อยู่ก่อน <code>if (!mounted)</code></td></tr>
+<tr><td>6</td><td>ตัวควบคุมที่สร้างในเมธอดแล้วไม่ถูก dispose</td></tr>
+<tr><td>7</td><td>ข้อความที่เขียนสาเหตุไว้ตายตัว</td></tr>
+<tr><td>8</td><td>สามสิ่งที่ทำได้ดี</td></tr>
+</tbody></table><pre class="code-vs"><code># ข้อ 2 — มี enum ไหม
+rg "^enum " lib/screens/packing
+
+# ข้อ 4 — return เงียบ
+rg -B3 "^\s+return;$" lib/screens/packing/packing_screen.dart
+
+# ข้อ 5 — ลำดับ setState กับ mounted
+rg -A2 "setState\(\(\) =&gt; _loading = false\);" lib/screens/packing
+
+# ข้อ 6 — ตัวควบคุมที่สร้างนอก State
+rg "TextEditingController\(|FocusNode\(\)" lib/screens/packing
+
+# ข้อ 7 — ข้อความไทยที่อธิบายสาเหตุ
+rg "message: '" lib/screens/packing</code></pre><p><strong>ข้อ 8 บังคับ</strong> — เหตุผลเดิมจาก 16.12 และ 17.14</p></section>
+
+<section id="section-7"><h2>7. แบบทดสอบตัวเอง</h2><ol><li>putaway กับ picking ต่างกันที่การแตกไฟล์อย่างไร และเพราะอะไร (18.1)</li><li><code>StationInfo</code> ใน <code>putaway/shared/</code> ถูก import จากโดเมนไหนอีก และบอกอะไร (18.1)</li><li><code>didUpdateWidget</code> ถูกเรียกเมื่อไร และทำไมต้องเทียบกับค่าเก่า (18.2)</li><li><code>PutawayStationGrid</code> จะพังเมื่อไร (18.2)</li><li>สามฟิลด์ท้ายของ <code>StationInfo</code> เปลี่ยนพฤติกรรมอะไรบ้าง (18.3)</li><li>ทำไม <code>setState</code> ต้องอยู่หลัง <code>if (!mounted)</code> (18.3)</li><li>ทำไมข้อผิดพลาดนี้ไม่มีใครแจ้ง (18.3)</li><li><code>isSendStation</code> ผิดตรงไหน (18.3)</li><li>ตัวจับเวลาใน Prework ตรวจสองอย่างอะไร (18.4)</li><li>แอนิเมชันคืนพาเลทจบเมื่อไร และควรจบเมื่อไร (18.4)</li><li><code>...?</code> ต่างจาก <code>...</code> อย่างไร (18.4)</li><li>กฎ “PW ไป Prework ได้” อยู่ที่ไหน และควรอยู่ที่ไหน (18.5)</li><li>ทำไมต้องล้าง <code>_wrappingRequired</code> เมื่อเปลี่ยนปลายทาง (18.5)</li><li>ทำไมส่ง <code>bool</code> แทนค่าจริงเป็นปัญหา (18.6)</li><li>ทำไมสวิตช์ต้องแตะได้ทั้งแถว (18.6)</li><li>เมื่อไรควรสร้างโมเดลแทน <code>Map</code> ดิบ (18.7)</li><li><code>PutawayResult.success</code> ต่างจาก <code>ApiResult.success</code> อย่างไร (18.7)</li><li>ref-count แก้ปัญหาอะไร (18.8)</li><li>ทำไม <code>withAutomaticReconnect()</code> ยังไม่พอ (18.8)</li><li>ทำไมต้อง <code>List.of()</code> ก่อนวนกระจาย (18.8)</li><li>ทำไมจอรายการทำสองเรื่องที่ไม่เกี่ยวกัน (18.9)</li><li>รูปแบบ preview → ยืนยัน → สั่งจริง จำเป็นเมื่อไร (18.9)</li><li>ทำไม <code>addPostFrameCallback</code> จำเป็นก่อน <code>requestFocus</code> (18.10)</li><li>ชั้นแรกของการตรวจสองชั้นมีไว้ทำอะไร (18.10)</li><li><code>enum _PickState</code> แก้ปัญหาอะไรได้บ้าง (18.11)</li><li>ทำไม <code>switch</code> บน enum ปลอดภัยกว่า <code>if</code> ซ้อน (18.11)</li><li>ทำไมสแกน S/N ในจอนี้ไม่ต้องยิงเน็ต (18.12)</li><li><code>_addQty</code> กับ <code>_activatePart</code> ขัดกันอย่างไร (18.12)</li><li>เมื่อไร widget ควรยิง API เอง (18.13)</li><li>ทำไมแตะชิปแล้วเติมช่องดีกว่ายืนยันทันที (18.13)</li><li>สามทางส่งพาเลทต่างกันอย่างไร (18.14)</li><li>ข้อความสาเหตุตายตัวทำให้เกิดอะไร (18.15)</li></ol></section>
+
+<section id="section-8"><h2>8. สรุปท้าย Part 18</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เทียบสองโดเมนที่แตกไฟล์ต่างกันสิบเท่า และตอบได้ว่าอะไรทำให้ต่างกัน</li><li>อ่าน widget ที่ปรับพฤติกรรมตามค่าที่รับเข้ามา แทนการสืบทอด</li><li>หาบั๊ก <code>setState</code> หลัง <code>await</code> ที่ไม่ปรากฏใน release</li><li>อ่านจอที่มีสถานะสองชุดและตัวจับเวลาซ้อนกัน</li><li>เห็นว่ากฎธุรกิจฝังอยู่ในเงื่อนไขของ widget ตรงไหน และย้ายออกมาเทสต์ได้อย่างไร</li><li>ตัดสินได้ว่าเมื่อไรควรสร้างโมเดลแทน <code>Map</code> ดิบ</li><li>อ่านชั้นเรียลไทม์และชี้ได้ว่าเหตุการณ์หายไปตอนไหน</li><li>อ่านเครื่องสถานะที่เขียนไว้ชัด และเทียบกับที่ซ่อนอยู่</li><li>เห็นว่าข้อความที่บอกสิ่งที่แอปไม่รู้ นำไปสู่คำสั่งที่ผิดได้</li><li>รวมตารางกฎที่ไม่ตรงกันเป็นเก้าแถว</li></ul></div><p><strong>บทเรียนที่ใหญ่ที่สุดของ Part นี้</strong></p><table><thead><tr><th>ข้อสังเกต</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>ไฟล์ 1,599 บรรทัดอ่านง่ายกว่าไฟล์ 317 บรรทัด</td><td>สถานะถูกเขียนไว้เป็นชนิดข้อมูล ไม่ใช่เงื่อนไขที่กระจาย</td></tr>
+<tr><td>โดเมนที่แตกไฟล์เยอะกลับมีปัญหาสถานะมากกว่า</td><td>การแตกไฟล์ย้าย UI ออก ไม่ได้ย้ายตรรกะ</td></tr>
+<tr><td>ปัญหาที่แก้ได้ด้วย enum ล้วนเป็นปัญหาในจอ</td><td>ปัญหาที่รากอยู่ชั้นล่างยังอยู่ครบ</td></tr>
+</tbody></table><p>สามข้อนี้รวมกันตอบว่า <strong>“ไฟล์ควรยาวแค่ไหน” เป็นคำถามที่ผิด</strong> — คำถามที่ถูกคือ “ต้องคิดถึงสถานะกี่อย่างพร้อมกันเพื่อจะเข้าใจโค้ดนี้”</p><p><strong>Part ถัดไป</strong></p><table><thead><tr><th>Part</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>19</td><td>Packing 2,176 / Check-in 1,441 / Sorting 1,030 — สามจอที่ยังเป็นไฟล์เดียว และ Sorting ที่มี SignalR ของตัวเอง</td></tr>
+<tr><td>20–22</td><td><code>wms_absolute_mobile</code> — โปรเจกต์เดียวกันในโจทย์เดียวกัน แต่มี store, มี repository, และมีเทสต์</td></tr>
+<tr><td>23</td><td>รวมตารางกฎที่ไม่ตรงกันจาก Part 17–19 แล้วออกแบบชั้นที่รวมไว้</td></tr>
+</tbody></table><p>Part 19 จะถามคำถามที่ต่อจาก Part นี้โดยตรง — <strong>“จอที่ไม่มี enum และไม่แตกไฟล์เลย ถือสถานะกี่อย่าง และอ่านอย่างไรให้ไม่หลง”</strong></p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

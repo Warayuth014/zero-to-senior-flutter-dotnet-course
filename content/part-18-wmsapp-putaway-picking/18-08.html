@@ -1,11 +1,291 @@
-<div class="note"><strong>SignalR เป็น invalidation channel:</strong> event ทำให้หน้าจอรู้ว่าควร refresh ไม่ใช่แหล่งข้อมูลเดียว เพราะ reconnect อาจพลาด event และ event payload อาจมีเพียงบาง field</div>
-<section><h2>1. Singleton + ref count</h2><p><code>SignalRService</code> เป็น singleton; connect เพิ่ม <code>_refCount</code> และ disconnect ลด เมื่อถึงศูนย์จึง stop connection ทำให้ Putaway กับ Prework ใช้ hub เดียวพร้อมกันได้</p></section>
-<section><h2>2. Hub connection</h2><p>service resolve server URL แล้วต่อ <code>/hubs/putaway</code> ด้วย automatic reconnect จากนั้น register StationDispatched, PalletArrived, PalletReturned และ LabelingCompleted</p></section>
-<section><h2>3. Listener lifecycle</h2><p>screen add callbacks ใน initState และ remove ใน dispose การ remove ต้องส่ง function instance เดิม ซึ่ง method tear-off ของ state ทำได้ตามโค้ดปัจจุบัน แต่ duplicate registration ยังควรป้องกัน</p></section>
-<section><h2>4. Safe dispatch</h2><pre class="code-vs"><code>for (final cb in List.of(listeners)) {
-  cb(data);
-}</code></pre><p>copy list ก่อน iterate ทำให้ callback remove listener ระหว่าง dispatch ได้โดยไม่เกิด concurrent modification</p></section>
-<section><h2>5. Parse event args</h2><p><code>_parseArgs</code> รับ null/empty/non-map เป็น empty map แล้ว handler screen ตรวจ stationId ต่อ ความทนนี้กัน crash แต่ malformed events ถูกกลืน ควร log metric พร้อม event name/schema version</p></section>
-<section><h2>6. Optimistic merge</h2><p>StationDispatched merge pallet/destination เพื่อแสดง busy ทันที จากนั้นโหลด REST ใหม่ ส่วน events อื่นใช้ refresh อย่างเดียว Pattern นี้ลด latency แต่ต้องมี request generation guard ไม่ให้ response เก่าทับ event ใหม่</p></section>
-<section><h2>7. Connection gaps</h2><p>connect catch แล้ว log แต่ไม่ส่ง connection state ให้ UI; automatic reconnect ไม่รับประกัน event replay จึงควร refresh เมื่อ reconnected, ทำ periodic reconciliation และแสดงสถานะ stale/offline</p></section>
-<section><h2>8. Realtime tests</h2><div class="success">fake stream แล้วทดสอบ event ซ้ำ/ผิดลำดับ/unknown station, disconnect-reconnect, สอง screens ref-count, listener remove, REST response เก่าหลัง event และ event ที่ payload ขาด field โดย state สุดท้ายต้องตรง snapshot ล่าสุด</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด services/signalr_service.dart ทั้ง 130 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.7, Part 12 (เรียลไทม์) โดยเฉพาะ 12.4 และ 12.11<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านชั้นเรียลไทม์ของโปรเจกต์จริง และชี้ได้ว่าเหตุการณ์หายไปตอนไหน</div>
+
+<section><h2>1. โครงของบริการ</h2><pre class="code-vs"><code>class SignalRService {
+  static final SignalRService _instance = SignalRService._internal();
+  factory SignalRService() =&gt; _instance;
+  SignalRService._internal();
+
+  HubConnection? _connection;
+  int _refCount = 0;
+
+  final List&lt;SignalRCallback&gt; _stationDispatchedListeners = [];
+  final List&lt;SignalRCallback&gt; _palletArrivedListeners = [];
+  final List&lt;SignalRCallback&gt; _palletReturnedListeners = [];
+  final List&lt;SignalRCallback&gt; _labelingCompletedListeners = [];
+}</code></pre><p>singleton เหมือน <code>ApiService</code> (16.6) และมีรายการผู้ฟังแยกตามชนิดเหตุการณ์</p><p>โปรเจกต์นี้มีสองบริการแบบนี้</p><table><thead><tr><th>ไฟล์</th><th>hub</th><th>เหตุการณ์</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td><code>signalr_service.dart</code></td><td><code>/hubs/putaway</code></td><td>4</td><td>130</td></tr>
+<tr><td><code>sorting_signalr_service.dart</code></td><td><code>/hubs/sorting</code></td><td>6</td><td>105</td></tr>
+</tbody></table><p>โครงเหมือนกันเกือบทุกบรรทัด — ต่างที่ URL และรายชื่อเหตุการณ์</p><div class="note"><strong>ตัวที่สองเขียนดีกว่าตัวแรกในจุดหนึ่ง</strong><pre class="code-vs"><code>// sorting — ตัวช่วยสร้าง handler
+void Function(List&lt;Object?&gt;?) _on(List&lt;SortingCallback&gt; listeners) =&gt; (args) {
+  final data = _parseArgs(args);
+  for (final cb in List.of(listeners)) cb(data);
+};
+
+_connection!.on('StationCounterUpdated', _on(_counterUpdated));
+_connection!.on('StationFull', _on(_stationFull));</code></pre>ส่วนตัวแรกเขียนเมธอดซ้ำสี่ตัวที่เนื้อเหมือนกันทุกบรรทัด — 24 บรรทัดที่ตัวช่วยห้าบรรทัดทำแทนได้</div></section>
+
+<section><h2>2. ref-count คืออะไรและแก้ปัญหาอะไร</h2><pre class="code-vs"><code>Future&lt;void&gt; connect() async {
+  _refCount++;
+  if (_connection != null &amp;&amp;
+      _connection!.state != HubConnectionState.Disconnected) {
+    return;                      // ต่ออยู่แล้ว ไม่ต่อซ้ำ
+  }
+  ... สร้างการเชื่อมต่อใหม่ ...
+}
+
+Future&lt;void&gt; disconnect() async {
+  _refCount--;
+  if (_refCount &lt;= 0) {
+    _refCount = 0;
+    if (_connection != null) {
+      await _connection!.stop();
+      _connection = null;
+    }
+  }
+}</code></pre><p>ปัญหาที่แก้: สองจอที่ใช้ hub เดียวกันอาจเปิดพร้อมกัน</p><pre class="code-vs"><code>PutawayScreen เปิด        → connect() → _refCount = 1, ต่อจริง
+PutawayPreworkScreen เปิด → connect() → _refCount = 2, ไม่ต่อซ้ำ
+PutawayScreen ปิด         → disconnect() → _refCount = 1, ไม่ตัด
+PutawayPreworkScreen ปิด  → disconnect() → _refCount = 0, ตัดจริง</code></pre><p>ถ้าไม่มี ref-count จอแรกที่ปิดจะตัดการเชื่อมต่อของจอที่ยังเปิดอยู่ — ตรงกับที่ 12.7 สอน</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>นับก่อนตรวจสถานะ</td><td><code>_refCount++</code> อยู่บรรทัดแรก ไม่ว่าจะต่อใหม่หรือไม่</td></tr>
+<tr><td>ป้องกันติดลบ</td><td><code>if (_refCount &lt;= 0) _refCount = 0;</code></td></tr>
+<tr><td>ล้าง <code>_connection</code> หลัง stop</td><td>ครั้งต่อไปจะสร้างใหม่ ไม่ใช้ตัวที่ตายแล้ว</td></tr>
+</tbody></table></section>
+
+<section><h2>3. ที่ ref-count นับผิดได้</h2><pre class="code-vs"><code>Future&lt;void&gt; connect() async {
+  _refCount++;                        // ← เพิ่มเสมอ
+  ...
+  try {
+    ...
+    await _connection!.start();
+  } catch (e) {
+    dev.log('[SignalR] Connect error: $e');   // ← ล้มเหลวก็ไม่ลด
+  }
+}</code></pre><p>ถ้าต่อไม่สำเร็จ <code>_refCount</code> ยังเพิ่มขึ้น — และ <code>_connection</code> อาจเป็นค่าที่สร้างแล้วแต่ start ไม่ผ่าน</p><pre class="code-vs"><code>เน็ตมีปัญหา
+  PutawayScreen เปิด → connect() → _refCount = 1, start() โยน, _connection ค้าง
+    → ผู้ใช้ปิดจอ → disconnect() → _refCount = 0 → stop() ตัวที่ไม่เคยต่อ</code></pre><p>ในกรณีนี้ยังกลับมาเป็นศูนย์ถูก แต่มีเส้นทางที่นับค้าง</p><pre class="code-vs"><code>PutawayScreen เปิด → connect() → _refCount = 1
+  → ผู้ใช้กดเข้า PutawayPreworkScreen ทันที (จอแรกยังไม่ถูก dispose)
+    → connect() → _refCount = 2
+      → ผู้ใช้กดย้อนกลับสองครั้งเร็ว ๆ
+        → dispose() ทั้งสอง → _refCount = 0 ✓</code></pre><p>เส้นทางปกติถูกต้อง ปัญหาอยู่ที่เส้นทางที่ <code>dispose()</code> ไม่ถูกเรียก</p><pre class="code-vs"><code>@override
+void dispose() {
+  _signalR.removeStationDispatchedListener(_handleStationDispatched);
+  ...
+  _signalR.disconnect();          // ← ไม่ await
+  _stationController.dispose();
+  super.dispose();
+}</code></pre><table><thead><tr><th>ข้อสังเกต</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>disconnect()</code> เป็น async แต่ไม่ await</td><td>ถูกต้อง — <code>dispose()</code> เป็น sync จะ await ไม่ได้</td></tr>
+<tr><td>ถ้า <code>stop()</code> โยน exception</td><td><strong>ไม่มีใครจับ</strong> — กลายเป็น unhandled</td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; disconnect() async {
+  _refCount--;
+  if (_refCount &lt;= 0) {
+    _refCount = 0;
+    final connection = _connection;
+    _connection = null;              // ล้างก่อน กันการเรียกซ้อน
+    if (connection != null) {
+      try {
+        await connection.stop();
+      } catch (e) {
+        dev.log('[SignalR] Stop error: $e');   // ตัดไม่ได้ก็ไม่ควรทำให้แอปพัง
+      }
+    }
+  }
+}</code></pre></section>
+
+<section><h2>4. ความล้มเหลวที่ไม่มีใครรู้</h2><pre class="code-vs"><code>try {
+  final serverUrl = await ApiService.resolveServerUrl();
+  final hubUrl = '$serverUrl/hubs/putaway';
+  ...
+  await _connection!.start();
+  dev.log('[SignalR] Connected to $hubUrl');
+} catch (e) {
+  dev.log('[SignalR] Connect error: $e');      // ← จบแค่นี้
+}</code></pre><p>ต่อไม่สำเร็จ → เขียน log → ไม่มีใครรู้</p><pre class="code-vs"><code>Future&lt;void&gt; _initSignalR() async {
+  await _signalR.connect();          // ← ไม่คืนค่าอะไร ไม่มีอะไรให้ตรวจ
+}</code></pre><table><thead><tr><th>ผู้ใช้เห็น</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>จอสถานีปกติ</td><td>เชื่อมต่อสำเร็จ ข้อมูลสดตลอด</td></tr>
+<tr><td>จอสถานีปกติ</td><td><strong>เชื่อมต่อไม่ได้ ข้อมูลค้างตั้งแต่โหลดครั้งแรก</strong></td></tr>
+</tbody></table><p>สองกรณีนี้หน้าตาเหมือนกันทุกพิกเซล และ <code>dev.log</code> เห็นได้เฉพาะตอนต่อ debugger</p><div class="note"><strong>ตรงกับที่ 12.11 เรียกว่าความล้มเหลวเงียบสี่แบบ</strong> — และนี่คือแบบแรก: ต่อไม่ติดตั้งแต่แรก<br>ผลในคลัง: ผู้ใช้ยืนดูสถานีที่ยังแสดงว่าว่าง ทั้งที่มีพาเลทอยู่จริง แล้วเดินไปสแกนเพื่อเจอ error</div><p>สิ่งที่ 10.12 และ 12.3 สอนคือ<strong>ผู้ใช้ต้องเห็นสถานะของการเชื่อมต่อ</strong></p><pre class="code-vs"><code>enum RealtimeStatus { unknown, connecting, connected, disconnected }
+
+class SignalRService {
+  final ValueNotifier&lt;RealtimeStatus&gt; status =
+      ValueNotifier(RealtimeStatus.unknown);
+
+  Future&lt;void&gt; connect() async {
+    _refCount++;
+    if (_connection != null &amp;&amp;
+        _connection!.state != HubConnectionState.Disconnected) return;
+
+    status.value = RealtimeStatus.connecting;
+    try {
+      ...
+      await _connection!.start();
+      status.value = RealtimeStatus.connected;
+    } catch (e) {
+      status.value = RealtimeStatus.disconnected;
+      dev.log('[SignalR] Connect error: $e');
+    }
+  }
+}</code></pre><pre class="code-vs"><code>// ในจอ — แถบเล็ก ๆ บนหัว
+ValueListenableBuilder&lt;RealtimeStatus&gt;(
+  valueListenable: _signalR.status,
+  builder: (_, status, __) =&gt; status == RealtimeStatus.connected
+      ? const SizedBox.shrink()
+      : Container(
+          color: AppTheme.warning.withValues(alpha: 0.15),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(children: [
+            Icon(Icons.cloud_off, size: 16, color: AppTheme.warning),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('ไม่ได้รับข้อมูลสด — ดึงลงเพื่อรีเฟรช')),
+          ]),
+        ),
+)</code></pre><p>ข้อความบอกทางออกที่ทำได้ทันที ตรงกับหลักของ 15.11 — ไม่ปิดปุ่ม แค่บอกว่าข้อมูลอาจไม่สด</p></section>
+
+<section><h2>5. เหตุการณ์ที่หายไประหว่างหลุด</h2><pre class="code-vs"><code>_connection = HubConnectionBuilder()
+    .withUrl(hubUrl)
+    .withAutomaticReconnect()      // ← ต่อกลับเอง
+    .build();</code></pre><p><code>withAutomaticReconnect()</code> ทำให้ไลบรารีต่อกลับเองเมื่อสายหลุด — ทำถูก</p><p>แต่<strong>ไม่มี <code>onreconnected</code></strong></p><pre class="code-vs"><code>เชื่อมต่ออยู่ → สถานีทุกใบว่าง
+  ↓ สัญญาณหลุด 40 วินาที
+  ระหว่างนั้น: StationDispatched × 3, PalletArrived × 2
+  ↓ ต่อกลับได้เอง
+  → แอปไม่รู้ว่าพลาดอะไรไป → หน้าจอยังแสดงว่าทุกสถานีว่าง</code></pre><table><thead><tr><th>เหตุการณ์ที่พลาด</th><th>ผลบนหน้าจอ</th></tr></thead><tbody>
+<tr><td><code>StationDispatched</code></td><td>สถานีที่กำลังทำงานยังแสดงว่าว่าง</td></tr>
+<tr><td><code>PalletArrived</code></td><td>พาเลทมาถึงแล้วแต่จอไม่รู้</td></tr>
+<tr><td><code>PalletReturned</code></td><td>สถานีว่างแล้วแต่จอแสดงว่ายังทำงาน</td></tr>
+</tbody></table><p>ผู้ใช้ที่แตะสถานีที่ “ว่าง” จะเจอ error ตอนสแกน — หรือแย่กว่าคือไม่แตะเลยเพราะเห็นว่า “ทำงานอยู่”</p><div class="note"><strong>นี่คือข้อ 14 ในรายการตรวจของ 15.11</strong> — <em>ต่อกลับแล้วต้องโหลดใหม่ทั้งชุด</em> ซึ่งเป็นข้อที่ 12.4 ระบุว่าโปรเจกต์นี้ยังไม่ทำ<br>เหตุผลที่ต้องโหลดใหม่ทั้งชุด ไม่ใช่แค่ที่พลาด: <strong>แอปไม่รู้ว่าพลาดอะไรไป</strong> จึงเดาไม่ได้ว่าต้องขออะไรเพิ่ม</div><p>แก้ได้โดยเปิดช่องให้จอรู้ว่าต่อกลับแล้ว</p><pre class="code-vs"><code>final List&lt;VoidCallback&gt; _reconnectedListeners = [];
+
+void addReconnectedListener(VoidCallback cb) =&gt; _reconnectedListeners.add(cb);
+void removeReconnectedListener(VoidCallback cb) =&gt; _reconnectedListeners.remove(cb);
+
+Future&lt;void&gt; connect() async {
+  ...
+  _connection!.onreconnected(({connectionId}) {
+    status.value = RealtimeStatus.connected;
+    // แอปไม่รู้ว่าพลาดอะไรไประหว่างหลุด — ให้ทุกจอโหลดใหม่ทั้งชุด
+    for (final cb in List.of(_reconnectedListeners)) cb();
+  });
+
+  _connection!.onreconnecting(({error}) {
+    status.value = RealtimeStatus.connecting;
+  });
+
+  _connection!.onclose(({error}) {
+    status.value = RealtimeStatus.disconnected;
+  });
+  ...
+}</code></pre><pre class="code-vs"><code>// ในจอ
+@override
+void initState() {
+  super.initState();
+  _signalR.addReconnectedListener(_loadStationStatus);   // ← โหลดใหม่ทั้งชุด
+  ...
+}
+
+@override
+void dispose() {
+  _signalR.removeReconnectedListener(_loadStationStatus);
+  ...
+}</code></pre><p>เมธอด <code>_loadStationStatus</code> มีอยู่แล้วและโหลดทั้งชุดอยู่แล้ว — แค่ต้องมีใครเรียกตอนต่อกลับ</p></section>
+
+<section><h2>6. การกระจายเหตุการณ์ที่ทำถูก</h2><pre class="code-vs"><code>void _onStationDispatched(List&lt;Object?&gt;? args) {
+  final data = _parseArgs(args);
+  for (final cb in List.of(_stationDispatchedListeners)) {
+    cb(data);
+  }
+}</code></pre><p><code>List.of(...)</code> คัดลอกรายการก่อนวน</p><table><thead><tr><th>ถ้าไม่คัดลอก</th></tr></thead><tbody>
+<tr><td>ผู้ฟังตัวหนึ่งเรียก <code>removeXxxListener</code> ระหว่างที่กำลังวน → <code>ConcurrentModificationError</code></td></tr>
+</tbody></table><p>เกิดได้จริงในจอนี้ — ผู้ฟังเรียก <code>setState</code> ซึ่งอาจทำให้จอถูกถอดและ <code>dispose()</code> ทำงาน</p><p>รูปแบบเดียวกับที่ 12.5 สอนและที่ 17.6 ใช้กับ <code>List&lt;String&gt;.of(_serialNumbers)</code></p><pre class="code-vs"><code>Map&lt;String, dynamic&gt; _parseArgs(List&lt;Object?&gt;? args) {
+  if (args == null || args.isEmpty) return {};
+  final first = args.first;
+  if (first is Map&lt;String, dynamic&gt;) return first;
+  if (first is Map) return Map&lt;String, dynamic&gt;.from(first);
+  return {};
+}</code></pre><table><thead><tr><th>กรณี</th><th>คืนอะไร</th></tr></thead><tbody>
+<tr><td>ไม่มี args</td><td><code>{}</code> — ไม่โยน</td></tr>
+<tr><td>เป็น <code>Map&lt;String, dynamic&gt;</code> อยู่แล้ว</td><td>ตัวเดิม ไม่คัดลอก</td></tr>
+<tr><td>เป็น <code>Map</code> ชนิดอื่น</td><td>แปลงชนิด</td></tr>
+<tr><td>ไม่ใช่ <code>Map</code> เลย</td><td><code>{}</code> — ไม่โยน</td></tr>
+</tbody></table><div class="note"><strong>การถอดรหัสที่ไม่โยน exception เป็นสิ่งจำเป็นในตัวจัดการเหตุการณ์</strong> — ถ้าโยน จะเกิดในบริบทที่ไม่มีใครรอ (ไม่มี <code>await</code> ครอบ) และกลายเป็น unhandled error<br>ตรงกับที่ 12.6 สอน และเป็นสิ่งที่ทำถูกทั้งสองบริการ</div><p>แต่มีราคาที่ต้องรู้ — ข้อมูลที่ผิดรูปจะเงียบ</p><pre class="code-vs"><code>// ถ้าเซิร์ฟเวอร์เปลี่ยนรูปแบบ payload
+return {};      // → ผู้ฟังได้ Map ว่าง → data['stationId'] เป็น null → return เงียบ</code></pre><pre class="code-vs"><code>// เห็นได้ตอนพัฒนา แต่ไม่พังใน release
+Map&lt;String, dynamic&gt; _parseArgs(List&lt;Object?&gt;? args) {
+  if (args == null || args.isEmpty) return {};
+  final first = args.first;
+  if (first is Map&lt;String, dynamic&gt;) return first;
+  if (first is Map) return Map&lt;String, dynamic&gt;.from(first);
+
+  assert(false, 'SignalR payload ไม่ใช่ Map: ${first.runtimeType}');
+  return {};
+}</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>withAutomaticReconnect()</code> พอแล้ว</td><td>ต่อกลับได้ แต่ไม่รู้ว่าพลาดอะไรไป</td></tr>
+<tr><td><code>connect()</code> ที่ไม่โยน แปลว่าต่อสำเร็จ</td><td>จับ exception ไว้แล้วเขียน log</td></tr>
+<tr><td>ref-count ไม่จำเป็นถ้ามีจอเดียว</td><td>ที่นี่มีสองจอที่ใช้ hub เดียวกัน</td></tr>
+<tr><td>วน list ตรง ๆ ได้ถ้าไม่มีใครแก้</td><td>ผู้ฟังเรียก <code>setState</code> → จอถูกถอด → <code>remove</code> ระหว่างวน</td></tr>
+<tr><td>ตัวถอดรหัสควรโยนเมื่อข้อมูลผิด</td><td>ในตัวจัดการเหตุการณ์ไม่ควร ไม่มีใครจับ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “ตอนเช้าใช้ดี พอบ่ายสถานีบนจอไม่ตรงกับของจริงเลย ต้องปิดแอปเปิดใหม่”</p><ol><li>อธิบายว่าเกิดได้อย่างไร</li><li>ทำไม “ปิดแอปเปิดใหม่” ถึงแก้ได้</li><li>แก้ให้ผู้ใช้ไม่ต้องปิดแอป</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เกิดได้อย่างไร</strong></p><pre class="code-vs"><code>เช้า: เปิดแอป → connect() สำเร็จ → เหตุการณ์เข้ามาปกติ
+      _loadStationStatus() โหลดครั้งแรก → หน้าจอตรง
+
+บ่าย: ผู้ใช้เดินเข้าโซนที่สัญญาณอ่อน
+      → สายหลุด
+      → withAutomaticReconnect() พยายามต่อกลับ
+        ├─ ถ้าต่อกลับได้: ไม่มี onreconnected → ไม่โหลดใหม่
+        │                  → เหตุการณ์ที่พลาดหายไปถาวร
+        └─ ถ้าต่อกลับไม่ได้: ไม่มีอะไรบอกผู้ใช้
+      → หน้าจอค้างที่สถานะตอนก่อนหลุด</code></pre><p>สังเกตว่าทั้งสองสาขาให้ผลเดียวกันในสายตาผู้ใช้ — หน้าจอไม่ตรง</p><p>และไม่มีอะไรบนจอที่ต่างกันระหว่าง “ยังเชื่อมต่ออยู่” กับ “หลุดไปแล้ว”</p><p><strong>ข้อ 2 — ทำไมปิดแอปแล้วหาย</strong></p><table><thead><tr><th>ปิดแอปทำให้</th><th>ผล</th></tr></thead><tbody>
+<tr><td><code>dispose()</code> ทำงาน → <code>_refCount = 0</code> → ตัดจริง</td><td>สถานะเก่าถูกล้าง</td></tr>
+<tr><td>เปิดใหม่ → <code>initState</code> → <code>connect()</code></td><td>ต่อใหม่หมด</td></tr>
+<tr><td><code>_loadStationStatus()</code> ถูกเรียกอีกครั้ง</td><td><strong>โหลดสถานะจริงทั้งชุด</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่แก้ปัญหาจริง — ไม่ใช่การต่อใหม่ แต่คือการ<strong>โหลดข้อมูลใหม่ทั้งชุด</strong></p><p>ข้อสังเกตนี้สำคัญ เพราะบอกว่าทางแก้ไม่ต้องแตะเรื่องการเชื่อมต่อเลย — แค่ต้องมีใครเรียก <code>_loadStationStatus()</code> ในจังหวะที่ถูก</p><p><strong>ข้อ 3 — แก้</strong></p><p>ทำสามชั้น เรียงตามความคุ้มค่า</p><table><thead><tr><th>ชั้น</th><th>ทำอะไร</th><th>แก้กรณีไหน</th></tr></thead><tbody>
+<tr><td>1</td><td>โหลดใหม่เมื่อกลับมาจากพื้นหลัง</td><td>ผู้ใช้เก็บเครื่องแล้วหยิบมาใช้</td></tr>
+<tr><td>2</td><td>โหลดใหม่เมื่อ SignalR ต่อกลับ</td><td>หลุดสั้น ๆ แล้วกลับมาเอง</td></tr>
+<tr><td>3</td><td>โหลดใหม่เป็นระยะ + แสดงสถานะ</td><td>ต่อกลับไม่ได้เลย</td></tr>
+</tbody></table><pre class="code-vs"><code>class _PutawayScreenState extends State&lt;PutawayScreen&gt;
+    with WidgetsBindingObserver {
+
+  Timer? _safetyNet;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _signalR.addStationDispatchedListener(_handleStationDispatched);
+    ...
+    // ชั้น 2 — ต่อกลับแล้วโหลดใหม่ทั้งชุด
+    _signalR.addReconnectedListener(_loadStationStatus);
+    _initSignalR();
+    _loadStationStatus();
+
+    // ชั้น 3 — ตาข่ายกันพลาด ห่างพอที่จะไม่กระทบต้นทุน
+    _safetyNet = Timer.periodic(
+      const Duration(minutes: 3),
+      (_) =&gt; _loadStationStatus(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _safetyNet?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _signalR.removeReconnectedListener(_loadStationStatus);
+    ...
+    super.dispose();
+  }
+
+  // ชั้น 1 — กลับมาจากพื้นหลัง
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadStationStatus();
+  }
+}</code></pre><p>สามบรรทัดที่ต้องไม่ลืมใน <code>dispose()</code> — ตัวจับเวลา, observer, และผู้ฟังตัวใหม่</p><p><strong>ทำไมต้องมีชั้นที่ 3 ทั้งที่มีชั้น 1 กับ 2 แล้ว</strong></p><table><thead><tr><th>กรณี</th><th>ชั้น 1</th><th>ชั้น 2</th><th>ชั้น 3</th></tr></thead><tbody>
+<tr><td>เก็บเครื่องแล้วหยิบมา</td><td>✓</td><td></td><td>✓</td></tr>
+<tr><td>หลุดแล้วต่อกลับได้</td><td></td><td>✓</td><td>✓</td></tr>
+<tr><td><strong>ต่อกลับไม่ได้เลย</strong></td><td></td><td></td><td><strong>✓</strong></td></tr>
+<tr><td>เซิร์ฟเวอร์ไม่ยิงเหตุการณ์เพราะบั๊กฝั่งนั้น</td><td></td><td></td><td><strong>✓</strong></td></tr>
+</tbody></table><p>สองแถวล่างคือเหตุผลที่ 12.10 ยืนยันว่าต้องมีตาข่าย — <strong>ไม่มีระบบเรียลไทม์ไหนที่ไม่เคยพลาด</strong></p><p>สามนาทีเป็นการแลกที่สมเหตุสมผล: ยิงเพิ่ม 20 ครั้งต่อชั่วโมงต่อเครื่อง แลกกับการที่ข้อมูลไม่มีทางค้างเกินสามนาที</p><p><strong>สิ่งที่ควรทำพร้อมกัน</strong> — แสดงสถานะการเชื่อมต่อตามหัวข้อ 4 เพราะถ้าไม่แสดง ผู้ใช้จะไม่รู้ว่าทำไมบางทีข้อมูลช้าถึงสามนาที</p><p><strong>ข้อสรุป:</strong> ปัญหานี้แก้ได้โดยไม่ต้องแตะเรื่องการเชื่อมต่อเลย — เพราะสิ่งที่ผู้ใช้ต้องการคือข้อมูลที่ตรง ไม่ใช่การเชื่อมต่อที่ไม่หลุด และ “โหลดใหม่ทั้งชุด” ให้สิ่งนั้นได้ในทุกกรณี</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>สองบริการโครงเหมือนกัน ต่างที่ URL และรายชื่อเหตุการณ์ — ตัว sorting เขียนกระชับกว่าด้วยตัวช่วย <code>_on</code></li><li>ref-count แก้ปัญหาสองจอที่ใช้ hub เดียวกันปิดทับกัน</li><li><code>_refCount++</code> เกิดก่อนการต่อจริง และไม่ลดเมื่อต่อไม่สำเร็จ</li><li><code>disconnect()</code> ไม่จับ exception จาก <code>stop()</code></li><li>ต่อไม่สำเร็จ → เขียน log → ไม่มีใครรู้ — ความล้มเหลวเงียบแบบที่ 12.11 อธิบาย</li><li>มี <code>withAutomaticReconnect()</code> แต่ไม่มี <code>onreconnected</code> — เหตุการณ์ที่พลาดหายถาวร</li><li><code>List.of()</code> ก่อนวนกระจาย ป้องกันการแก้รายการระหว่างวน</li><li><code>_parseArgs</code> ไม่โยน exception ซึ่งจำเป็นในตัวจัดการเหตุการณ์</li><li>ทางแก้ที่แท้จริงคือโหลดใหม่ทั้งชุดในสามจังหวะ ไม่ใช่ทำให้การเชื่อมต่อไม่หลุด</li></ul></div><p><strong>บทหน้า:</strong> ข้ามไปฝั่ง picking — หน้าแรกที่มีทั้งรายการงานและช่องสแกนที่ทำงานคนละเรื่อง</p></section>

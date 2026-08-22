@@ -1,13 +1,269 @@
-<div class="note"><strong>PutawayScreen เป็น live station board:</strong> grid ไม่ได้เป็นเพียงเมนู แต่สะท้อนว่าสถานีใดว่างหรือกำลัง dispatch จาก map ที่ key ด้วย stationId</div>
-<section><h2>1. Static station catalog</h2><p><code>_kStations</code> กำหนด STN-1, STN-2 และ STN-3 พร้อม label, สี และ icon ข้อมูลคงที่นี้คือ UI configuration ส่วน availability ต้องมาจาก backend</p></section>
-<section><h2>2. Runtime status map</h2><pre class="code-vs"><code>Map&lt;String, Map&lt;String, dynamic&gt;&gt; _stationStatus
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด putaway_screen.dart, putaway_station_grid.dart, station_card.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.1, Part 1 (widget), 4.15 (didUpdateWidget)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน widget ที่มีแอนิเมชันและตอบสนองต่อค่าที่เปลี่ยนจากภายนอกได้</div>
 
-stationStatus[stationId] = {
-  palletId, destination, items
-};</code></pre><p>map ทำ lookup ต่อ card ได้เร็ว แต่ dynamic payload ทำให้ typo/type error ไปเกิด runtime ควรสร้าง typed StationStatus</p></section>
-<section><h2>3. Initial load</h2><p><code>getStationStatus()</code> คืนรายการแล้วแปลงเป็น map ด้วย <code>stationId</code> ถ้า request fail โค้ดปัจจุบันคง board เดิม/ว่างโดยไม่แสดง error จึงแยก “ไม่มีงาน” ออกจาก “โหลดสถานะไม่ได้” ไม่ได้</p></section>
-<section><h2>4. Scan station</h2><p>ค่าถูก trim และ uppercase แล้วค้นใน catalog หากไม่พบจะแสดง supported stations หากพบจึงเรียก <code>_openStationPopup</code> นี่เป็น local guard ก่อนทำ I/O</p></section>
-<section><h2>5. Busy guard</h2><p>ถ้า <code>_stationStatus[station.id]</code> มีค่า method จะ return และไม่เปิด sheet แม้ข้อความบน busy card เขียนว่า “กดดูรายละเอียด” จึงเกิด UX contract ไม่ตรงพฤติกรรม ควรเปิด read-only detail หรือเปลี่ยนข้อความ</p></section>
-<section><h2>6. Grid composition</h2><p><code>PutawayStationGrid</code> สร้าง Row ของ Expanded cards และกำหนด <code>isDispatching</code> จาก <code>containsKey</code> เหมาะกับ 3 สถานี แต่หน้าจอแคบมากอาจควรใช้ Wrap/GridView เพื่อรักษา tap target และข้อความ</p></section>
-<section><h2>7. Live updates</h2><p>StationDispatched merge pallet/destination ทันที แล้วเรียก REST reconcile ส่วน PalletArrived, PalletReturned และ LabelingCompleted โหลด snapshot ใหม่ทั้งหมด ทำให้ UI responsive แต่ยัง eventually consistent</p></section>
-<section><h2>8. Widget tests</h2><div class="success">ทดสอบ unknown station, lowercase normalization, empty/error/success status, busy tap, event ของ station ที่ไม่อยู่ใน catalog และ layout ที่ความกว้าง PDA โดย fake API/SignalR แทน singleton จริง</div></section>
+<section><h2>1. จอที่สั้นแต่มีเรียลไทม์</h2><p><code>putaway_screen.dart</code> 168 บรรทัด และ state มีตัวเดียว</p><pre class="code-vs"><code>class _PutawayScreenState extends State&lt;PutawayScreen&gt; {
+  final _stationController = TextEditingController();
+  final _api = ApiService();
+  final _signalR = SignalRService();
+
+  Map&lt;String, Map&lt;String, dynamic&gt;&gt; _stationStatus = {};
+}</code></pre><p>ตัวเดียวนี้เก็บสถานะของทุกสถานี โดยใช้รหัสสถานีเป็นคีย์</p><pre class="code-vs"><code>Future&lt;void&gt; _loadStationStatus() async {
+  final result = await _api.getStationStatus();
+  if (!mounted || !result.success) return;
+
+  final map = &lt;String, Map&lt;String, dynamic&gt;&gt;{};
+  for (final station in result.data!) {
+    map[station['stationId'] as String] = station;
+  }
+  setState(() =&gt; _stationStatus = map);
+}</code></pre><table><thead><tr><th>สิ่งที่ API คืน</th><th>สิ่งที่จอเก็บ</th></tr></thead><tbody>
+<tr><td><code>List&lt;Map&gt;</code></td><td><code>Map&lt;String, Map&gt;</code> ที่มีรหัสสถานีเป็นคีย์</td></tr>
+</tbody></table><p>แปลงเป็น <code>Map</code> เพราะการใช้งานคือ “สถานีนี้มีสถานะอะไร” ไม่ใช่ “ไล่ดูทั้งรายการ”</p><pre class="code-vs"><code>isDispatching: stationStatus.containsKey(stations[i].id),        // O(1)
+busyPalletId: stationStatus[stations[i].id]?['palletId'],        // O(1)</code></pre><p>ถ้าเก็บเป็น <code>List</code> ต้อง <code>firstWhere</code> ทุกครั้ง ซึ่งเป็น O(n) และเขียนยาวกว่า</p><div class="note"><strong>สถานะเป็น <code>Map&lt;String, dynamic&gt;</code> ดิบ ไม่มีโมเดล</strong> — ต่างจากทุกโดเมนที่ผ่านมาที่แปลงเป็นคลาสก่อน<pre class="code-vs"><code>// putaway_api.dart
+Future&lt;ApiResult&lt;List&lt;Map&lt;String, dynamic&gt;&gt;&gt;&gt; getStationStatus() async {
+  final response = await _get('/putaway/station-status');
+  if (!response.success) return ApiResult.error(response.error);
+  final items = response.data!['items'] as List;
+  return ApiResult.success(items.cast&lt;Map&lt;String, dynamic&gt;&gt;());
+}</code></pre>ผลคือทุกที่ที่อ่านค่าต้อง cast เอง และพิมพ์ชื่อคีย์ผิดจะรู้ตอนรันเท่านั้น — 18.7 จะดูว่าทำไมถึงเลือกแบบนี้</div></section>
+
+<section><h2>2. ตารางสถานีที่ไม่ใช่ GridView</h2><pre class="code-vs"><code>Row(
+  children: [
+    for (int i = 0; i &lt; stations.length; i++) ...[
+      if (i &gt; 0) const SizedBox(width: 10),
+      Expanded(
+        child: StationCard(
+          station: stations[i],
+          isDispatching: stationStatus.containsKey(stations[i].id),
+          busyPalletId: stationStatus[stations[i].id]?['palletId'] as String?,
+          busyDestination: stationStatus[stations[i].id]?['destination'] as String?,
+          onTap: () =&gt; onStationTap(stations[i]),
+        ),
+      ),
+    ],
+  ],
+)</code></pre><p>ชื่อคลาสคือ <code>PutawayStationGrid</code> แต่ที่จริงเป็น <code>Row</code> — เพราะมีสามสถานีที่เรียงแถวเดียวได้พอดี</p><table><thead><tr><th></th><th><code>Row</code> + <code>Expanded</code></th><th><code>GridView</code></th></tr></thead><tbody>
+<tr><td>ความกว้างเท่ากัน</td><td>ได้ทันที</td><td>ต้องตั้ง <code>crossAxisCount</code></td></tr>
+<tr><td>ความสูงเท่ากัน</td><td>ได้ตามตัวที่สูงสุด</td><td>ต้องตั้ง <code>childAspectRatio</code></td></tr>
+<tr><td>เกินหนึ่งแถว</td><td><strong>ล้น</strong></td><td>ขึ้นบรรทัดใหม่เอง</td></tr>
+</tbody></table><p>สำหรับสามใบ <code>Row</code> ง่ายกว่ามาก แต่ถ้าเพิ่มเป็นสี่หรือห้าสถานีจะล้นออกนอกจอทันที และไม่มีอะไรเตือน</p><pre class="code-vs"><code>// ทนกว่าโดยไม่เปลี่ยนหน้าตาตอนมีสามใบ
+Wrap(
+  spacing: 10,
+  runSpacing: 10,
+  children: [
+    for (final station in stations)
+      SizedBox(
+        width: (MediaQuery.sizeOf(context).width - 32 - 20) / 3,
+        child: StationCard(...),
+      ),
+  ],
+)</code></pre><p>รูปแบบ <code>for</code> ที่ใช้ <code>if (i &gt; 0)</code> ใส่ช่องว่างระหว่างใบ เป็นวิธีที่อ่านง่ายกว่าการใช้ <code>expand</code> และตรงกับที่ 2.6 สอน</p><p>สังเกตว่าไฟล์นี้ 45 บรรทัดและ<strong>ไม่รู้จัก <code>ApiService</code></strong> — รับ <code>stationStatus</code> เข้ามาแล้ววาด ตรงกับหลักที่ 17.4 ใช้ตรวจว่าแตกไฟล์ถูกไหม</p></section>
+
+<section><h2>3. การ์ดที่เปลี่ยนหน้าตาสองแบบ</h2><pre class="code-vs"><code>child: widget.isDispatching
+    ? StationDispatchingContent(
+        animation: _ctrl,
+        station: widget.station,
+        busyPalletId: widget.busyPalletId,
+        busyDestination: widget.busyDestination,
+      )
+    : StationNormalContent(
+        station: widget.station,
+        busyPalletId: widget.busyPalletId,
+        busyDestination: widget.busyDestination,
+      ),</code></pre><p>สองเนื้อหาถูกแยกเป็นสองไฟล์ (109 และ 116 บรรทัด) — การ์ดตัวเองเหลือ 96 บรรทัดที่ทำแค่ตัดสินใจและจัดการแอนิเมชัน</p><pre class="code-vs"><code>decoration: BoxDecoration(
+  color: widget.isDispatching ? AppTheme.danger : widget.station.color,
+  ...
+  boxShadow: [
+    BoxShadow(
+      color: (widget.isDispatching ? AppTheme.danger : widget.station.color)
+          .withValues(alpha: 0.4),
+      ...</code></pre><p>สถานีที่กำลังทำงานเปลี่ยนเป็นสีแดง — ผู้ใช้เห็นจากไกลว่าสถานีไหนว่าง</p><p>และห่อด้วย <code>AnimatedContainer</code></p><pre class="code-vs"><code>AnimatedContainer(
+  duration: const Duration(milliseconds: 300),
+  ...</code></pre><p>สีเปลี่ยนแบบไล่ระดับใน 300 มิลลิวินาที ไม่ใช่กระโดดทันที — รายละเอียดที่ทำให้เห็นว่ามีอะไรเปลี่ยน แทนที่จะสงสัยว่าตัวเองจำผิดหรือเปล่า</p><div class="note"><strong><code>AnimatedContainer</code> ทำงานได้เพราะ Flutter เทียบค่าเก่ากับค่าใหม่ให้</strong> — เราแค่ให้ค่าใหม่ มันจัดการช่วงกลางเอง<br>ต่างจาก <code>AnimationController</code> ที่ต้องคุมเองทุกขั้น ซึ่งใช้กับกรณีที่ต้องวนซ้ำไม่รู้จบอย่างในหัวข้อถัดไป</div></section>
+
+<section><h2>4. แอนิเมชันที่ต้องรู้ว่าค่าเปลี่ยนจากภายนอก</h2><pre class="code-vs"><code>class _StationCardState extends State&lt;StationCard&gt;
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    if (widget.isDispatching) _ctrl.repeat();      // ← เริ่มถ้าตอนสร้างกำลังทำงานอยู่
+  }
+
+  @override
+  void didUpdateWidget(StationCard old) {
+    super.didUpdateWidget(old);
+    if (widget.isDispatching &amp;&amp; !old.isDispatching) {
+      _ctrl.repeat();                              // ← เพิ่งเริ่มทำงาน
+    } else if (!widget.isDispatching &amp;&amp; old.isDispatching) {
+      _ctrl.stop();
+      _ctrl.reset();                               // ← เพิ่งหยุด
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+}</code></pre><p><code>didUpdateWidget</code> ถูกเรียกเมื่อ<strong>พ่อสร้าง widget ตัวใหม่ที่ตำแหน่งเดิม</strong> ซึ่งเกิดทุกครั้งที่จอ <code>setState</code></p><table><thead><tr><th>เมธอด</th><th>ถูกเรียกเมื่อ</th><th>ในจอนี้คือ</th></tr></thead><tbody>
+<tr><td><code>initState</code></td><td>สร้าง State ครั้งแรก</td><td>เปิดจอ</td></tr>
+<tr><td><code>didUpdateWidget</code></td><td>ได้ค่าใหม่จากพ่อ</td><td>SignalR แจ้งว่าสถานีเปลี่ยนสถานะ</td></tr>
+<tr><td><code>dispose</code></td><td>State ถูกถอด</td><td>ออกจากจอ</td></tr>
+</tbody></table><p>ทำไมต้องเทียบกับค่าเก่า</p><pre class="code-vs"><code>// ถ้าเขียนแบบนี้ จะเรียก repeat() ซ้ำทุกครั้งที่จอ setState
+if (widget.isDispatching) _ctrl.repeat();</code></pre><p><code>repeat()</code> ซ้ำ ๆ ทำให้แอนิเมชันกระตุกเพราะถูกรีสตาร์ทกลางทาง — การเทียบ <code>old.isDispatching</code> ทำให้ทำงานเฉพาะตอนที่<strong>เปลี่ยน</strong>จริง</p><div class="note"><strong>นี่คือรูปแบบมาตรฐานที่ 4.15 สอน และทำได้ครบทั้งสี่จุด</strong> — สร้าง, เริ่มถ้าจำเป็น, ตอบสนองการเปลี่ยน, และคืนทรัพยากร<br><code>SingleTickerProviderStateMixin</code> จำเป็นเพราะ <code>AnimationController</code> ต้องมีตัวจับจังหวะเฟรม — ถ้ามีหลาย controller ต้องใช้ <code>TickerProviderStateMixin</code> แทน</div><p>สิ่งที่ต้องระวัง: <code>_ctrl.repeat()</code> วน<strong>ตลอดเวลา</strong>ที่สถานีทำงานอยู่ ซึ่งอาจนานหลายนาที</p><table><thead><tr><th>ผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>วาดใหม่ 60 ครั้งต่อวินาที</td><td>เฉพาะส่วนที่ผูกกับ <code>_ctrl</code></td></tr>
+<tr><td>กินแบตต่อเนื่อง</td><td>สามสถานีทำงานพร้อมกัน = สามตัว</td></tr>
+</tbody></table><p>สำหรับจอที่ผู้ใช้เปิดค้างไว้ทั้งกะ ควรพิจารณาหยุดแอนิเมชันเมื่อแอปไปอยู่พื้นหลัง — แต่ตอนนี้ยังไม่ทำ</p></section>
+
+<section><h2>5. สถานีที่กดไม่ได้</h2><pre class="code-vs"><code>void _openStationPopup(StationInfo station) {
+  final busy = _stationStatus[station.id];
+  if (busy != null) return;          // ← กำลังทำงานอยู่ กดไม่ได้
+
+  showModalBottomSheet(...);
+}</code></pre><p>แต่การ์ดยังรับการแตะอยู่</p><pre class="code-vs"><code>GestureDetector(
+  onTap: widget.onTap,               // ← ไม่ได้ปิด
+  child: AnimatedContainer(...),
+)</code></pre><table><thead><tr><th>ผู้ใช้แตะสถานีที่กำลังทำงาน</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>การ์ดตอบสนอง</td><td>ไม่มีอะไรเลย — <code>return</code> เงียบ ๆ</td></tr>
+<tr><td>ผู้ใช้เห็น</td><td>ไม่มีอะไรเกิดขึ้น</td></tr>
+<tr><td>ผู้ใช้คิดว่า</td><td>แตะไม่โดน หรือแอปค้าง</td></tr>
+</tbody></table><p>การ์ดสีแดงบอกอยู่แล้วว่ากำลังทำงาน แต่ไม่ได้บอกว่า<strong>กดไม่ได้</strong> — ผู้ใช้ที่ไม่รู้จะกดซ้ำหลายครั้ง</p><pre class="code-vs"><code>// ทางเลือกที่ 1 — บอกด้วยข้อความ
+void _openStationPopup(StationInfo station) {
+  final busy = _stationStatus[station.id];
+  if (busy != null) {
+    showWarningSnackbar(
+      context,
+      '${station.id} กำลังจ่ายพาเลท ${busy['palletId']} — รอจนเสร็จก่อน',
+    );
+    return;
+  }
+  ...
+}</code></pre><p>ข้อความนี้บอกด้วยว่าพาเลทไหน ซึ่งช่วยให้ผู้ใช้รู้ว่ารออะไรอยู่</p><p>สังเกตว่าปัญหานี้เกิดเพราะ<strong>การตัดสินใจอยู่ที่จอ แต่การแสดงผลอยู่ที่การ์ด</strong> — การ์ดไม่รู้ว่าตัวเองกดไม่ได้ จึงทำหน้าตาเหมือนกดได้</p><pre class="code-vs"><code>// ทางเลือกที่ 2 — ให้การ์ดรู้ แล้วแสดงให้ตรง
+StationCard(
+  station: stations[i],
+  isDispatching: isBusy,
+  enabled: !isBusy,          // ← เพิ่ม
+  onTap: () =&gt; onStationTap(stations[i]),
+)</code></pre><p>แล้วในการ์ด</p><pre class="code-vs"><code>GestureDetector(
+  onTap: widget.enabled ? widget.onTap : null,
+  child: Opacity(
+    opacity: widget.enabled ? 1.0 : 0.85,
+    child: AnimatedContainer(...),
+  ),
+)</code></pre></section>
+
+<section><h2>6. สแกนบาร์โค้ดสถานี</h2><pre class="code-vs"><code>void _onStationBarcodeScan() {
+  final raw = _stationController.text.trim().toUpperCase();
+  _stationController.clear();
+  if (raw.isEmpty) return;
+
+  final station = _kStations.where((item) =&gt; item.id == raw).firstOrNull;
+  if (station == null) {
+    showErrorDialog(context,
+      message: 'Station not found: $raw\nSupported stations: STN-1, STN-2, STN-3');
+    return;
+  }
+
+  _openStationPopup(station);
+}</code></pre><p>เหมือนกับ <code>UnloadScreen</code> ใน 17.11 ทุกบรรทัด รวมถึงการพิมพ์รายชื่อสถานีซ้ำในข้อความ</p><table><thead><tr><th>จอ</th><th>รายชื่อในข้อความ</th></tr></thead><tbody>
+<tr><td><code>UnloadScreen</code></td><td>UNL-1, UNL-2, UNL-3</td></tr>
+<tr><td><code>PutawayScreen</code></td><td>STN-1, STN-2, STN-3</td></tr>
+<tr><td><code>PutawayPreworkScreen</code></td><td>PW-STN-1 to PW-STN-6</td></tr>
+</tbody></table><p>สามจอเขียนรูปแบบเดียวกันสามครั้ง และทั้งสามมีรายชื่อพิมพ์ซ้ำที่จะไม่ตรงถ้าเพิ่มสถานี</p><div class="note"><strong>โค้ดที่ซ้ำสามครั้งคือสัญญาณว่าควรรวม</strong> — โดยเฉพาะเมื่อทั้งสามอยู่คนละโดเมนแต่ทำเรื่องเดียวกันเป๊ะ<pre class="code-vs"><code>// ใน putaway/shared/ ที่มีอยู่แล้ว
+StationInfo? findStation(List&lt;StationInfo&gt; stations, String raw) =&gt;
+    stations.where((s) =&gt; s.id == raw.trim().toUpperCase()).firstOrNull;
+
+String supportedStationsText(List&lt;StationInfo&gt; stations) =&gt;
+    stations.map((s) =&gt; s.id).join(', ');</code></pre>สองฟังก์ชันนี้เป็นฟังก์ชันบริสุทธิ์ — เทสต์ได้ทันทีและใช้ได้ทั้งสามจอ</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>Grid</code> ในชื่อคลาสแปลว่าใช้ <code>GridView</code></td><td>เป็น <code>Row</code> ที่รองรับแค่แถวเดียว</td></tr>
+<tr><td><code>didUpdateWidget</code> ถูกเรียกเมื่อ state ของตัวเองเปลี่ยน</td><td>ถูกเรียกเมื่อ<strong>พ่อ</strong>ส่งค่าใหม่มา</td></tr>
+<tr><td>เรียก <code>repeat()</code> ซ้ำได้ไม่เป็นไร</td><td>รีสตาร์ทแอนิเมชันกลางทาง ทำให้กระตุก</td></tr>
+<tr><td>สถานะดิบ <code>Map</code> เร็วกว่าโมเดล</td><td>ต่างกันไม่ได้วัดได้ แต่พิมพ์คีย์ผิดจับไม่ได้</td></tr>
+<tr><td>การ์ดสีแดงบอกว่ากดไม่ได้</td><td>บอกว่ากำลังทำงาน ไม่ได้บอกว่ากดไม่ได้</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมจะเพิ่มสถานี STN-4 และ STN-5</p><ol><li>อะไรจะพังบ้าง</li><li>แก้ให้รองรับจำนวนสถานีเท่าไรก็ได้</li><li>ต้องระวังอะไรเรื่องแอนิเมชันเมื่อมีห้าสถานี</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — อะไรจะพัง</strong></p><table><thead><tr><th>จุด</th><th>อาการ</th><th>เห็นทันทีไหม</th></tr></thead><tbody>
+<tr><td><code>Row</code> ใน <code>PutawayStationGrid</code></td><td>ล้นออกนอกจอ — แถบเหลืองดำ</td><td><strong>เห็น</strong></td></tr>
+<tr><td>ข้อความ “Supported stations: STN-1, STN-2, STN-3”</td><td>บอกข้อมูลผิด</td><td>ไม่เห็นจนกว่าจะสแกนผิด</td></tr>
+<tr><td>การ์ดแคบเกินไป</td><td>ข้อความในการ์ดถูกตัด</td><td>เห็น</td></tr>
+</tbody></table><p>ข้อที่สองอันตรายที่สุดเพราะเงียบ — ผู้ใช้ที่สแกน STN-4 แล้วผิดพลาดจะถูกบอกว่ามีแค่สามสถานี</p><p><strong>ข้อ 2 — แก้</strong></p><pre class="code-vs"><code>class PutawayStationGrid extends StatelessWidget {
+  ...
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionHeader(title: 'เลือก Station', icon: MdiIcons.viewGridOutline),
+        const SizedBox(height: 12),
+        // ขึ้นบรรทัดใหม่เองเมื่อสถานีเยอะ — ไม่ล้น
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const spacing = 10.0;
+            // สูงสุด 3 ใบต่อแถว เพื่อให้การ์ดไม่แคบเกินอ่าน
+            final perRow = stations.length &lt;= 3 ? stations.length : 3;
+            final width =
+                (constraints.maxWidth - spacing * (perRow - 1)) / perRow;
+
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final station in stations)
+                  SizedBox(
+                    width: width,
+                    child: StationCard(
+                      station: station,
+                      isDispatching: stationStatus.containsKey(station.id),
+                      busyPalletId: stationStatus[station.id]?['palletId'] as String?,
+                      busyDestination:
+                          stationStatus[station.id]?['destination'] as String?,
+                      onTap: () =&gt; onStationTap(station),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}</code></pre><p><code>LayoutBuilder</code> ให้ความกว้างจริงของพื้นที่ ไม่ใช่ความกว้างของจอ — สำคัญเพราะพ่อมี <code>padding</code> อยู่</p><p>และแก้ข้อความ</p><pre class="code-vs"><code>final ids = _kStations.map((s) =&gt; s.id).join(', ');
+showErrorDialog(context, message: 'ไม่พบสถานี "$raw"\nสถานีที่ใช้ได้: $ids');</code></pre><p><strong>ข้อ 3 — ระวังอะไรเรื่องแอนิเมชัน</strong></p><table><thead><tr><th>เรื่อง</th><th>3 สถานี</th><th>5 สถานี</th></tr></thead><tbody>
+<tr><td><code>AnimationController</code> ที่ทำงานพร้อมกัน</td><td>สูงสุด 3</td><td>สูงสุด 5</td></tr>
+<tr><td>เฟรมที่ต้องวาด</td><td>3 ส่วน × 60 fps</td><td>5 ส่วน × 60 fps</td></tr>
+<tr><td>แบตบน PDA</td><td>รู้สึกได้ถ้าเปิดค้างทั้งกะ</td><td>รู้สึกมากขึ้น</td></tr>
+</tbody></table><p>ห้าตัวยังไม่ถึงจุดที่แอปกระตุก แต่การเปิดจอค้างไว้ทั้งกะโดยมีแอนิเมชันวนตลอดเป็นการใช้แบตที่ไม่คุ้ม</p><p>แก้ได้โดยหยุดเมื่อแอปไม่ได้อยู่หน้าจอ</p><pre class="code-vs"><code>class _StationCardState extends State&lt;StationCard&gt;
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    if (widget.isDispatching) _ctrl.repeat();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // อยู่ในกระเป๋า = ไม่มีใครเห็น ไม่ต้องวาด
+    if (state == AppLifecycleState.resumed) {
+      if (widget.isDispatching) _ctrl.repeat();
+    } else {
+      _ctrl.stop();
+    }
+  }
+}</code></pre><div class="note"><strong>แต่มีทางที่ง่ายกว่านั้นมาก</strong> — Flutter หยุดวาดเฟรมเองอยู่แล้วเมื่อแอปไปอยู่พื้นหลัง ดังนั้นแอนิเมชันที่วนอยู่จะไม่กินเฟรมจริง<br>สิ่งที่ยังกินคือ <code>Ticker</code> ที่ยังลงทะเบียนอยู่ ซึ่งเบามาก<br><strong>ก่อนแก้ ควรวัดก่อนตามที่ 14.13 สอน</strong> — ถ้าวัดแล้วไม่ต่าง การเพิ่ม observer 5 ตัวคือความซับซ้อนที่ไม่ได้อะไร</div><p><strong>ข้อสรุป:</strong> ข้อ 1 กับ 2 ต้องแก้แน่นอนเพราะพังจริงและเห็นได้ ส่วนข้อ 3 เป็นสิ่งที่ต้องวัดก่อนตัดสิน — ไม่ใช่ทุกข้อสังเกตจะเป็นปัญหาที่ต้องแก้</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>จอ 168 บรรทัด state ตัวเดียว เก็บสถานะทุกสถานีเป็น <code>Map</code> ที่มีรหัสเป็นคีย์</li><li>สถานะเป็น <code>Map&lt;String, dynamic&gt;</code> ดิบ ไม่มีโมเดล — พิมพ์คีย์ผิดรู้ตอนรัน</li><li><code>PutawayStationGrid</code> เป็น <code>Row</code> ที่รองรับแค่แถวเดียว</li><li>ไฟล์ widget ทั้งสองไม่รู้จัก <code>ApiService</code> — แตกถูกทิศ</li><li>การ์ดเปลี่ยนสีเป็นแดงเมื่อสถานีทำงาน และไล่ระดับด้วย <code>AnimatedContainer</code></li><li><code>didUpdateWidget</code> เทียบกับค่าเก่าก่อนสั่ง <code>repeat()</code> — ไม่งั้นแอนิเมชันกระตุก</li><li>สถานีที่ทำงานอยู่กดไม่ได้ แต่ไม่มีอะไรบอกผู้ใช้</li><li>ข้อความ “Supported stations” พิมพ์รายชื่อซ้ำในสามจอ</li></ul></div><p><strong>บทหน้า:</strong> <code>StationSheet</code> — แผ่นเดียว 317 บรรทัดที่ทำงานได้ห้าแบบตามค่าที่รับเข้ามา</p></section>

@@ -1,12 +1,255 @@
-<div class="note"><strong>Confirm pick คือ inventory transaction:</strong> ยอดถูกหักจาก source และเพิ่มที่ destination พร้อมอัปเดต order จึงต้อง atomic, idempotent และตรวจ serial/quantity จากฐานข้อมูลล่าสุด</div>
-<section><h2>1. Build selected items</h2><p>วน palletItems แล้วใช้ serial count หรือ qty map; รายการที่ qty≤0 ถูกข้าม สำหรับ serial item ส่ง serialNumbers ที่เลือก ส่วน non-serial ส่ง empty list ให้ backendตรวจ <code>SerialRequire</code> เอง</p></section>
-<section><h2>2. Confirm payload</h2><pre class="code-vs"><code>POST /picking/confirm-pick
-{ pickOrderId, sourcePalletId, destPalletId,
-  items: [{ partId, qty, serialNumbers }],
-  operatorId }</code></pre><p>payload ปัจจุบันไม่มี lineId/lot/condition จึงกำกวมเมื่อ partId ซ้ำหลาย inventory lines</p></section>
-<section><h2>3. Client validation</h2><p>ต้องมีอย่างน้อยหนึ่ง item; qty ไม่เกิน suggested; serial ไม่ซ้ำ อยู่ใน available list และไม่เกิน suggested แต่เป็น UX guard เท่านั้น ไม่ใช่ security/inventory guarantee</p></section>
-<section><h2>4. Atomic backend rules</h2><p>ตรวจ source ownership/location, destination eligibility/capacity, order remaining, serial membership/uniqueness และ concurrency version ใน transaction เดียว หากบาง item ไม่ผ่านต้องกำหนดชัดว่า reject ทั้งชุดหรือ partial result</p></section>
-<section><h2>5. Response dimensions</h2><p><code>ConfirmPickResponse</code> มี isPickOrderComplete, sourcePalletEmpty, sourcePickDone, pickOrderStatus, remainingItems และ message แต่ UI ปัจจุบันใช้หลัก ๆ complete/remaining และไม่ได้ใช้ source flags ตัดสิน transitionครบถ้วน</p></section>
-<section><h2>6. After-pick state</h2><p>success banner แยก order complete กับรอบนี้สำเร็จ และ remaining card filter qty&gt;0 ผู้ใช้เลือกกลับ scan source หรือส่ง destination ไป PACK ข้อมูลนี้ควร reload authoritative order ก่อน action ถัดไป</p></section>
-<section><h2>7. Retry ambiguity</h2><p>timeout หลัง commit อาจทำให้ผู้ใช้กดยืนยันซ้ำ ต้องส่ง idempotency key/operationId และ backendคืน response เดิม หรือ client query operation/order state ก่อน retry</p></section>
-<section><h2>8. Confirm tests</h2><div class="success">ทดสอบ nonserial/serial/mixed, part หลาย lot, concurrent stock change, duplicate command, destination full, partial failure policy, source empty และ order complete โดย assert ยอด source+dest และ order เปลี่ยนสอดคล้องกัน</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _confirmPick, _buildAfterPick และ widgets/after_pick/</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.13, 7.10 (คำสั่งที่ไม่รู้ผล), 17.7 (ความล้มเหลวครึ่งทาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านสิ่งที่เกิดหลังยืนยันสำเร็จ และเห็นว่าปุ่มที่ปิดตัวเองบอกอะไรผู้ใช้</div>
+
+<section><h2>1. คำขอยืนยันการหยิบ</h2><pre class="code-vs"><code>setState(() =&gt; _loading = true);
+final result = await _api.confirmPickV2(
+  pickOrderId: _pickOrderId,
+  sourcePalletId: _assignment.palletId,
+  destPalletId: destId,
+  items: items,
+  operatorId: widget.userId,
+);
+if (!mounted) return;
+setState(() =&gt; _loading = false);
+
+if (!result.success) {
+  showErrorDialog(context, message: result.error ?? 'Confirm Pick ไม่สำเร็จ');
+  return;                          // ← ไม่ล้างอะไร
+}
+
+setState(() {
+  _lastResult = result.data!;
+  _state = _PickState.afterPick;
+});</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>if (!mounted) return;</code> ก่อน <code>setState</code></td><td>ลำดับถูก ต่างจาก <code>StationSheet</code> (18.3)</td><td>4.13</td></tr>
+<tr><td>ล้มเหลวแล้วไม่ล้าง S/N</td><td>ผู้ใช้กดยืนยันซ้ำได้ทันที</td><td>15.11 ข้อ 20</td></tr>
+<tr><td>เก็บผลลัพธ์ไว้ใน <code>_lastResult</code></td><td>จอถัดไปต้องใช้</td><td>—</td></tr>
+</tbody></table><p>แต่ขาดสิ่งที่ 7.10 สอน — ไม่บอกว่าคำสั่งอาจไปถึงแล้ว</p><pre class="code-vs"><code>showErrorDialog(context, message: result.error ?? 'Confirm Pick ไม่สำเร็จ');</code></pre><div class="note"><strong>การยืนยันการหยิบเป็นคำสั่งที่เปลี่ยนข้อมูล</strong> — ถ้าเน็ตหลุดหลังจากที่เซิร์ฟเวอร์บันทึกแล้ว ผู้ใช้ที่กดซ้ำจะหยิบซ้ำ<br>ต่างจาก <code>_sendPallet</code> ใน 18.9 ที่มี preview คอยกันไว้โดยบังเอิญ — ที่นี่ไม่มีอะไรกัน<br>และเมธอดนี้ไม่ได้ส่ง <code>Idempotency-Key</code> ไปด้วย ตามที่ 16.6 พบว่า <code>ApiService</code> ไม่มีกลไกนี้เลย</div><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(
+    context,
+    title: 'ไม่ทราบผล',
+    message: '${result.error ?? "ยืนยันไม่สำเร็จ"}\n\n'
+        'คำสั่งอาจบันทึกไปแล้ว — กลับไปดูรายการงานก่อนกดซ้ำ',
+  );
+  return;
+}</code></pre></section>
+
+<section><h2>2. ผลลัพธ์ที่บอกสองอย่าง</h2><pre class="code-vs"><code>Widget _buildAfterPick() {
+  final result = _lastResult!;
+  final isComplete = result.isPickOrderComplete;
+  final remaining = result.remainingItems
+      .where((item) =&gt; item.remainingQty &gt; 0)
+      .toList();
+  ...
+}</code></pre><table><thead><tr><th>ฟิลด์</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td><code>isPickOrderComplete</code></td><td>งานทั้งใบเสร็จหรือยัง</td></tr>
+<tr><td><code>remainingItems</code></td><td>ยังเหลืออะไรต้องหยิบอีก</td></tr>
+</tbody></table><p>เซิร์ฟเวอร์คำนวณให้ทั้งสองอย่าง — แอปไม่ต้องเดา</p><pre class="code-vs"><code>.where((item) =&gt; item.remainingQty &gt; 0)</code></pre><p>กรองอีกชั้นแม้เซิร์ฟเวอร์ควรส่งเฉพาะที่เหลือมาแล้ว — ทนต่อกรณีที่เซิร์ฟเวอร์ส่งทั้งหมดมา</p><p>สังเกตว่าใช้ <code>&gt; 0</code> ไม่ใช่ <code>!= 0</code> ซึ่งกันค่าติดลบด้วย เหมือน <code>isDone</code> ใน 17.13</p><pre class="code-vs"><code>PickingAfterPickSuccessBanner(
+  isComplete: isComplete,
+  destPalletId: _destPalletId,
+),
+if (remaining.isNotEmpty) ...[
+  const SizedBox(height: 12),
+  PickingRemainingItemsCard(remainingItems: remaining),
+],</code></pre><p>รายการที่เหลือแสดงเฉพาะเมื่อมี — ไม่มีการ์ดว่างเปล่าที่บอกว่า “ไม่เหลืออะไร”</p><p>เพราะข้อมูลนั้นอยู่ในแบนเนอร์แล้วผ่าน <code>isComplete</code></p></section>
+
+<section><h2>3. สองทางออกที่ไม่เท่ากัน</h2><pre class="code-vs"><code>// ทางที่ 1 — กลับไปสแกนพาเลทต้นทางใบใหม่
+ElevatedButton.icon(
+  onPressed: _goToScanSource,
+  icon: const Icon(Icons.qr_code_scanner, size: 20),
+  label: const Text('กลับไปสแกน Source Pallet'),
+  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary, ...),
+),
+
+// ทางที่ 2 — ส่งพาเลทปลายทางไปแพ็ก
+ElevatedButton.icon(
+  onPressed: _destPalletId != null ? () =&gt; _sendToPack(_destPalletId!) : null,
+  icon: const Icon(Icons.local_shipping, size: 20),
+  label: const Text('ส่งไป PACK'),
+  style: ElevatedButton.styleFrom(
+    backgroundColor: AppTheme.secondary,
+    disabledBackgroundColor: AppTheme.textGrey(context).withValues(alpha: 0.3),
+    disabledForegroundColor: AppTheme.textGrey(context),
+    ...
+  ),
+),</code></pre><table><thead><tr><th>ทาง</th><th>ผู้ใช้ทำเมื่อ</th><th>ผลกับพาเลทปลายทาง</th></tr></thead><tbody>
+<tr><td>สแกนต้นทางใบใหม่</td><td>ยังหยิบไม่ครบ</td><td>ยังใช้ต่อ</td></tr>
+<tr><td>ส่งไป PACK</td><td>พาเลทปลายทางเต็มหรืองานเสร็จ</td><td>ถูกส่งออกไป</td></tr>
+</tbody></table><p>ปุ่มที่สองปิดตัวเองเมื่อไม่มีพาเลทปลายทาง</p><pre class="code-vs"><code>onPressed: _destPalletId != null ? () =&gt; _sendToPack(_destPalletId!) : null,</code></pre><p>และมีการตกแต่งสถานะปิดไว้ครบ</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ตั้ง <code>disabledBackgroundColor</code></td><td>ปุ่มปิดดูต่างชัดเจน ไม่ใช่แค่จาง</td></tr>
+<tr><td>ตั้ง <code>disabledForegroundColor</code></td><td>ข้อความยังอ่านได้</td></tr>
+<tr><td>ใช้สีจากธีม ไม่ใช่ <code>Colors.grey</code></td><td>ทำงานถูกในโหมดมืด</td></tr>
+</tbody></table><div class="note"><strong>แต่ปุ่มปิดไม่ได้บอกว่าทำไม</strong> — ผู้ใช้เห็นปุ่มเทาแล้วไม่รู้ว่าต้องทำอะไรถึงจะกดได้<br>ในทางปฏิบัติ <code>_destPalletId</code> จะไม่เป็น null ตอนอยู่ในสถานะ <code>afterPick</code> เพราะเพิ่งยืนยันไปโดยใช้พาเลทนั้น — ปุ่มจึงกดได้เสมอ<br>ปุ่มที่ปิดไม่ได้จริงทำให้โค้ดดูปลอดภัยแต่ไม่ได้ป้องกันอะไร และเพิ่มเงื่อนไขให้คนอ่านต้องคิด</div><p>วิธีตรวจ: ไล่ดูว่าเข้าสถานะ <code>afterPick</code> ได้จากไหนบ้าง</p><pre class="code-vs"><code>// ทางเดียว — จาก _confirmPick ที่สำเร็จ
+setState(() {
+  _lastResult = result.data!;
+  _state = _PickState.afterPick;
+});</code></pre><pre class="code-vs"><code>// และ _confirmPick ถูกเรียกจากสองที่ ซึ่งทั้งสองมี destId แน่นอน
+_confirmPick(_destPalletId!);      // จาก _goToScanDestOrConfirm
+_destPalletId = destId;
+await _confirmPick(destId);        // จาก _scanDestAndConfirm</code></pre><p>ยืนยันได้ว่า <code>_destPalletId</code> ไม่เป็น null ในสถานะนี้ — เงื่อนไขนั้นตายแล้ว</p></section>
+
+<section><h2>4. ส่งไปแพ็กแล้วทำอะไรต่อ</h2><pre class="code-vs"><code>Future&lt;void&gt; _sendToPack(String palletId) async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.sendToPack(palletId: palletId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'ส่งไป PACK ไม่สำเร็จ');
+    return;
+  }
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(result.data?['message'] ?? 'ส่งไป PACK สำเร็จ'),
+      backgroundColor: AppTheme.success,
+    ),
+  );
+
+  // กลับไปสแกน source ต่อ (ยังอยู่หน้า Pick)
+  setState(() =&gt; _destPalletId = null);
+  _goToScanSource();
+}</code></pre><table><thead><tr><th>ขั้น</th><th>ทำอะไร</th></tr></thead><tbody>
+<tr><td>1</td><td>ส่งพาเลทไปแพ็ก</td></tr>
+<tr><td>2</td><td>ล้าง <code>_destPalletId</code> — พาเลทใบนั้นไม่อยู่แล้ว</td></tr>
+<tr><td>3</td><td>กลับไปสแกนต้นทาง</td></tr>
+</tbody></table><p>ขั้นที่ 2 สำคัญ — ถ้าไม่ล้าง รอบถัดไปจะข้ามการสแกนปลายทาง (18.11) แล้วส่งของไปพาเลทที่ถูกส่งออกไปแล้ว</p><p>แต่มีสองจุดที่ไม่สม่ำเสมอ</p><pre class="code-vs"><code>ScaffoldMessenger.of(context).showSnackBar(
+  SnackBar(content: Text(...), backgroundColor: AppTheme.success),
+);</code></pre><p>สร้าง SnackBar เองแทนที่จะใช้ <code>showSuccessSnackbar()</code> — ปัญหาเดียวกับที่ 17.10 พบใน <code>LoadToBasketScreen</code></p><table><thead><tr><th>เสียอะไรไป</th></tr></thead><tbody>
+<tr><td>การสั่นเบา — ผู้ใช้ที่ไม่ได้มองจอไม่รู้ว่าสำเร็จ (16.9)</td></tr>
+<tr><td>ไอคอนเครื่องหมายถูก</td></tr>
+<tr><td>เวลาแสดงที่ตรงกับที่อื่น</td></tr>
+</tbody></table><p>ในไฟล์เดียวกันมีที่ใช้ตัวกลางถูก</p><pre class="code-vs"><code>// _returnPallet
+showSuccessSnackbar(context, 'ส่ง $palletId ไป $destination แล้ว');</code></pre><p>สองเมธอดที่ทำเรื่องคล้ายกัน ใช้คนละวิธี</p><p>อีกจุดคือการอ่านผลลัพธ์</p><pre class="code-vs"><code>result.data?['message'] ?? 'ส่งไป PACK สำเร็จ'</code></pre><p><code>sendToPack</code> คืน <code>Map&lt;String, dynamic&gt;</code> ดิบ ไม่มีโมเดล — จึงต้องอ่านคีย์ด้วยมือ</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; sendToPack({required String palletId}) async {
+  final response = await _post('/picking/send-to-pack/$palletId', {});
+  if (!response.success) return ApiResult.error(response.error);
+  return ApiResult.success(response.data!);
+}</code></pre><p>รูปแบบเดียวกับที่ 18.7 พบใน <code>getStationStatus</code> — และที่นี่ใช้คีย์เดียวจึงยังพอรับได้</p></section>
+
+<section><h2>5. คืนพาเลทต้นทาง</h2><pre class="code-vs"><code>Future&lt;void&gt; _returnPallet(String palletId, String destination) async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.returnPallet(palletId: palletId, destination: destination);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'ส่ง Pallet กลับไม่สำเร็จ');
+    return;
+  }
+
+  showSuccessSnackbar(context, 'ส่ง $palletId ไป $destination แล้ว');
+  _goToScanSource();
+}</code></pre><p>เรียกจากสถานะ <code>returnSource</code> ซึ่งเข้ามาเมื่อสแกนพาเลทต้นทางไม่สำเร็จ (18.11)</p><pre class="code-vs"><code>PickingReturnSourceActions(
+  palletId: palletId,
+  onReturn: (destination) =&gt; _returnPallet(palletId, destination),
+),</code></pre><pre class="code-vs"><code>// widget ที่ให้เลือกปลายทาง
+ElevatedButton.icon(
+  onPressed: () =&gt; onReturn('ASRS'),
+  label: const Text('ส่งกลับ ASRS'),
+),
+ElevatedButton.icon(
+  onPressed: () =&gt; onReturn('ZONE_PACK'),
+  label: const Text('ส่งไป ZONE PACK'),
+),</code></pre><div class="note"><strong>ต่างจาก <code>_sendPallet</code> ใน 18.9 อย่างสำคัญ</strong><table><thead><tr><th></th><th>18.9 (จอรายการ)</th><th>ที่นี่</th></tr></thead><tbody>
+<tr><td>ใครเลือกปลายทาง</td><td><strong>เซิร์ฟเวอร์</strong> ผ่าน preview</td><td><strong>ผู้ใช้</strong></td></tr>
+<tr><td>ยืนยันก่อนไหม</td><td>มีกล่องยืนยัน</td><td><strong>ไม่มี — กดปุ่มแล้วส่งเลย</strong></td></tr>
+<tr><td>ผู้ใช้รู้ผลก่อนกดไหม</td><td>รู้</td><td>ไม่รู้ว่าถูกไหม</td></tr>
+</tbody></table>ที่นี่ผู้ใช้กดปุ่มเดียวแล้วพาเลทถูกส่งทันที — ไม่มีทางกลับ</div><p>สองปุ่มอยู่ห่างกัน 10 พิกเซล และมีขนาดเท่ากัน</p><pre class="code-vs"><code>const SizedBox(height: 10),</code></pre><p>ผู้ใช้ที่ใส่ถุงมือกดพลาดได้ง่าย และผลของการกดผิดคือพาเลทถูกส่งไปผิดที่</p><pre class="code-vs"><code>// เพิ่มการยืนยันเฉพาะที่จำเป็น
+onPressed: () async {
+  final confirm = await showConfirmDialog(
+    context,
+    title: 'ส่ง Pallet',
+    message: 'ส่ง $palletId ไป ${destination == 'ZONE_PACK' ? 'ZONE PACK' : 'ASRS'}\n\n'
+        'AMR จะมารับทันที',
+    confirmLabel: 'ส่ง',
+  );
+  if (confirm) onReturn(destination);
+},</code></pre><p>ข้อความ “AMR จะมารับทันที” เป็นแบบเดียวกับที่ 18.3 ใช้ในฝั่ง putaway — บอกผลลัพธ์ทางกายภาพ</p></section>
+
+<section><h2>6. เปรียบเทียบสามทางที่ส่งพาเลท</h2><table><thead><tr><th></th><th>18.9 จอรายการ</th><th>18.14 คืนต้นทาง</th><th>18.14 ส่งไปแพ็ก</th></tr></thead><tbody>
+<tr><td>endpoint</td><td><code>returnPallet</code></td><td><code>returnPallet</code></td><td><code>sendToPack</code></td></tr>
+<tr><td>ปลายทางมาจาก</td><td>เซิร์ฟเวอร์</td><td>ผู้ใช้เลือก</td><td>ตายตัว</td></tr>
+<tr><td>preview</td><td><strong>มี</strong></td><td>ไม่มี</td><td>ไม่มี</td></tr>
+<tr><td>กล่องยืนยัน</td><td><strong>มี</strong></td><td>ไม่มี</td><td>ไม่มี</td></tr>
+<tr><td>ใช้ <code>showSuccessSnackbar</code></td><td><strong>ใช้</strong></td><td><strong>ใช้</strong></td><td>ไม่ใช้</td></tr>
+<tr><td>บอกว่าอาจไม่รู้ผล</td><td>ไม่</td><td>ไม่</td><td>ไม่</td></tr>
+</tbody></table><p>สามทางที่ทำเรื่องคล้ายกันมาก แต่ระดับการป้องกันต่างกันสามระดับ</p><div class="note"><strong>นี่คือรูปแบบเดียวกับตารางใน 17.14</strong> — กฎเดียวกันที่เขียนคนละที่จะไม่ตรงกัน<br>ที่นี่ทั้งสามอยู่ในโดเมนเดียวกันด้วยซ้ำ และสองในสามอยู่ในไฟล์เดียวกัน<br>สาเหตุคือแต่ละทางถูกเขียนตอนแก้โจทย์คนละข้อ ไม่ได้ถูกออกแบบพร้อมกัน</div><p>ทางที่ 18.9 ใช้ครบที่สุด — และเป็นตัวที่ควรใช้เป็นแบบให้อีกสองตัว</p><pre class="code-vs"><code>// ตัวช่วยที่ทั้งสามใช้ร่วมกันได้
+Future&lt;bool&gt; confirmPalletMove(
+  BuildContext context, {
+  required String palletId,
+  required String destination,
+}) {
+  final label = switch (destination) {
+    'ZONE_PACK' =&gt; 'ZONE PACK',
+    'ASRS' =&gt; 'ASRS',
+    _ =&gt; destination,
+  };
+  return showConfirmDialog(
+    context,
+    title: 'ส่ง Pallet',
+    message: 'ส่ง $palletId ไป $label\n\nAMR จะมารับทันที',
+    confirmLabel: 'ส่ง',
+  );
+}</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ปุ่มที่ปิดตัวเองแปลว่ามีกรณีที่ปิดจริง</td><td>ที่นี่เงื่อนไขเป็น true เสมอ</td></tr>
+<tr><td>ยืนยันไม่สำเร็จ = ไม่มีอะไรเกิดขึ้น</td><td>อาจบันทึกไปแล้ว</td></tr>
+<tr><td>สร้าง SnackBar เองก็เหมือนกัน</td><td>เสียการสั่นและความสม่ำเสมอ</td></tr>
+<tr><td>ปุ่มสองปุ่มที่ห่าง 10 พิกเซลพอ</td><td>ผู้ใช้ใส่ถุงมือกดพลาดได้</td></tr>
+<tr><td>เมธอดในไฟล์เดียวกันทำเหมือนกัน</td><td>สามทางส่งพาเลทป้องกันสามระดับ</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “กดส่ง Pallet ผิดปุ่ม ของไป ZONE PACK แทนที่จะกลับ ASRS แก้ไม่ได้เลย”</p><ol><li>ทำไมถึงกดผิดได้ง่าย</li><li>เสนอการแก้สามระดับ พร้อมผลกระทบต่อความเร็วในการทำงาน</li><li>ควรมีทางยกเลิกไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ทำไมกดผิดง่าย</strong></p><table><thead><tr><th>ปัจจัย</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ปุ่มขนาดเท่ากัน</td><td>ทั้งคู่ <code>width: double.infinity</code>, <code>vertical: 14</code></td></tr>
+<tr><td>ห่างกัน 10 พิกเซล</td><td>น้อยกว่าครึ่งของนิ้วมือที่ใส่ถุงมือ</td></tr>
+<tr><td>ไม่มีการยืนยัน</td><td>กดปุ๊บส่งปั๊บ</td></tr>
+<tr><td>สีต่างกันแต่ไม่ได้สื่อความหมาย</td><td><code>primary</code> น้ำเงิน กับ <code>secondary</code> ฟ้า — ใกล้กัน</td></tr>
+</tbody></table><p>ปัจจัยที่สี่สำคัญ — สองสีนี้อยู่ในตระกูลเดียวกัน</p><pre class="code-vs"><code>static const primary   = Color(0xFF1565C0);   // น้ำเงิน
+static const secondary = Color(0xFF0288D1);   // ฟ้า</code></pre><p>ผู้ใช้ที่กดโดยดูสีจากมุมตาแยกไม่ออก</p><p><strong>ข้อ 2 — สามระดับ</strong></p><table><thead><tr><th>ระดับ</th><th>ทำอะไร</th><th>เสียเวลาเพิ่ม</th><th>กันได้แค่ไหน</th></tr></thead><tbody>
+<tr><td>1</td><td>เพิ่มระยะห่างเป็น 24 + ใช้สีที่ต่างกันจริง</td><td>ไม่มี</td><td>กดพลาดน้อยลง</td></tr>
+<tr><td>2</td><td>เพิ่มกล่องยืนยัน</td><td>1 แตะ ต่อครั้ง</td><td>กันได้เกือบหมด</td></tr>
+<tr><td>3</td><td>ใช้ preview แบบ 18.9 ให้เซิร์ฟเวอร์แนะนำ</td><td>1 คำขอ + 1 แตะ</td><td>กันได้และแนะนำถูกด้วย</td></tr>
+</tbody></table><pre class="code-vs"><code>// ระดับ 1 — แก้ที่ widget ได้เลย ไม่กระทบ flow
+const SizedBox(height: 24),        // จาก 10
+
+// และแยกสีให้ต่างกันจริง
+style: ElevatedButton.styleFrom(
+  backgroundColor: AppTheme.primary,     // ASRS = น้ำเงิน (กลับที่เดิม)
+  ...
+),
+style: ElevatedButton.styleFrom(
+  backgroundColor: AppTheme.teal,        // ZONE PACK = เขียวน้ำเงิน (ไปต่อ)
+  ...
+),</code></pre><p>ระดับ 1 ควรทำก่อนเสมอเพราะไม่มีต้นทุน — แต่ไม่พอ เพราะยังกดผิดได้</p><pre class="code-vs"><code>// ระดับ 2 — ในตัว widget เอง ไม่ต้องแก้จอ
+class PickingReturnSourceActions extends StatelessWidget {
+  ...
+  Future&lt;void&gt; _confirmAndReturn(BuildContext context, String destination) async {
+    final label = destination == 'ZONE_PACK' ? 'ZONE PACK' : 'ASRS';
+    final ok = await showConfirmDialog(
+      context,
+      title: 'ส่ง Pallet',
+      message: 'ส่ง $palletId ไป $label\n\nAMR จะมารับทันที กลับไม่ได้',
+      confirmLabel: 'ส่งไป $label',
+    );
+    if (ok) onReturn(destination);
+  }
+}</code></pre><p><code>confirmLabel</code> เขียนปลายทางไว้ในปุ่มด้วย — ผู้ใช้ที่กดเร็วโดยไม่อ่านเนื้อหาก็ยังเห็น ตรงกับที่ 18.9 ทำ</p><p><strong>ข้อ 3 — ควรมีทางยกเลิกไหม</strong></p><table><thead><tr><th>คำถาม</th><th>คำตอบ</th></tr></thead><tbody>
+<tr><td>ยกเลิกได้ทางเทคนิคไหม</td><td>ต้องถามฝั่งเซิร์ฟเวอร์ — มี endpoint ไหม</td></tr>
+<tr><td>ยกเลิกได้ทางกายภาพไหม</td><td><strong>ขึ้นกับว่า AMR มาถึงหรือยัง</strong></td></tr>
+<tr><td>ถ้าของไปถึง ZONE PACK แล้ว</td><td>ต้องให้คนไปเอากลับ ซึ่งเป็นงานนอกระบบ</td></tr>
+</tbody></table><p>คำตอบที่ตรงที่สุดคือ <strong>“ป้องกันดีกว่ายกเลิก”</strong> — เพราะคำสั่งนี้ทำให้ของเคลื่อนที่จริง และมีช่วงเวลาสั้นมากก่อนที่หุ่นยนต์จะมารับ</p><p>แต่ถ้าจะมี ควรเป็นแบบที่มีเวลาจำกัด</p><pre class="code-vs"><code>// แถบที่ให้ยกเลิกได้ในช่วงสั้น ๆ ก่อน AMR มาถึง
+ScaffoldMessenger.of(context).showSnackBar(
+  SnackBar(
+    content: Text('ส่ง $palletId ไป $label แล้ว'),
+    backgroundColor: AppTheme.success,
+    duration: const Duration(seconds: 8),
+    action: SnackBarAction(
+      label: 'ยกเลิก',
+      textColor: Colors.white,
+      onPressed: () =&gt; _cancelPalletMove(palletId),
+    ),
+  ),
+);</code></pre><div class="note"><strong>ก่อนทำต้องยืนยันสามข้อกับทีมและฝ่ายคลัง</strong><ol><li>มี endpoint ยกเลิกไหม</li><li>ยกเลิกได้ภายในกี่วินาทีก่อน AMR ออกเดินทาง</li><li>ถ้ายกเลิกไม่ทัน ผู้ใช้ควรทำอย่างไร</li></ol>ถ้าตอบข้อ 1 ว่าไม่มี การใส่ปุ่มยกเลิกจะกลายเป็นการหลอกผู้ใช้ว่าแก้ได้ ซึ่งแย่กว่าไม่มีปุ่ม</div><p><strong>ข้อสรุป:</strong> สำหรับคำสั่งที่มีผลทางกายภาพและกลับไม่ได้ ลำดับความสำคัญคือ <strong>ทำให้กดผิดยาก → ยืนยันก่อน → แล้วค่อยคิดเรื่องยกเลิก</strong></p><p>ระดับ 1 กับ 2 รวมกันใช้เวลาแก้ไม่ถึงชั่วโมงและแก้ปัญหาได้เกือบทั้งหมด — ส่วนการยกเลิกต้องแก้ทั้งสองฝั่งและอาจทำไม่ได้จริง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>_confirmPick</code> ตรวจ <code>mounted</code> ก่อน <code>setState</code> และไม่ล้าง S/N เมื่อล้มเหลว</li><li>แต่ไม่บอกว่าคำสั่งอาจบันทึกไปแล้ว และไม่มี <code>Idempotency-Key</code></li><li>เซิร์ฟเวอร์คำนวณ <code>isPickOrderComplete</code> และ <code>remainingItems</code> ให้</li><li>ปุ่ม “ส่งไป PACK” ปิดตัวเองด้วยเงื่อนไขที่เป็น true เสมอ</li><li><code>_sendToPack</code> ล้าง <code>_destPalletId</code> เพื่อไม่ให้รอบถัดไปข้ามการสแกนปลายทาง</li><li>แต่สร้าง SnackBar เอง — เสียการสั่นไป ทั้งที่เมธอดข้าง ๆ ใช้ตัวกลาง</li><li>การคืนพาเลทต้นทางให้ผู้ใช้เลือกปลายทางเอง ไม่มี preview ไม่มีการยืนยัน</li><li>สามทางที่ส่งพาเลทในโดเมนเดียวกัน ป้องกันสามระดับ</li><li>สำหรับคำสั่งที่กลับไม่ได้ — ทำให้กดผิดยาก แล้วยืนยัน ดีกว่าคิดเรื่องยกเลิก</li></ul></div><p><strong>บทหน้า:</strong> สถานะ <code>returnSource</code> เต็ม ๆ และการเลือกปลายทางที่ผู้ใช้ตัดสินเอง</p></section>

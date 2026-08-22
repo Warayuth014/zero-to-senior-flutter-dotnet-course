@@ -4,17 +4,222 @@
 <title>Return Source Pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-15 · Real Codebase</span><h1>Return Source Pallet</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Return API</a></li><li><a href="#section-2">Preview model</a></li><li><a href="#section-3">Orders-list flow</a></li><li><a href="#section-4">Pick-flow fallback</a></li><li><a href="#section-5">Unify decision</a></li><li><a href="#section-6">Source result flags</a></li><li><a href="#section-7">Concurrency/idempotency</a></li><li><a href="#section-8">Return tests</a></li></ol></nav>
-<div class="note"><strong>Return pallet มีสอง entry points:</strong> orders list ใช้ preview ก่อนส่ง ส่วน PickItemsScreen เสนอ ASRS/ZONE_PACK ทันทีเมื่อ assign source ไม่สำเร็จ ความต่างนี้ต้องอธิบายและทำ policy ให้เป็นหนึ่งเดียว</div>
-<section id="section-1"><h2>1. Return API</h2><pre class="code-vs"><code>GET  /picking/return-pallet-preview/{palletId}
-POST /picking/return-pallet
-{ palletId, destination? }</code></pre><p>ถ้าไม่ส่ง destination backend เลือก ZONE_PACK สำหรับ PACKED มิฉะนั้น ASRS</p></section>
-<section id="section-2"><h2>2. Preview model</h2><p><code>ReturnPalletPreview</code> มี currentStatus/location, canReturn, destination และ reason จึงเป็น typed decision จาก server ก่อน mutation ไม่ใช่แค่ข้อมูลแสดงผล</p></section>
-<section id="section-3"><h2>3. Orders-list flow</h2><p>scan → preview → deny หรือ confirm destination ที่ serverแนะนำ → execute → clear/focus เป็น flow ปลอดภัยเพราะ operator เห็นเหตุผลและ routing ก่อน commit</p></section>
-<section id="section-4"><h2>4. Pick-flow fallback</h2><p>เมื่อ assign source fail โค้ด set returnPalletId และเปิดสองปุ่ม ASRS/ZONE_PACK โดยไม่ preview ทั้งยังตีความทุก error ว่าไม่มีของที่ต้อง pick จึงเสี่ยง routing pallet หลัง network/auth failure</p></section>
-<section id="section-5"><h2>5. Unify decision</h2><p>สร้าง ReturnPalletCoordinator ที่เรียก preview, แสดง destination ที่อนุญาต และ execute ด้วย version/token จาก preview ใช้ร่วมทั้งสองหน้า ห้ามให้ widget เดา policy จากข้อความ error</p></section>
-<section id="section-6"><h2>6. Source result flags</h2><p>หลัง confirm response มี sourcePalletEmpty/sourcePickDone ซึ่งควรช่วยตัดสินว่า source ต้อง return หรือใช้ต่อ แต่ UI ปัจจุบันไม่ได้ branch ด้วย flags เหล่านี้ ควรออกแบบ transition ตาม domain outcome</p></section>
-<section id="section-7"><h2>7. Concurrency/idempotency</h2><p>return ชนกับ pick/robot dispatch ได้ Backend ต้อง lock/version pallet, reject stale preview และทำ retry key ให้ safe Client ต้อง refresh location/status หลัง 409 หรือ timeout</p></section>
-<section id="section-8"><h2>8. Return tests</h2><div class="success">ทดสอบ AVAILABLE/PICKING/PACKED, canReturn false, auto-route, explicit destination, preview stale, timeout after commit, assign transport error และสองเครื่อง return พร้อมกัน โดยมีเพียงหนึ่ง transition สำเร็จ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สถานะที่เกิดจากความล้มเหลว</a></li><li><a href="#section-2">หน้าที่แสดง</a></li><li><a href="#section-3">ข้อความที่เดาสาเหตุ</a></li><li><a href="#section-4">ทางออกที่ไม่ควรมีในบางกรณี</a></li><li><a href="#section-5">ทางกลับที่มีอยู่แล้ว</a></li><li><a href="#section-6">การ์ดที่ตั้งชื่อไม่ตรงกับสิ่งที่ทำ</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน _buildReturnSource และ widgets/return_source/ ทั้งสองไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.14, 18.11 (เครื่องสถานะ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านสถานะที่ถูกออกแบบมารับความล้มเหลว และเห็นว่าข้อความเดาสาเหตุแทนที่จะรายงานสาเหตุจริง</div>
+
+<section id="section-1"><h2>1. สถานะที่เกิดจากความล้มเหลว</h2><pre class="code-vs"><code>if (!result.success) {
+  setState(() {
+    _returnPalletId = palletId;
+    _state = _PickState.returnSource;
+  });
+  return;
+}</code></pre><p>สถานะเดียวใน enum ที่เข้าได้เฉพาะเมื่อคำขอล้มเหลว</p><table><thead><tr><th>สถานะ</th><th>เข้าจาก</th></tr></thead><tbody>
+<tr><td><code>pickView</code></td><td>เปิดจอ หรือสแกนต้นทางสำเร็จ</td></tr>
+<tr><td><code>scanDest</code></td><td>กดยืนยันโดยยังไม่มีปลายทาง</td></tr>
+<tr><td><code>afterPick</code></td><td>ยืนยันสำเร็จ</td></tr>
+<tr><td><code>scanSource</code></td><td>เสร็จรอบหนึ่งแล้ว</td></tr>
+<tr><td><strong><code>returnSource</code></strong></td><td><strong>สแกนต้นทางล้มเหลว</strong></td></tr>
+</tbody></table><div class="note"><strong>การมีสถานะสำหรับความล้มเหลวเป็นการตัดสินใจที่ดี</strong> — แทนที่จะแสดงกล่อง error แล้วให้ผู้ใช้ยืนงงว่าทำอะไรต่อ จอพาไปหน้าที่มีทางออกให้<br>18.9 ทำสิ่งเดียวกันด้วย preview และ 17.7 ทำด้วย <code>palletError</code> — สามที่ในสองโดเมนที่ใช้แนวคิดเดียวกัน</div></section>
+
+<section id="section-2"><h2>2. หน้าที่แสดง</h2><pre class="code-vs"><code>Widget _buildReturnSource() {
+  final palletId = _returnPalletId ?? '';
+
+  return SingleChildScrollView(
+    padding: const EdgeInsets.all(16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PickingOrderInfoBanner(pickOrderId: _pickOrderId),
+        if (_destPalletId != null) ...[
+          const SizedBox(height: 8),
+          PickingDestPalletBanner(destPalletId: _destPalletId!),
+        ],
+        const SizedBox(height: 16),
+        PickingReturnSourceInfoCard(palletId: palletId),
+        const SizedBox(height: 20),
+        PickingReturnSourceActions(
+          palletId: palletId,
+          onReturn: (destination) =&gt; _returnPallet(palletId, destination),
+        ),
+      ],
+    ),
+  );
+}</code></pre><table><thead><tr><th>ส่วน</th><th>บอกอะไร</th></tr></thead><tbody>
+<tr><td>แบนเนอร์งาน</td><td>ยังอยู่ในงานเดิม</td></tr>
+<tr><td>แบนเนอร์ปลายทาง</td><td>พาเลทปลายทางที่ใช้อยู่ยังไม่หาย</td></tr>
+<tr><td>การ์ดข้อมูล</td><td>พาเลทที่สแกนมาคือใบไหน และทำไมใช้ไม่ได้</td></tr>
+<tr><td>ปุ่มสองใบ</td><td>ทางออกสองทาง</td></tr>
+</tbody></table><p>แบนเนอร์ปลายทางสำคัญ — ผู้ใช้ที่ยังมีพาเลทปลายทางค้างอยู่ต้องรู้ว่ามันยังอยู่ ไม่ได้หายไปพร้อมกับความล้มเหลว</p><pre class="code-vs"><code>final palletId = _returnPalletId ?? '';</code></pre><p><code>?? ''</code> ป้องกันกรณีที่เข้าสถานะนี้โดยไม่มีรหัส — ซึ่งเกิดไม่ได้ตามเส้นทางปัจจุบัน แต่ป้องกันไว้ไม่เสียหาย</p><p>ผลถ้าเกิดจริง: การ์ดจะแสดงรหัสว่าง และปุ่มจะส่ง <code>''</code> ไปเซิร์ฟเวอร์ ซึ่งจะถูกปฏิเสธ</p></section>
+
+<section id="section-3"><h2>3. ข้อความที่เดาสาเหตุ</h2><pre class="code-vs"><code>class PickingReturnSourceInfoCard extends StatelessWidget {
+  final String palletId;
+  ...
+  child: Column(children: [
+    const Icon(Icons.info_outline, color: AppTheme.warning, size: 40),
+    Text(palletId, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+    Text('ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้',       // ← ข้อความตายตัว
+        style: TextStyle(fontSize: 14, color: AppTheme.textGrey(context))),
+  ]),
+}</code></pre><p>การ์ดรับแค่ <code>palletId</code> และเขียนสาเหตุไว้ตายตัว</p><p>แต่ <code>assignPickStation</code> ล้มเหลวได้หลายสาเหตุ</p><table><thead><tr><th>สาเหตุจริง</th><th>ข้อความที่ผู้ใช้เห็น</th><th>ตรงไหม</th></tr></thead><tbody>
+<tr><td>ไม่มีของที่ต้องหยิบบนพาเลทนี้</td><td>ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้</td><td><strong>ตรง</strong></td></tr>
+<tr><td>พาเลทถูกคนอื่นจองอยู่</td><td>ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้</td><td><strong>ผิด</strong></td></tr>
+<tr><td>ไม่มีสถานีว่าง</td><td>ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้</td><td><strong>ผิด</strong></td></tr>
+<tr><td>รหัสพาเลทไม่มีในระบบ</td><td>ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้</td><td><strong>ผิด</strong></td></tr>
+<tr><td>เน็ตหลุด</td><td>ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้</td><td><strong>ผิดมาก</strong></td></tr>
+</tbody></table><div class="note"><strong>แถวสุดท้ายเป็นปัญหาที่ร้ายแรงที่สุด</strong> — เน็ตหลุดแล้วผู้ใช้ถูกบอกว่าพาเลทไม่มีของ<br>ถ้าผู้ใช้เชื่อแล้วกดส่งพาเลทกลับ ASRS ของที่ยังอยู่บนพาเลทจะถูกส่งกลับเข้าคลังทั้งที่ต้องหยิบ<br>นี่คือ<strong>คำสั่งที่ผิดซึ่งเกิดจากข้อความที่ผิด</strong> ไม่ใช่จากบั๊กในโค้ดที่ส่งคำสั่ง</div><p>ข้อความจริงมีอยู่แล้วใน <code>result.error</code> แต่ถูกทิ้ง</p><pre class="code-vs"><code>if (!result.success) {
+  setState(() {
+    _returnPalletId = palletId;
+    _state = _PickState.returnSource;
+    // result.error ไม่ถูกเก็บไว้ที่ไหนเลย
+  });
+  return;
+}</code></pre><pre class="code-vs"><code>String? _returnReason;
+
+if (!result.success) {
+  setState(() {
+    _returnPalletId = palletId;
+    _returnReason = result.error;        // ← เก็บไว้
+    _state = _PickState.returnSource;
+  });
+  return;
+}</code></pre><pre class="code-vs"><code>PickingReturnSourceInfoCard(
+  palletId: palletId,
+  reason: _returnReason,                 // ← ส่งต่อ
+),</code></pre><pre class="code-vs"><code>class PickingReturnSourceInfoCard extends StatelessWidget {
+  final String palletId;
+  final String? reason;
+  ...
+  Text(
+    // เหตุผลจริงจากเซิร์ฟเวอร์ ถ้าไม่มีค่อยเดา
+    reason ?? 'ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้',
+    textAlign: TextAlign.center,
+    style: TextStyle(fontSize: 14, height: 1.4, color: AppTheme.textGrey(context)),
+  ),
+}</code></pre></section>
+
+<section id="section-4"><h2>4. ทางออกที่ไม่ควรมีในบางกรณี</h2><p>เมื่อรู้สาเหตุจริงแล้ว จะเห็นว่าปุ่มสองใบไม่เหมาะกับทุกกรณี</p><table><thead><tr><th>สาเหตุ</th><th>ส่งพาเลทกลับเหมาะไหม</th></tr></thead><tbody>
+<tr><td>ไม่มีของที่ต้องหยิบ</td><td><strong>เหมาะ</strong> — พาเลทนี้ไม่มีงาน ส่งกลับได้</td></tr>
+<tr><td>พาเลทถูกคนอื่นจอง</td><td><strong>ไม่เหมาะ</strong> — คนอื่นกำลังใช้อยู่</td></tr>
+<tr><td>ไม่มีสถานีว่าง</td><td><strong>ไม่เหมาะ</strong> — รอสักครู่แล้วลองใหม่</td></tr>
+<tr><td>รหัสพาเลทไม่มีในระบบ</td><td><strong>ไม่เหมาะ</strong> — สแกนผิด</td></tr>
+<tr><td>เน็ตหลุด</td><td><strong>อันตราย</strong></td></tr>
+</tbody></table><p>เหลือกรณีเดียวจากห้ากรณีที่ปุ่มนี้ควรมี</p><div class="note"><strong>วิธีที่ถูกคือให้เซิร์ฟเวอร์บอกว่าทำอะไรได้</strong> — เหมือน <code>previewReturnPallet</code> ใน 18.9 ที่คืน <code>canReturn</code> มาให้<pre class="code-vs"><code>class ReturnPalletPreview {
+  final bool canReturn;
+  final String? destination;
+  final String reason;
+}</code></pre>ถ้า <code>assignPickStation</code> คืนข้อมูลแบบเดียวกันเมื่อล้มเหลว จอนี้จะแสดงปุ่มเฉพาะเมื่อทำได้จริง</div><p>สิ่งที่ทำได้ทันทีโดยไม่แตะเซิร์ฟเวอร์ — แยกกรณีเน็ตออกก่อน</p><pre class="code-vs"><code>if (!result.success) {
+  // เน็ตมีปัญหา = ไม่รู้ว่าพาเลทมีของหรือเปล่า → ห้ามเสนอให้ส่งกลับ
+  final looksLikeNetwork = (result.error ?? '').contains('เชื่อมต่อ') ||
+      (result.error ?? '').contains('หมดเวลา');
+
+  if (looksLikeNetwork) {
+    showErrorDialog(
+      context,
+      title: 'เชื่อมต่อไม่ได้',
+      message: '${result.error}\n\nลองสแกนใหม่เมื่อสัญญาณกลับมา',
+    );
+    _sourceScanFocus.requestFocus();
+    return;
+  }
+
+  setState(() {
+    _returnPalletId = palletId;
+    _returnReason = result.error;
+    _state = _PickState.returnSource;
+  });
+  return;
+}</code></pre><p>การเดาจากข้อความไม่ใช่วิธีที่ดี — แต่เป็นสิ่งที่ทำได้เมื่อ <code>ApiResult</code> ไม่มี <code>kind</code> (16.6)</p><p>ถ้าเพิ่ม <code>ApiFailureKind</code> ตามที่ 16.6 แบบฝึกหัดเสนอ จะเขียนได้ตรงกว่ามาก</p><pre class="code-vs"><code>if (result.kind == ApiFailureKind.network || result.kind == ApiFailureKind.timeout) {
+  ...
+}</code></pre></section>
+
+<section id="section-5"><h2>5. ทางกลับที่มีอยู่แล้ว</h2><pre class="code-vs"><code>void _handleBack() {
+  switch (_state) {
+    ...
+    case _PickState.returnSource:
+      _goToScanSource();        // ← กดย้อนกลับ = ไปสแกนใบใหม่
+      break;
+    ...
+  }
+}</code></pre><p>ผู้ใช้ที่ไม่อยากส่งพาเลทกลับกดปุ่มย้อนกลับได้ — แต่<strong>ไม่มีอะไรบนหน้าจอบอก</strong></p><table><thead><tr><th>ทางออก</th><th>เห็นบนจอไหม</th></tr></thead><tbody>
+<tr><td>ส่งกลับ ASRS</td><td>เห็น — ปุ่มใหญ่</td></tr>
+<tr><td>ส่งไป ZONE PACK</td><td>เห็น — ปุ่มใหญ่</td></tr>
+<tr><td><strong>สแกนใบอื่นแทน</strong></td><td><strong>ไม่เห็น</strong></td></tr>
+</tbody></table><p>ผู้ใช้ที่สแกนผิดใบจะเห็นแค่สองปุ่มที่ทั้งคู่ส่งพาเลท — ทางที่ถูก (สแกนใหม่) ซ่อนอยู่ในปุ่มย้อนกลับของเครื่อง</p><pre class="code-vs"><code>PickingReturnSourceActions(
+  palletId: palletId,
+  onReturn: (destination) =&gt; _returnPallet(palletId, destination),
+  onScanAnother: _goToScanSource,       // ← เพิ่ม
+),</code></pre><pre class="code-vs"><code>// ในตัว widget — ปุ่มที่สาม แบบ outlined เพื่อไม่ให้แข่งกับสองปุ่มแรก
+const SizedBox(height: 16),
+SizedBox(
+  width: double.infinity,
+  child: OutlinedButton.icon(
+    onPressed: onScanAnother,
+    icon: const Icon(Icons.qr_code_scanner, size: 20),
+    label: const Text('สแกน Pallet ใบอื่น'),
+    style: OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+  ),
+),</code></pre><div class="note"><strong>ใช้ <code>OutlinedButton</code> ไม่ใช่ <code>ElevatedButton</code></strong> — บอกว่าเป็นทางเลือกรอง ไม่ใช่การกระทำหลัก<br>และวางไว้ล่างสุดโดยมีระยะห่างมากกว่า เพื่อไม่ให้ปนกับสองปุ่มที่ส่งพาเลท</div></section>
+
+<section id="section-6"><h2>6. การ์ดที่ตั้งชื่อไม่ตรงกับสิ่งที่ทำ</h2><pre class="code-vs"><code>class PickingReturnSourceInfoCard extends StatelessWidget {</code></pre><p>ชื่อบอกว่าเป็นการ์ดข้อมูลของการคืนพาเลทต้นทาง — แต่สิ่งที่แสดงคือ<strong>เหตุผลที่ใช้พาเลทนี้ไม่ได้</strong></p><table><thead><tr><th>ชื่อสื่อว่า</th><th>ที่จริงคือ</th></tr></thead><tbody>
+<tr><td>ข้อมูลเกี่ยวกับการคืน</td><td>ข้อความอธิบายความล้มเหลว</td></tr>
+</tbody></table><p>ชื่อที่ตรงกว่าคือ <code>PickingSourceUnusableCard</code> หรือ <code>PickingScanSourceFailedCard</code></p><p>ชื่อที่ไม่ตรงทำให้คนที่มาอ่านทีหลังเสียเวลา — และเป็นเหตุผลที่ 18.7 ชี้ว่า <code>isSendStation</code> ที่ชื่อไม่ตรงกับสิ่งที่คำนวณเป็นปัญหา</p><p>สังเกตไอคอนด้วย</p><pre class="code-vs"><code>const Icon(Icons.info_outline, color: AppTheme.warning, size: 40),</code></pre><table><thead><tr><th>ไอคอน</th><th>สี</th><th>สื่อว่า</th></tr></thead><tbody>
+<tr><td><code>info_outline</code></td><td>เหลือง</td><td>ข้อมูล + ระวัง</td></tr>
+</tbody></table><p>ไอคอน “ข้อมูล” กับสี “เตือน” ส่งสัญญาณคนละอย่าง — ถ้าเป็นเรื่องที่ต้องระวังควรใช้ <code>warning_amber_rounded</code> ให้ตรงกัน</p><p>แต่ในกรณีที่ข้อความเป็น “ไม่มีของที่ต้องหยิบ” ซึ่งเป็นเรื่องปกติ สีเหลืองอาจแรงเกินไป</p><div class="note"><strong>นี่คือผลของการที่การ์ดไม่รู้ว่าสาเหตุคืออะไร</strong> — พอไม่รู้ ก็ต้องเลือกไอคอนและสีที่ใช้ได้กับทุกกรณี ซึ่งแปลว่าไม่เหมาะกับกรณีไหนเลย<br>ถ้ารับ <code>reason</code> เข้ามาแล้ว จะเลือกให้เหมาะได้</div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ข้อความตายตัวปลอดภัยกว่าข้อความจากเซิร์ฟเวอร์</td><td>ที่นี่ทำให้ผู้ใช้ตัดสินใจผิด</td></tr>
+<tr><td>คำขอล้มเหลวมีสาเหตุเดียว</td><td>อย่างน้อยห้าสาเหตุ</td></tr>
+<tr><td>ทางออกที่มีปุ่มคือทางออกทั้งหมด</td><td>ปุ่มย้อนกลับก็เป็นทางออกแต่มองไม่เห็น</td></tr>
+<tr><td>ชื่อคลาสไม่สำคัญเท่าโค้ดข้างใน</td><td>ชื่อที่ไม่ตรงทำให้คนอ่านเข้าใจผิด</td></tr>
+<tr><td>ไอคอนกับสีเลือกแยกกันได้</td><td>ต้องสื่อความหมายเดียวกัน</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกนพาเลทแล้วขึ้นว่าไม่มีของ พอกดส่งกลับ ASRS แล้วมารู้ทีหลังว่าของยังอยู่บนพาเลท”</p><ol><li>ไล่ว่าเกิดได้อย่างไร ทีละขั้น</li><li>จุดไหนที่ถ้าแก้แล้วจะหยุดเหตุการณ์นี้ได้</li><li>เรียงลำดับการแก้ตามผลกระทบ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ไล่ทีละขั้น</strong></p><pre class="code-vs"><code>1. ผู้ใช้สแกน PAL-042
+2. _scanSourcePallet() ยิง assignPickStation
+3. คำขอล้มเหลว (สาเหตุอะไรก็ได้ — เน็ต, สถานีไม่ว่าง, คนอื่นจอง)
+4. เข้าสถานะ returnSource โดยไม่เก็บ result.error
+5. การ์ดแสดง "ไม่มีสินค้าที่ต้อง Pick บน Pallet นี้"    ← ข้อความเดา
+6. ผู้ใช้อ่านแล้วเชื่อ
+7. กด "ส่งกลับ ASRS"
+8. returnPallet สำเร็จ → พาเลทถูกส่งกลับพร้อมของที่ยังไม่ได้หยิบ</code></pre><p>สังเกตว่า<strong>ทุกขั้นทำงานถูกตามที่โค้ดเขียนไว้</strong> — ไม่มีบั๊กในความหมายของโค้ดที่ทำงานผิด</p><p>สิ่งที่ผิดคือขั้นที่ 5 บอกข้อมูลที่ไม่จริง แล้วผู้ใช้ตัดสินใจจากข้อมูลนั้น</p><p><strong>ข้อ 2 — จุดที่หยุดได้</strong></p><table><thead><tr><th>ขั้น</th><th>แก้อย่างไร</th><th>หยุดได้ไหม</th></tr></thead><tbody>
+<tr><td>3–4</td><td>แยกความล้มเหลวจากเน็ตออกก่อนเข้าสถานะนี้</td><td><strong>หยุดได้บางกรณี</strong></td></tr>
+<tr><td>5</td><td>แสดง <code>result.error</code> แทนข้อความเดา</td><td><strong>หยุดได้ทุกกรณี</strong></td></tr>
+<tr><td>7</td><td>เพิ่มกล่องยืนยันที่บอกว่า AMR จะมารับทันที</td><td>หยุดได้บางส่วน</td></tr>
+<tr><td>7</td><td>แสดงปุ่มเฉพาะเมื่อเซิร์ฟเวอร์บอกว่าส่งได้</td><td><strong>หยุดได้ทุกกรณี</strong></td></tr>
+</tbody></table><p>สองจุดที่หยุดได้ทุกกรณี — จุดที่ 5 แก้ฝั่งแอปอย่างเดียว จุดสุดท้ายต้องแก้ทั้งสองฝั่ง</p><p><strong>ข้อ 3 — เรียงลำดับ</strong></p><table><thead><tr><th>ลำดับ</th><th>แก้อะไร</th><th>ต้นทุน</th><th>ผล</th></tr></thead><tbody>
+<tr><td>1</td><td>เก็บ <code>result.error</code> แล้วแสดงในการ์ด</td><td>~15 บรรทัด ฝั่งแอป</td><td><strong>ผู้ใช้เห็นสาเหตุจริง</strong></td></tr>
+<tr><td>2</td><td>เพิ่มปุ่ม “สแกนใบอื่น”</td><td>~15 บรรทัด</td><td>มีทางออกที่ถูกให้เลือก</td></tr>
+<tr><td>3</td><td>เพิ่มกล่องยืนยันก่อนส่ง (18.14)</td><td>~10 บรรทัด</td><td>มีจังหวะให้คิด</td></tr>
+<tr><td>4</td><td>แยกความล้มเหลวจากเน็ต</td><td>ต้องเพิ่ม <code>kind</code> ใน <code>ApiResult</code></td><td>กันกรณีที่อันตรายที่สุด</td></tr>
+<tr><td>5</td><td>ให้เซิร์ฟเวอร์คืน <code>canReturn</code></td><td>ต้องแก้ .NET</td><td>ถูกที่สุด</td></tr>
+</tbody></table><p>สามข้อแรกรวมกันใช้เวลาไม่ถึงครึ่งวันและแก้ปัญหาได้เกือบทั้งหมด — ควรทำก่อน</p><pre class="code-vs"><code>// ข้อ 1 — ที่จุดที่ล้มเหลว
+String? _returnReason;
+...
+if (!result.success) {
+  setState(() {
+    _returnPalletId = palletId;
+    _returnReason = result.error;
+    _state = _PickState.returnSource;
+  });
+  return;
+}
+
+// และล้างเมื่อออกจากสถานะ
+void _goToScanSource() {
+  _resetPickedSerials();
+  setState(() {
+    _state = _PickState.scanSource;
+    _sourceScanCtrl.clear();
+    _returnReason = null;          // ← ไม่ให้ค้างไปรอบหน้า
+    _returnPalletId = null;
+  });
+  ...
+}</code></pre><p>บรรทัดที่ล้างสำคัญ — ถ้าไม่ล้าง รอบถัดไปที่เข้าสถานะนี้อาจเห็นเหตุผลของรอบก่อน</p><p>เป็นบทเรียนเดียวกับที่ 17.5 พบเรื่องสถานะค้างใน <code>ScanPartScreen</code></p><div class="note"><strong>ข้อสรุปที่ใหญ่กว่าเคสนี้</strong><br>ความเสียหายในเคสนี้ไม่ได้เกิดจากโค้ดที่ทำงานผิด แต่เกิดจาก<strong>ข้อความที่บอกสิ่งที่แอปไม่รู้</strong><br>ข้อความตายตัวที่เขียนไว้ตอนที่มีสาเหตุเดียว จะกลายเป็นข้อมูลเท็จทันทีที่มีสาเหตุที่สอง<br>วิธีตรวจ: ทุกครั้งที่เขียนข้อความอธิบายสาเหตุ ให้ถามว่า <strong>“แอปรู้จริงหรือเปล่าว่าสาเหตุคือนี่”</strong> ถ้าไม่รู้ ต้องเอาข้อมูลจากที่ที่รู้ หรือไม่ก็บอกว่าไม่รู้</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>returnSource</code> เป็นสถานะเดียวที่เข้าได้เฉพาะเมื่อคำขอล้มเหลว</li><li>การมีสถานะสำหรับความล้มเหลวดีกว่าแสดงกล่อง error แล้วปล่อยผู้ใช้</li><li>แบนเนอร์ปลายทางยังแสดงอยู่ — ผู้ใช้รู้ว่าพาเลทปลายทางยังไม่หาย</li><li>การ์ดเขียนสาเหตุไว้ตายตัว ทั้งที่ล้มเหลวได้อย่างน้อยห้าสาเหตุ</li><li><code>result.error</code> มีข้อความจริงอยู่แล้วแต่ถูกทิ้ง</li><li>เน็ตหลุดแล้วผู้ใช้ถูกบอกว่าพาเลทไม่มีของ ซึ่งนำไปสู่คำสั่งที่ผิด</li><li>ทางออกจริงมีสามทาง แต่เห็นบนจอสองทาง</li><li>ชื่อคลาสสื่อว่าเป็นการ์ดข้อมูล แต่ที่จริงคือคำอธิบายความล้มเหลว</li><li>ข้อความที่บอกสิ่งที่แอปไม่รู้ กลายเป็นข้อมูลเท็จทันทีที่มีสาเหตุที่สอง</li></ul></div><p><strong>บทหน้า:</strong> ต่อทั้งสองโดเมนเป็นภาพเดียว สรุปสิ่งที่พบทั้ง Part และเตรียมเข้า Part 19</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

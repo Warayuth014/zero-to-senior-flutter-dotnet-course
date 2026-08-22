@@ -1,10 +1,190 @@
-<div class="note"><strong>Destination pallet เป็น inventory owner หลัง confirm:</strong> ต้องไม่ใช่ source และอาจเป็น pallet เดิมของ order เพื่อรวมสินค้าหลาย source รอบ</div>
-<section><h2>1. Enter destination state</h2><p>เมื่อมีรายการ pick อย่างน้อยหนึ่งรายการและยังไม่มี dest, state เปลี่ยนเป็น scanDest, clear input แล้ว request focus หลัง frame หากมี <code>_destPalletId</code> จากรอบก่อนจะ confirm ต่อ pallet เดิมทันที</p></section>
-<section><h2>2. Suggested destination</h2><p><code>getSuggestedDestPallet()</code> รับ pickOrderId เพื่อหา pallet ที่เหมาะกับ order ปัจจุบัน</p><pre class="code-vs"><code>GET /picking/suggest-dest-pallets
-  ?pickOrderId={encodedOrderId}</code></pre><p>API เลือกรายการแรกและคืน Dart record <code>(palletId, continued)</code> หรือ null</p></section>
-<section><h2>3. Continued semantics</h2><p><code>continued=true</code> หมายถึง order นี้มี destination pallet เดิม ให้ใช้ต่อ; false คือ pallet ว่าง Type=NULL+AVAILABLE UI แสดง label/chip ต่างกันเพื่อไม่ให้ผู้ใช้คิดว่าเป็นคำแนะนำชนิดเดียวกัน</p></section>
-<section><h2>4. Suggestion is optional</h2><p>ผู้ใช้แตะ chip เพื่อเติม controller แล้วต้องยืนยันเอง การโหลด suggestion fail ถูกแปลงเป็นไม่มี suggestionโดยไม่แสดงเหตุผล จึงควรแยก no candidate จาก network/error</p></section>
-<section><h2>5. Source ≠ destination</h2><p><code>_scanDestAndConfirm</code> reject เมื่อ destId เท่ากับ source pallet ปัจจุบัน นี่เป็น local invariant สำคัญ แต่ server ต้องตรวจซ้ำและควร normalize IDs แบบเดียวกัน</p></section>
-<section><h2>6. Stale suggestion</h2><p>ระหว่างแนะนำกับ confirm pallet ว่างอาจถูกอุปกรณ์อื่นจอง หรือ continued pallet อาจไป PACK แล้ว Backend ต้อง reserve/validate atomically และตอบ conflict ที่ทำให้ client reload suggestion</p></section>
-<section><h2>7. Persist across sources</h2><p>หลัง confirm destination ID ยังอยู่ เมื่อกลับ scan source รอบถัดไปจึงข้าม scanDest และเติม pallet เดิม แต่ต้องตรวจว่า order/pallet ยังเปิดรับและ capacity พอก่อนทุก confirm</p></section>
-<section><h2>8. Destination tests</h2><div class="success">ทดสอบ no suggestion, continued/new, refresh, source=dest, suggestion ถูกแย่ง, dest capacity เต็ม, order เปลี่ยน และการใช้ dest เดิมกับ source รอบสองโดย backend ยังเป็นผู้ตัดสินสุดท้าย</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด widgets/scan_dest/picking_dest_scan_card.dart และอ่าน _scanDestAndConfirm</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.12, 16.6 (singleton), 17.4 (widget ที่แตกออกมา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน widget ที่โหลดข้อมูลเอง และตัดสินได้ว่าเมื่อไรควรให้ widget ยิง API</div>
+
+<section><h2>1. widget ที่ยิง API เอง</h2><pre class="code-vs"><code>class _PickingDestScanCardState extends State&lt;PickingDestScanCard&gt; {
+  final _api = ApiService();          // ← widget ย่อยที่รู้จัก ApiService
+  String? _suggestedPalletId;
+  bool _continued = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSuggested();
+  }
+}</code></pre><p>17.4 ใช้คำถาม “widget นี้ต้องรู้จัก <code>ApiService</code> ไหม” เป็นตัวตรวจว่าแตกไฟล์ถูกทิศ — และตอบว่าถ้าไม่ต้อง แปลว่าแตกถูก</p><p>ไฟล์นี้ตอบว่า<strong>ต้อง</strong> ซึ่งเป็นข้อยกเว้นเดียวใน widget ทั้งหมดที่อ่านมา</p><table><thead><tr><th>โฟลเดอร์ widget</th><th>ไฟล์ที่ import <code>api_service</code></th></tr></thead><tbody>
+<tr><td><code>picking/pick_items/widgets/</code></td><td><strong>1 จาก 11</strong></td></tr>
+<tr><td><code>putaway/shared/widgets/</code></td><td>1 จาก 9 (<code>station_sheet.dart</code>)</td></tr>
+<tr><td><code>receiving/*/widgets/</code></td><td>0 จาก 14</td></tr>
+<tr><td><code>unload/*/widgets/</code></td><td>0 จาก 6</td></tr>
+</tbody></table><div class="note"><strong>สองข้อยกเว้นนี้ต่างกัน</strong> — <code>station_sheet.dart</code> เป็นแผ่นเลื่อนที่ทำหน้าที่เหมือนจอ (มี flow ของตัวเอง) ส่วนไฟล์นี้เป็นการ์ดที่อยู่ในจอ<br>คำถามคือ: การ์ดควรโหลดข้อมูลเองไหม</div></section>
+
+<section><h2>2. ข้อดีและข้อเสียของการให้ widget โหลดเอง</h2><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>จอไม่ต้องรู้เรื่องนี้เลย — เพิ่มการ์ดแล้วจบ</td><td>จอควบคุมไม่ได้ว่าจะโหลดเมื่อไร</td></tr>
+<tr><td>โหลดเฉพาะเมื่อการ์ดถูกแสดงจริง</td><td>ทดสอบจอต้องมีเซิร์ฟเวอร์</td></tr>
+<tr><td>สถานะการโหลดอยู่ในการ์ด ไม่ปนกับจอ</td><td>โหลดใหม่จากภายนอกไม่ได้</td></tr>
+</tbody></table><p>ข้อดีข้อสองสำคัญที่นี่ — การ์ดนี้แสดงเฉพาะในสถานะ <code>scanDest</code></p><pre class="code-vs"><code>_PickState.scanDest =&gt; _buildScanDest(),</code></pre><p>ผู้ใช้ที่ไม่เคยเข้าสถานะนั้น (เพราะรู้พาเลทปลายทางแล้ว) จะไม่ยิงคำขอนี้เลย</p><p>ถ้าจอโหลดให้ ต้องตัดสินใจว่าโหลดตอน <code>initState</code> (เสียเปล่าถ้าไม่ใช้) หรือตอนเปลี่ยนสถานะ (ซับซ้อนขึ้น)</p><p>ข้อเสียข้อสามเป็นสิ่งที่ต้องรู้</p><pre class="code-vs"><code>Future&lt;void&gt; _loadSuggested() async { ... }     // private ไม่มีใครเรียกจากข้างนอกได้</code></pre><table><thead><tr><th>สถานการณ์</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ยืนยันหยิบ → กลับมา <code>scanDest</code> อีกครั้ง</td><td>การ์ดถูกสร้างใหม่ → โหลดใหม่เอง ✓</td></tr>
+<tr><td>ผู้ใช้อยู่ใน <code>scanDest</code> นานแล้วพาเลทที่แนะนำถูกคนอื่นใช้</td><td><strong>ไม่มีทางโหลดใหม่</strong></td></tr>
+</tbody></table><p>แถวที่สองไม่เสียหายมาก เพราะการแนะนำเป็นแค่ตัวช่วย — ผู้ใช้สแกนใบอื่นได้เสมอ และเซิร์ฟเวอร์จะปฏิเสธถ้าใช้ไม่ได้</p><div class="note"><strong>หลักที่ใช้ตัดสิน:</strong> ให้ widget โหลดเองได้เมื่อข้อมูลนั้น<strong>เป็นของ widget ตัวนั้นคนเดียว</strong> และ<strong>ไม่ต้องซิงก์กับอะไร</strong><br>ที่นี่ครบทั้งสองข้อ — คำแนะนำพาเลทใช้เฉพาะในการ์ดนี้ และผิดก็ไม่เสียหาย<br>ถ้าเป็นข้อมูลที่จอต้องใช้ด้วย หรือต้องโหลดใหม่พร้อมกับอย่างอื่น ต้องให้จอโหลด</div></section>
+
+<section><h2>3. สองความหมายของคำแนะนำ</h2><pre class="code-vs"><code>final res = await _api.getSuggestedDestPallet(pickOrderId: widget.pickOrderId);
+if (!mounted) return;
+setState(() {
+  _suggestedPalletId = res.success ? res.data?.palletId : null;
+  _continued = res.success &amp;&amp; (res.data?.continued ?? false);
+  _loading = false;
+});</code></pre><p>ฝั่ง API อธิบายไว้ในคอมเมนต์</p><pre class="code-vs"><code>/// แนะนำ pallet ปลายทาง — ถ้า order นี้กำลังใช้ pallet เดิมอยู่ → ส่ง pallet เดิม
+/// ไม่งั้นส่ง pallet ว่างถัดไป (Type=NULL + AVAILABLE)
+/// คืน (palletId, continued) — continued=true แปลว่าเป็น pallet เดิมที่ pick ก่อนหน้าไว้
+Future&lt;ApiResult&lt;({String palletId, bool continued})?&gt;&gt; getSuggestedDestPallet(...)</code></pre><table><thead><tr><th><code>continued</code></th><th>หมายถึง</th><th>ผู้ใช้ควรรู้ว่า</th></tr></thead><tbody>
+<tr><td><code>true</code></td><td>พาเลทที่งานนี้ใช้อยู่แล้ว</td><td>ใส่ต่อจากของเดิม</td></tr>
+<tr><td><code>false</code></td><td>พาเลทว่างใบถัดไป</td><td>เริ่มพาเลทใหม่</td></tr>
+</tbody></table><p>ความต่างนี้สำคัญ — ผู้ใช้ที่คิดว่าเป็นพาเลทใหม่แต่ที่จริงมีของอยู่แล้ว จะนับของผิด</p><p>ชนิดที่ API คืนน่าสนใจ</p><pre class="code-vs"><code>ApiResult&lt;({String palletId, bool continued})?&gt;</code></pre><table><thead><tr><th>ค่า</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>success</code> + record</td><td>มีพาเลทแนะนำ</td></tr>
+<tr><td><code>success</code> + <code>null</code></td><td><strong>ถามสำเร็จ แต่ไม่มีพาเลทว่าง</strong></td></tr>
+<tr><td><code>error</code></td><td>ถามไม่ได้</td></tr>
+</tbody></table><p>16.7 ชมการแยกนี้ไว้แล้ว — แยก “ไม่มี” ออกจาก “ล้มเหลว” ถูกต้อง</p><p>แต่การ์ดยุบสองกรณีเข้าด้วยกัน</p><pre class="code-vs"><code>_suggestedPalletId = res.success ? res.data?.palletId : null;</code></pre><table><thead><tr><th>กรณี</th><th><code>_suggestedPalletId</code></th><th>หน้าจอแสดง</th></tr></thead><tbody>
+<tr><td>มีพาเลทแนะนำ</td><td>รหัส</td><td>ชิปให้แตะ</td></tr>
+<tr><td>ไม่มีพาเลทว่าง</td><td><code>null</code></td><td><strong>ไม่แสดงอะไร</strong></td></tr>
+<tr><td>ถามไม่ได้</td><td><code>null</code></td><td><strong>ไม่แสดงอะไร</strong></td></tr>
+</tbody></table><p>สองแถวล่างหน้าตาเหมือนกัน — ผู้ใช้ที่รอคำแนะนำจะไม่รู้ว่าไม่มีพาเลทว่าง หรือแค่ถามไม่ได้</p><pre class="code-vs"><code>// แยกให้ครบสามกรณี
+String? _suggestedPalletId;
+bool _askFailed = false;
+
+setState(() {
+  _askFailed = !res.success;
+  _suggestedPalletId = res.success ? res.data?.palletId : null;
+  _continued = res.success &amp;&amp; (res.data?.continued ?? false);
+  _loading = false;
+});</code></pre><pre class="code-vs"><code>else if (_askFailed)
+  Text('ขอคำแนะนำพาเลทไม่สำเร็จ — สแกนเองได้ตามปกติ',
+      style: TextStyle(fontSize: 12, color: AppTheme.textGrey(context)))
+else if (_suggestedPalletId == null)
+  Text('ไม่มีพาเลทว่าง — ใช้พาเลทที่มีอยู่หรือแจ้งหัวหน้า',
+      style: TextStyle(fontSize: 12, color: AppTheme.warning))
+else ...[ ...ชิป... ]</code></pre><p>ข้อความที่สองมีค่ามาก เพราะ “ไม่มีพาเลทว่าง” เป็นปัญหาที่ผู้ใช้ต้องทำอะไรบางอย่าง ไม่ใช่แค่ข้อมูลที่หายไป</p></section>
+
+<section><h2>4. แตะเพื่อเติม ไม่ใช่แตะเพื่อยืนยัน</h2><pre class="code-vs"><code>void _useSuggestion() {
+  if (_suggestedPalletId == null) return;
+  widget.controller.text = _suggestedPalletId!;    // ← เติมช่อง
+  widget.focusNode.requestFocus();                  // ← คืนโฟกัส
+}</code></pre><p>แตะชิปแล้ว<strong>เติมค่าลงช่อง</strong> ไม่ได้ยืนยันทันที</p><table><thead><tr><th>ถ้าแตะแล้วยืนยันเลย</th><th>ถ้าแตะแล้วเติมช่อง (ที่ทำ)</th></tr></thead><tbody>
+<tr><td>เร็วกว่าหนึ่งขั้น</td><td>ช้ากว่าหนึ่งขั้น</td></tr>
+<tr><td><strong>แตะพลาดแล้วยืนยันไปเลย</strong></td><td>เห็นค่าในช่องก่อนกด</td></tr>
+<tr><td>ผู้ใช้ไม่ได้อ่านรหัส</td><td>รหัสอยู่ในช่องให้อ่าน</td></tr>
+</tbody></table><p>สำหรับการยืนยันที่ทำให้ของเคลื่อนที่จริง การเพิ่มขั้นหนึ่งคุ้ม — ตรงกับหลักเดียวกับที่ 18.9 ใช้ preview ก่อนสั่ง</p><p>และ <code>requestFocus()</code> ทำให้เครื่องสแกนยังพร้อมใช้ — ผู้ใช้ที่เปลี่ยนใจยิงบาร์โค้ดใบอื่นทับได้ทันที</p></section>
+
+<section><h2>5. ยืนยันปลายทางที่ตรวจข้อเดียว</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanDestAndConfirm() async {
+  final destId = _destScanCtrl.text.trim().toUpperCase();
+  if (destId.isEmpty) return;
+
+  if (destId == _assignment.palletId) {
+    showErrorDialog(context, message: 'Dest Pallet ต้องไม่ใช่ Source Pallet เดียวกัน');
+    return;
+  }
+
+  _destPalletId = destId;
+  await _confirmPick(destId);
+}</code></pre><p>ตรวจอย่างเดียวว่าไม่ใช่พาเลทต้นทาง — ที่เหลือให้เซิร์ฟเวอร์ตัดสิน</p><div class="note"><strong>การตรวจนี้จำเป็นเพราะเป็นความผิดพลาดที่เกิดได้ง่ายและเสียหายมาก</strong><br>ผู้ใช้ที่ยิงพาเลทต้นทางซ้ำ (เพราะมันวางอยู่ตรงหน้า) จะกลายเป็นการหยิบของออกจากพาเลทแล้วใส่กลับที่เดิม — ระบบบันทึกว่าหยิบแล้ว แต่ของไม่ได้ขยับ</div><p>สังเกตว่า <code>_destPalletId</code> ถูกตั้งค่านอก <code>setState</code> อีกครั้ง</p><pre class="code-vs"><code>_destPalletId = destId;
+await _confirmPick(destId);</code></pre><p>ทำงานได้เพราะ <code>_confirmPick</code> มี <code>setState</code> ข้างใน — แต่เป็นรูปแบบเดียวกับที่ 18.12 ชี้ว่าควรเลี่ยง</p><p>และไม่มีการตรวจว่าช่องว่างก่อนหน้านี้แล้วคืนโฟกัส</p><pre class="code-vs"><code>if (destId.isEmpty) return;      // ← เงียบ ไม่บอกอะไร</code></pre><p>ผู้ใช้ที่กดปุ่มโดยยังไม่สแกนจะไม่เห็นอะไรเลย — จุดที่ <code>return;</code> เงียบอีกจุด</p></section>
+
+<section><h2>6. ประกอบรายการที่จะส่ง</h2><pre class="code-vs"><code>Future&lt;void&gt; _confirmPick(String destId) async {
+  final items = &lt;Map&lt;String, dynamic&gt;&gt;[];
+  for (final item in _assignment.palletItems) {
+    final qty = _pickedCountFor(item);
+    if (qty &lt;= 0) continue;                    // ← ข้ามของที่ไม่ได้หยิบ
+
+    items.add({
+      'partId': item.partId,
+      'qty': qty,
+      // สินค้าไม่มี S/N ส่ง [] ไป backend จะเช็คด้วย Part.SerialRequire เอง
+      'serialNumbers': item.serialRequire
+          ? (_pickedSerials[item.partId] ?? const &lt;String&gt;[])
+          : const &lt;String&gt;[],
+    });
+  }
+
+  if (items.isEmpty) {
+    showWarningSnackbar(context, 'กรุณาสแกน S/N หรือระบุจำนวนที่จะ Pick อย่างน้อย 1 รายการ');
+    return;
+  }
+  ...
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>วนจาก <code>palletItems</code> ไม่ใช่จาก <code>_pickedSerials</code></td><td>ได้ลำดับที่แน่นอนและไม่พลาดของที่กรอกจำนวน</td></tr>
+<tr><td>ใช้ <code>_pickedCountFor</code></td><td>คำนวณตามชนิดสินค้าให้เอง (18.11)</td></tr>
+<tr><td>ข้าม <code>qty &lt;= 0</code></td><td>ไม่ส่งของที่ไม่ได้หยิบ</td></tr>
+<tr><td>ส่ง <code>[]</code> เมื่อไม่ต้องมี S/N</td><td>ข้อตกลงเดียวกับที่ 17.13 พบในสามไฟล์</td></tr>
+<tr><td>ตรวจว่ามีอย่างน้อยหนึ่งรายการ</td><td>ไม่ยิงคำขอเปล่า</td></tr>
+</tbody></table><p>แต่ไม่ได้คัดลอกรายการ S/N</p><pre class="code-vs"><code>'serialNumbers': item.serialRequire
+    ? (_pickedSerials[item.partId] ?? const &lt;String&gt;[])   // ← ส่งตัวเดิม
+    : const &lt;String&gt;[],</code></pre><p>เทียบกับ <code>ScanPartScreen</code> ที่คัดลอกก่อนส่ง (17.6)</p><pre class="code-vs"><code>serialNumbers = List&lt;String&gt;.of(_serialNumbers);</code></pre><table><thead><tr><th>ที่นี่ปลอดภัยไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ปลอดภัย</td><td><code>_resetPickedSerials()</code> ถูกเรียกหลังคำขอเสร็จเท่านั้น</td></tr>
+</tbody></table><p>ไล่ดูเส้นทาง</p><pre class="code-vs"><code>_confirmPick → await confirmPickV2(...) → สำเร็จ → _state = afterPick
+  → ผู้ใช้กดคืนพาเลท → _returnPallet → _goToScanSource → _resetPickedSerials()</code></pre><p>การล้างเกิดหลังคำขอจบไปนานแล้ว — แต่ความปลอดภัยขึ้นกับลำดับที่เขียนไว้ ไม่ได้ขึ้นกับโครงสร้าง</p><div class="note"><strong>ถ้าวันหนึ่งมีคนเพิ่มปุ่ม “ล้างทั้งหมด” ที่เรียก <code>_resetPickedSerials()</code> ได้ระหว่างที่คำขอค้างอยู่</strong> รายการที่ส่งไปจะกลายเป็นว่างกลางทาง<br>การคัดลอกด้วย <code>List.of()</code> ปิดช่องนี้ถาวรและมีค่าใช้จ่ายเป็นศูนย์ — ควรทำเหมือนที่ <code>ScanPartScreen</code> ทำ</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>widget ห้ามยิง API เด็ดขาด</td><td>ได้ ถ้าข้อมูลเป็นของ widget นั้นคนเดียว</td></tr>
+<tr><td>widget ที่โหลดเองโหลดใหม่ได้จากข้างนอก</td><td>ไม่ได้ ถ้าไม่เปิดช่องไว้</td></tr>
+<tr><td>“ไม่มีคำแนะนำ” กับ “ถามไม่ได้” เหมือนกัน</td><td>ผู้ใช้ต้องทำคนละอย่าง</td></tr>
+<tr><td>แตะชิปแล้วยืนยันเลยเร็วกว่า</td><td>เร็วกว่าแต่แตะพลาดแล้วเสียหาย</td></tr>
+<tr><td>ส่งรายการเดิมเข้าคำขอได้ถ้าไม่มีใครล้าง</td><td>ปลอดภัยตามลำดับที่เขียน ไม่ใช่ตามโครงสร้าง</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมอยากให้จอ <code>scanDest</code> เตือนเมื่อผู้ใช้สแกนพาเลทที่มีของของงานอื่นอยู่</p><ol><li>ข้อมูลที่ต้องใช้มีอยู่แล้วไหม</li><li>ควรตรวจฝั่งแอปหรือฝั่งเซิร์ฟเวอร์</li><li>ออกแบบการเตือนที่ไม่ขวางผู้ใช้ที่ทำถูก</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ข้อมูลที่มีอยู่</strong></p><table><thead><tr><th>ข้อมูล</th><th>มีไหม</th></tr></thead><tbody>
+<tr><td>พาเลทที่แนะนำ + <code>continued</code></td><td><strong>มี</strong> — จาก <code>getSuggestedDestPallet</code></td></tr>
+<tr><td>พาเลทที่ผู้ใช้สแกนมี<strong>ของงานอื่น</strong>ไหม</td><td><strong>ไม่มี</strong></td></tr>
+</tbody></table><p><code>continued</code> บอกได้แค่ว่าพาเลทที่<strong>แนะนำ</strong>เป็นใบเดิมของงานนี้ไหม — ไม่ได้บอกอะไรเกี่ยวกับใบที่ผู้ใช้สแกนเอง</p><p>ต้องมีข้อมูลใหม่ ซึ่งแปลว่าต้องยิงคำขอเพิ่มหรือขอให้เซิร์ฟเวอร์ส่งมา</p><p><strong>ข้อ 2 — ตรวจที่ไหน</strong></p><table><thead><tr><th></th><th>ฝั่งแอป (ยิง preview)</th><th>ฝั่งเซิร์ฟเวอร์ (ตรวจตอน confirm)</th></tr></thead><tbody>
+<tr><td>ผู้ใช้รู้ก่อนกดยืนยันไหม</td><td><strong>รู้</strong></td><td>ไม่รู้ — รู้หลังกดแล้ว</td></tr>
+<tr><td>ยิงคำขอเพิ่ม</td><td>ทุกครั้งที่สแกน</td><td>ไม่เพิ่ม</td></tr>
+<tr><td>ป้องกันได้จริงไหม</td><td>ไม่ — ข้อมูลอาจเก่า (18.10)</td><td><strong>ได้</strong></td></tr>
+</tbody></table><p>คำตอบคือ<strong>ทั้งสอง</strong> — เซิร์ฟเวอร์ต้องเป็นผู้ตัดสินคนสุดท้าย ส่วนแอปเตือนล่วงหน้าเพื่อให้ผู้ใช้ไม่เสียเวลา</p><p>แต่ที่นี่ต่างจาก 18.9 ตรงที่<strong>ไม่ควรบล็อก</strong></p><table><thead><tr><th>กรณี</th><th>ควรทำ</th></tr></thead><tbody>
+<tr><td>พาเลทมีของงานอื่น</td><td>เตือน แต่ยังยืนยันได้</td></tr>
+<tr><td>พาเลทเป็นใบต้นทาง</td><td><strong>ห้าม</strong> — ไม่มีเหตุผลที่จะทำ</td></tr>
+</tbody></table><p>เพราะการใส่ของหลายงานลงพาเลทเดียวอาจเป็นสิ่งที่ทำได้จริงในบางกรณี — ต้องถามฝ่ายคลังก่อนว่าห้ามหรือแค่ไม่แนะนำ</p><p><strong>ข้อ 3 — ออกแบบการเตือน</strong></p><p>สิ่งที่ต้องไม่ทำคือเด้งกล่องทุกครั้งที่สแกน</p><pre class="code-vs"><code>// ขอข้อมูลพาเลทเมื่อผู้ใช้สแกน — ไม่ใช่ตอนกดยืนยัน
+Future&lt;void&gt; _onDestScanned(String destId) async {
+  if (destId == _assignment.palletId) {
+    showErrorDialog(context, message: 'Dest Pallet ต้องไม่ใช่ Source Pallet เดียวกัน');
+    _destScanFocus.requestFocus();
+    return;
+  }
+
+  setState(() =&gt; _loadingDestInfo = true);
+  final info = await _api.previewDestPallet(destId, pickOrderId: _pickOrderId);
+  if (!mounted) return;
+  setState(() {
+    _loadingDestInfo = false;
+    _destInfo = info.success ? info.data : null;
+  });
+}</code></pre><p>แล้วแสดงเป็นแถบใต้ช่อง ไม่ใช่กล่อง</p><pre class="code-vs"><code>if (_destInfo != null &amp;&amp; _destInfo!.hasOtherOrderItems) ...[
+  const SizedBox(height: 8),
+  Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppTheme.warning.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: AppTheme.warning.withValues(alpha: 0.4)),
+    ),
+    child: Row(children: [
+      Icon(Icons.warning_amber_rounded, size: 18, color: AppTheme.warning),
+      const SizedBox(width: 8),
+      Expanded(
+        child: Text(
+          'พาเลทนี้มีของจากงาน ${_destInfo!.otherOrderId} อยู่แล้ว '
+          '(${_destInfo!.otherItemCount} รายการ)',
+          style: const TextStyle(fontSize: 12, height: 1.4),
+        ),
+      ),
+    ]),
+  ),
+],</code></pre><table><thead><tr><th>ทำไมใช้แถบไม่ใช่กล่อง</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ที่ทำถูก (ส่วนใหญ่) ไม่เห็นอะไรเลย</td></tr>
+<tr><td>ผู้ใช้ที่สแกนผิดเห็นทันทีก่อนกดยืนยัน</td></tr>
+<tr><td>ไม่ต้องกดปิด — สแกนใบใหม่แถบก็เปลี่ยน</td></tr>
+</tbody></table><p>และเปลี่ยนปุ่มยืนยันให้เป็นสีเตือนเมื่อมีคำเตือน</p><pre class="code-vs"><code>PrimaryButton(
+  label: 'ยืนยัน Pick',
+  color: _destInfo?.hasOtherOrderItems == true ? AppTheme.warning : null,
+  onPressed: _scanDestAndConfirm,
+)</code></pre><p><code>PrimaryButton</code> รับ <code>color</code> ได้อยู่แล้ว (16.9) — ไม่ต้องสร้างปุ่มใหม่</p><div class="note"><strong>หลักที่ใช้:</strong> การเตือนที่ดีต้อง<strong>เห็นได้โดยไม่ต้องกดอะไร</strong> และ<strong>ไม่ขวางคนที่ทำถูก</strong><br>กล่องขวางทุกคนเท่ากัน ส่วนแถบขวางเฉพาะคนที่ควรหยุดอ่าน<br>ตรงกับที่ 17.6 ตัดสินใจใช้แถบลอยกับการสแกน S/N ซ้ำ แทนที่จะเด้งกล่อง</div><p><strong>สิ่งที่ต้องยืนยันก่อนทำ:</strong> endpoint <code>previewDestPallet</code> ยังไม่มี — ต้องคุยกับทีม .NET ว่าจะเพิ่มไหม หรือให้ <code>getSuggestedDestPallet</code> รับ <code>palletId</code> เพื่อถามข้อมูลใบที่ระบุได้</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>PickingDestScanCard</code> เป็น widget ย่อยตัวเดียวในโดเมนนี้ที่ยิง API เอง</li><li>ทำได้เพราะข้อมูลเป็นของ widget นั้นคนเดียวและผิดก็ไม่เสียหาย</li><li>แต่โหลดใหม่จากข้างนอกไม่ได้ — คำแนะนำอาจล้าสมัยถ้าอยู่นาน</li><li><code>continued</code> แยก “ใส่ต่อจากเดิม” จาก “เริ่มพาเลทใหม่”</li><li>การ์ดยุบ “ไม่มีพาเลทว่าง” กับ “ถามไม่ได้” เป็นกรณีเดียวกัน</li><li>แตะชิปแล้วเติมช่อง ไม่ยืนยันทันที — ปลอดภัยกว่าสำหรับคำสั่งที่ทำให้ของเคลื่อนที่</li><li>ตรวจอย่างเดียวว่าปลายทางไม่ใช่ต้นทาง ซึ่งเป็นความผิดพลาดที่เสียหายมาก</li><li><code>_confirmPick</code> วนจาก <code>palletItems</code> และข้ามของที่ไม่ได้หยิบ</li><li>ไม่คัดลอกรายการ S/N ก่อนส่ง — ปลอดภัยตามลำดับที่เขียน ไม่ใช่ตามโครงสร้าง</li></ul></div><p><strong>บทหน้า:</strong> สิ่งที่เกิดขึ้นหลังยืนยันสำเร็จ และการตัดสินใจสามทางที่ผู้ใช้ต้องทำต่อ</p></section>

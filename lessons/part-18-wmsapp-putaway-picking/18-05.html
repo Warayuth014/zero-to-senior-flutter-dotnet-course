@@ -4,15 +4,235 @@
 <title>Pallet &amp; Destination Scan</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-05 · Real Codebase</span><h1>Pallet &amp; Destination Scan</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Normalize scans</a></li><li><a href="#section-2">Station scan guard</a></li><li><a href="#section-3">Pallet lookup</a></li><li><a href="#section-4">Type compatibility</a></li><li><a href="#section-5">Destination choices</a></li><li><a href="#section-6">Wrapping invariant</a></li><li><a href="#section-7">Suggested destination</a></li><li><a href="#section-8">Decision-table test</a></li></ol></nav>
-<div class="note"><strong>Destination ไม่ใช่ label:</strong> ASRS, PREWORK และ REPLENISH เป็น business command คนละแบบ ส่วน wrapping เป็น option ที่ถูกต้องเฉพาะเส้นทาง ASRS</div>
-<section id="section-1"><h2>1. Normalize scans</h2><p>station/pallet IDs ถูก trim และ uppercase ก่อนใช้ ลดความต่างจาก scanner แต่ API client ต้อง encode path/query และ backend ต้อง normalize/validate ซ้ำเสมอ</p></section>
-<section id="section-2"><h2>2. Station scan guard</h2><p>ค้น station จาก catalog เพื่อหานโยบาย allowedType/fixedDestination/pwRole การส่งเฉพาะ stationId โดยไม่มี policy object ไปทั่ว widget ช่วยลด branch ที่ซ้ำ</p></section>
-<section id="section-3"><h2>3. Pallet lookup</h2><pre class="code-vs"><code>GET /putaway/scan-pallet/{palletId}?stationId={stationId}</code></pre><p>การรวม stationId ทำให้ server ตรวจว่าพา pallet มาที่ station นี้ได้หรือไม่ ไม่ใช่แค่อ่านรายละเอียด pallet</p></section>
-<section id="section-4"><h2>4. Type compatibility</h2><p>receive/send prework รับเฉพาะ PW หาก response type ไม่ตรง UI reject ก่อน confirm แต่ backend confirm ต้องตรวจซ้ำเพื่อกัน stale response และ forged request</p></section>
-<section id="section-5"><h2>5. Destination choices</h2><p>PW pallet เลือก ASRS หรือ PREWORK; FG palletเลือก ASRS หรือ REPLENISH ส่วน fixed destination ไม่แสดง selector การ map นี้ควรเป็น enum/decision table แทน String literals กระจายหลายไฟล์</p></section>
-<section id="section-6"><h2>6. Wrapping invariant</h2><p>เมื่อเปลี่ยน destination ออกจาก ASRS โค้ด reset <code>wrappingRequired=false</code> และ toggle แสดงเฉพาะ ASRS ดังนั้น payload ต้องไม่เกิด PREWORK+wrapping หรือ REPLENISH+wrapping</p></section>
-<section id="section-7"><h2>7. Suggested destination</h2><p>server ส่ง suggestedDestination และ model fallback เป็น ASRS หาก field หาย ค่า fallback อาจส่งของผิดปลายทางโดยเงียบ ควรใช้ nullable/unknown แล้วบังคับเลือกหรือ fail contract แทน default ที่มี side effect</p></section>
-<section id="section-8"><h2>8. Decision-table test</h2><div class="success">เขียน table สำหรับ pallet type × station policy × destination × wrapping พร้อม expected allowed/rejected แล้วใช้ชุดเดียวทดสอบ Dart policy และ .NET validator เพื่อลด contract drift</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สามไฟล์ของตัวเลือกปลายทาง</a></li><li><a href="#section-2">กฎที่ฝังอยู่ใน widget</a></li><li><a href="#section-3">ตัวเลือกที่โผล่และหายตามตัวเลือกอื่น</a></li><li><a href="#section-4">หัวข้อที่เปลี่ยนสีตามประเภท</a></li><li><a href="#section-5">ปุ่มปลายทางที่บอกทั้งชื่อและผล</a></li><li><a href="#section-6">หน้าดูของบนพาเลท</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด shared/widgets/destination/ ทั้งสามไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.3, Part 3 (การสแกน)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านตัวเลือกที่เปลี่ยนกันเองตามเงื่อนไข และเห็นว่ากฎธุรกิจถูกฝังอยู่ใน widget ตรงไหน</div>
+
+<section id="section-1"><h2>1. สามไฟล์ของตัวเลือกปลายทาง</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>หน้าที่</th></tr></thead><tbody>
+<tr><td><code>station_destination_selector.dart</code></td><td>95</td><td>ตัดสินว่าจะแสดงตัวเลือกอะไร</td></tr>
+<tr><td><code>station_wrapping_toggle.dart</code></td><td>63</td><td>สวิตช์พันฟิล์ม</td></tr>
+<tr><td><code>dest_button.dart</code></td><td>61</td><td>ปุ่มหนึ่งใบ</td></tr>
+</tbody></table><p>สามชั้นซ้อนกัน — ตัวเลือกประกอบด้วยปุ่ม และมีสวิตช์อยู่ข้างใน</p></section>
+
+<section id="section-2"><h2>2. กฎที่ฝังอยู่ใน widget</h2><pre class="code-vs"><code>final isPW = palletType == 'PW';
+
+Row(
+  children: [
+    Expanded(
+      child: DestButton(
+        label: 'ASRS',
+        subtitle: 'เก็บเข้าคลังหลัก',
+        selected: selectedDestination == 'ASRS',
+        onTap: () =&gt; onDestinationChanged('ASRS'),
+      ),
+    ),
+    const SizedBox(width: 10),
+    Expanded(
+      child: isPW
+          ? DestButton(
+              label: 'Prework',
+              subtitle: 'ส่งจุด Prework',
+              selected: selectedDestination == 'PREWORK',
+              onTap: () =&gt; onDestinationChanged('PREWORK'),
+            )
+          : DestButton(
+              label: 'Replenish',
+              subtitle: 'เติมสต็อก Rack',
+              selected: selectedDestination == 'REPLENISH',
+              onTap: () =&gt; onDestinationChanged('REPLENISH'),
+            ),
+    ),
+  ],
+)</code></pre><table><thead><tr><th>ประเภทพาเลท</th><th>ตัวเลือกที่ 1</th><th>ตัวเลือกที่ 2</th></tr></thead><tbody>
+<tr><td><code>PW</code> (ต้องแปรรูป)</td><td>ASRS</td><td><strong>Prework</strong></td></tr>
+<tr><td><code>FG</code> (ของดี)</td><td>ASRS</td><td><strong>Replenish</strong></td></tr>
+</tbody></table><div class="note"><strong>นี่คือกฎทางธุรกิจ ไม่ใช่เรื่องหน้าตา</strong> — “ของที่ต้องแปรรูปส่งไปเติมสต็อกไม่ได้” และ “ของดีส่งไปแปรรูปไม่ได้”<br>กฎนี้อยู่ในไฟล์ที่ชื่อว่า <code>widget</code> และไม่มีที่อื่นเขียนไว้ ถ้าวันหนึ่งมีจออื่นที่ให้เลือกปลายทาง จะต้องเขียนกฎซ้ำหรือลืมไปเลย</div><p>ตำแหน่งที่ควรอยู่</p><pre class="code-vs"><code>// ใน putaway/shared/models/ — ที่เดียวที่ทุกคนถามได้
+List&lt;String&gt; allowedDestinations(String palletType) =&gt; switch (palletType) {
+  'PW' =&gt; const ['ASRS', 'PREWORK'],
+  'FG' =&gt; const ['ASRS', 'REPLENISH'],
+  _ =&gt; const ['ASRS'],          // ประเภทที่ไม่รู้จัก = เก็บเข้าคลังอย่างเดียว
+};</code></pre><p>แล้ว widget วนจากรายการนั้นแทนที่จะเขียน <code>if</code></p><pre class="code-vs"><code>Row(
+  children: [
+    for (final dest in allowedDestinations(palletType)) ...[
+      if (dest != allowedDestinations(palletType).first) const SizedBox(width: 10),
+      Expanded(child: DestButton(
+        label: destLabel(dest),
+        subtitle: destSubtitle(dest),
+        selected: selectedDestination == dest,
+        onTap: () =&gt; onDestinationChanged(dest),
+      )),
+    ],
+  ],
+)</code></pre><p>ได้อย่างหนึ่งที่สำคัญกว่าความสวยงามของโค้ด — <strong>เทสต์ได้</strong></p><pre class="code-vs"><code>test('พาเลท PW ห้ามส่งไป Replenish', () {
+  expect(allowedDestinations('PW'), isNot(contains('REPLENISH')));
+});
+
+test('พาเลท FG ห้ามส่งไป Prework', () {
+  expect(allowedDestinations('FG'), isNot(contains('PREWORK')));
+});
+
+test('ทุกประเภทส่งเข้า ASRS ได้เสมอ', () {
+  for (final type in ['PW', 'FG', 'UNKNOWN']) {
+    expect(allowedDestinations(type), contains('ASRS'));
+  }
+});</code></pre><p>สามข้อนี้คือกฎที่คลังใช้จริง — ตอนนี้กฎเดียวกันอยู่ในเงื่อนไข <code>isPW ? ... : ...</code> ที่เทสต์ได้เฉพาะผ่านการวาดหน้าจอ</p></section>
+
+<section id="section-3"><h2>3. ตัวเลือกที่โผล่และหายตามตัวเลือกอื่น</h2><pre class="code-vs"><code>if (selectedDestination == 'ASRS') ...[
+  const SizedBox(height: 12),
+  StationWrappingToggle(value: wrappingRequired, onChanged: onWrappingChanged),
+],</code></pre><p>สวิตช์พันฟิล์มแสดงเฉพาะเมื่อปลายทางเป็น ASRS — เพราะการพันฟิล์มเกิดที่เครื่องระหว่างทางไปคลังหลักเท่านั้น</p><p>และฝั่งที่เรียกก็ล้างค่าให้ด้วย</p><pre class="code-vs"><code>// ใน StationSheet
+onDestinationChanged: (destination) {
+  setState(() {
+    _selectedDestination = destination;
+    if (destination != 'ASRS') {
+      _wrappingRequired = false;      // ← ล้างค่าเมื่อตัวเลือกหายไป
+    }
+  });
+},</code></pre><div class="note"><strong>บรรทัดนี้สำคัญมากและถูกลืมบ่อย</strong> — ถ้าไม่ล้าง ผู้ใช้ที่เปิดสวิตช์ไว้ตอนเลือก ASRS แล้วเปลี่ยนไป Prework จะยังส่ง <code>wrappingRequired: true</code> ไปเซิร์ฟเวอร์<br>สวิตช์หายจากหน้าจอ แต่ค่ายังอยู่ใน state — <strong>สิ่งที่ผู้ใช้เห็นกับสิ่งที่ส่งไปไม่ตรงกัน</strong></div><p>หลักที่ใช้ได้ทั่วไป</p><table><thead><tr><th>เมื่อตัวเลือกหายจากหน้าจอ</th><th>ต้องทำ</th></tr></thead><tbody>
+<tr><td>ค่าไม่มีความหมายแล้ว</td><td><strong>ล้างค่า</strong> (กรณีนี้)</td></tr>
+<tr><td>ค่ายังมีความหมาย แค่ซ่อนไว้</td><td>เก็บไว้ แต่ต้องมั่นใจว่าตั้งใจ</td></tr>
+</tbody></table><p>วิธีตรวจว่าทำครบไหม: หาทุกที่ที่ widget ถูกซ่อนด้วยเงื่อนไข แล้วถามว่าค่าที่มันคุมอยู่ถูกจัดการหรือยัง</p></section>
+
+<section id="section-4"><h2>4. หัวข้อที่เปลี่ยนสีตามประเภท</h2><pre class="code-vs"><code>final headerColor = isPW ? AppTheme.warning : AppTheme.primary;
+final headerIcon = isPW ? Icons.warning_amber : MdiIcons.packageVariantClosed;
+final headerText = isPW
+    ? 'Pallet ประเภท PW - เลือกปลายทาง'
+    : 'Pallet ประเภท FG - เลือกปลายทาง';</code></pre><p>ของที่ต้องแปรรูปใช้สีเหลืองและไอคอนเตือน — บอกผู้ใช้ว่าต้องระวังโดยไม่ต้องอ่านข้อความ</p><table><thead><tr><th>ประเภท</th><th>สี</th><th>ไอคอน</th><th>ความหมายที่สื่อ</th></tr></thead><tbody>
+<tr><td>PW</td><td>เหลือง</td><td>สามเหลี่ยมเตือน</td><td>ยังใช้ไม่ได้ ต้องจัดการก่อน</td></tr>
+<tr><td>FG</td><td>น้ำเงิน</td><td>กล่อง</td><td>ปกติ</td></tr>
+</tbody></table><p>แต่ข้อความมีคำซ้ำ</p><pre class="code-vs"><code>'Pallet ประเภท PW - เลือกปลายทาง'
+'Pallet ประเภท FG - เลือกปลายทาง'
+//                  ^^^^^^^^^^^ ซ้ำทั้งสองแบบ</code></pre><p>เขียนให้สั้นและไม่ซ้ำได้</p><pre class="code-vs"><code>final headerText = 'Pallet ประเภท $palletType - เลือกปลายทาง';</code></pre><p>ได้ประโยชน์เพิ่มคือรองรับประเภทใหม่โดยอัตโนมัติ — ถ้าวันหนึ่งมีประเภท <code>QC</code> ข้อความจะถูกต้องเอง ต่างจากตอนนี้ที่จะแสดงว่า “ประเภท FG” ให้ทุกอย่างที่ไม่ใช่ PW</p><div class="note"><strong>นี่คือกับดักของเงื่อนไขสองทาง</strong> — <code>isPW ? A : B</code> แปลว่า “ทุกอย่างที่ไม่ใช่ PW คือ FG” ซึ่งจริงตอนนี้แต่ไม่ได้รับประกันไว้<br>รูปแบบเดียวกับที่ 16.9 พบใน <code>StatusBadge</code> และ 18.3 พบใน <code>destLabel</code> — เจอสามที่แล้วในโปรเจกต์นี้</div></section>
+
+<section id="section-5"><h2>5. ปุ่มปลายทางที่บอกทั้งชื่อและผล</h2><pre class="code-vs"><code>DestButton(
+  label: 'ASRS',
+  subtitle: 'เก็บเข้าคลังหลัก',
+  icon: MdiIcons.officeBuildingOutline,
+  selected: selectedDestination == 'ASRS',
+  onTap: () =&gt; onDestinationChanged('ASRS'),
+)</code></pre><table><thead><tr><th>ส่วน</th><th>บอกอะไร</th><th>ใครอ่าน</th></tr></thead><tbody>
+<tr><td><code>label</code></td><td>รหัสที่ใช้ในระบบ</td><td>ผู้ใช้ที่ชำนาญ</td></tr>
+<tr><td><code>subtitle</code></td><td>ผลลัพธ์ที่จะเกิด</td><td>ผู้ใช้ใหม่</td></tr>
+<tr><td><code>icon</code></td><td>สัญลักษณ์</td><td>ทุกคน จากมุมตา</td></tr>
+</tbody></table><p>สามอย่างพร้อมกันทำให้ปุ่มใช้ได้ทั้งกับคนที่เพิ่งเข้ามาและคนที่ทำมาสามปี</p><p>คำบรรยายทั้งสามตัวบอก<strong>สิ่งที่จะเกิดขึ้น</strong> ไม่ใช่ชื่อของที่ตั้งไว้</p><table><thead><tr><th>รหัส</th><th>คำบรรยาย</th></tr></thead><tbody>
+<tr><td><code>ASRS</code></td><td>เก็บเข้าคลังหลัก</td></tr>
+<tr><td><code>PREWORK</code></td><td>ส่งจุด Prework</td></tr>
+<tr><td><code>REPLENISH</code></td><td>เติมสต็อก Rack</td></tr>
+</tbody></table><p>ตรงกับหลักเดียวกับข้อความยืนยันใน 18.3 ที่บอกว่า “AMR จะมารับทันที” — ในคลังที่การกดปุ่มทำให้ของเคลื่อนที่จริง ผู้ใช้ต้องรู้ว่าจะเกิดอะไรก่อนกด</p></section>
+
+<section id="section-6"><h2>6. หน้าดูของบนพาเลท</h2><pre class="code-vs"><code>void _showItemsDetail(BuildContext context) {
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) =&gt; PalletItemsPage(
+        palletId: _pallet!.palletId,
+        type: _pallet!.type,
+        items: _pallet!.items,          // ← ส่งข้อมูลที่มีอยู่แล้ว ไม่โหลดใหม่
+      ),
+    ),
+  );
+}</code></pre><p><code>PalletItemsPage</code> 194 บรรทัดและเป็น <code>StatelessWidget</code> ทั้งหมด — ไม่มี state ไม่มี API</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>รับข้อมูลผ่านตัวสร้าง</td><td>เปิดทันที ไม่มีตัวหมุน</td></tr>
+<tr><td>เป็น <code>StatelessWidget</code></td><td>ไม่มีสถานะให้ค้างผิด</td></tr>
+<tr><td>ใช้ <code>ListView.separated</code></td><td>สร้างเฉพาะแถวที่เห็น + จัดการช่องว่างให้</td></tr>
+</tbody></table><p>แถวสุดท้ายต่างจาก <code>po_items_list.dart</code> ใน 17.4 ที่ใช้ <code>Column</code> + spread</p><table><thead><tr><th></th><th><code>PalletItemsPage</code></th><th><code>PoItemsList</code> (17.4)</th></tr></thead><tbody>
+<tr><td>วิธีวาดรายการ</td><td><code>ListView.separated</code></td><td><code>Column</code> + <code>...map()</code></td></tr>
+<tr><td>สร้างกี่แถว</td><td>เฉพาะที่เห็น</td><td>ทุกแถว</td></tr>
+<tr><td>โหลดรูปกี่ใบ</td><td>เฉพาะที่เห็น</td><td>ทุกใบ</td></tr>
+</tbody></table><p>เพราะจอนี้เป็นจอเต็มที่มีแต่รายการ จึงใช้ <code>ListView</code> ได้ตรง ๆ ส่วน 17.4 มีรายการอยู่กลางหน้าที่มีของอื่นบนล่าง</p><div class="note"><strong>ข้อสังเกต:</strong> ปัญหาหน่วยความจำที่ 17.4 พบไม่เกิดที่นี่ เพราะโครงหน้าจอต่างกัน ไม่ใช่เพราะคนเขียนคิดถึงเรื่องนี้<br>แต่ปัญหา <code>PartThumbnail</code> ที่ไม่มี <code>cacheWidth</code> (16.10) ยังอยู่ — ที่นี่ขอขนาด 56 ซึ่งเป็นขนาดใหญ่ที่สุดในทั้งโปรเจกต์ และยังคลายรูปที่ 1024×1024 เหมือนเดิม</div><p>และมีการคำนวณสรุปในบรรทัดเดียว</p><pre class="code-vs"><code>Text('ประเภท $type • ${items.length} รายการ • '
+     'รวม ${items.fold&lt;int&gt;(0, (sum, i) =&gt; sum + i.qty)} ชิ้น')</code></pre><p><code>fold</code> รวมจำนวนจากทุกรายการ — คำนวณจากแหล่งเดียวเหมือนที่ 17.12 ชม ไม่ได้เก็บผลรวมไว้แยก</p><p>แต่คำนวณอยู่ใน <code>build()</code> ซึ่งทำงานทุกครั้งที่วาด — ที่รายการหลักสิบไม่มีปัญหา</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ไฟล์ใน <code>widgets/</code> มีแต่เรื่องหน้าตา</td><td>กฎ “PW ห้ามไป Replenish” อยู่ในนั้น</td></tr>
+<tr><td>ซ่อน widget แล้วค่าหายไปเอง</td><td>ต้องล้าง state เอง</td></tr>
+<tr><td><code>isPW ? A : B</code> ครอบคลุมทุกกรณี</td><td>ทุกอย่างที่ไม่ใช่ PW จะได้ B</td></tr>
+<tr><td>จอที่ไม่มี state ไม่ต้องระวังอะไร</td><td>ยังมีปัญหาเรื่องรูปจาก <code>PartThumbnail</code></td></tr>
+<tr><td><code>ListView</code> ดีกว่า <code>Column</code> เสมอ</td><td>ขึ้นกับว่าอยู่ในโครงแบบไหน</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมคลังแจ้งกฎใหม่ — พาเลทประเภท <code>FG</code> ที่มีสินค้าเกิน 50 ชิ้น ห้ามส่งไป Replenish ต้องเข้า ASRS เท่านั้น</p><ol><li>ถ้าทำแบบที่โค้ดปัจจุบันเขียนไว้ ต้องแก้ตรงไหน</li><li>ถ้าย้ายกฎออกมาก่อน ต้องแก้ตรงไหน</li><li>เขียนเทสต์ที่ยืนยันกฎใหม่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — แก้แบบปัจจุบัน</strong></p><pre class="code-vs"><code>// station_destination_selector.dart
+class StationDestinationSelector extends StatelessWidget {
+  final String palletType;
+  final int totalQty;              // ← ต้องเพิ่มพารามิเตอร์
+  ...
+
+  @override
+  Widget build(BuildContext context) {
+    final isPW = palletType == 'PW';
+    final canReplenish = !isPW &amp;&amp; totalQty &lt;= 50;    // ← กฎใหม่
+    ...
+    Expanded(
+      child: isPW
+          ? DestButton(label: 'Prework', ...)
+          : canReplenish
+              ? DestButton(label: 'Replenish', ...)
+              : const SizedBox.shrink(),               // ← ไม่มีตัวเลือกที่สอง
+    ),</code></pre><p>ต้องแก้สามที่</p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>station_destination_selector.dart</code></td><td>เพิ่มพารามิเตอร์ + เงื่อนไขซ้อนสามชั้น</td></tr>
+<tr><td><code>station_sheet.dart</code></td><td>ส่ง <code>totalQty</code> เข้าไป</td></tr>
+<tr><td><code>station_sheet.dart</code></td><td>ตรวจซ้ำตอนกดยืนยัน (ไม่งั้นค่าที่เลือกไว้ก่อนยังส่งได้)</td></tr>
+</tbody></table><p>ปัญหาของวิธีนี้: <code>SizedBox.shrink()</code> ทำให้ปุ่ม ASRS กว้างครึ่งเดียวและมีที่ว่างข้าง ๆ ซึ่งดูเหมือนหน้าจอพัง</p><p><strong>ข้อ 2 — แก้แบบที่ย้ายกฎออกมา</strong></p><pre class="code-vs"><code>// putaway/shared/models/putaway_rules.dart
+List&lt;String&gt; allowedDestinations({
+  required String palletType,
+  required int totalQty,
+}) {
+  if (palletType == 'PW') return const ['ASRS', 'PREWORK'];
+  if (palletType != 'FG') return const ['ASRS'];
+
+  // FG ที่หนักเกิน 50 ชิ้น ต้องเข้าคลังหลัก — Rack รับไม่ไหว
+  if (totalQty &gt; 50) return const ['ASRS'];
+  return const ['ASRS', 'REPLENISH'];
+}</code></pre><p>widget ไม่ต้องแก้เลยถ้าเคยเปลี่ยนเป็นวนจากรายการตามหัวข้อ 2</p><table><thead><tr><th>ไฟล์</th><th>แก้อะไร</th></tr></thead><tbody>
+<tr><td><code>putaway_rules.dart</code></td><td>เพิ่มเงื่อนไขสองบรรทัด</td></tr>
+<tr><td><code>station_sheet.dart</code></td><td>ส่ง <code>totalQty</code> เข้าไป</td></tr>
+</tbody></table><p>และการตรวจซ้ำตอนยืนยันก็ใช้ฟังก์ชันเดียวกัน</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmPutaway() async {
+  if (_pallet == null) return;
+
+  final dest = _effectiveDestination;
+  final totalQty = _pallet!.items.fold&lt;int&gt;(0, (s, i) =&gt; s + i.qty);
+
+  // ตรวจซ้ำด้วยกฎเดียวกับที่ใช้แสดงตัวเลือก — ไม่มีทางไม่ตรง
+  if (!allowedDestinations(palletType: _pallet!.type, totalQty: totalQty)
+      .contains(dest)) {
+    showErrorDialog(context,
+        message: 'พาเลท ${_pallet!.type} จำนวน $totalQty ชิ้น ส่งไป $dest ไม่ได้');
+    return;
+  }
+  ...
+}</code></pre><p>วิธีนี้แก้ปัญหาที่ 17.14 ชี้ไว้ตรง ๆ — กฎเดียวกันที่เขียนคนละที่จะไม่ตรงกันเมื่อไหร่ก็ได้</p><p><strong>ข้อ 3 — เทสต์</strong></p><pre class="code-vs"><code>void main() {
+  group('allowedDestinations', () {
+    test('PW ส่งได้แค่ ASRS กับ Prework', () {
+      final dests = allowedDestinations(palletType: 'PW', totalQty: 10);
+      expect(dests, containsAll(['ASRS', 'PREWORK']));
+      expect(dests, isNot(contains('REPLENISH')));
+    });
+
+    test('FG น้อยกว่าหรือเท่ากับ 50 ส่ง Replenish ได้', () {
+      expect(allowedDestinations(palletType: 'FG', totalQty: 50),
+          contains('REPLENISH'));
+    });
+
+    test('FG เกิน 50 ส่ง Replenish ไม่ได้', () {
+      expect(allowedDestinations(palletType: 'FG', totalQty: 51),
+          isNot(contains('REPLENISH')));
+    });
+
+    test('ทุกกรณีส่งเข้า ASRS ได้เสมอ', () {
+      for (final type in ['PW', 'FG', 'QC', '']) {
+        for (final qty in [0, 50, 51, 9999]) {
+          expect(allowedDestinations(palletType: type, totalQty: qty),
+              contains('ASRS'),
+              reason: 'type=$type qty=$qty');
+        }
+      }
+    });
+
+    test('ประเภทที่ไม่รู้จัก ส่งได้แค่ ASRS', () {
+      expect(allowedDestinations(palletType: 'QC', totalQty: 10), ['ASRS']);
+    });
+  });
+}</code></pre><p>เทสต์ที่สองกับสามทดสอบ<strong>ขอบเขต</strong> — 50 ผ่าน 51 ไม่ผ่าน ซึ่งเป็นจุดที่โค้ดผิดได้ง่ายที่สุด (<code>&gt;</code> กับ <code>&gt;=</code>)</p><p>เทสต์ที่สี่ใช้ <code>reason:</code> เพื่อให้รู้ว่าล้มที่ชุดค่าไหน — สำคัญเมื่อวนหลายค่าในเทสต์เดียว</p><div class="note"><strong>ข้อสรุปที่ใหญ่กว่าโจทย์:</strong> กฎธุรกิจที่อยู่ในเงื่อนไขของ widget เทสต์ได้เฉพาะผ่านการวาดหน้าจอ ซึ่งช้าและเปราะ<br>พอย้ายออกมาเป็นฟังก์ชันบริสุทธิ์ เทสต์ห้าข้อข้างบนรันในไม่กี่มิลลิวินาที และยังใช้ได้แม้จะเปลี่ยนหน้าตาทั้งหมด<br>นี่คือเหตุผลเดียวกับที่ทำให้ <code>validateHost</code> ใน 16.5 เป็นส่วนที่เทสต์ได้ทันทีในโปรเจกต์ที่มีเทสต์ 0 ข้อ</div></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>สามไฟล์ซ้อนกัน: ตัวเลือก → ปุ่ม และมีสวิตช์อยู่ข้างใน</li><li>กฎ “PW ไป Prework ได้ FG ไป Replenish ได้” อยู่ในเงื่อนไขของ widget ไม่มีที่อื่นเขียนไว้</li><li>ย้ายออกมาเป็นฟังก์ชันบริสุทธิ์แล้วเทสต์ได้ทันที และใช้ตรวจซ้ำตอนยืนยันได้ด้วย</li><li>สวิตช์พันฟิล์มแสดงเฉพาะเมื่อปลายทางเป็น ASRS และค่าถูกล้างเมื่อเปลี่ยนปลายทาง</li><li>เมื่อ widget ถูกซ่อน ต้องถามเสมอว่าค่าที่มันคุมถูกจัดการหรือยัง</li><li><code>isPW ? A : B</code> ทำให้ทุกอย่างที่ไม่ใช่ PW ได้ B — เจอรูปแบบนี้สามที่แล้ว</li><li>ปุ่มปลายทางบอกทั้งรหัส ผลลัพธ์ และไอคอน — ใช้ได้ทั้งคนใหม่และคนชำนาญ</li><li><code>PalletItemsPage</code> เป็น <code>StatelessWidget</code> รับข้อมูลผ่านตัวสร้าง เปิดทันทีไม่มีตัวหมุน</li></ul></div><p><strong>บทหน้า:</strong> การพันฟิล์ม รายการของบนพาเลท และสิ่งที่เกิดขึ้นหลังกดยืนยัน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

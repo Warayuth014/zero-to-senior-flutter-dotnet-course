@@ -4,17 +4,273 @@
 <title>Source Scan</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-12 · Real Codebase</span><h1>Source Scan</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Source scan UI</a></li><li><a href="#section-2">Assign source command</a></li><li><a href="#section-3">Assignment snapshot</a></li><li><a href="#section-4">Part activation</a></li><li><a href="#section-5">Non-serial quantity</a></li><li><a href="#section-6">Serial guard</a></li><li><a href="#section-7">Identity collision</a></li><li><a href="#section-8">Source tests</a></li></ol></nav>
-<div class="note"><strong>Source pallet กำหนดชุดสินค้าที่หยิบได้:</strong> assignment response คือ snapshot ที่ผูก station, source pallet และ order เข้าด้วยกัน ทุก part/serial ที่เลือกต้องอยู่ใน snapshot นี้</div>
-<section id="section-1"><h2>1. Source scan UI</h2><p><code>PickingScanSourceCard</code> รับ controller/focus/onScan จาก parent จึงเป็น stateless presentation scanner focus กลับมาหลัง transition ด้วย post-frame callback</p></section>
-<section id="section-2"><h2>2. Assign source command</h2><pre class="code-vs"><code>POST /picking/assign-station
-{ "palletId": sourcePalletId,
-  "pickOrderId": pickOrderId }</code></pre><p>response คืน station และรายการบน pallet พร้อมจำนวนแนะนำที่จะ pick</p></section>
-<section id="section-3"><h2>3. Assignment snapshot</h2><p><code>PickItemOnPallet</code> มี partId, lotNumber, qtyOnPallet, qtyToPickSuggested, condition, serialRequire และ availableSerials Client ใช้กำหนด input mode และเพดาน local</p></section>
-<section id="section-4"><h2>4. Part activation</h2><p>scan part ต้องตรง item ใน assignment แล้ว selection เป็น single-select; serial item โฟกัส serial field ส่วน non-serial เติมค่าเริ่มต้นเป็น suggested remaining และโฟกัส qty</p></section>
-<section id="section-5"><h2>5. Non-serial quantity</h2><p><code>_addQty</code> รับ int มากกว่า 0 และไม่เกิน qtyToPickSuggested แล้วเก็บใน map Backend ยังต้องตรวจ stock/order remaining ล่าสุด เพราะ local snapshot อาจ stale</p></section>
-<section id="section-6"><h2>6. Serial guard</h2><p>serial ต้องไม่ซ้ำใน local list, อยู่ใน <code>availableSerials</code> ของ part และ count ไม่เกิน suggested qty ต่างจาก receiving flow ที่ validate server ต่อ scan; ที่นี่ server validation เกิดตอน confirm จึงมี conflict ช้ากว่า</p></section>
-<section id="section-7"><h2>7. Identity collision</h2><p>selection, <code>_pickedSerials</code> และ <code>_pickedQty</code> key ด้วย partId หาก source มี part เดียวกันหลาย lot/condition record จะชนกัน ควรใช้ lineId หรือ composite part+lot+condition ที่ backendรับรู้</p></section>
-<section id="section-8"><h2>8. Source tests</h2><div class="success">ทดสอบ wrong pallet/order, empty assignment, part หลาย lot, duplicate/unknown serial, suggested qty ศูนย์/เกิน, scan source ซ้ำ และ network failure โดยห้ามเปลี่ยนไป returnSource เมื่อเป็น transport error</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สแกนพาเลทต้นทาง</a></li><li><a href="#section-2">เลือกสินค้าแล้วเตรียมช่องให้</a></li><li><a href="#section-3">เลือกซ้ำเพื่อยกเลิก</a></li><li><a href="#section-4">สแกน S/N ที่ไม่ยิงเน็ตเลย</a></li><li><a href="#section-5">กรอกจำนวนสำหรับสินค้าที่ไม่มี S/N</a></li><li><a href="#section-6">เครื่องมือทดสอบที่ติดมากับ release</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _scanSourcePallet, _activatePart, _scanSerial, _addQty</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.11, 17.6 (ด่านตรวจ S/N)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการเลือกสินค้าและสแกน S/N ที่ไม่พึ่งเน็ต และเห็นเครื่องมือสำหรับทดสอบที่ติดมากับ release</div>
+
+<section id="section-1"><h2>1. สแกนพาเลทต้นทาง</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanSourcePallet() async {
+  final palletId = _sourceScanCtrl.text.trim().toUpperCase();
+  if (palletId.isEmpty) return;
+
+  setState(() =&gt; _loading = true);
+  final result = await _api.assignPickStation(palletId: palletId, pickOrderId: _pickOrderId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    setState(() {
+      _returnPalletId = palletId;
+      _state = _PickState.returnSource;
+    });
+    return;
+  }
+
+  _assignment = result.data!;      // ← ไม่ได้อยู่ใน setState
+  _resetPickedSerials();
+
+  setState(() {
+    _state = _PickState.pickView;
+  });
+}</code></pre><p>สังเกตสองบรรทัดกลาง — <code>_assignment</code> และการล้างข้อมูลอยู่<strong>นอก</strong> <code>setState</code></p><table><thead><tr><th>ทำงานได้ไหม</th><th>เพราะ</th></tr></thead><tbody>
+<tr><td>ได้</td><td><code>setState</code> ที่ตามมาทำให้วาดใหม่อยู่แล้ว</td></tr>
+</tbody></table><div class="note"><strong>แต่เป็นรูปแบบที่ควรเลี่ยง</strong> — <code>setState</code> ไม่ได้ทำหน้าที่เปลี่ยนค่า มันทำหน้าที่<strong>บอก Flutter ว่ามีอะไรเปลี่ยน</strong><br>การแยกการเปลี่ยนค่าออกจาก <code>setState</code> ทำให้คนอ่านต้องไล่ว่าค่าไหนเปลี่ยนที่ไหนบ้าง และถ้าวันหนึ่งมีคนลบ <code>setState</code> บรรทัดล่างออก จะเกิดบั๊กที่หายาก<pre class="code-vs"><code>setState(() {
+  _assignment = result.data!;
+  _resetPickedSerials();
+  _state = _PickState.pickView;
+});</code></pre></div><p>และช่องสแกนไม่ถูกล้างเลยในเมธอดนี้ — ปัญหาเดียวกับ 18.9 และ 18.10</p><p>แต่ที่นี่ผลต่างออกไป</p><pre class="code-vs"><code>ผู้ใช้อยู่ scanSource สแกน PAL-001 → สำเร็จ → ไป pickView
+  → ทำงานเสร็จ กลับมา scanSource ผ่าน _goToScanSource()</code></pre><pre class="code-vs"><code>void _goToScanSource() {
+  _resetPickedSerials();
+  setState(() {
+    _state = _PickState.scanSource;
+    _sourceScanCtrl.clear();          // ← ล้างตรงนี้
+  });
+  ...
+}</code></pre><p>ทางกลับมาล้างให้ — แต่ทางที่ล้มเหลว (ไป <code>returnSource</code>) ไม่ล้าง และ <code>_returnPalletId</code> เก็บค่าไว้แล้ว จึงไม่จำเป็น</p></section>
+
+<section id="section-2"><h2>2. เลือกสินค้าแล้วเตรียมช่องให้</h2><pre class="code-vs"><code>void _activatePart(String partId) {
+  final item = _assignment.palletItems.where((i) =&gt; i.partId == partId).firstOrNull;
+  if (item == null) return;
+
+  setState(() {
+    _selectedPartIds..clear()..add(partId);
+    _partScanCtrl.text = partId;                    // ← เติมช่อง Part ให้
+    if (!item.serialRequire) {
+      final remaining = item.qtyToPickSuggested - (_pickedQty[partId] ?? 0);
+      _qtyEntryCtrl.text = remaining &gt; 0 ? '$remaining' : '0';   // ← เติมจำนวนที่เหลือ
+    }
+  });
+
+  if (item.serialRequire) {
+    _serialScanFocus.requestFocus();      // ← ไปช่อง S/N
+  } else {
+    _qtyEntryFocus.requestFocus();        // ← ไปช่องจำนวน
+  }
+}</code></pre><table><thead><tr><th>สินค้า</th><th>เติมอะไรให้</th><th>โฟกัสไปที่</th></tr></thead><tbody>
+<tr><td>ต้องมี S/N</td><td>รหัสสินค้า</td><td>ช่อง S/N</td></tr>
+<tr><td>ไม่ต้องมี</td><td>รหัสสินค้า + <strong>จำนวนที่เหลือ</strong></td><td>ช่องจำนวน</td></tr>
+</tbody></table><p>แถวที่สองประหยัดเวลาผู้ใช้มาก — ส่วนใหญ่หยิบครบตามที่ระบบขอ จึงกดยืนยันได้เลยโดยไม่ต้องพิมพ์</p><pre class="code-vs"><code>final remaining = item.qtyToPickSuggested - (_pickedQty[partId] ?? 0);
+_qtyEntryCtrl.text = remaining &gt; 0 ? '$remaining' : '0';</code></pre><p>คำนวณจากที่ต้องหยิบ ลบที่หยิบไปแล้ว — ผู้ใช้ที่กลับมาเลือกสินค้าเดิมซ้ำจะเห็นจำนวนที่เหลือจริง ไม่ใช่จำนวนเต็ม</p><p><code>remaining &gt; 0 ? ... : '0'</code> กันกรณีที่หยิบเกิน ซึ่งทำให้ได้ค่าติดลบ</p><div class="note"><strong>การเติมค่าล่วงหน้าเป็นดาบสองคม</strong> — ประหยัดเวลาเมื่อค่าที่เดาถูก แต่ทำให้ผู้ใช้กดยืนยันโดยไม่อ่านเมื่อเดาผิด<br>ที่นี่คุ้ม เพราะค่าที่เดาคือ “จำนวนที่ระบบขอให้หยิบ” ซึ่งเป็นค่าที่ถูกในกรณีส่วนใหญ่ และผู้ใช้ที่หยิบได้ไม่ครบต้องแก้อยู่แล้ว</div></section>
+
+<section id="section-3"><h2>3. เลือกซ้ำเพื่อยกเลิก</h2><pre class="code-vs"><code>void _selectPartForScan(String partId) {
+  final item = _assignment.palletItems.where((i) =&gt; i.partId == partId).firstOrNull;
+  if (item == null) return;
+
+  if (_selectedPartIds.contains(partId)) {
+    // tap ตัวที่ select อยู่ → deselect (กลับไปดูทั้งหมด)
+    setState(() {
+      _selectedPartIds.remove(partId);
+      if (_partScanCtrl.text == partId) _partScanCtrl.clear();
+    });
+    return;
+  }
+  _activatePart(partId);
+}</code></pre><p>แตะการ์ดที่เลือกอยู่แล้ว = ยกเลิกการเลือก</p><p>และมีแบนเนอร์อีกทางหนึ่ง</p><pre class="code-vs"><code>Widget _buildShowAllBanner() {
+  return InkWell(
+    onTap: () =&gt; setState(() {
+      _selectedPartIds.clear();
+      _partScanCtrl.clear();
+    }),
+    child: Container(
+      ...
+      child: Row(children: [
+        Icon(Icons.filter_alt_outlined, ...),
+        const Expanded(child: Text('แสดงเฉพาะ part ที่เลือก')),
+        Text('ดูทั้งหมด'),
+        Icon(Icons.close, ...),
+      ]),
+    ),
+  );
+}</code></pre><table><thead><tr><th>ทางยกเลิก</th><th>ผู้ใช้ต้องรู้ก่อนไหม</th></tr></thead><tbody>
+<tr><td>แตะการ์ดซ้ำ</td><td><strong>ต้อง</strong> — ไม่มีอะไรบอก</td></tr>
+<tr><td>แบนเนอร์ “ดูทั้งหมด”</td><td>ไม่ — มีคำว่า “ดูทั้งหมด” และไอคอนกากบาท</td></tr>
+</tbody></table><p>สองทางที่ทำเรื่องเดียวกัน — และทางที่สองมองเห็นได้ ซึ่งเป็นสิ่งที่ 17.5 ชี้ว่า <code>ScanPartScreen</code> ขาดไปทั้งหมด</p><p>สังเกตรายละเอียดในทางแรก</p><pre class="code-vs"><code>if (_partScanCtrl.text == partId) _partScanCtrl.clear();</code></pre><p>ล้างช่อง Part เฉพาะเมื่อค่าในช่องตรงกับที่กำลังยกเลิก — ถ้าผู้ใช้พิมพ์อย่างอื่นไว้ ค่านั้นจะไม่ถูกล้าง</p><p>รายละเอียดเล็กที่แสดงว่าคนเขียนคิดถึงกรณีที่ผู้ใช้กำลังพิมพ์อยู่</p></section>
+
+<section id="section-4"><h2>4. สแกน S/N ที่ไม่ยิงเน็ตเลย</h2><pre class="code-vs"><code>void _scanSerial() {
+  final partId = _partScanCtrl.text.trim().toUpperCase();
+  final serialNo = _serialScanCtrl.text.trim().toUpperCase();
+  if (partId.isEmpty) {
+    showWarningSnackbar(context, 'กรุณาสแกน Part ก่อน');
+    _partScanFocus.requestFocus();
+    return;
+  }
+  if (serialNo.isEmpty) { ... }
+
+  final match = _assignment.palletItems.where((item) =&gt; item.partId == partId).firstOrNull;
+  if (match == null) {
+    showErrorDialog(context, message: 'ไม่พบ Part "$partId" บน Pallet นี้');
+    ...
+  }
+
+  final serials = _pickedSerials.putIfAbsent(partId, () =&gt; &lt;String&gt;[]);
+  if (serials.contains(serialNo)) {
+    showWarningSnackbar(context, 'S/N "$serialNo" สแกนไปแล้ว');
+    ...
+  }
+
+  if (!match.availableSerials.contains(serialNo)) {
+    showErrorDialog(context, message: 'S/N "$serialNo" ไม่อยู่บน Pallet นี้สำหรับ Part "$partId"');
+    ...
+  }
+
+  if (serials.length &gt;= match.qtyToPickSuggested) {
+    showWarningSnackbar(context, 'Part $partId สแกนครบ ${match.qtyToPickSuggested} ชิ้นแล้ว');
+    ...
+  }
+
+  setState(() {
+    _selectedPartIds.add(partId);
+    serials.add(serialNo);
+  });
+  _serialScanCtrl.clear();
+  _serialScanFocus.requestFocus();
+}</code></pre><p><strong>ทั้งเมธอดไม่มี <code>async</code> เลย</strong> — เป็น <code>void</code> ล้วน</p><table><thead><tr><th>ด่าน</th><th>ตรวจอะไร</th><th>ใช้ข้อมูลจาก</th></tr></thead><tbody>
+<tr><td>1</td><td>เลือกสินค้าแล้วยัง</td><td>ช่อง Part</td></tr>
+<tr><td>2</td><td>กรอก S/N มาไหม</td><td>ช่อง S/N</td></tr>
+<tr><td>3</td><td>สินค้านี้อยู่บนพาเลทไหม</td><td><code>_assignment.palletItems</code></td></tr>
+<tr><td>4</td><td>สแกนซ้ำไหม</td><td><code>_pickedSerials</code></td></tr>
+<tr><td>5</td><td><strong>S/N นี้อยู่บนพาเลทจริงไหม</strong></td><td><code>match.availableSerials</code></td></tr>
+<tr><td>6</td><td>ครบจำนวนแล้วไหม</td><td><code>match.qtyToPickSuggested</code></td></tr>
+</tbody></table><p>ด่านที่ 5 คือด่านที่ <code>ScanPartScreen</code> ต้องยิงเน็ตถึงจะรู้ (17.6)</p><table><thead><tr><th></th><th>Receiving (17.6)</th><th>Picking (ที่นี่)</th></tr></thead><tbody>
+<tr><td>รายชื่อ S/N ที่ถูกต้อง</td><td>ไม่รู้ ต้องถามทีละตัว</td><td><strong>มากับ <code>availableSerials</code></strong></td></tr>
+<tr><td>เวลาต่อการสแกนหนึ่งครั้ง</td><td>รอเน็ต</td><td>ทันที</td></tr>
+<tr><td>ทำงานตอนเน็ตหลุด</td><td>ไม่ได้</td><td><strong>ได้จนถึงตอนกดยืนยัน</strong></td></tr>
+</tbody></table><div class="note"><strong>ความต่างมาจากฝั่งเซิร์ฟเวอร์ ไม่ใช่ฝั่งแอป</strong> — <code>assignPickStation</code> ส่งรายชื่อ S/N บนพาเลทมาให้ครบตั้งแต่แรก<br>เหมือนที่ <code>LoadToBasketScreen</code> (17.10) ได้ <code>serialNumbers</code> มาพร้อมข้อมูล<br>สองในสามจอที่สแกน S/N ในโปรเจกต์นี้ไม่ต้องยิงเน็ต — มีแค่ receiving ที่ต้อง เพราะตอนรับของยังไม่รู้ว่าจะมี S/N อะไรมาบ้าง</div><p>สังเกต <code>putIfAbsent</code></p><pre class="code-vs"><code>final serials = _pickedSerials.putIfAbsent(partId, () =&gt; &lt;String&gt;[]);</code></pre><p>คืนรายการที่มีอยู่ หรือสร้างใหม่ถ้ายังไม่มี — แล้ว <code>serials.add()</code> ทีหลังแก้รายการใน <code>Map</code> โดยตรง</p><p>ทำงานได้เพราะ <code>List</code> เป็นวัตถุอ้างอิง แต่ทำให้ <code>setState</code> ครอบแค่บางส่วน</p><pre class="code-vs"><code>setState(() {
+  _selectedPartIds.add(partId);
+  serials.add(serialNo);         // ← แก้รายการใน Map ผ่านตัวอ้างอิง
+});</code></pre><p>ที่นี่อยู่ใน <code>setState</code> จึงถูกต้อง — แต่ด่านที่ 4 เรียก <code>putIfAbsent</code> ก่อนหน้านั้น ซึ่งอาจเพิ่มคีย์ใหม่เข้า <code>Map</code> โดยไม่มี <code>setState</code></p><table><thead><tr><th>ผลของการเพิ่มคีย์ว่างนอก setState</th></tr></thead><tbody>
+<tr><td>ไม่มีผลกับหน้าจอ เพราะรายการว่างไม่แสดงอะไร</td></tr>
+<tr><td>แต่ถ้า S/N ถูกปฏิเสธที่ด่าน 5 หรือ 6 คีย์ว่างจะค้างอยู่</td></tr>
+</tbody></table><p>ไม่เสียหายในทางปฏิบัติ เพราะ <code>_pickedCountFor</code> คืน 0 สำหรับรายการว่าง</p></section>
+
+<section id="section-5"><h2>5. กรอกจำนวนสำหรับสินค้าที่ไม่มี S/N</h2><pre class="code-vs"><code>void _addQty() {
+  final item = _currentItem;
+  if (item == null) {
+    showWarningSnackbar(context, 'กรุณาสแกน Part ก่อน');
+    _partScanFocus.requestFocus();
+    return;
+  }
+
+  final qty = int.tryParse(_qtyEntryCtrl.text.trim());
+  if (qty == null || qty &lt;= 0) {
+    showWarningSnackbar(context, 'กรุณาระบุจำนวน');
+    _qtyEntryFocus.requestFocus();
+    return;
+  }
+  if (qty &gt; item.qtyToPickSuggested) {
+    showErrorDialog(context,
+        message: 'จำนวนเกินที่ต้องการ Pick (สูงสุด ${item.qtyToPickSuggested})');
+    return;
+  }
+
+  setState(() =&gt; _pickedQty[item.partId] = qty);
+  showSuccessSnackbar(context, 'Part ${item.partId} ระบุจำนวน $qty ชิ้น');
+}</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>int.tryParse</code> ไม่ใช่ <code>int.parse</code></td><td>ผู้ใช้พิมพ์ตัวอักษรก็ไม่พัง</td></tr>
+<tr><td>ตรวจ <code>&lt;= 0</code></td><td>กันทั้งศูนย์และค่าติดลบ</td></tr>
+<tr><td>ตรวจเกินจำนวนที่ขอ</td><td>บอกค่าสูงสุดในข้อความด้วย</td></tr>
+<tr><td>คืนโฟกัสตามช่องที่ผิด</td><td>ผิดที่ Part → กลับช่อง Part, ผิดที่จำนวน → กลับช่องจำนวน</td></tr>
+</tbody></table><p>แต่ทางที่สามไม่คืนโฟกัส</p><pre class="code-vs"><code>if (qty &gt; item.qtyToPickSuggested) {
+  showErrorDialog(context, message: '...');
+  return;                       // ← ไม่คืนโฟกัส
+}</code></pre><p>ผู้ใช้ที่กรอกเกินต้องแตะช่องเองก่อนแก้ — จุดเดียวกับที่ 18.10 พบ</p><p>และสังเกตว่าใช้ <code>=</code> ไม่ใช่ <code>+=</code></p><pre class="code-vs"><code>_pickedQty[item.partId] = qty;      // ← แทนที่ ไม่ใช่บวกเพิ่ม</code></pre><p>ผู้ใช้ที่กด “เพิ่มจำนวน” สองครั้งจะได้ค่าครั้งหลัง ไม่ใช่ผลรวม — ซึ่งตรงกับที่ <code>_activatePart</code> เติมจำนวนที่<strong>เหลือ</strong>ให้</p><pre class="code-vs"><code>final remaining = item.qtyToPickSuggested - (_pickedQty[partId] ?? 0);</code></pre><div class="note"><strong>สองบรรทัดนี้ขัดกัน</strong> — <code>_activatePart</code> คำนวณจำนวนที่เหลือโดยหักที่หยิบไปแล้ว แต่ <code>_addQty</code> แทนที่ค่าเดิมทั้งหมด<pre class="code-vs"><code>ต้องหยิบ 10 ชิ้น
+  → เลือกสินค้า → ช่องเติม "10" → กดเพิ่ม → _pickedQty = 10
+    → เลือกซ้ำ → remaining = 10 - 10 = 0 → ช่องเติม "0"
+      → กดเพิ่ม → "กรุณาระบุจำนวน" (เพราะ 0 ไม่ผ่านด่าน)</code></pre>ผู้ใช้ที่อยากแก้จำนวนต้องพิมพ์เองทั้งหมด — และค่าที่เติมให้ (0) ไม่ช่วยอะไร</div><p>ถ้าตั้งใจให้แทนที่ ควรเติมค่าปัจจุบันแทนที่เหลือ</p><pre class="code-vs"><code>// เติมค่าที่ระบุไว้แล้ว หรือจำนวนที่ขอถ้ายังไม่เคยระบุ
+final current = _pickedQty[partId];
+_qtyEntryCtrl.text = '${current ?? item.qtyToPickSuggested}';</code></pre></section>
+
+<section id="section-6"><h2>6. เครื่องมือทดสอบที่ติดมากับ release</h2><pre class="code-vs"><code>Future&lt;void&gt; _copyAndFillSerialForTest(String partId, String serialNo) async {
+  await Clipboard.setData(ClipboardData(text: serialNo));
+  if (!mounted) return;
+  setState(() {
+    _partScanCtrl.text = partId;
+    _serialScanCtrl.text = serialNo;
+  });
+  _serialScanFocus.requestFocus();
+  showSuccessSnackbar(context, 'คัดลอก S/N "$serialNo" แล้ว');
+}</code></pre><pre class="code-vs"><code>void _showAvailableSerialsSheet() {
+  final itemsWithSerials = _assignment.palletItems
+      .where((item) =&gt; item.availableSerials.isNotEmpty)
+      .toList();
+
+  showModalBottomSheet(
+    ...
+    child: const Text('S/N สำหรับทดสอบ', ...),
+    ...
+  );
+}</code></pre><p>แผ่นนี้แสดง<strong>รายชื่อ S/N ทั้งหมดบนพาเลท</strong> แล้วให้แตะเพื่อเติมลงช่องอัตโนมัติ</p><table><thead><tr><th>ประโยชน์</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>ทดสอบ flow ได้โดยไม่ต้องมีของจริง</td><td><strong>ผู้ใช้ยืนยันการหยิบได้โดยไม่ได้หยิบจริง</strong></td></tr>
+<tr><td>คนพัฒนาไม่ต้องพิมพ์ S/N ยาว ๆ</td><td>ไม่มีอะไรบอกว่าเป็นเครื่องมือทดสอบนอกจากชื่อ</td></tr>
+</tbody></table><div class="note"><strong>ชื่อบนแผ่นเขียนว่า “S/N สำหรับทดสอบ” ซึ่งบอกเจตนาชัด</strong> — เหมือนที่ 16.4 ชมว่าจอล็อกอินบอกตรง ๆ ว่าเป็นของจำลอง<br>แต่ต่างกันตรงที่จอล็อกอินไม่มีทางเลือกอื่น ส่วนแผ่นนี้<strong>ทำให้ข้ามการสแกนจริงได้ทั้งหมด</strong><br>ในระบบที่ต้องติดตามสินค้าทีละชิ้น การยืนยันโดยไม่ได้สแกนของจริงทำให้ข้อมูลในระบบไม่ตรงกับของจริง — ซึ่งเป็นสิ่งที่ S/N มีไว้ป้องกันตั้งแต่แรก</div><p>15.1 สอนวิธีจำกัดให้มีเฉพาะตอนพัฒนา</p><pre class="code-vs"><code>if (kDebugMode)
+  IconButton(
+    icon: const Icon(Icons.science_outlined),
+    tooltip: 'S/N สำหรับทดสอบ',
+    onPressed: _showAvailableSerialsSheet,
+  ),</code></pre><p>หรือถ้าต้องใช้หน้างานตอนติดตั้ง ให้ผูกกับบทบาทเหมือนที่ 16.3 เสนอ</p><pre class="code-vs"><code>if (_role == 'SUPERVISOR') ...</code></pre><p>สังเกตว่าจอนี้ไม่ได้รับ <code>role</code> เข้ามา — รับแค่ <code>userId</code> กับ <code>fullName</code> ซึ่งเป็นสิ่งที่ <code>HomeScreen</code> ส่งต่อ (16.3)</p><p>การผูกกับบทบาทจึงต้องส่ง <code>role</code> ผ่านมาทั้งสี่ชั้นของ picking — เป็นราคาที่ต้องจ่ายเมื่อไม่มีที่เก็บ session กลาง</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>แก้ค่านอก <code>setState</code> ได้ถ้ามี <code>setState</code> ตามมา</td><td>ทำงานได้แต่ทำให้คนอ่านตามยาก</td></tr>
+<tr><td>สแกน S/N ต้องยิงเน็ตเสมอ</td><td>สองในสามจอในโปรเจกต์นี้ไม่ต้อง</td></tr>
+<tr><td><code>putIfAbsent</code> ต้องอยู่ใน <code>setState</code></td><td>ที่นี่ไม่จำเป็น เพราะรายการว่างไม่แสดงอะไร</td></tr>
+<tr><td>เติมค่าล่วงหน้าดีเสมอ</td><td>ทำให้ผู้ใช้กดยืนยันโดยไม่อ่านเมื่อเดาผิด</td></tr>
+<tr><td>เครื่องมือทดสอบไม่อยู่ใน release</td><td>อยู่ ถ้าไม่ครอบด้วย <code>kDebugMode</code></td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “กรอกจำนวนไป 8 แล้วอยากแก้เป็น 5 แต่พอแตะการ์ดซ้ำ ช่องขึ้น 2 ไม่ใช่ 8”</p><ol><li>อธิบายว่าเลข 2 มาจากไหน</li><li>อะไรคือพฤติกรรมที่ผู้ใช้คาดหวัง</li><li>แก้อย่างไร และมีทางเลือกอื่นไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เลข 2 มาจากไหน</strong></p><pre class="code-vs"><code>ต้องหยิบ 10 ชิ้น (qtyToPickSuggested = 10)
+  → เลือกสินค้า → remaining = 10 - 0 = 10 → ช่องขึ้น "10"
+    → ผู้ใช้แก้เป็น 8 แล้วกดเพิ่ม → _pickedQty[partId] = 8
+      → แตะการ์ดซ้ำเพื่อแก้
+        → _activatePart → remaining = 10 - 8 = 2 → ช่องขึ้น "2"</code></pre><p>เลข 2 คือ<strong>จำนวนที่ยังขาด</strong> ไม่ใช่จำนวนที่กรอกไว้</p><p>สับสนเพราะสองเมธอดตีความ <code>_pickedQty</code> คนละแบบ</p><table><thead><tr><th>เมธอด</th><th>ตีความ <code>_pickedQty</code> ว่า</th></tr></thead><tbody>
+<tr><td><code>_activatePart</code></td><td>ยอดสะสม — จึงหักออกเพื่อหาที่เหลือ</td></tr>
+<tr><td><code>_addQty</code></td><td>ค่าปัจจุบัน — จึงแทนที่ทั้งหมด</td></tr>
+</tbody></table><p>ถ้า <code>_addQty</code> เป็น <code>+=</code> การหักออกจะถูก — แต่ตอนนี้เป็น <code>=</code></p><p><strong>ข้อ 2 — ผู้ใช้คาดหวังอะไร</strong></p><table><thead><tr><th>ผู้ใช้พูดว่า</th><th>แปลว่าเขาคิดว่า</th></tr></thead><tbody>
+<tr><td>“กรอกจำนวนไป 8”</td><td>ตัวเลข 8 คือค่าที่บันทึกไว้</td></tr>
+<tr><td>“อยากแก้เป็น 5”</td><td>ต้องการ<strong>แทนที่</strong> 8 ด้วย 5</td></tr>
+<tr><td>“ช่องควรขึ้น 8”</td><td>เพื่อจะได้เห็นว่าตอนนี้เป็นเท่าไรก่อนแก้</td></tr>
+</tbody></table><p>ผู้ใช้คิดแบบ “ค่าปัจจุบัน” ซึ่งตรงกับที่ <code>_addQty</code> ทำ — <code>_activatePart</code> คือตัวที่ไม่ตรง</p><p><strong>ข้อ 3 — แก้</strong></p><pre class="code-vs"><code>void _activatePart(String partId) {
+  final item = _assignment.palletItems.where((i) =&gt; i.partId == partId).firstOrNull;
+  if (item == null) return;
+
+  setState(() {
+    _selectedPartIds..clear()..add(partId);
+    _partScanCtrl.text = partId;
+    if (!item.serialRequire) {
+      // ระบุไว้แล้ว → แสดงค่าเดิมให้แก้ / ยังไม่เคยระบุ → เติมจำนวนที่ระบบขอ
+      final current = _pickedQty[partId];
+      _qtyEntryCtrl.text = '${current ?? item.qtyToPickSuggested}';
+    }
+  });
+  ...
+}</code></pre><table><thead><tr><th>สถานการณ์</th><th>ก่อน</th><th>หลัง</th></tr></thead><tbody>
+<tr><td>เลือกครั้งแรก</td><td>10</td><td>10</td></tr>
+<tr><td>เลือกซ้ำหลังกรอก 8</td><td><strong>2</strong></td><td><strong>8</strong></td></tr>
+<tr><td>เลือกซ้ำหลังกรอกครบ 10</td><td>0 (กดไม่ผ่าน)</td><td>10</td></tr>
+</tbody></table><p>แถวสุดท้ายแก้ปัญหาที่หัวข้อ 5 ชี้ไว้ด้วย — เดิมผู้ใช้ที่กรอกครบแล้วจะแก้ไม่ได้เลย</p><p><strong>ทางเลือกอื่น</strong></p><table><thead><tr><th>ทาง</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>เปลี่ยน <code>_addQty</code> เป็น <code>+=</code></td><td><code>_activatePart</code> เดิมถูกทันที</td><td><strong>ผู้ใช้แก้ค่าลงไม่ได้</strong> — บวกได้อย่างเดียว</td></tr>
+<tr><td>เปลี่ยน <code>_activatePart</code> (ข้างบน)</td><td>ตรงกับที่ผู้ใช้คิด แก้ได้ทั้งขึ้นและลง</td><td>ต้องรู้ว่ามีค่าเดิมอยู่</td></tr>
+<tr><td>ปุ่มบวกลบแทนช่องกรอก</td><td>ผิดยาก ไม่ต้องพิมพ์</td><td>กด 8 ครั้งเพื่อได้ 8</td></tr>
+</tbody></table><p>ทางที่สองดีที่สุดเพราะแก้ตรงจุดและไม่เปลี่ยนวิธีใช้งาน</p><p>ทางที่สามน่าสนใจถ้าจำนวนมักน้อย — <code>ScanPartScreen</code> มี <code>_buildManualQtyEditor</code> ที่ทำแบบนี้ (17.5) พร้อมทั้งปุ่มบวกลบและช่องกรอก</p><div class="note"><strong>สิ่งที่ควรทำพร้อมกัน:</strong> ปุ่มที่ใช้เรียก <code>_addQty</code> ควรเปลี่ยนคำ<br>ถ้าพฤติกรรมคือ “แทนที่” ปุ่มไม่ควรเขียนว่า “เพิ่ม” — ควรเป็น “บันทึกจำนวน” หรือ “ระบุจำนวน”<br>ข้อความสำเร็จก็เขียนถูกอยู่แล้ว: <code>'Part ${item.partId} ระบุจำนวน $qty ชิ้น'</code> ใช้คำว่า “ระบุ” ไม่ใช่ “เพิ่ม”</div><p><strong>ข้อสรุป:</strong> บั๊กนี้เกิดจากสองเมธอดที่ตีความข้อมูลเดียวกันคนละแบบ — และวิธีจับคือถามว่า <strong>“ค่านี้หมายถึงอะไร”</strong> แล้วตรวจว่าทุกที่ที่แตะมันตอบเหมือนกันไหม</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>_assignment</code> ถูกแก้นอก <code>setState</code> — ทำงานได้แต่ทำให้ตามยาก</li><li><code>_activatePart</code> เติมรหัสสินค้าและจำนวนให้ แล้วย้ายโฟกัสตามชนิดสินค้า</li><li>มีสองทางยกเลิกการเลือก และทางหนึ่งมองเห็นได้ — สิ่งที่ <code>ScanPartScreen</code> ขาด</li><li><code>_scanSerial()</code> ไม่ใช่ async เลย — หกด่านตรวจในเครื่องทั้งหมด</li><li>รายชื่อ S/N มากับ <code>availableSerials</code> ตั้งแต่ตอนจัดสถานี</li><li>สองในสามจอที่สแกน S/N ในโปรเจกต์นี้ไม่ต้องยิงเน็ต</li><li><code>_addQty</code> แทนที่ค่าเดิม แต่ <code>_activatePart</code> คำนวณจำนวนที่เหลือ — สองเมธอดตีความข้อมูลเดียวกันคนละแบบ</li><li>แผ่น “S/N สำหรับทดสอบ” แสดงรายชื่อ S/N ทั้งหมดและติดมากับ release</li><li>เครื่องมือที่ทำให้ข้ามการสแกนจริงได้ ควรครอบด้วย <code>kDebugMode</code> หรือผูกกับบทบาท</li></ul></div><p><strong>บทหน้า:</strong> การสแกนพาเลทปลายทางและการยืนยันการหยิบ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

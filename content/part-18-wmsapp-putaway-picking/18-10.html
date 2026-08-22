@@ -1,11 +1,200 @@
-<div class="note"><strong>Order detail เชื่อม demand กับ source pallets:</strong> ต้องแยกยอดระดับ order, ยอดที่ allocate บนแต่ละ pallet และยอดที่หยิบแล้ว ไม่เช่นนั้น progress จะดูถูกแต่ inventory ผิด</div>
-<section><h2>1. Model topology</h2><pre class="code-vs"><code>PickOrderDetailFull
-├─ pallets[] → pallet parts[]
-└─ parts[]   → required/reserved/remaining</code></pre><p>สองมุมมองตอบคนละคำถาม: ของอยู่ที่ pallet ใด และ order ยังต้องการ part เท่าไร</p></section>
-<section><h2>2. List item model</h2><p><code>PickOrderListItem</code> เป็น summary สำหรับหน้าแรก ส่วน <code>PickOrderDetailFull</code> มีข้อมูลเต็ม อย่าใช้ summary ต่อในหน้าทำงานเพราะอาจ stale และไม่มี line detail</p></section>
-<section><h2>3. Pallet status</h2><p><code>PickOrderPalletInfo</code> มี palletStatus, stationId/name, partCount, totalQty และ parts โดย part status เป็น PENDING/PARTIAL/PICKED UI ใช้แสดงตำแหน่งและ progress ก่อน scan</p></section>
-<section><h2>4. Order part totals</h2><p><code>PickOrderPartInfo</code> แยก requiredQty, reservedQty และ remainingQty คำว่า reserved ไม่เท่ากับ picked; UI และ backend ต้องนิยามว่าการยกเลิก/คืน pallet ปลด reservation เมื่อใด</p></section>
-<section><h2>5. Scan membership guard</h2><p>detail screen ตรวจ local ว่า palletId อยู่ใน <code>detail.pallets</code> ก่อนเรียก assign ลด request ผิด แต่ server ต้องตรวจ order membership/version ซ้ำเพราะ snapshot อาจเปลี่ยน</p></section>
-<section><h2>6. Assign response</h2><p><code>AssignPickStationResponse</code> คืน station, source pallet, pick order, palletItems และ pickOrderItems เป็น working snapshot สำหรับ PickItemsScreen จึงเป็น boundary เริ่ม picking session ใน client</p></section>
-<section><h2>7. Parser risks</h2><p>วันที่ผิด fallback เป็น now และหลาย required field cast ตรง; unknown status ถูกเก็บ String การ fallback วันที่ทำให้ order เก่าดูใหม่ ควรใช้ nullable/parse failure และ typed enum ที่รองรับ unknown</p></section>
-<section><h2>8. Detail tests</h2><div class="success">fixture order หลาย pallets, part ซ้ำหลาย pallet, partial/picked, station null, invalid date และ concurrent unassignment; widget test ต้องพิสูจน์ local reject, server conflict และ refresh หลังกลับจาก PickItemsScreen</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด picking/order_detail/picking_order_detail_screen.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.9, 17.3 (จอค้นหา)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ตรวจสองชั้นก่อนเข้างานจริง และรู้ว่าการตรวจในเครื่องก่อนยิงเน็ตต่างกันอย่างไร</div>
+
+<section><h2>1. หน้าที่ของจอกลาง</h2><p>คอมเมนต์บนหัวไฟล์บอกไว้ครบ</p><pre class="code-vs"><code>// หน้า 2 ของ Picking flow:
+//   - แสดง Pallets ทั้งหมดที่ผูกกับ order (พร้อม station ที่ assign)
+//   - แสดง Parts ทั้งหมด + qty
+//   - มีช่อง scan pallet — เมื่อ scan ผ่าน → ไปต่อ PickItemsScreen</code></pre><p>state สี่ตัว</p><pre class="code-vs"><code>final _api = ApiService();
+final _scanCtrl = TextEditingController();
+final _scanFocus = FocusNode();
+
+bool _loading = false;
+PickOrderDetailFull? _detail;</code></pre><p>เรียบง่ายกว่าหน้าแรก (18.9) เพราะทำเรื่องเดียว — แสดงรายละเอียดแล้วรอสแกน</p><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  _load();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _scanFocus.requestFocus();          // ← โฟกัสทันทีที่วาดเสร็จ
+  });
+}</code></pre><div class="note"><strong><code>addPostFrameCallback</code> จำเป็นตรงนี้</strong> — ถ้าเรียก <code>requestFocus()</code> ใน <code>initState</code> ตรง ๆ ช่องยังไม่ถูกวาด จึงยังไม่มีอะไรให้โฟกัส<br>ตรงกับที่ 3.11 สอน และเป็นรายละเอียดที่ทำให้ผู้ใช้ยิงบาร์โค้ดได้ทันทีที่จอเปิด โดยไม่ต้องแตะจอเลย</div></section>
+
+<section><h2>2. ตรวจสองชั้นก่อนเข้าจอหยิบ</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanPallet() async {
+  final palletId = _scanCtrl.text.trim().toUpperCase();
+  if (palletId.isEmpty) return;
+
+  // ── ชั้นที่ 1: ตรวจในเครื่อง ──
+  final found = _detail?.pallets.any((p) =&gt; p.palletId == palletId) ?? false;
+  if (!found) {
+    showErrorDialog(context, message: 'Pallet "$palletId" ไม่อยู่ใน Pick Order นี้');
+    _scanCtrl.clear();
+    _scanFocus.requestFocus();
+    return;
+  }
+
+  // ── ชั้นที่ 2: ถามเซิร์ฟเวอร์ ──
+  setState(() =&gt; _loading = true);
+  final res = await _api.assignPickStation(palletId: palletId, pickOrderId: widget.pickOrderId);
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!res.success) {
+    showErrorDialog(context, message: res.error ?? 'Scan pallet ไม่สำเร็จ');
+    return;
+  }
+
+  _scanCtrl.clear();
+  await Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) =&gt; PickItemsScreen(
+      userId: widget.userId,
+      fullName: widget.fullName,
+      pickOrderId: widget.pickOrderId,
+      initialAssignment: res.data!,
+    )),
+  );
+  _load();
+}</code></pre><table><thead><tr><th>ชั้น</th><th>ตรวจอะไร</th><th>ใช้เวลา</th></tr></thead><tbody>
+<tr><td>1</td><td>พาเลทนี้อยู่ใน order นี้ไหม</td><td>ทันที</td></tr>
+<tr><td>2</td><td>เซิร์ฟเวอร์ยอมให้เริ่มหยิบไหม</td><td>รอเน็ต</td></tr>
+</tbody></table><p>เรียงจากถูกไปแพงเหมือนที่ 17.6 สอน — ผู้ใช้ที่สแกนพาเลทผิดใบรู้ทันทีโดยไม่ต้องรอ</p><div class="note"><strong>ข้อมูลที่ใช้ตรวจชั้นแรกมาจาก <code>_detail</code> ที่โหลดมาแล้ว</strong> — ไม่ต้องยิงเพิ่ม<br>เป็นแบบเดียวกับ <code>LoadToBasketScreen</code> (17.10) ที่ตรวจ S/N จากรายชื่อที่ส่งมาพร้อมข้อมูล<br>ทั้งสองกรณีเกิดจากการที่เซิร์ฟเวอร์ส่งข้อมูลที่จำเป็นมาครบตั้งแต่แรก ทำให้แอปตัดสินใจเองได้</div><p>สังเกตความไม่สม่ำเสมอในการล้างช่อง</p><pre class="code-vs"><code>if (!found) {
+  ...
+  _scanCtrl.clear();          // ← ล้างเมื่อผิดชั้น 1
+  ...
+}
+
+if (!res.success) {
+  showErrorDialog(...);
+  return;                     // ← ไม่ล้างเมื่อผิดชั้น 2
+}
+
+_scanCtrl.clear();            // ← ล้างเมื่อสำเร็จ</code></pre><table><thead><tr><th>ทางออก</th><th>ล้างช่องไหม</th></tr></thead><tbody>
+<tr><td>ช่องว่าง</td><td>ไม่ (ไม่มีอะไรให้ล้าง)</td></tr>
+<tr><td>พาเลทไม่อยู่ใน order</td><td><strong>ล้าง</strong></td></tr>
+<tr><td>เซิร์ฟเวอร์ปฏิเสธ</td><td><strong>ไม่ล้าง</strong></td></tr>
+<tr><td>สำเร็จ</td><td>ล้าง</td></tr>
+</tbody></table><p>สามในสี่ล้าง — และทางที่ไม่ล้างจะทำให้ค่าต่อกันเมื่อสแกนใหม่ ปัญหาเดียวกับ 18.9</p><p>ทางที่ไม่ต้องจำคือล้างทันทีหลังอ่านค่า</p><pre class="code-vs"><code>final palletId = _scanCtrl.text.trim().toUpperCase();
+_scanCtrl.clear();
+if (palletId.isEmpty) return;</code></pre></section>
+
+<section><h2>3. โฟกัสที่หายไปหนึ่งทาง</h2><pre class="code-vs"><code>if (!found) {
+  showErrorDialog(...);
+  _scanCtrl.clear();
+  _scanFocus.requestFocus();      // ← คืนโฟกัส
+  return;
+}
+
+if (!res.success) {
+  showErrorDialog(context, message: res.error ?? 'Scan pallet ไม่สำเร็จ');
+  return;                          // ← ไม่คืนโฟกัส
+}</code></pre><p>ผู้ใช้ที่ถูกเซิร์ฟเวอร์ปฏิเสธจะต้อง<strong>แตะจอ</strong>ก่อนถึงจะสแกนใหม่ได้</p><table><thead><tr><th>บน PDA</th><th>ผล</th></tr></thead><tbody>
+<tr><td>สแกนแล้วไม่มีอะไรเข้าช่อง</td><td>ผู้ใช้คิดว่าเครื่องสแกนเสีย</td></tr>
+<tr><td>ต้องถอดถุงมือเพื่อแตะจอ</td><td>เสียเวลาและน่ารำคาญ</td></tr>
+</tbody></table><p>เทียบกับ <code>LoadToBasketScreen</code> ใน 17.10 ที่คืนโฟกัสในทุกทางออก — ที่นั่นทำครบ ที่นี่ขาดหนึ่งทาง</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(context, message: res.error ?? 'Scan pallet ไม่สำเร็จ');
+  _scanFocus.requestFocus();
+  return;
+}</code></pre><div class="note"><strong>วิธีตรวจว่าทำครบไหม:</strong> ค้น <code>return;</code> ทุกจุดในเมธอดที่มีช่องสแกน แล้วดูว่าก่อนหน้ามี <code>requestFocus()</code> ไหม<br>ในเมธอดนี้มีสามจุด และหนึ่งจุดขาด<br>เป็นวิธีเดียวกับที่ 18.4 ใช้หาจุดที่ <code>return</code> เงียบโดยไม่บอกผู้ใช้</div></section>
+
+<section><h2>4. การ์ดพาเลทที่บอกสถานะด้วยสี</h2><pre class="code-vs"><code>Widget _buildPalletCard(PickOrderPalletInfo p) {
+  final atStation = p.stationId != null;
+  final accent = atStation ? AppTheme.success : Colors.grey;
+  ...
+}</code></pre><table><thead><tr><th><code>stationId</code></th><th>หมายถึง</th><th>สี</th></tr></thead><tbody>
+<tr><td>ไม่ใช่ null</td><td>พาเลทถึงสถานีแล้ว หยิบได้</td><td>เขียว</td></tr>
+<tr><td>null</td><td>ยังไม่ถึง</td><td>เทา</td></tr>
+</tbody></table><p>ผู้ใช้เห็นจากรายการว่าพาเลทไหนพร้อมแล้ว โดยไม่ต้องอ่านตัวหนังสือ</p><p>แต่สีเทาที่ใช้คือ <code>Colors.grey</code> ตรง ๆ ไม่ใช่ <code>AppTheme.textGrey(context)</code></p><pre class="code-vs"><code>final accent = atStation ? AppTheme.success : Colors.grey;
+//                                            ^^^^^^^^^^^ ไม่รู้ธีม</code></pre><p>ในโหมดมืดสีเทานี้จะดูไม่เข้ากับพื้นหลัง — ปัญหาเดียวกับที่ 16.2 พบใน <code>AppTheme.borderColor</code></p><p>ในไฟล์นี้มี <code>Colors.grey[600]</code> และ <code>Colors.grey[700]</code> อีกหลายจุด</p><pre class="code-vs"><code>Text('ลูกค้า: ${d.owner.isEmpty ? "-" : d.owner}',
+    style: TextStyle(fontSize: 13, color: Colors.grey[700])),</code></pre><p>ทั้งที่มี <code>AppTheme.textGrey(context)</code> ที่รู้ธีมอยู่แล้ว และไฟล์นี้ก็ import <code>theme.dart</code> มาแล้ว</p><table><thead><tr><th>ใช้</th><th>โหมดสว่าง</th><th>โหมดมืด</th></tr></thead><tbody>
+<tr><td><code>Colors.grey[700]</code></td><td>อ่านได้</td><td><strong>เข้มเกินไป กลืนกับพื้น</strong></td></tr>
+<tr><td><code>AppTheme.textGrey(context)</code></td><td>อ่านได้</td><td>อ่านได้</td></tr>
+</tbody></table><p>สังเกตว่าจุดที่ใช้ถูกก็มี</p><pre class="code-vs"><code>Icon(icon, size: 16, color: AppTheme.textGrey(context)),</code></pre><p>ในไฟล์เดียวกันมีทั้งสองแบบ — ร่องรอยว่าเขียนคนละเวลาหรือคัดลอกมาจากที่ต่างกัน</p></section>
+
+<section><h2>5. ฟิลด์ที่แสดงเมื่อมี</h2><pre class="code-vs"><code>Text('ลูกค้า: ${d.owner.isEmpty ? "-" : d.owner}')
+
+if (d.customerOrderId != null) ...[
+  const SizedBox(height: 4),
+  Row(children: [ ... Text(d.customerOrderId!, ...) ]),
+],</code></pre><p>สองฟิลด์ที่อาจไม่มี จัดการคนละแบบ</p><table><thead><tr><th>ฟิลด์</th><th>ชนิด</th><th>เมื่อไม่มี</th></tr></thead><tbody>
+<tr><td><code>owner</code></td><td><code>String</code> (มี <code>?? ''</code> ในโมเดล)</td><td>แสดง <code>-</code></td></tr>
+<tr><td><code>customerOrderId</code></td><td><code>String?</code></td><td>ซ่อนทั้งแถว</td></tr>
+</tbody></table><p>ทั้งสองแบบถูกต้อง แต่ต่างกันตามความหมาย</p><table><thead><tr><th>แบบ</th><th>เหมาะเมื่อ</th></tr></thead><tbody>
+<tr><td>แสดง <code>-</code></td><td>ฟิลด์นี้ควรมีเสมอ การไม่มีคือข้อมูลผิดปกติ</td></tr>
+<tr><td>ซ่อนทั้งแถว</td><td>ฟิลด์นี้มีบ้างไม่มีบ้างเป็นเรื่องปกติ</td></tr>
+</tbody></table><p>ลูกค้าควรมีเสมอ ส่วนรหัสใบสั่งของลูกค้ามีเฉพาะบางงาน — การเลือกจึงถูกทั้งคู่</p><p>และรหัสใบสั่งใช้ฟอนต์พิเศษ</p><pre class="code-vs"><code>style: TextStyle(fontSize: 12, color: Colors.grey[600], fontFamily: 'monospace'),</code></pre><div class="note"><strong>ฟอนต์ความกว้างคงที่สำหรับรหัสเป็นการเลือกที่ดี</strong> — ตัวเลข 1 กับ l กับ I แยกออกจากกันได้ ซึ่งสำคัญเมื่อผู้ใช้ต้องอ่านรหัสไปเทียบกับเอกสาร<br><strong>แต่ <code>'monospace'</code> ไม่ได้ประกาศใน <code>pubspec.yaml</code></strong> (16.11) — Flutter จะตกไปใช้ฟอนต์เริ่มต้นของระบบ ซึ่งบน PDA อาจไม่มีและได้ผลไม่ตรงกับที่ตั้งใจ<br>ถ้าต้องการจริง ต้องฝังฟอนต์ความกว้างคงที่เข้าไปเหมือนที่ทำกับ Sarabun</div></section>
+
+<section><h2>6. รายการที่ใช้ ListView ถูกทาง</h2><pre class="code-vs"><code>child: _detail == null
+    ? const SizedBox.shrink()
+    : RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
+          children: [
+            _buildHeader(_detail!),
+            const SizedBox(height: 12),
+            _buildScanCard(),
+            const SizedBox(height: 16),
+            _buildSectionHeader('Pallets', Icons.pallet, '${_detail!.pallets.length}'),
+            const SizedBox(height: 8),
+            ..._detail!.pallets.map(_buildPalletCard),
+          ],
+        ),
+      ),</code></pre><p><code>physics: AlwaysScrollableScrollPhysics()</code> จำเป็นเมื่อใช้ <code>RefreshIndicator</code></p><table><thead><tr><th>ถ้าไม่ใส่</th></tr></thead><tbody>
+<tr><td>เมื่อเนื้อหาสั้นกว่าจอ รายการจะเลื่อนไม่ได้ → ลากลงไม่ติด → รีเฟรชไม่ได้</td></tr>
+</tbody></table><p>เป็นรายละเอียดเดียวกับที่ 17.2 แบบฝึกหัดชี้ว่า <code>RefreshIndicator</code> ต้องมีลูกที่เลื่อนได้</p><p><code>_detail == null</code> คืน <code>SizedBox.shrink()</code> — จอว่างเปล่าตอนกำลังโหลดครั้งแรก</p><table><thead><tr><th>สถานะ</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td>กำลังโหลด</td><td><code>LoadingOverlay</code> ทับอยู่ + ข้างหลังว่าง</td></tr>
+<tr><td>โหลดสำเร็จ</td><td>รายการ</td></tr>
+<tr><td><strong>โหลดล้มเหลว</strong></td><td><strong>จอว่างเปล่า</strong> หลังกดปิดกล่อง error</td></tr>
+</tbody></table><p>แถวสุดท้ายทำให้ผู้ใช้ติดอยู่ — ไม่มีปุ่มลองใหม่ และลากลงรีเฟรชไม่ได้เพราะไม่มี <code>ListView</code></p><pre class="code-vs"><code>child: _detail == null
+    ? (_loading
+        ? const SizedBox.shrink()
+        : ErrorState(                       // widget ที่ 16.9 แบบฝึกหัดเสนอ
+            message: 'โหลดรายละเอียดงานไม่สำเร็จ',
+            onRetry: _load,
+          ))
+    : RefreshIndicator(...)</code></pre></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>requestFocus()</code> ใน <code>initState</code> ทำงานได้</td><td>ต้องรอให้วาดเสร็จก่อน</td></tr>
+<tr><td>ตรวจฝั่งเซิร์ฟเวอร์อย่างเดียวพอ</td><td>ตรวจในเครื่องก่อนทำให้ผู้ใช้ไม่ต้องรอ</td></tr>
+<tr><td><code>Colors.grey</code> กับ <code>AppTheme.textGrey</code> เหมือนกัน</td><td>ตัวหลังรู้ธีม</td></tr>
+<tr><td><code>fontFamily: 'monospace'</code> ได้ฟอนต์ที่ตั้งใจ</td><td>ต้องประกาศใน pubspec ก่อน</td></tr>
+<tr><td><code>RefreshIndicator</code> ทำงานกับรายการสั้นได้</td><td>ต้องมี <code>AlwaysScrollableScrollPhysics</code></td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกนพาเลทที่การ์ดขึ้นสีเขียวแล้ว แต่แอปบอกว่าสแกนไม่สำเร็จ”</p><ol><li>อธิบายว่าเกิดได้อย่างไร</li><li>ผู้ใช้ควรได้ข้อความว่าอย่างไร</li><li>ป้องกันไม่ให้เกิดอีกได้ไหม</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — เกิดได้อย่างไร</strong></p><p>การ์ดสีเขียวมาจากชั้นแรก</p><pre class="code-vs"><code>final atStation = p.stationId != null;
+final accent = atStation ? AppTheme.success : Colors.grey;</code></pre><p>แต่คำว่า “สแกนไม่สำเร็จ” มาจากชั้นที่สอง</p><pre class="code-vs"><code>final res = await _api.assignPickStation(palletId: palletId, pickOrderId: widget.pickOrderId);
+if (!res.success) {
+  showErrorDialog(context, message: res.error ?? 'Scan pallet ไม่สำเร็จ');
+  return;
+}</code></pre><p>ทั้งสองใช้ข้อมูลคนละเวลา</p><table><thead><tr><th>เวลา</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>t=0</td><td><code>_load()</code> โหลดข้อมูล — พาเลทมี <code>stationId</code> → การ์ดเขียว</td></tr>
+<tr><td>t=30 วิ</td><td>คนอื่นเริ่มหยิบพาเลทใบนี้ที่สถานีอื่น</td></tr>
+<tr><td>t=60 วิ</td><td>ผู้ใช้สแกน → ชั้น 1 ผ่าน (ข้อมูลเก่า) → ชั้น 2 ปฏิเสธ</td></tr>
+</tbody></table><p>สาเหตุอื่นที่เป็นไปได้</p><table><thead><tr><th>สาเหตุ</th><th>เซิร์ฟเวอร์ปฏิเสธเพราะ</th></tr></thead><tbody>
+<tr><td>คนอื่นหยิบอยู่</td><td>พาเลทถูกจองแล้ว</td></tr>
+<tr><td>งานถูกยกเลิกระหว่างนั้น</td><td>order ไม่อยู่ในสถานะที่หยิบได้</td></tr>
+<tr><td>พาเลทถูกส่งกลับไปแล้ว</td><td>ไม่อยู่ที่สถานี</td></tr>
+<tr><td>สถานีถูกใช้โดยงานอื่น</td><td>จัดสถานีให้ไม่ได้</td></tr>
+</tbody></table><p><strong>ทั้งหมดเป็นเรื่องที่เกิดหลังจากโหลดข้อมูล</strong> — ชั้นแรกจึงไม่มีทางจับได้ และไม่ใช่บั๊ก</p><p><strong>ข้อ 2 — ข้อความที่ควรได้</strong></p><p>ปัจจุบัน</p><pre class="code-vs"><code>res.error ?? 'Scan pallet ไม่สำเร็จ'</code></pre><p>ถ้าเซิร์ฟเวอร์ส่งเหตุผลมา ผู้ใช้จะเห็นเหตุผลนั้น — ซึ่งดี</p><p>ถ้าไม่ส่ง จะเห็น “Scan pallet ไม่สำเร็จ” ซึ่งไม่บอกอะไร</p><pre class="code-vs"><code>if (!res.success) {
+  showErrorDialog(
+    context,
+    title: 'เริ่มหยิบไม่ได้',
+    message: '${res.error ?? "เซิร์ฟเวอร์ไม่อนุญาตให้เริ่มหยิบพาเลทนี้"}\n\n'
+        'สถานะอาจเปลี่ยนไปหลังจากเปิดหน้านี้ — ดึงลงเพื่อโหลดข้อมูลใหม่',
+  );
+  _scanFocus.requestFocus();
+  _load();                      // ← โหลดใหม่ให้เลย ไม่ต้องให้ผู้ใช้ทำ
+  return;
+}</code></pre><table><thead><tr><th>เปลี่ยนจาก</th><th>เป็น</th></tr></thead><tbody>
+<tr><td>บอกว่าล้มเหลว</td><td>บอกว่าทำไม และข้อมูลบนจออาจเก่า</td></tr>
+<tr><td>ผู้ใช้ต้องเดาว่าต้องทำอะไร</td><td>โหลดใหม่ให้เลย การ์ดจะเปลี่ยนสีเอง</td></tr>
+<tr><td>ไม่คืนโฟกัส</td><td>สแกนใบอื่นได้ทันที</td></tr>
+</tbody></table><p>การเรียก <code>_load()</code> ตรงนี้สำคัญ — หลังกดปิดกล่อง ผู้ใช้จะเห็นการ์ดที่เพิ่งเขียวกลายเป็นเทา ซึ่งอธิบายทุกอย่างโดยไม่ต้องอ่าน</p><p><strong>ข้อ 3 — ป้องกันได้ไหม</strong></p><table><thead><tr><th>ทาง</th><th>ได้ผลไหม</th></tr></thead><tbody>
+<tr><td>โหลดข้อมูลใหม่ก่อนสแกนทุกครั้ง</td><td>ลดโอกาสแต่ไม่หมด — ยังมีช่องระหว่างโหลดกับสั่ง</td></tr>
+<tr><td>โหลดใหม่เป็นระยะ</td><td>ลดโอกาส และการ์ดจะเปลี่ยนสีเองก่อนผู้ใช้สแกน</td></tr>
+<tr><td>ฟัง SignalR</td><td>ลดได้มากที่สุด แต่ต้องแตะฝั่งเซิร์ฟเวอร์</td></tr>
+<tr><td><strong>ป้องกันให้หมด</strong></td><td><strong>ทำไม่ได้</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือคำตอบที่แท้จริง — ไม่ว่าจะโหลดใหม่เร็วแค่ไหน ก็มีช่วงเวลาระหว่างที่ผู้ใช้เห็นข้อมูลกับที่กดเสมอ</p><div class="note"><strong>นี่คือธรรมชาติของระบบที่มีผู้ใช้หลายคน ไม่ใช่ข้อบกพร่องของโค้ด</strong><br>สิ่งที่ทำได้คือ<strong>ให้เซิร์ฟเวอร์เป็นผู้ตัดสินคนสุดท้ายเสมอ</strong> ซึ่งโค้ดนี้ทำถูกแล้ว — ชั้นแรกเป็นแค่การช่วยผู้ใช้ ไม่ใช่การรับประกัน<br>สิ่งที่ต้องแก้คือ<strong>ข้อความตอนที่ชั้นสองปฏิเสธ</strong> ให้บอกว่านี่เป็นเรื่องปกติที่เกิดได้ ไม่ใช่ว่าแอปพัง</div><p>วิธีตรวจว่าเข้าใจถูก: ถามว่าถ้าลบชั้นแรกออกทั้งหมด ระบบยังปลอดภัยไหม</p><p>คำตอบคือ<strong>ปลอดภัย</strong> — ชั้นแรกมีไว้ให้ผู้ใช้รู้เร็ว ไม่ได้มีไว้ป้องกัน และนั่นคือเหตุผลที่มันอยู่ในเครื่องได้โดยไม่เสี่ยง</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>จอกลางมี state สี่ตัว ทำเรื่องเดียว — แสดงรายละเอียดแล้วรอสแกน</li><li><code>addPostFrameCallback</code> ทำให้โฟกัสเข้าช่องทันทีที่จอเปิด</li><li>ตรวจสองชั้น: ในเครื่องก่อน แล้วค่อยถามเซิร์ฟเวอร์</li><li>ชั้นแรกใช้ข้อมูลที่โหลดมาแล้ว ไม่ต้องยิงเพิ่ม</li><li>ล้างช่องสามในสี่ทางออก และคืนโฟกัสสองในสามทาง</li><li>การ์ดใช้ <code>stationId != null</code> ตัดสินว่าพาเลทพร้อมไหม</li><li>ไฟล์เดียวใช้ทั้ง <code>Colors.grey[700]</code> และ <code>AppTheme.textGrey(context)</code></li><li><code>fontFamily: 'monospace'</code> ไม่ได้ประกาศใน pubspec</li><li>โหลดล้มเหลวแล้วจอว่างเปล่า ไม่มีทางลองใหม่</li><li>ชั้นแรกช่วยให้รู้เร็ว ไม่ได้ป้องกัน — เซิร์ฟเวอร์เป็นผู้ตัดสินคนสุดท้ายเสมอ</li></ul></div><p><strong>บทหน้า:</strong> <code>PickItemsScreen</code> 1,599 บรรทัด และ <code>enum</code> ห้าสถานะที่ทำให้มันต่างจาก <code>ScanPartScreen</code> อย่างสิ้นเชิง</p></section>

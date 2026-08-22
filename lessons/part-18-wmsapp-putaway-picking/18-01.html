@@ -4,19 +4,175 @@
 <title>Putaway Map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">18-01 · Real Codebase</span><h1>Putaway Map</h1><p>Part 18: wmsapp Putaway &amp; Picking</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Putaway flow map</a></li><li><a href="#section-2">Picking flow map</a></li><li><a href="#section-3">Station families</a></li><li><a href="#section-4">Identity map</a></li><li><a href="#section-5">Two sources of state</a></li><li><a href="#section-6">Command vs event</a></li><li><a href="#section-7">Failure boundaries</a></li><li><a href="#section-8">วิธีอ่าน Part นี้</a></li></ol></nav>
-<div class="note"><strong>Part 18 คือการเคลื่อน inventory ผ่าน station:</strong> Putaway ส่ง pallet ไป ASRS/Prework/Replenish ส่วน Picking ดึงของจาก source pallet ไป destination pallet ทุกขั้นต้องรักษา pallet, order และ part identity ให้ตรงกัน</div>
-<section id="section-1"><h2>1. Putaway flow map</h2><pre class="code-vs"><code>station scan → pallet scan → inspect items
-→ choose destination/wrapping → confirm
-→ AMR dispatch → SignalR event → REST reconcile</code></pre><p>หน้าจอไม่ได้ขยับสินค้าเอง แต่ส่ง intent ให้ .NET แล้วแสดงสถานะงานขนส่งที่ backend ยืนยัน</p></section>
-<section id="section-2"><h2>2. Picking flow map</h2><pre class="code-vs"><code>orders list → order detail → assign source station
-→ scan part/serial or qty → choose dest pallet
-→ confirm pick → return source / continue / send dest to pack</code></pre><p>หนึ่ง order อาจใช้หลาย source pallet และใช้ destination pallet เดิมต่อได้</p></section>
-<section id="section-3"><h2>3. Station families</h2><p>Putaway ปกติมี <code>STN-1..3</code> ส่วน Prework มี <code>PW-STN-1..6</code> โดยสถานีเลขคี่เป็น receive และเลขคู่เป็น send กติกาอยู่ใน <code>StationInfo</code>: allowedType, fixedDestination และ <code>PWRole</code></p></section>
-<section id="section-4"><h2>4. Identity map</h2><ul><li>stationId ระบุจุดกายภาพ</li><li>palletId ระบุภาชนะและ inventory ปัจจุบัน</li><li>pickOrderId ระบุความต้องการรวม</li><li>partId/lot/serial ระบุสินค้าที่เคลื่อน</li></ul><p>ห้ามแทน line หรือ lot ด้วย partId เมื่อหนึ่ง part ปรากฏหลายชุด</p></section>
-<section id="section-5"><h2>5. Two sources of state</h2><p>REST status เป็น authoritative snapshot ส่วน SignalR เป็นเหตุการณ์เร่ง UI ให้ตอบสนองเร็ว Pattern ในโค้ดคือ merge event บางส่วนแล้วเรียก REST โหลดใหม่ จึงต้องกัน response เก่าทับ state ใหม่และรองรับ event หลุด</p></section>
-<section id="section-6"><h2>6. Command vs event</h2><p><code>confirmPutaway</code>, <code>confirmPickV2</code>, <code>returnPallet</code> และ <code>sendToPack</code> เป็น command ที่อาจเปลี่ยนข้อมูล ส่วน StationDispatched/PalletArrived/PalletReturned เป็น notification ห้ามนำ event มา commit inventory ซ้ำใน client</p></section>
-<section id="section-7"><h2>7. Failure boundaries</h2><p>แยก validation reject, conflict, timeout ที่ไม่รู้ผล, transport failure และ event disconnect เพราะ retry policy ต่างกัน โดยเฉพาะ confirm/return ต้องมี idempotency key หรือ query สถานะก่อน retry</p></section>
-<section id="section-8"><h2>8. วิธีอ่าน Part นี้</h2><div class="success">ทุกบทให้ trace 5 ช่อง: user scan → local transition → API payload → backend result/event → UI reconciliation แล้วจด invariant อย่างน้อยหนึ่งข้อและ failure case อย่างน้อยสองกรณี</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คำถามที่ Part นี้ตอบ</a></li><li><a href="#section-2">putaway — 26 ไฟล์กระจายอย่างไร</a></li><li><a href="#section-3">picking — 15 ไฟล์กระจายอย่างไร</a></li><li><a href="#section-4">ความต่างที่แท้จริงระหว่างสองโดเมน</a></li><li><a href="#section-5">เส้นทางของ Putaway</a></li><li><a href="#section-6">เส้นทางของ Picking</a></li><li><a href="#section-7">endpoint ของสองโดเมน</a></li><li><a href="#section-8">เรียลไทม์ที่มีเฉพาะ putaway</a></li><li><a href="#section-9">ลำดับที่จะอ่านใน Part นี้</a></li><li><a href="#section-10">แบบฝึกหัด</a></li><li><a href="#section-11">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–55 นาที</span><span>ลงมือทำ: เปิด lib/screens/putaway/ และ lib/screens/picking/</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 16, Part 17<br><strong>จบบทนี้แล้วจะทำได้:</strong> เทียบสองโดเมนที่แตกไฟล์ต่างกันมาก และตอบได้ว่าการแตกไฟล์ช่วยอะไรและไม่ช่วยอะไร</div>
+
+<section id="section-1"><h2>1. คำถามที่ Part นี้ตอบ</h2><p>17.1 ตั้งคำถามไว้ว่า <strong>“การแตกไฟล์ช่วยอะไรได้จริงบ้าง”</strong> — Part นี้เปิดสองโดเมนที่อยู่คนละขั้วในเรื่องนี้</p><table><thead><tr><th>โดเมน</th><th>ไฟล์</th><th>บรรทัด</th><th>เฉลี่ยต่อไฟล์</th><th>ไฟล์ใหญ่สุด</th></tr></thead><tbody>
+<tr><td>putaway</td><td>26</td><td>2,378</td><td><strong>91</strong></td><td>317</td></tr>
+<tr><td>picking</td><td>15</td><td>3,483</td><td><strong>232</strong></td><td><strong>1,599</strong></td></tr>
+</tbody></table><p>ทั้งสองอยู่ในโปรเจกต์เดียวกัน เขียนโดยคนกลุ่มเดียวกัน และแก้ปัญหาที่คล้ายกัน — สแกนพาเลท ทำอะไรบางอย่าง แล้วส่งต่อ</p><p>แต่กระจายโค้ดคนละแบบสิ้นเชิง</p><div class="note"><strong>คำถามที่ต้องเก็บไว้ตลอด Part นี้:</strong> <code>putaway</code> ที่ไม่มีไฟล์ไหนเกิน 317 บรรทัด อ่านง่ายกว่าจริงไหม และถ้าใช่ — ง่ายกว่าเพราะแตกไฟล์ หรือเพราะงานมันง่ายกว่าตั้งแต่แรก</div></section>
+
+<section id="section-2"><h2>2. putaway — 26 ไฟล์กระจายอย่างไร</h2><pre class="code-vs"><code>putaway/
+├─ putaway_main/                       ← จอสถานีปกติ
+│   ├─ putaway_screen.dart        (168)
+│   └─ widgets/station/
+│       ├─ putaway_station_grid.dart      (45)
+│       └─ putaway_station_scan_card.dart (45)
+│
+├─ putaway_prework/                    ← จอสถานีแปรรูป
+│   ├─ putaway_prework_screen.dart (306)
+│   └─ widgets/
+│       ├─ receive/  (8 ไฟล์ รวม 519)
+│       ├─ scan/     (1 ไฟล์  47)
+│       └─ send/     (1 ไฟล์  40)
+│
+└─ shared/                             ← ใช้ร่วมกันทั้งสองจอ
+    ├─ putaway_shared_widgets.dart  (8)   ← ไฟล์รวมทางเข้า
+    ├─ models/station_info.dart     (20)
+    └─ widgets/
+        ├─ station/     (4 ไฟล์ รวม 629)  ← station_sheet.dart 317
+        ├─ pallet/      (2 ไฟล์ รวม 287)
+        └─ destination/ (3 ไฟล์ รวม 219)</code></pre><p>โครงนี้มีสามชั้น: จอ → widget ของจอนั้น → widget ที่ใช้ร่วม</p><table><thead><tr><th>ชั้น</th><th>ไฟล์</th><th>บรรทัด</th><th>สัดส่วน</th></tr></thead><tbody>
+<tr><td>จอ</td><td>2</td><td>474</td><td>20%</td></tr>
+<tr><td>widget ของจอ</td><td>12</td><td>741</td><td>31%</td></tr>
+<tr><td>shared</td><td>12</td><td>1,163</td><td>49%</td></tr>
+</tbody></table><p>ครึ่งหนึ่งของโค้ดอยู่ใน <code>shared/</code> — เป็นสัดส่วนที่บอกว่าสองจอนี้ใช้ของร่วมกันเยอะมาก</p><p>ไฟล์รวมทางเข้า 8 บรรทัด</p><pre class="code-vs"><code>// putaway_shared_widgets.dart — export อย่างเดียว ไม่มีโค้ด
+export 'models/station_info.dart';
+export 'widgets/station/station_card.dart';
+export 'widgets/station/station_sheet.dart';
+...</code></pre><p>รูปแบบเดียวกับ <code>wms_models.dart</code> ใน 16.8 — จอ import บรรทัดเดียวได้ของครบ</p></section>
+
+<section id="section-3"><h2>3. picking — 15 ไฟล์กระจายอย่างไร</h2><pre class="code-vs"><code>picking/
+├─ picking_session/
+│   └─ picking_session_screen.dart      (38)   ← แค่เด้งต่อ
+├─ orders_list/
+│   └─ picking_orders_list_screen.dart (571)
+├─ order_detail/
+│   └─ picking_order_detail_screen.dart (497)
+└─ pick_items/
+    ├─ pick_items_screen.dart         (1,599)  ★
+    └─ widgets/
+        ├─ scan_source/   (1 ไฟล์  61)
+        ├─ pick_view/     (4 ไฟล์ 209)
+        ├─ scan_dest/     (2 ไฟล์ 268)
+        ├─ after_pick/    (2 ไฟล์ 124)
+        └─ return_source/ (2 ไฟล์ 116)</code></pre><table><thead><tr><th>ชั้น</th><th>ไฟล์</th><th>บรรทัด</th><th>สัดส่วน</th></tr></thead><tbody>
+<tr><td>จอ</td><td>4</td><td>2,705</td><td><strong>78%</strong></td></tr>
+<tr><td>widget</td><td>11</td><td>778</td><td>22%</td></tr>
+<tr><td>shared</td><td>0</td><td>0</td><td>0%</td></tr>
+</tbody></table><p>ไม่มี <code>shared/</code> เลย — และ 78% ของโค้ดอยู่ในสี่ไฟล์จอ</p><p>สังเกตว่าชื่อโฟลเดอร์ของ widget ตรงกับ<strong>ขั้นตอนของ flow</strong></p><pre class="code-vs"><code>scan_source → pick_view → scan_dest → after_pick → return_source</code></pre><p>นี่ไม่ใช่เรื่องบังเอิญ — 18.11 จะเจอว่าจอนั้นมี <code>enum</code> ที่มีสมาชิกห้าตัวชื่อเดียวกันเป๊ะ</p></section>
+
+<section id="section-4"><h2>4. ความต่างที่แท้จริงระหว่างสองโดเมน</h2><p>ถ้าดูแค่ตัวเลข จะสรุปว่า <code>picking</code> เขียนแย่กว่า — แต่ดูงานที่ทำก่อน</p><table><thead><tr><th></th><th>putaway</th><th>picking</th></tr></thead><tbody>
+<tr><td>ผู้ใช้ทำอะไร</td><td>สแกนพาเลท เลือกปลายทาง กดยืนยัน</td><td>สแกนพาเลทต้นทาง → เลือกของทีละชิ้น → สแกน S/N → สแกนพาเลทปลายทาง → ยืนยัน → ตัดสินใจว่าจะทำอะไรต่อ</td></tr>
+<tr><td>ขั้นตอน</td><td>2</td><td>5</td></tr>
+<tr><td>สถานะที่ต้องจำระหว่างทาง</td><td>พาเลท + ปลายทาง + ต้องพันฟิล์มไหม</td><td>ของที่เลือก + S/N ต่อชิ้น + จำนวนต่อชิ้น + พาเลทปลายทาง + ผลลัพธ์ล่าสุด</td></tr>
+<tr><td>เรียลไทม์</td><td><strong>มี — 4 เหตุการณ์</strong></td><td>ไม่มี</td></tr>
+<tr><td>จำนวนสถานี</td><td>3 + 6</td><td>ไม่มีแนวคิดสถานี</td></tr>
+</tbody></table><div class="note"><strong>ข้อสรุปที่สำคัญ:</strong> <code>putaway</code> แตกไฟล์ได้เยอะเพราะสิ่งที่ซ้ำคือ<strong>หน้าตา</strong> — สถานี 9 แห่งใช้การ์ดแบบเดียวกัน แผ่นเลื่อนแบบเดียวกัน ตัวเลือกปลายทางแบบเดียวกัน<br><code>picking</code> แตกได้น้อยเพราะสิ่งที่ซับซ้อนคือ<strong>ลำดับและเงื่อนไข</strong> ซึ่งแตกเป็น widget ไม่ได้<br>ทั้งสองแตกถูกทิศทั้งคู่ — ความต่างมาจากธรรมชาติของงาน ไม่ใช่ความขยัน</div><p>แต่ 18.11 จะแสดงว่า <code>picking</code> มีสิ่งที่ <code>ScanPartScreen</code> ไม่มี และมันสำคัญกว่าจำนวนไฟล์</p></section>
+
+<section id="section-5"><h2>5. เส้นทางของ Putaway</h2><pre class="code-vs"><code>HomeScreen
+  ├─ "Putaway for Receive"
+  │    ▼
+  │  PutawayScreen (168)                 ← STN-1..3
+  │    │  SignalR: 4 เหตุการณ์
+  │    │  getStationStatus() → สถานะแต่ละสถานี
+  │    └─ แตะสถานีที่ว่าง
+  │         ▼
+  │       StationSheet (317)             ← แผ่นเลื่อน
+  │         สแกนพาเลท → scanPalletForPutaway()
+  │         เลือกปลายทาง (ASRS / PREWORK / REPLENISH)
+  │         เลือกพันฟิล์มไหม
+  │         → confirmPutaway()
+  │
+  └─ "Putaway for Prework"
+       ▼
+     PutawayPreworkScreen (306)          ← PW-STN-1..6
+       │  SignalR: 4 เหตุการณ์เดียวกัน
+       │  getStationStatus() + getPreworkStationStatus()
+       ├─ สถานีฝั่งรับ (PWRole.receive)
+       │    ▼  PreworkReceiveSheet (152)
+       └─ สถานีฝั่งส่ง (PWRole.send)
+            ▼  StationSheet (317)        ← ตัวเดียวกับข้างบน</code></pre><p>สังเกตว่า <code>StationSheet</code> ถูกใช้จากสองจอ และปรับตัวตาม <code>StationInfo</code> ที่รับเข้ามา — 18.3 จะดูว่ามันทำอย่างไร</p></section>
+
+<section id="section-6"><h2>6. เส้นทางของ Picking</h2><pre class="code-vs"><code>HomeScreen
+  └─ "Picking"
+       ▼
+     PickingSessionScreen (38)           ← เด้งต่อทันที ไม่มีอะไร
+       ▼
+     PickingOrdersListScreen (571)       ← หน้า 1
+       │  getPickOrdersList() → WAITING + PICKING
+       │  + ช่องสแกนพาเลทเพื่อส่งกลับ (previewReturnPallet → returnPallet)
+       └─ แตะ order ที่เป็น PICKING
+            ▼
+          PickingOrderDetailScreen (497) ← หน้า 2
+            │  getPickOrderDetailFull() → pallets + parts
+            └─ สแกนพาเลท → assignPickStation()
+                 ▼
+               PickItemsScreen (1,599)   ← หน้า 3 ★
+                 enum _PickState 5 สถานะ
+                 scanSource → pickView → scanDest → afterPick → returnSource</code></pre><p>สามหน้าซ้อนกัน และแต่ละหน้าโหลดข้อมูลใหม่เมื่อกลับมา</p><pre class="code-vs"><code>await Navigator.push(...);
+_load();      // ← รูปแบบเดียวกับ 17.2</code></pre></section>
+
+<section id="section-7"><h2>7. endpoint ของสองโดเมน</h2><table><thead><tr><th>โดเมน</th><th>เมธอด</th><th>path</th></tr></thead><tbody>
+<tr><td rowspan="5">putaway</td><td><code>getStationStatus</code></td><td><code>GET /putaway/station-status</code></td></tr>
+<tr><td><code>scanPalletForPutaway</code></td><td><code>GET /putaway/scan-pallet/{id}?stationId=</code></td></tr>
+<tr><td><code>confirmPutaway</code></td><td><code>POST /putaway/confirm</code></td></tr>
+<tr><td><code>getPreworkStationStatus</code></td><td><code>GET /putaway/prework-station-status</code></td></tr>
+<tr><td><code>preworkReturnPallet</code></td><td><code>POST /putaway/prework-return-pallet</code></td></tr>
+<tr><td rowspan="8">picking</td><td><code>getPickOrdersList</code></td><td><code>GET /picking/orders-list</code></td></tr>
+<tr><td><code>getPickOrderDetailFull</code></td><td><code>GET /picking/orders/{id}/detail</code></td></tr>
+<tr><td><code>getSuggestedDestPallet</code></td><td><code>GET /picking/suggest-dest-pallets</code></td></tr>
+<tr><td><code>notifyArrival</code></td><td><code>POST /picking/orders/{id}/notify-arrival</code></td></tr>
+<tr><td><code>assignPickStation</code></td><td><code>POST /picking/assign-station</code></td></tr>
+<tr><td><code>confirmPickV2</code></td><td><code>POST /picking/confirm-pick</code></td></tr>
+<tr><td><code>previewReturnPallet</code></td><td><code>GET /picking/return-pallet-preview/{id}</code></td></tr>
+<tr><td><code>returnPallet</code> / <code>sendToPack</code></td><td><code>POST /picking/return-pallet</code>, <code>/send-to-pack/{id}</code></td></tr>
+</tbody></table><p>picking มี 11 endpoint (รวม <code>getAvailableLines</code> และ <code>createTestOrder</code>) มากที่สุดในโปรเจกต์</p><p>สังเกตชื่อ <code>confirmPickV2</code> — มี V2 แปลว่าเคยมี V1 และถูกเปลี่ยน แต่ชื่อเก่ายังติดมา ซึ่งเป็นร่องรอยที่พบบ่อยและควรทำความสะอาดเมื่อไม่มีใครใช้ V1 แล้ว</p></section>
+
+<section id="section-8"><h2>8. เรียลไทม์ที่มีเฉพาะ putaway</h2><pre class="code-vs"><code>final _signalR = SignalRService();
+
+@override
+void initState() {
+  super.initState();
+  _signalR.addStationDispatchedListener(_handleStationDispatched);
+  _signalR.addPalletArrivedListener(_handlePalletArrived);
+  _signalR.addPalletReturnedListener(_handlePalletReturned);
+  _signalR.addLabelingCompletedListener(_handleLabelingCompleted);
+  _initSignalR();
+  _loadStationStatus();
+}</code></pre><table><thead><tr><th>เหตุการณ์</th><th>เกิดเมื่อ</th></tr></thead><tbody>
+<tr><td><code>StationDispatched</code></td><td>มีคนสั่ง putaway ที่สถานีหนึ่ง</td></tr>
+<tr><td><code>PalletArrived</code></td><td>หุ่นยนต์เอาพาเลทมาถึงสถานี</td></tr>
+<tr><td><code>PalletReturned</code></td><td>หุ่นยนต์รับพาเลทกลับไป</td></tr>
+<tr><td><code>LabelingCompleted</code></td><td>ติดฉลากเสร็จ</td></tr>
+</tbody></table><p>ทั้งสี่เป็นเหตุการณ์ที่<strong>ผู้ใช้ไม่ได้เป็นคนทำ</strong> — หุ่นยนต์ทำ หรือคนอื่นที่สถานีอื่นทำ</p><div class="note">ตรงกับหลักที่ 12.1 สอน — ใช้เรียลไทม์เมื่อข้อมูลเปลี่ยนโดยที่ผู้ใช้ไม่ได้กด<br><code>picking</code> ไม่มีเรียลไทม์เพราะทุกอย่างเกิดจากการกระทำของผู้ใช้เอง ยกเว้นสถานะ <code>WAITING</code> ที่รอหุ่นยนต์ — ซึ่ง 18.9 จะเจอว่าตรงนั้นใช้การกดรีเฟรชเองแทน</div></section>
+
+<section id="section-9"><h2>9. ลำดับที่จะอ่านใน Part นี้</h2><table><thead><tr><th>บท</th><th>อ่านอะไร</th></tr></thead><tbody>
+<tr><td>18.2</td><td>ตารางสถานีและการ์ดที่เปลี่ยนหน้าตาตามสถานะ</td></tr>
+<tr><td>18.3</td><td><code>StationSheet</code> — แผ่นเดียวที่ทำงานได้ห้าแบบ</td></tr>
+<tr><td>18.4</td><td>จอ Prework ที่มีสองฝั่งและแอนิเมชันสองชั้น</td></tr>
+<tr><td>18.5–18.6</td><td>การสแกนพาเลท ตัวเลือกปลายทาง และการดูของบนพาเลท</td></tr>
+<tr><td>18.7</td><td>โมเดลและ API ของ putaway</td></tr>
+<tr><td>18.8</td><td><code>SignalRService</code> — ref-count และสิ่งที่ขาด</td></tr>
+<tr><td>18.9–18.10</td><td>สองหน้าแรกของ picking</td></tr>
+<tr><td>18.11</td><td><code>PickItemsScreen</code> — enum ห้าสถานะที่เขียนไว้ชัด</td></tr>
+<tr><td>18.12–18.14</td><td>สแกนต้นทาง ปลายทาง และการยืนยัน</td></tr>
+<tr><td>18.15–18.16</td><td>สองทางออกหลังหยิบเสร็จ และสรุปทั้ง Part</td></tr>
+</tbody></table></section>
+
+<section id="section-10"><h2>10. แบบฝึกหัด</h2><ol><li>จากตัวเลขในบทนี้ ทำนายว่าจอไหนมีปัญหาสถานะค้างแบบที่ 17.5 เจอ และจอไหนไม่มี</li><li><code>putaway</code> มี <code>shared/</code> 49% ส่วน <code>picking</code> ไม่มีเลย — บอกอะไรได้บ้าง</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>จอ</th><th>ทำนาย</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td><code>StationSheet</code></td><td>ไม่น่ามี</td><td>สถานะน้อย (พาเลท ปลายทาง พันฟิล์ม) และแผ่นตายเมื่อปิด</td></tr>
+<tr><td><code>PutawayPreworkScreen</code></td><td><strong>น่ามี</strong></td><td>มีตัวจับเวลาสองตัวสำหรับแอนิเมชัน + สถานะสองชุด</td></tr>
+<tr><td><code>PickItemsScreen</code></td><td><strong>น่ามีที่สุด</strong></td><td>1,599 บรรทัด ห้าขั้นตอน สถานะสะสมข้ามขั้น</td></tr>
+</tbody></table><p>แต่มีตัวแปรที่ทำนายจากตัวเลขไม่ได้ — <strong>สถานะนั้นถูกเขียนไว้ชัดหรือซ่อนอยู่</strong></p><p>17.5 พบว่า <code>ScanPartScreen</code> มีสามโหมดที่ไม่มีที่ไหนเขียนไว้ ต้องอ่าน <code>build()</code> แล้วประกอบเอง</p><p>ถ้า <code>PickItemsScreen</code> มี <code>enum</code> ที่ระบุสถานะไว้ ปัญหาจะต่างออกไปมาก — เพราะสถานะที่ขัดแย้งกันจะสร้างไม่ได้ตั้งแต่แรก</p><p>คำตอบจริงอยู่ที่ 18.11 และเป็นความต่างที่ใหญ่ที่สุดระหว่าง <code>ScanPartScreen</code> กับ <code>PickItemsScreen</code></p><p><strong>ข้อ 2 — <code>shared/</code> บอกอะไร</strong></p><table><thead><tr><th>ข้อสังเกต</th><th>ตีความ</th></tr></thead><tbody>
+<tr><td>putaway มี shared 49%</td><td>มีสองจอที่ทำงานคล้ายกันมาก จึงคุ้มที่จะแยกของกลาง</td></tr>
+<tr><td>picking ไม่มี shared</td><td>สามจอทำงานคนละอย่าง ไม่มีอะไรให้แชร์</td></tr>
+</tbody></table><p>ตรวจสมมติฐานได้จากรายชื่อไฟล์</p><pre class="code-vs"><code>putaway/shared/widgets/station/station_sheet.dart    ← ใช้จาก 2 จอ
+putaway/shared/widgets/destination/*.dart            ← ใช้จาก station_sheet
+putaway/shared/models/station_info.dart              ← ใช้จาก 3 จอ (รวม unload!)</code></pre><p>บรรทัดสุดท้ายน่าสนใจ — <code>StationInfo</code> ถูกใช้จาก <code>unload_screen.dart</code> ด้วย (17.11)</p><pre class="code-vs"><code>// unload_screen.dart
+import '../putaway/shared/putaway_shared_widgets.dart';</code></pre><p>โดเมน unload import ของจากโดเมน putaway — แปลว่า <code>shared/</code> นั้นไม่ได้ shared แค่ในโดเมนตัวเอง</p><div class="note"><strong>นี่เป็นสัญญาณที่ต้องสังเกต</strong> — เมื่อโดเมน A ต้อง import จาก <code>โดเมน B/shared/</code> แปลว่าของชิ้นนั้นไม่ใช่ของ B แต่เป็นของกลางของทั้งแอป<br>ที่ถูกคือย้ายไปที่ <code>lib/widgets/</code> หรือ <code>lib/models/common/</code> ซึ่งมีอยู่แล้ว<br>ผลของการไม่ย้าย: ถ้าวันหนึ่งลบโดเมน putaway ทิ้ง โดเมน unload จะพังตามโดยไม่มีใครคาดคิด</div><p><strong>ข้อสรุป:</strong> การมี <code>shared/</code> เป็นข้อดี แต่ต้องดูด้วยว่าใครใช้บ้าง — <code>shared</code> ที่ถูกใช้ข้ามโดเมนคือของกลางที่วางผิดที่</p></details></section>
+
+<section id="section-11"><h2>11. สรุป</h2><div class="success"><ul><li>putaway 26 ไฟล์ เฉลี่ย 91 บรรทัด — picking 15 ไฟล์ เฉลี่ย 232</li><li>putaway มี <code>shared/</code> 49% ส่วน picking ไม่มีเลย</li><li>putaway แตกได้เยอะเพราะสิ่งที่ซ้ำคือหน้าตา (9 สถานีใช้ของเดียวกัน)</li><li>picking แตกได้น้อยเพราะสิ่งที่ซับซ้อนคือลำดับและเงื่อนไข ซึ่งแตกเป็น widget ไม่ได้</li><li>ชื่อโฟลเดอร์ widget ของ picking ตรงกับขั้นตอนของ flow ทั้งห้าขั้น</li><li>putaway มี SignalR 4 เหตุการณ์ ทั้งหมดเป็นสิ่งที่หุ่นยนต์หรือคนอื่นทำ</li><li>picking ไม่มีเรียลไทม์เพราะทุกอย่างเกิดจากผู้ใช้เอง</li><li><code>StationInfo</code> ใน <code>putaway/shared/</code> ถูก import จากโดเมน unload — ของกลางที่วางผิดที่</li></ul></div><p><strong>บทหน้า:</strong> ตารางสถานีที่แสดงสถานะจากสองแหล่ง และการ์ดที่เปลี่ยนหน้าตาสามแบบ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

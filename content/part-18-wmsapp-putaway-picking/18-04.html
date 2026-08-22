@@ -1,12 +1,275 @@
-<div class="note"><strong>Prework เป็นสองคอลัมน์แต่ใช้คนละ state source:</strong> receive stations แสดง pallet ที่เรียกมา/ตัดเสร็จ ส่วน send stations แสดง pallet ที่กำลังส่งกลับ ASRS</div>
-<section><h2>1. Six-station topology</h2><p>PW-STN-1/3/5 เป็น <code>PWRole.receive</code>; PW-STN-2/4/6 เป็น send พร้อม <code>fixedDestination: ASRS</code> และทุกสถานีจำกัด <code>allowedType: PW</code></p></section>
-<section><h2>2. Two status maps</h2><p><code>_receiveStatus</code> มาจาก <code>prework-station-status</code> ส่วน <code>_stationStatus</code> มาจาก station-status ทั่วไป การใช้ map แยกสะท้อน backend read model คนละชุด แต่ควรมี type แทน dynamic map</p></section>
-<section><h2>3. Parallel initial load</h2><pre class="code-vs"><code>await Future.wait([
-  _loadStationStatus(),
-  _loadPreworkStationStatus(),
-]);</code></pre><p>ลดเวลาโหลดรวม แต่แต่ละ call กลืน error จึงอาจได้ครึ่งหน้าที่ดูเหมือนปกติ ควรแสดง freshness/error แยกต่อ column</p></section>
-<section><h2>4. Receive states</h2><p>ไม่มี pallet แสดง empty; status <code>IN_TRANSIT</code> แสดงกำลังมาและปิดการเปิด sheet; state อื่นแสดง cut complete, cutItems และปุ่ม return empty pallet</p></section>
-<section><h2>5. Send states</h2><p>send station ใช้ StationSheet เดิมเพื่อ scan PW pallet และ confirm ไป ASRS ปลายทางถูกล็อก จึงเลือก PREWORK/REPLENISH ไม่ได้ แต่ wrapping ยังเปิดได้เมื่อ fixed destination เป็น ASRS</p></section>
-<section><h2>6. Return empty pallet</h2><p><code>preworkReturnPallet(palletId, stationId)</code> เปลี่ยน pallet เป็น AVAILABLE หลัง confirm เมื่อสำเร็จ sheet ปิด แสดง snackbar และ parent เริ่ม animation การ return</p></section>
-<section><h2>7. Animation vs truth</h2><p>ข้อความ AMR picking up/returning เปลี่ยนด้วย timer 2+2 วินาทีแล้ว refresh สถานะ Timer เป็น feedback เท่านั้น ไม่ควรกำหนดว่ากระบวนการจริงเสร็จ หาก event มาช้าหรือเร็ว UI ต้องยัง reconcile กับ server</p></section>
-<section><h2>8. Test matrix</h2><div class="success">ทดสอบ receive empty/in-transit/cut-complete, cutItems ว่าง/หลายรายการ, send busy, return reject/timeout/success, event ระหว่าง timer และ dispose ก่อน timer จบ โดย assert ว่า timer ถูก cancel และไม่ setState หลัง dispose</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด putaway_prework_screen.dart ทั้ง 350 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 18.3, 12.8 (ตัวจับเวลา), 4.13 (mounted)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่มีสถานะสองชุดและตัวจับเวลาซ้อนกัน และรู้ว่าแอนิเมชันที่ไม่ผูกกับความจริงมีความเสี่ยงอะไร</div>
+
+<section><h2>1. หกสถานีที่แบ่งเป็นสองบทบาท</h2><pre class="code-vs"><code>final _kPWStations = [
+  StationInfo(id: 'PW-STN-1', label: 'Receive Pallet', color: _kColorReceive,
+      allowedType: 'PW', pwRole: PWRole.receive),
+  StationInfo(id: 'PW-STN-2', label: 'Send Pallet', color: _kColorSend,
+      allowedType: 'PW', fixedDestination: 'ASRS', pwRole: PWRole.send),
+  ...  // สลับกันไปจนถึง PW-STN-6
+];</code></pre><p>เลขคี่เป็นฝั่งรับ เลขคู่เป็นฝั่งส่ง แล้วถูกแยกตอนวาด</p><pre class="code-vs"><code>final receiveStations =
+    _kPWStations.where((station) =&gt; station.pwRole == PWRole.receive).toList();
+final sendStations =
+    _kPWStations.where((station) =&gt; station.pwRole == PWRole.send).toList();</code></pre><pre class="code-vs"><code>Row(
+  children: [
+    Expanded(child: PreworkReceiveColumn(stations: receiveStations, ...)),
+    const SizedBox(width: 12),
+    Expanded(child: PreworkSendColumn(stations: sendStations, ...)),
+  ],
+)</code></pre><p>สองคอลัมน์แทนตาราง — สะท้อนผังจริงของสถานีในคลัง ที่ฝั่งหนึ่งรับของเข้ามาแปรรูป อีกฝั่งส่งกลับ</p><table><thead><tr><th>ฝั่ง</th><th>สี</th><th>ผู้ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td>รับ (<code>#00796B</code> เขียวน้ำเงิน)</td><td>เย็น</td><td>เรียกพาเลทจาก ASRS มาแปรรูป</td></tr>
+<tr><td>ส่ง (<code>#D84315</code> ส้มแดง)</td><td>ร้อน</td><td>ส่งพาเลทที่แปรรูปเสร็จกลับ</td></tr>
+</tbody></table><p>การใช้สีอุ่นกับเย็นแยกทิศทางเป็นวิธีที่อ่านได้จากมุมตา — ผู้ใช้ไม่ต้องอ่านป้ายว่าคอลัมน์ไหนคืออะไร</p></section>
+
+<section><h2>2. สถานะสองชุดจากสอง endpoint</h2><pre class="code-vs"><code>Map&lt;String, Map&lt;String, dynamic&gt;&gt; _stationStatus = {};   // สำหรับฝั่งส่ง
+Map&lt;String, Map&lt;String, dynamic&gt;&gt; _receiveStatus = {};   // สำหรับฝั่งรับ
+
+Future&lt;void&gt; _loadAllStatus() async {
+  await Future.wait([_loadStationStatus(), _loadPreworkStationStatus()]);
+}</code></pre><table><thead><tr><th>ตัวแปร</th><th>มาจาก</th><th>ใช้กับ</th></tr></thead><tbody>
+<tr><td><code>_stationStatus</code></td><td><code>GET /putaway/station-status</code></td><td>สถานีฝั่งส่ง</td></tr>
+<tr><td><code>_receiveStatus</code></td><td><code>GET /putaway/prework-station-status</code></td><td>สถานีฝั่งรับ</td></tr>
+</tbody></table><p><code>Future.wait</code> ยิงทั้งสองพร้อมกัน ไม่ใช่เรียงกัน — ประหยัดเวลาไปครึ่งหนึ่ง</p><pre class="code-vs"><code>// ถ้าเขียนเรียงกัน จะช้าเป็นสองเท่า
+await _loadStationStatus();
+await _loadPreworkStationStatus();</code></pre><div class="note"><strong>ข้อควรระวังของ <code>Future.wait</code>:</strong> ถ้าตัวใดตัวหนึ่งโยน exception ทั้งชุดจะล้ม<br>ที่นี่ปลอดภัยเพราะทั้งสองเมธอดจับ error ไว้ข้างในแล้ว (คืน <code>ApiResult</code> ไม่โยน) — เป็นผลของการที่ <code>ApiService</code> ไม่ปล่อย exception ออกมา ตามที่ 16.6 อธิบาย</div><p>แต่มีจุดที่ต่างจากที่คาด — ทั้งสองเมธอดใช้รูปแบบเดียวกัน</p><pre class="code-vs"><code>Future&lt;void&gt; _loadStationStatus() async {
+  final result = await _api.getStationStatus();
+  if (!mounted || !result.success) return;      // ล้มเหลว → เงียบ
+  ...
+}</code></pre><p>ล้มเหลวแล้วเงียบ — ถ้ายิงไม่สำเร็จ สถานีทุกใบจะแสดงว่าว่างทั้งที่อาจไม่ว่าง</p><table><thead><tr><th>ผู้ใช้เห็น</th><th>ความจริง</th><th>ผลที่ตามมา</th></tr></thead><tbody>
+<tr><td>สถานีว่าง</td><td>ว่างจริง</td><td>กดเข้าไปได้</td></tr>
+<tr><td>สถานีว่าง</td><td><strong>ไม่รู้ (ยิงไม่สำเร็จ)</strong></td><td>กดเข้าไป แล้วเจอ error ตอนสแกนพาเลท</td></tr>
+</tbody></table><p>ปัญหาเดียวกับ 17.2 — และที่นี่หนักกว่าเพราะผู้ใช้ต้องเดินไปที่สถานีจริงก่อนถึงจะรู้</p></section>
+
+<section><h2>3. แอนิเมชันที่คุมด้วยตัวจับเวลาซ้อนกัน</h2><pre class="code-vs"><code>Timer? _returnAnimMidTimer;
+Timer? _returnAnimEndTimer;
+String? _returnAnimStation;
+String _returnAnimText = '';
+
+void _playReturnAnimation(String stationId) {
+  _cancelReturnAnimation();                    // ← ยกเลิกของเก่าก่อนเสมอ
+  setState(() {
+    _returnAnimStation = stationId;
+    _returnAnimText = 'AMR is picking up the pallet...';
+  });
+
+  _returnAnimMidTimer = Timer(const Duration(seconds: 2), () {
+    if (!mounted || _returnAnimStation != stationId) return;   // ← ตรวจสองอย่าง
+
+    setState(() =&gt; _returnAnimText = 'AMR is returning the pallet...');
+
+    _returnAnimEndTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || _returnAnimStation != stationId) return;
+
+      setState(() {
+        _returnAnimStation = null;
+        _returnAnimText = '';
+      });
+      _loadAllStatus();                        // ← โหลดของจริงหลังจบ
+    });
+  });
+}</code></pre><p>สี่วินาที แบ่งเป็นสองช่วง ๆ ละสองวินาที พร้อมข้อความคนละแบบ</p><table><thead><tr><th>เวลา</th><th>ข้อความ</th></tr></thead><tbody>
+<tr><td>0–2 วินาที</td><td>AMR is picking up the pallet…</td></tr>
+<tr><td>2–4 วินาที</td><td>AMR is returning the pallet…</td></tr>
+<tr><td>4 วินาที</td><td>จบ แล้วโหลดสถานะจริง</td></tr>
+</tbody></table><p>การป้องกันสองชั้นในแต่ละตัวจับเวลาทำได้ครบ</p><table><thead><tr><th>เงื่อนไข</th><th>ป้องกันอะไร</th></tr></thead><tbody>
+<tr><td><code>!mounted</code></td><td>จอถูกปิดไปแล้ว — <code>setState</code> จะพัง</td></tr>
+<tr><td><code>_returnAnimStation != stationId</code></td><td><strong>มีแอนิเมชันของสถานีอื่นเริ่มไปแล้ว</strong></td></tr>
+</tbody></table><p>เงื่อนไขที่สองสำคัญมาก ลองไล่กรณี</p><pre class="code-vs"><code>t=0.0  PW-STN-1 คืนพาเลท → เริ่มแอนิเมชัน, ตั้ง MidTimer(2s)
+t=1.0  PW-STN-3 คืนพาเลท → _cancelReturnAnimation() ยกเลิก MidTimer เก่า
+                          → _returnAnimStation = 'PW-STN-3'
+t=3.0  MidTimer ของ STN-3 ทำงาน → ตรวจ: 'PW-STN-3' == 'PW-STN-3' ✓ ผ่าน</code></pre><p>ในกรณีนี้ <code>_cancelReturnAnimation()</code> จัดการให้แล้ว — แต่การตรวจซ้ำเป็นตาข่ายชั้นที่สองที่กันกรณีที่เผลอลืมยกเลิก</p><div class="note"><strong>นี่คือรูปแบบที่ถูกที่สุดในเรื่องตัวจับเวลาที่เจอในทั้งโปรเจกต์</strong> — ยกเลิกของเก่าก่อนสร้างใหม่, ตรวจ <code>mounted</code>, ตรวจว่ายังเป็นงานเดิมอยู่, และยกเลิกทั้งสองตัวใน <code>dispose()</code><pre class="code-vs"><code>@override
+void dispose() {
+  _cancelReturnAnimation();     // ← ตัวแรกใน dispose
+  ...
+}</code></pre>เทียบกับ 17.6 ที่ <code>ScanPartScreen</code> มีตัวจับเวลาตัวเดียวและทำครบเหมือนกัน — ทีมนี้เข้าใจเรื่องนี้ดี</div></section>
+
+<section><h2>4. ปัญหาที่ซ่อนอยู่ในแอนิเมชันนี้</h2><p>แอนิเมชันสี่วินาทีนี้<strong>ไม่ได้ผูกกับความจริง</strong> — มันเริ่มเมื่อได้รับเหตุการณ์ แล้วจบตามเวลา ไม่ใช่จบเมื่อหุ่นยนต์ทำเสร็จจริง</p><pre class="code-vs"><code>void _handlePalletReturned(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as String?;
+  if (stationId != null &amp;&amp;
+      _kPWStations.any((s) =&gt; s.id == stationId &amp;&amp; s.pwRole == PWRole.receive)) {
+    _playReturnAnimation(stationId);      // ← เล่นแอนิเมชัน
+    return;                                // ← ไม่โหลดสถานะทันที
+  }
+
+  _loadAllStatus();
+}</code></pre><table><thead><tr><th>ถ้าหุ่นยนต์</th><th>ผู้ใช้เห็น</th><th>ตรงไหม</th></tr></thead><tbody>
+<tr><td>ใช้เวลา ~4 วินาที</td><td>แอนิเมชันจบพอดี</td><td>ตรง</td></tr>
+<tr><td>ใช้เวลา 15 วินาที</td><td>แอนิเมชันจบตั้งแต่วินาทีที่ 4 แล้วโหลดสถานะที่ยังไม่เปลี่ยน</td><td><strong>ไม่ตรง</strong></td></tr>
+<tr><td>ติดขัด ไม่มาเลย</td><td>แอนิเมชันจบปกติ ไม่มีอะไรบอกว่ามีปัญหา</td><td><strong>ไม่ตรง</strong></td></tr>
+</tbody></table><p>แถวกลางคือกรณีที่เกิดบ่อยที่สุด — ผู้ใช้เห็นแอนิเมชันจบ คิดว่าเรียบร้อย แล้วสถานะบนจอกลับไปเหมือนเดิม</p><p>เทียบกับวิธีที่ 17.11 ใช้ในการคืนพาเลท</p><pre class="code-vs"><code>// UnloadSessionSheet — หน่วงพร้อมกับคำขอจริง
+final results = await Future.wait([
+  ApiService().returnPalletToAsis(...),
+  Future.delayed(const Duration(seconds: 5)),
+]);</code></pre><table><thead><tr><th></th><th>UnloadSession</th><th>Prework (ที่นี่)</th></tr></thead><tbody>
+<tr><td>รออะไร</td><td>คำขอจริง + เวลาขั้นต่ำ</td><td>เวลาอย่างเดียว</td></tr>
+<tr><td>รู้ผลลัพธ์ไหม</td><td><strong>รู้</strong></td><td>ไม่รู้</td></tr>
+<tr><td>ถ้าช้ากว่าที่หน่วง</td><td>รอต่อจนเสร็จ</td><td>จบตามเวลา</td></tr>
+</tbody></table><p>ทางที่ตรงกว่าคือให้แอนิเมชันจบเมื่อได้รับเหตุการณ์ยืนยัน ไม่ใช่ตามเวลา</p><pre class="code-vs"><code>void _playReturnAnimation(String stationId) {
+  _cancelReturnAnimation();
+  setState(() {
+    _returnAnimStation = stationId;
+    _returnAnimText = 'AMR กำลังมารับพาเลท...';
+  });
+
+  // ตาข่ายกันค้าง — ถ้าไม่มีเหตุการณ์ยืนยันใน 30 วินาที ให้เลิกรอ
+  _returnAnimEndTimer = Timer(const Duration(seconds: 30), () {
+    if (!mounted || _returnAnimStation != stationId) return;
+    setState(() {
+      _returnAnimStation = null;
+      _returnAnimText = '';
+    });
+    showWarningSnackbar(context, '$stationId ยังไม่ยืนยันว่ารับพาเลทแล้ว — ตรวจที่หน้างาน');
+    _loadAllStatus();
+  });
+}
+
+// จบเมื่อได้รับเหตุการณ์จริง
+void _handlePalletArrived(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as String?;
+  if (stationId != null &amp;&amp; _returnAnimStation == stationId) {
+    _cancelReturnAnimation();
+    setState(() { _returnAnimStation = null; _returnAnimText = ''; });
+  }
+  _loadAllStatus();
+}</code></pre><div class="note"><strong>ต้องยืนยันกับฝั่ง .NET ก่อนทำ</strong> — วิธีนี้ใช้ได้ก็ต่อเมื่อมีเหตุการณ์ที่ยิงมาเมื่อหุ่นยนต์ทำเสร็จจริง<br>ถ้าไม่มี การหน่วงตามเวลาคือสิ่งที่ทำได้ดีที่สุด — แต่ควรเขียนคอมเมนต์บอกว่าเวลานี้เป็นการประมาณ ไม่ใช่ความจริง</div></section>
+
+<section><h2>5. การอัปเดตแบบทันตาก่อนของจริง</h2><pre class="code-vs"><code>void _handleStationDispatched(Map&lt;String, dynamic&gt; data) {
+  final stationId = data['stationId'] as String?;
+  final destination = data['destination'] as String?;
+
+  if (stationId != null &amp;&amp;
+      _kPWStations.any((s) =&gt; s.id == stationId &amp;&amp; s.pwRole == PWRole.send) &amp;&amp;
+      mounted) {
+    setState(() {
+      _stationStatus = {
+        ..._stationStatus,
+        stationId: {
+          ...?_stationStatus[stationId],       // เก็บของเดิมไว้
+          'stationId': stationId,
+          'palletId': data['palletId'],
+          'destination': destination,
+          'items': _stationStatus[stationId]?['items'] ?? const [],
+        },
+      };
+    });
+  }
+
+  if (destination == 'PREWORK') {
+    _loadPreworkStationStatus();
+  }
+  _loadStationStatus();                        // ← โหลดของจริงตามมา
+}</code></pre><p>อัปเดตสองรอบ: จากข้อมูลในเหตุการณ์ทันที แล้วโหลดของจริงตามมา</p><table><thead><tr><th>รอบ</th><th>ได้อะไร</th><th>เวลา</th></tr></thead><tbody>
+<tr><td>1 จากเหตุการณ์</td><td>สถานีเปลี่ยนเป็นสีแดงทันที</td><td>~0 ms</td></tr>
+<tr><td>2 จากเซิร์ฟเวอร์</td><td>ข้อมูลครบ รวมรายการของบนพาเลท</td><td>~200–1000 ms</td></tr>
+</tbody></table><p>ผู้ใช้เห็นการตอบสนองทันที ไม่ต้องรอเน็ต — และข้อมูลที่ขาดถูกเติมทีหลัง</p><p>สังเกตสามตัวดำเนินการที่ใช้</p><pre class="code-vs"><code>{..._stationStatus, stationId: {...}}        // คัดลอก Map เดิม แล้วทับคีย์เดียว
+{...?_stationStatus[stationId], ...}         // คัดลอกถ้ามี ไม่มีก็ข้าม
+_stationStatus[stationId]?['items'] ?? const []   // เก็บ items เดิมไว้</code></pre><p><code>...?</code> เป็นตัวกระจายที่ยอมให้ค่าเป็น null — ถ้าเขียน <code>...</code> เฉย ๆ จะพังเมื่อสถานีนั้นยังไม่มีข้อมูล</p><p>และการสร้าง <code>Map</code> ใหม่แทนการแก้ของเดิมสำคัญ</p><pre class="code-vs"><code>// ผิด — แก้ Map เดิม Flutter อาจไม่เห็นว่าเปลี่ยน
+_stationStatus[stationId] = {...};
+setState(() {});
+
+// ถูก — สร้างใหม่
+setState(() =&gt; _stationStatus = {..._stationStatus, stationId: {...}});</code></pre><div class="note"><strong>สังเกตว่า <code>items</code> ถูกเก็บไว้เป็นพิเศษ</strong> — เพราะเหตุการณ์ SignalR ไม่ได้ส่งรายการของบนพาเลทมา ถ้าไม่เก็บไว้ การ์ดจะแสดงว่าพาเลทไม่มีของ จนกว่าการโหลดจริงจะเสร็จ<br>รายละเอียดแบบนี้เกิดจากการเจอปัญหาจริงแล้วแก้ ไม่ใช่จากการออกแบบล่วงหน้า</div></section>
+
+<section><h2>6. สามทางเข้าของแผ่นเลื่อน</h2><pre class="code-vs"><code>void _openStationPopup(StationInfo station) {
+  if (_returnAnimStation == station.id) return;       // กันตอนแอนิเมชันเล่นอยู่
+
+  if (station.pwRole == PWRole.receive) {
+    final info = _receiveStatus[station.id];
+    final palletId = info?['palletId'] as String?;
+    final palletStatus = info?['palletStatus'] as String?;
+
+    if (palletStatus == 'IN_TRANSIT') return;         // กำลังขนมา กดไม่ได้
+
+    final cutItems = (info?['cutItems'] as List?)?.cast&lt;Map&lt;String, dynamic&gt;&gt;() ?? [];
+
+    showModalBottomSheet(
+      ...
+      builder: (_) =&gt; PreworkReceiveSheet(
+        station: station, userId: widget.userId,
+        palletId: palletId, palletStatus: palletStatus, cutItems: cutItems,
+        onCompleted: () =&gt; _playReturnAnimation(station.id),
+      ),
+    );
+    return;
+  }
+
+  final busy = _stationStatus[station.id];
+  if (busy != null) return;                            // ฝั่งส่งกำลังทำงาน
+
+  showModalBottomSheet(
+    ...
+    builder: (_) =&gt; StationSheet(station: station, userId: widget.userId,
+        onConfirmed: () { _loadAllStatus(); }),
+  );
+}</code></pre><table><thead><tr><th>เงื่อนไข</th><th>ผลลัพธ์</th><th>บอกผู้ใช้ไหม</th></tr></thead><tbody>
+<tr><td>แอนิเมชันของสถานีนี้เล่นอยู่</td><td>ไม่เปิด</td><td><strong>ไม่บอก</strong></td></tr>
+<tr><td>ฝั่งรับ + <code>IN_TRANSIT</code></td><td>ไม่เปิด</td><td><strong>ไม่บอก</strong></td></tr>
+<tr><td>ฝั่งส่ง + กำลังทำงาน</td><td>ไม่เปิด</td><td><strong>ไม่บอก</strong></td></tr>
+<tr><td>ว่าง</td><td>เปิดแผ่นที่ตรงกับบทบาท</td><td>—</td></tr>
+</tbody></table><p>สามกรณีแรก <code>return</code> เงียบทั้งหมด — ปัญหาเดียวกับที่ 18.2 พบใน <code>PutawayScreen</code> แต่ที่นี่มีสามกรณีแทนที่จะเป็นหนึ่ง</p><p>อย่างน้อยสองในสามมีสัญญาณบนหน้าจอ (แอนิเมชันกำลังเล่น, การ์ดเป็นสีแดง) แต่กรณี <code>IN_TRANSIT</code> ต้องดูที่การ์ดว่าแสดงอะไร</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>Future.wait</code> ทำให้ช้ากว่าเรียงกัน</td><td>เร็วกว่า เพราะยิงพร้อมกัน</td></tr>
+<tr><td>ตัวจับเวลาที่ตรวจ <code>mounted</code> แล้วปลอดภัย</td><td>ต้องตรวจด้วยว่ายังเป็นงานเดิมอยู่</td></tr>
+<tr><td>แอนิเมชันจบ = งานเสร็จ</td><td>ที่นี่จบตามเวลา ไม่ใช่ตามความจริง</td></tr>
+<tr><td><code>...</code> ใช้กับค่าที่อาจเป็น null ได้</td><td>ต้องใช้ <code>...?</code></td></tr>
+<tr><td>แก้ <code>Map</code> ในที่แล้ว <code>setState</code> ก็พอ</td><td>ควรสร้าง <code>Map</code> ใหม่</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “กดสถานี PW-STN-1 แล้วไม่มีอะไรขึ้น กดหลายรอบก็ไม่ขึ้น สักพักถึงจะเข้าได้”</p><ol><li>สาเหตุที่เป็นไปได้มีกี่อย่าง</li><li>จะแยกแยะอย่างไรว่าเป็นอันไหน</li><li>แก้ให้ผู้ใช้ไม่ต้องเดา</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><p>PW-STN-1 เป็นสถานีฝั่งรับ จึงมีสองเงื่อนไขที่ทำให้เปิดไม่ได้</p><table><thead><tr><th>สาเหตุ</th><th>เงื่อนไขในโค้ด</th><th>“สักพักถึงเข้าได้” ตรงไหม</th></tr></thead><tbody>
+<tr><td>แอนิเมชันคืนพาเลทเล่นอยู่</td><td><code>_returnAnimStation == station.id</code></td><td><strong>ตรง — จบใน 4 วินาที</strong></td></tr>
+<tr><td>พาเลทกำลังถูกขนมา</td><td><code>palletStatus == 'IN_TRANSIT'</code></td><td><strong>ตรง — จบเมื่อพาเลทถึง</strong></td></tr>
+</tbody></table><p>ทั้งสองอธิบาย “สักพักถึงเข้าได้” ได้ทั้งคู่ — ต้องแยกด้วยระยะเวลา</p><p><strong>ข้อ 2 — แยกอย่างไร</strong></p><table><thead><tr><th>ถาม/สังเกต</th><th>ถ้าใช่</th></tr></thead><tbody>
+<tr><td>รอไม่เกิน 5 วินาทีแล้วเข้าได้</td><td>แอนิเมชัน</td></tr>
+<tr><td>รอเป็นสิบวินาทีหรือนาที</td><td><code>IN_TRANSIT</code></td></tr>
+<tr><td>มีข้อความ “AMR is…” บนการ์ดตอนนั้นไหม</td><td>มี = แอนิเมชัน</td></tr>
+<tr><td>เกิดหลังจากเพิ่งกดคืนพาเลทเองหรือเปล่า</td><td>ใช่ = แอนิเมชัน</td></tr>
+</tbody></table><p>คำถามที่สามตรงที่สุดเพราะดูได้จากหน้าจอทันที และไม่ต้องพึ่งความทรงจำของผู้ใช้</p><p><strong>ข้อ 3 — แก้ให้ไม่ต้องเดา</strong></p><pre class="code-vs"><code>void _openStationPopup(StationInfo station) {
+  if (_returnAnimStation == station.id) {
+    showWarningSnackbar(context, '${station.id} — AMR กำลังทำงาน รอสักครู่');
+    return;
+  }
+
+  if (station.pwRole == PWRole.receive) {
+    final info = _receiveStatus[station.id];
+    final palletStatus = info?['palletStatus'] as String?;
+
+    if (palletStatus == 'IN_TRANSIT') {
+      final palletId = info?['palletId'] as String?;
+      showWarningSnackbar(
+        context,
+        palletId != null
+            ? '${station.id} — พาเลท $palletId กำลังถูกขนมา รอจนถึงก่อน'
+            : '${station.id} — กำลังขนพาเลทมา รอสักครู่',
+      );
+      return;
+    }
+    ...
+  }
+
+  final busy = _stationStatus[station.id];
+  if (busy != null) {
+    showWarningSnackbar(
+      context,
+      '${station.id} — กำลังจ่ายพาเลท ${busy['palletId']} รอจนเสร็จก่อน',
+    );
+    return;
+  }
+  ...
+}</code></pre><table><thead><tr><th>เปลี่ยนจาก</th><th>เป็น</th></tr></thead><tbody>
+<tr><td>กดแล้วไม่มีอะไร ผู้ใช้กดซ้ำ</td><td>บอกว่าทำไม และรออะไรอยู่</td></tr>
+<tr><td>สามกรณีหน้าตาเหมือนกัน</td><td>สามข้อความที่ต่างกัน</td></tr>
+</tbody></table><p><strong>แต่มีเรื่องที่ต้องคิดต่อ</strong> — แถบข้อความที่โผล่ทุกครั้งที่กดจะน่ารำคาญถ้าผู้ใช้กดหลายครั้ง</p><p>ทางที่ดีกว่าคือทำให้การ์ดบอกตั้งแต่แรกว่ากดไม่ได้ แล้วแถบข้อความเป็นตาข่ายชั้นสอง</p><pre class="code-vs"><code>// ในการ์ด — เพิ่มสถานะที่สาม
+StationCard(
+  station: station,
+  isDispatching: isBusy,
+  enabled: !isBusy &amp;&amp; !isAnimating &amp;&amp; !isInTransit,
+  statusText: isAnimating
+      ? 'AMR กำลังทำงาน'
+      : isInTransit
+          ? 'พาเลทกำลังมา'
+          : null,
+  onTap: () =&gt; onStationTap(station),
+)</code></pre><p><strong>ข้อสรุปที่ใหญ่กว่า:</strong> ทุกจุดที่โค้ดเขียน <code>return;</code> เงียบ ๆ คือจุดที่ผู้ใช้จะไม่รู้ว่าเกิดอะไรขึ้น</p><p>ค้นหา <code>return;</code> ที่ไม่มีการแสดงผลอะไรก่อนหน้า เป็นวิธีหาจุดแบบนี้ได้เร็ว — ในจอนี้เจอสามจุด และในทั้ง Part 17 เจออีกหลายจุด</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>หกสถานีแบ่งสองบทบาทด้วย <code>pwRole</code> แล้ววาดเป็นสองคอลัมน์ที่ใช้สีอุ่น/เย็นแยกทิศทาง</li><li>สถานะสองชุดจากสอง endpoint โหลดพร้อมกันด้วย <code>Future.wait</code></li><li>ทั้งสองเมธอดล้มเหลวแล้วเงียบ — สถานีจะดูว่างทั้งที่อาจไม่ว่าง</li><li>ตัวจับเวลาสองตัวซ้อนกัน ตรวจทั้ง <code>mounted</code> และว่ายังเป็นงานเดิม — รูปแบบที่ถูกที่สุดในโปรเจกต์</li><li>แต่แอนิเมชันจบตามเวลา ไม่ใช่ตามความจริงที่หุ่นยนต์ทำ</li><li>อัปเดตสองรอบ: จากเหตุการณ์ทันที แล้วโหลดของจริงตามมา</li><li><code>...?</code> จำเป็นเมื่อค่าที่จะกระจายอาจเป็น null</li><li><code>items</code> ถูกเก็บไว้เป็นพิเศษเพราะเหตุการณ์ไม่ได้ส่งมา</li><li>สามเงื่อนไขที่ทำให้เปิดแผ่นไม่ได้ ทั้งหมด <code>return</code> เงียบ</li></ul></div><p><strong>บทหน้า:</strong> การสแกนพาเลทและตัวเลือกปลายทาง — สามตัวเลือกที่เปลี่ยนกันเองตามเงื่อนไข</p></section>
