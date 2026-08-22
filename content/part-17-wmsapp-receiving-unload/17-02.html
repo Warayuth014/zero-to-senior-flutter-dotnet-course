@@ -1,12 +1,173 @@
-<div class="note"><strong>ReceivingMenu เป็น dashboardเล็ก:</strong> มีสอง card—เริ่มรับเอกสารและรายการค้างผูก pallet—พร้อม badgeที่นับจาก server ไม่ใช่ local cache</div>
-<section><h2>1. Inputs</h2><p><code>ReceivingMenuScreen</code>รับ userId/fullNameจาก HomeScreen ใช้ fullNameใน AppBarและส่งทั้งคู่ต่อ routeลูก ไม่มี session lookupซ้ำในเมนู</p></section>
-<section><h2>2. Pending count</h2><pre class="code-vs"><code>initState() → _loadPendingCount()
-→ getPendingPalletLines()
-→ count = result.data!.length</code></pre><p>failureถูกละเลยและ countคง 0 จึงแยกไม่ได้ว่าไม่มีค้างหรือโหลดล้ม</p></section>
-<section><h2>3. Refresh on return</h2><pre class="code-vs"><code>await Navigator.push(...ScanPoScreen...);
-_loadPendingCount();</code></pre><p>ทำเหมือนกันกับ PendingPalletScreen จึงสะท้อนรายการใหม่หลังรับ/assign แต่ควรเช็ก mounted/generationและมี loading/error state</p></section>
-<section><h2>4. Card semantics</h2><p><code>ReceivingMenuCard</code>รับ icon/title/subtitle/color/badge/onTap เมื่อ pending&gt;0ใช้ dangerและ badge count; เมื่อ 0ใช้ textGrey เป็น presentation componentที่ไม่รู้ API</p></section>
-<section><h2>5. Route A</h2><p>“รับเอกสาร” push <code>ScanPoScreen(userId, fullName)</code> แล้ว workflowภายในเลือก POและรับสินค้า</p></section>
-<section><h2>6. Route B</h2><p>“ค้างการผูก Pallet” push <code>PendingPalletScreen</code> เพื่อแก้รายการที่ receiptสำเร็จแต่ palletยังไม่ผูก เมนูจึงเป็น recovery entry point ไม่ใช่แค่ navigation</p></section>
-<section><h2>7. Race</h2><p>ถ้ากลับ routeเร็วแล้ว refreshหลายครั้ง responseเก่าอาจทับใหม่ แม้เป็น countอย่างเดียวควรใช้ single-flight/generation และแสดง retryเมื่อโหลดล้มแทน count 0หลอก</p></section>
-<section><h2>8. Tests</h2><div class="success">0/positive badge, API failure, refreshหลังทั้ง routes, disposeระหว่าง load, double tapไม่ pushซ้ำ และ constructorส่ง user identityถูก โดย fake ReceivingRepositoryแทน singleton</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เปิด receiving_menu_screen.dart ทั้ง 107 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.1, Part 5 (การนำทาง)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่โหลดข้อมูลใหม่เมื่อกลับมา และรู้ว่ารูปแบบนี้ทำงานอย่างไรและพลาดตรงไหน</div>
+
+<section><h2>1. จอที่เล็กที่สุดในโดเมน</h2><p>107 บรรทัด มี state สองตัว</p><pre class="code-vs"><code>class _ReceivingMenuScreenState extends State&lt;ReceivingMenuScreen&gt; {
+  final _api = ApiService();
+  int _pendingPalletCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPendingCount();
+  }
+
+  Future&lt;void&gt; _loadPendingCount() async {
+    final result = await _api.getPendingPalletLines();
+    if (mounted &amp;&amp; result.success) {
+      setState(() =&gt; _pendingPalletCount = result.data!.length);
+    }
+  }</code></pre><p>ทำหน้าที่เดียว — แสดงสองทางเลือก และบอกว่ามีของค้างกี่รายการ</p><table><thead><tr><th>ทางเลือก</th><th>ไปที่</th></tr></thead><tbody>
+<tr><td>รับเอกสาร</td><td><code>ScanPoScreen</code></td></tr>
+<tr><td>ค้างการผูก Pallet</td><td><code>PendingPalletScreen</code></td></tr>
+</tbody></table></section>
+
+<section><h2>2. รูปแบบ “กลับมาแล้วโหลดใหม่”</h2><pre class="code-vs"><code>Future&lt;void&gt; _openScanPo() async {
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) =&gt; ScanPoScreen(
+        userId: widget.userId,
+        fullName: widget.fullName,
+      ),
+    ),
+  );
+  _loadPendingCount();       // ← กลับมาแล้วโหลดใหม่
+}</code></pre><p><code>Navigator.push</code> คืน <code>Future</code> ที่เสร็จเมื่อจอปลายทางถูกปิด — บรรทัดหลัง <code>await</code> จึงทำงานตอนผู้ใช้กดย้อนกลับมา</p><table><thead><tr><th>ผู้ใช้ทำ</th><th>ผลกับตัวเลข</th></tr></thead><tbody>
+<tr><td>เข้าไปรับสินค้าแล้วผูกพาเลทครบ</td><td>ตัวเลขลดลง</td></tr>
+<tr><td>เข้าไปรับสินค้าแล้วผูกพาเลทไม่สำเร็จ</td><td>ตัวเลขเพิ่มขึ้น</td></tr>
+<tr><td>เข้าไปแล้วออกเลย</td><td>เท่าเดิม</td></tr>
+</tbody></table><p>เป็นวิธีที่ตรงไปตรงมาและได้ผล — ไม่ต้องมีตัวจัดการ state กลาง ไม่ต้องมีการแจ้งเตือนข้ามจอ</p><p>เทียบกับทางเลือกอื่น</p><table><thead><tr><th>วิธี</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>โหลดใหม่ตอนกลับมา (วิธีนี้)</td><td>ง่าย ไม่ต้องมีโครงเพิ่ม</td><td>ยิงคำขอทุกครั้งที่กลับ แม้ไม่มีอะไรเปลี่ยน</td></tr>
+<tr><td>ส่งค่ากลับมาทาง <code>Navigator.pop(value)</code></td><td>ไม่ต้องยิงซ้ำ</td><td>ทุกทางออกของจอปลายทางต้องส่งค่าให้ครบ</td></tr>
+<tr><td>store กลางที่ทุกจอฟัง</td><td>ทุกจอตรงกันเสมอ</td><td>ต้องมีโครงที่โปรเจกต์นี้ยังไม่มี</td></tr>
+</tbody></table><p>สำหรับจอที่ผู้ใช้เข้าออกไม่กี่ครั้งต่อกะ วิธีแรกคุ้มที่สุด</p><div class="note"><strong>สังเกตว่าทำไมวิธีที่สองอันตราย</strong> — <code>ScanPartScreen</code> มีทางออกสามทาง (กดย้อนกลับ, ปิด session อัตโนมัติ, <code>popUntil</code> กลับหน้าแรก) ถ้าใช้การส่งค่ากลับ ต้องจำส่งให้ครบทั้งสามทาง ลืมทางเดียวตัวเลขก็ผิด</div></section>
+
+<section><h2>3. จุดที่รูปแบบนี้พลาด</h2><p>ไล่ดูตัวอย่างจริง</p><pre class="code-vs"><code>ผู้ใช้อยู่ที่ ReceivingMenuScreen เห็น "มี 3 รายการรอผูก Pallet"
+  → เพื่อนร่วมกะที่เครื่องอื่นผูกไป 2 รายการ
+    → ตัวเลขบนเครื่องนี้ยังเป็น 3
+      → ผู้ใช้กดเข้าไป เห็นเหลือ 1
+        → งง แต่ไม่เสียหาย</code></pre><p>กรณีนี้ไม่ร้ายแรงเพราะกดเข้าไปแล้วเห็นของจริง แต่มีอีกกรณีที่ร้ายกว่า</p><pre class="code-vs"><code>ผู้ใช้ค้างอยู่ที่จอนี้ 20 นาที (วางเครื่องไว้)
+  → มีของค้างเพิ่มเป็น 12 รายการ
+    → หน้าจอยังบอกว่า "ไม่มีรายการค้าง" และการ์ดเป็นสีเทา
+      → ผู้ใช้เดินผ่านไปโดยไม่รู้ว่ามีงานรออยู่</code></pre><p>ตรงกับที่ 12.10 เตือน — ข้อมูลที่ไม่มีการโหลดซ้ำจะค้างเก่าโดยไม่มีอะไรบอก</p><p>แก้ได้สองแบบ</p><pre class="code-vs"><code>// แบบที่ 1 — โหลดใหม่ตอนแอปกลับมาจากพื้นหลัง
+class _ReceivingMenuScreenState extends State&lt;ReceivingMenuScreen&gt;
+    with WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPendingCount();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);   // ห้ามลืม
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadPendingCount();
+  }
+}</code></pre><pre class="code-vs"><code>// แบบที่ 2 — ให้ผู้ใช้ลากลงเพื่อรีเฟรชเอง
+RefreshIndicator(
+  onRefresh: _loadPendingCount,
+  child: ...,
+)</code></pre><p>แบบที่สองถูกใช้แล้วใน <code>LoadToBasketScreen</code> (17.10) แต่ยังไม่มีในจอนี้ — ความไม่สม่ำเสมอที่เจอบ่อยในโปรเจกต์ที่ไม่มีข้อตกลงเขียนไว้</p></section>
+
+<section><h2>4. ความล้มเหลวที่เงียบสนิท</h2><pre class="code-vs"><code>Future&lt;void&gt; _loadPendingCount() async {
+  final result = await _api.getPendingPalletLines();
+  if (mounted &amp;&amp; result.success) {
+    setState(() =&gt; _pendingPalletCount = result.data!.length);
+  }
+  // ถ้า !result.success → ไม่ทำอะไรเลย
+}</code></pre><p>ถ้ายิงไม่สำเร็จ ตัวเลขจะค้างที่ค่าเดิม ซึ่งตอนเปิดจอครั้งแรกคือ <code>0</code></p><table><thead><tr><th>สถานการณ์</th><th>ผู้ใช้เห็น</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>ยิงสำเร็จ ไม่มีของค้าง</td><td>“ไม่มีรายการค้าง” สีเทา</td><td>ถูก</td></tr>
+<tr><td><strong>ยิงไม่สำเร็จ</strong></td><td>“ไม่มีรายการค้าง” สีเทา</td><td><strong>ไม่รู้</strong></td></tr>
+</tbody></table><p>สองสถานการณ์นี้หน้าตาเหมือนกันทุกพิกเซล ผู้ใช้แยกไม่ออก และไม่มีอะไรบอกว่าเชื่อมต่อไม่ได้</p><div class="note"><strong>ทำไมถึงเลือกเงียบ</strong> — ถ้าเด้งกล่องข้อผิดพลาดทุกครั้งที่กลับมาแล้วเน็ตไม่ดี ผู้ใช้จะต้องกดปิดตลอดเวลา ซึ่งน่ารำคาญกว่า<br>การเลือกเงียบจึงไม่ผิด แต่<strong>ต้องแยก “ยังไม่รู้” ออกจาก “รู้ว่าไม่มี”</strong> ตามที่ 10.8 สอน</div><p>ทำได้โดยเพิ่มสถานะที่สาม</p><pre class="code-vs"><code>int? _pendingPalletCount;      // null = ยังไม่รู้
+
+Future&lt;void&gt; _loadPendingCount() async {
+  final result = await _api.getPendingPalletLines();
+  if (!mounted) return;
+  setState(() =&gt; _pendingPalletCount = result.success ? result.data!.length : null);
+}</code></pre><pre class="code-vs"><code>subtitle: switch (_pendingPalletCount) {
+  null =&gt; 'ยังไม่ทราบ — แตะเพื่อดู',
+  0 =&gt; 'ไม่มีรายการค้าง',
+  final n =&gt; 'มี $n รายการรอผูก Pallet',
+},</code></pre><p>ตอนนี้ผู้ใช้แยกออกว่า “ตรวจแล้วไม่มี” กับ “ตรวจไม่ได้” และการ์ดยังกดเข้าไปดูเองได้เสมอ ซึ่งเป็นหลักของ 10.12 ที่ว่าอย่าปิดปุ่มเพราะสถานะเครือข่าย</p></section>
+
+<section><h2>5. การแสดงผลตามจำนวน</h2><pre class="code-vs"><code>ReceivingMenuCard(
+  icon: Icons.pallet,
+  title: 'ค้างการผูก Pallet',
+  subtitle: _pendingPalletCount == 0
+      ? 'ไม่มีรายการค้าง'
+      : 'มี $_pendingPalletCount รายการรอผูก Pallet',
+  color: _pendingPalletCount == 0
+      ? AppTheme.textGrey(context)
+      : AppTheme.danger,
+  badge: _pendingPalletCount &gt; 0 ? '$_pendingPalletCount' : null,
+  onTap: _openPendingPallet,
+),</code></pre><p>สามอย่างเปลี่ยนพร้อมกันตามตัวเลขเดียว — ข้อความ สี และป้าย</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ใช้สีแดงเมื่อมีของค้าง</td><td>ผู้ใช้เห็นแต่ไกลว่ามีงานรอ</td></tr>
+<tr><td>ป้ายเป็น <code>null</code> เมื่อไม่มี</td><td>ไม่แสดงป้าย “0” ที่ไม่มีความหมาย</td></tr>
+<tr><td>ยังกดได้แม้ไม่มีของค้าง</td><td>ผู้ใช้เข้าไปยืนยันได้เอง</td></tr>
+</tbody></table><p>แถวสุดท้ายสำคัญ — จอที่ปิดปุ่มเมื่อ “ไม่มีอะไรให้ทำ” จะทำให้ผู้ใช้ที่ไม่เชื่อตัวเลขทำอะไรไม่ได้เลย</p><p>สิ่งที่ควรระวังคือสีแดง</p><div class="note">สีแดงในโปรเจกต์นี้ (<code>AppTheme.danger</code>) ถูกใช้ทั้งกับ “มีงานรอ” และ “เกิดข้อผิดพลาด” — ความหมายต่างกันมากแต่สีเดียวกัน<br>ถ้าจะแยกให้ชัด “มีงานรอ” ควรใช้ <code>AppTheme.warning</code> ส่วนสีแดงเก็บไว้ให้สิ่งที่ผิดจริง ๆ ตรงกับหลักของ 11.2 ที่ว่าสีต้องตั้งชื่อตามบทบาท ไม่ใช่ตามหน้าตา</div></section>
+
+<section><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ตัวเลขบนเมนูทันสมัยเสมอ</td><td>โหลดเฉพาะตอนเปิดจอและตอนกลับมา</td></tr>
+<tr><td>“ไม่มีรายการค้าง” แปลว่าตรวจแล้ว</td><td>อาจแปลว่ายิงไม่สำเร็จ</td></tr>
+<tr><td>โค้ดหลัง <code>await Navigator.push</code> ไม่ทำงาน</td><td>ทำงานตอนจอปลายทางถูกปิด</td></tr>
+<tr><td>ต้องมี store กลางถึงจะซิงก์ข้อมูลได้</td><td>สำหรับจอที่เข้าออกไม่บ่อย วิธีนี้พอ</td></tr>
+</tbody></table></section>
+
+<section><h2>7. แบบฝึกหัด</h2><p>ทีมอยากให้ตัวเลขบนเมนูทันสมัยขึ้น โดยไม่ยิงคำขอถี่เกินไป</p><ol><li>เสนอทางเลือกสามทาง พร้อมต้นทุน</li><li>เลือกหนึ่งทางแล้วเขียนโค้ด</li><li>ทำไมถึงไม่ควรใช้ตัวจับเวลาที่ยิงทุก 10 วินาที</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ทาง</th><th>คำขอต่อกะ (โดยประมาณ)</th><th>ความสด</th><th>งานที่ต้องทำ</th></tr></thead><tbody>
+<tr><td>ตอนกลับมาจากพื้นหลัง</td><td>เพิ่มไม่กี่ครั้ง</td><td>ดีสำหรับกรณีวางเครื่องไว้</td><td>เพิ่ม observer + ต้องลบใน dispose</td></tr>
+<tr><td>ลากลงเพื่อรีเฟรช</td><td>เท่าที่ผู้ใช้กด</td><td>ผู้ใช้ควบคุมเอง</td><td>ครอบด้วย <code>RefreshIndicator</code></td></tr>
+<tr><td>ตัวจับเวลาทุก 2 นาที</td><td>~240 ครั้ง</td><td>สดตลอด</td><td>ต้องหยุดเมื่อออกจากจอ</td></tr>
+</tbody></table><p>สองทางแรกรวมกันคุ้มที่สุด และทั้งคู่ใช้ <code>_loadPendingCount()</code> ตัวเดิม</p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>class _ReceivingMenuScreenState extends State&lt;ReceivingMenuScreen&gt;
+    with WidgetsBindingObserver {
+  final _api = ApiService();
+  int? _pendingPalletCount;          // null = ยังไม่รู้
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadPendingCount();
+  }
+
+  @override
+  void dispose() {
+    // ลืมบรรทัดนี้ = observer ค้างอยู่หลังจอถูกปิด แล้ว setState บน State ที่ตายแล้ว
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadPendingCount();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: ...,
+      body: RefreshIndicator(
+        onRefresh: _loadPendingCount,
+        // RefreshIndicator ต้องมีลูกที่เลื่อนได้เสมอ ไม่งั้นลากไม่ติด
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [ ...การ์ดทั้งสองใบ... ],
+        ),
+      ),
+    );
+  }
+}</code></pre><p>สองรายละเอียดที่พลาดง่าย: <code>removeObserver</code> ใน <code>dispose</code> และ <code>RefreshIndicator</code> ต้องมีลูกที่เลื่อนได้ — จอเดิมใช้ <code>Padding</code> + <code>Column</code> ซึ่งลากลงไม่ติด ต้องเปลี่ยนเป็น <code>ListView</code></p><p><strong>ข้อ 3 — ทำไมไม่ใช้ตัวจับเวลาทุก 10 วินาที</strong></p><table><thead><tr><th>เหตุผล</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>ตัวเลขนี้ไม่ได้เปลี่ยนเร็วขนาดนั้น</td><td>ของค้างเกิดจากการผูกพาเลทล้มเหลว ซึ่งนาน ๆ ครั้ง</td></tr>
+<tr><td>เปลืองแบตบน PDA</td><td>ปลุกวิทยุทุก 10 วินาทีตลอดกะ (12.1)</td></tr>
+<tr><td>ผู้ใช้ไม่ได้จ้องจอนี้</td><td>เป็นจอทางผ่าน อยู่ไม่กี่วินาที</td></tr>
+<tr><td>เพิ่มโหลดเซิร์ฟเวอร์คูณจำนวนเครื่อง</td><td>20 เครื่อง × 6 ครั้ง/นาที = 120 คำขอ/นาที เพื่อตัวเลขเดียว</td></tr>
+</tbody></table><p><strong>หลักที่ใช้ตัดสิน:</strong> ความถี่ของการถามต้องมาจาก<strong>ความเร็วที่ข้อมูลเปลี่ยนจริง</strong> และ<strong>ความเสียหายถ้าเห็นข้อมูลเก่า</strong> ไม่ใช่จากความอยากให้สด</p><p>ที่นี่ข้อมูลเปลี่ยนช้าและเห็นเลขเก่าก็ไม่เสียหาย เพราะกดเข้าไปแล้วเห็นของจริงอยู่ดี — 12.1 ใช้หลักเดียวกันตัดสินว่าเรื่องไหนควรใช้เรียลไทม์และเรื่องไหนไม่ต้อง</p></details></section>
+
+<section><h2>8. สรุป</h2><div class="success"><ul><li>จอ 107 บรรทัด มี state สองตัว และทำหน้าที่เดียว</li><li>ใช้รูปแบบ <code>await Navigator.push(...)</code> แล้วโหลดใหม่ — ง่ายและได้ผลสำหรับจอที่เข้าออกไม่บ่อย</li><li>ปลอดภัยกว่าการส่งค่ากลับ เพราะจอปลายทางมีทางออกหลายทาง</li><li>ไม่มีการโหลดซ้ำระหว่างที่ค้างอยู่ที่จอ — ตัวเลขค้างเก่าได้</li><li>ยิงไม่สำเร็จแล้วเงียบ ทำให้ “ไม่มีของค้าง” กับ “ตรวจไม่ได้” หน้าตาเหมือนกัน</li><li>แก้ได้ด้วยการทำให้ตัวนับเป็น <code>int?</code> โดย <code>null</code> แปลว่ายังไม่รู้</li><li>สีแดงถูกใช้ทั้งกับ “มีงานรอ” และ “ผิดพลาด” ซึ่งควรแยก</li><li>ความถี่ของการถามต้องมาจากความเร็วที่ข้อมูลเปลี่ยนจริง</li></ul></div><p><strong>บทหน้า:</strong> จอค้นหา PO และการตัดสินใจเรื่องการล้างข้อมูลเก่าก่อนโหลดใหม่</p></section>

@@ -4,19 +4,249 @@
 <title>ScanPart State Machine</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-05 · Real Codebase</span><h1>ScanPart State Machine</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">State clusters</a></li><li><a href="#section-2">Initialize/resume</a></li><li><a href="#section-3">Resolve Part</a></li><li><a href="#section-4">Two input branches</a></li><li><a href="#section-5">Pallet memory</a></li><li><a href="#section-6">Submit outcomes</a></li><li><a href="#section-7">Timer/lifecycle</a></li><li><a href="#section-8">Refactor seam</a></li></ol></nav>
-<div class="note"><strong>ScanPartScreen คือ state machine แม้ยังเขียนเป็น fields:</strong> ต้องอ่านเป็น phases—idle → resolving line/lot → scanning serialหรือ qty → choosing pallet → submitting → assigned/pending/auto-closed</div>
-<section id="section-1"><h2>1. State clusters</h2><p>controllers/focus 3 กลุ่ม Part/Serial/Pallet, current PO, scanning item, serial list/manual qty, last pallet memory, assigned lines, resumed pending lines, loadingและ timed scan status หาก fieldใดไม่ resetตาม transitionจะข้ามข้อมูลระหว่าง item</p></section>
-<section id="section-2"><h2>2. Initialize/resume</h2><p><code>_currentPo = widget.po</code>และ copy <code>po.pendingLines</code>เข้า resumed list ทำให้กลับมาแก้ pallet assignmentจาก receiptเดิมได้โดยไม่ submitรับซ้ำ</p></section>
-<section id="section-3"><h2>3. Resolve Part</h2><pre class="code-vs"><code>getPartLines(partId)
-→ filter line.poId == currentPo.poId
-→ choose condition if many
-→ choose lot if many
-→ resolve POItem by lot.id</code></pre></section>
-<section id="section-4"><h2>4. Two input branches</h2><p>ถ้า <code>serialRequire</code> focus serialและ qtyมาจากจำนวน serial; ถ้าไม่ requireแสดง manual qty editorพร้อม +/- และ clamp 0..remaining ทั้งคู่รวมกลับที่ <code>_confirmPart</code></p></section>
-<section id="section-5"><h2>5. Pallet memory</h2><p><code>_lastPalletId/_lastPalletType</code>ช่วย default palletถัดไปและรวม assigned summary แต่ต้อง clearเมื่อ typeขัด, assignmentล้ม, POเปลี่ยนหรือ userยกเลิก เพื่อไม่ส่ง palletเก่าโดยไม่ตั้งใจ</p></section>
-<section id="section-6"><h2>6. Submit outcomes</h2><p>ReceiptLineResponseอาจ normal success, OVER warning, <code>palletError</code>ให้เข้ารายการ pending หรือ <code>autoClosed</code>แสดง dialog/ปิด flow Outcomeเหล่านี้ควรเป็น sealed resultแทน flagsที่ผสมกันได้หลายแบบ</p></section>
-<section id="section-7"><h2>7. Timer/lifecycle</h2><p>scan statusมี Timer 5sและ ScrollController animateไป serialที่เกี่ยว ต้อง cancel timer/dispose controllers/focus/scrollและ mounted guard post-frame callbacks ป้องกัน leak/setStateหลังออกหน้า</p></section>
-<section id="section-8"><h2>8. Refactor seam</h2><div class="success">สร้าง ReceivingFlowState + reducer/commands, ScanValidator, PalletAssignmentPolicyและ repository แล้วให้ widgetถือเฉพาะ controllers/focus การแยก phaseชัดจะกำจัด state combinationที่เป็นไปไม่ได้</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">27 ฟิลด์คืออะไรบ้าง</a></li><li><a href="#section-2">เครื่องสถานะที่ซ่อนอยู่</a></li><li><a href="#section-3">ช่องที่ถูกปิดด้วยฟิลด์เดียว</a></li><li><a href="#section-4">สองฟิลด์ที่เก็บเรื่องเดียวกัน</a></li><li><a href="#section-5">ความจำเรื่องพาเลท</a></li><li><a href="#section-6">ทรัพยากรที่ไม่ถูกคืน</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 60–80 นาที</span><span>ลงมือทำ: เปิด scan_part_screen.dart — ไฟล์ที่ใหญ่ที่สุดใน Part นี้</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.4, Part 4 (state และ async), 9.7 (การย้ายตรรกะออกจากจอ)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอที่ถือ 27 ฟิลด์ได้ และเขียนเครื่องสถานะที่ซ่อนอยู่ออกมาเป็นแผนภาพ</div>
+
+<section id="section-1"><h2>1. 27 ฟิลด์คืออะไรบ้าง</h2><p>วิธีอ่านจอใหญ่คือ<strong>จัดกลุ่มฟิลด์ตามหน้าที่ก่อน</strong> อย่าอ่านเรียงตามที่เขียน</p><pre class="code-vs"><code>// ── กลุ่ม 1: ค่าคงที่ของเลย์เอาต์ (3) ──
+static const double _serialHeaderHeight = 32;
+static const double _serialRowHeight = 42;
+static const int _serialVisibleRowLimit = 5;
+
+// ── กลุ่ม 2: ตัวควบคุมช่องกรอก (9) ──
+final _partController = TextEditingController();
+final _partFocus = FocusNode();
+final _qtyController = TextEditingController();
+final _manualQtyController = TextEditingController(text: '0');
+final _serialController = TextEditingController();
+final _serialFocus = FocusNode();
+final _palletController = TextEditingController();
+final _palletFocus = FocusNode();
+final _serialListController = ScrollController();
+
+// ── กลุ่ม 3: การเชื่อมต่อ (1) ──
+final _api = ApiService();
+
+// ── กลุ่ม 4: สถานะของ PO (2) ──
+bool _loading = false;
+late POResponse _currentPo;
+
+// ── กลุ่ม 5: ความจำเรื่องพาเลท (3) ──
+String? _lastPalletId;
+String? _lastPalletType;
+ReceiptLineResponse? _pendingLine;
+
+// ── กลุ่ม 6: รายการที่สะสมไว้ (2) ──
+final List&lt;AssignedReceivingLine&gt; _assignedLines = [];
+final List&lt;ReceiptLineResponse&gt; _resumedPendingLines = [];
+
+// ── กลุ่ม 7: การสแกนที่กำลังทำอยู่ (4) ──
+final List&lt;String&gt; _serialNumbers = [];
+String? _serialPartId;
+POItem? _scanningItem;
+int _manualQty = 0;
+
+// ── กลุ่ม 8: การแสดงผลชั่วคราว (5) ──
+String? _highlightedSerial;
+bool _highlightedSerialDuplicate = false;
+Timer? _scanStatusTimer;
+String? _scanStatusMessage;
+_ScanStatusTone _scanStatusTone = _ScanStatusTone.success;</code></pre><table><thead><tr><th>กลุ่ม</th><th>จำนวน</th><th>เป็นสถานะจริงไหม</th></tr></thead><tbody>
+<tr><td>1 ค่าคงที่</td><td>3</td><td>ไม่ — เป็นค่าคงที่</td></tr>
+<tr><td>2 ตัวควบคุม</td><td>9</td><td>ไม่ — เป็นทรัพยากร</td></tr>
+<tr><td>3 การเชื่อมต่อ</td><td>1</td><td>ไม่</td></tr>
+<tr><td>4–8 สถานะ</td><td><strong>16</strong></td><td><strong>ใช่</strong></td></tr>
+</tbody></table><p>ตัวเลขที่ต้องคิดถึงจริงคือ 16 ไม่ใช่ 27 — และ 16 ตัวนี้คือสิ่งที่ทำให้จอนี้ยาก</p><div class="note">การจัดกลุ่มแบบนี้ใช้เวลา 10 นาที และเปลี่ยนไฟล์ 1,727 บรรทัดจาก “อ่านไม่รู้เรื่อง” เป็น “มีโครง” — ทำทุกครั้งที่เจอจอใหญ่ ก่อนจะอ่านเมธอดไหนก็ตาม</div></section>
+
+<section id="section-2"><h2>2. เครื่องสถานะที่ซ่อนอยู่</h2><p>ไม่มีที่ไหนในโค้ดเขียนว่าจอนี้มีกี่โหมด แต่อ่านจาก <code>build()</code> แล้วประกอบได้</p><pre class="code-vs"><code>final showPalletSection = _pendingLine != null;</code></pre><p>บรรทัดเดียวนี้แบ่งจอเป็นสองโลก</p><pre class="code-vs"><code>┌─ โหมด A: สแกนของ (_pendingLine == null) ─────────────┐
+│                                                       │
+│  A1  ว่าง            _scanningItem == null            │
+│      → ช่อง Part เปิด รอสแกน                          │
+│                                                       │
+│  A2  เลือกของแล้ว    _scanningItem != null            │
+│      ├─ A2a ต้องมี S/N  → ช่อง S/N + รายการที่สแกน    │
+│      └─ A2b ไม่ต้อง     → ช่องกรอกจำนวน               │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+                          │
+                  ผูกพาเลทไม่สำเร็จ
+                          ▼
+┌─ โหมด B: ผูกพาเลท (_pendingLine != null) ────────────┐
+│      → ช่อง Part ถูกซ่อน แสดงช่องพาเลทแทน            │
+│      → ออกจากจอไม่ได้ (PopScope)                     │
+└───────────────────────────────────────────────────────┘</code></pre><p>เส้นทางปกติของผู้ใช้</p><pre class="code-vs"><code>A1 → สแกน Part → [เลือก condition] → [เลือก lot] → A2
+A2 → สแกน S/N ครบ / กรอกจำนวน → กดยืนยัน
+   → popup ให้สแกนพาเลท → บันทึก
+   → สำเร็จ: กลับไป A1
+   → พาเลทไม่ผ่าน: ไปอยู่ใน _resumedPendingLines (ยังอยู่ A1)</code></pre><p>สังเกตว่าโหมด B ไม่ได้ถูกเข้าจากเส้นทางปกติ — เข้าได้จากการกด “ผูก” ที่รายการค้างเท่านั้น</p><table><thead><tr><th>ฟิลด์ที่คุมโหมด</th><th>ค่าไหนหมายถึงอะไร</th></tr></thead><tbody>
+<tr><td><code>_pendingLine</code></td><td>ไม่ใช่ null = อยู่โหมด B</td></tr>
+<tr><td><code>_scanningItem</code></td><td>ไม่ใช่ null = เลือกของแล้ว รอกรอกจำนวน/S/N</td></tr>
+<tr><td><code>_scanningItem!.serialRequire</code></td><td>true = A2a, false = A2b</td></tr>
+</tbody></table></section>
+
+<section id="section-3"><h2>3. ช่องที่ถูกปิดด้วยฟิลด์เดียว</h2><pre class="code-vs"><code>ScanTextField(
+  label: 'Part ID',
+  hint: 'เช่น PT-9821',
+  controller: _partController,
+  focusNode: _partFocus,
+  enabled: _scanningItem == null,      // ← ปิดเมื่อเลือกของแล้ว
+  onSubmit: _scanPartId,
+),</code></pre><p>และเมธอดกันซ้ำอีกชั้น</p><pre class="code-vs"><code>Future&lt;void&gt; _scanPartId() async {
+  if (_scanningItem != null) return;   // ← กันซ้ำที่ต้นทาง
+  ...</code></pre><p>สองชั้นนี้ทำงานร่วมกันได้ถูก — ต่างจาก <code>ScanPoScreen</code> ใน 17.3 ที่กันแค่ที่ปุ่ม</p><table><thead><tr><th>ชั้น</th><th>กันอะไร</th></tr></thead><tbody>
+<tr><td><code>enabled:</code></td><td>ผู้ใช้พิมพ์หรือเครื่องสแกนยิงเข้ามาไม่ได้</td></tr>
+<tr><td><code>if (... != null) return</code></td><td>กันกรณีที่ยังมีทางเรียกเมธอดนี้อยู่</td></tr>
+</tbody></table><div class="note"><strong>ผลข้างเคียงที่ผู้ใช้เจอ:</strong> เมื่อเลือกของแล้ว ช่อง Part ถูกปิด — ถ้าผู้ใช้เลือกผิดของ ต้อง<strong>สแกน S/N ให้ครบหรือหาปุ่มยกเลิก</strong>ก่อนถึงจะสแกนของใหม่ได้<br>จาก 27 ฟิลด์ ไม่มีตัวไหนที่เป็น “ปุ่มยกเลิกการเลือก” และ <code>_clearSerialScan()</code> ถูกเรียกจากการบันทึกสำเร็จหรือการลบ S/N ตัวสุดท้ายเท่านั้น</div><p>นี่คือคำตอบของแบบฝึกหัดใน 17.1 ข้อ 1</p><pre class="code-vs"><code>void _removeScannedSerial(String serialNo) {
+  setState(() {
+    _serialNumbers.remove(serialNo);
+    ...
+    if (_serialNumbers.isEmpty) {
+      _clearSerialScan();          // ← ทางออกทางเดียวที่ผู้ใช้ทำเองได้
+    }
+  });
+  _serialFocus.requestFocus();
+}</code></pre><p>ผู้ใช้ที่เลือกผิดของและ<strong>ยังไม่ได้สแกน S/N สักตัว</strong> จะไม่มีทางออกเลย — เพราะไม่มี S/N ให้ลบ</p><p>เพิ่มทางออกได้ด้วยโค้ดไม่กี่บรรทัด</p><pre class="code-vs"><code>if (_scanningItem != null)
+  TextButton.icon(
+    icon: const Icon(Icons.close),
+    label: Text('ยกเลิก ${_scanningItem!.partId}'),
+    onPressed: () =&gt; setState(_clearSerialScan),
+  ),</code></pre></section>
+
+<section id="section-4"><h2>4. สองฟิลด์ที่เก็บเรื่องเดียวกัน</h2><pre class="code-vs"><code>final _qtyController = TextEditingController();
+final _manualQtyController = TextEditingController(text: '0');
+int _manualQty = 0;</code></pre><p>สามตัวนี้เกี่ยวกับจำนวนทั้งหมด แต่ทำหน้าที่ต่างกัน</p><table><thead><tr><th>ตัว</th><th>ใช้เมื่อ</th><th>ถูกตั้งค่าจากไหน</th></tr></thead><tbody>
+<tr><td><code>_qtyController</code></td><td>ค่าที่จะส่งไปเซิร์ฟเวอร์</td><td>ตั้งจากจำนวน S/N หรือจากช่องกรอก</td></tr>
+<tr><td><code>_manualQtyController</code></td><td>ช่องที่ผู้ใช้เห็นเมื่อไม่ต้องมี S/N</td><td>ผู้ใช้พิมพ์ หรือกดปุ่มบวกลบ</td></tr>
+<tr><td><code>_manualQty</code></td><td>ค่าเดียวกับข้างบน แต่เป็นตัวเลข</td><td><code>_setManualQty()</code></td></tr>
+</tbody></table><p>ตอนสแกน S/N ค่าถูกซิงก์มือ</p><pre class="code-vs"><code>setState(() {
+  _serialNumbers.add(serialNo);
+  _qtyController.text = _serialNumbers.length.toString();   // ← ซิงก์
+  _serialController.clear();
+});</code></pre><p>และตอนลบ</p><pre class="code-vs"><code>_serialNumbers.remove(serialNo);
+...
+_qtyController.text = _serialNumbers.length.toString();     // ← ซิงก์อีกที</code></pre><p>ทุกที่ที่แตะ <code>_serialNumbers</code> ต้องจำไปแก้ <code>_qtyController</code> ด้วย</p><div class="note"><strong>นี่คือรูปแบบที่ 9.3 เรียกว่าไม่มีแหล่งความจริงเดียว</strong> — จำนวนถูกเก็บสองที่ และความถูกต้องขึ้นกับว่าคนเขียนจำซิงก์ครบทุกจุดหรือไม่<br>ถ้าวันหนึ่งมีคนเพิ่มปุ่ม “ล้าง S/N ทั้งหมด” แล้วลืมแก้ <code>_qtyController</code> จำนวนที่ส่งไปเซิร์ฟเวอร์จะไม่ตรงกับ S/N ที่ส่งไป</div><p>แก้ได้โดยให้จำนวนคำนวณจาก S/N แทนที่จะเก็บแยก</p><pre class="code-vs"><code>// ไม่ต้องมี _qtyController สำหรับกรณี serial
+int get _qtyToSend =&gt; _scanningItem!.serialRequire
+    ? _serialNumbers.length      // มาจากแหล่งเดียว ไม่มีทางไม่ตรง
+    : _manualQty;</code></pre><p>โค้ดปัจจุบันมีการตรวจสอบกันไว้อีกชั้นแล้วที่ <code>_confirmPart</code> ซึ่งช่วยได้ (17.6 จะดู) แต่การตรวจสอบทีหลังแก้อาการ ไม่ได้แก้สาเหตุ</p></section>
+
+<section id="section-5"><h2>5. ความจำเรื่องพาเลท</h2><pre class="code-vs"><code>String? _lastPalletId;
+String? _lastPalletType;</code></pre><p>สองตัวนี้จำพาเลทที่ผูกครั้งล่าสุด แล้วเอาไปเติมให้อัตโนมัติ</p><pre class="code-vs"><code>final palletId = await _pickPallet(defaultPalletId: _lastPalletId);</code></pre><p>ผู้ใช้ที่รับของหลายชิ้นลงพาเลทเดียวจึงไม่ต้องสแกนพาเลทซ้ำทุกชิ้น — แค่กดยืนยันในกล่องที่เติมมาให้แล้ว</p><table><thead><tr><th>เมื่อไร</th><th><code>_lastPalletId</code></th></tr></thead><tbody>
+<tr><td>ผูกพาเลทสำเร็จ</td><td>ตั้งเป็นพาเลทนั้น</td></tr>
+<tr><td>ผูกพาเลทล้มเหลว</td><td><strong>ล้างเป็น null</strong></td></tr>
+<tr><td>ผู้ใช้กดปุ่มล้างบนแถบด้านบน</td><td>ล้างเป็น null</td></tr>
+</tbody></table><pre class="code-vs"><code>void _clearPalletMemoryForRetry(ReceiptLineResponse line) {
+  setState(() {
+    _pendingLine = line;
+    _lastPalletId = null;        // ← ล้างเมื่อล้มเหลว
+    _lastPalletType = null;
+  });
+}</code></pre><p>การล้างเมื่อล้มเหลวเป็นการตัดสินใจที่ถูก — ถ้าพาเลทนั้นใช้ไม่ได้ ไม่ควรเสนอให้ผู้ใช้อีก</p><p>และมีการตรวจสภาพก่อนใช้ความจำ</p><pre class="code-vs"><code>Future&lt;void&gt; _assignResumedLine(ReceiptLineResponse line) async {
+  // พาเลทที่จำไว้ใช้ได้เฉพาะเมื่อสภาพสินค้าตรงกัน
+  if (_lastPalletId != null &amp;&amp; _lastPalletType == line.condition) {
+    await _assignToPallet(line, _lastPalletId!);
+    setState(() =&gt; _resumedPendingLines.remove(line));
+    return;
+  }
+  ...</code></pre><p>ของ FG กับ PW ห้ามอยู่พาเลทเดียวกัน โค้ดจึงเทียบ <code>_lastPalletType</code> ก่อน — เป็นกฎทางธุรกิจที่ถูกเข้ารหัสไว้ในจอ ไม่ได้อยู่ในโมเดลหรือชั้นกลาง</p><div class="note"><strong>จุดที่ต้องระวังเมื่อจะย้ายตรรกะออกจากจอ:</strong> กฎ “พาเลทต้องสภาพเดียวกัน” อยู่ในจอนี้ที่เดียว ถ้ามีจออื่นผูกพาเลทด้วย จะต้องเขียนกฎซ้ำ<br><code>PendingPalletScreen</code> (17.8) ก็ผูกพาเลทเหมือนกัน — ไปดูว่ามีกฎเดียวกันไหม</div></section>
+
+<section id="section-6"><h2>6. ทรัพยากรที่ไม่ถูกคืน</h2><pre class="code-vs"><code>@override
+void dispose() {
+  _scanStatusTimer?.cancel();
+  _partController.dispose();
+  _partFocus.dispose();
+  _qtyController.dispose();
+  _manualQtyController.dispose();
+  _serialController.dispose();
+  _serialFocus.dispose();
+  _serialListController.dispose();
+  _palletController.dispose();
+  _palletFocus.dispose();
+  super.dispose();
+}</code></pre><p>เก้าตัวควบคุมและตัวจับเวลาถูกคืนครบ — ทำถูกทุกข้อตามที่ 4.14 สอน</p><p>แต่มีทรัพยากรอีกชุดที่สร้างนอก <code>State</code></p><pre class="code-vs"><code>Future&lt;String?&gt; _pickPallet({String? defaultPalletId}) {
+  final controller = TextEditingController(text: defaultPalletId ?? '');
+  final focusNode = FocusNode();
+  //    ↑ สร้างใหม่ทุกครั้งที่เรียก และไม่มีใคร dispose
+
+  return showModalBottomSheet&lt;String&gt;(...);
+}</code></pre><table><thead><tr><th>ผู้ใช้รับของกี่ชิ้น</th><th>วัตถุที่ค้าง</th></tr></thead><tbody>
+<tr><td>10</td><td>20</td></tr>
+<tr><td>100</td><td>200</td></tr>
+<tr><td>ทั้งกะ (~400)</td><td><strong>800</strong></td></tr>
+</tbody></table><p>แต่ละตัวไม่ใหญ่ แต่ <code>TextEditingController</code> เป็น <code>ChangeNotifier</code> ที่อาจถือผู้ฟังไว้ และ <code>FocusNode</code> ลงทะเบียนกับระบบโฟกัส — การไม่คืนทำให้ทั้งสองอย่างค้างจนกว่าจอจะถูกปิด</p><p>แก้ได้ด้วยการคืนหลังกล่องปิด</p><pre class="code-vs"><code>Future&lt;String?&gt; _pickPallet({String? defaultPalletId}) async {
+  final controller = TextEditingController(text: defaultPalletId ?? '');
+  final focusNode = FocusNode();
+  try {
+    return await showModalBottomSheet&lt;String&gt;(...);
+  } finally {
+    controller.dispose();
+    focusNode.dispose();
+  }
+}</code></pre><p><code>finally</code> รับประกันว่าคืนแน่ ไม่ว่ากล่องจะปิดด้วยการกดยืนยัน กดยกเลิก หรือปัดลง</p><div class="note"><strong>รูปแบบนี้เจอสามที่ในโดเมนที่เรากำลังอ่าน</strong> — <code>_pickPallet</code> ที่นี่, <code>_openAssignDialog</code> ใน 17.8, และ <code>_showBasketDialog</code> ใน 17.10 รวมแปดวัตถุที่ไม่ถูกคืน<br>คนเขียนรู้เรื่อง <code>dispose</code> ดี — เก้าตัวในจอนี้ถูกคืนครบ สิ่งที่พลาดคือ<strong>ตัวที่สร้างในเมธอด</strong> ซึ่งอยู่นอกสายตาของ <code>dispose()</code></div></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>27 ฟิลด์คือสถานะ 27 อย่าง</td><td>เป็นสถานะจริง 16 ที่เหลือเป็นทรัพยากรและค่าคงที่</td></tr>
+<tr><td>ปิดช่องสแกนแล้วผู้ใช้ยกเลิกได้เสมอ</td><td>ที่นี่ยกเลิกได้เฉพาะเมื่อมี S/N ให้ลบ</td></tr>
+<tr><td>จำนวนที่ส่งมาจากแหล่งเดียว</td><td>เก็บสองที่และซิงก์ด้วยมือ</td></tr>
+<tr><td>ความจำพาเลทใช้ได้กับของทุกชิ้น</td><td>ต้องสภาพตรงกันเท่านั้น</td></tr>
+<tr><td><code>dispose()</code> ครบแล้วแปลว่าไม่รั่ว</td><td>ตัวที่สร้างในเมธอดไม่อยู่ในนั้น</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียนเครื่องสถานะของจอนี้ออกมาให้ครบ แล้วหาสถานะที่ไม่ควรเกิดได้</p><ol><li>ลิสต์ชุดค่าของ <code>_pendingLine</code> และ <code>_scanningItem</code> ทั้งสี่แบบ แล้วบอกว่าแบบไหนเกิดได้จริง</li><li>ถ้ามีแบบที่ไม่ควรเกิดแต่โค้ดไม่ได้ห้าม จะเกิดขึ้นได้อย่างไร</li><li>เสนอวิธีทำให้สถานะที่ไม่ควรเกิด สร้างขึ้นไม่ได้เลย</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th><code>_pendingLine</code></th><th><code>_scanningItem</code></th><th>หมายถึง</th><th>เกิดได้ไหม</th></tr></thead><tbody>
+<tr><td>null</td><td>null</td><td>A1 — ว่าง รอสแกน</td><td>ได้</td></tr>
+<tr><td>null</td><td>มีค่า</td><td>A2 — เลือกของแล้ว</td><td>ได้</td></tr>
+<tr><td>มีค่า</td><td>null</td><td>B — กำลังผูกพาเลท</td><td>ได้</td></tr>
+<tr><td><strong>มีค่า</strong></td><td><strong>มีค่า</strong></td><td><strong>??</strong></td><td><strong>ไม่ควรเกิด</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายไม่มีความหมาย — ผู้ใช้จะกำลังผูกพาเลทและกำลังเลือกของพร้อมกันไม่ได้</p><p>ถ้าเกิด หน้าจอจะแสดงส่วนพาเลท (เพราะ <code>showPalletSection</code> ชนะ) แต่ <code>_scanningItem</code> ที่ค้างอยู่จะทำให้ช่อง Part ยังถูกปิดหลังกลับมาโหมด A</p><p><strong>ข้อ 2 — เกิดได้อย่างไร</strong></p><p>ไล่จาก <code>_confirmPart</code></p><pre class="code-vs"><code>if (line.palletError != null) {
+  showWarningSnackbar(context, '...ผูก Pallet ไม่สำเร็จ...');
+  setState(() =&gt; _resumedPendingLines.insert(0, line));
+} else {
+  ...
+}
+
+_clearFormFields();
+_clearSerialScan();      // ← ล้าง _scanningItem ตรงนี้</code></pre><p>เส้นทางนี้ปลอดภัย เพราะล้างเสมอ</p><p>แต่ดู <code>_assignResumedLine</code></p><pre class="code-vs"><code>Future&lt;void&gt; _assignResumedLine(ReceiptLineResponse line) async {
+  if (_lastPalletId != null &amp;&amp; _lastPalletType == line.condition) { ... }
+
+  setState(() {
+    _pendingLine = line;          // ← ตั้ง _pendingLine โดยไม่ล้าง _scanningItem
+    _resumedPendingLines.remove(line);
+  });
+  _palletFocus.requestFocus();
+}</code></pre><p>เมธอดนี้ตั้ง <code>_pendingLine</code> โดยไม่แตะ <code>_scanningItem</code> เลย</p><p>ผู้ใช้ที่จะเข้าถึงได้ต้องกดปุ่ม “ผูก” ที่รายการค้าง ซึ่งถูกป้องกันไว้ด้วย</p><pre class="code-vs"><code>ResumedPendingList(
+  lines: _resumedPendingLines,
+  canAssign: _pendingLine == null,    // ← กันไว้แล้ว แต่กันแค่ _pendingLine
+  ...</code></pre><p><code>canAssign</code> ตรวจแค่ <code>_pendingLine</code> ไม่ได้ตรวจ <code>_scanningItem</code></p><pre class="code-vs"><code>ผู้ใช้สแกน Part → _scanningItem มีค่า (โหมด A2)
+  → รายการค้างยังแสดงอยู่และปุ่ม "ผูก" ยังกดได้ (canAssign = true)
+    → ผู้ใช้กดผูก → _pendingLine มีค่า
+      → ทั้งสองตัวมีค่าพร้อมกัน ← สถานะที่ไม่ควรเกิด</code></pre><p>ผลที่ตามมา: ผู้ใช้ผูกพาเลทเสร็จ กลับมาโหมด A แต่ <code>_scanningItem</code> ยังค้าง ช่อง Part ยังปิดอยู่ และ <code>_serialNumbers</code> ที่สแกนไว้ก่อนหน้ายังอยู่ — ถ้าผู้ใช้สแกน S/N ต่อ จะกลายเป็นของชิ้นเดิมที่อาจไม่ได้ตั้งใจ</p><p><strong>ข้อ 3 — ทำให้สร้างไม่ได้</strong></p><p>วิธีที่เร็วที่สุดคือแก้เงื่อนไข</p><pre class="code-vs"><code>canAssign: _pendingLine == null &amp;&amp; _scanningItem == null,</code></pre><p>แก้ได้ แต่เป็นการอุดรูทีละรู — ถ้ามีทางเข้าใหม่ก็ต้องจำเพิ่มเงื่อนไขอีก</p><p>วิธีที่ทำให้สถานะผิดสร้างไม่ได้เลยคือรวมสองฟิลด์เป็นชนิดเดียวตามที่ 6.13 สอน</p><pre class="code-vs"><code>sealed class ScanMode {}
+
+/// ว่าง รอสแกน Part
+class Idle extends ScanMode {
+  const Idle();
+}
+
+/// เลือกของแล้ว กำลังกรอกจำนวนหรือสแกน S/N
+class Scanning extends ScanMode {
+  Scanning(this.item);
+  final POItem item;
+  final List&lt;String&gt; serials = [];
+
+  int get qty =&gt; item.serialRequire ? serials.length : manualQty;
+  int manualQty = 0;
+}
+
+/// กำลังผูกพาเลทให้รายการที่ค้าง
+class AssigningPallet extends ScanMode {
+  AssigningPallet(this.line);
+  final ReceiptLineResponse line;
+}</code></pre><pre class="code-vs"><code>ScanMode _mode = const Idle();</code></pre><p>ตอนนี้สองสถานะพร้อมกัน<strong>เป็นไปไม่ได้</strong> เพราะฟิลด์มีตัวเดียวและถือค่าได้ทีละแบบ</p><p>และ <code>build()</code> เขียนได้แบบที่คอมไพเลอร์ตรวจว่าครบทุกกรณี</p><pre class="code-vs"><code>switch (_mode) {
+  Idle() =&gt; _buildScanPartSection(enabled: true),
+  Scanning(:final item) =&gt; item.serialRequire
+      ? _buildSerialSection(item)
+      : _buildManualQtySection(item),
+  AssigningPallet(:final line) =&gt; _buildPalletSection(line),
+}</code></pre><p>เพิ่มโหมดใหม่วันหลัง คอมไพเลอร์จะบอกทันทีว่ามีที่ไหนยังไม่ได้จัดการ — ต่างจากตอนนี้ที่ต้องหาเองว่ามีเงื่อนไข <code>!= null</code> อยู่กี่ที่</p><p><strong>ข้อสังเกตที่สำคัญที่สุด:</strong> บั๊กนี้ยังไม่มีใครแจ้ง เพราะผู้ใช้ต้องกดในลำดับที่ไม่ปกติถึงจะเจอ — แต่มันเป็นบั๊กที่<strong>โครงสร้างของโค้ดเปิดช่องไว้</strong> ไม่ใช่ความผิดพลาดของคนเขียน<br>วิธีอุดรูทีละรูจะได้ผลจนกว่าจะมีคนเพิ่มทางเข้าใหม่ ส่วนวิธีที่สองปิดช่องถาวร</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>27 ฟิลด์แบ่งได้ 8 กลุ่ม และเป็นสถานะจริงแค่ 16</li><li>จอมีสามโหมด: ว่าง / เลือกของแล้ว / ผูกพาเลท ซึ่งไม่มีที่ไหนเขียนไว้</li><li><code>_pendingLine</code> คุมโหมดใหญ่ <code>_scanningItem</code> คุมโหมดย่อย</li><li>ช่อง Part ถูกปิดสองชั้น — ทั้งที่ widget และที่เมธอด</li><li>ผู้ใช้ที่เลือกผิดของและยังไม่สแกน S/N จะไม่มีทางยกเลิก</li><li>จำนวนถูกเก็บสองที่และซิงก์ด้วยมือทุกจุดที่แตะ <code>_serialNumbers</code></li><li>ความจำพาเลทถูกล้างเมื่อล้มเหลว และตรวจสภาพสินค้าก่อนใช้</li><li>ตัวควบคุมที่สร้างใน <code>_pickPallet</code> ไม่ถูกคืน — สะสมทั้งกะ</li><li><code>_pendingLine</code> และ <code>_scanningItem</code> มีค่าพร้อมกันได้ ซึ่งไม่ควรเกิด</li></ul></div><p><strong>บทหน้า:</strong> การตรวจ S/N ที่มีการป้องกันสี่ชั้น และการกันสแกนซ้ำที่ทำได้ดีกว่าที่คิด</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

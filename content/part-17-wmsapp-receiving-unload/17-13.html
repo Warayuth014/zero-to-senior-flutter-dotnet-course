@@ -1,10 +1,183 @@
-<div class="note"><strong>Unload/Basket contract เชื่อม inventory สองสถานะ:</strong> model ต้องรักษา session line, part+lot, serial และยอด remaining เพื่อให้ทุก mutation ตรวจย้อนหลังและ retry ได้อย่างปลอดภัย</div>
-<section><h2>1. UnloadApi</h2><p>สามคำสั่งคือ <code>open-session</code>, <code>confirm-unload</code> และ <code>return-pallet-to-asis</code> แต่ละคำสั่งควรแปลง non-2xx, timeout และ malformed JSON เป็น error ที่ต่างกันเพื่อให้ UI ตัดสินใจ refresh/retry ถูก</p></section>
-<section><h2>2. UnloadSession</h2><p><code>UnloadSession</code> มี sessionId, pallet, status, items และ <code>confirmedLineIds</code> Session ID ต้องถูกส่งคืนทุก mutation เพื่อให้ backend ตรวจ ownership/version ของ workflow</p></section>
-<section><h2>3. UnloadItem</h2><p><code>lineId</code> แยก part+lot แต่ละบรรทัด; partId อย่างเดียวไม่พอ โค้ดปัจจุบันอนุมาน <code>serialRequire</code> จาก <code>serialNumbers.isNotEmpty</code> ซึ่งคลุมเครือเมื่อ serial-controlled item มีข้อมูลเสียหรือรายการว่าง ควรส่ง boolean จาก API โดยตรง</p></section>
-<section><h2>4. Confirm contract</h2><p>serial item ส่ง serialNumbers และอาจไม่ต้องส่ง qty; non-serial ส่ง qtyUnloaded และ empty serial list DTO ฝั่ง .NET ควร validate รูปแบบแบบ mutually exclusive ตาม serialRequire ของ inventory จริง ไม่เชื่อ client</p></section>
-<section><h2>5. BasketApi</h2><pre class="code-vs"><code>GET  /basket/unloaded-items
-POST /basket/load</code></pre><p>endpoint แรกให้ snapshot ของ staging inventory ส่วน endpoint หลังย้ายจำนวน/serial ไป basket และควรคืนยอด/สถานะใหม่ที่ตรวจสอบได้</p></section>
-<section><h2>6. UnloadedItem</h2><p>model มี partId, lotNumber, qtyUnloaded, qtyLoaded, <code>qtyRemaining</code>, basketId, unloadLineIds และ serialNumbers ทำให้ตามที่มาจาก unload หลาย line ได้ แต่ key ใน UI ต้องอย่างน้อย part+lot และอาจต้อง condition/site เพิ่มตาม backend</p></section>
-<section><h2>7. Load response</h2><p><code>LoadToBasketResponse</code> ควรสื่อผลธุรกรรม, basket ปลายทาง, จำนวน accepted/rejected และ remaining อย่าง explicit หาก API คืนเพียง message UI ต้อง reload เสมอและวิเคราะห์ partial result ได้ยาก</p></section>
-<section><h2>8. Contract checklist</h2><div class="success">ใช้ enum/status ที่รองรับ unknown, decimal policy เดียวกันทั้ง Dart/.NET, UTC timestamps, correlation/idempotency key, version/concurrency token, typed problem details และ JSON fixtures ที่ทดสอบทั้งสองฝั่ง</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด basket_models.dart, unload_models.dart, basket_api.dart, unload_api.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.12, 17.9 (โมเดล receiving)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เทียบสัญญาของสองโดเมนได้ และรู้ว่าฟิลด์ที่คำนวณเองต่างจากฟิลด์ที่มาจากเซิร์ฟเวอร์อย่างไร</div>
+
+<section><h2>1. โมเดลของสองโดเมน</h2><table><thead><tr><th>ไฟล์</th><th>คลาส</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td><code>unload_models.dart</code></td><td><code>UnloadItem</code>, <code>UnloadSession</code>, <code>BasketScanResponse</code>, <code>GroupedUnloadItem</code></td><td>120</td></tr>
+<tr><td><code>basket_models.dart</code></td><td><code>UnloadedItemsResponse</code>, <code>UnloadedItem</code>, <code>LoadToBasketResponse</code></td><td>98</td></tr>
+</tbody></table><p>เจ็ดคลาส 218 บรรทัด — เล็กกว่า receiving ที่มีเจ็ดคลาสใน 264 บรรทัด</p><p>สังเกตชื่อที่ใกล้กันจนสับสน</p><table><thead><tr><th>คลาส</th><th>อยู่ไฟล์</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td><code>UnloadItem</code></td><td><code>unload_models</code></td><td>ของ<strong>บนพาเลท</strong> ที่รอถ่ายลง</td></tr>
+<tr><td><code>UnloadedItem</code></td><td><code>basket_models</code></td><td>ของที่<strong>ถ่ายลงแล้ว</strong> รอใส่ตะกร้า</td></tr>
+</tbody></table><div class="note"><strong>ต่างกันแค่ตัว <code>ed</code></strong> — และทั้งคู่ถูก export ผ่าน <code>wms_models.dart</code> เดียวกัน จึงเรียกใช้ได้ทั้งคู่ในไฟล์เดียวโดยไม่มีอะไรเตือน<br>ถ้าพิมพ์ผิด คอมไพเลอร์จะจับได้เพราะฟิลด์ต่างกัน แต่คนอ่านโค้ดจะสับสนแน่นอน<br>ชื่อที่ชัดกว่าคือ <code>PalletItem</code> กับ <code>UnloadedItem</code> — บอกว่าอยู่ขั้นไหนของ flow</div></section>
+
+<section><h2>2. ฟิลด์ที่คำนวณเองสองที่</h2><pre class="code-vs"><code>// unload_models.dart
+class UnloadItem {
+  final List&lt;String&gt; serialNumbers;
+  ...
+  bool get serialRequire =&gt; serialNumbers.isNotEmpty;
+}</code></pre><pre class="code-vs"><code>// basket_models.dart
+class UnloadedItem {
+  final List&lt;String&gt; serialNumbers;
+  final int qtyRemaining;
+  ...
+  bool get isDone =&gt; qtyRemaining &lt;= 0;
+  bool get serialRequire =&gt; serialNumbers.isNotEmpty;
+}</code></pre><p>ทั้งสองคลาสคำนวณ <code>serialRequire</code> เอง ต่างจาก receiving ที่รับมาจากเซิร์ฟเวอร์</p><table><thead><tr><th>โดเมน</th><th><code>serialRequire</code> มาจาก</th><th>ผลเมื่อข้อมูลไม่ครบ</th></tr></thead><tbody>
+<tr><td>receiving</td><td>ฟิลด์จริง <code>json['serialRequire'] ?? false</code></td><td>เดาว่าไม่ต้อง</td></tr>
+<tr><td>unload / basket</td><td>คำนวณจาก <code>serialNumbers.isNotEmpty</code></td><td>เดาว่าไม่ต้อง</td></tr>
+</tbody></table><p>ทั้งสองแบบล้มไปทาง “ไม่ต้องสแกน” เมื่อข้อมูลขาด ซึ่งเป็นค่าเริ่มต้นแบบผ่อนปรนตามที่ 17.9 อธิบาย</p><p>แต่มีความต่างที่สำคัญ</p><pre class="code-vs"><code>// receiving — สองเรื่องแยกกัน
+serialRequire: true          // "ของนี้ต้องสแกน S/N"
+serialNumbers: []            // "แต่ยังไม่รู้ว่ามีตัวไหนบ้าง"   ← เป็นไปได้
+
+// unload — เรื่องเดียวกัน
+serialNumbers: []            // "ไม่มี S/N" = "ไม่ต้องสแกน"     ← แยกไม่ได้</code></pre><table><thead><tr><th>สถานการณ์</th><th>receiving จับได้ไหม</th><th>unload จับได้ไหม</th></tr></thead><tbody>
+<tr><td>ของต้องมี S/N และเซิร์ฟเวอร์ส่งรายชื่อมาครบ</td><td>ได้</td><td>ได้</td></tr>
+<tr><td>ของไม่ต้องมี S/N</td><td>ได้</td><td>ได้</td></tr>
+<tr><td><strong>ของต้องมี S/N แต่เซิร์ฟเวอร์ไม่ส่งรายชื่อมา</strong></td><td><strong>ได้ — <code>serialRequire</code> ยังเป็น true แล้วผู้ใช้สแกนไม่ผ่าน</strong></td><td><strong>ไม่ได้ — ผ่านไปด้วยจำนวนเลย</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือช่องโหว่จริง — ของที่ควรถูกติดตามทีละชิ้น จะถูกถ่ายลงด้วยจำนวนโดยไม่มีใครรู้</p><p>แก้ได้โดยขอให้เซิร์ฟเวอร์ส่งฟิลด์มาตรง ๆ</p><pre class="code-vs"><code>class UnloadItem {
+  final bool serialRequire;                     // จากเซิร์ฟเวอร์
+  final List&lt;String&gt; serialNumbers;
+
+  factory UnloadItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt; UnloadItem(
+    // ถ้าเซิร์ฟเวอร์ยังไม่ส่งฟิลด์นี้ ให้เดาจากรายชื่อไปก่อน
+    serialRequire: json['serialRequire'] ?? (json['serialNumbers'] as List?)?.isNotEmpty ?? false,
+    ...
+  );
+
+  /// รายชื่อไม่ครบทั้งที่ต้องสแกน = ข้อมูลผิด ต้องหยุด
+  bool get serialDataIncomplete =&gt; serialRequire &amp;&amp; serialNumbers.isEmpty;
+}</code></pre><p>เขียนแบบนี้ทำงานได้ทั้งก่อนและหลังฝั่ง .NET เพิ่มฟิลด์ และ <code>serialDataIncomplete</code> ทำให้กรณีที่สามมองเห็นได้แทนที่จะเงียบ</p></section>
+
+<section><h2>3. isDone ที่ทนกว่าที่จำเป็น</h2><pre class="code-vs"><code>bool get isDone =&gt; qtyRemaining &lt;= 0;</code></pre><p>ใช้ <code>&lt;=</code> ไม่ใช่ <code>==</code> — เผื่อกรณีที่ค่าติดลบ</p><table><thead><tr><th><code>qtyRemaining</code></th><th><code>== 0</code></th><th><code>&lt;= 0</code></th></tr></thead><tbody>
+<tr><td>5</td><td>ยังไม่เสร็จ</td><td>ยังไม่เสร็จ</td></tr>
+<tr><td>0</td><td>เสร็จ</td><td>เสร็จ</td></tr>
+<tr><td><strong>-2</strong></td><td><strong>ยังไม่เสร็จ</strong></td><td><strong>เสร็จ</strong></td></tr>
+</tbody></table><p>ค่าติดลบเกิดได้ถ้ามีการโหลดเกิน หรือข้อมูลจากสองแหล่งไม่ตรงกัน — <code>&lt;=</code> ทำให้รายการนั้นถูกซ่อนแทนที่จะค้างอยู่ตลอดไป</p><p>เป็นการเขียนที่ป้องกันไว้โดยไม่ต้องอธิบาย และค่าใช้จ่ายเป็นศูนย์</p><p>แต่ควรระวังว่าการซ่อนไม่ใช่การแก้ — ถ้ามีค่าติดลบจริง ควรมีใครสักคนรู้</p><pre class="code-vs"><code>bool get isDone =&gt; qtyRemaining &lt;= 0;
+
+/// จำนวนติดลบ = ข้อมูลไม่สอดคล้อง ควรแจ้งทีมหลังบ้าน
+bool get hasInvalidQty =&gt; qtyRemaining &lt; 0;</code></pre></section>
+
+<section><h2>4. ระดับการป้องกันที่ต่างกันสามไฟล์</h2><p>เทียบการอ่านฟิลด์คำอธิบายในสามโดเมน</p><pre class="code-vs"><code>// receiving_models.dart — POItem
+owner: json['owner'],              // พังถ้าไม่มี
+brand: json['brand'],              // พังถ้าไม่มี
+itemDesc: json['itemDesc'],        // พังถ้าไม่มี
+
+// unload_models.dart — UnloadItem
+owner: json['owner'],              // พังถ้าไม่มี
+brand: json['brand'],              // พังถ้าไม่มี
+itemDesc: json['itemDesc'],        // พังถ้าไม่มี
+
+// basket_models.dart — UnloadedItem
+owner: json['owner'] ?? '',        // ← กันไว้
+brand: json['brand'] ?? '',        // ← กันไว้
+itemDesc: json['itemDesc'] ?? '',  // ← กันไว้</code></pre><p>ไฟล์ที่สามกันไว้ ส่วนสองไฟล์แรกไม่กัน — ทั้งที่เป็นข้อมูลชนิดเดียวกันของสินค้าตัวเดียวกัน</p><div class="note"><strong>นี่คือหลักฐานว่าไฟล์ถูกเขียนต่างเวลากันและไม่มีข้อตกลงเขียนไว้</strong><br>คนเขียน <code>basket_models.dart</code> รู้ว่าควรกัน — แต่ไม่มีใครกลับไปแก้สองไฟล์แรก เพราะไม่มีอะไรบอกว่ามีความไม่สม่ำเสมออยู่<br>เทสต์ตามที่ 17.9 เสนอจะทำให้เห็นทันที เพราะเทสต์เดียวกันจะผ่านที่หนึ่งและล้มที่อีกที่</div><p>ส่วนการอ่านรายการก็ต่างกันอีก</p><pre class="code-vs"><code>// unload_models.dart — UnloadSession
+items: (json['items'] as List).map((i) =&gt; UnloadItem.fromJson(i)).toList(),
+//                        ↑ ไม่กัน null
+
+// basket_models.dart — UnloadedItemsResponse
+items: (json['items'] as List).map((e) =&gt; UnloadedItem.fromJson(e)).toList(),
+//                        ↑ ไม่กันเหมือนกัน
+
+// แต่ฟิลด์อื่นในไฟล์เดียวกันกัน
+confirmedLineIds: (json['confirmedLineIds'] as List? ?? []).map((e) =&gt; e as int).toList(),
+serialNumbers: (json['serialNumbers'] as List?)?.map((e) =&gt; e as String).toList() ?? [],</code></pre><p>รูปแบบที่เจอคือ <strong>ฟิลด์หลักไม่กัน ฟิลด์เสริมกัน</strong> — สมเหตุสมผลถ้าคิดว่าฟิลด์หลักต้องมีเสมอ แต่ผลคือคำตอบที่ผิดรูปทำให้พังโดยไม่มีข้อความที่ช่วยอะไร</p></section>
+
+<section><h2>5. ฝั่ง API — ห้าเมธอด</h2><pre class="code-vs"><code>// unload_api.dart — สามเมธอด ทิ้ง statusCode ทั้งหมด
+if (!response.success) return ApiResult.error(response.error);
+
+// basket_api.dart — สองเมธอด ส่ง statusCode ต่อทั้งคู่
+if (!response.success) {
+  return ApiResult.error(response.error, statusCode: response.statusCode);
+}</code></pre><p>ตรงกับตารางใน 16.7 — <code>basket_api.dart</code> อยู่ในกลุ่มที่ทำครบ ส่วน <code>unload_api.dart</code> อยู่ในกลุ่มที่ทิ้ง</p><p>อีกจุดที่ทั้งสองไฟล์ทำเหมือนกัน</p><pre class="code-vs"><code>// unload_api.dart
+final body = &lt;String, dynamic&gt;{
+  ...
+  // Part ไม่ require serial ต้องส่ง null/[] เสมอ (ฝั่ง backend รองรับทั้งคู่)
+  'serialNumbers': serialNumbers ?? [],
+};
+if (qtyUnloaded != null) body['qtyUnloaded'] = qtyUnloaded;</code></pre><pre class="code-vs"><code>// basket_api.dart
+final response = await _post('/basket/load', {
+  ...
+  // Part ไม่ require serial ต้องส่ง null/[] เสมอ (ฝั่ง backend รองรับทั้งคู่)
+  'serialNumbers': serialNumbers ?? [],
+});</code></pre><p>คอมเมนต์เดียวกันคำต่อคำในสามไฟล์ (รวม <code>receiving_api.dart</code>) — เป็นข้อตกลงกับฝั่ง .NET ที่ถูกบันทึกไว้ในที่ที่คนอ่านโค้ดจะเห็น</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>บันทึกข้อตกลงไว้ในคอมเมนต์</td><td>คนที่มาแก้ทีหลังจะไม่เปลี่ยนเป็น <code>if (serialNumbers != null)</code></td></tr>
+<tr><td>ส่ง <code>[]</code> แทน <code>null</code></td><td>ฝั่ง .NET ไม่ต้องแยกสองกรณี</td></tr>
+</tbody></table><p>สังเกตความต่างของการใส่ฟิลด์ที่อาจไม่มี</p><pre class="code-vs"><code>// unload — ใส่เฉพาะเมื่อมี
+if (qtyUnloaded != null) body['qtyUnloaded'] = qtyUnloaded;
+
+// basket — ใส่เสมอ แม้เป็น null
+'lotNumber': lotNumber,</code></pre><p>สองแบบนี้ต่างกันฝั่งเซิร์ฟเวอร์ — แบบแรกฟิลด์ไม่ปรากฏใน JSON เลย แบบที่สองปรากฏเป็น <code>null</code></p><table><thead><tr><th>ถ้า .NET ใช้</th><th>ไม่ส่งฟิลด์</th><th>ส่งเป็น null</th></tr></thead><tbody>
+<tr><td>ค่าเริ่มต้นของ property</td><td>ได้ค่าเริ่มต้น</td><td>ได้ null</td></tr>
+<tr><td><code>[Required]</code></td><td>ไม่ผ่าน validation</td><td>ไม่ผ่าน validation</td></tr>
+<tr><td>ตรวจ <code>== null</code></td><td>เหมือนกัน</td><td>เหมือนกัน</td></tr>
+</tbody></table><p>ในกรณีทั่วไปได้ผลเหมือนกัน แต่ถ้า .NET ใช้ <code>JsonPatchDocument</code> หรือมีตรรกะที่แยก “ไม่ส่ง” จาก “ส่งค่าว่าง” จะต่างกันมาก — เป็นเรื่องที่ต้องยืนยันกับทีมหลังบ้าน ไม่ใช่เดา</p></section>
+
+<section><h2>6. คลาสที่ไม่ถูกใช้</h2><p>ค้นทั้งโปรเจกต์แล้วมีสองคลาสในสองไฟล์นี้ที่ไม่มีใครเรียก</p><table><thead><tr><th>คลาส</th><th>อยู่ไฟล์</th><th>ถูกใช้ที่</th></tr></thead><tbody>
+<tr><td><code>BasketScanResponse</code></td><td><code>unload_models.dart</code></td><td>ไม่มี</td></tr>
+<tr><td><code>GroupedUnloadItem</code></td><td><code>unload_models.dart</code></td><td>ไม่มี</td></tr>
+</tbody></table><p>เป็นร่องรอยของ endpoint ที่เคยมีหรือกำลังจะมี</p><table><thead><tr><th>ควรทำอย่างไร</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ลบทิ้ง</td><td>โค้ดที่ไม่ถูกใช้ทำให้คนอ่านเสียเวลา และ git เก็บประวัติไว้ให้อยู่แล้ว</td></tr>
+<tr><td>เขียนคอมเมนต์บอกว่ารออะไร</td><td>ถ้ารู้ว่าจะใช้เร็ว ๆ นี้</td></tr>
+<tr><td>ปล่อยไว้เฉย ๆ</td><td><strong>แย่ที่สุด</strong> — คนอ่านต้องเดาว่ามีไว้ทำไม</td></tr>
+</tbody></table><div class="note">การหาโค้ดที่ไม่ถูกใช้ทำได้ด้วยการค้นชื่อคลาสทั้งโปรเจกต์<pre class="code-vs"><code>rg "BasketScanResponse" lib
+# เจอแค่ที่ประกาศ = ไม่มีใครใช้</code></pre>ทำครั้งเดียวตอนเข้าโปรเจกต์ใหม่ จะได้รู้ว่าอะไรเป็นของจริงและอะไรเป็นซาก</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>UnloadItem</code> กับ <code>UnloadedItem</code> เป็นตัวเดียวกัน</td><td>คนละขั้นของ flow คนละไฟล์</td></tr>
+<tr><td>คำนวณ <code>serialRequire</code> เองปลอดภัยพอ</td><td>แยก “ไม่ต้องสแกน” จาก “ข้อมูลขาด” ไม่ได้</td></tr>
+<tr><td>โมเดลในโปรเจกต์เดียวกันป้องกันเหมือนกัน</td><td>สามไฟล์ป้องกันสามระดับ</td></tr>
+<tr><td>ไม่ส่งฟิลด์กับส่งเป็น null เหมือนกัน</td><td>ขึ้นกับว่า .NET อ่านอย่างไร</td></tr>
+<tr><td>คลาสที่มีอยู่ต้องถูกใช้</td><td>สองคลาสในไฟล์นี้ไม่มีใครเรียก</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สินค้า PT-5502 ที่มี S/N พอไป Load เข้า Basket มันไม่ให้สแกน S/N เลย ให้กรอกจำนวนอย่างเดียว”</p><ol><li>ไล่หาสาเหตุจากโค้ดที่บทนี้อ่านมา</li><li>ยืนยันสมมติฐานอย่างไรโดยไม่ต้องแก้โค้ด</li><li>แก้อย่างไรให้ปัญหานี้มองเห็นได้ในอนาคต</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ไล่หาสาเหตุ</strong></p><p>เริ่มจากจุดที่ตัดสินใจว่าจะแสดงช่อง S/N ไหม</p><pre class="code-vs"><code>// load_to_basket_screen.dart
+final requiresSerial = item.serialRequire;
+var showBasketStep = !requiresSerial;      // ← true = ข้ามขั้น S/N ไปเลย</code></pre><p>ตามต่อไปที่โมเดล</p><pre class="code-vs"><code>// basket_models.dart
+bool get serialRequire =&gt; serialNumbers.isNotEmpty;</code></pre><p>แปลว่า <code>serialNumbers</code> ที่ได้มาว่างเปล่า</p><pre class="code-vs"><code>serialNumbers: (json['serialNumbers'] as List?)?.map((e) =&gt; e as String).toList() ?? [],</code></pre><table><thead><tr><th>สาเหตุที่เป็นไปได้</th><th>ตรวจอย่างไร</th></tr></thead><tbody>
+<tr><td>เซิร์ฟเวอร์ไม่ส่ง <code>serialNumbers</code> มาเลย</td><td>ดู JSON จริง</td></tr>
+<tr><td>ส่งมาเป็น <code>[]</code></td><td>ดู JSON จริง</td></tr>
+<tr><td>ส่งมาแต่ชื่อคีย์ต่าง (เช่น <code>SerialNumbers</code>)</td><td>ดู JSON จริง — และ 16.8 เตือนเรื่องนี้ไว้</td></tr>
+<tr><td>S/N ทั้งหมดถูก Load ไปแล้ว</td><td>ดู <code>qtyRemaining</code></td></tr>
+</tbody></table><p>สาเหตุที่สี่น่าสนใจ — ถ้า S/N ที่เหลือถูกโหลดไปหมดแล้ว รายการนั้นควรมี <code>qtyRemaining == 0</code> และถูกกรองออกตั้งแต่แรก</p><pre class="code-vs"><code>.where((i) =&gt; i.partId == partId &amp;&amp; !i.isDone)</code></pre><p>จึงตัดสาเหตุที่สี่ออกได้ เหลือสามข้อแรกที่ทั้งหมดเป็นเรื่องของ JSON</p><p><strong>ข้อ 2 — ยืนยันโดยไม่แก้โค้ด</strong></p><pre class="code-vs"><code># ยิง endpoint ตรงจากเครื่องที่ต่อวงเดียวกัน
+curl http://192.168.1.50:5000/api/basket/unloaded-items</code></pre><p>แล้วดูรายการของ <code>PT-5502</code></p><table><thead><tr><th>ถ้าเห็น</th><th>สรุปได้ว่า</th></tr></thead><tbody>
+<tr><td>ไม่มีคีย์ <code>serialNumbers</code> เลย</td><td>ฝั่ง .NET ไม่ได้ส่ง — งานอยู่หลังบ้าน</td></tr>
+<tr><td><code>"serialNumbers": []</code></td><td>ส่งแต่ว่าง — ต้องดูว่าทำไม</td></tr>
+<tr><td><code>"SerialNumbers": [...]</code></td><td><strong>ชื่อคีย์เป็น PascalCase</strong> — endpoint นี้ไม่ผ่านตัวแปลงมาตรฐาน</td></tr>
+</tbody></table><p>กรณีที่สามเป็นสิ่งที่ 16.8 เตือนไว้ และจะทำให้<strong>ทุกฟิลด์ของรายการนั้นเป็นค่าเริ่มต้นหมด</strong> ไม่ใช่แค่ S/N — ตรวจได้โดยดูว่า <code>owner</code> กับ <code>brand</code> ว่างด้วยไหม</p><p>ถ้าว่างทั้งหมด ยืนยันได้ทันทีโดยไม่ต้องดู JSON ด้วยซ้ำ</p><p><strong>ข้อ 3 — ทำให้มองเห็นได้</strong></p><p>ปัญหานี้เงียบเพราะแอปไม่มีทางแยก “ไม่ต้องมี S/N” จาก “ควรมีแต่ไม่ได้มา”</p><pre class="code-vs"><code>class UnloadedItem {
+  final bool? serialRequire;                  // จากเซิร์ฟเวอร์ — null = ไม่ได้ส่งมา
+  final List&lt;String&gt; serialNumbers;
+
+  factory UnloadedItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt; UnloadedItem(
+    serialRequire: json['serialRequire'] as bool?,
+    serialNumbers: (json['serialNumbers'] as List?)
+            ?.map((e) =&gt; e as String).toList() ?? [],
+    ...
+  );
+
+  /// ต้องสแกน S/N ไหม — ใช้ค่าจากเซิร์ฟเวอร์ก่อน ถ้าไม่มีค่อยเดา
+  bool get needsSerial =&gt; serialRequire ?? serialNumbers.isNotEmpty;
+
+  /// บอกว่าต้องสแกน แต่ไม่มีรายชื่อมาให้ = ข้อมูลไม่ครบ
+  bool get serialDataMissing =&gt; serialRequire == true &amp;&amp; serialNumbers.isEmpty;
+}</code></pre><p>แล้วหยุดผู้ใช้ก่อนที่จะทำผิด</p><pre class="code-vs"><code>void _onScanPart() {
+  ...
+  final item = items.first;
+
+  if (item.serialDataMissing) {
+    showErrorDialog(
+      context,
+      title: 'ข้อมูล S/N ไม่ครบ',
+      message: '${item.partId} ต้องสแกน S/N แต่ระบบไม่ส่งรายชื่อ S/N มา\n'
+          'กรุณาแจ้งทีมไอที — อย่า Load ด้วยจำนวนแทน',
+    );
+    _scanFocus.requestFocus();
+    return;
+  }
+
+  setState(() =&gt; _selectedItem = item);
+  _showBasketDialog(item);
+}</code></pre><table><thead><tr><th>เปลี่ยนจาก</th><th>เป็น</th></tr></thead><tbody>
+<tr><td>ปล่อยผ่านเงียบ ๆ ด้วยจำนวน</td><td>หยุดและบอกว่าข้อมูลผิด</td></tr>
+<tr><td>ไม่มีใครรู้ว่ามีปัญหา</td><td>ผู้ใช้แจ้งได้ทันทีพร้อมรหัสสินค้า</td></tr>
+</tbody></table><p><strong>ข้อควรระวังก่อนทำ:</strong> ถ้าฝั่ง .NET ยังไม่ส่ง <code>serialRequire</code> มาเลย <code>serialDataMissing</code> จะเป็น <code>false</code> เสมอ และไม่มีอะไรเปลี่ยน</p><p>การแก้นี้จึงต้องทำสองฝั่ง — และการทำฝั่งแอปก่อนก็ยังคุ้ม เพราะพอฝั่ง .NET เพิ่มฟิลด์เมื่อไร แอปจะจับได้ทันทีโดยไม่ต้องปล่อยรุ่นใหม่</p><p><strong>ข้อสรุปที่ใหญ่กว่า:</strong> ฟิลด์ที่คำนวณจากข้อมูลอื่น (<code>serialRequire =&gt; serialNumbers.isNotEmpty</code>) ประหยัดฝั่งเซิร์ฟเวอร์ แต่แลกมาด้วยการที่<strong>ข้อมูลขาดกับข้อมูลว่างแยกกันไม่ออก</strong> — ใช้ได้กับค่าที่ไม่สำคัญ แต่ไม่ควรใช้กับกฎที่ตัดสินว่าผู้ใช้ต้องทำอะไร</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>เจ็ดคลาส 218 บรรทัด และมีสองคลาสที่ไม่มีใครเรียก</li><li><code>UnloadItem</code> กับ <code>UnloadedItem</code> ต่างกันแค่ <code>ed</code> แต่คนละขั้นของ flow</li><li><code>serialRequire</code> ถูกคำนวณจาก <code>serialNumbers.isNotEmpty</code> — แยกข้อมูลขาดจากไม่ต้องมีไม่ได้</li><li>receiving รับฟิลด์นี้มาตรง ๆ จึงจับกรณีข้อมูลขาดได้</li><li><code>isDone</code> ใช้ <code>&lt;=</code> เผื่อค่าติดลบ — ป้องกันไว้โดยไม่มีค่าใช้จ่าย</li><li>สามไฟล์โมเดลป้องกันฟิลด์คำอธิบายสามระดับต่างกัน</li><li><code>basket_api</code> ส่ง <code>statusCode</code> ต่อ ส่วน <code>unload_api</code> ทิ้งทั้งสามเมธอด</li><li>คอมเมนต์เรื่อง <code>serialNumbers ?? []</code> ปรากฏเหมือนกันสามไฟล์ — ข้อตกลงกับ .NET ที่บันทึกไว้ดี</li><li>“ไม่ส่งฟิลด์” กับ “ส่งเป็น null” อาจต่างกันฝั่งเซิร์ฟเวอร์</li></ul></div><p><strong>บทหน้า:</strong> ต่อทั้ง flow เป็นเส้นเดียว สรุปสิ่งที่พบทั้ง Part และเตรียมเข้า Part 18</p></section>

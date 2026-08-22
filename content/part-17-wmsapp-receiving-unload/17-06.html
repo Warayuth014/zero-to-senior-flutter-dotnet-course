@@ -1,16 +1,229 @@
-<div class="note"><strong>Duplicate guard มีสองชั้น:</strong> local listตอบผู้ใช้เร็ว แต่ server validationและ uniqueness constraintเท่านั้นที่กัน serialซ้ำข้ามเครื่อง/ข้าม sessionได้</div>
-<section><h2>1. Local duplicate</h2><pre class="code-vs"><code>final index = _serialNumbers.indexOf(serialNo);
-if (index &gt;= 0) {
-  highlight(index, duplicate: true);
-  show duplicate status;
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: อ่าน _addSerial() และ _confirmPart() ใน scan_part_screen.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.5, Part 3 (การสแกน), 7.9 (ชนิดของความล้มเหลว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการตรวจสอบหลายชั้นได้ และรู้ว่าลำดับของการตรวจสำคัญอย่างไร</div>
+
+<section><h2>1. ห้าด่านของการเพิ่ม S/N</h2><p><code>_addSerial()</code> ยาว 73 บรรทัด และเกือบทั้งหมดเป็นการตรวจสอบ</p><pre class="code-vs"><code>Future&lt;void&gt; _addSerial() async {
+  // ด่าน 1 — เลือกของแล้วหรือยัง
+  final item = _scanningItem;
+  if (item == null) {
+    showErrorDialog(context, message: 'กรุณาสแกน Part ID ก่อน');
+    _partFocus.requestFocus();
+    return;
+  }
+
+  // ด่าน 2 — กรอกอะไรมาไหม
+  final serialNo = _serialController.text.trim().toUpperCase();
+  if (serialNo.isEmpty) {
+    showErrorDialog(context, message: 'กรุณาใส่ S/N');
+    _serialFocus.requestFocus();
+    return;
+  }
+
+  // ด่าน 3 — สแกนซ้ำไหม (ตรวจในเครื่อง ไม่ยิงเน็ต)
+  final existingSerialIndex = _serialNumbers.indexOf(serialNo);
+  if (existingSerialIndex &gt;= 0) {
+    _markScannedSerial(serialNo, duplicate: true);
+    _showScanStatus(
+      'S/N "$serialNo" สแกนแล้ว อยู่รายการที่ ${existingSerialIndex + 1}',
+      tone: _ScanStatusTone.duplicate,
+    );
+    _serialController.clear();
+    _serialFocus.requestFocus();
+    return;
+  }
+
+  // ด่าน 4 — ครบจำนวนแล้วหรือยัง (ตรวจในเครื่อง)
+  final maxQty = item.qtyRemaining &gt; 0 ? item.qtyRemaining : item.qtyOrdered;
+  if (_serialNumbers.length &gt;= maxQty) {
+    showErrorDialog(context, message: 'สแกนครบ $maxQty ชิ้นแล้ว');
+    _serialController.clear();
+    _serialFocus.requestFocus();
+    return;
+  }
+
+  // ด่าน 5 — ถามเซิร์ฟเวอร์ว่า S/N นี้ถูกต้องไหม
+  setState(() =&gt; _loading = true);
+  final serialResult = await _api.validateReceivingSerial(
+    partId: item.partId,
+    serialNo: serialNo,
+  );
+  ...</code></pre><div class="note"><strong>ลำดับของด่านเป็นการตัดสินใจที่สำคัญที่สุดในเมธอดนี้</strong> — สามด่านแรกตรวจในเครื่องและไม่ยิงเน็ตเลย ส่วนด่านที่แพงที่สุดอยู่ท้ายสุด<br>ผู้ใช้ที่สแกนซ้ำจะได้คำตอบทันที ไม่ต้องรอ 10 วินาทีเพื่อจะรู้ว่าสแกนไปแล้ว</div><p>ลองสลับลำดับดูว่าจะเป็นอย่างไร</p><table><thead><tr><th>ถ้าถามเซิร์ฟเวอร์ก่อน</th><th>ผลกับผู้ใช้</th></tr></thead><tbody>
+<tr><td>สแกนซ้ำ</td><td>รอ 1–2 วินาที แล้วถึงจะรู้</td></tr>
+<tr><td>สแกนเกินจำนวน</td><td>รอเหมือนกัน</td></tr>
+<tr><td>เน็ตช้าและสแกนเร็ว</td><td>คำขอกองกันเป็นสิบ</td></tr>
+</tbody></table><p>ผู้ใช้ในคลังสแกนได้ราวหนึ่งชิ้นต่อวินาที — การเรียงด่านผิดทำให้ flow นี้ใช้ไม่ได้ทันที</p></section>
+
+<section><h2>2. สองระดับของการบอกผู้ใช้</h2><p>สังเกตว่าด่าน 3 กับด่านอื่นบอกผู้ใช้คนละแบบ</p><table><thead><tr><th>ด่าน</th><th>วิธีบอก</th><th>ต้องกดปิดไหม</th></tr></thead><tbody>
+<tr><td>3 สแกนซ้ำ</td><td>แถบลอย + ไฮไลต์แถวที่ซ้ำ</td><td><strong>ไม่ต้อง</strong></td></tr>
+<tr><td>1, 2, 4</td><td>กล่องข้อความกลางจอ</td><td>ต้อง</td></tr>
+</tbody></table><p>เป็นการตัดสินใจที่ถูก — การสแกนซ้ำเกิดบ่อยมากในคลัง (ผู้ใช้ยิงสองครั้งเพราะไม่แน่ใจว่าติดหรือยัง) ถ้าเด้งกล่องทุกครั้งจะทำงานไม่ได้เลย</p><pre class="code-vs"><code>void _showScanStatus(String message, {_ScanStatusTone tone = _ScanStatusTone.success}) {
+  _scanStatusTimer?.cancel();          // ยกเลิกตัวเก่าก่อนเสมอ
+  setState(() {
+    _scanStatusMessage = message;
+    _scanStatusTone = tone;
+  });
+  _scanStatusTimer = Timer(const Duration(seconds: 5), _hideScanStatus);
+}</code></pre><p><code>_scanStatusTimer?.cancel()</code> บรรทัดแรกป้องกันปัญหาที่เจอบ่อย — ถ้าไม่ยกเลิก ตัวจับเวลาของข้อความก่อนหน้าจะมาปิดข้อความใหม่ก่อนเวลา</p><pre class="code-vs"><code>t=0s   สแกนตัวที่ 1 สำเร็จ → ข้อความขึ้น, ตั้งเวลา A ปิดที่ t=5
+t=1s   สแกนตัวที่ 2 สำเร็จ → ข้อความใหม่, ตั้งเวลา B ปิดที่ t=6
+t=5s   ถ้าไม่ยกเลิก A → A ปิดข้อความของตัวที่ 2 ทั้งที่เพิ่งขึ้นได้ 4 วินาที</code></pre><p>และตัวจับเวลาถูกยกเลิกใน <code>dispose()</code> ด้วย — ครบตามที่ 12.8 สอน</p><p>มีอีกเมธอดที่น่าสนใจ</p><pre class="code-vs"><code>void _holdScanStatus() {
+  _scanStatusTimer?.cancel();
+  _scanStatusTimer = null;
+}</code></pre><p>ค้างข้อความไว้ไม่ให้หายเอง ใช้ตอนที่ต้องการให้ผู้ใช้อ่านจนกว่าจะทำอย่างอื่น</p></section>
+
+<section><h2>3. เลื่อนไปหาแถวที่ซ้ำ</h2><pre class="code-vs"><code>void _markScannedSerial(String serialNo, {bool duplicate = false}) {
+  setState(() {
+    _highlightedSerial = serialNo;
+    _highlightedSerialDuplicate = duplicate;
+  });
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final index = _serialNumbers.indexOf(serialNo);
+    if (index &lt; 0 || !_serialListController.hasClients) return;
+
+    final target = (index * _serialRowHeight)
+        .clamp(0.0, _serialListController.position.maxScrollExtent)
+        .toDouble();
+    _serialListController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  });
+}</code></pre><p>ผู้ใช้ที่สแกนซ้ำจะเห็นรายการเลื่อนไปหาแถวที่ซ้ำและแถวนั้นถูกไฮไลต์ — บอกได้ทันทีว่าซ้ำกับอันไหน</p><table><thead><tr><th>รายละเอียด</th><th>ทำไมจำเป็น</th></tr></thead><tbody>
+<tr><td><code>addPostFrameCallback</code></td><td>ต้องรอให้ <code>setState</code> วาดเสร็จก่อน ไม่งั้น <code>maxScrollExtent</code> ยังเป็นค่าเก่า</td></tr>
+<tr><td><code>hasClients</code></td><td>ถ้ารายการยังไม่ถูกวาด <code>ScrollController</code> ยังไม่ผูกกับอะไร — เรียก <code>position</code> จะพัง</td></tr>
+<tr><td><code>clamp</code></td><td>ตำแหน่งที่คำนวณอาจเกินความยาวจริง</td></tr>
+<tr><td>คูณด้วย <code>_serialRowHeight</code></td><td>คำนวณตำแหน่งจากความสูงคงที่ต่อแถว</td></tr>
+</tbody></table><p>บรรทัดสุดท้ายทำงานได้เพราะทุกแถวสูงเท่ากันจริง — ค่าคงที่ <code>_serialRowHeight = 42</code> ถูกใช้ทั้งตอนวาดและตอนคำนวณตำแหน่ง</p><pre class="code-vs"><code>Container(
+  height: _serialHeaderHeight + (rowCount * _serialRowHeight),   // ตอนวาด
+  ...</code></pre><div class="note"><strong>ข้อดีของการใช้ค่าคงที่เดียวกันสองที่:</strong> ถ้าเปลี่ยนความสูงแถว การเลื่อนยังคำนวณถูกโดยอัตโนมัติ<br><strong>ข้อควรระวัง:</strong> ถ้าวันหนึ่งแถวมีความสูงไม่เท่ากัน (เช่น S/N ยาวจนขึ้นสองบรรทัด) การคำนวณจะผิดทันทีโดยไม่มีอะไรเตือน</div></section>
+
+<section><h2>4. ด่านที่หกที่ซ่อนอยู่</h2><p>หลังเซิร์ฟเวอร์ตอบว่า S/N ถูกต้อง ยังมีการตรวจอีกชั้น</p><pre class="code-vs"><code>// S/N ต้องเป็นของ lot/line ที่กำลังรับอยู่เท่านั้น
+// (กันสแกน S/N lot อื่นหลุดเข้ามาผิด lot)
+if (serialResult.data!.lineId != item.id) {
+  showErrorDialog(
+    context,
+    message:
+        'S/N "$serialNo" ไม่ตรงกับ Lot "${item.lotNumber}" ที่กำลังรับ '
+        '(จริงๆ อยู่ Lot "${serialResult.data!.lotNumber ?? "ไม่ทราบ"}")',
+  );
+  _serialController.clear();
+  _serialFocus.requestFocus();
   return;
-}</code></pre><p>normalize trim+uppercaseก่อนเทียบ</p></section>
-<section><h2>2. Quantity guard</h2><p>maxใช้ qtyRemainingถ้า &gt;0 มิฉะนั้น qtyOrdered และ rejectเมื่อ serial countถึง max ต้องระวัง remaining=0ไม่ควร fallback orderedถ้า item complete; server status/revalidationเป็นตัวตัดสินสุดท้าย</p></section>
-<section><h2>3. Server validation</h2><p>หน้าจอเรียก <code>validateReceivingSerial()</code> ผ่าน ReceivingApi ก่อนเพิ่มค่าเข้า local state</p><pre class="code-vs"><code>GET /receiving/validate-serial
-  ?partId=P-001&amp;serialNo=SN-01
-→ ValidateSerialResponse</code></pre><p>queryสร้างด้วย Uriจึง encodeค่าอย่างถูกต้อง</p></section>
-<section><h2>4. Line/lot match</h2><p>แม้ serialเป็นของ partถูก ต้องมี <code>serialResult.lineId == item.id</code> มิฉะนั้น rejectพร้อมบอก lotจริง ป้องกัน serialของ lotอื่นหลุดเข้า receipt lineปัจจุบัน</p></section>
-<section><h2>5. Add and focus</h2><p>เมื่อผ่านจึง add list, update qty text, clear input, highlight/scroll row, show status 5sและคืน focusให้ serial field UXเหล่านี้เป็นผลหลัง authoritative validation ไม่ก่อน</p></section>
-<section><h2>6. Remove</h2><p>ลบ serialต้อง confirm, update list/qty/highlightและคืน focus หาก request submitกำลังทำงานควร disable mutationหรือ snapshot serial listที่ส่งเพื่อไม่ให้ UI/stateต่างจาก command</p></section>
-<section><h2>7. Race/double scan</h2><p>scannerยิง serialเดิมสองครั้งเร็วระหว่าง validationแรก pending ทั้งคู่ยังไม่อยู่ local listและอาจ addซ้ำ ต้องมี in-flight set/serialize scan และ server enforce unique/idempotent command</p></section>
-<section><h2>8. Tests</h2><div class="success">local duplicate, concurrent duplicate, case/space, max qty, server reject, wrong line/lot, validation timeout, remove cancel/confirm, focusและ timer dispose พร้อม integration test uniquenessข้ามสอง clients</div></section>
+}</code></pre><p>เซิร์ฟเวอร์ตอบว่า “S/N นี้มีอยู่จริง” แต่<strong>ไม่ได้บอกว่าตรงกับล็อตที่ผู้ใช้กำลังรับ</strong> — แอปจึงต้องเทียบเอง</p><table><thead><tr><th>สถานการณ์</th><th>เซิร์ฟเวอร์ตอบ</th><th>แอปตัดสิน</th></tr></thead><tbody>
+<tr><td>S/N ของล็อตที่กำลังรับ</td><td>สำเร็จ + <code>lineId</code> ตรง</td><td>รับ</td></tr>
+<tr><td>S/N ของล็อตอื่นใน PO เดียวกัน</td><td><strong>สำเร็จ</strong> + <code>lineId</code> ไม่ตรง</td><td><strong>ปฏิเสธ</strong></td></tr>
+<tr><td>S/N ที่ไม่มีในระบบ</td><td>ล้มเหลว</td><td>ปฏิเสธ</td></tr>
+</tbody></table><p>แถวกลางคือกรณีที่เกิดจริงในคลัง — ผู้ใช้หยิบกล่องผิดล็อตมาสแกน ถ้าไม่มีด่านนี้ ของจะถูกบันทึกเข้าล็อตผิด และเป็นความผิดพลาดที่แก้ยากมากเพราะระบบเชื่อว่าถูกแล้ว</p><p>ข้อความที่บอกผู้ใช้ทำได้ดีมาก</p><pre class="code-vs"><code>'S/N "SN-4471" ไม่ตรงกับ Lot "LOT-A" ที่กำลังรับ (จริงๆ อยู่ Lot "LOT-B")'</code></pre><table><thead><tr><th>ข้อความบอก</th><th>ผู้ใช้ทำอะไรต่อได้</th></tr></thead><tbody>
+<tr><td>ตัวที่สแกนคืออะไร</td><td>ยืนยันว่าอ่านถูกตัว</td></tr>
+<tr><td>กำลังรับล็อตไหนอยู่</td><td>รู้ว่าตัวเองอยู่ตรงไหน</td></tr>
+<tr><td><strong>ของจริงอยู่ล็อตไหน</strong></td><td><strong>รู้ว่าต้องไปหยิบกล่องไหนมาแทน</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่ทำให้ข้อความนี้ต่างจาก “S/N ไม่ถูกต้อง” — ผู้ใช้ไม่ต้องเดินไปถามใคร</p><p>สังเกต <code>?? "ไม่ทราบ"</code> ด้วย — เซิร์ฟเวอร์อาจไม่ส่ง <code>lotNumber</code> มา ข้อความก็ยังอ่านได้ไม่พังกลางประโยค</p></section>
+
+<section><h2>5. ตรวจอีกรอบตอนยืนยัน</h2><pre class="code-vs"><code>Future&lt;void&gt; _confirmPart(POItem poItem, {int? qtyOverride}) async {
+  final qty = qtyOverride ?? int.tryParse(_qtyController.text.trim());
+  if (qty == null || qty &lt;= 0) {
+    showErrorDialog(context, message: 'จำนวนไม่ถูกต้อง');
+    return;
+  }
+
+  final maxQty = poItem.qtyRemaining &gt; 0 ? poItem.qtyRemaining : poItem.qtyOrdered;
+  if (qty &gt; maxQty) {
+    showErrorDialog(context,
+        message: 'รับได้สูงสุด $maxQty ชิ้น (รับไปแล้ว ${poItem.qtyReceived} ชิ้น)');
+    return;
+  }
+
+  // สินค้ามี serial ต้องมี S/N ครบตามจำนวน
+  List&lt;String&gt;? serialNumbers;
+  if (poItem.serialRequire) {
+    serialNumbers =
+        _serialPartId == poItem.partId &amp;&amp; _serialNumbers.length == qty
+        ? List&lt;String&gt;.of(_serialNumbers)
+        : null;
+    if (serialNumbers == null) {
+      showErrorDialog(context,
+          message: _serialNumbers.isEmpty
+              ? 'กรุณาสแกน S/N'
+              : 'จำนวน S/N (${_serialNumbers.length}) ไม่ตรงกับจำนวนรับ ($qty)');
+      return;
+    }
+  }
+  ...</code></pre><p>เงื่อนไขกลางตรวจสองอย่างพร้อมกัน</p><pre class="code-vs"><code>_serialPartId == poItem.partId    // S/N ที่สแกนไว้เป็นของสินค้าตัวนี้จริงไหม
+&amp;&amp; _serialNumbers.length == qty   // จำนวนตรงกันไหม</code></pre><p>เงื่อนไขแรกคือตัวกันปัญหาที่ 17.5 ชี้ไว้ — ถ้า <code>_scanningItem</code> ค้างจากของชิ้นก่อน <code>_serialPartId</code> จะไม่ตรงและถูกปฏิเสธ</p><div class="note"><strong>นี่คือการป้องกันแบบตาข่ายชั้นที่สอง</strong> — สถานะที่ไม่ควรเกิดยังสร้างได้ (17.5) แต่ตรงนี้จับได้ก่อนส่งข้อมูลผิดไปเซิร์ฟเวอร์<br>ตาข่ายแบบนี้มีค่ามาก แต่ต้องรู้ว่ามันแก้อาการ ไม่ได้แก้สาเหตุ — ผู้ใช้จะเจอข้อความปฏิเสธโดยไม่เข้าใจว่าทำไม</div><p>และ <code>List&lt;String&gt;.of(_serialNumbers)</code> คัดลอกรายการ ไม่ได้ส่งตัวเดิม</p><pre class="code-vs"><code>// ถ้าส่งตัวเดิม แล้ว _clearSerialScan() ล้างรายการหลังจากนี้
+// รายการที่ส่งไปกับคำขอจะกลายเป็นว่างกลางทาง
+serialNumbers = List&lt;String&gt;.of(_serialNumbers);</code></pre><p>รูปแบบเดียวกับที่ 12.5 ชมไว้ตอนที่ SignalR ทำ <code>List.of(listeners)</code> ก่อนกระจายเหตุการณ์</p></section>
+
+<section><h2>6. จำนวนสูงสุดที่คำนวณสองแบบ</h2><pre class="code-vs"><code>final maxQty = item.qtyRemaining &gt; 0 ? item.qtyRemaining : item.qtyOrdered;</code></pre><p>บรรทัดนี้ปรากฏสองที่ — ใน <code>_addSerial</code> และใน <code>_confirmPart</code></p><table><thead><tr><th><code>qtyRemaining</code></th><th>ใช้ค่าไหน</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>&gt; 0</td><td><code>qtyRemaining</code></td><td>รับไปแล้วบางส่วน เหลือเท่านี้</td></tr>
+<tr><td>0</td><td><code>qtyOrdered</code></td><td>ถือว่ายังไม่เคยรับ ใช้จำนวนสั่งเต็ม</td></tr>
+</tbody></table><p>แถวที่สองน่าสงสัย — <code>qtyRemaining == 0</code> ควรแปลว่า<strong>รับครบแล้ว</strong> ไม่ใช่ยังไม่เคยรับ</p><p>ย้อนไปดูโมเดล</p><pre class="code-vs"><code>qtyRemaining: json['qtyRemaining'] ?? 0,</code></pre><p>ถ้าฝั่ง .NET ไม่ส่ง <code>qtyRemaining</code> มา จะได้ <code>0</code> — และโค้ดนี้ตีความว่า “ยังไม่เคยรับ” แล้วอนุญาตให้รับเต็มจำนวน</p><table><thead><tr><th>สถานการณ์</th><th><code>qtyRemaining</code></th><th>maxQty ที่ได้</th><th>ถูกไหม</th></tr></thead><tbody>
+<tr><td>สั่ง 10 รับแล้ว 4</td><td>6</td><td>6</td><td>ถูก</td></tr>
+<tr><td>สั่ง 10 รับครบ 10</td><td>0</td><td><strong>10</strong></td><td><strong>ผิด — รับซ้ำได้อีก 10</strong></td></tr>
+<tr><td>เซิร์ฟเวอร์ไม่ส่งค่ามา</td><td>0</td><td>10</td><td>ตั้งใจให้เป็นแบบนี้</td></tr>
+</tbody></table><p>แถวกลางไม่เกิดในทางปฏิบัติ เพราะรายการที่รับครบจะมี <code>status == 'RECEIVED'</code> และถูกกรองออกจากรายการที่แสดง</p><pre class="code-vs"><code>final pendingItems = _currentPo.items
+    .where((item) =&gt; item.status != 'RECEIVED')
+    .toList();</code></pre><p>แต่การป้องกันอยู่ที่<strong>การกรองในหน้าจอ</strong> ไม่ใช่ที่การคำนวณจำนวน — ถ้าวันหนึ่งมีทางเข้าที่ข้ามการกรอง (เช่นสแกน Part โดยตรงซึ่ง <code>_scanPartId</code> ทำอยู่แล้ว) ตัวเลขจะผิด</p><div class="note"><strong>ตรวจสอบจริง:</strong> <code>_scanPartId()</code> สร้าง <code>POItem</code> เองด้วย <code>orElse</code> เมื่อหาไม่เจอใน <code>_currentPo.items</code><pre class="code-vs"><code>orElse: () =&gt; POItem(
+  ...
+  qtyOrdered: lot.qtyOrdered,
+  qtyReceived: lot.qtyReceived,
+  qtyRemaining: lot.qtyOrdered - lot.qtyReceived,   // ← คำนวณเอง ปลอดภัย
+  status: 'PENDING',
+  ...
+)</code></pre>ตรงนี้คำนวณ <code>qtyRemaining</code> เองจากผลต่าง จึงไม่พึ่งค่าที่เซิร์ฟเวอร์ส่ง — เป็นการป้องกันที่ทำไว้แล้วโดยไม่ได้เขียนคอมเมนต์อธิบาย</div></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ลำดับของการตรวจไม่สำคัญ</td><td>ตรวจในเครื่องก่อนยิงเน็ต ทำให้ flow ใช้ได้จริง</td></tr>
+<tr><td>ทุกความผิดพลาดควรเด้งกล่อง</td><td>สแกนซ้ำเกิดบ่อยเกินกว่าจะเด้งได้</td></tr>
+<tr><td>เซิร์ฟเวอร์บอกว่า S/N ถูก แปลว่ารับได้</td><td>ต้องเทียบ <code>lineId</code> กับล็อตที่กำลังรับ</td></tr>
+<tr><td>ส่งรายการเดิมเข้าไปได้เลย</td><td>ต้องคัดลอก ไม่งั้นถูกล้างกลางทาง</td></tr>
+<tr><td><code>qtyRemaining == 0</code> แปลว่ารับครบ</td><td>โค้ดนี้ตีความว่ายังไม่เคยรับ</td></tr>
+<tr><td>ตัวจับเวลาตัวใหม่ทับตัวเก่าเอง</td><td>ต้อง <code>cancel()</code> เอง</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกน S/N ครบ 5 ตัวแล้ว กดยืนยัน ขึ้นว่าจำนวนไม่ตรง แต่นับดูก็ 5 ตัว”</p><ol><li>ไล่ว่าเงื่อนไขไหนที่ปฏิเสธ และเป็นไปได้อย่างไร</li><li>ถ้าเป็นบั๊กจริง จะแก้ที่ไหน</li><li>ข้อความปฏิเสธควรเขียนใหม่ว่าอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ไล่เงื่อนไข</strong></p><pre class="code-vs"><code>serialNumbers = _serialPartId == poItem.partId &amp;&amp; _serialNumbers.length == qty
+    ? List&lt;String&gt;.of(_serialNumbers)
+    : null;</code></pre><p>มีสองทางที่จะได้ <code>null</code></p><table><thead><tr><th>ทาง</th><th>เกิดเมื่อ</th><th>ผู้ใช้เห็นอะไร</th></tr></thead><tbody>
+<tr><td><code>_serialPartId != poItem.partId</code></td><td>S/N ที่สแกนไว้เป็นของสินค้าคนละตัว</td><td>นับดูก็ 5 ตัว — <strong>ตรงกับที่แจ้ง</strong></td></tr>
+<tr><td><code>_serialNumbers.length != qty</code></td><td>จำนวนไม่ตรงจริง</td><td>นับแล้วต้องไม่ตรง</td></tr>
+</tbody></table><p>เนื่องจากผู้ใช้บอกว่านับได้ 5 ตัว ทางแรกน่าสงสัยกว่า</p><p>เกิดได้จากสถานะที่ 17.5 ข้อ 2 อธิบายไว้</p><pre class="code-vs"><code>ผู้ใช้สแกน Part A → _scanningItem = A, _serialPartId = 'A'
+  → สแกน S/N ของ A ไป 5 ตัว
+    → กดปุ่ม "ผูก" ที่รายการค้าง → _pendingLine มีค่า
+      → ผูกพาเลทเสร็จ กลับมาโหมด A
+        → _scanningItem ยังเป็น A แต่ _currentPo ถูกโหลดใหม่
+          → poItem ที่ส่งเข้า _confirmPart อาจเป็นตัวใหม่ที่ partId ต่าง</code></pre><p>แต่ยังมีอีกทางที่ตรงกว่า</p><pre class="code-vs"><code>ผู้ใช้สแกน Part A → สแกน S/N 5 ตัว
+  → เปลี่ยนใจ ลบ S/N จนหมด → _clearSerialScan() → _serialPartId = null
+    → สแกน Part B → _serialPartId = 'B'
+      → สแกน S/N ของ B ไป 5 ตัว
+        → กดยืนยัน → ตรงหมด ไม่มีปัญหา</code></pre><p>ทางนี้ไม่เกิดปัญหา แสดงว่าต้องมีเส้นทางที่ <code>_scanningItem</code> เปลี่ยนโดย <code>_serialPartId</code> ไม่เปลี่ยน หรือกลับกัน</p><p>ไล่ดูว่ามีที่ไหนตั้ง <code>_scanningItem</code> บ้าง — เจอที่เดียวคือ <code>_scanPartId()</code> ซึ่งตั้งทั้งสองตัวพร้อมกัน</p><pre class="code-vs"><code>setState(() {
+  _scanningItem = resolvedItem;
+  _serialPartId = partId;          // ตั้งพร้อมกัน
+  ...
+});</code></pre><p>สังเกตว่า <code>partId</code> ที่ตั้งคือ<strong>ค่าที่ผู้ใช้สแกนมา</strong> ส่วน <code>resolvedItem.partId</code> อาจต่างกันได้ ถ้ามาจาก <code>orElse</code></p><pre class="code-vs"><code>orElse: () =&gt; POItem(
+  id: lot.id,
+  partId: partId,        // ← ตรงกัน ในกรณีนี้
+  ...</code></pre><p>ตรงกัน แต่กรณีที่หาเจอใน <code>_currentPo.items</code></p><pre class="code-vs"><code>final resolvedItem = _currentPo.items.firstWhere((i) =&gt; i.id == lot.id, orElse: ...);</code></pre><p><strong>เทียบด้วย <code>id</code> ไม่ใช่ <code>partId</code></strong> — ถ้าฝั่ง .NET มีข้อมูลที่ <code>id</code> เดียวกันแต่ <code>partId</code> ต่าง (เช่นรหัสสินค้าถูกแก้) <code>resolvedItem.partId</code> จะไม่เท่ากับ <code>partId</code> ที่สแกน แล้วเงื่อนไขจะปฏิเสธ</p><p><strong>ข้อ 2 — แก้ที่ไหน</strong></p><p>แก้ให้ทั้งสองที่อ้างค่าเดียวกัน</p><pre class="code-vs"><code>setState(() {
+  _scanningItem = resolvedItem;
+  _serialPartId = resolvedItem.partId;   // ← ใช้ค่าจากตัวที่จะใช้ยืนยันจริง
+  ...
+});</code></pre><p>แต่วิธีที่ปิดปัญหาถาวรคือเลิกเก็บ <code>_serialPartId</code> แยก แล้วเก็บ S/N ไว้ในโหมดเดียวกับสินค้าตามที่ 17.5 ข้อ 3 เสนอ</p><pre class="code-vs"><code>class Scanning extends ScanMode {
+  Scanning(this.item);
+  final POItem item;
+  final List&lt;String&gt; serials = [];    // ผูกกับ item เสมอ ไม่มีทางไม่ตรง
+}</code></pre><p>เมื่อ S/N อยู่ในวัตถุเดียวกับสินค้า ไม่มีทางที่จะเป็นของคนละตัวได้เลย</p><p><strong>ข้อ 3 — ข้อความที่ควรเป็น</strong></p><p>ปัจจุบัน</p><pre class="code-vs"><code>'จำนวน S/N (5) ไม่ตรงกับจำนวนรับ (5)'    // ← อ่านแล้วงงมาก</code></pre><p>ผู้ใช้เห็นตัวเลขเท่ากันแต่ถูกบอกว่าไม่ตรง ซึ่งทำให้เชื่อว่าแอปพัง</p><p>ต้องแยกสองสาเหตุออกจากกัน</p><pre class="code-vs"><code>if (_serialPartId != poItem.partId) {
+  showErrorDialog(
+    context,
+    message: 'S/N ที่สแกนไว้เป็นของ "$_serialPartId" '
+        'แต่กำลังยืนยัน "${poItem.partId}" — กรุณาสแกน S/N ใหม่',
+  );
+  return;
+}
+if (_serialNumbers.length != qty) {
+  showErrorDialog(
+    context,
+    message: 'สแกน S/N ไว้ ${_serialNumbers.length} ตัว '
+        'แต่จำนวนที่จะรับคือ $qty',
+  );
+  return;
+}</code></pre><p><strong>หลักที่ใช้:</strong> ข้อความที่รวมสองสาเหตุเข้าด้วยกันจะอธิบายได้ดีแค่สาเหตุเดียว — ถ้าเงื่อนไขมีสองส่วน ข้อความก็ต้องมีสองแบบ</p><p>และข้อความแรกมีค่ามากที่สุด เพราะบอกได้ว่า<strong>ระบบสับสนระหว่างสินค้าสองตัว</strong> ซึ่งเป็นข้อมูลที่ผู้ใช้เอาไปแจ้งทีมได้ ต่างจาก “ไม่ตรง” ที่ไม่บอกอะไรเลย</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li><code>_addSerial()</code> มีห้าด่าน สามด่านแรกตรวจในเครื่อง ด่านที่แพงที่สุดอยู่ท้าย</li><li>การสแกนซ้ำใช้แถบลอยไม่ใช่กล่อง เพราะเกิดบ่อยเกินกว่าจะให้กดปิดทุกครั้ง</li><li><code>_scanStatusTimer?.cancel()</code> ก่อนตั้งตัวใหม่เสมอ ไม่งั้นตัวเก่าปิดข้อความใหม่</li><li>การเลื่อนไปหาแถวที่ซ้ำต้องอยู่ใน <code>addPostFrameCallback</code> และตรวจ <code>hasClients</code></li><li>มีด่านที่หก — เทียบ <code>lineId</code> เพราะเซิร์ฟเวอร์ตอบว่า S/N มีจริงแต่ไม่บอกว่าตรงล็อต</li><li>ข้อความบอกด้วยว่าของจริงอยู่ล็อตไหน ผู้ใช้จึงไปหยิบถูก</li><li><code>_confirmPart</code> ตรวจซ้ำอีกชั้นว่า S/N เป็นของสินค้าตัวที่กำลังยืนยัน</li><li><code>List&lt;String&gt;.of()</code> คัดลอกก่อนส่ง ไม่งั้นรายการถูกล้างกลางทาง</li><li>ข้อความที่รวมสองสาเหตุจะอธิบายได้ดีแค่สาเหตุเดียว</li></ul></div><p><strong>บทหน้า:</strong> การผูกพาเลท และสิ่งที่เกิดขึ้นเมื่อบันทึกสำเร็จแต่ผูกพาเลทล้มเหลว</p></section>

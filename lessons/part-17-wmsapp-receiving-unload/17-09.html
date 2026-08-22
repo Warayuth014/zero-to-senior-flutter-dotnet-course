@@ -4,19 +4,278 @@
 <title>Receiving Models &amp; API</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-09 · Real Codebase</span><h1>Receiving Models &amp; API</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Receiving API surface</a></li><li><a href="#section-2">POResponse</a></li><li><a href="#section-3">POItem identity</a></li><li><a href="#section-4">PartLinesResponse</a></li><li><a href="#section-5">Serial validation result</a></li><li><a href="#section-6">Receipt response</a></li><li><a href="#section-7">Endpoint contracts</a></li><li><a href="#section-8">Contract hardening</a></li></ol></nav>
-<div class="note"><strong>Model คือขอบเขตความจริงของแอป:</strong> อ่าน JSON ให้ได้ไม่พอ ต้องรู้ว่า field ใดเป็น identity, field ใด nullable และ fallback แบบใดอาจซ่อนข้อมูลเสียจาก backend</div>
-<section id="section-1"><h2>1. Receiving API surface</h2><p><code>ReceivingApi</code> มี 6 งานหลัก: อ่าน PO, อ่าน part lines, validate serial, scan receipt, assign pallet และอ่าน pending pallet lines หน้าจอควรเรียกผ่าน service นี้แทนประกอบ URL เอง</p></section>
-<section id="section-2"><h2>2. POResponse</h2><p><code>POResponse</code> รวม header, <code>items</code> และ <code>pendingLines</code> จึงเป็น snapshot ของ receiving document ณ เวลาหนึ่ง วันที่ parse ไม่ได้ถูก fallback เป็น <code>DateTime.now()</code> ในโค้ดจริง ซึ่งทำให้ข้อมูลเสียดูเหมือนข้อมูลใหม่ ควรพิจารณา nullable หรือ parse error ที่สังเกตได้</p></section>
-<section id="section-3"><h2>3. POItem identity</h2><p><code>POItem.id</code> ใช้แทน line/lot identity ส่วน <code>partId</code> คือรหัสสินค้า หนึ่ง part อาจมีหลาย lot หรือ condition จึงห้ามใช้ partId เป็น key เดี่ยวเมื่อเลือกบรรทัดรับสินค้า</p></section>
-<section id="section-4"><h2>4. PartLinesResponse</h2><p>โครงสร้าง <code>PartLinesResponse → PartLine(condition) → PartLot(id, lot, qty)</code> อธิบายเหตุผลที่ UI ต้องให้เลือก condition และ lot ก่อนจะได้ lineId ที่แน่นอนสำหรับการรับ</p></section>
-<section id="section-5"><h2>5. Serial validation result</h2><p><code>ValidateSerialResponse</code> ส่ง <code>lineId</code>, <code>poId</code>, condition และ lot กลับมา Client ต้องเทียบ lineId กับ item ที่กำลังรับ ไม่ควรเชื่อเพียงว่า serial มีอยู่ เพราะ serial อาจเป็นของอีก lot หรืออีก PO</p></section>
-<section id="section-6"><h2>6. Receipt response</h2><p><code>ReceiptLineResponse</code> มี palletId, <code>palletError</code>, <code>autoClosed</code>, poStatus และ closeMessage จึงแทนผลหลายมิติ: receipt สำเร็จหรือไม่, assignment สำเร็จหรือไม่ และ PO ปิดแล้วหรือยัง</p></section>
-<section id="section-7"><h2>7. Endpoint contracts</h2><pre class="code-vs"><code>GET  /receiving/po/{poId}
-GET  /receiving/validate-serial?partId=...&amp;serialNo=...
-POST /receiving/scan-part
-POST /receiving/assign-pallet
-GET  /receiving/pending-pallet-lines</code></pre><p>query ต้อง encode ค่า, JSON key ต้องตรง DTO และ error response ควรแปลงเป็น domain exception ที่ UI เข้าใจ</p></section>
-<section id="section-8"><h2>8. Contract hardening</h2><div class="success">เพิ่ม fixture tests สำหรับ missing/null/wrong type, unknown status, invalid date, empty serial list และ <code>palletError</code> พร้อมแยก transport DTO ออกจาก domain model เพื่อให้ API เปลี่ยนโดยไม่กระจายผลไปทุก widget</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">เจ็ดคลาสของโดเมน</a></li><li><a href="#section-2">สามระดับของการป้องกันในโดเมนนี้</a></li><li><a href="#section-3">ค่าเริ่มต้นที่ตัดสินใจแทนผู้ใช้</a></li><li><a href="#section-4">ฟิลด์ที่มีเฉพาะบางกรณี</a></li><li><a href="#section-5">ฝั่ง API — สี่เมธอด</a></li><li><a href="#section-6">เมธอดที่ประกอบ path ต่างกันสามแบบ</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 50–60 นาที</span><span>ลงมือทำ: เปิด receiving_models.dart และ receiving_api.dart คู่กัน</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.8, 16.7 (extension), 16.8 (โมเดล)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านสัญญาระหว่างแอปกับ .NET ของโดเมนนี้ได้ครบ และชี้ได้ว่าฟิลด์ไหนเปราะ</div>
+
+<section id="section-1"><h2>1. เจ็ดคลาสของโดเมน</h2><table><thead><tr><th>คลาส</th><th>มาจาก endpoint</th><th>ใช้ทำอะไร</th></tr></thead><tbody>
+<tr><td><code>POResponse</code></td><td><code>GET /receiving/po/{id}</code></td><td>ข้อมูล PO ทั้งใบ</td></tr>
+<tr><td><code>POItem</code></td><td>อยู่ใน <code>POResponse</code></td><td>หนึ่งบรรทัดใน PO</td></tr>
+<tr><td><code>PartLinesResponse</code></td><td><code>GET /receiving/validate-serial?partId=</code></td><td>Part นี้มีกี่สภาพ</td></tr>
+<tr><td><code>PartLine</code></td><td>อยู่ใน <code>PartLinesResponse</code></td><td>หนึ่งสภาพ พร้อมล็อตทั้งหมด</td></tr>
+<tr><td><code>PartLot</code></td><td>อยู่ใน <code>PartLine</code></td><td>หนึ่งล็อต</td></tr>
+<tr><td><code>ValidateSerialResponse</code></td><td><code>GET .../validate-serial?partId=&amp;serialNo=</code></td><td>S/N นี้เป็นของล็อตไหน</td></tr>
+<tr><td><code>ReceiptLineResponse</code></td><td><code>POST /receiving/scan-part</code></td><td>ผลของการรับหนึ่งครั้ง</td></tr>
+<tr><td><code>PendingPalletLine</code></td><td><code>GET /receiving/pending-pallet-lines</code></td><td>รายการที่ค้างผูกพาเลท</td></tr>
+</tbody></table><p>โครงการซ้อนของสามคลาสกลางสะท้อนความจริงในคลัง</p><pre class="code-vs"><code>PartLinesResponse            "PT-9821 มีอะไรให้รับบ้าง"
+  ├─ serialRequire: true     ต้องสแกน S/N ไหม
+  └─ lines: [
+       PartLine              สภาพ FG
+         ├─ lineId, poId
+         └─ lots: [
+              PartLot        ล็อต LOT-A  สั่ง 20 รับแล้ว 5
+              PartLot        ล็อต LOT-B  สั่ง 10 รับแล้ว 0
+            ]
+       PartLine              สภาพ PW
+         └─ lots: [ ... ]
+     ]</code></pre><p>ผู้ใช้ยิงบาร์โค้ดที่มีแค่ <code>PT-9821</code> แต่ระบบต้องรู้ว่าจะรับเข้าล็อตไหนของสภาพไหน — นี่คือที่มาของ popup สองชั้นใน 17.5</p></section>
+
+<section id="section-2"><h2>2. สามระดับของการป้องกันในโดเมนนี้</h2><p>เอาหลักจาก 16.8 มาใช้กับไฟล์นี้จริง</p><pre class="code-vs"><code>factory POItem.fromJson(Map&lt;String, dynamic&gt; json) =&gt; POItem(
+  id: json['id'],                              // ← ไม่ป้องกัน
+  partId: json['partId'],                      // ← ไม่ป้องกัน
+  owner: json['owner'],                        // ← ไม่ป้องกัน
+  brand: json['brand'],                        // ← ไม่ป้องกัน
+  itemDesc: json['itemDesc'],                  // ← ไม่ป้องกัน
+  imageUrl: json['imageUrl'],                  // nullable อยู่แล้ว
+  serialRequire: json['serialRequire'] ?? false,
+  qtyOrdered: json['qtyOrdered'],              // ← ไม่ป้องกัน
+  qtyReceived: json['qtyReceived'],            // ← ไม่ป้องกัน
+  qtyRemaining: json['qtyRemaining'] ?? 0,
+  status: json['status'],                      // ← ไม่ป้องกัน
+  condition: json['condition'] ?? 'FG',
+  lotNumber: json['lotNumber'],
+  expiredDate: json['expiredDate'],
+);</code></pre><table><thead><tr><th>ฟิลด์ที่ไม่ป้องกัน</th><th>ถ้าไม่มีค่าจะเกิดอะไร</th></tr></thead><tbody>
+<tr><td><code>id</code>, <code>partId</code></td><td><code>TypeError</code> — สมเหตุสมผล ไม่มีรหัสก็ไม่มีความหมาย</td></tr>
+<tr><td><code>owner</code>, <code>brand</code>, <code>itemDesc</code></td><td><code>TypeError</code> — <strong>ไม่สมเหตุสมผล</strong> ข้อมูลนี้เป็นแค่คำอธิบาย</td></tr>
+<tr><td><code>qtyOrdered</code>, <code>qtyReceived</code></td><td><code>TypeError</code> — ก้ำกึ่ง</td></tr>
+<tr><td><code>status</code></td><td><code>TypeError</code> — ก้ำกึ่ง</td></tr>
+</tbody></table><div class="note"><strong>แถวที่สองคือจุดที่เปราะที่สุด</strong> — สินค้าที่ยังไม่ได้กรอกยี่ห้อหรือคำอธิบายจะทำให้<strong>ทั้ง PO เปิดไม่ได้</strong> ทั้งที่ข้อมูลนั้นแค่ใช้แสดงบนจอ<br>ผู้ใช้เห็นแค่ “เกิดข้อผิดพลาด: type 'Null' is not a subtype of type 'String'” และไม่มีใครรู้ว่าสาเหตุคือสินค้าตัวเดียวใน 30 ตัวที่ไม่มียี่ห้อ</div><p>แก้ได้ทันทีโดยไม่กระทบใคร</p><pre class="code-vs"><code>owner: json['owner'] ?? '',
+brand: json['brand'] ?? '',
+itemDesc: json['itemDesc'] ?? '',</code></pre><p>ค่าว่างบนหน้าจอ ดีกว่าทั้งใบเปิดไม่ได้ — และผู้ใช้เห็นได้ทันทีว่าสินค้าตัวไหนข้อมูลไม่ครบ</p><p>เทียบกับคลาสอื่นในไฟล์เดียวกันที่ป้องกันมากกว่า</p><pre class="code-vs"><code>factory PartLine.fromJson(Map&lt;String, dynamic&gt; json) =&gt; PartLine(
+  lineId: json['lineId'],
+  poId: json['poId'],
+  condition: json['condition'] ?? 'FG',        // ← มีค่าเริ่มต้น
+  lots: (json['lots'] as List? ?? [])          // ← กัน null
+      .map((l) =&gt; PartLot.fromJson(l))
+      .toList(),
+);</code></pre><p>ความไม่สม่ำเสมอนี้เป็นร่องรอยว่าไฟล์ถูกเขียนต่างเวลากัน</p></section>
+
+<section id="section-3"><h2>3. ค่าเริ่มต้นที่ตัดสินใจแทนผู้ใช้</h2><pre class="code-vs"><code>condition: json['condition'] ?? 'FG',</code></pre><p>ถ้าเซิร์ฟเวอร์ไม่ส่งสภาพมา แอปเดาว่าเป็น <code>FG</code> (ของดี)</p><table><thead><tr><th>ถ้าเดาถูก</th><th>ถ้าเดาผิด</th></tr></thead><tbody>
+<tr><td>ทำงานปกติ</td><td><strong>ของ PW ถูกรับเข้าเป็น FG</strong></td></tr>
+</tbody></table><p>ผลของการเดาผิด: ของที่ต้องแปรรูปก่อนถูกส่งไปขายเลย และของสองสภาพถูกผูกลงพาเลทเดียวกันได้ ทั้งที่กฎห้าม</p><div class="note"><strong>เทียบกับค่าเริ่มต้นตัวอื่นในไฟล์เดียวกัน</strong><table><thead><tr><th>ค่าเริ่มต้น</th><th>เดาผิดแล้วเป็นอย่างไร</th><th>ปลอดภัยไหม</th></tr></thead><tbody>
+<tr><td><code>serialRequire ?? false</code></td><td>ของที่ต้องสแกน S/N ถูกรับด้วยจำนวน</td><td><strong>ไม่</strong></td></tr>
+<tr><td><code>qtyReceived ?? 0</code></td><td>คิดว่ายังไม่เคยรับ</td><td>ก้ำกึ่ง</td></tr>
+<tr><td><code>condition ?? 'FG'</code></td><td>ของเสียถูกรับเป็นของดี</td><td><strong>ไม่</strong></td></tr>
+<tr><td><code>autoClosed ?? false</code></td><td>ไม่ปิด session ทั้งที่ควรปิด</td><td>ปลอดภัย</td></tr>
+</tbody></table>สองข้อแรกคือ<strong>ค่าเริ่มต้นที่ผ่อนปรน</strong> — เดาผิดแล้วปล่อยของผ่านไป ส่วนข้อสุดท้ายเป็น<strong>ค่าเริ่มต้นที่เข้มงวด</strong> — เดาผิดแล้วผู้ใช้แค่ต้องทำเพิ่ม</div><p>หลักที่ควรใช้: <strong>เมื่อไม่รู้ ให้เดาไปทางที่ผู้ใช้ต้องทำงานเพิ่ม ไม่ใช่ทางที่ระบบปล่อยผ่าน</strong></p><pre class="code-vs"><code>// ปลอดภัยกว่า — ไม่รู้สภาพ = ไม่ให้รับ ต้องไปแก้ข้อมูลก่อน
+final String? condition;
+...
+condition: json['condition'],       // ไม่เดา
+...
+bool get canReceive =&gt; condition != null;</code></pre><p>แต่ในทางปฏิบัติต้องดูก่อนว่าฝั่ง .NET มีทางที่จะไม่ส่ง <code>condition</code> มาจริงไหม — ถ้าคอลัมน์นั้นเป็น NOT NULL ในฐานข้อมูล ค่าเริ่มต้นนี้ไม่มีวันถูกใช้และไม่ต้องแตะ</p><p>นี่คือคำถามที่ต้องถามทีมหลังบ้าน ไม่ใช่เดาเอง</p></section>
+
+<section id="section-4"><h2>4. ฟิลด์ที่มีเฉพาะบางกรณี</h2><pre class="code-vs"><code>class ReceiptLineResponse {
+  // ── ข้อมูลของรายการที่รับ (มีเสมอ) ──
+  final int lineId;
+  final String partId;
+  ...
+  final String poItemStatus;
+  final String message;
+
+  // ── ผลของการผูก Pallet (ถ้า scan-part ส่ง palletId มาด้วย) ──
+  final String? palletId;
+  final bool autoClosed;
+  final String? poStatus;
+  final String? closeMessage;
+  final String? palletError;
+}</code></pre><p>ห้าฟิลด์ล่างมีค่าเฉพาะเมื่อคำขอส่ง <code>palletId</code> ไปด้วย — คอมเมนต์บอกไว้ชัดเจน ซึ่งช่วยมาก</p><p>แต่ชนิดข้อมูลไม่ได้บังคับความสัมพันธ์</p><table><thead><tr><th>ชุดค่าที่เป็นไปได้ตามชนิด</th><th>เกิดจริงไหม</th></tr></thead><tbody>
+<tr><td><code>palletId</code> มีค่า, <code>palletError</code> เป็น null</td><td>ผูกสำเร็จ</td></tr>
+<tr><td><code>palletId</code> เป็น null, <code>palletError</code> มีค่า</td><td>ผูกไม่สำเร็จ</td></tr>
+<tr><td>ทั้งสองเป็น null</td><td>ไม่ได้ส่งพาเลทไป</td></tr>
+<tr><td><strong>ทั้งสองมีค่า</strong></td><td><strong>ไม่ควรเกิด แต่ชนิดไม่ได้ห้าม</strong></td></tr>
+</tbody></table><p>โค้ดที่ใช้จึงต้องเลือกว่าจะเชื่ออันไหนก่อน</p><pre class="code-vs"><code>if (line.palletError != null) {
+  // ถือว่าล้มเหลว แม้ palletId จะมีค่า
+} else {
+  _storeAssignedLine(line, line.palletId!);   // ← ใช้ ! เพราะเชื่อว่ามี
+}</code></pre><p>เครื่องหมาย <code>!</code> ตรงนี้คือการยืนยันว่า “ถ้าไม่มี error แปลว่าต้องมี palletId” ซึ่งเป็นข้อตกลงที่ไม่ได้เขียนไว้ที่ไหน — ถ้าฝั่ง .NET เปลี่ยนแล้วส่งทั้งสองเป็น null แอปจะพังตรงนี้</p><p>เขียนให้ปลอดภัยได้โดยไม่เปลี่ยนโมเดล</p><pre class="code-vs"><code>final palletId = line.palletId;
+if (line.palletError != null || palletId == null) {
+  // ไม่มีพาเลท = ยังต้องผูก ไม่ว่าจะด้วยเหตุผลใด
+  setState(() =&gt; _resumedPendingLines.insert(0, line));
+} else {
+  _storeAssignedLine(line, palletId);
+}</code></pre></section>
+
+<section id="section-5"><h2>5. ฝั่ง API — สี่เมธอด</h2><pre class="code-vs"><code>extension ReceivingApi on ApiService {
+  Future&lt;ApiResult&lt;POResponse&gt;&gt; getPO(String poId) async {
+    final response = await _get('/receiving/po/$poId');
+    if (!response.success) return ApiResult.error(response.error);   // ← ทิ้ง statusCode
+    return ApiResult.success(POResponse.fromJson(response.data!));
+  }</code></pre><p>ทั้งหกจุดในไฟล์นี้ทิ้ง <code>statusCode</code> ตามที่ 16.7 นับไว้ — โดเมนนี้ไม่มีจุดไหนส่งต่อเลย</p><p>ผลที่ตามมาชัดเจนที่สุดตรงการค้นหา PO</p><table><thead><tr><th>เซิร์ฟเวอร์ตอบ</th><th>ควรบอกผู้ใช้</th><th>ตอนนี้บอก</th></tr></thead><tbody>
+<tr><td>404</td><td>“ไม่พบ PO นี้ — ตรวจว่าสแกนถูกใบ”</td><td>ข้อความจากเซิร์ฟเวอร์</td></tr>
+<tr><td>500</td><td>“ระบบมีปัญหา แจ้งทีมไอที”</td><td>ข้อความจากเซิร์ฟเวอร์</td></tr>
+<tr><td>ไม่มีเน็ต</td><td>“เดินไปที่ที่มีสัญญาณ”</td><td>“ไม่สามารถเชื่อมต่อ server ได้”</td></tr>
+</tbody></table><p>สามกรณีนี้ผู้ใช้ต้องทำคนละอย่าง แต่ทั้งหมดขึ้นเป็นกล่องแดงหน้าตาเหมือนกัน</p><pre class="code-vs"><code>showErrorDialog(context, message: result.error!);</code></pre><p>แก้ขั้นแรกได้ด้วยการส่ง <code>statusCode</code> ต่อ แล้วจอเลือกข้อความเอง</p><pre class="code-vs"><code>if (result.isNotFound) {
+  showErrorDialog(context,
+    title: 'ไม่พบ PO',
+    message: 'ไม่มี PO "$poId" ในระบบ\nตรวจว่าสแกนถูกใบ หรือ PO ยังไม่ถูกสร้าง');
+  return;
+}
+showErrorDialog(context, message: result.error!);</code></pre></section>
+
+<section id="section-6"><h2>6. เมธอดที่ประกอบ path ต่างกันสามแบบ</h2><p>ในไฟล์เดียวมีทั้งสามแบบที่ 16.7 อธิบาย</p><pre class="code-vs"><code>// แบบต่อสตริง
+final response = await _get('/receiving/po/$poId');
+
+// แบบใช้ Uri — สองเมธอดที่ยิง path เดียวกัน
+final path = Uri(
+  path: '/receiving/validate-serial',
+  queryParameters: {'partId': partId, 'serialNo': serialNo},
+).toString();
+
+final path = Uri(
+  path: '/receiving/validate-serial',
+  queryParameters: {'partId': partId},
+).toString();</code></pre><p>สองอันหลังใช้ <code>Uri</code> ซึ่งปลอดภัย — สำคัญมากเพราะ S/N อาจมีอักขระพิเศษ</p><table><thead><tr><th>S/N</th><th>ต่อสตริงตรง ๆ</th><th>ผ่าน <code>Uri</code></th></tr></thead><tbody>
+<tr><td><code>SN-4471</code></td><td>ทำงานได้</td><td>ทำงานได้</td></tr>
+<tr><td><code>SN 4471</code> (มีช่องว่าง)</td><td><strong>path พัง</strong></td><td>เข้ารหัสเป็น <code>SN%204471</code></td></tr>
+<tr><td><code>SN/4471</code></td><td><strong>กลายเป็นคนละ path</strong></td><td>เข้ารหัสถูก</td></tr>
+<tr><td><code>SN#4471</code></td><td><strong>ทุกอย่างหลัง # หายไป</strong></td><td>เข้ารหัสถูก</td></tr>
+</tbody></table><p>ส่วน <code>getPO</code> ที่ต่อสตริงตรง ๆ ยังปลอดภัยตราบใดที่รหัส PO เป็นตัวอักษรกับตัวเลขและขีดกลาง — แต่ไม่มีอะไรรับประกันไว้</p><pre class="code-vs"><code>// ปลอดภัยกว่าและยาวขึ้นแค่นิดเดียว
+final response = await _get('/receiving/po/${Uri.encodeComponent(poId)}');</code></pre><p>อีกจุดที่ทำถูกคือการแปลงรายการ</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;List&lt;PendingPalletLine&gt;&gt;&gt; getPendingPalletLines() async {
+  final response = await _get('/receiving/pending-pallet-lines');
+  if (!response.success) return ApiResult.error(response.error);
+
+  final list = (response.data!['lines'] as List)      // ← ไม่กัน null
+      .map((item) =&gt; PendingPalletLine.fromJson(item))
+      .toList();
+  return ApiResult.success(list);
+}</code></pre><p>ตรงนี้ไม่กัน <code>null</code> — ถ้าเซิร์ฟเวอร์ไม่ส่ง <code>lines</code> มา (เช่นตอนไม่มีของค้าง) จะพัง</p><pre class="code-vs"><code>final list = (response.data!['lines'] as List? ?? [])</code></pre><p>เทียบกับ <code>upload_api.dart</code> ที่ใช้ <code>items</code> และก็ไม่กันเหมือนกัน ส่วน <code>picking_api.dart</code> กันบางเมธอด — ความไม่สม่ำเสมอเดียวกับที่ 16.7 ชี้ไว้</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ฟิลด์ที่เป็นแค่คำอธิบายไม่ทำให้พัง</td><td><code>brand</code> ที่หายไปทำให้ทั้ง PO เปิดไม่ได้</td></tr>
+<tr><td>ค่าเริ่มต้นปลอดภัยเสมอ</td><td><code>condition ?? 'FG'</code> ปล่อยของเสียผ่าน</td></tr>
+<tr><td>ฟิลด์ nullable สองตัวเป็นอิสระต่อกัน</td><td><code>palletId</code> กับ <code>palletError</code> ผูกกันแต่ชนิดไม่ได้บังคับ</td></tr>
+<tr><td>ต่อ path ด้วยสตริงพอ</td><td>S/N ที่มี <code>#</code> ทำให้พารามิเตอร์หายทั้งหมด</td></tr>
+<tr><td>ทุก endpoint ส่ง array มาเสมอ</td><td>บางตัวอาจไม่ส่งเมื่อไม่มีข้อมูล</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>เขียนชุดเทสต์ให้โมเดลของโดเมนนี้ โดยไม่แก้โค้ดเดิม</p><ol><li>เทสต์อะไรได้บ้าง และแต่ละข้อจับปัญหาอะไร</li><li>เขียนเทสต์ที่จับปัญหาซึ่งบทนี้ชี้ไว้ อย่างน้อยสามข้อ</li><li>ถ้าเทสต์ล้ม แต่โปรเจกต์นี้ทำงานอยู่ในคลังปกติ จะรายงานอย่างไร</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>เทสต์</th><th>จับอะไร</th></tr></thead><tbody>
+<tr><td>JSON ครบทุกฟิลด์ → แปลงถูก</td><td>ตาข่ายพื้นฐาน</td></tr>
+<tr><td>ฟิลด์ที่เป็นคำอธิบายหาย → ?</td><td><strong>บันทึกว่าตอนนี้พัง</strong></td></tr>
+<tr><td>ไม่มี <code>condition</code> → ได้ <code>FG</code></td><td>บันทึกการเดาที่อันตราย</td></tr>
+<tr><td>ไม่มี <code>lots</code> → ได้รายการว่าง</td><td>ยืนยันว่ากันไว้แล้ว</td></tr>
+<tr><td>รายการซ้อนแปลงครบทุกชั้น</td><td>PartLinesResponse → PartLine → PartLot</td></tr>
+<tr><td><code>palletError</code> มีค่า → รู้ว่าล้มเหลวครึ่งทาง</td><td>สัญญาที่จอพึ่งพา</td></tr>
+</tbody></table><p>ทั้งหมดนี้เขียนได้ทันที เพราะ <code>fromJson</code> เป็นฟังก์ชันบริสุทธิ์ที่รับ <code>Map</code> — ไม่ต้องมีเน็ต ไม่ต้องมี <code>ApiService</code></p><p><strong>ข้อ 2</strong></p><pre class="code-vs"><code>import 'package:flutter_test/flutter_test.dart';
+import 'package:wmsapp/models/wms_models.dart';
+
+/// JSON ที่ครบทุกฟิลด์ — ใช้เป็นฐาน แล้วแต่ละเทสต์เอาออกทีละอย่าง
+Map&lt;String, dynamic&gt; goodItem() =&gt; {
+  'id': 101,
+  'partId': 'PT-9821',
+  'owner': 'ACME',
+  'brand': 'BOSCH',
+  'itemDesc': 'มอเตอร์ 3 เฟส',
+  'imageUrl': '/images/pt-9821.jpg',
+  'serialRequire': true,
+  'qtyOrdered': 20,
+  'qtyReceived': 5,
+  'qtyRemaining': 15,
+  'status': 'PARTIAL',
+  'condition': 'FG',
+  'lotNumber': 'LOT-A',
+};
+
+void main() {
+  group('POItem.fromJson', () {
+    test('JSON ครบ แปลงได้ถูกต้อง', () {
+      final item = POItem.fromJson(goodItem());
+      expect(item.partId, 'PT-9821');
+      expect(item.serialRequire, isTrue);
+      expect(item.qtyRemaining, 15);
+    });
+
+    test('ไม่มี brand → ทั้งใบเปิดไม่ได้', () {
+      // บันทึกพฤติกรรมปัจจุบัน: ฟิลด์ที่เป็นแค่คำอธิบายทำให้ทั้ง PO พัง
+      // ถ้าวันหนึ่งแก้เป็น ?? '' เทสต์นี้จะล้ม แล้วให้เปลี่ยนเป็น
+      //   expect(POItem.fromJson(json).brand, isEmpty);
+      final json = goodItem()..remove('brand');
+      expect(() =&gt; POItem.fromJson(json), throwsA(isA&lt;TypeError&gt;()));
+    });
+
+    test('ไม่มี condition → เดาว่าเป็น FG', () {
+      // ค่าเริ่มต้นที่ผ่อนปรน: ของ PW ที่ไม่มี condition จะถูกรับเป็นของดี
+      final json = goodItem()..remove('condition');
+      expect(POItem.fromJson(json).condition, 'FG');
+    });
+
+    test('ไม่มี serialRequire → เดาว่าไม่ต้องสแกน S/N', () {
+      final json = goodItem()..remove('serialRequire');
+      expect(POItem.fromJson(json).serialRequire, isFalse);
+    });
+  });
+
+  group('ReceiptLineResponse.fromJson', () {
+    test('ผูก Pallet ไม่สำเร็จ ต้องอ่าน palletError ได้', () {
+      final line = ReceiptLineResponse.fromJson({
+        'lineId': 5,
+        'partId': 'PT-9821',
+        'owner': 'ACME',
+        'brand': 'BOSCH',
+        'itemDesc': 'มอเตอร์',
+        'qtyOrdered': 20,
+        'qtyReceived': 3,
+        'condition': 'FG',
+        'poItemStatus': 'PARTIAL',
+        'message': 'ok',
+        'palletError': 'Pallet PLT-001 มีสินค้า PW อยู่แล้ว',
+      });
+
+      // สัญญาที่ ScanPartScreen พึ่งพา (17.7)
+      expect(line.palletError, isNotNull);
+      expect(line.palletId, isNull);
+    });
+  });
+
+  group('PartLinesResponse.fromJson', () {
+    test('รายการซ้อนสามชั้นแปลงครบ', () {
+      final response = PartLinesResponse.fromJson({
+        'partId': 'PT-9821',
+        'serialRequire': true,
+        'lines': [
+          {
+            'lineId': 1,
+            'poId': 'PO-2026-001',
+            'condition': 'FG',
+            'lots': [
+              {'id': 101, 'lotNumber': 'LOT-A', 'qtyOrdered': 20, 'qtyReceived': 5},
+              {'id': 102, 'lotNumber': 'LOT-B', 'qtyOrdered': 10, 'qtyReceived': 0},
+            ],
+          },
+        ],
+      });
+
+      expect(response.lines, hasLength(1));
+      expect(response.lines.first.lots, hasLength(2));
+      expect(response.lines.first.lots[1].lotNumber, 'LOT-B');
+    });
+
+    test('ไม่มี lots → ได้รายการว่าง ไม่พัง', () {
+      final response = PartLinesResponse.fromJson({
+        'partId': 'PT-9821',
+        'lines': [
+          {'lineId': 1, 'poId': 'PO-1', 'condition': 'FG'},
+        ],
+      });
+      expect(response.lines.first.lots, isEmpty);
+    });
+  });
+}</code></pre><p>สังเกตเทสต์ที่สองใน group แรก — <strong>เทสต์ที่ยืนยันว่าตอนนี้พัง</strong> ไม่ใช่เทสต์ที่ยืนยันว่าถูก</p><p>เทสต์แบบนี้มีค่าเพราะบันทึกพฤติกรรมปัจจุบันไว้ ทำให้เห็นทันทีเมื่อมีคนแก้ และคอมเมนต์บอกว่าถ้าล้มควรทำอะไร</p><p><strong>ข้อ 3 — รายงานอย่างไร</strong></p><p>ผิดที่สุดคือรายงานว่า “โมเดลมีบั๊ก 3 ข้อ” เพราะแอปทำงานอยู่จริงในคลังทุกวัน</p><p>ที่ควรรายงานคือ<strong>เงื่อนไขที่จะทำให้พัง</strong> พร้อมความน่าจะเป็น</p><table><thead><tr><th>ข้อ</th><th>จะเกิดเมื่อ</th><th>ตรวจได้จาก</th></tr></thead><tbody>
+<tr><td><code>brand</code> หาย</td><td>ฐานข้อมูลยอมให้คอลัมน์นี้ว่าง</td><td>ถามทีม .NET หรือดู schema</td></tr>
+<tr><td><code>condition</code> หาย</td><td>เหมือนกัน</td><td>เหมือนกัน</td></tr>
+<tr><td><code>serialRequire</code> หาย</td><td>เหมือนกัน</td><td>เหมือนกัน</td></tr>
+</tbody></table><p>ถ้าคอลัมน์เหล่านี้เป็น NOT NULL ทั้งหมด ทั้งสามข้อไม่มีวันเกิด และควรบันทึกไว้ในเทสต์ว่า “ป้องกันไว้เพราะฝั่ง .NET รับประกันแล้ว” แทนที่จะแก้โค้ด</p><p>ถ้ามีคอลัมน์ไหน NULL ได้ นั่นคืองานจริงที่ต้องแก้ และเทสต์ที่เขียนไว้จะกลายเป็นตัวยืนยันว่าแก้แล้ว</p><p><strong>ข้อสรุปที่สำคัญ:</strong> เทสต์บอกได้ว่า “ถ้าข้อมูลเป็นแบบนี้ จะเกิดอะไร” แต่บอกไม่ได้ว่า “ข้อมูลจะเป็นแบบนั้นไหม” — คำตอบครึ่งหลังอยู่ที่ฝั่งเซิร์ฟเวอร์ และต้องไปถาม ไม่ใช่เดาจากโค้ดฝั่งแอป</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>เจ็ดคลาส และสามคลาสกลางซ้อนกันสามชั้นสะท้อนความจริงว่า Part หนึ่งมีหลายสภาพหลายล็อต</li><li>ฟิลด์ที่เป็นแค่คำอธิบาย (<code>owner</code>, <code>brand</code>, <code>itemDesc</code>) ไม่ป้องกัน ทำให้ทั้ง PO เปิดไม่ได้</li><li>ค่าเริ่มต้นแบ่งได้สองแบบ — ผ่อนปรน (อันตราย) กับเข้มงวด (ปลอดภัย)</li><li><code>condition ?? 'FG'</code> และ <code>serialRequire ?? false</code> เป็นแบบผ่อนปรนทั้งคู่</li><li>เมื่อไม่รู้ ให้เดาไปทางที่ผู้ใช้ต้องทำเพิ่ม ไม่ใช่ทางที่ระบบปล่อยผ่าน</li><li><code>palletId</code> กับ <code>palletError</code> ผูกกันแต่ชนิดไม่ได้บังคับ — <code>!</code> เป็นข้อตกลงที่ไม่ได้เขียนไว้</li><li>ทั้งหกจุดในโดเมนนี้ทิ้ง <code>statusCode</code> — แยก 404 จาก 500 ไม่ได้</li><li>สอง endpoint ใช้ <code>Uri</code> ถูกต้อง แต่ <code>getPO</code> ต่อสตริงตรง ๆ</li><li>เทสต์ที่ยืนยันว่า “ตอนนี้พัง” มีค่าพอ ๆ กับเทสต์ที่ยืนยันว่าถูก</li></ul></div><p><strong>บทหน้า:</strong> ข้ามไปฝั่ง Unload — จอ Load to Basket และกล่องสองขั้นตอนที่ซับซ้อนที่สุดในโดเมน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

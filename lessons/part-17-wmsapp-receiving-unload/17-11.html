@@ -4,17 +4,238 @@
 <title>Unload Session State</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-11 · Real Codebase</span><h1>Unload Session State</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">State inventory</a></li><li><a href="#section-2">Open session transition</a></li><li><a href="#section-3">Per-line state</a></li><li><a href="#section-4">Selection state</a></li><li><a href="#section-5">Confirm transition</a></li><li><a href="#section-6">Authoritative reload</a></li><li><a href="#section-7">Lifecycle safety</a></li><li><a href="#section-8">Refactor target</a></li></ol></nav>
-<div class="note"><strong>UnloadSessionSheet เป็น stateful workflow:</strong> state ไม่ได้มีแค่ loading แต่มี session, line ที่เลือก, serial/qty ที่กรอก, สถานะราย line และการคืน pallet ซึ่งต้องเปลี่ยนอย่างมีลำดับ</div>
-<section id="section-1"><h2>1. State inventory</h2><p>แกนหลักประกอบด้วย <code>_session</code>, <code>_partStatus</code>, selected item, scanned serials, qty controllers, loading/error และ scanner focus การเขียนรายการ state ก่อนแก้โค้ดช่วยเห็น invariant และ cleanup ที่ต้องทำ</p></section>
-<section id="section-2"><h2>2. Open session transition</h2><pre class="code-vs"><code>idle → opening → active
-             ↘ error</code></pre><p>scan pallet แล้วเรียก <code>open-session</code>; เมื่อสำเร็จสร้าง status map จาก items/confirmedLineIds และ reset input เก่าทั้งหมด ไม่ให้ข้อมูลของ pallet ก่อนหน้ารั่วเข้ามา</p></section>
-<section id="section-3"><h2>3. Per-line state</h2><p><code>lineId</code> เป็น key ของ <code>_partStatus</code> ค่า PENDING/CONFIRMED บอกว่างานใดเหลืออยู่ ห้าม key ด้วย partId เพราะ part เดียวกันอาจอยู่หลาย lot และต้องยืนยันแยกกัน</p></section>
-<section id="section-4"><h2>4. Selection state</h2><p>scan part จะเลือกรายการ pending ที่ตรง หากมีหลาย lot ควรให้ผู้ใช้เลือก เมื่อเปลี่ยน selection ต้อง clear serials และ qty ของ selection เดิมเพื่อป้องกันค่าค้างถูกส่งกับ line ใหม่</p></section>
-<section id="section-5"><h2>5. Confirm transition</h2><pre class="code-vs"><code>selected → validating → confirming → reloading → active
-                      ↘ validation/error</code></pre><p>ระหว่าง confirming ต้อง lock input/double tap และเก็บ context ที่แน่นอน ไม่อ่าน selected item ที่อาจเปลี่ยนระหว่าง await</p></section>
-<section id="section-6"><h2>6. Authoritative reload</h2><p>หลัง confirm ต้อง reload session เพราะ partial unload อาจสร้าง remainder line ด้วย <code>lineId</code> ใหม่ การ mark local line ว่า confirmed อย่างเดียวจึงไม่พอและอาจทำให้ progress ผิด</p></section>
-<section id="section-7"><h2>7. Lifecycle safety</h2><p>controller, timer และ focus node ต้อง dispose; callback หลัง await ตรวจ mounted; scanner keyboard events ต้องไม่ทำงานขณะ dialog/return flow เปิด มิฉะนั้น event ซ้ำอาจเปลี่ยน state ที่ไม่คาดคิด</p></section>
-<section id="section-8"><h2>8. Refactor target</h2><div class="success">ย้าย workflow ไปเป็น reducer/controller ที่มี event เช่น <code>PalletScanned</code>, <code>PartSelected</code>, <code>SerialAdded</code>, <code>ConfirmRequested</code>, <code>SessionReloaded</code> แล้ว widget มีหน้าที่ render state และส่ง event เท่านั้น</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">จอเลือกสถานีที่ฝังข้อมูลไว้</a></li><li><a href="#section-2">เปิดเป็นแผ่นเลื่อน ไม่ใช่จอ</a></li><li><a href="#section-3">Map ของตัวควบคุมที่ต้องจัดการเอง</a></li><li><a href="#section-4">โหลดใหม่แทนการแก้เอง</a></li><li><a href="#section-5">การป้องกันการปิดแผ่น</a></li><li><a href="#section-6">แอนิเมชันที่ถูกบังคับให้ครบเวลา</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: เปิด unload_screen.dart และ unload_session_sheet.dart</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.10, Part 4 (state), 4.14 (การคืนทรัพยากร)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน flow ที่ใช้แผ่นเลื่อนแทนจอ และจัดการ Map ของตัวควบคุมได้ถูก</div>
+
+<section id="section-1"><h2>1. จอเลือกสถานีที่ฝังข้อมูลไว้</h2><pre class="code-vs"><code>final _kUnloadStations = &lt;StationInfo&gt;[
+  StationInfo(id: 'UNL-1', label: 'Unload 1', color: Color(0xFF1976D2), ...),
+  StationInfo(id: 'UNL-2', label: 'Unload 2', color: Color(0xFF009688), ...),
+  StationInfo(id: 'UNL-3', label: 'Unload 3', color: Color(0xFF4CAF50), ...),
+];</code></pre><p>สามสถานีถูกเขียนไว้ในโค้ด ไม่ได้โหลดจากเซิร์ฟเวอร์</p><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>เปิดจอได้ทันที ไม่ต้องรอเน็ต</td><td>เพิ่มสถานีต้องปล่อยแอปใหม่</td></tr>
+<tr><td>สีและไอคอนคุมได้</td><td>ต้องแก้ทั้งสองฝั่งให้ตรงกัน</td></tr>
+<tr><td>ทำงานได้แม้เน็ตหลุด</td><td>สถานีที่ปิดซ่อมยังแสดงอยู่</td></tr>
+</tbody></table><p>สำหรับคลังที่มีสถานีคงที่และไม่ค่อยเปลี่ยน การฝังไว้เป็นการแลกที่คุ้ม — แต่ควรรู้ว่านี่คือข้อมูลที่ซ้ำกับฝั่งเซิร์ฟเวอร์</p><p>สองทางเข้าเหมือนกับที่ 3.4 สอน</p><pre class="code-vs"><code>void _onStationBarcodeScan() {
+  final raw = _stationController.text.trim().toUpperCase();
+  _stationController.clear();
+  if (raw.isEmpty) return;
+
+  final station = _kUnloadStations.where((s) =&gt; s.id == raw).firstOrNull;
+  if (station == null) {
+    showErrorDialog(context,
+      message: 'Station not found: $raw\nSupported stations: UNL-1, UNL-2, UNL-3');
+    return;
+  }
+  _openStation(station);
+}</code></pre><p><code>firstOrNull</code> คืน <code>null</code> เมื่อไม่เจอ — ต่างจาก <code>firstWhere</code> ที่โยน <code>StateError</code></p><div class="note"><strong>ข้อความผิดพลาดตรงนี้บอกรายชื่อที่ใช้ได้</strong> — ผู้ใช้ที่สแกนป้ายผิดรู้ทันทีว่าควรหาป้ายไหน<br>แต่รายชื่อถูกพิมพ์ซ้ำในข้อความ ถ้าเพิ่มสถานีที่สี่แล้วลืมแก้ข้อความ ผู้ใช้จะได้ข้อมูลผิด<pre class="code-vs"><code>// สร้างจากรายการจริง ไม่มีทางไม่ตรง
+final ids = _kUnloadStations.map((s) =&gt; s.id).join(', ');
+message: 'ไม่พบสถานี "$raw"\nสถานีที่ใช้ได้: $ids',</code></pre></div></section>
+
+<section id="section-2"><h2>2. เปิดเป็นแผ่นเลื่อน ไม่ใช่จอ</h2><pre class="code-vs"><code>void _openStation(StationInfo station) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,      // ให้สูงเกินครึ่งจอได้
+    useSafeArea: true,             // ไม่ทับแถบสถานะ
+    backgroundColor: Colors.transparent,
+    builder: (_) =&gt; UnloadSessionSheet(...),
+  );
+}</code></pre><table><thead><tr><th>ค่า</th><th>ถ้าไม่ใส่</th></tr></thead><tbody>
+<tr><td><code>isScrollControlled: true</code></td><td>แผ่นสูงได้แค่ครึ่งจอ เนื้อหายาวจะถูกบีบ</td></tr>
+<tr><td><code>useSafeArea: true</code></td><td>เนื้อหาบนสุดถูกแถบสถานะบัง</td></tr>
+<tr><td><code>backgroundColor: transparent</code></td><td>เห็นพื้นหลังของแผ่นซ้อนกับที่ลูกวาดเอง</td></tr>
+</tbody></table><p>ทั้งสามค่าจำเป็นเมื่อลูกวาดรูปทรงเอง ซึ่ง <code>UnloadSessionSheet</code> ทำ</p><pre class="code-vs"><code>return PopScope(
+  canPop: _canDismiss,
+  child: Container(
+    margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),      // เว้นขอบเอง
+    constraints: BoxConstraints(maxHeight: maxHeight),      // จำกัดความสูงเอง
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.all(Radius.circular(20)),  // มุมโค้งทั้งสี่มุม
+    ),
+    ...</code></pre><p>ผลคือแผ่นลอยที่มีขอบทั้งสี่ด้าน ต่างจากแผ่นมาตรฐานที่ติดขอบจอ</p><pre class="code-vs"><code>final mq = MediaQuery.of(context);
+final bottomPad = mq.viewInsets.bottom + mq.viewPadding.bottom;
+final maxHeight = mq.size.height * 0.92;</code></pre><table><thead><tr><th>ค่า</th><th>คืออะไร</th></tr></thead><tbody>
+<tr><td><code>viewInsets.bottom</code></td><td>ความสูงของแป้นพิมพ์ที่ขึ้นมา</td></tr>
+<tr><td><code>viewPadding.bottom</code></td><td>แถบนำทางของระบบ</td></tr>
+</tbody></table><p>บวกกันแล้วใช้เป็นระยะล่างของเนื้อหา — ทำให้ช่องกรอกไม่ถูกแป้นพิมพ์บัง ตรงกับที่ 2.14 สอน</p></section>
+
+<section id="section-3"><h2>3. Map ของตัวควบคุมที่ต้องจัดการเอง</h2><pre class="code-vs"><code>// key = UnloadItem.lineId (ไม่ใช่ partId — 1 Part อาจมีหลาย Lot บน pallet เดียวกัน)
+final Map&lt;int, String&gt; _partStatus = {};
+final Map&lt;int, TextEditingController&gt; _qtyCtrl = {};</code></pre><p>คอมเมนต์อธิบายเหตุผลของคีย์ไว้ ซึ่งสำคัญมาก — ถ้าใช้ <code>partId</code> เป็นคีย์ สินค้าเดียวกันคนละล็อตจะทับกัน</p><p>แต่ละรายการมีช่องกรอกจำนวนของตัวเอง จึงต้องมีตัวควบคุมหนึ่งตัวต่อรายการ</p><pre class="code-vs"><code>void _buildQtyControllers() {
+  _disposeQtyControllers();            // ← คืนของเก่าก่อนเสมอ
+  if (_session == null) return;
+
+  for (final item in _session!.items) {
+    _qtyCtrl[item.lineId] = TextEditingController(text: '${item.qty}');
+  }
+}
+
+void _disposeQtyControllers() {
+  for (final controller in _qtyCtrl.values) {
+    controller.dispose();
+  }
+  _qtyCtrl.clear();
+}</code></pre><table><thead><tr><th>เรียก <code>_buildQtyControllers()</code> ที่</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>หลังเปิด session</td><td>สร้างช่องให้ทุกรายการบนพาเลท</td></tr>
+<tr><td>หลัง <code>_reloadSession()</code></td><td>รายการเปลี่ยน lineId เปลี่ยน</td></tr>
+</tbody></table><p>และถูกคืนสามที่</p><pre class="code-vs"><code>@override
+void dispose() {
+  ...
+  _disposeQtyControllers();       // ← 1. ตอนแผ่นถูกปิด
+  super.dispose();
+}
+
+void _buildQtyControllers() {
+  _disposeQtyControllers();       // ← 2. ก่อนสร้างชุดใหม่
+  ...
+}
+
+void _resetForNextPallet() {
+  _disposeQtyControllers();       // ← 3. ตอนเริ่มพาเลทใหม่
+  ...
+}</code></pre><div class="note"><strong>นี่คือการจัดการทรัพยากรที่ถูกที่สุดในทั้งสองโดเมน</strong> — ครบทุกทางออก และมีฟังก์ชันเดียวที่ทุกที่เรียก<br>ต่างจาก <code>_pickPallet</code> (17.5), <code>_openAssignDialog</code> (17.8) และ <code>_showBasketDialog</code> (17.10) ที่ไม่คืนเลย<br>คนเขียนคนเดียวกันทำถูกที่นี่และพลาดที่นั่น — ความต่างคือ<strong>ตัวควบคุมที่นี่เป็นฟิลด์ของ State</strong> จึงอยู่ในสายตาของ <code>dispose()</code></div><p>จุดที่ยังพลาดได้</p><pre class="code-vs"><code>final qtyText = _qtyCtrl[item.lineId]?.text.trim() ?? '';
+qty = int.tryParse(qtyText) ?? 0;</code></pre><p><code>?.</code> และ <code>?? ''</code> กันกรณีที่ไม่มีตัวควบคุมของ <code>lineId</code> นั้น ซึ่งเกิดได้ถ้า <code>_reloadSession()</code> ทำงานแล้ว lineId เปลี่ยน — จบด้วย <code>qty = 0</code> แล้วถูกปฏิเสธที่ด่านถัดไป</p><pre class="code-vs"><code>if (qty &lt;= 0) {
+  showErrorDialog(context, message: 'กรุณาระบุจำนวนที่ต้องการ Unload');
+  return;
+}</code></pre><p>ผู้ใช้จะเห็นข้อความที่ไม่ตรงกับสาเหตุ — เขากรอกจำนวนไว้แล้ว แต่ตัวควบคุมหายไป</p></section>
+
+<section id="section-4"><h2>4. โหลดใหม่แทนการแก้เอง</h2><pre class="code-vs"><code>// โหลด session ปัจจุบันซ้ำจาก server — ใช้หลัง confirm สำเร็จ เพื่อให้ LineId/qty ตรงกับจริงเสมอ
+// (ถ้ามีเศษเหลือ backend จะสร้าง UnloadLine ใหม่ที่มี LineId ต่างจากเดิม
+//  แก้ปัญหาโดยโหลดใหม่แทนการ patch เอง)
+Future&lt;void&gt; _reloadSession() async {
+  final session = _session;
+  if (session == null) return;
+
+  final result = await ApiService().openUnloadSession(
+    palletId: session.palletId,
+    operatorId: widget.userId,
+  );
+  if (!mounted || !result.success) return;
+
+  final fresh = result.data!;
+  setState(() {
+    _session = fresh;
+    _sessionId = fresh.sessionId;
+    _partStatus.clear();
+    for (final item in fresh.items) {
+      _partStatus[item.lineId] =
+          fresh.confirmedLineIds.contains(item.lineId) ? 'CONFIRMED' : 'PENDING';
+    }
+  });
+  _buildQtyControllers();
+}</code></pre><p>คอมเมนต์อธิบายการตัดสินใจไว้ครบ — ทำไมถึงโหลดใหม่แทนที่จะแก้ข้อมูลในเครื่อง</p><table><thead><tr><th>วิธี</th><th>เมื่อเซิร์ฟเวอร์แตกรายการใหม่</th></tr></thead><tbody>
+<tr><td>แก้ในเครื่อง</td><td>ต้องเดาว่า lineId ใหม่คืออะไร — เดาไม่ได้</td></tr>
+<tr><td><strong>โหลดใหม่</strong></td><td>ได้ของจริงเสมอ</td></tr>
+</tbody></table><p>สังเกตว่าการยืนยันหยิบของบางส่วนทำให้เซิร์ฟเวอร์สร้างรายการใหม่สำหรับส่วนที่เหลือ — ข้อมูลในเครื่องจึงล้าสมัยทันทีหลังยืนยัน</p><p>นี่เป็นตัวอย่างของหลักที่ 12.4 สอนไว้: <strong>เมื่อไม่แน่ใจว่าสถานะในเครื่องยังตรงไหม ให้โหลดใหม่ทั้งชุด</strong> — ถูกกว่าและปลอดภัยกว่าการพยายามซิงก์ทีละส่วน</p><p>ราคาที่จ่ายคือหนึ่งคำขอเพิ่มต่อการยืนยันหนึ่งครั้ง ซึ่งยอมรับได้เพราะผู้ใช้ยืนยันไม่กี่สิบครั้งต่อพาเลท</p><p>สังเกตอีกอย่าง — <code>openUnloadSession</code> ถูกใช้ทั้งเปิดใหม่และโหลดซ้ำ</p><pre class="code-vs"><code>// เปิด session
+final result = await ApiService().openUnloadSession(palletId: palletId, ...);
+
+// โหลดซ้ำ — เมธอดเดียวกัน
+final result = await ApiService().openUnloadSession(palletId: session.palletId, ...);</code></pre><p>แปลว่า endpoint นี้เป็นแบบ<strong>เรียกซ้ำได้โดยไม่เปลี่ยนผล</strong> — เรียกสิบครั้งกับพาเลทเดียวกันได้ session เดิม ซึ่งเป็นคุณสมบัติที่ทำให้การโหลดซ้ำปลอดภัย</p></section>
+
+<section id="section-5"><h2>5. การป้องกันการปิดแผ่น</h2><pre class="code-vs"><code>bool get _canDismiss =&gt; !_loading &amp;&amp; !_returning;
+
+return PopScope(
+  canPop: _canDismiss,
+  child: Container(...),
+);</code></pre><p>ปิดแผ่นไม่ได้ระหว่างที่มีคำขอค้างอยู่ หรือระหว่างที่กำลังคืนพาเลท</p><table><thead><tr><th>สถานะ</th><th>ปิดได้ไหม</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>ว่าง ยังไม่สแกนพาเลท</td><td>ได้</td><td>ไม่มีอะไรเสีย</td></tr>
+<tr><td>เปิด session แล้ว ยืนยันไปบางส่วน</td><td><strong>ได้</strong></td><td>สถานะอยู่ที่เซิร์ฟเวอร์แล้ว</td></tr>
+<tr><td>กำลังยิงคำขอ</td><td>ไม่ได้</td><td>ผลลัพธ์ยังไม่รู้</td></tr>
+<tr><td>กำลังคืนพาเลท</td><td>ไม่ได้</td><td>มีแอนิเมชัน 5 วินาทีที่ต้องดูจนจบ</td></tr>
+</tbody></table><div class="note"><strong>แถวที่สองต่างจาก <code>ScanPartScreen</code> อย่างสำคัญ</strong> — ที่นี่ปิดแผ่นกลางทางได้โดยไม่เสียงาน เพราะทุกการยืนยันถูกส่งไปเซิร์ฟเวอร์แล้ว ผู้ใช้สแกนพาเลทเดิมกลับมาได้ session เดิม<br>ต่างจาก S/N ที่สแกนค้างใน <code>ScanPartScreen</code> ซึ่งอยู่แต่ในเครื่องและหายเมื่อออกจากจอ<br><strong>ความต่างอยู่ที่ว่าสถานะอยู่ฝั่งไหน</strong> ไม่ใช่ที่โค้ดฝั่งแอปเขียนดีกว่ากัน</div><p>แต่ยังมีสถานะที่หายได้ — S/N ที่สแกนไว้ในแผ่นนี้</p><pre class="code-vs"><code>final List&lt;String&gt; _scannedSerials = [];</code></pre><p>ถ้าผู้ใช้สแกน S/N ไป 8 ตัวแล้วปัดแผ่นลง จะหายเหมือนกัน และ <code>_canDismiss</code> ไม่ได้ตรวจเรื่องนี้</p><pre class="code-vs"><code>// ควรเป็น
+bool get _canDismiss =&gt; !_loading &amp;&amp; !_returning &amp;&amp; _scannedSerials.isEmpty;</code></pre><p>เป็นปัญหาเดียวกับที่ 17.7 พบใน <code>ScanPartScreen</code> และ 17.10 พบใน <code>LoadToBasketScreen</code> — <strong>รูปแบบเดียวกันในสามจอ</strong></p></section>
+
+<section id="section-6"><h2>6. แอนิเมชันที่ถูกบังคับให้ครบเวลา</h2><pre class="code-vs"><code>setState(() =&gt; _returning = true);
+final results = await Future.wait([
+  ApiService().returnPalletToAsis(palletId: session.palletId, sessionId: _sessionId),
+  Future.delayed(const Duration(seconds: 5)),      // ← หน่วงคงที่
+]);
+
+if (!mounted) return;
+setState(() =&gt; _returning = false);
+
+final result = results.first as ApiResult&lt;Map&lt;String, dynamic&gt;&gt;;</code></pre><p><code>Future.wait</code> รอทั้งสองอย่างเสร็จ — คำขอกับตัวหน่วง 5 วินาที</p><table><thead><tr><th>คำขอใช้เวลา</th><th>ผู้ใช้รอ</th></tr></thead><tbody>
+<tr><td>0.3 วินาที</td><td>5 วินาที</td></tr>
+<tr><td>3 วินาที</td><td>5 วินาที</td></tr>
+<tr><td>8 วินาที</td><td>8 วินาที</td></tr>
+</tbody></table><p>ตั้งใจให้แอนิเมชันลูกศร (<code>UnloadReturnAnimation</code>) แสดงครบอย่างน้อย 5 วินาที</p><table><thead><tr><th>เหตุผลที่เป็นไปได้</th><th>สมเหตุสมผลไหม</th></tr></thead><tbody>
+<tr><td>ให้ผู้ใช้เห็นว่าพาเลทกำลังถูกส่งกลับ</td><td>ใช่ — เป็นการกระทำทางกายภาพที่ต้องรอจริง</td></tr>
+<tr><td>ให้เวลาผู้ใช้ถอยออกจากพาเลท</td><td>ใช่ ถ้าโฟล์คลิฟท์อัตโนมัติมารับ</td></tr>
+<tr><td>ให้แอนิเมชันดูสวย</td><td><strong>ไม่ — 5 วินาทีต่อพาเลทคือเวลาจริงของผู้ใช้</strong></td></tr>
+</tbody></table><p>ถ้าเหตุผลคือสองข้อแรก ควรเขียนคอมเมนต์บอก เพราะคนที่มาอ่านทีหลังจะคิดว่าเป็นการหน่วงที่ไม่จำเป็นแล้วเอาออก</p><pre class="code-vs"><code>// หน่วง 5 วินาทีโดยตั้งใจ — ให้ผู้ใช้ถอยห่างก่อนโฟล์คลิฟท์อัตโนมัติเข้ามารับพาเลท
+// อย่าลดเวลานี้โดยไม่ถามฝ่ายคลังก่อน
+Future.delayed(const Duration(seconds: 5)),</code></pre><p>มีจุดหนึ่งที่พลาด</p><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(context, message: result.error ?? 'เกิดข้อผิดพลาด');
+  return;
+}
+
+_resetForNextPallet();</code></pre><p>คืนพาเลทไม่สำเร็จ → แสดงข้อความ → ไม่ล้างสถานะ ซึ่งถูกต้อง ผู้ใช้ลองใหม่ได้</p><p>แต่การคืนพาเลทเป็นคำสั่งที่<strong>ไม่รู้ผล</strong>เมื่อเน็ตหลุด — คำสั่งอาจไปถึงแล้ว โฟล์คลิฟท์อาจกำลังมา แต่แอปบอกว่าล้มเหลว</p><p>ตรงกับสิ่งที่ 7.10 อธิบาย และข้อความควรบอกให้ตรวจก่อนสั่งซ้ำ</p><pre class="code-vs"><code>showErrorDialog(
+  context,
+  title: 'ไม่ทราบผล',
+  message: '${result.error}\n\n'
+      'คำสั่งอาจส่งไปแล้ว — ตรวจว่าพาเลทถูกรับไปหรือยังก่อนสั่งซ้ำ',
+);</code></pre></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>แผ่นเลื่อนใช้แทนจอได้ทุกกรณี</td><td>ปิดโดยไม่ตั้งใจง่ายกว่ามาก</td></tr>
+<tr><td><code>Map</code> ของตัวควบคุมคืนพร้อม State</td><td>ต้องวนคืนเองทุกตัว</td></tr>
+<tr><td>แก้ข้อมูลในเครื่องเร็วกว่าโหลดใหม่</td><td>ที่นี่โหลดใหม่ถูกกว่าเพราะ lineId เปลี่ยน</td></tr>
+<tr><td>ปิดแผ่นกลางทางแล้วเสียงาน</td><td>ที่นี่ไม่เสีย เพราะสถานะอยู่ที่เซิร์ฟเวอร์</td></tr>
+<tr><td><code>Future.wait</code> คืนเมื่อตัวแรกเสร็จ</td><td>รอครบทุกตัว</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ทีมอยากเพิ่มสถานี UNL-4 และอยากให้รายชื่อสถานีมาจากเซิร์ฟเวอร์แทนการฝังในโค้ด</p><ol><li>ต้องแก้อะไรบ้าง</li><li>จอจะทำงานอย่างไรถ้าโหลดรายชื่อไม่สำเร็จ</li><li>คุ้มไหมที่จะทำ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><table><thead><tr><th>ฝั่ง</th><th>งาน</th></tr></thead><tbody>
+<tr><td>.NET</td><td>endpoint <code>GET /unload/stations</code></td></tr>
+<tr><td>models</td><td><code>StationInfo.fromJson</code> — ตอนนี้ไม่มี</td></tr>
+<tr><td>api</td><td>เมธอดใหม่ใน <code>unload_api.dart</code></td></tr>
+<tr><td>screen</td><td>เปลี่ยนจากค่าคงที่เป็น state + โหลดใน <code>initState</code></td></tr>
+</tbody></table><p>ปัญหาแรกที่เจอ: <code>StationInfo</code> มี <code>Color</code> และ <code>IconData</code> ซึ่งส่งผ่าน JSON ตรง ๆ ไม่ได้</p><pre class="code-vs"><code>StationInfo(
+  id: 'UNL-1',
+  label: 'Unload 1',
+  color: const Color(0xFF1976D2),     // ส่งเป็นสตริง '#1976D2' แล้วแปลง
+  icon: MdiIcons.trayArrowUp,          // ส่งไม่ได้ — ต้องแมปจากชื่อ
+)</code></pre><pre class="code-vs"><code>// แมปชื่อไอคอนที่รองรับ — ที่ไม่รู้จักใช้ตัวเริ่มต้น
+IconData _iconFor(String? name) =&gt; switch (name) {
+  'trayArrowUp' =&gt; MdiIcons.trayArrowUp,
+  'trayArrowDown' =&gt; MdiIcons.trayArrowDown,
+  _ =&gt; MdiIcons.viewGridOutline,
+};
+
+factory StationInfo.fromJson(Map&lt;String, dynamic&gt; json) =&gt; StationInfo(
+  id: json['id'],
+  label: json['label'] ?? json['id'],
+  color: Color(int.parse('FF${json['color'] ?? '757575'}', radix: 16)),
+  icon: _iconFor(json['icon']),
+);</code></pre><p>สังเกตว่าไอคอนยังต้องอยู่ในโค้ดอยู่ดี — เพิ่มไอคอนแบบใหม่ยังต้องปล่อยแอปใหม่ ได้แค่ไม่ต้องปล่อยเมื่อเพิ่มสถานีที่ใช้ไอคอนเดิม</p><p><strong>ข้อ 2 — โหลดไม่สำเร็จ</strong></p><p>นี่คือคำถามที่สำคัญที่สุด เพราะเปลี่ยนจอจาก “เปิดได้เสมอ” เป็น “ขึ้นกับเน็ต”</p><table><thead><tr><th>ทางเลือก</th><th>ผล</th></tr></thead><tbody>
+<tr><td>แสดงข้อผิดพลาด จอว่าง</td><td><strong>ผู้ใช้ทำงานไม่ได้เลย</strong> — แย่กว่าเดิมมาก</td></tr>
+<tr><td>ใช้รายชื่อที่ฝังไว้เป็นตัวสำรอง</td><td>ทำงานได้เสมอ แต่ต้องดูแลสองที่</td></tr>
+<tr><td>จำรายชื่อล่าสุดที่โหลดสำเร็จ</td><td>ทำงานได้ถ้าเคยโหลดสำเร็จ</td></tr>
+</tbody></table><pre class="code-vs"><code>// ทางที่สาม — เก็บลง SharedPreferences หลังโหลดสำเร็จ
+Future&lt;void&gt; _loadStations() async {
+  final result = await _api.getUnloadStations();
+  if (!mounted) return;
+
+  if (result.success) {
+    setState(() =&gt; _stations = result.data!);
+    unawaited(_cacheStations(result.data!));
+    return;
+  }
+
+  // โหลดไม่ได้ → ใช้ของที่จำไว้ ผู้ใช้ยังทำงานต่อได้
+  final cached = await _loadCachedStations();
+  if (!mounted) return;
+  setState(() =&gt; _stations = cached);
+  if (cached.isEmpty) {
+    showWarningSnackbar(context, 'โหลดรายชื่อสถานีไม่ได้ — สแกนบาร์โค้ดสถานีแทนได้');
+  }
+}</code></pre><p>สังเกตข้อความสุดท้าย — บอกทางออกที่ยังใช้ได้ เพราะการสแกนบาร์โค้ดต้องเทียบกับรายชื่อ ซึ่งถ้าไม่มีรายชื่อก็สแกนไม่ได้เหมือนกัน</p><p>ตรงนี้เป็นข้อบกพร่องของแผน — ต้องให้เซิร์ฟเวอร์ตรวจแทน หรือยอมรับว่าไม่มีรายชื่อก็เข้าสถานีไม่ได้</p><p><strong>ข้อ 3 — คุ้มไหม</strong></p><table><thead><tr><th>คำถาม</th><th>ถ้าตอบว่า</th><th>สรุป</th></tr></thead><tbody>
+<tr><td>สถานีเปลี่ยนบ่อยแค่ไหน</td><td>ปีละครั้ง</td><td><strong>ไม่คุ้ม</strong></td></tr>
+<tr><td></td><td>เดือนละครั้ง</td><td>คุ้ม</td></tr>
+<tr><td>ปล่อยแอปใหม่ยากแค่ไหน</td><td>ต้องเดินไปติดตั้งทีละเครื่อง 20 เครื่อง</td><td>คุ้มขึ้นมาก</td></tr>
+<tr><td>มีสถานีที่ปิดชั่วคราวไหม</td><td>มี ต้องซ่อมบ่อย</td><td>คุ้ม — ซ่อนสถานีที่ปิดได้</td></tr>
+</tbody></table><p><strong>คำตอบที่ตรงที่สุดสำหรับกรณีนี้:</strong> ถ้าโจทย์คือ “เพิ่ม UNL-4” อย่างเดียว การเพิ่มสามบรรทัดในโค้ดแล้วปล่อยแอปใหม่ ใช้เวลาน้อยกว่างานทั้งหมดข้างบนมาก</p><p>การย้ายไปเซิร์ฟเวอร์คุ้มก็ต่อเมื่อ<strong>จะมีการเปลี่ยนอีกหลายครั้ง</strong> หรือ<strong>ต้องซ่อนสถานีที่ปิดชั่วคราว</strong> ซึ่งเป็นความสามารถที่ต่างออกไปและควรเป็นเหตุผลหลัก ไม่ใช่ผลพลอยได้</p><p>ตรงกับหลักที่ 9.12 สอน — ย้ายของออกจากโค้ดเมื่อมีเหตุผลที่ชัดเจน ไม่ใช่เพราะ “ฝังในโค้ดไม่ดี”</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>สามสถานีถูกฝังในโค้ด — เปิดจอได้ทันทีแต่เพิ่มสถานีต้องปล่อยแอปใหม่</li><li>ข้อความผิดพลาดพิมพ์รายชื่อสถานีซ้ำ แทนที่จะสร้างจากรายการจริง</li><li>แผ่นเลื่อนต้องตั้งสามค่าเมื่อลูกวาดรูปทรงเอง</li><li><code>viewInsets.bottom + viewPadding.bottom</code> กันแป้นพิมพ์บังช่องกรอก</li><li><code>Map</code> ของตัวควบคุมถูกคืนครบสามทางออกผ่านฟังก์ชันเดียว — ดีที่สุดในสองโดเมนนี้</li><li>ตัวควบคุมที่เป็นฟิลด์ของ State ถูกคืน ส่วนที่สร้างในเมธอดไม่ถูกคืน</li><li>โหลด session ใหม่แทนการแก้ในเครื่อง เพราะ lineId เปลี่ยนหลังยืนยันบางส่วน</li><li>ปิดแผ่นกลางทางไม่เสียงาน เพราะสถานะอยู่ที่เซิร์ฟเวอร์ — แต่ S/N ที่สแกนค้างยังหาย</li><li><code>Future.wait</code> กับตัวหน่วง 5 วินาทีบังคับให้แอนิเมชันครบเวลา</li></ul></div><p><strong>บทหน้า:</strong> การติดตามความคืบหน้าในแผ่นนี้ และ getter ที่คำนวณจากแหล่งเดียว</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

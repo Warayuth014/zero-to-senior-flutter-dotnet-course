@@ -4,24 +4,146 @@
 <title>Receiving Map</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-01 · Real Codebase</span><h1>Receiving Map</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Receiving route</a></li><li><a href="#section-2">Receiving data flow</a></li><li><a href="#section-3">Unload route</a></li><li><a href="#section-4">Identity keys</a></li><li><a href="#section-5">Source ownership</a></li><li><a href="#section-6">Partial success</a></li><li><a href="#section-7">Failure boundaries</a></li><li><a href="#section-8">Trace rule</a></li></ol></nav>
-<div class="note"><strong>Inbound มีสองการเปลี่ยน ownership:</strong> Receiving ยืนยันของจาก POเข้า WMSและผูก pallet; Unloadเปิด palletจาก ASRSแล้วแยก Part/Lotออกก่อน Load to Basket ทุก commandต้องรักษา line/lot/serial identity</div>
-<section id="section-1"><h2>1. Receiving route</h2><pre class="code-vs"><code>Home → ReceivingMenu
-  → ScanPo → ScanPart
-  → PendingPallet (แก้ partial assignment)</code></pre><p>Homeส่ง userId/fullName; Receiving menu refresh pending countทุกครั้งที่ routeลูกกลับ</p></section>
-<section id="section-2"><h2>2. Receiving data flow</h2><pre class="code-vs"><code>PO ID → POResponse
-Part ID → PartLinesResponse
-→ choose condition + lot
-→ validate serial(s) / manual qty
-→ scanReceiptPart(..., palletId)
-→ ReceiptLineResponse</code></pre></section>
-<section id="section-3"><h2>3. Unload route</h2><pre class="code-vs"><code>Home → UnloadMenu
-  → UnloadScreen → UnloadSessionSheet
-  → LoadToBasketScreen</code></pre><p>Unloadและ Basketเป็นคนละ endpoint/state แม้หน้าต่อกันทางธุรกิจ</p></section>
-<section id="section-4"><h2>4. Identity keys</h2><p><code>poId</code>ระบุเอกสาร, <code>lineId</code>ระบุ Part+condition+lot, <code>partId</code>อย่างเดียวไม่พอ, <code>serialNo</code>ระบุชิ้น, <code>palletId</code>/<code>basketId</code>ระบุ container และ <code>sessionId</code>ผูก unload operation</p></section>
-<section id="section-5"><h2>5. Source ownership</h2><p>Screen Stateถือ controllers/focus/loading/selections, ApiService extensionsประกอบ transport, models parse DTO และ serverเป็น authorityของ qty/status/assignment หลัง commandสำเร็จ flowที่ดี reload authoritative snapshotแทน patchซับซ้อนเอง</p></section>
-<section id="section-6"><h2>6. Partial success</h2><p>Receiving APIอาจบันทึกรับสำเร็จแต่ผูก palletล้ม โดยคืน <code>palletError</code> Screenต้องเก็บ lineไว้ pendingและห้าม resend receiptทั้งก้อน นี่เป็น outcomeแบบ “success + follow-up required” ไม่ใช่ boolean errorธรรมดา</p></section>
-<section id="section-7"><h2>7. Failure boundaries</h2><p>POไม่พบ, condition/lotไม่ตรง, serialซ้ำ/ผิด line, qtyเกิน, pallet typeขัดกัน, unload partial remainder, session staleและ basket loadซ้ำ แต่ละจุดควรมี typed outcome/idempotency ไม่ใช้ข้อความเป็น control flow</p></section>
-<section id="section-8"><h2>8. Trace rule</h2><div class="success">ทุก actionให้จด stateก่อน → API method/path/payload → response DTO → stateหลัง → focus/navigation → retry semantics โดยเฉพาะ “serverทำสำเร็จแต่ clientไม่เห็น response”</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Part นี้อ่านอะไร</a></li><li><a href="#section-2">Receiving — เส้นทางของผู้ใช้</a></li><li><a href="#section-3">Unload — เส้นทางของผู้ใช้</a></li><li><a href="#section-4">endpoint ที่สองโดเมนนี้ใช้</a></li><li><a href="#section-5">คำศัพท์ที่ต้องรู้ก่อนอ่าน</a></li><li><a href="#section-6">รูปแบบที่ซ้ำกันทั้งสองโดเมน</a></li><li><a href="#section-7">ลำดับที่จะอ่านใน Part นี้</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 40–50 นาที</span><span>ลงมือทำ: เปิด lib/screens/receiving/ และ lib/screens/unload/</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> Part 16 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นแผนที่ของสอง flow ที่ใหญ่ที่สุดในฝั่งขาเข้า และรู้ว่าจะอ่านไฟล์ไหนก่อน</div>
+
+<section id="section-1"><h2>1. Part นี้อ่านอะไร</h2><p>Part 16 ทำแผนที่ทั้งโปรเจกต์ Part นี้ลงลึกที่สองโดเมนแรก — <strong>Receiving</strong> (รับสินค้าจากผู้ขาย) และ <strong>Unload</strong> (ถ่ายของจากพาเลทลงตะกร้า)</p><table><thead><tr><th>โดเมน</th><th>ไฟล์</th><th>บรรทัด</th></tr></thead><tbody>
+<tr><td>receiving</td><td>18</td><td>3,403</td></tr>
+<tr><td>unload</td><td>10</td><td>1,989</td></tr>
+<tr><td><strong>รวม</strong></td><td><strong>28</strong></td><td><strong>5,392</strong></td></tr>
+</tbody></table><p>คิดเป็น 24% ของโค้ดทั้งโปรเจกต์ และเป็นสองโดเมนที่ผู้ใช้ในคลังแตะบ่อยที่สุด</p><p>สองโดเมนนี้ถูกจับมาไว้ Part เดียวกันเพราะเป็น<strong>ขาเข้าทั้งคู่</strong> — ของเข้าคลังผ่าน Receiving แล้วถูกถ่ายลงตะกร้าผ่าน Unload ก่อนจะไปสู่การจัดเก็บ</p></section>
+
+<section id="section-2"><h2>2. Receiving — เส้นทางของผู้ใช้</h2><pre class="code-vs"><code>HomeScreen กด "Receive"
+  ▼
+ReceivingMenuScreen (107)              ← เมนู 2 ทาง + ป้ายจำนวนค้าง
+  ├─ "รับเอกสาร"
+  │    ▼
+  │  ScanPoScreen (148)                ← ค้นหา PO
+  │    ▼
+  │  ScanPartScreen (1,727)            ← สแกนของทีละชิ้น ★ ใหญ่สุด
+  │
+  └─ "ค้างการผูก Pallet"
+       ▼
+     PendingPalletScreen (272)         ← ตามเก็บของที่ค้าง</code></pre><p>สังเกตว่าเส้นทางหลักมีแค่สามจอ แต่จอที่สามยาว 1,727 บรรทัด — มากกว่าอีกสองจอรวมกันหกเท่า</p><p>รอบ ๆ จอหลักมีไฟล์ย่อยที่ถูกแตกออกมาแล้ว</p><table><thead><tr><th>ไฟล์ย่อย</th><th>บรรทัด</th><th>ของจอ</th></tr></thead><tbody>
+<tr><td><code>pending_pallet_po_group.dart</code></td><td>186</td><td>PendingPallet</td></tr>
+<tr><td><code>po_items_list.dart</code></td><td>129</td><td>ScanPo</td></tr>
+<tr><td><code>resumed_pending_list.dart</code></td><td>116</td><td>ScanPart</td></tr>
+<tr><td><code>pallet_scan_section.dart</code></td><td>112</td><td>ScanPart</td></tr>
+<tr><td><code>pending_items_list.dart</code></td><td>105</td><td>ScanPart</td></tr>
+<tr><td><code>assigned_list.dart</code></td><td>92</td><td>ScanPart</td></tr>
+<tr><td><code>receiving_menu_card.dart</code></td><td>85</td><td>Menu</td></tr>
+<tr><td>อีก 7 ไฟล์</td><td>&lt; 75 ต่อไฟล์</td><td>กระจาย</td></tr>
+</tbody></table><div class="note"><strong>ข้อสังเกตสำคัญ:</strong> <code>ScanPartScreen</code> มีไฟล์ย่อยถึง 6 ไฟล์แล้ว รวม 512 บรรทัด แต่ตัวจอเองยัง 1,727<br>แปลว่าสิ่งที่ถูกแตกออกไปคือ<strong>ส่วนที่วาดหน้าจอ</strong> ส่วนที่เหลืออยู่ในจอคือ<strong>ตรรกะ</strong> — ซึ่งเป็นการแตกที่ถูกทิศ แต่ยังไม่จบ</div></section>
+
+<section id="section-3"><h2>3. Unload — เส้นทางของผู้ใช้</h2><pre class="code-vs"><code>HomeScreen กด "Replenishment"
+  ▼
+UnloadMenuScreen (124)
+  ├─ "Unload จาก Pallet"
+  │    ▼
+  │  UnloadScreen (158)                ← เลือกสถานี
+  │    ▼
+  │  UnloadSessionSheet (528)          ← แผ่นเลื่อนขึ้น ไม่ใช่จอใหม่ ★
+  │
+  └─ "Load เข้า Basket"
+       ▼
+     LoadToBasketScreen (470)</code></pre><p>ต่างจาก Receiving ตรงที่หัวใจของ flow ไม่ใช่จอ แต่เป็น <strong>bottom sheet</strong></p><table><thead><tr><th></th><th>จอ (<code>Navigator.push</code>)</th><th>แผ่นเลื่อน (<code>showModalBottomSheet</code>)</th></tr></thead><tbody>
+<tr><td>เห็นของข้างหลังไหม</td><td>ไม่เห็น</td><td>เห็นบางส่วน</td></tr>
+<tr><td>ปุ่มย้อนกลับ</td><td>มีบนแถบบน</td><td>ปัดลงหรือกดปุ่มระบบ</td></tr>
+<tr><td>ปิดโดยไม่ตั้งใจ</td><td>ยาก</td><td><strong>ง่าย</strong></td></tr>
+</tbody></table><p>แถวสุดท้ายเป็นเหตุผลที่ <code>UnloadSessionSheet</code> ต้องมีการป้องกัน ซึ่ง 17.11 จะดูโค้ดจริง</p><p><code>UnloadSessionSheet</code> มีไฟล์ย่อย 6 ไฟล์ รวม 709 บรรทัด มากกว่าตัวมันเองด้วยซ้ำ — เป็นสัดส่วนที่ดีกว่า <code>ScanPartScreen</code> มาก</p></section>
+
+<section id="section-4"><h2>4. endpoint ที่สองโดเมนนี้ใช้</h2><table><thead><tr><th>โดเมน</th><th>เมธอด</th><th>path</th><th>ชนิด</th></tr></thead><tbody>
+<tr><td rowspan="5">receiving</td><td><code>getPO</code></td><td><code>/receiving/po/{poId}</code></td><td>GET</td></tr>
+<tr><td><code>getPartLines</code></td><td><code>/receiving/validate-serial?partId=</code></td><td>GET</td></tr>
+<tr><td><code>validateReceivingSerial</code></td><td><code>/receiving/validate-serial?partId=&amp;serialNo=</code></td><td>GET</td></tr>
+<tr><td><code>scanReceiptPart</code></td><td><code>/receiving/scan-part</code></td><td>POST</td></tr>
+<tr><td><code>assignPallet</code></td><td><code>/receiving/assign-pallet</code></td><td>POST</td></tr>
+<tr><td>receiving</td><td><code>getPendingPalletLines</code></td><td><code>/receiving/pending-pallet-lines</code></td><td>GET</td></tr>
+<tr><td rowspan="3">unload</td><td><code>openUnloadSession</code></td><td><code>/unload/open-session</code></td><td>POST</td></tr>
+<tr><td><code>confirmUnload</code></td><td><code>/unload/confirm-unload</code></td><td>POST</td></tr>
+<tr><td><code>returnPalletToAsis</code></td><td><code>/unload/return-pallet-to-asis</code></td><td>POST</td></tr>
+<tr><td rowspan="2">basket</td><td><code>getUnloadedItems</code></td><td><code>/basket/unloaded-items</code></td><td>GET</td></tr>
+<tr><td><code>loadToBasket</code></td><td><code>/basket/load</code></td><td>POST</td></tr>
+</tbody></table><p>สิบเอ็ด endpoint สำหรับ 5,392 บรรทัด — สัดส่วนนี้บอกว่า<strong>โค้ดส่วนใหญ่ไม่ได้ใช้คุยกับเซิร์ฟเวอร์</strong> แต่ใช้จัดการสถานะบนหน้าจอ</p><p>สังเกตแถวที่ 2 กับ 3 — เป็น path เดียวกันแต่ส่งพารามิเตอร์ต่างกัน</p><pre class="code-vs"><code>// ส่งแค่ partId → ถามว่ามีกี่ condition/lot ให้เลือก
+Uri(path: '/receiving/validate-serial', queryParameters: {'partId': partId})
+
+// ส่ง partId + serialNo → ถามว่า S/N นี้ถูกต้องไหม
+Uri(path: '/receiving/validate-serial',
+    queryParameters: {'partId': partId, 'serialNo': serialNo})</code></pre><p>endpoint เดียวทำสองงานที่ต่างกันตามพารามิเตอร์ที่ส่งมา — ประหยัดฝั่งเซิร์ฟเวอร์ แต่ชื่อ <code>validate-serial</code> ไม่ได้บอกว่าเรียกโดยไม่มี serial ก็ได้ ต้องอ่านโค้ดฝั่งแอปถึงจะรู้</p></section>
+
+<section id="section-5"><h2>5. คำศัพท์ที่ต้องรู้ก่อนอ่าน</h2><table><thead><tr><th>คำ</th><th>หมายถึง</th></tr></thead><tbody>
+<tr><td>PO</td><td>ใบสั่งซื้อจากผู้ขาย บอกว่าจะมีของอะไรมาเท่าไร</td></tr>
+<tr><td>Line</td><td>หนึ่งบรรทัดใน PO — Part หนึ่งชนิด สภาพหนึ่งแบบ ล็อตหนึ่งล็อต</td></tr>
+<tr><td>Part</td><td>รหัสสินค้า</td></tr>
+<tr><td>Lot</td><td>ล็อตการผลิต สินค้าเดียวกันคนละล็อตต้องแยกกัน</td></tr>
+<tr><td>Condition</td><td>สภาพสินค้า — <code>FG</code> (ของดี) หรือ <code>PW</code> (ต้องแปรรูปก่อน)</td></tr>
+<tr><td>S/N</td><td>หมายเลขเครื่อง ของบางชนิดต้องสแกนทีละชิ้น</td></tr>
+<tr><td>Pallet</td><td>แท่นวางของ ของที่รับแล้วต้องผูกกับพาเลท</td></tr>
+<tr><td>Basket</td><td>ตะกร้า ปลายทางของของที่ถ่ายจากพาเลท</td></tr>
+<tr><td>ASRS</td><td>คลังอัตโนมัติ ที่พาเลทถูกส่งกลับไป</td></tr>
+</tbody></table><div class="note"><strong>สิ่งที่ทำให้ flow นี้ซับซ้อนกว่าที่คิด:</strong> Part หนึ่งตัว อาจมีหลาย Condition และแต่ละ Condition มีหลาย Lot — ผู้ใช้สแกนบาร์โค้ดที่มีแค่รหัส Part ระบบจึงต้องถามกลับว่าจะรับอันไหน<br>นี่คือเหตุผลหลักที่ <code>ScanPartScreen</code> ยาว 1,727 บรรทัด</div></section>
+
+<section id="section-6"><h2>6. รูปแบบที่ซ้ำกันทั้งสองโดเมน</h2><p>ทุกจอในสองโดเมนนี้เดินตามโครงเดียวกัน</p><pre class="code-vs"><code>class _XxxScreenState extends State&lt;XxxScreen&gt; {
+  final _api = ApiService();               // 1. เชื่อมต่อ
+  final _xxxController = TextEditingController();   // 2. ช่องสแกน
+  final _xxxFocus = FocusNode();
+
+  bool _loading = false;                   // 3. สถานะ
+  SomeModel? _data;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();                               // 4. โหลดตอนเปิด
+  }
+
+  Future&lt;void&gt; _load() async {
+    setState(() =&gt; _loading = true);
+    final result = await _api.something();
+    if (!mounted) return;                  // 5. ตรวจก่อน setState
+    setState(() =&gt; _loading = false);
+    if (!result.success) {
+      showErrorDialog(context, message: result.error!);
+      return;
+    }
+    setState(() =&gt; _data = result.data);
+  }
+
+  @override
+  void dispose() {                         // 6. คืนทรัพยากร
+    _xxxController.dispose();
+    _xxxFocus.dispose();
+    super.dispose();
+  }
+}</code></pre><p>หกขั้นนี้ตรงกับที่ Part 4 สอนทุกข้อ อ่านจอแรกเข้าใจแล้วจะอ่านจอที่เหลือได้เร็ว</p><p><strong>สิ่งที่ต่างกันในแต่ละจอคือสิ่งที่อยู่ระหว่างขั้น 3 กับ 4</strong> — จำนวน state ที่ถือ</p><table><thead><tr><th>จอ</th><th>จำนวนฟิลด์ใน State</th></tr></thead><tbody>
+<tr><td><code>ReceivingMenuScreen</code></td><td>2</td></tr>
+<tr><td><code>ScanPoScreen</code></td><td>4</td></tr>
+<tr><td><code>PendingPalletScreen</code></td><td>4</td></tr>
+<tr><td><code>LoadToBasketScreen</code></td><td>6</td></tr>
+<tr><td><code>UnloadSessionSheet</code></td><td>16</td></tr>
+<tr><td><code>ScanPartScreen</code></td><td><strong>27</strong></td></tr>
+</tbody></table><p>ตัวเลขนี้ทำนายความยากของการอ่านได้แม่นกว่าจำนวนบรรทัด — 27 ฟิลด์แปลว่ามีสถานะที่เป็นไปได้จำนวนมหาศาล และหลายชุดไม่ควรเกิดพร้อมกัน</p></section>
+
+<section id="section-7"><h2>7. ลำดับที่จะอ่านใน Part นี้</h2><table><thead><tr><th>บท</th><th>อ่านอะไร</th></tr></thead><tbody>
+<tr><td>17.2</td><td>เมนูและป้ายจำนวนค้าง — จอที่เล็กที่สุด ใช้ตั้งหลัก</td></tr>
+<tr><td>17.3–17.4</td><td>ค้นหา PO และการแสดงผล</td></tr>
+<tr><td>17.5</td><td><code>ScanPartScreen</code> — 27 ฟิลด์นั้นคืออะไรบ้าง</td></tr>
+<tr><td>17.6</td><td>การตรวจ S/N และการกันสแกนซ้ำ</td></tr>
+<tr><td>17.7</td><td>การผูกพาเลท และเส้นทางที่ล้มเหลวครึ่งทาง</td></tr>
+<tr><td>17.8</td><td>จอตามเก็บของที่ค้าง</td></tr>
+<tr><td>17.9</td><td>โมเดลและ API ของ receiving</td></tr>
+<tr><td>17.10–17.12</td><td>Unload ทั้ง flow</td></tr>
+<tr><td>17.13</td><td>โมเดลและ API ของ basket</td></tr>
+<tr><td>17.14</td><td>ต่อทั้งหมดเป็นเส้นเดียวและสรุปสิ่งที่พบ</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ยังไม่ต้องเปิดไฟล์ ใช้ข้อมูลในบทนี้ตอบ</p><ol><li>ถ้าผู้ใช้แจ้งว่า “สแกน Part แล้วเด้งถามว่าจะรับอันไหน แต่กดยกเลิกแล้วสแกนใหม่ไม่ได้” จะเปิดไฟล์ไหน และคาดว่าสาเหตุอยู่ที่ไหน</li><li>ทำไม <code>UnloadSessionSheet</code> ถึงมีไฟล์ย่อยรวมกันมากกว่าตัวเอง แต่ <code>ScanPartScreen</code> กลับกัน</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><p><code>scan_part_screen.dart</code> — และคาดว่าสาเหตุคือ<strong>สถานะค้าง</strong></p><p>อาการ “กดยกเลิกแล้วสแกนใหม่ไม่ได้” แปลว่ามีฟิลด์บางตัวถูกตั้งค่าไว้ตอนเริ่มสแกน แล้วไม่ถูกล้างเมื่อผู้ใช้ยกเลิก</p><p>จาก 27 ฟิลด์ ตัวที่น่าสงสัยคือตัวที่ควบคุมว่าช่องสแกนใช้ได้หรือไม่ — 17.5 จะเจอว่าเป็น <code>_scanningItem</code> และช่อง Part ถูกปิดด้วย <code>enabled: _scanningItem == null</code></p><p>วิธีเข้าเร็วที่สุดคือค้นคำว่า <code>enabled:</code> ในไฟล์นั้น แล้วดูว่าเงื่อนไขขึ้นกับฟิลด์ไหน จากนั้นค้นว่าฟิลด์นั้นถูกตั้งค่าและถูกล้างที่ไหนบ้าง</p><p><strong>ข้อ 2</strong></p><table><thead><tr><th></th><th><code>UnloadSessionSheet</code></th><th><code>ScanPartScreen</code></th></tr></thead><tbody>
+<tr><td>ตัวเอง</td><td>528</td><td>1,727</td></tr>
+<tr><td>ไฟล์ย่อย</td><td>709</td><td>512</td></tr>
+<tr><td>สัดส่วนที่แตกออก</td><td>57%</td><td>23%</td></tr>
+</tbody></table><p>คำอธิบายที่น่าจะถูกที่สุดคือ<strong>ความซับซ้อนของกฎ ไม่ใช่ความขยันของคนเขียน</strong></p><p>Unload มีกฎเดียว: ของบนพาเลทมีอะไรบ้าง ยืนยันทีละรายการจนครบ</p><p>Receiving มีกฎซ้อนกันหลายชั้น: Part → เลือก Condition → เลือก Lot → สแกน S/N หรือกรอกจำนวน → เลือกพาเลท → บันทึก → อาจล้มเหลวครึ่งทาง → ต้องตามเก็บ</p><p>ตรรกะที่ซ้อนกันแบบนี้แตกออกเป็น widget ไม่ได้ เพราะมันไม่ใช่ส่วนที่วาดหน้าจอ — ต้องแตกออกเป็น<strong>ชั้นที่ถือสถานะ</strong> ซึ่งโปรเจกต์นี้ยังไม่มี</p><p><strong>ข้อสรุปที่ใช้ได้ทั่วไป:</strong> ถ้าจอหนึ่งแตกไฟล์ไปแล้วแต่ยังใหญ่อยู่ แปลว่าสิ่งที่เหลือไม่ใช่ UI — และการแตกเป็น widget เพิ่มจะไม่ช่วย ต้องย้ายตรรกะออกไปที่ store ตามที่ 9.7 สอน ซึ่ง Part 23 จะทำจริง</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>Receiving + Unload = 28 ไฟล์ 5,392 บรรทัด คิดเป็น 24% ของโปรเจกต์</li><li>Receiving มีสามจอหลัก จอสุดท้ายยาว 1,727 บรรทัด</li><li>Unload ใช้ bottom sheet เป็นหัวใจของ flow ไม่ใช่จอ</li><li>สิบเอ็ด endpoint สำหรับ 5,392 บรรทัด — โค้ดส่วนใหญ่จัดการสถานะบนจอ</li><li><code>/receiving/validate-serial</code> ทำสองงานตามพารามิเตอร์ที่ส่ง</li><li>ทุกจอเดินตามโครงหกขั้นเดียวกัน สิ่งที่ต่างคือจำนวน state ที่ถือ</li><li>จำนวนฟิลด์ใน State ทำนายความยากได้แม่นกว่าจำนวนบรรทัด</li><li>Part เดียวมีหลาย Condition และหลาย Lot คือต้นเหตุของความซับซ้อนทั้งหมด</li></ul></div><p><strong>บทหน้า:</strong> จอเมนู 107 บรรทัด และป้ายตัวเลขที่บอกเรื่องสำคัญเรื่องหนึ่งเกี่ยวกับวิธีที่แอปนี้โหลดข้อมูลใหม่</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

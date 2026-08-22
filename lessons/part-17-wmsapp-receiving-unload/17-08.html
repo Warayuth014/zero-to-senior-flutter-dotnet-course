@@ -4,24 +4,241 @@
 <title>Pending Pallets</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-08 · Real Codebase</span><h1>Pending Pallets</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Load pending lines</a></li><li><a href="#section-2">Group by PO</a></li><li><a href="#section-3">Identity ที่ต้องรักษา</a></li><li><a href="#section-4">Scan pallet dialog</a></li><li><a href="#section-5">Assignment request</a></li><li><a href="#section-6">Refresh authoritative data</a></li><li><a href="#section-7">Error และ retry</a></li><li><a href="#section-8">แบบฝึกหัด</a></li></ol></nav>
-<div class="note"><strong>Pending pallet คือ recovery queue:</strong> receipt ถูกบันทึกแล้ว แต่ยังผูก pallet ไม่สำเร็จ หน้านี้จึงต้องซ่อมเฉพาะ assignment และห้ามยิงรับสินค้าเดิมซ้ำ</div>
-<section id="section-1"><h2>1. Load pending lines</h2><p><code>PendingPalletScreen</code> เรียก <code>getPendingPalletLines()</code> ตอนเปิดหน้า เก็บ loading/error/data แยกกัน และตรวจ <code>mounted</code> ก่อนเปลี่ยน state หลัง await เพื่อไม่อัปเดต widget ที่ถูก dispose แล้ว</p></section>
-<section id="section-2"><h2>2. Group by PO</h2><pre class="code-vs"><code>final grouped = &lt;String, List&lt;PendingPalletLine&gt;&gt;{};
-for (final line in lines) {
-  grouped.putIfAbsent(line.poId, () =&gt; []).add(line);
-}</code></pre><p>การจัดกลุ่มด้วย <code>poId</code> ช่วยให้ operator เห็นบริบทเอกสาร ไม่ปะปน line จากหลาย PO ในรายการยาว</p></section>
-<section id="section-3"><h2>3. Identity ที่ต้องรักษา</h2><p><code>lineId</code> คือ receipt line ที่ backend สร้างแล้ว ไม่ใช่ partId และไม่ใช่ PO item id การ retry ต้องส่ง lineId เดิมกลับไปเพื่อผูก pallet กับ record ที่ถูกต้อง</p></section>
-<section id="section-4"><h2>4. Scan pallet dialog</h2><p>เมื่อเลือกบรรทัด UI เปิด dialog ให้ scan/กรอก pallet แล้ว trim ค่า ตรวจไม่ให้ว่าง และ disable ปุ่มระหว่างส่ง request ส่วน <code>palletType</code> ใช้ condition ของ line เป็นข้อมูลประกอบตาม contract ปัจจุบัน</p></section>
-<section id="section-5"><h2>5. Assignment request</h2><pre class="code-vs"><code>POST /receiving/assign-pallet
-{
-  "palletId": palletId,
-  "palletType": line.condition,
-  "operatorId": operatorId,
-  "lineIds": [line.lineId]
-}</code></pre><p>API รองรับหลาย line แต่หน้าปัจจุบันซ่อมครั้งละหนึ่ง line จึงส่ง list ขนาดหนึ่ง</p></section>
-<section id="section-6"><h2>6. Refresh authoritative data</h2><p>หลัง assign สำเร็จให้โหลด pending จาก server ใหม่แทนการลบ local อย่างเดียว เพราะ backend อาจ normalize pallet, เปลี่ยนสถานะ หรือมีรายการใหม่จากอุปกรณ์อื่นระหว่างนั้น</p></section>
-<section id="section-7"><h2>7. Error และ retry</h2><p>network timeout ทำให้ไม่รู้แน่ว่า server commit หรือยัง ทางปลอดภัยคือ refresh ก่อน retry ถ้า line หายจาก pending แปลว่าสำเร็จแล้ว ถ้ายังอยู่จึงค่อยส่ง assignment ซ้ำ และ backend ควรทำ operation นี้ให้ idempotent</p></section>
-<section id="section-8"><h2>8. แบบฝึกหัด</h2><div class="success">เพิ่ม bulk assignment โดยเลือกหลาย line ภายใน PO เดียว ตรวจ condition ให้เข้ากัน สแกน pallet ครั้งเดียว แล้วส่ง <code>lineIds</code> ทั้งชุด พร้อมทดสอบ success, partial conflict และ refresh หลัง timeout</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">จอที่มีอยู่เพราะความล้มเหลวครึ่งทาง</a></li><li><a href="#section-2">การจัดกลุ่มที่ทำในเครื่อง</a></li><li><a href="#section-3">กล่องผูกพาเลทที่จัดการสถานะเอง</a></li><li><a href="#section-4">กฎที่หายไป</a></li><li><a href="#section-5">การจัดการ context สองตัว</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: เปิด pending_pallet_screen.dart ทั้ง 272 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.7, Part 2 (เลย์เอาต์)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เทียบสองจอที่ทำงานเดียวกัน และเห็นว่ากฎทางธุรกิจหายไปได้อย่างไรเมื่อมีสองทางเข้า</div>
+
+<section id="section-1"><h2>1. จอที่มีอยู่เพราะความล้มเหลวครึ่งทาง</h2><p>จอนี้มีอยู่เพราะกรณีที่ 17.7 อธิบาย — ของถูกบันทึกแล้วแต่ผูกพาเลทไม่สำเร็จ</p><pre class="code-vs"><code>Future&lt;void&gt; _load() async {
+  setState(() =&gt; _loading = true);
+  final result = await _api.getPendingPalletLines();
+  if (!mounted) return;
+
+  if (result.success) {
+    setState(() {
+      _lines = result.data!;
+      _loading = false;
+    });
+    return;
+  }
+
+  setState(() =&gt; _loading = false);
+  showErrorDialog(context, message: result.error ?? 'โหลดข้อมูลไม่ได้');
+}</code></pre><p>ต่างจาก <code>ScanPartScreen</code> ที่แสดงเฉพาะรายการค้างของ PO ใบที่กำลังทำอยู่ — จอนี้แสดง<strong>ทุก PO ทุกคน</strong></p><table><thead><tr><th></th><th>รายการค้างใน ScanPart</th><th>จอนี้</th></tr></thead><tbody>
+<tr><td>ขอบเขต</td><td>PO ใบเดียว</td><td>ทั้งคลัง</td></tr>
+<tr><td>มาจาก</td><td><code>POResponse.pendingLines</code></td><td><code>/receiving/pending-pallet-lines</code></td></tr>
+<tr><td>เข้าถึงเมื่อ</td><td>อยู่ใน flow รับของ</td><td>จากเมนู เมื่อไรก็ได้</td></tr>
+</tbody></table><p>สองแหล่งนี้ทับซ้อนกัน — รายการเดียวกันโผล่ทั้งสองที่ ซึ่งถูกต้อง เพราะผู้ใช้ควรตามเก็บได้ทั้งระหว่างทำงานและทีหลัง</p></section>
+
+<section id="section-2"><h2>2. การจัดกลุ่มที่ทำในเครื่อง</h2><pre class="code-vs"><code>Map&lt;String, List&lt;PendingPalletLine&gt;&gt; _groupedLines() {
+  final grouped = &lt;String, List&lt;PendingPalletLine&gt;&gt;{};
+  for (final line in _lines) {
+    grouped.putIfAbsent(line.poId, () =&gt; []).add(line);
+  }
+  return grouped;
+}</code></pre><p><code>putIfAbsent</code> สร้างรายการว่างถ้ายังไม่มีคีย์นั้น แล้วคืนรายการที่มีอยู่ — สั้นกว่าการตรวจเองสองบรรทัด</p><pre class="code-vs"><code>// เขียนแบบยาวได้ผลเหมือนกัน
+if (!grouped.containsKey(line.poId)) grouped[line.poId] = [];
+grouped[line.poId]!.add(line);</code></pre><p>การจัดกลุ่มตาม PO ช่วยผู้ใช้เพราะของที่มาจาก PO เดียวกันมักลงพาเลทเดียวกัน</p><div class="note"><strong>จุดที่ต้องระวัง:</strong> <code>_groupedLines()</code> ถูกเรียกใน <code>build()</code><pre class="code-vs"><code>@override
+Widget build(BuildContext context) {
+  final grouped = _groupedLines();     // ← วนทั้งรายการทุกครั้งที่ build
+  ...</code></pre>ทุกครั้งที่ <code>setState</code> ทำงาน รายการทั้งหมดถูกวนใหม่ ที่หลักสิบรายการไม่มีปัญหา แต่ถ้าของค้างสะสมเป็นหลักร้อยและ <code>build</code> ทำงานบ่อย จะเริ่มรู้สึกได้<br>แก้ได้ด้วยการคำนวณครั้งเดียวตอนโหลดแล้วเก็บไว้</div><p>ส่วนการแสดงผลใช้ <code>ListView.builder</code> ถูกต้อง</p><pre class="code-vs"><code>: RefreshIndicator(
+    onRefresh: _load,
+    child: ListView.builder(...)</code></pre><p>และมี <code>RefreshIndicator</code> ให้ผู้ใช้ลากลงรีเฟรชเอง — สิ่งที่ <code>ReceivingMenuScreen</code> ใน 17.2 ยังไม่มี</p><p>สามสถานะของหน้าจอถูกแยกครบ</p><pre class="code-vs"><code>child: _loading
+    ? const Center(child: CircularProgressIndicator())
+    : _lines.isEmpty
+    ? const PendingPalletEmptyState()
+    : RefreshIndicator(...)</code></pre><table><thead><tr><th>สถานะ</th><th>แสดง</th></tr></thead><tbody>
+<tr><td>กำลังโหลด</td><td>วงกลมหมุน</td></tr>
+<tr><td>โหลดแล้วไม่มีของค้าง</td><td>จอว่างที่มีข้อความอธิบาย</td></tr>
+<tr><td>มีของค้าง</td><td>รายการที่จัดกลุ่มแล้ว</td></tr>
+</tbody></table><p>ยังขาดสถานะที่สี่ — โหลดไม่สำเร็จ ตอนนี้จะเด้งกล่องแล้วแสดงจอว่างที่บอกว่า “ไม่มีรายการค้าง” ซึ่งไม่จริง</p></section>
+
+<section id="section-3"><h2>3. กล่องผูกพาเลทที่จัดการสถานะเอง</h2><pre class="code-vs"><code>void _openAssignDialog(PendingPalletLine line) {
+  final palletCtrl = TextEditingController();
+  final palletFocus = FocusNode();
+  bool assigning = false;                       // ← สถานะของกล่อง
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) =&gt; StatefulBuilder(
+      builder: (ctx, setDlg) =&gt; AlertDialog(...),
+    ),
+  );
+}</code></pre><p><code>StatefulBuilder</code> ให้กล่องมี <code>setState</code> ของตัวเองโดยไม่ต้องสร้างคลาส <code>StatefulWidget</code> ใหม่</p><table><thead><tr><th></th><th><code>setDlg</code></th><th><code>setState</code> ของจอ</th></tr></thead><tbody>
+<tr><td>วาดใหม่</td><td>เฉพาะในกล่อง</td><td>ทั้งจอ</td></tr>
+<tr><td>เข้าถึงตัวแปร</td><td><code>assigning</code> ที่เป็น local</td><td>ฟิลด์ของ State</td></tr>
+<tr><td>เหมาะกับ</td><td>สถานะที่ตายไปพร้อมกล่อง</td><td>สถานะที่อยู่ต่อ</td></tr>
+</tbody></table><p><code>assigning</code> เป็นสถานะที่ไม่มีความหมายนอกกล่อง — ใช้ <code>StatefulBuilder</code> จึงถูกต้อง และไม่ทำให้จอทั้งจอวาดใหม่ตอนกดปุ่ม</p><p>ปุ่มทั้งสองถูกปิดตอนกำลังทำงาน</p><pre class="code-vs"><code>TextButton(
+  onPressed: assigning ? null : () =&gt; Navigator.pop(ctx),   // ปิดปุ่มยกเลิกด้วย
+  child: Text('ยกเลิก', ...),
+),
+ElevatedButton(
+  onPressed: assigning ? null : () =&gt; _doAssign(...),
+  child: assigning
+      ? const SizedBox(width: 18, height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+      : const Text('ยืนยัน'),
+),</code></pre><p>และช่องกรอกก็ถูกปิดด้วย</p><pre class="code-vs"><code>onSubmitted: assigning ? null : (_) =&gt; _doAssign(...),</code></pre><div class="note"><strong>ครบทั้งสามทางเข้า</strong> — ปุ่มยืนยัน, ปุ่มยกเลิก, และการกด Enter จากเครื่องสแกน<br>ต่างจาก <code>ScanPoScreen</code> ใน 17.3 ที่ปิดแค่ปุ่มแต่ปล่อยให้ Enter ผ่านเข้าไปได้ — สองจอในโปรเจกต์เดียวกันจัดการเรื่องเดียวกันไม่เหมือนกัน</div><p><code>barrierDismissible: false</code> ป้องกันการปัดปิดกลางคัน ซึ่งจำเป็นเพราะกล่องนี้กำลังจะเปลี่ยนข้อมูล</p></section>
+
+<section id="section-4"><h2>4. กฎที่หายไป</h2><p>เทียบการผูกพาเลทของสองจอ</p><pre class="code-vs"><code>// ScanPartScreen (17.5)
+Future&lt;void&gt; _assignResumedLine(ReceiptLineResponse line) async {
+  // ตรวจว่าสภาพสินค้าตรงกับพาเลทที่จำไว้
+  if (_lastPalletId != null &amp;&amp; _lastPalletType == line.condition) {
+    await _assignToPallet(line, _lastPalletId!);
+    ...
+  }
+  ...
+}</code></pre><pre class="code-vs"><code>// PendingPalletScreen (จอนี้)
+Future&lt;void&gt; _doAssign(...) async {
+  final palletId = palletCtrl.text.trim().toUpperCase();
+  if (palletId.isEmpty) {
+    showErrorDialog(dlgCtx, message: 'กรุณาใส่ Pallet ID');
+    return;
+  }
+
+  markLoading();
+
+  final result = await _api.assignPallet(
+    palletId: palletId,
+    palletType: line.condition,      // ← ส่งสภาพไป แต่ไม่ได้ตรวจอะไรก่อน
+    operatorId: widget.userId,
+    lineIds: [line.lineId],
+  );
+  ...</code></pre><table><thead><tr><th></th><th>ScanPart</th><th>PendingPallet</th></tr></thead><tbody>
+<tr><td>จำพาเลทล่าสุด</td><td><strong>มี</strong></td><td>ไม่มี</td></tr>
+<tr><td>ตรวจสภาพก่อนใช้ความจำ</td><td><strong>มี</strong></td><td>ไม่เกี่ยว (ไม่มีความจำ)</td></tr>
+<tr><td>เติมพาเลทให้อัตโนมัติ</td><td><strong>มี</strong></td><td>ไม่มี</td></tr>
+</tbody></table><p>ผลที่ตามมาในทางปฏิบัติ</p><pre class="code-vs"><code>ของค้าง 8 รายการจาก PO เดียวกัน สภาพเดียวกัน จะลงพาเลทเดียวกัน
+  → ที่จอนี้: ต้องสแกนพาเลทซ้ำทั้ง 8 ครั้ง
+  → ที่ ScanPart: สแกนครั้งแรก แล้วอีก 7 ครั้งกดยืนยันอย่างเดียว</code></pre><div class="note"><strong>นี่ไม่ใช่บั๊ก แต่เป็นความสามารถที่หายไปเพราะเขียนคนละที่</strong> — จอที่ทำงานเดียวกันสองจอ จะพัฒนาแยกกันเสมอถ้าตรรกะไม่ได้อยู่ที่เดียว<br>ถ้าการผูกพาเลทเป็น store ตามที่ 9.7 สอน ความจำและกฎเรื่องสภาพจะอยู่ในนั้นที่เดียว และทั้งสองจอได้เหมือนกันฟรี</div><p>ที่จอนี้เพิ่มความจำได้ไม่ยาก เพราะรายการถูกจัดกลุ่มตาม PO อยู่แล้ว</p><pre class="code-vs"><code>String? _lastPalletId;
+String? _lastPalletCondition;
+
+void _openAssignDialog(PendingPalletLine line) {
+  // เติมให้ถ้าพาเลทล่าสุดสภาพตรงกัน
+  final suggested = _lastPalletCondition == line.condition ? _lastPalletId : null;
+  final palletCtrl = TextEditingController(text: suggested ?? '');
+  ...</code></pre></section>
+
+<section id="section-5"><h2>5. การจัดการ context สองตัว</h2><pre class="code-vs"><code>Future&lt;void&gt; _doAssign(
+  BuildContext dlgCtx,           // ← context ของกล่อง
+  PendingPalletLine line,
+  TextEditingController palletCtrl,
+  VoidCallback markLoading,
+) async {
+  ...
+  if (!mounted) return;          // จอยังอยู่ไหม
+  if (!dlgCtx.mounted) return;   // กล่องยังอยู่ไหม
+
+  Navigator.pop(dlgCtx);         // ปิดกล่องด้วย context ของกล่อง
+
+  if (!mounted) return;          // ตรวจอีกรอบหลังปิดกล่อง
+
+  if (result.success) {
+    showSuccessSnackbar(context, '...');   // ใช้ context ของจอ
+    _load();
+    return;
+  }
+
+  showErrorDialog(context, title: 'ผูก Pallet ไม่สำเร็จ', message: ...);
+}</code></pre><p>มี <code>context</code> สองตัวและต้องใช้ให้ถูกตัว</p><table><thead><tr><th>ใช้ <code>dlgCtx</code></th><th>ใช้ <code>context</code> ของจอ</th></tr></thead><tbody>
+<tr><td>ปิดกล่อง</td><td>แสดงแถบข้อความหลังกล่องปิด</td></tr>
+<tr><td></td><td>เปิดกล่องใหม่</td></tr>
+</tbody></table><p>ถ้าใช้ <code>dlgCtx</code> แสดงแถบหลังปิดกล่อง จะหาไม่เจอเพราะกล่องหายไปแล้ว</p><p>และการตรวจ <code>mounted</code> สามครั้งไม่ใช่ความระแวงเกินไป</p><pre class="code-vs"><code>await _api.assignPallet(...)     // ← ระหว่างนี้ผู้ใช้อาจกดย้อนกลับ
+if (!mounted) return;            // จอถูกปิดไปแล้ว
+if (!dlgCtx.mounted) return;     // หรือกล่องถูกปิดไปแล้ว
+Navigator.pop(dlgCtx);           // ← ปลอดภัยแล้ว
+if (!mounted) return;            // pop อาจทำให้จอถูกปิดตาม</code></pre><div class="note">ตรงกับที่ 5.10 สอนเรื่อง <code>context</code> ข้าม async gap — และเป็นตัวอย่างที่ทำครบที่สุดในโปรเจกต์นี้<br>สังเกตว่าโค้ดนี้ตรวจ <code>dlgCtx.mounted</code> ด้วย ซึ่งเป็นสิ่งที่หลายคนลืม เพราะ <code>mounted</code> ของ State ไม่ได้บอกอะไรเกี่ยวกับกล่องเลย</div><p>จุดหนึ่งที่แปลก</p><pre class="code-vs"><code>if (palletId.isEmpty) {
+  showErrorDialog(dlgCtx, message: 'กรุณาใส่ Pallet ID');
+  return;
+}</code></pre><p>เปิดกล่องข้อผิดพลาดซ้อนบนกล่องที่เปิดอยู่ ทำงานได้ แต่ผู้ใช้ต้องกดปิดสองชั้น</p><p>ทางที่ดีกว่าคือแสดงข้อความในกล่องเดิม</p><pre class="code-vs"><code>TextField(
+  controller: palletCtrl,
+  decoration: InputDecoration(
+    labelText: 'Pallet ID',
+    errorText: palletError,      // ← แสดงในที่เดียวกับที่กรอก
+  ),
+  ...</code></pre></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>StatefulBuilder</code> ทำให้จอทั้งจอวาดใหม่</td><td>วาดเฉพาะในกล่อง</td></tr>
+<tr><td><code>mounted</code> ของ State บอกว่ากล่องยังอยู่</td><td>ต้องตรวจ <code>dlgCtx.mounted</code> แยก</td></tr>
+<tr><td>ปิดปุ่มยืนยันพอแล้ว</td><td>ต้องปิดปุ่มยกเลิกและ <code>onSubmitted</code> ด้วย</td></tr>
+<tr><td>สองจอที่ทำงานเดียวกันมีกฎเหมือนกัน</td><td>ที่นี่ต่างกัน — ความจำพาเลทมีที่เดียว</td></tr>
+<tr><td>จอว่าง = ไม่มีข้อมูล</td><td>อาจแปลว่าโหลดไม่สำเร็จ</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>หัวหน้ากะบอกว่า “ของค้าง 40 รายการจาก PO เดียวกัน จะลงพาเลทเดียวกันหมด แต่ต้องมานั่งกด 40 รอบ”</p><ol><li>ทำไมทำเป็นชุดไม่ได้ในตอนนี้ ทั้งที่ API รองรับ</li><li>ออกแบบวิธีที่ผู้ใช้เลือกหลายรายการแล้วผูกครั้งเดียว</li><li>ต้องระวังอะไรที่ต่างจากการผูกทีละรายการ</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ทำไมยังทำไม่ได้</strong></p><p>API รองรับอยู่แล้ว</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; assignPallet({
+  required List&lt;int&gt; lineIds,      // ← รับหลายรายการ
+})</code></pre><p>แต่ฝั่งแอปส่งทีละหนึ่งเสมอ</p><table><thead><tr><th>ที่ขาด</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td>สถานะการเลือก</td><td>ไม่มีฟิลด์ไหนเก็บว่าเลือกรายการไหนไว้บ้าง</td></tr>
+<tr><td>UI ให้เลือก</td><td>การ์ดแต่ละใบมีปุ่ม “ผูก” อย่างเดียว ไม่มีช่องติ๊ก</td></tr>
+<tr><td>ปุ่มทำกับที่เลือก</td><td>ไม่มีแถบล่างที่แสดงจำนวนที่เลือกและปุ่มยืนยัน</td></tr>
+</tbody></table><p><strong>ข้อ 2 — ออกแบบ</strong></p><pre class="code-vs"><code>final Set&lt;int&gt; _selectedLineIds = {};
+
+bool get _isSelecting =&gt; _selectedLineIds.isNotEmpty;</code></pre><p>ใช้ <code>Set</code> ไม่ใช่ <code>List</code> เพราะต้องตรวจว่ามีอยู่ไหมบ่อยและห้ามซ้ำ</p><pre class="code-vs"><code>void _toggleSelect(PendingPalletLine line) {
+  setState(() {
+    if (!_selectedLineIds.remove(line.lineId)) {
+      _selectedLineIds.add(line.lineId);
+    }
+  });
+}</code></pre><p><code>Set.remove</code> คืน <code>bool</code> ว่าลบได้จริงไหม — ใช้เป็นทั้งการลบและการตรวจในบรรทัดเดียว</p><pre class="code-vs"><code>// แถบล่างที่โผล่เมื่อเลือกอย่างน้อยหนึ่ง
+bottomNavigationBar: _isSelecting
+    ? SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text('เลือกไว้ ${_selectedLineIds.length} รายการ'),
+              ),
+              TextButton(
+                onPressed: () =&gt; setState(_selectedLineIds.clear),
+                child: const Text('ล้าง'),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 160,
+                child: PrimaryButton(
+                  label: 'ผูก Pallet',
+                  icon: Icons.pallet,
+                  onPressed: _openBatchAssignDialog,
+                ),
+              ),
+            ],
+          ),
+        ),
+      )
+    : null,</code></pre><p>และเพิ่มปุ่ม “เลือกทั้งกลุ่ม” ที่หัวกลุ่ม PO เพราะกรณีที่หัวหน้าเล่ามาคือทั้ง PO ลงพาเลทเดียว</p><pre class="code-vs"><code>void _selectWholeGroup(String poId, List&lt;PendingPalletLine&gt; lines) {
+  setState(() {
+    // เลือกเฉพาะที่สภาพเดียวกับตัวแรก — กันของสองสภาพลงพาเลทเดียว
+    final condition = lines.first.condition;
+    _selectedLineIds.addAll(
+      lines.where((l) =&gt; l.condition == condition).map((l) =&gt; l.lineId),
+    );
+  });
+}</code></pre><p><strong>ข้อ 3 — ต้องระวังอะไร</strong></p><table><thead><tr><th>เรื่อง</th><th>ทำไมต่างจากทีละรายการ</th></tr></thead><tbody>
+<tr><td><strong>สภาพต้องตรงกันทุกรายการ</strong></td><td>ผูกทีละอันตรวจได้จากรายการนั้น แต่ 40 รายการอาจมีทั้ง FG และ PW ปน</td></tr>
+<tr><td><strong>สำเร็จบางส่วน</strong></td><td>เซิร์ฟเวอร์อาจผูกได้ 37 จาก 40 แล้วผู้ใช้ต้องรู้ว่าอีก 3 คืออะไร</td></tr>
+<tr><td>เวลาที่ใช้</td><td>คำขอเดียวแต่ทำงานหนักกว่า — timeout 10 วินาทีอาจไม่พอ</td></tr>
+<tr><td>ยกเลิกกลางคัน</td><td>ผู้ใช้กดย้อนกลับตอนกำลังผูก 40 รายการ ต้องรู้ว่าผูกไปแล้วกี่อัน</td></tr>
+</tbody></table><p>ข้อแรกกันได้ตั้งแต่ตอนเลือก</p><pre class="code-vs"><code>void _toggleSelect(PendingPalletLine line) {
+  // ถ้าเลือกไว้แล้วและสภาพไม่ตรง ห้ามเลือกเพิ่ม
+  if (_selectedLineIds.isNotEmpty) {
+    final first = _lines.firstWhere((l) =&gt; l.lineId == _selectedLineIds.first);
+    if (first.condition != line.condition &amp;&amp;
+        !_selectedLineIds.contains(line.lineId)) {
+      showWarningSnackbar(
+        context,
+        'เลือกได้เฉพาะสภาพ ${first.condition} — พาเลทเดียวใส่สองสภาพไม่ได้',
+      );
+      return;
+    }
+  }
+  setState(() { ... });
+}</code></pre><p>ข้อสองสำคัญที่สุดและต้องดูฝั่งเซิร์ฟเวอร์ก่อนออกแบบ</p><table><thead><tr><th>ถ้าเซิร์ฟเวอร์</th><th>แอปต้อง</th></tr></thead><tbody>
+<tr><td>ทำทั้งหมดหรือไม่ทำเลย</td><td>แสดงว่าล้มเหลวทั้งชุด ให้ลองใหม่</td></tr>
+<tr><td>ทำได้เท่าที่ทำได้</td><td><strong>ต้องอ่านจากคำตอบว่าอันไหนไม่ผ่าน แล้วบอกทีละอัน</strong></td></tr>
+</tbody></table><p>ถ้าเป็นแบบที่สองและแอปไม่อ่าน ผู้ใช้จะเห็น “สำเร็จ” แล้วเดินจากไป ทั้งที่ยังมีของค้าง 3 รายการ — ซึ่งแย่กว่าการผูกทีละอันมาก เพราะการผูกทีละอันไม่มีทางเข้าใจผิดแบบนี้</p><p><strong>ข้อสรุปที่สำคัญ:</strong> การทำงานเป็นชุดประหยัดเวลาผู้ใช้ แต่ทำให้ “สำเร็จบางส่วน” เป็นสถานะที่ต้องออกแบบ ก่อนเขียนโค้ดต้องรู้ก่อนว่าเซิร์ฟเวอร์ทำแบบไหน — ไม่ใช่เดา</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>จอนี้มีอยู่เพราะกรณีสำเร็จครึ่งทางใน 17.7 และแสดงของค้างทั้งคลัง</li><li>จัดกลุ่มตาม PO ด้วย <code>putIfAbsent</code> แต่คำนวณใน <code>build()</code> ทุกครั้ง</li><li>มี <code>RefreshIndicator</code> ซึ่ง <code>ReceivingMenuScreen</code> ยังไม่มี</li><li>แยกสถานะโหลด/ว่าง/มีข้อมูล แต่ยังไม่แยกสถานะโหลดไม่สำเร็จ</li><li><code>StatefulBuilder</code> ให้กล่องมีสถานะของตัวเองโดยไม่วาดจอใหม่ทั้งจอ</li><li>ปิดครบสามทางเข้า: ปุ่มยืนยัน ปุ่มยกเลิก และ <code>onSubmitted</code></li><li>ความจำพาเลทมีเฉพาะใน <code>ScanPartScreen</code> — ผู้ใช้ที่นี่ต้องสแกนซ้ำทุกรายการ</li><li>จัดการ <code>context</code> สองตัวได้ครบ รวมถึงตรวจ <code>dlgCtx.mounted</code></li><li>API รับหลายรายการได้แต่แอปส่งทีละหนึ่งเสมอ</li></ul></div><p><strong>บทหน้า:</strong> โมเดลและ API ของ receiving ทั้งชุด และฟิลด์ที่จะพังถ้าฝั่ง .NET เปลี่ยน</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

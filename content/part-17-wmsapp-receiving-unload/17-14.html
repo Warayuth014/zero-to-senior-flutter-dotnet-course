@@ -1,16 +1,170 @@
-<div class="note"><strong>บทสรุป Part 17:</strong> Receiving และ Unload เป็น chain ของ inventory transitions ที่ต้องรักษา line identity, เชื่อ server หลัง mutation และออกแบบ partial failure/retry ตั้งแต่ต้น</div>
-<section><h2>1. End-to-end receiving</h2><pre class="code-vs"><code>scan PO → choose part/condition/lot
-→ validate serial or qty → receive line
-→ assign pallet → refresh PO
-                  ↘ pending recovery</code></pre><p>จุดสำคัญคือ receipt สำเร็จแต่ pallet fail ได้ จึงต้องไป recovery โดยไม่รับซ้ำ</p></section>
-<section><h2>2. End-to-end unload</h2><pre class="code-vs"><code>scan pallet → open session → select line
-→ validate serial/qty → confirm unload → reload session
-→ all confirmed → return pallet</code></pre><p>reload หลังทุก confirm รองรับ line/version ที่ backend เปลี่ยน</p></section>
-<section><h2>3. End-to-end basket</h2><pre class="code-vs"><code>load unloaded inventory → scan part/choose lot
-→ validate serial/qtyRemaining → scan basket
-→ load → refresh unloaded inventory</code></pre><p>นี่คือธุรกรรมใหม่ ไม่ใช่ continuation state ใน widget เดิม</p></section>
-<section><h2>4. Invariants</h2><ul><li>lineId ระบุ lot/receipt/session line; partId ระบุชนิดสินค้า</li><li>serial ห้ามซ้ำและต้องอยู่ใน line ที่เลือก</li><li>qty ต้องอยู่ใน remaining ล่าสุด</li><li>mutation สำเร็จแล้วต้องไม่ถูก submit ซ้ำเพราะ UI retry</li></ul></section>
-<section><h2>5. Refactor priorities</h2><p>เริ่มจากแยก workflow controller ออกจาก widget, ทำ typed result สำหรับ partial success, เพิ่ม explicit serialRequire, ยกเลิก silent date fallback, ทำ cancellation/latest-request guard และรวม error mapping ไว้ที่ API layer</p></section>
-<section><h2>6. Observability</h2><p>ทุก request ควรมี correlation ID พร้อม operator, device, session, PO/pallet/line IDs และ result category โดยไม่ log token หรือข้อมูลลับ Metrics ที่ควรมีคือ retry rate, pending age, duplicate rejection และ unload duration</p></section>
-<section><h2>7. Test pyramid</h2><p>unit test parser/validator/reducer, widget test scanner focus/dialog/progress, API contract test กับ .NET fixture และ end-to-end test ตั้งแต่รับ PO จนเข้า basket เน้น timeout ambiguity, concurrency และ partial success มากกว่า happy path อย่างเดียว</p></section>
-<section><h2>8. Capstone</h2><div class="success">วาด sequence diagram จากโค้ดจริงหนึ่ง receiving line และหนึ่ง unload line จากนั้น refactor flow ใด flow หนึ่งให้มี immutable state + typed commands เพิ่ม idempotency key ฝั่ง API และเขียน test พิสูจน์ว่า retry หลัง timeout ไม่เพิ่ม inventory ซ้ำ</div></section>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 90–120 นาที</span><span>ลงมือทำ: เดินทั้ง flow เองหนึ่งรอบและจดสิ่งที่พบ</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.1–17.13 ทั้งหมด<br><strong>จบบทนี้แล้วจะทำได้:</strong> อธิบาย flow รับสินค้าและถ่ายของได้ครบทั้งเส้น และมีรายการปัญหาที่ยืนยันแล้วพร้อมลำดับการแก้</div>
+
+<section><h2>1. เส้นทางเต็มของ Receiving</h2><pre class="code-vs"><code>HomeScreen
+  └─ กด "Receive"  → _requireLogin()
+       ▼
+ReceivingMenuScreen (107)
+  │  initState → getPendingPalletLines()  → ป้ายจำนวนค้าง
+  └─ กด "รับเอกสาร"
+       ▼
+ScanPoScreen (166)
+  │  สแกน PO → getPO(poId) → POResponse
+  │  แสดง PoStepIndicator / PoInfoCard / PoItemsList
+  └─ กด "เริ่มรับสินค้า"
+       ▼
+ScanPartScreen (1,727)  ← 27 ฟิลด์ 3 โหมด
+  │
+  │  initState → กู้ pendingLines จาก session เดิม
+  │
+  ├─ [A1] สแกน Part → getPartLines(partId)
+  │        └─ หลาย condition? → popup เลือก
+  │             └─ หลาย lot? → popup เลือก
+  │                  ▼
+  ├─ [A2a] ต้องมี S/N → สแกนทีละตัว
+  │          ├─ ด่าน 1–4 ตรวจในเครื่อง
+  │          └─ ด่าน 5 validateReceivingSerial()
+  │               └─ ด่าน 6 เทียบ lineId กับ lot ที่กำลังรับ
+  │
+  ├─ [A2b] ไม่ต้อง → กรอกจำนวน
+  │
+  └─ กดยืนยัน → _pickPallet() popup
+       └─ scanReceiptPart(poId, partId, lineId, qty, serials, palletId)
+            ├─ สำเร็จ         → จำพาเลท + เข้า _assignedLines
+            ├─ palletError    → เข้า _resumedPendingLines (ยังทำงานต่อได้)
+            ├─ ล้มเหลว        → S/N ยังอยู่ กดซ้ำได้
+            └─ autoClosed     → กล่องสรุป → popUntil หน้าแรก</code></pre><p>ทางแยกที่สอง</p><pre class="code-vs"><code>ReceivingMenuScreen
+  └─ กด "ค้างการผูก Pallet"
+       ▼
+PendingPalletScreen (272)
+  │  getPendingPalletLines() → จัดกลุ่มตาม PO
+  └─ กด "ผูก" ที่รายการ
+       └─ กล่อง StatefulBuilder → assignPallet(palletId, condition, [lineId])</code></pre></section>
+
+<section><h2>2. เส้นทางเต็มของ Unload</h2><pre class="code-vs"><code>HomeScreen
+  └─ กด "Replenishment"
+       ▼
+UnloadMenuScreen (124)
+  ├─ "Unload จาก Pallet"
+  │    ▼
+  │  UnloadScreen (173)  ← สถานี 3 แห่งฝังในโค้ด
+  │    └─ สแกนหรือแตะสถานี
+  │         ▼
+  │      UnloadSessionSheet (528)  ← แผ่นเลื่อน
+  │        │  สแกนพาเลท → openUnloadSession() → UnloadSession
+  │        │    └─ สร้าง Map ของ TextEditingController ต่อรายการ
+  │        │
+  │        ├─ สแกน Part → เลือก lot แรกที่ยัง PENDING
+  │        │    ├─ ต้องมี S/N → สแกนจนครบ (ตรวจในเครื่อง ไม่ยิงเน็ต)
+  │        │    └─ ไม่ต้อง → ใช้ค่าจาก _qtyCtrl[lineId]
+  │        │
+  │        ├─ ยืนยัน → confirmUnload() → _reloadSession()
+  │        │    └─ ครบทุกรายการ? → _showNextPalletDialog() → คืนพาเลท
+  │        │
+  │        └─ คืนพาเลท → Future.wait([returnPalletToAsis(), delay(5s)])
+  │             └─ _resetForNextPallet()
+  │
+  └─ "Load เข้า Basket"
+       ▼
+     LoadToBasketScreen (470)
+       │  getUnloadedItems() → รายการที่ถ่ายลงแล้ว
+       └─ สแกน Part → กล่องสองขั้นตอน
+            ├─ ขั้น 1: สแกน S/N (ถ้าต้องมี)
+            └─ ขั้น 2: สแกน Basket + จำนวน
+                 └─ loadToBasket() → โหลดรายการใหม่</code></pre></section>
+
+<section><h2>3. สิ่งที่ยืนยันแล้วว่าเป็นปัญหา</h2><table><thead><tr><th>#</th><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td>1</td><td>ตัวควบคุมที่สร้างในเมธอดไม่ถูกคืน — 8 วัตถุใน 3 จุด</td><td>ScanPart, PendingPallet, LoadToBasket</td><td>17.5, 17.8, 17.10</td></tr>
+<tr><td>2</td><td>S/N ที่สแกนค้างหายเมื่อออกจากจอ/ปิดกล่อง</td><td>ScanPart, UnloadSession, LoadToBasket</td><td>17.7, 17.10, 17.11</td></tr>
+<tr><td>3</td><td><code>_pendingLine</code> กับ <code>_scanningItem</code> มีค่าพร้อมกันได้</td><td>ScanPart</td><td>17.5</td></tr>
+<tr><td>4</td><td>ไม่มีทางยกเลิกการเลือกสินค้าถ้ายังไม่สแกน S/N</td><td>ScanPart</td><td>17.5</td></tr>
+<tr><td>5</td><td>จำนวนถูกเก็บสองที่และซิงก์ด้วยมือ</td><td>ScanPart</td><td>17.5</td></tr>
+<tr><td>6</td><td>ฟิลด์คำอธิบายที่หายทำให้ทั้ง PO เปิดไม่ได้</td><td>receiving_models</td><td>17.9</td></tr>
+<tr><td>7</td><td><code>condition ?? 'FG'</code> ปล่อยของ PW ผ่านเป็นของดี</td><td>receiving_models</td><td>17.9</td></tr>
+<tr><td>8</td><td><code>serialRequire</code> คำนวณเอง — ข้อมูลขาดกลายเป็นไม่ต้องสแกน</td><td>unload/basket models</td><td>17.13</td></tr>
+<tr><td>9</td><td>ทั้ง 9 จุดของ receiving/unload ทิ้ง <code>statusCode</code></td><td>api</td><td>17.9, 17.13</td></tr>
+<tr><td>10</td><td>คำขอซ้อนกันได้ คำตอบที่มาทีหลังชนะ</td><td>ScanPo</td><td>17.3</td></tr>
+<tr><td>11</td><td>ความจำพาเลทมีเฉพาะจอเดียว</td><td>PendingPallet</td><td>17.8</td></tr>
+<tr><td>12</td><td><code>_currentScannedItem()</code> ประกาศ nullable แต่ใช้ <code>firstWhere</code></td><td>UnloadSession</td><td>17.12</td></tr>
+<tr><td>13</td><td>แถบความคืบหน้านับรายการ ไม่ใช่ชิ้น</td><td>UnloadSession</td><td>17.12</td></tr>
+<tr><td>14</td><td>รายการสินค้าใน PO สร้างทุกแถวพร้อมกัน + โหลดรูปทุกใบ</td><td>po_items_list</td><td>17.4</td></tr>
+<tr><td>15</td><td>ล้มเหลวแล้วเงียบ ตัวเลขบนจอไม่ตรงกับความจริง</td><td>ReceivingMenu, ScanPo</td><td>17.2, 17.3</td></tr>
+</tbody></table><p>เรียงตามผลกระทบต่อผู้ใช้</p><table><thead><tr><th>ระดับ</th><th>ข้อ</th><th>เหตุผล</th></tr></thead><tbody>
+<tr><td>เสียงานที่ทำไปแล้ว</td><td>2, 4</td><td>ผู้ใช้ต้องสแกนใหม่ทั้งหมด</td></tr>
+<tr><td>ข้อมูลผิดเข้าระบบ</td><td>7, 8</td><td>แก้ยากที่สุดเพราะไม่มีใครรู้</td></tr>
+<tr><td>ใช้งานไม่ได้เลย</td><td>6</td><td>PO ทั้งใบเปิดไม่ได้</td></tr>
+<tr><td>ผู้ใช้เห็นข้อมูลผิด</td><td>10, 13, 15</td><td>ตัดสินใจจากตัวเลขที่ไม่ตรง</td></tr>
+<tr><td>สะสมแล้วมีปัญหา</td><td>1, 14</td><td>ทั้งกะถึงจะรู้สึก</td></tr>
+<tr><td>ยังไม่เกิดแต่จะเกิด</td><td>3, 12</td><td>โครงสร้างเปิดช่องไว้</td></tr>
+<tr><td>ทำงานได้แต่ช้ากว่าที่ควร</td><td>11</td><td>ผู้ใช้ต้องสแกนซ้ำ</td></tr>
+<tr><td>จำกัดความสามารถในอนาคต</td><td>5, 9</td><td>ยังไม่กระทบวันนี้</td></tr>
+</tbody></table></section>
+
+<section><h2>4. สิ่งที่ทำได้ดีและต้องรักษาไว้</h2><table><thead><tr><th>เรื่อง</th><th>ที่</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>palletError</code> แยกสำเร็จครึ่งทางออกจากล้มเหลว</td><td>receiving</td><td>17.7</td></tr>
+<tr><td>ล้มเหลวแล้วไม่ล้าง S/N — กดซ้ำได้ทันที</td><td>ScanPart</td><td>17.7</td></tr>
+<tr><td>รายการค้างถูกกู้จาก <code>POResponse.pendingLines</code></td><td>ScanPart</td><td>17.7</td></tr>
+<tr><td>ด่านตรวจเรียงจากถูกไปแพง</td><td>ScanPart</td><td>17.6</td></tr>
+<tr><td>ข้อความบอกว่า S/N อยู่ล็อตไหนจริง ๆ</td><td>ScanPart</td><td>17.6</td></tr>
+<tr><td>สแกนซ้ำใช้แถบลอย ไม่ใช่กล่อง</td><td>ScanPart</td><td>17.6</td></tr>
+<tr><td>เลื่อนไปหาแถวที่ซ้ำและไฮไลต์</td><td>ScanPart</td><td>17.6</td></tr>
+<tr><td><code>PopScope</code> กันการออกตอนผูกพาเลทค้าง</td><td>ScanPart</td><td>17.7</td></tr>
+<tr><td><code>_po = null</code> ก่อนโหลดใหม่</td><td>ScanPo</td><td>17.3</td></tr>
+<tr><td>เอาปุ่มออกเมื่อรับครบ ไม่ใช่ปิดปุ่ม</td><td>ScanPo</td><td>17.3</td></tr>
+<tr><td>ปิดครบสามทางเข้าตอนกำลังทำงาน</td><td>PendingPallet</td><td>17.8</td></tr>
+<tr><td>จัดการ <code>context</code> สองตัวครบ</td><td>PendingPallet</td><td>17.8</td></tr>
+<tr><td>คืน <code>Map</code> ของตัวควบคุมครบสามทาง</td><td>UnloadSession</td><td>17.11</td></tr>
+<tr><td>โหลด session ใหม่แทนการแก้ในเครื่อง</td><td>UnloadSession</td><td>17.11</td></tr>
+<tr><td>getter คำนวณจากแหล่งเดียว</td><td>UnloadSession</td><td>17.12</td></tr>
+<tr><td>มีปุ่มยกเลิกการเลือก</td><td>UnloadSession</td><td>17.12</td></tr>
+<tr><td>ตรวจ S/N ในเครื่อง ไม่พึ่งเน็ต</td><td>LoadToBasket</td><td>17.10</td></tr>
+<tr><td>ล้างช่องสแกนทันทีหลังอ่านค่า</td><td>LoadToBasket</td><td>17.10</td></tr>
+<tr><td>คืนโฟกัสทุกทางออก</td><td>LoadToBasket</td><td>17.10</td></tr>
+<tr><td>คอมเมนต์อธิบายการตัดสินใจ</td><td>ทั้งสองโดเมน</td><td>17.11, 17.13</td></tr>
+</tbody></table><div class="note"><strong>ยี่สิบเอ็ดข้อ เทียบกับปัญหาสิบห้าข้อ</strong> — และหลายข้อในรายการนี้เป็นสิ่งที่ทีมส่วนใหญ่ไม่ทำ เช่นการกู้รายการค้าง การแยกสำเร็จครึ่งทาง และการเรียงด่านตรวจ<br>สิ่งที่ขาดส่วนใหญ่เป็น<strong>ความสม่ำเสมอ</strong> ไม่ใช่ความรู้ — จอหนึ่งทำถูก อีกจอทำไม่ครบ เพราะไม่มีที่กลางที่บังคับให้เหมือนกัน</div></section>
+
+<section><h2>5. รูปแบบที่เกิดซ้ำ</h2><p>สามปัญหาข้างล่างปรากฏในหลายจอ และทั้งหมดมีรากเดียวกัน</p><table><thead><tr><th>รูปแบบ</th><th>เจอที่</th><th>ราก</th></tr></thead><tbody>
+<tr><td>S/N ค้างหายเมื่อออก</td><td>3 จอ</td><td>สถานะอยู่ในเครื่อง ไม่ได้ส่งไปเซิร์ฟเวอร์</td></tr>
+<tr><td>ตัวควบคุมในเมธอดไม่ถูกคืน</td><td>3 จุด</td><td>อยู่นอกสายตาของ <code>dispose()</code></td></tr>
+<tr><td>กฎเดียวกันเขียนคนละแบบ</td><td>2 คู่จอ</td><td>ตรรกะอยู่ในจอ ไม่มีที่กลาง</td></tr>
+</tbody></table><p>รากที่สามอธิบายรายการต่อไปนี้ทั้งหมด</p><table><thead><tr><th>กฎ</th><th>จอ A</th><th>จอ B</th></tr></thead><tbody>
+<tr><td>เลือกล็อตเมื่อมีหลายล็อต</td><td>ScanPart: popup ให้เลือก</td><td>UnloadSession / LoadToBasket: เลือกตัวแรกให้</td></tr>
+<tr><td>จำพาเลทล่าสุด</td><td>ScanPart: มี + ตรวจสภาพ</td><td>PendingPallet: ไม่มี</td></tr>
+<tr><td>S/N ต้องครบก่อนยืนยัน</td><td>UnloadSession: ต้องครบ</td><td>LoadToBasket: มีอย่างน้อยหนึ่ง</td></tr>
+<tr><td>แจ้งความล้มเหลวของการผูกพาเลท</td><td>ScanPart: แถบเหลือง</td><td>ScanPart (อีกเส้นทาง): กล่องแดง</td></tr>
+<tr><td>ล้างช่องสแกน</td><td>LoadToBasket: ล้างทันที</td><td>UnloadSession: ล้างสามที่</td></tr>
+</tbody></table><p>ทุกแถวคือกฎที่ควรมีคำตอบเดียว แต่มีสองคำตอบเพราะเขียนคนละที่</p><p>Part 23 จะกลับมาที่ตารางนี้ตอนออกแบบชั้นที่รวมกฎเหล่านี้ไว้</p></section>
+
+<section><h2>6. ลงมือทำ</h2><p>เดิน flow เองหนึ่งรอบและทำเอกสารออกมา</p><table><thead><tr><th>#</th><th>ต้องได้</th></tr></thead><tbody>
+<tr><td>1</td><td>แผนภาพเส้นทางของ <strong>Putaway</strong> (Part 18 จะอ่าน) ตั้งแต่ปุ่มบนหน้าหลักถึง endpoint</td></tr>
+<tr><td>2</td><td>รายการ state ของจอที่ใหญ่ที่สุดในโดเมนนั้น จัดกลุ่มแบบ 17.5</td></tr>
+<tr><td>3</td><td>เครื่องสถานะของจอนั้น — มีกี่โหมด ฟิลด์ไหนคุม</td></tr>
+<tr><td>4</td><td>จุดที่สร้างตัวควบคุมในเมธอด (ค้น <code>TextEditingController(</code> ในโฟลเดอร์)</td></tr>
+<tr><td>5</td><td>จุดที่ทิ้ง <code>statusCode</code></td></tr>
+<tr><td>6</td><td>ฟิลด์ในโมเดลที่ไม่ป้องกัน และผลถ้าไม่มีค่า</td></tr>
+<tr><td>7</td><td>ค่าเริ่มต้นที่ผ่อนปรน (เดาผิดแล้วปล่อยผ่าน)</td></tr>
+<tr><td>8</td><td>สามสิ่งที่ทำได้ดี</td></tr>
+</tbody></table><p><strong>คำสั่งค้นที่ใช้ได้ทุกข้อ</strong></p><pre class="code-vs"><code># ข้อ 4 — ตัวควบคุมที่สร้างนอก State
+rg "TextEditingController\(|FocusNode\(\)" lib/screens/putaway
+
+# ข้อ 5 — จุดที่ทิ้ง statusCode
+rg "ApiResult.error\(response.error\);" lib/services/api/putaway_api.dart
+
+# ข้อ 6 — ฟิลด์ที่ไม่มี ?? และไม่ใช่ nullable
+rg "json\['\w+'\]," lib/models/putaway
+
+# ข้อ 7 — ค่าเริ่มต้นทั้งหมด
+rg "\?\? " lib/models/putaway</code></pre><p><strong>ข้อ 8 บังคับ</strong> — เหตุผลเดียวกับ 16.12 คนที่เจอแต่ข้อเสียมักอ่านไม่ครบ</p></section>
+
+<section><h2>7. แบบทดสอบตัวเอง</h2><ol><li>Receiving กับ Unload รวมกันกี่บรรทัด และคิดเป็นกี่เปอร์เซ็นต์ของโปรเจกต์ (17.1)</li><li><code>/receiving/validate-serial</code> ทำสองงานอย่างไร (17.1)</li><li>ทำไมจำนวนฟิลด์ใน State ทำนายความยากได้ดีกว่าจำนวนบรรทัด (17.1)</li><li><code>await Navigator.push(...)</code> แล้วโหลดใหม่ ดีกว่าส่งค่ากลับอย่างไร (17.2)</li><li>“ไม่มีรายการค้าง” กับ “ตรวจไม่ได้” ต่างกันอย่างไรบนหน้าจอ (17.2)</li><li>ทำไมต้อง <code>_po = null</code> ก่อนยิงคำขอ (17.3)</li><li>คำตอบที่กลับมาทีหลังชนะเสมอ — แก้อย่างไร (17.3)</li><li><code>...items.map()</code> ใน <code>Column</code> สร้างกี่แถว (17.4)</li><li>ทำไม <code>RichText</code> อาจใช้ฟอนต์ผิด (17.4)</li><li>27 ฟิลด์ใน <code>ScanPartScreen</code> เป็นสถานะจริงกี่ตัว (17.5)</li><li>จอนั้นมีกี่โหมด และฟิลด์ไหนคุม (17.5)</li><li>ผู้ใช้ที่เลือกผิดสินค้าและยังไม่สแกน S/N ทำอย่างไรได้บ้าง (17.5)</li><li>ทำไมด่านตรวจในเครื่องต้องอยู่ก่อนด่านที่ยิงเน็ต (17.6)</li><li>ด่านที่หกตรวจอะไร และทำไมเซิร์ฟเวอร์ตรวจให้ไม่ได้ (17.6)</li><li>ทำไม <code>_scanStatusTimer?.cancel()</code> ต้องอยู่บรรทัดแรก (17.6)</li><li>ทำไมต้อง <code>List&lt;String&gt;.of()</code> ก่อนส่ง (17.6)</li><li><code>scan-part</code> มีผลลัพธ์กี่แบบ (17.7)</li><li><code>palletError</code> แก้ปัญหาอะไร (17.7)</li><li>ทำไม <code>insert(0)</code> ไม่ใช่ <code>add()</code> (17.7)</li><li><code>PopScope</code> ที่นั่นกันอะไร และไม่กันอะไร (17.7)</li><li><code>StatefulBuilder</code> ต่างจาก <code>setState</code> ของจออย่างไร (17.8)</li><li>ทำไมต้องตรวจ <code>dlgCtx.mounted</code> แยกจาก <code>mounted</code> (17.8)</li><li>ความจำพาเลทหายไปไหนใน <code>PendingPalletScreen</code> (17.8)</li><li>ค่าเริ่มต้นแบบผ่อนปรนกับแบบเข้มงวดต่างกันอย่างไร (17.9)</li><li>ทำไม <code>brand</code> ที่หายทำให้ทั้ง PO เปิดไม่ได้ (17.9)</li><li><code>palletId</code> กับ <code>palletError</code> ผูกกันอย่างไร (17.9)</li><li>ทำไมกล่องใน <code>LoadToBasketScreen</code> ไม่มีสถานะค้างผิด แต่กู้ไม่ได้ (17.10)</li><li>ปุ่ม “ถัดไป” ตรวจอะไร และไม่ตรวจอะไร (17.10)</li><li>ทำไมการตรวจ S/N ที่นั่นไม่ต้องยิงเน็ต (17.10)</li><li>ทำไมโหลด session ใหม่ดีกว่าแก้ข้อมูลในเครื่อง (17.11)</li><li>ทำไมปิดแผ่นกลางทางแล้วไม่เสียงาน (17.11)</li><li><code>Future.wait</code> กับตัวหน่วง 5 วินาทีทำอะไร (17.11)</li><li>ทำไม getter ที่คำนวณชนะการเก็บค่าไว้ (17.12)</li><li><code>0 / 0</code> ได้อะไร และทำให้อะไรพัง (17.12)</li><li><code>firstWhere</code> ต่างจาก <code>firstOrNull</code> อย่างไร (17.12)</li><li><code>UnloadItem</code> กับ <code>UnloadedItem</code> ต่างกันอย่างไร (17.13)</li><li>ทำไม <code>serialRequire</code> ที่คำนวณเองอันตรายกว่าที่รับมา (17.13)</li><li>ทำไม <code>isDone</code> ใช้ <code>&lt;=</code> (17.13)</li></ol></section>
+
+<section><h2>8. สรุปท้าย Part 17</h2><div class="success"><p><strong>สิ่งที่ทำได้แล้ว</strong></p><ul><li>เดิน flow รับสินค้าจากปุ่มบนหน้าหลักถึง endpoint และกลับได้ครบ</li><li>อ่านจอ 1,727 บรรทัดโดยจัดกลุ่ม state ก่อน แล้วเขียนเครื่องสถานะที่ซ่อนอยู่ออกมา</li><li>วิเคราะห์ลำดับของการตรวจสอบและอธิบายได้ว่าทำไมลำดับนั้นสำคัญ</li><li>อ่านการรับมือความล้มเหลวครึ่งทาง ซึ่งเป็นสิ่งที่โปรเจกต์นี้ทำได้ดีที่สุด</li><li>เทียบสองจอที่ทำงานเดียวกันแล้วชี้ได้ว่ากฎไหนหายไป</li><li>อ่านสัญญากับ .NET และชี้ฟิลด์ที่เปราะได้</li><li>แยกค่าเริ่มต้นที่ผ่อนปรนออกจากที่เข้มงวด</li><li>อ่าน flow ที่ใช้แผ่นเลื่อนและจัดการ <code>Map</code> ของตัวควบคุม</li><li>เห็นความต่างระหว่างสถานะที่อยู่ในเครื่องกับที่อยู่ที่เซิร์ฟเวอร์</li><li>รวมปัญหาที่ยืนยันแล้วเป็นรายการที่เรียงตามผลกระทบต่อผู้ใช้</li></ul></div><p><strong>บทเรียนที่ใหญ่ที่สุดของ Part นี้</strong></p><table><thead><tr><th>ข้อสังเกต</th><th>สาเหตุ</th></tr></thead><tbody>
+<tr><td>จอหนึ่งทำถูก อีกจอทำไม่ครบ</td><td>ตรรกะอยู่ในจอ ไม่มีที่กลาง</td></tr>
+<tr><td>สถานะบางอย่างกู้ได้ บางอย่างหาย</td><td>ขึ้นกับว่าอยู่ฝั่งไหน ไม่ใช่โค้ดเขียนดีกว่ากัน</td></tr>
+<tr><td>ตัวควบคุมบางตัวถูกคืน บางตัวไม่</td><td>อยู่ในหรือนอกสายตาของ <code>dispose()</code></td></tr>
+</tbody></table><p>ทั้งสามข้อไม่ใช่เรื่องของความรู้หรือความตั้งใจ แต่เป็นผลของ<strong>ที่ที่โค้ดถูกวางไว้</strong> — ซึ่งเป็นสิ่งที่การแยกชั้นแก้ได้</p><p><strong>Part ถัดไป</strong></p><table><thead><tr><th>Part</th><th>เนื้อหา</th></tr></thead><tbody>
+<tr><td>18</td><td>Putaway (26 ไฟล์ 2,378 บรรทัด) กับ Picking (15 ไฟล์ 3,483) — โดเมนที่แตกไฟล์แล้วมากที่สุด เทียบกับที่แตกน้อย</td></tr>
+<tr><td>19</td><td>Packing 2,176 / Check-in 1,441 / Sorting 1,030 — สามจอที่ยังเป็นไฟล์เดียว</td></tr>
+<tr><td>20–22</td><td><code>wms_absolute_mobile</code> ที่แก้ปัญหาเดียวกันด้วยโครงคนละแบบ</td></tr>
+<tr><td>23</td><td>รวมตารางกฎที่ไม่ตรงกันจาก Part 17–19 แล้วออกแบบชั้นที่รวมไว้</td></tr>
+</tbody></table><p>Part 18 จะตอบคำถามที่ 17.1 ตั้งไว้ — <strong>“การแตกไฟล์ช่วยอะไรได้จริงบ้าง และช่วยอะไรไม่ได้”</strong> โดยเทียบ <code>putaway</code> ที่มี 26 ไฟล์เฉลี่ย 91 บรรทัด กับ <code>picking</code> ที่มี 15 ไฟล์เฉลี่ย 232 บรรทัด ในโปรเจกต์เดียวกัน</p></section>

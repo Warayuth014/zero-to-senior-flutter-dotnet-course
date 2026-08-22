@@ -4,17 +4,264 @@
 <title>Assign Line to Pallet</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-07 · Real Codebase</span><h1>Assign Line to Pallet</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Validate qty</a></li><li><a href="#section-2">Pick pallet</a></li><li><a href="#section-3">Payload</a></li><li><a href="#section-4">Success</a></li><li><a href="#section-5">Pallet failure</a></li><li><a href="#section-6">Auto close/over</a></li><li><a href="#section-7">Atomicity decision</a></li><li><a href="#section-8">Retry tests</a></li></ol></nav>
-<div class="note"><strong>Receipt + pallet เป็น compound operation:</strong> UIส่ง palletIdพร้อม <code>scan-part</code> แต่ responseแยกผล receiptกับ <code>palletError</code> จึงต้องรองรับ partial successโดยไม่รับสินค้าซ้ำ</div>
-<section id="section-1"><h2>1. Validate qty</h2><p>qtyต้อง &gt;0และไม่เกิน remaining/ordered; serial itemต้องมี serial countเท่ากับ qtyและเป็น partปัจจุบัน Non-serialใช้ manual qtyที่ clampแล้วแต่ validateซ้ำก่อน request</p></section>
-<section id="section-2"><h2>2. Pick pallet</h2><p><code>_pickPallet(defaultPalletId: _lastPalletId)</code>เปิด sheetรับ palletก่อน submitทุกครั้ง ใช้ memoryลดการ scanซ้ำแต่ผู้ใช้ยังยืนยัน/เปลี่ยนได้</p></section>
-<section id="section-3"><h2>3. Payload</h2><pre class="code-vs"><code>POST /receiving/scan-part
-{ poId, partId, lineId, qtyReceived,
-  operatorId, serialNumbers: [], palletId }</code></pre><p>serial non-requiredส่ง empty listตาม backend contract</p></section>
-<section id="section-4"><h2>4. Success</h2><p>ไม่มี palletError: เก็บ assigned summaryโดย part+pallet, จำ last pallet/type, clear form/serial, reload POและแสดง success หาก lineเดิมรับหลายครั้ง summaryบวก qty</p></section>
-<section id="section-5"><h2>5. Pallet failure</h2><p>receiptถูกบันทึกแล้วแต่ assignmentล้ม: insert ReceiptLineResponseใน resumed pending listและแจ้ง warning Retryต้องเรียก <code>assignPallet(lineIds)</code> ไม่เรียก <code>scanReceiptPart</code>ซ้ำ</p></section>
-<section id="section-6"><h2>6. Auto close/over</h2><p><code>poItemStatus == OVER</code>แสดง warning; <code>autoClosed/poStatus/closeMessage</code>บอก documentปิด ต้อง refresh/ออก flowตาม responseและกัน callbackเก่าดำเนินต่อ</p></section>
-<section id="section-7"><h2>7. Atomicity decision</h2><p>backendตั้งใจให้ partial successหรือควร transaction receipt+assignmentต้องตัดสินตามธุรกิจ หาก partialถูกต้อง responseควร typed explicit เช่น <code>receiptCommitted=true, palletAssignment=failed</code>และมี operation ID</p></section>
-<section id="section-8"><h2>8. Retry tests</h2><div class="success">normal, receipt reject, timeout ambiguity, pallet partial failure, retry assign success/fail, double tap/idempotency, over receive/conflictและ auto close โดย assertว่า receipt endpointไม่ถูกเรียกซ้ำหลัง partial success</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">คำสั่งเดียวที่ทำสองอย่าง</a></li><li><a href="#section-2">สามทางแยกหลังคำตอบกลับมา</a></li><li><a href="#section-3">รายการค้างที่โผล่ขึ้นบนสุด</a></li><li><a href="#section-4">เส้นทางการผูกพาเลทที่สอง</a></li><li><a href="#section-5">ทางออกที่ถูกปิด</a></li><li><a href="#section-6">การปิด session อัตโนมัติ</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 55–70 นาที</span><span>ลงมือทำ: อ่าน _confirmPart, _assignToPallet, _assignResumedLine</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.6, 7.10 (คำสั่งที่ไม่รู้ผล), 15.11 (การรับมือเครือข่าย)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านการรับมือความล้มเหลวครึ่งทาง ซึ่งเป็นสิ่งที่ทำได้ดีที่สุดในโปรเจกต์นี้</div>
+
+<section id="section-1"><h2>1. คำสั่งเดียวที่ทำสองอย่าง</h2><pre class="code-vs"><code>final result = await _api.scanReceiptPart(
+  poId: widget.po.poId,
+  partId: poItem.partId,
+  lineId: poItem.id,
+  qtyReceived: qty,
+  operatorId: widget.userId,
+  serialNumbers: serialNumbers,
+  palletId: palletId,          // ← ส่งพาเลทไปด้วยในคำขอเดียว
+);</code></pre><p>คำขอนี้ทำสองงานฝั่งเซิร์ฟเวอร์: บันทึกว่ารับของแล้ว และผูกของนั้นกับพาเลท</p><p>ผลลัพธ์จึงมีสามแบบ ไม่ใช่สองแบบ</p><table><thead><tr><th>ผลลัพธ์</th><th>บันทึกของ</th><th>ผูกพาเลท</th></tr></thead><tbody>
+<tr><td>สำเร็จทั้งหมด</td><td>สำเร็จ</td><td>สำเร็จ</td></tr>
+<tr><td><strong>สำเร็จครึ่งทาง</strong></td><td><strong>สำเร็จ</strong></td><td><strong>ล้มเหลว</strong></td></tr>
+<tr><td>ล้มเหลว</td><td>ล้มเหลว</td><td>ไม่ได้ทำ</td></tr>
+</tbody></table><p>โมเดลที่รับผลลัพธ์รองรับแถวกลางไว้แล้ว</p><pre class="code-vs"><code>class ReceiptLineResponse {
+  ...
+  // ── ผลของการผูก Pallet (ถ้า scan-part ส่ง palletId มาด้วย) ──
+  final String? palletId;
+  final bool autoClosed;
+  final String? poStatus;
+  final String? closeMessage;
+  final String? palletError;      // ← ไม่ใช่ null = ผูกไม่สำเร็จ
+}</code></pre><div class="note"><strong>นี่คือการออกแบบที่ถูกต้องและหายาก</strong> — แทนที่จะให้คำขอล้มเหลวทั้งหมดเมื่อผูกพาเลทไม่ผ่าน เซิร์ฟเวอร์ตอบว่า “ของบันทึกแล้ว แต่ผูกพาเลทไม่ได้เพราะ...” <br>ของที่รับมาแล้วจริงบนโต๊ะจะไม่หายไปจากระบบเพียงเพราะพาเลทมีปัญหา</div></section>
+
+<section id="section-2"><h2>2. สามทางแยกหลังคำตอบกลับมา</h2><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(context, message: result.error!);
+  return;                                    // ทาง 1: ล้มเหลว
+}
+
+final line = result.data!;
+
+if (line.poItemStatus == 'OVER') {
+  showWarningSnackbar(context, 'Over receiving: ${line.message}');
+}
+
+if (line.palletError != null) {
+  // ทาง 2: สำเร็จครึ่งทาง
+  showWarningSnackbar(context,
+      '${line.partId} บันทึกแล้ว แต่ผูก Pallet ไม่สำเร็จ: ${line.palletError}');
+  setState(() =&gt; _resumedPendingLines.insert(0, line));
+} else {
+  // ทาง 3: สำเร็จทั้งหมด
+  showSuccessSnackbar(context, '${line.partId} -&gt; Pallet ${line.palletId} สำเร็จ');
+  setState(() {
+    _lastPalletId = line.palletId;
+    _lastPalletType = line.condition;
+    _storeAssignedLine(line, line.palletId!);
+  });
+}
+
+_clearFormFields();
+_clearSerialScan();</code></pre><table><thead><tr><th>ทาง</th><th>ผู้ใช้เห็น</th><th>สถานะที่เปลี่ยน</th><th>ผู้ใช้ต้องทำอะไรต่อ</th></tr></thead><tbody>
+<tr><td>1 ล้มเหลว</td><td>กล่องแดง ต้องกดปิด</td><td>ไม่มี — S/N ยังอยู่ครบ</td><td>ลองใหม่</td></tr>
+<tr><td>2 ครึ่งทาง</td><td>แถบเหลือง หายเอง</td><td>เพิ่มเข้ารายการค้าง</td><td>สแกนของต่อ แล้วค่อยผูกพาเลททีหลัง</td></tr>
+<tr><td>3 สำเร็จ</td><td>แถบเขียว หายเอง</td><td>จำพาเลท + เพิ่มรายการที่ผูกแล้ว</td><td>สแกนชิ้นถัดไป</td></tr>
+</tbody></table><p>สังเกตว่าทางที่ 2 ใช้แถบเหลืองไม่ใช่กล่องแดง — เพราะ<strong>ของถูกบันทึกแล้ว</strong> ไม่มีอะไรเสียหาย แค่ต้องตามเก็บทีหลัง ผู้ใช้จึงทำงานต่อได้โดยไม่ต้องหยุด</p><p>และทางที่ 1 ไม่ล้าง S/N — <code>return</code> ก่อนถึง <code>_clearSerialScan()</code></p><pre class="code-vs"><code>if (!result.success) {
+  showErrorDialog(context, message: result.error!);
+  return;                       // ← S/N ที่สแกนมา 20 ตัวยังอยู่
+}</code></pre><div class="note">ตรงกับข้อ 20 ของ 15.11 พอดี — <strong>ยืนยันไม่สำเร็จ ต้องเก็บที่สแกนไว้</strong><br>ผู้ใช้ที่สแกน S/N มา 20 ตัวแล้วเน็ตหลุดตอนกดยืนยัน จะกดยืนยันซ้ำได้ทันที ไม่ต้องสแกนใหม่ทั้งหมด</div></section>
+
+<section id="section-3"><h2>3. รายการค้างที่โผล่ขึ้นบนสุด</h2><pre class="code-vs"><code>setState(() =&gt; _resumedPendingLines.insert(0, line));</code></pre><p><code>insert(0, ...)</code> ไม่ใช่ <code>add(...)</code> — รายการใหม่ไปอยู่บนสุด</p><table><thead><tr><th></th><th><code>insert(0, ...)</code></th><th><code>add(...)</code></th></tr></thead><tbody>
+<tr><td>รายการที่เพิ่งค้าง</td><td>เห็นทันทีบนสุด</td><td>ต้องเลื่อนลงไปหา</td></tr>
+<tr><td>ตรงกับความทรงจำผู้ใช้</td><td>ใช่ — เพิ่งเกิด อยู่บนสุด</td><td>ไม่</td></tr>
+</tbody></table><p>รายละเอียดเล็กที่ทำให้ผู้ใช้ไม่พลาดรายการที่เพิ่งมีปัญหา</p><p>และรายการนี้ถูกกู้คืนตอนกลับเข้ามาใหม่ด้วย</p><pre class="code-vs"><code>@override
+void initState() {
+  super.initState();
+  _currentPo = widget.po;
+  if (widget.po.pendingLines.isNotEmpty) {
+    _resumedPendingLines.addAll(widget.po.pendingLines);   // จาก session เดิม
+  }
+}</code></pre><p><code>POResponse</code> มีฟิลด์ <code>pendingLines</code> ที่เซิร์ฟเวอร์ส่งมาพร้อมข้อมูล PO</p><pre class="code-vs"><code>pendingLines: (json['pendingLines'] as List? ?? [])
+    .map((l) =&gt; ReceiptLineResponse.fromJson(l))
+    .toList(),</code></pre><p>ผู้ใช้ที่ปิดแอปกลางทางแล้วกลับมาเปิด PO เดิม จะเห็นรายการที่ค้างจากครั้งก่อนรออยู่ — เป็นการกู้คืนงานที่ทำถูก และเป็นสิ่งที่ 15.11 บอกว่ายังทำไม่ได้ในหลายกรณี แต่ตรงนี้ทำได้เพราะ<strong>สถานะอยู่ที่เซิร์ฟเวอร์ ไม่ใช่ในเครื่อง</strong></p></section>
+
+<section id="section-4"><h2>4. เส้นทางการผูกพาเลทที่สอง</h2><p>นอกจากผูกพร้อมตอนรับของ ยังผูกทีหลังได้ผ่าน <code>_assignToPallet</code></p><pre class="code-vs"><code>Future&lt;void&gt; _assignToPallet(ReceiptLineResponse line, String palletId) async {
+  setState(() =&gt; _loading = true);
+
+  final result = await _api.assignPallet(
+    palletId: palletId,
+    palletType: line.condition,
+    operatorId: widget.userId,
+    lineIds: [line.lineId],        // ← รับได้หลายรายการ แต่ส่งทีละหนึ่ง
+  );
+
+  if (!mounted) return;
+  setState(() =&gt; _loading = false);
+
+  if (!result.success) {
+    _clearPalletMemoryForRetry(line);
+    showErrorDialog(context, message: result.error ?? 'ผูก Pallet ไม่สำเร็จ');
+    _palletFocus.requestFocus();
+    return;
+  }
+  ...</code></pre><p>สามอย่างที่ทำเมื่อล้มเหลว</p><table><thead><tr><th>ทำ</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td><code>_pendingLine = line</code></td><td>เข้าโหมด B — รายการนี้ยังต้องผูก</td></tr>
+<tr><td>ล้างความจำพาเลท</td><td>พาเลทนั้นใช้ไม่ได้ ไม่ควรเสนออีก</td></tr>
+<tr><td>คืนโฟกัสไปช่องพาเลท</td><td>ผู้ใช้สแกนพาเลทใหม่ได้ทันที</td></tr>
+</tbody></table><p>ข้อสุดท้ายสำคัญบน PDA — ถ้าไม่คืนโฟกัส ผู้ใช้ต้องแตะช่องก่อนถึงจะยิงบาร์โค้ดได้ ซึ่งเสียเวลาและมองไม่เห็นว่าต้องทำ</p><p><code>lineIds: [line.lineId]</code> น่าสังเกต — API รับเป็นรายการ แต่ที่นี่ส่งทีละหนึ่งเสมอ</p><pre class="code-vs"><code>Future&lt;ApiResult&lt;Map&lt;String, dynamic&gt;&gt;&gt; assignPallet({
+  required String palletId,
+  required String palletType,
+  required String operatorId,
+  required List&lt;int&gt; lineIds,     // ← รองรับหลายรายการ
+})</code></pre><p>ค้นทั้งโปรเจกต์แล้วมีสองที่ที่เรียก และทั้งสองส่งรายการเดียว — ความสามารถที่มีแต่ยังไม่ได้ใช้ ซึ่งเปิดทางให้ทำปุ่ม “ผูกทั้งหมดลงพาเลทเดียว” ได้โดยไม่ต้องแก้ฝั่งเซิร์ฟเวอร์</p></section>
+
+<section id="section-5"><h2>5. ทางออกที่ถูกปิด</h2><pre class="code-vs"><code>return PopScope(
+  canPop: _pendingLine == null,
+  onPopInvokedWithResult: (didPop, _) {
+    if (didPop) return;
+    setState(() {
+      _resumedPendingLines.insert(0, _pendingLine!);
+      _pendingLine = null;
+    });
+    _reloadPo();
+  },
+  child: Scaffold(...),
+);</code></pre><p>เมื่ออยู่โหมด B (กำลังผูกพาเลท) ผู้ใช้กดย้อนกลับจะ<strong>ไม่ออกจากจอ</strong> แต่กลับไปโหมด A แทน และรายการที่ค้างถูกใส่กลับเข้ารายการ</p><table><thead><tr><th>ผู้ใช้กดย้อนกลับตอน</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>โหมด A</td><td>ออกจากจอตามปกติ</td></tr>
+<tr><td>โหมด B</td><td>กลับไปโหมด A รายการค้างยังอยู่</td></tr>
+</tbody></table><p>ป้องกันการทำงานหลุดกลางคัน — ผู้ใช้ที่กดย้อนกลับโดยไม่ตั้งใจจะไม่เสียรายการที่ค้างไป</p><div class="note"><strong>สังเกตว่าไม่ได้ถามยืนยัน</strong> — แค่พาไปสถานะที่ปลอดภัยกว่าเงียบ ๆ<br>เป็นการเลือกที่ดีสำหรับ PDA ที่ปุ่มย้อนกลับอยู่ตรงที่กดโดนง่าย การเด้งกล่องถามทุกครั้งจะน่ารำคาญ ส่วนการปล่อยให้ออกไปเลยจะเสียงาน</div><p>แต่มีจุดที่ไม่ครบ — โหมด A2 (เลือกของแล้ว สแกน S/N ไปครึ่งทาง) ยังออกได้ทันที</p><pre class="code-vs"><code>canPop: _pendingLine == null,     // ไม่ได้ตรวจ _scanningItem</code></pre><table><thead><tr><th>สถานการณ์</th><th>กดย้อนกลับแล้ว</th></tr></thead><tbody>
+<tr><td>ผูกพาเลทค้าง</td><td>กันไว้</td></tr>
+<tr><td><strong>สแกน S/N ไป 15 ตัวยังไม่ยืนยัน</strong></td><td><strong>ออกเลย S/N หายหมด</strong></td></tr>
+</tbody></table><p>กรณีที่สองเสียงานมากกว่าด้วยซ้ำ — S/N 15 ตัวคือการเดินไปหยิบของ 15 ชิ้น</p><pre class="code-vs"><code>// ควรเป็น
+canPop: _pendingLine == null &amp;&amp; _serialNumbers.isEmpty,
+
+onPopInvokedWithResult: (didPop, _) async {
+  if (didPop) return;
+
+  if (_pendingLine != null) {
+    setState(() {
+      _resumedPendingLines.insert(0, _pendingLine!);
+      _pendingLine = null;
+    });
+    _reloadPo();
+    return;
+  }
+
+  // มี S/N ค้าง — ถามก่อนทิ้ง เพราะทิ้งแล้วกู้ไม่ได้
+  final leave = await showConfirmDialog(
+    context,
+    title: 'ออกจากหน้านี้?',
+    message: 'สแกน S/N ไว้ ${_serialNumbers.length} ตัว ยังไม่ได้ยืนยัน\n'
+        'ออกตอนนี้จะต้องสแกนใหม่ทั้งหมด',
+    confirmLabel: 'ออก',
+    isDanger: true,
+  );
+  if (leave &amp;&amp; context.mounted) Navigator.pop(context);
+},</code></pre><p>ที่นี่ต้องถามยืนยัน ต่างจากกรณีพาเลท เพราะ<strong>ไม่มีสถานะที่ปลอดภัยกว่าให้พาไป</strong> — S/N ยังไม่ถูกส่งไปเซิร์ฟเวอร์ ทิ้งแล้วหายจริง</p></section>
+
+<section id="section-6"><h2>6. การปิด session อัตโนมัติ</h2><pre class="code-vs"><code>if (line.autoClosed) {
+  await _showAutoClosedDialog(
+    line.poStatus ?? 'RECEIVED',
+    line.closeMessage ?? 'ปิด Session อัตโนมัติ',
+  );
+  return;                    // ← ไม่โหลด PO ใหม่ ไม่คืนโฟกัส
+}
+
+await _reloadPo();
+_partFocus.requestFocus();</code></pre><p>เมื่อรับครบทั้ง PO เซิร์ฟเวอร์ตอบ <code>autoClosed: true</code> แล้วแอปเด้งกล่องสรุปและพากลับหน้าแรก</p><pre class="code-vs"><code>actions: [
+  ElevatedButton(
+    onPressed: () {
+      Navigator.pop(ctx);                          // ปิดกล่อง
+      Navigator.popUntil(
+        context,
+        (route) =&gt; route.isFirst || route.settings.name == '/',
+      );                                            // กลับหน้าแรกรวดเดียว
+    },
+    child: const Text('เสร็จสิ้น'),
+  ),
+],</code></pre><p><code>barrierDismissible: false</code> ทำให้กดนอกกล่องปิดไม่ได้ — บังคับให้ผู้ใช้เห็นสรุปก่อน ซึ่งถูกต้องเพราะเป็นการจบงาน</p><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ไม่โหลด PO ใหม่</td><td>กำลังจะออกจากจออยู่แล้ว ประหยัดคำขอ</td></tr>
+<tr><td><code>popUntil</code> ไปหน้าแรก</td><td>ข้ามจอ ScanPo ที่ไม่มีประโยชน์แล้ว</td></tr>
+<tr><td>แสดง PO และสถานะในกล่อง</td><td>ผู้ใช้ยืนยันได้ว่าปิดใบถูก</td></tr>
+</tbody></table><p>แต่มีจุดที่อาจไม่ตรงใจ — <code>popUntil</code> พากลับ<strong>หน้าแรกสุด</strong> ไม่ใช่หน้าเมนู Receiving</p><pre class="code-vs"><code>HomeScreen → ReceivingMenu → ScanPo → ScanPart
+    ↑                                      │
+    └──────────── popUntil isFirst ────────┘</code></pre><p>ผู้ใช้ที่จะรับ PO ใบถัดไปต้องกดเข้าไปใหม่สามชั้น ถ้าอยากให้กลับไปที่เมนู Receiving ต้องตั้งชื่อเส้นทางหรือใช้วิธีอื่น — ซึ่งทำไม่ได้ง่ายในโปรเจกต์ที่ไม่มี named route (16.3)</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>คำขอมีสองผลลัพธ์: สำเร็จหรือไม่</td><td>ที่นี่มีสาม — รวมสำเร็จครึ่งทาง</td></tr>
+<tr><td>ผูกพาเลทไม่ได้ = รับของไม่ได้</td><td>ของถูกบันทึกแล้ว แค่ต้องตามผูกทีหลัง</td></tr>
+<tr><td><code>PopScope</code> กันการออกทุกกรณี</td><td>กันเฉพาะโหมดผูกพาเลท</td></tr>
+<tr><td><code>insert(0)</code> กับ <code>add</code> เหมือนกัน</td><td>ตำแหน่งที่ผู้ใช้เห็นต่างกันมาก</td></tr>
+<tr><td>ล้มเหลวแล้วต้องล้างฟอร์ม</td><td>ต้องเก็บไว้ให้กดซ้ำได้</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกนของครบ กดยืนยัน แล้วขึ้นเหลือง ๆ ว่าผูกพาเลทไม่สำเร็จ พอกดผูกใหม่ก็ขึ้นแบบเดิมอีก วนอยู่แบบนี้”</p><ol><li>สาเหตุที่เป็นไปได้มีอะไรบ้าง</li><li>ทำไมผู้ใช้ถึงติดอยู่ในวง และแอปควรช่วยอย่างไร</li><li>เขียนโค้ดที่ตัดวงนี้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สาเหตุ</strong></p><p><code>palletError</code> มาจากฝั่งเซิร์ฟเวอร์ ต้องดูว่ากฎอะไรที่ทำให้ผูกไม่ได้</p><table><thead><tr><th>สาเหตุ</th><th>ผู้ใช้แก้เองได้ไหม</th></tr></thead><tbody>
+<tr><td>พาเลทมีของสภาพอื่นอยู่แล้ว (FG กับ PW ปนกันไม่ได้)</td><td>ได้ — ใช้พาเลทอื่น</td></tr>
+<tr><td>พาเลทเต็ม</td><td>ได้ — ใช้พาเลทอื่น</td></tr>
+<tr><td>พาเลทถูกใช้ในงานอื่นอยู่</td><td>ได้ — ใช้พาเลทอื่น</td></tr>
+<tr><td>รหัสพาเลทไม่มีในระบบ</td><td>ได้ — ตรวจว่าสแกนถูกป้าย</td></tr>
+<tr><td>เซิร์ฟเวอร์มีปัญหา</td><td><strong>ไม่ได้</strong></td></tr>
+</tbody></table><p>ทั้งหมดยกเว้นข้อสุดท้ายแก้ได้ด้วยการใช้พาเลทอื่น — แต่ผู้ใช้จะรู้ก็ต่อเมื่ออ่านข้อความ</p><p><strong>ข้อ 2 — ทำไมติดอยู่ในวง</strong></p><p>ปัญหาอยู่ที่วิธีแสดงข้อความ</p><pre class="code-vs"><code>showWarningSnackbar(context,
+    '${line.partId} บันทึกแล้ว แต่ผูก Pallet ไม่สำเร็จ: ${line.palletError}');</code></pre><table><thead><tr><th>ปัญหา</th><th>ผล</th></tr></thead><tbody>
+<tr><td>แถบหายเองใน 3 วินาที</td><td>ผู้ใช้ที่มองของอยู่พลาดข้อความ</td></tr>
+<tr><td>ข้อความยาว ตัดท้าย</td><td>เหตุผลจริงอยู่ท้ายสุดและถูกตัด</td></tr>
+<tr><td>เหตุผลปนกับชื่อ Part</td><td>อ่านยากในเวลาสั้น</td></tr>
+</tbody></table><p>ผู้ใช้จึงรู้แค่ว่า “ไม่สำเร็จ” แล้วลองซ้ำด้วยพาเลทเดิม ซึ่งล้มเหลวเหมือนเดิมทุกครั้ง</p><p>สังเกตความไม่สอดคล้อง — ตอนผูกทีหลังผ่าน <code>_assignToPallet</code> ใช้<strong>กล่อง</strong> แต่ตอนผูกพร้อมรับของใช้<strong>แถบ</strong></p><pre class="code-vs"><code>// ใน _assignToPallet — ใช้กล่อง ผู้ใช้ต้องอ่าน
+showErrorDialog(context, message: result.error ?? 'ผูก Pallet ไม่สำเร็จ');
+
+// ใน _confirmPart — ใช้แถบ หายเอง
+showWarningSnackbar(context, '...ผูก Pallet ไม่สำเร็จ: ${line.palletError}');</code></pre><p>ทั้งที่เป็นความล้มเหลวชนิดเดียวกัน</p><p><strong>ข้อ 3 — ตัดวง</strong></p><pre class="code-vs"><code>if (line.palletError != null) {
+  setState(() =&gt; _resumedPendingLines.insert(0, line));
+
+  // ของบันทึกแล้ว → ไม่ใช่ความผิดพลาดร้ายแรง
+  // แต่เหตุผลต้องอ่านได้ ไม่งั้นผู้ใช้ลองพาเลทเดิมซ้ำ
+  await showDialog&lt;void&gt;(
+    context: context,
+    builder: (ctx) =&gt; AlertDialog(
+      title: Row(children: [
+        Icon(Icons.warning_amber_rounded, color: AppTheme.warning),
+        const SizedBox(width: 8),
+        const Expanded(child: Text('บันทึกแล้ว แต่ยังไม่ได้ผูก Pallet')),
+      ]),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InfoRow(label: 'สินค้า', value: line.partId),
+          InfoRow(label: 'จำนวน', value: '${line.qtyReceived} ชิ้น'),
+          const SizedBox(height: 12),
+          // เหตุผลเป็นบรรทัดของตัวเอง ไม่ปนกับอย่างอื่น
+          Text(line.palletError!, style: const TextStyle(height: 1.5)),
+          const SizedBox(height: 12),
+          Text(
+            'สินค้าถูกบันทึกไว้แล้ว — ไปที่รายการ "รอผูก Pallet" '
+            'แล้วลองพาเลทใบอื่น',
+            style: TextStyle(fontSize: 13, color: AppTheme.textGrey(ctx)),
+          ),
+        ],
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () =&gt; Navigator.pop(ctx),
+          child: const Text('เข้าใจแล้ว'),
+        ),
+      ],
+    ),
+  );
+}</code></pre><table><thead><tr><th>สิ่งที่เปลี่ยน</th><th>ผล</th></tr></thead><tbody>
+<tr><td>ใช้กล่องแทนแถบ</td><td>ผู้ใช้ต้องอ่านก่อนทำต่อ</td></tr>
+<tr><td>เหตุผลอยู่บรรทัดของตัวเอง</td><td>ไม่ถูกตัดท้าย</td></tr>
+<tr><td>บอกว่า “ลองพาเลทใบอื่น”</td><td>ตัดวงการลองพาเลทเดิมซ้ำ</td></tr>
+<tr><td>ย้ำว่าของบันทึกแล้ว</td><td>ผู้ใช้ไม่กลัวว่าของหาย</td></tr>
+</tbody></table><p><strong>แต่กล่องมีต้นทุน</strong> — ถ้าเน็ตมีปัญหาและล้มเหลวติดกันสิบครั้ง ผู้ใช้จะต้องกดปิดสิบครั้ง</p><p>ทางที่สมดุลกว่าคือใช้แถบสำหรับครั้งแรก แล้วเปลี่ยนเป็นกล่องเมื่อล้มเหลวซ้ำด้วยพาเลทเดิม</p><pre class="code-vs"><code>String? _lastFailedPalletId;
+
+if (line.palletError != null) {
+  final sameAsLast = palletId == _lastFailedPalletId;
+  _lastFailedPalletId = palletId;
+
+  if (sameAsLast) {
+    await _showPalletErrorDialog(line);      // ซ้ำแล้ว → บังคับให้อ่าน
+  } else {
+    showWarningSnackbar(context, '...');     // ครั้งแรก → ไม่ขวาง
+  }
+  setState(() =&gt; _resumedPendingLines.insert(0, line));
+}</code></pre><p><strong>หลักที่ได้:</strong> ความรุนแรงของวิธีแจ้งควรขึ้นกับ<strong>ว่าผู้ใช้กำลังทำผิดซ้ำหรือไม่</strong> ไม่ใช่แค่ชนิดของความล้มเหลว — ครั้งแรกอาจเป็นเรื่องบังเอิญ ครั้งที่สองแปลว่าผู้ใช้ไม่ได้รับข้อมูลที่ต้องการ</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li><code>scan-part</code> ทำสองงานในคำขอเดียว ผลลัพธ์จึงมีสามแบบ ไม่ใช่สองแบบ</li><li><code>palletError</code> แยก “บันทึกแล้วแต่ผูกไม่ได้” ออกจาก “ล้มเหลว” — เป็นการออกแบบที่ถูกและหายาก</li><li>สำเร็จครึ่งทางใช้แถบเหลือง ไม่ใช่กล่องแดง เพราะไม่มีอะไรเสียหาย</li><li>ล้มเหลวแล้วไม่ล้าง S/N — ตรงกับข้อ 20 ของ 15.11</li><li><code>insert(0, ...)</code> ทำให้รายการที่เพิ่งค้างอยู่บนสุด</li><li>รายการค้างจาก session เดิมถูกกู้จาก <code>POResponse.pendingLines</code></li><li><code>PopScope</code> กันการออกตอนผูกพาเลทค้าง แต่ไม่กันตอนสแกน S/N ค้าง</li><li>ความล้มเหลวชนิดเดียวกันถูกแจ้งสองแบบในสองเส้นทาง</li><li>ความรุนแรงของการแจ้งควรขึ้นกับว่าผู้ใช้ทำผิดซ้ำหรือไม่</li></ul></div><p><strong>บทหน้า:</strong> จอตามเก็บของที่ค้าง และกฎทางธุรกิจที่หายไประหว่างสองจอ</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

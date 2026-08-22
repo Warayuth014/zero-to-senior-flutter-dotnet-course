@@ -4,23 +4,263 @@
 <title>Unload to Basket</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-10 · Real Codebase</span><h1>Unload to Basket</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">Unload menu</a></li><li><a href="#section-2">Open unload flow</a></li><li><a href="#section-3">Load-to-basket source</a></li><li><a href="#section-4">Select part and lot</a></li><li><a href="#section-5">Serial vs quantity</a></li><li><a href="#section-6">Load request</a></li><li><a href="#section-7">Refresh after mutation</a></li><li><a href="#section-8">Failure boundaries</a></li></ol></nav>
-<div class="note"><strong>Unload มีสองช่วงคนละธุรกรรม:</strong> นำของออกจาก pallet ให้เป็น unloaded inventory ก่อน แล้วจึง load ของนั้นเข้าบasket อย่ารวมสองขั้นจน retry และ audit แยกไม่ได้</div>
-<section id="section-1"><h2>1. Unload menu</h2><p><code>UnloadMenuScreen</code> เป็นทางแยกไป <code>UnloadScreen</code> สำหรับถอดของออกจาก pallet และ <code>LoadToBasketScreen</code> สำหรับนำยอดที่ unload แล้วเข้าบasket ชื่อปุ่มและคำอธิบายต้องทำให้ลำดับนี้ชัด</p></section>
-<section id="section-2"><h2>2. Open unload flow</h2><p>เส้นทาง unload เริ่ม scan pallet แล้วเรียก open session จากนั้นแสดงรายการ part/lot ที่อยู่บน pallet ให้ operator ยืนยันทีละ line session เป็นขอบเขต audit ของงานครั้งนั้น</p></section>
-<section id="section-3"><h2>3. Load-to-basket source</h2><p><code>LoadToBasketScreen</code> เรียก <code>GET /basket/unloaded-items</code> เพื่ออ่านของที่พร้อมย้าย ไม่ควรใช้รายการจาก unload screen โดยตรง เพราะ server คือแหล่งจริงและงานอาจถูกทำต่อจากคนละเครื่อง</p></section>
-<section id="section-4"><h2>4. Select part and lot</h2><p>เมื่อ scan part อาจพบหลาย <code>UnloadedItem</code> ที่ lot ต่างกัน UI ต้องให้เลือก line ที่ต้องการอย่างชัดเจน การเลือกตัวแรกอัตโนมัติเสี่ยงลงยอดผิด lot แม้ partId จะตรง</p></section>
-<section id="section-5"><h2>5. Serial vs quantity</h2><p>รายการ serial-controlled ให้สะสม serial ที่อยู่ในชุดอนุญาตและห้ามซ้ำ ส่วน non-serial รับจำนวนด้วยตัวเลขที่มากกว่า 0 และไม่เกิน <code>qtyRemaining</code> ก่อนเปิดปุ่มยืนยัน</p></section>
-<section id="section-6"><h2>6. Load request</h2><pre class="code-vs"><code>POST /basket/load
-{
-  "partId": item.partId,
-  "lotNumber": item.lotNumber,
-  "basketId": basketId,
-  "qty": qty,
-  "operatorId": operatorId,
-  "serialNumbers": serials
-}</code></pre><p>part+lot ระบุ inventory bucket ส่วน basketId ระบุปลายทาง</p></section>
-<section id="section-7"><h2>7. Refresh after mutation</h2><p>เมื่อ load สำเร็จให้ clear selection/controller แล้วโหลด unloaded items ใหม่ เพราะ backend อาจลด qtyRemaining, เติม basketId, รวมรายการ หรือปิดรายการเมื่อยอดเป็นศูนย์</p></section>
-<section id="section-8"><h2>8. Failure boundaries</h2><div class="success">ทดสอบ basket ไม่พบ, part หลาย lot, serial ไม่อยู่ในรายการ, qty เกินคงเหลือ, double tap, timeout หลัง server commit และผู้ใช้ออกจากหน้าระหว่าง request โดยต้องไม่ทำยอด unload ซ้ำ</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">งานของจอนี้</a></li><li><a href="#section-2">สแกนแล้วเลือกให้อัตโนมัติ</a></li><li><a href="#section-3">กล่องที่มีสองขั้นตอน</a></li><li><a href="#section-4">ขั้นตอนที่คุมด้วยตัวแปรเดียว</a></li><li><a href="#section-5">การตรวจ S/N ที่ต่างจาก receiving</a></li><li><a href="#section-6">ส่วนที่ทำได้ดีในจอนี้</a></li><li><a href="#section-7">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-8">แบบฝึกหัด</a></li><li><a href="#section-9">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: สูง</span><span>ใช้เวลา: 50–65 นาที</span><span>ลงมือทำ: เปิด load_to_basket_screen.dart ทั้ง 470 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.9, Part 3 (การสแกน), 17.8 (StatefulBuilder)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านกล่องที่มีสองขั้นตอนในตัวเอง และรู้ว่าสถานะที่อยู่นอก State มีข้อดีข้อเสียอย่างไร</div>
+
+<section id="section-1"><h2>1. งานของจอนี้</h2><p>ของที่ถูกถ่ายลงจากพาเลทแล้ว (Unload) ต้องถูกใส่ลงตะกร้า (Basket) เพื่อส่งต่อ จอนี้ทำขั้นที่สอง</p><pre class="code-vs"><code>class _LoadToBasketScreenState extends State&lt;LoadToBasketScreen&gt; {
+  final _api = ApiService();
+  final _scanCtrl = TextEditingController();
+  final _scanFocus = FocusNode();
+
+  bool _loading = false;
+  UnloadedItemsResponse? _data;
+  UnloadedItem? _selectedItem;
+}</code></pre><p>หกฟิลด์ เทียบกับ 27 ของ <code>ScanPartScreen</code> — แต่ไฟล์ยาว 470 บรรทัด</p><p>เหตุผลอยู่ที่กล่อง: <strong>สถานะส่วนใหญ่ของ flow อยู่ในกล่อง ไม่ได้อยู่ใน State</strong></p></section>
+
+<section id="section-2"><h2>2. สแกนแล้วเลือกให้อัตโนมัติ</h2><pre class="code-vs"><code>void _onScanPart() {
+  final partId = _scanCtrl.text.trim().toUpperCase();
+  _scanCtrl.clear();                    // ← ล้างก่อนตรวจ
+  if (partId.isEmpty) return;
+
+  final items = _data?.items
+      .where((i) =&gt; i.partId == partId &amp;&amp; !i.isDone)
+      .toList() ?? [];
+
+  if (items.isEmpty) {
+    showErrorDialog(context, message: 'ไม่พบ Part "$partId" ที่รอ Load เข้า Basket');
+    _scanFocus.requestFocus();
+    return;
+  }
+
+  setState(() =&gt; _selectedItem = items.first);
+  _showBasketDialog(items.first);
+}</code></pre><p><code>_scanCtrl.clear()</code> อยู่บรรทัดที่สอง — ล้างทันทีไม่ว่าผลจะเป็นอย่างไร</p><table><thead><tr><th>ล้างตอนไหน</th><th>ผล</th></tr></thead><tbody>
+<tr><td><strong>ทันที (โค้ดนี้)</strong></td><td>สแกนถัดไปไม่ต่อท้ายค่าเดิมแน่นอน</td></tr>
+<tr><td>เฉพาะเมื่อสำเร็จ</td><td>สแกนผิดแล้วยิงใหม่ จะได้ค่าติดกันสองอัน</td></tr>
+</tbody></table><p>ตรงกับที่ 3.9 สอน — ช่องสแกนต้องว่างเสมอหลังอ่านค่าออกมาแล้ว</p><p>ตัวกรองมีสองเงื่อนไข</p><pre class="code-vs"><code>.where((i) =&gt; i.partId == partId &amp;&amp; !i.isDone)</code></pre><p><code>isDone</code> เป็น getter ที่คำนวณจากจำนวน</p><pre class="code-vs"><code>bool get isDone =&gt; qtyRemaining &lt;= 0;</code></pre><p>ใช้ <code>&lt;=</code> ไม่ใช่ <code>==</code> — เผื่อกรณีที่ตัวเลขติดลบจากข้อมูลที่ผิด ซึ่งเป็นการเขียนที่ทนกว่า</p><div class="note"><strong>จุดที่ต้องระวัง:</strong> <code>items.first</code> เลือกตัวแรกที่เจอโดยไม่ถามผู้ใช้<br>สินค้าตัวเดียวกันคนละล็อตจะมีหลายรายการ (ข้อมูลถูกจัดกลุ่มตาม Part+Lot) ถ้าผู้ใช้สแกน <code>PT-9821</code> ที่มีสองล็อตค้างอยู่ ระบบเลือกล็อตแรกให้เลย<br>ต่างจาก <code>ScanPartScreen</code> ที่เด้ง popup ให้เลือกล็อต — สองจอในโปรเจกต์เดียวกันจัดการเรื่องเดียวกันคนละแบบอีกครั้ง</div><p>ที่นี่อาจยอมรับได้ เพราะของที่ unload แล้วอยู่ตรงหน้าผู้ใช้จริง ๆ และผู้ใช้แตะการ์ดในรายการเพื่อเลือกล็อตอื่นได้ — แต่ถ้าผู้ใช้ไม่รู้ว่ามีล็อตอื่น ก็จะไม่ไปแตะ</p></section>
+
+<section id="section-3"><h2>3. กล่องที่มีสองขั้นตอน</h2><pre class="code-vs"><code>Future&lt;void&gt; _showBasketDialog(UnloadedItem item) async {
+  final basketCtrl = TextEditingController();
+  final qtyCtrl = TextEditingController(text: item.qtyRemaining.toString());
+  final serialCtrl = TextEditingController();
+  final serialFocus = FocusNode();
+  final requiresSerial = item.serialRequire;
+  final scannedSerials = &lt;String&gt;[];
+  // มี serial ต้องสแกน S/N ให้ครบก่อน ถึงจะไปสแกน/กรอก Basket ID ได้
+  var showBasketStep = !requiresSerial;
+
+  final confirmed = await showDialog&lt;bool&gt;(
+    context: context,
+    builder: (ctx) =&gt; StatefulBuilder(
+      builder: (ctx, setDialogState) { ... },
+    ),
+  );</code></pre><p>ตัวแปรทั้งเจ็ดเป็น local ของเมธอด ไม่ใช่ฟิลด์ของ State</p><table><thead><tr><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>ตายไปพร้อมกล่อง ไม่มีสถานะค้าง</td><td><strong>ไม่ถูก dispose</strong></td></tr>
+<tr><td>ไม่ต้องล้างเองเหมือน <code>_clearSerialScan()</code></td><td>ทดสอบแยกไม่ได้</td></tr>
+<tr><td>อ่านจบในเมธอดเดียว</td><td>กู้คืนไม่ได้ถ้ากล่องปิดโดยไม่ตั้งใจ</td></tr>
+</tbody></table><div class="note"><strong>ข้อดีข้อแรกแก้ปัญหาที่ <code>ScanPartScreen</code> มี</strong> — ที่นั่น <code>_scanningItem</code> ค้างได้เพราะเป็นฟิลด์ของ State (17.5) ที่นี่ไม่มีทางค้าง เพราะพอกล่องปิดตัวแปรก็หายไป<br>แต่แลกมาด้วยข้อเสียข้อสาม: ผู้ใช้ที่สแกน S/N ไป 10 ตัวแล้วกล่องปิด จะเสียทั้งหมด</div><p>สี่ตัวแรกเป็นทรัพยากรที่ต้องคืน แต่ไม่มี <code>dispose</code> ที่ไหนเลย — เป็นการรั่วชุดที่สามที่เจอในโดเมนนี้ (นับกับ 17.5 และ 17.8 รวมแปดวัตถุ)</p><pre class="code-vs"><code>Future&lt;void&gt; _showBasketDialog(UnloadedItem item) async {
+  final basketCtrl = TextEditingController();
+  ...
+  try {
+    final confirmed = await showDialog&lt;bool&gt;(...);
+    ...
+  } finally {
+    basketCtrl.dispose();
+    qtyCtrl.dispose();
+    serialCtrl.dispose();
+    serialFocus.dispose();
+  }
+}</code></pre></section>
+
+<section id="section-4"><h2>4. ขั้นตอนที่คุมด้วยตัวแปรเดียว</h2><pre class="code-vs"><code>var showBasketStep = !requiresSerial;</code></pre><p>บรรทัดเดียวนี้ตัดสินว่ากล่องเริ่มที่ขั้นไหน</p><table><thead><tr><th>สินค้า</th><th><code>showBasketStep</code> เริ่มที่</th><th>ผู้ใช้เห็น</th></tr></thead><tbody>
+<tr><td>ต้องสแกน S/N</td><td><code>false</code></td><td>ช่อง S/N ก่อน → กด “ถัดไป” → ช่อง Basket</td></tr>
+<tr><td>ไม่ต้อง</td><td><code>true</code></td><td>ช่อง Basket + ช่องจำนวน เลย</td></tr>
+</tbody></table><pre class="code-vs"><code>if (!showBasketStep) ...[
+  // ขั้น 1 — สแกน S/N
+  Text('สแกน S/N (${scannedSerials.length}/${item.qtyRemaining})', ...),
+  TextField(controller: serialCtrl, focusNode: serialFocus, autofocus: true, ...),
+  if (scannedSerials.isNotEmpty) ...[ ...รายการ Chip... ],
+] else ...[
+  // ขั้น 2 — Basket
+  TextField(controller: basketCtrl, autofocus: true, ...),
+  if (requiresSerial)
+    Text('สแกน S/N แล้ว ${scannedSerials.length} ชิ้น', ...)
+  else
+    TextField(controller: qtyCtrl, keyboardType: TextInputType.number, ...),
+],</code></pre><p>และปุ่มเปลี่ยนตามขั้นด้วย</p><pre class="code-vs"><code>if (!showBasketStep)
+  ElevatedButton(
+    onPressed: scannedSerials.isEmpty
+        ? null                                    // ← ยังไม่สแกนเลย กดถัดไปไม่ได้
+        : () =&gt; setDialogState(() =&gt; showBasketStep = true),
+    child: const Text('ถัดไป'),
+  )
+else ...[
+  if (requiresSerial)
+    TextButton(
+      onPressed: () =&gt; setDialogState(() =&gt; showBasketStep = false),
+      child: const Text('ย้อนกลับ'),            // ← กลับไปแก้ S/N ได้
+    ),
+  ElevatedButton(
+    onPressed: () =&gt; Navigator.pop(ctx, true),
+    child: const Text('ยืนยัน'),
+  ),
+],</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>ปุ่ม “ถัดไป” ถูกปิดเมื่อยังไม่มี S/N</td><td>กันการข้ามขั้นตอน</td></tr>
+<tr><td>มีปุ่ม “ย้อนกลับ” เฉพาะกรณีที่มีขั้น 1</td><td>ไม่แสดงปุ่มที่ไม่มีความหมาย</td></tr>
+<tr><td><code>autofocus: true</code> ทั้งสองขั้น</td><td>เครื่องสแกนยิงเข้าช่องที่ถูกต้องทันที</td></tr>
+<tr><td>ลบ S/N ด้วย <code>Chip.onDeleted</code></td><td>แก้ไขได้โดยไม่ต้องเริ่มใหม่</td></tr>
+</tbody></table><p>แต่ปุ่ม “ถัดไป” ตรวจแค่ว่า<strong>มี S/N อย่างน้อยหนึ่งตัว</strong> ไม่ได้ตรวจว่าครบ</p><pre class="code-vs"><code>onPressed: scannedSerials.isEmpty ? null : ...</code></pre><p>ผู้ใช้สแกน 3 จาก 10 แล้วกดถัดไปได้ — และไม่มีการตรวจซ้ำตอนกดยืนยัน</p><pre class="code-vs"><code>final qty = requiresSerial ? scannedSerials.length : (int.tryParse(qtyCtrl.text) ?? 0);</code></pre><p>จำนวนถูกคำนวณจาก S/N ที่สแกนจริง — จึงไม่ผิดพลาด แต่ผู้ใช้อาจตั้งใจโหลด 10 ชิ้นแล้วเผลอโหลดแค่ 3</p><div class="note"><strong>นี่อาจเป็นการตั้งใจ</strong> — ผู้ใช้อาจอยากแบ่งโหลดหลายรอบ และ <code>qtyRemaining</code> จะลดลงตามจริง<br>ถ้าใช่ ควรมีข้อความบอก เช่น “โหลด 3 จาก 10 — ที่เหลือโหลดรอบหน้าได้” เพื่อไม่ให้ผู้ใช้คิดว่าตัวเองพลาด</div></section>
+
+<section id="section-5"><h2>5. การตรวจ S/N ที่ต่างจาก receiving</h2><pre class="code-vs"><code>void addSerial() {
+  final sn = serialCtrl.text.trim().toUpperCase();
+  serialCtrl.clear();
+  if (sn.isEmpty) return;
+
+  if (!item.serialNumbers.contains(sn)) {
+    showErrorDialog(context, message: 'S/N "$sn" ไม่ใช่ของรายการนี้ หรือถูก Load ไปแล้ว');
+    serialFocus.requestFocus();
+    return;
+  }
+  if (scannedSerials.contains(sn)) {
+    showErrorDialog(context, message: 'สแกน S/N "$sn" ซ้ำ');
+    serialFocus.requestFocus();
+    return;
+  }
+  if (scannedSerials.length &gt;= item.qtyRemaining) {
+    showErrorDialog(context, message: 'สแกนครบจำนวนที่เหลือแล้ว (${item.qtyRemaining})');
+    return;
+  }
+
+  setDialogState(() =&gt; scannedSerials.add(sn));
+  serialFocus.requestFocus();
+}</code></pre><p><strong>ไม่มีการยิงเน็ตเลย</strong> — ต่างจาก <code>_addSerial()</code> ใน 17.6 ที่ต้องถามเซิร์ฟเวอร์</p><table><thead><tr><th></th><th>Receiving (17.6)</th><th>Basket (ที่นี่)</th></tr></thead><tbody>
+<tr><td>รายชื่อ S/N ที่ถูกต้อง</td><td>ไม่รู้ ต้องถามทีละตัว</td><td><strong>รู้แล้ว — มากับ <code>item.serialNumbers</code></strong></td></tr>
+<tr><td>ความเร็ว</td><td>รอเน็ตทุกตัว</td><td>ทันที</td></tr>
+<tr><td>ทำงานตอนเน็ตหลุด</td><td>ไม่ได้</td><td><strong>ได้ จนถึงตอนกดยืนยัน</strong></td></tr>
+</tbody></table><p>เกิดจากการออกแบบฝั่งเซิร์ฟเวอร์ที่ส่งรายชื่อ S/N มาพร้อมข้อมูลรายการ</p><pre class="code-vs"><code>serialNumbers: (json['serialNumbers'] as List?)?.map((e) =&gt; e as String).toList() ?? [],</code></pre><p>สิ่งที่ได้คือ flow ที่สแกนเร็วมากและไม่พึ่งเน็ตระหว่างทาง — เหมาะกับคลังที่สัญญาณไม่ทั่วถึง</p><p>แต่มีจุดที่ต้องระวัง</p><pre class="code-vs"><code>bool get serialRequire =&gt; serialNumbers.isNotEmpty;</code></pre><p><code>serialRequire</code> ไม่ได้มาจากเซิร์ฟเวอร์ แต่<strong>เดาจากว่ามีรายชื่อ S/N ส่งมาไหม</strong></p><table><thead><tr><th>ถ้าเซิร์ฟเวอร์</th><th><code>serialRequire</code></th><th>ผล</th></tr></thead><tbody>
+<tr><td>ส่ง S/N มาครบ</td><td><code>true</code></td><td>ถูก</td></tr>
+<tr><td>ไม่ส่ง เพราะสินค้าไม่ต้องมี S/N</td><td><code>false</code></td><td>ถูก</td></tr>
+<tr><td><strong>ไม่ส่ง เพราะข้อมูลผิดพลาด</strong></td><td><code>false</code></td><td><strong>ของที่ต้องสแกน S/N ถูกโหลดด้วยจำนวน</strong></td></tr>
+</tbody></table><p>เทียบกับฝั่ง receiving ที่ <code>serialRequire</code> เป็นฟิลด์จริงจากเซิร์ฟเวอร์</p><pre class="code-vs"><code>// receiving_models.dart — เป็นฟิลด์จริง
+serialRequire: json['serialRequire'] ?? false,
+
+// basket_models.dart — คำนวณเอา
+bool get serialRequire =&gt; serialNumbers.isNotEmpty;</code></pre><p>ทั้งสองแบบล้มไปทาง “ไม่ต้องสแกน” เมื่อข้อมูลไม่ครบ ซึ่งเป็นค่าเริ่มต้นแบบผ่อนปรนตามที่ 17.9 อธิบาย</p></section>
+
+<section id="section-6"><h2>6. ส่วนที่ทำได้ดีในจอนี้</h2><table><thead><tr><th>เรื่อง</th><th>รายละเอียด</th></tr></thead><tbody>
+<tr><td><code>RefreshIndicator</code></td><td>ผู้ใช้ลากลงโหลดใหม่ได้</td></tr>
+<tr><td>ค้นในเครื่อง</td><td>สแกนแล้วหาทันที ไม่ยิงเน็ต</td></tr>
+<tr><td>คืนโฟกัสทุกทางออก</td><td>สแกนถัดไปได้เลยไม่ว่าจะสำเร็จหรือไม่</td></tr>
+<tr><td>โหลดใหม่หลังสำเร็จ</td><td>ตัวเลขที่เหลือตรงกับความจริง</td></tr>
+<tr><td>แสดงสรุปด้านบน</td><td>“รายการ Unload: 12 | Load แล้ว: 5”</td></tr>
+</tbody></table><pre class="code-vs"><code>Future&lt;void&gt; _doLoad(...) async {
+  ...
+  if (!result.success) {
+    showErrorDialog(context, message: result.error ?? 'Load ไม่สำเร็จ');
+    _scanFocus.requestFocus();        // ← คืนโฟกัสแม้ล้มเหลว
+    return;
+  }
+  ...
+  setState(() =&gt; _selectedItem = null);
+  await _loadItems();                 // ← โหลดใหม่
+  _scanFocus.requestFocus();
+}</code></pre><p>การคืนโฟกัสในทุกทางออกเป็นรายละเอียดที่แยกแอปที่ใช้งานได้จริงบน PDA ออกจากแอปที่ใช้ไม่ได้ — ผู้ใช้ไม่ต้องแตะจอเลยตลอดกะ</p><p>จุดหนึ่งที่ไม่สม่ำเสมอ</p><pre class="code-vs"><code>ScaffoldMessenger.of(context).showSnackBar(
+  SnackBar(
+    content: Text(result.data!.message),
+    backgroundColor: AppTheme.success,
+    duration: const Duration(seconds: 2),
+  ),
+);</code></pre><p>สร้างแถบเองแทนที่จะใช้ <code>showSuccessSnackbar()</code> จาก <code>common_widgets.dart</code> — ผลคือ<strong>ไม่มีการสั่น</strong> ซึ่ง 16.9 อธิบายว่าสำคัญเพราะผู้ใช้ไม่ได้มองจอ</p><pre class="code-vs"><code>// ใน common_widgets.dart
+void showSuccessSnackbar(BuildContext context, String message) {
+  HapticFeedback.lightImpact();      // ← ที่จอนี้ไม่ได้</code></pre><p>และเวลาแสดงเป็น 2 วินาที ต่างจาก 3 วินาทีของตัวกลาง — ความไม่สม่ำเสมอที่เกิดจากการเขียนเองแทนที่จะใช้ของที่มี</p></section>
+
+<section id="section-7"><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>สถานะใน local ไม่ต้องจัดการ</td><td>ตัวควบคุมยังต้อง dispose</td></tr>
+<tr><td>สแกน Part แล้วได้ล็อตที่ต้องการ</td><td>ได้ล็อตแรกที่เจอ</td></tr>
+<tr><td>ปุ่ม “ถัดไป” ตรวจว่า S/N ครบ</td><td>ตรวจแค่ว่ามีอย่างน้อยหนึ่ง</td></tr>
+<tr><td><code>serialRequire</code> มาจากเซิร์ฟเวอร์</td><td>คำนวณจากว่ามีรายชื่อ S/N ไหม</td></tr>
+<tr><td>สร้าง SnackBar เองก็เหมือนกัน</td><td>เสียการสั่นและเวลาไม่ตรงกับที่อื่น</td></tr>
+</tbody></table></section>
+
+<section id="section-8"><h2>8. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “สแกน S/N ไปเกือบครบ 20 ตัว แล้วเผลอกดข้างนอกกล่อง ทุกอย่างหายหมด ต้องเริ่มใหม่”</p><ol><li>ทำไมถึงหาย และเทียบกับ <code>ScanPartScreen</code> ว่าต่างกันอย่างไร</li><li>เสนอทางแก้สามระดับ พร้อมข้อดีข้อเสีย</li><li>เลือกหนึ่งแล้วเขียนโค้ด</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — ทำไมหาย</strong></p><pre class="code-vs"><code>final scannedSerials = &lt;String&gt;[];        // local ของเมธอด
+
+final confirmed = await showDialog&lt;bool&gt;(
+  context: context,
+  // ไม่มี barrierDismissible: false → กดข้างนอกปิดได้
+  builder: (ctx) =&gt; StatefulBuilder(...),
+);
+
+if (confirmed != true || !mounted) {
+  _scanFocus.requestFocus();
+  return;                                 // ← scannedSerials หายไปกับเมธอด
+}</code></pre><p>สองอย่างประกอบกัน: กล่องปิดได้ด้วยการกดข้างนอก และสถานะเป็น local</p><p>เทียบกับ <code>ScanPartScreen</code></p><table><thead><tr><th></th><th>ScanPart</th><th>LoadToBasket</th></tr></thead><tbody>
+<tr><td>S/N เก็บที่</td><td>ฟิลด์ของ State</td><td>local ของเมธอด</td></tr>
+<tr><td>ปิดกล่องแล้ว</td><td>ไม่มีกล่อง — สแกนบนจอ</td><td>หายหมด</td></tr>
+<tr><td>ออกจากจอตอนมี S/N ค้าง</td><td>ออกได้ (17.7 ชี้ว่าควรกัน)</td><td>ไม่เกี่ยว</td></tr>
+<tr><td>สถานะค้างผิดได้ไหม</td><td>ได้ (17.5)</td><td>ไม่ได้</td></tr>
+</tbody></table><p>สังเกตว่าสองจอแลกกันคนละแบบ — จอหนึ่งกู้ได้แต่ค้างผิดได้ อีกจอไม่ค้างแต่กู้ไม่ได้</p><p><strong>ข้อ 2 — สามระดับ</strong></p><table><thead><tr><th>ระดับ</th><th>ทำอะไร</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>1</td><td><code>barrierDismissible: false</code></td><td>บรรทัดเดียว กันการกดพลาดได้ทันที</td><td>ผู้ใช้ที่อยากออกจริงต้องหาปุ่มยกเลิก</td></tr>
+<tr><td>2</td><td>ถามยืนยันก่อนปิด ถ้ามี S/N ค้าง</td><td>ผู้ใช้ตัดสินใจเอง</td><td>ต้องดักการปิดทุกทาง</td></tr>
+<tr><td>3</td><td>ย้าย S/N ไปเก็บใน State</td><td>กู้ได้แม้กล่องปิด</td><td>ต้องล้างเองและอาจค้างผิดแบบ 17.5</td></tr>
+</tbody></table><p>ระดับ 1 ให้ผลมากที่สุดต่อความเสี่ยงที่ต่ำที่สุด และแก้อาการที่ผู้ใช้แจ้งมาโดยตรง — <strong>“เผลอกดข้างนอก”</strong></p><p>ระดับ 3 แก้ปัญหาได้ครบที่สุดแต่นำปัญหาของ <code>ScanPartScreen</code> เข้ามาแทน ไม่คุ้มสำหรับจอนี้</p><p><strong>ข้อ 3 — โค้ด</strong></p><p>ทำระดับ 1 กับ 2 พร้อมกัน เพราะระดับ 2 ยังต้องมีสำหรับปุ่ม “ยกเลิก”</p><pre class="code-vs"><code>final confirmed = await showDialog&lt;bool&gt;(
+  context: context,
+  // สแกน S/N ไปหลายตัวแล้วกดข้างนอกโดยไม่ตั้งใจ = เสียงานทั้งหมด
+  barrierDismissible: false,
+  builder: (ctx) =&gt; StatefulBuilder(
+    builder: (ctx, setDialogState) {
+      Future&lt;void&gt; cancel() async {
+        if (scannedSerials.isEmpty) {
+          Navigator.pop(ctx, false);
+          return;
+        }
+        final leave = await showConfirmDialog(
+          ctx,
+          title: 'ยกเลิกการโหลด?',
+          message: 'สแกน S/N ไว้ ${scannedSerials.length} ตัว\n'
+              'ยกเลิกแล้วต้องสแกนใหม่ทั้งหมด',
+          confirmLabel: 'ยกเลิกการโหลด',
+          cancelLabel: 'สแกนต่อ',
+          isDanger: true,
+        );
+        if (leave &amp;&amp; ctx.mounted) Navigator.pop(ctx, false);
+      }
+
+      return PopScope(
+        // ปุ่มย้อนกลับของเครื่องก็ต้องผ่าน cancel() เหมือนกัน
+        canPop: scannedSerials.isEmpty,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) cancel();
+        },
+        child: AlertDialog(
+          ...
+          actions: [
+            TextButton(onPressed: cancel, child: const Text('ยกเลิก')),
+            ...
+          ],
+        ),
+      );
+    },
+  ),
+);</code></pre><table><thead><tr><th>ทางออกที่ถูกดัก</th><th>ผล</th></tr></thead><tbody>
+<tr><td>กดข้างนอกกล่อง</td><td>ปิดไม่ได้เลย</td></tr>
+<tr><td>ปุ่ม “ยกเลิก”</td><td>ถามก่อนถ้ามี S/N</td></tr>
+<tr><td>ปุ่มย้อนกลับของเครื่อง</td><td>ถามก่อนถ้ามี S/N</td></tr>
+<tr><td>ยังไม่สแกนอะไรเลย</td><td>ปิดได้ทันที ไม่ถามให้รำคาญ</td></tr>
+</tbody></table><p>เงื่อนไข <code>scannedSerials.isEmpty</code> ปรากฏสองที่ ทำให้กล่องที่ยังไม่มีอะไรปิดได้เลย — สำคัญ เพราะผู้ใช้ที่สแกน Part ผิดจะเจอกล่องนี้บ่อยและต้องปิดเร็ว</p><p><strong>สิ่งที่ต้องแก้พร้อมกัน:</strong> ทรัพยากรสี่ตัวที่ยังไม่ถูกคืน — ตอนนี้มีทางออกมากขึ้น ยิ่งต้องมั่นใจว่าคืนทุกทาง ซึ่ง <code>try/finally</code> รับประกันให้</p><pre class="code-vs"><code>try {
+  final confirmed = await showDialog&lt;bool&gt;(...);
+  if (confirmed != true || !mounted) {
+    _scanFocus.requestFocus();
+    return;
+  }
+  ...
+} finally {
+  basketCtrl.dispose();
+  qtyCtrl.dispose();
+  serialCtrl.dispose();
+  serialFocus.dispose();
+}</code></pre><p><strong>ข้อสรุป:</strong> อาการที่ผู้ใช้แจ้งคือ “เผลอกด” ซึ่งชี้ตรงไปที่ <code>barrierDismissible</code> — การแก้ที่ตรงอาการมักเป็นบรรทัดเดียว ส่วนการแก้ที่ครบต้องดักทุกทางออก และควรทำพร้อมกันเพราะเป็นการอ่านโค้ดชุดเดียวกัน</p></details></section>
+
+<section id="section-9"><h2>9. สรุป</h2><div class="success"><ul><li>จอ 470 บรรทัดแต่มี state แค่หกตัว — สถานะส่วนใหญ่อยู่ในกล่อง</li><li><code>_scanCtrl.clear()</code> ทันทีหลังอ่านค่า ไม่รอผลลัพธ์</li><li>สแกน Part แล้วได้ล็อตแรกที่เจอ ไม่ถามผู้ใช้ ต่างจาก <code>ScanPartScreen</code></li><li>กล่องมีสองขั้นตอนคุมด้วย <code>showBasketStep</code> ตัวเดียว</li><li>ปุ่ม “ถัดไป” ตรวจว่ามี S/N อย่างน้อยหนึ่ง ไม่ได้ตรวจว่าครบ</li><li>การตรวจ S/N ไม่ยิงเน็ตเลย เพราะรายชื่อมาพร้อมข้อมูลรายการ</li><li><code>serialRequire</code> เป็น getter ที่เดาจากว่ามีรายชื่อ S/N ไหม</li><li>สถานะที่เป็น local ไม่มีทางค้างผิด แต่กู้ไม่ได้เมื่อกล่องปิด</li><li>ทรัพยากรสี่ตัวในกล่องไม่ถูกคืน</li><li>สร้าง SnackBar เองแทนที่จะใช้ของกลาง — เสียการสั่นไป</li></ul></div><p><strong>บทหน้า:</strong> <code>UnloadSessionSheet</code> — แผ่นเลื่อน 528 บรรทัดที่จัดการ session ทั้งชุดและมี Map ของ controller</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

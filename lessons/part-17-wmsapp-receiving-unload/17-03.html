@@ -4,21 +4,173 @@
 <title>PO Search Flow</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-03 · Real Codebase</span><h1>PO Search Flow</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">State</a></li><li><a href="#section-2">Search command</a></li><li><a href="#section-3">Endpoint</a></li><li><a href="#section-4">Error path</a></li><li><a href="#section-5">Start receiving</a></li><li><a href="#section-6">Stale search</a></li><li><a href="#section-7">UI extraction</a></li><li><a href="#section-8">Tests</a></li></ol></nav>
-<div class="note"><strong>Scan PO เป็น read-before-write gate:</strong> normalize input, โหลดเอกสาร/รายการ, แสดง status แล้วอนุญาตเข้า ScanPartเฉพาะ POที่ยังไม่ RECEIVED</div>
-<section id="section-1"><h2>1. State</h2><pre class="code-vs"><code>TextEditingController _poController
-POResponse? _po
-bool _loadingPo
-ApiService _api</code></pre><p>dispose controllerถูกต้องและไม่มี FocusNodeเฉพาะ</p></section>
-<section id="section-2"><h2>2. Search command</h2><pre class="code-vs"><code>poId = text.trim().toUpperCase();
-setState(() { loading = true; po = null; });
-result = await api.getPO(poId);</code></pre><p>clear POเดิมก่อน responseป้องกันผู้ใช้กดเริ่มจากข้อมูลเก่าระหว่าง load</p></section>
-<section id="section-3"><h2>3. Endpoint</h2><pre class="code-vs"><code>GET /api/receiving/po/{poId}
-→ POResponse(po, supplier, status, items, pendingLines)</code></pre><p>path segmentควร encodeด้วย Uriหาก IDมีอักขระพิเศษ ไม่ต่อ stringโดยสมมติรูปแบบเสมอ</p></section>
-<section id="section-4"><h2>4. Error path</h2><p>empty inputเปิด error dialog; API failureหยุด loadingและแสดง result.error ปัจจุบันใช้ <code>result.error!</code> จึง assume errorไม่ null ควร typed failure/fallbackแน่นอน</p></section>
-<section id="section-5"><h2>5. Start receiving</h2><p>เมื่อมี POและ statusไม่ใช่ <code>RECEIVED</code> push ScanPartScreenพร้อม snapshot PO หลัง routeกลับเรียก <code>_reloadPO()</code>เพื่อดึง qty/statusล่าสุดจาก server</p></section>
-<section id="section-6"><h2>6. Stale search</h2><p>ถ้าผู้ใช้ค้น Aแล้ว Bก่อน Aจบ response Aอาจทับ B ต้อง disable/serializeหรือใช้ generationผูก poIdกับ response Mounted guardป้องกัน disposeแต่ไม่ป้องกัน out-of-order</p></section>
-<section id="section-7"><h2>7. UI extraction</h2><p><code>PoSearchCard</code>เป็น input/loading action, <code>PoStepIndicator</code>เป็น flow context จึง test wiringแยกจาก parent orchestrationได้ แต่ source of truthของ queryยังอยู่ parent controller</p></section>
-<section id="section-8"><h2>8. Tests</h2><div class="success">trim/uppercase, empty, 404, loading, A/B race, RECEIVEDไม่มี start, active PO pushถูก, reloadหลังกลับและ dispose mid-request โดย assert APIเรียกด้วย PO IDจริง</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">จอที่เล็กแต่ครบ</a></li><li><a href="#section-2">ค้นหา PO</a></li><li><a href="#section-3">สองจุดที่จะเป็นปัญหาเมื่อเน็ตช้า</a></li><li><a href="#section-4">ปุ่มที่หายไปเมื่อรับครบ</a></li><li><a href="#section-5">ตัวชี้ขั้นตอน</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–55 นาที</span><span>ลงมือทำ: เปิด scan_po_screen.dart ทั้ง 166 บรรทัด</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.2, Part 3 (ฟอร์มและเครื่องสแกน), Part 4 (async)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่านจอค้นหาที่ทำงานถูกได้ และเห็นสองจุดที่จะเป็นปัญหาเมื่อเน็ตช้า</div>
+
+<section id="section-1"><h2>1. จอที่เล็กแต่ครบ</h2><p>state ทั้งหมดสี่ตัว</p><pre class="code-vs"><code>class _ScanPoScreenState extends State&lt;ScanPoScreen&gt; {
+  final _poController = TextEditingController();
+  final _api = ApiService();
+
+  POResponse? _po;
+  bool _loadingPo = false;</code></pre><p>สองตัวหลังคือสถานะจริง — ผลลัพธ์ที่ได้ และกำลังโหลดอยู่ไหม</p><table><thead><tr><th><code>_po</code></th><th><code>_loadingPo</code></th><th>หน้าจอแสดง</th></tr></thead><tbody>
+<tr><td><code>null</code></td><td><code>false</code></td><td>ช่องค้นหาอย่างเดียว</td></tr>
+<tr><td><code>null</code></td><td><code>true</code></td><td>ปุ่มค้นหากำลังหมุน</td></tr>
+<tr><td>มีค่า</td><td><code>false</code></td><td>ข้อมูล PO + รายการสินค้า + ปุ่มเริ่มรับ</td></tr>
+<tr><td>มีค่า</td><td><code>true</code></td><td><strong>เกิดไม่ได้</strong> — โค้ดล้าง <code>_po</code> ก่อนเสมอ</td></tr>
+</tbody></table><p>แถวสุดท้ายคือสิ่งที่ทำถูก และ 17.5 จะเจอว่าจอถัดไปไม่ได้ทำแบบนี้</p></section>
+
+<section id="section-2"><h2>2. ค้นหา PO</h2><pre class="code-vs"><code>Future&lt;void&gt; _scanPO() async {
+  final poId = _poController.text.trim().toUpperCase();
+  if (poId.isEmpty) {
+    showErrorDialog(context, message: 'กรุณาใส่ PO ID');
+    return;
+  }
+
+  setState(() {
+    _loadingPo = true;
+    _po = null;                  // ← ล้างผลเก่าก่อน
+  });
+
+  final result = await _api.getPO(poId);
+
+  if (!mounted) return;
+
+  if (!result.success) {
+    setState(() =&gt; _loadingPo = false);
+    showErrorDialog(context, message: result.error!);
+    return;
+  }
+
+  setState(() {
+    _po = result.data!;
+    _loadingPo = false;
+  });
+}</code></pre><table><thead><tr><th>รายละเอียด</th><th>ทำไมสำคัญ</th><th>บท</th></tr></thead><tbody>
+<tr><td><code>trim()</code></td><td>เครื่องสแกนบางรุ่นเติมช่องว่างท้าย</td><td>3.6</td></tr>
+<tr><td><code>toUpperCase()</code></td><td>รหัสในระบบเป็นตัวใหญ่ ผู้ใช้พิมพ์เล็กก็ยังหาเจอ</td><td>3.6</td></tr>
+<tr><td>ตรวจว่างก่อนยิง</td><td>ไม่เสียเวลารอเพื่อจะได้ข้อความว่ากรอกไม่ครบ</td><td>3.7</td></tr>
+<tr><td><code>_po = null</code> ก่อนยิง</td><td>ผู้ใช้ไม่เห็นข้อมูล PO เก่าคู่กับตัวหมุน</td><td>4.10</td></tr>
+<tr><td><code>if (!mounted) return</code></td><td>จอถูกปิดระหว่างรอได้จริง</td><td>4.13</td></tr>
+</tbody></table><p>ห้าข้อครบ ซึ่งไม่ใช่เรื่องปกติในโค้ดที่เขียนเร็ว</p><div class="note"><strong>บรรทัด <code>_po = null</code> สำคัญกว่าที่เห็น</strong> — ถ้าไม่ล้าง ผู้ใช้ที่ค้นหา PO ใหม่จะเห็นข้อมูลของ PO เก่าค้างอยู่ระหว่างรอ<br>ในคลังที่ผู้ใช้กดเริ่มรับสินค้าอย่างรวดเร็ว จังหวะนั้นอาจกลายเป็นการเริ่มรับผิดใบ ซึ่งเป็นความผิดพลาดที่แก้ยากมาก</div></section>
+
+<section id="section-3"><h2>3. สองจุดที่จะเป็นปัญหาเมื่อเน็ตช้า</h2><p><strong>จุดที่ 1 — สแกนซ้ำระหว่างรอ</strong></p><pre class="code-vs"><code>PoSearchCard(
+  controller: _poController,
+  loading: _loadingPo,
+  onSearch: _scanPO,
+),</code></pre><p><code>loading</code> ถูกส่งเข้าไปและ (ตามรูปแบบของ <code>PrimaryButton</code> ใน 16.9) จะปิดปุ่ม แต่<strong>ช่องข้อความยังพิมพ์ได้</strong> และเครื่องสแกนยังยิงเข้าไปได้</p><table><thead><tr><th>ผู้ใช้ทำ</th><th>เกิดอะไร</th></tr></thead><tbody>
+<tr><td>ยิงบาร์โค้ด PO แรก</td><td><code>_scanPO()</code> เริ่มทำงาน</td></tr>
+<tr><td>เน็ตช้า รอ 4 วินาที</td><td>ยังไม่มีอะไรเกิด</td></tr>
+<tr><td>ผู้ใช้คิดว่าไม่ติด ยิงซ้ำ</td><td><code>_scanPO()</code> ตัวที่สองเริ่ม</td></tr>
+<tr><td>คำตอบทั้งสองกลับมา</td><td><strong>ตัวที่กลับมาทีหลังชนะ</strong></td></tr>
+</tbody></table><p>ถ้าเป็น PO เดียวกันก็ไม่เสียหาย แต่ถ้าผู้ใช้ยิง PO คนละใบระหว่างรอ ผลลัพธ์ที่เห็นอาจไม่ใช่ใบที่ยิงล่าสุด</p><p>แก้ได้ด้วยการกันที่ต้นทาง</p><pre class="code-vs"><code>Future&lt;void&gt; _scanPO() async {
+  if (_loadingPo) return;      // กำลังค้นอยู่ ไม่รับคำสั่งใหม่
+  ...</code></pre><p>บรรทัดเดียว และเป็นรูปแบบที่ 4.9 สอนไว้ตรง ๆ</p><p><strong>จุดที่ 2 — กดเริ่มรับซ้ำ</strong></p><pre class="code-vs"><code>PrimaryButton(
+  label: 'เริ่มรับสินค้า',
+  icon: Icons.play_arrow,
+  onPressed: _startReceiving,       // ← ไม่มี loading
+)</code></pre><pre class="code-vs"><code>Future&lt;void&gt; _startReceiving() async {
+  final po = _po!;
+  await Navigator.push(...);        // เปิดจอถัดไป
+  await _reloadPO();                // กลับมาแล้วโหลดใหม่
+}</code></pre><p>ตรงนี้ปลอดภัยกว่าเพราะ <code>Navigator.push</code> ทำงานทันที ไม่มีช่วงรอให้กดซ้ำ</p><p>แต่ <code>_reloadPO()</code> ที่ตามมาไม่มีตัวหมุนบอก — ผู้ใช้กลับมาเห็นข้อมูลเก่าอยู่ครู่หนึ่งแล้วเปลี่ยนเอง</p><pre class="code-vs"><code>Future&lt;void&gt; _reloadPO() async {
+  if (_po == null) return;
+  final result = await _api.getPO(_po!.poId);
+  if (!mounted) return;
+  if (result.success) {
+    setState(() =&gt; _po = result.data!);
+  }
+  // ล้มเหลว → เงียบ ข้อมูลค้างเก่า
+}</code></pre><p>รูปแบบ “ล้มเหลวแล้วเงียบ” เดียวกับ 17.2 — และที่นี่ร้ายกว่า เพราะจำนวนที่รับไปแล้วบนหน้าจอจะไม่ตรงกับความจริง แล้วผู้ใช้อาจตัดสินใจจากตัวเลขนั้น</p></section>
+
+<section id="section-4"><h2>4. ปุ่มที่หายไปเมื่อรับครบ</h2><pre class="code-vs"><code>if (_po!.status != 'RECEIVED')
+  PrimaryButton(label: 'เริ่มรับสินค้า', ...)
+else
+  Container(
+    ...
+    child: const Row(
+      children: [
+        Icon(Icons.check_circle, color: AppTheme.success),
+        SizedBox(width: 8),
+        Text('PO นี้รับสินค้าครบแล้ว'),
+      ],
+    ),
+  ),</code></pre><table><thead><tr><th>ทำถูก</th><th>ทำไม</th></tr></thead><tbody>
+<tr><td>เอาปุ่มออกแทนที่จะปิดปุ่ม</td><td>ปุ่มที่กดไม่ได้ทำให้ผู้ใช้พยายามกดแล้วสงสัยว่าพัง</td></tr>
+<tr><td>มีข้อความอธิบายแทนที่</td><td>บอกว่าทำไมถึงไม่มีปุ่ม</td></tr>
+<tr><td>ใช้สีเขียวและไอคอนถูก</td><td>อ่านได้จากมุมตา</td></tr>
+</tbody></table><p>ต่างจากกรณีใน 17.2 ที่ยังควรให้กดได้ — ที่นั่นข้อมูลอาจไม่ทันสมัย ที่นี่สถานะเป็นข้อเท็จจริงที่เพิ่งดึงมา</p><div class="note"><strong>หลักที่แยกสองกรณี:</strong> เอาปุ่มออกได้ เมื่อ<strong>เรารู้แน่</strong>ว่าทำไม่ได้ และผู้ใช้เห็นเหตุผลบนจอ<br>ต้องปล่อยให้กดได้ เมื่อ<strong>เราแค่เดา</strong>จากข้อมูลที่อาจเก่า</div><p>เงื่อนไข <code>!= 'RECEIVED'</code> เขียนแบบตรวจว่าไม่เท่ากับค่าเดียว ซึ่งแปลว่าสถานะอื่นทั้งหมด — <code>OPEN</code>, <code>PARTIAL</code>, และสถานะใหม่ที่ฝั่ง .NET อาจเพิ่มมา — จะได้ปุ่มหมด</p><p>ในที่นี้ถูกต้อง เพราะ “ยังไม่ครบ” คือทุกอย่างที่ไม่ใช่ครบ แต่ถ้าวันหนึ่งมีสถานะ <code>CANCELLED</code> ผู้ใช้จะยังกดเริ่มรับใบที่ถูกยกเลิกได้</p></section>
+
+<section id="section-5"><h2>5. ตัวชี้ขั้นตอน</h2><pre class="code-vs"><code>const PoStepIndicator(),</code></pre><p>เป็น <code>const</code> แปลว่าไม่รับค่าอะไรเลย — แสดงขั้นตอนคงที่เหมือนกันตลอด ไม่ได้บอกว่าตอนนี้อยู่ขั้นไหน</p><table><thead><tr><th></th><th>แบบคงที่ (ตอนนี้)</th><th>แบบที่รู้ขั้นตอน</th></tr></thead><tbody>
+<tr><td>ประโยชน์</td><td>ผู้ใช้ใหม่รู้ว่า flow มีกี่ขั้น</td><td>รู้ด้วยว่าอยู่ขั้นไหน</td></tr>
+<tr><td>ต้นทุน</td><td>ไม่มี</td><td>ต้องส่งสถานะเข้ามาและอัปเดต</td></tr>
+<tr><td>ใช้ <code>const</code> ได้</td><td>ได้ — ไม่สร้างใหม่ตอน rebuild</td><td>ไม่ได้</td></tr>
+</tbody></table><p>สำหรับ flow ที่มีสองขั้นและผู้ใช้ทำทุกวัน แบบคงที่พอ — และการเป็น <code>const</code> ทำให้ Flutter ข้ามการสร้างใหม่ทุกครั้งที่ <code>build</code> ทำงาน ซึ่งในจอนี้เกิดทุกครั้งที่พิมพ์</p><p>ตรงกับที่ 1.14 สอนว่าใส่ <code>const</code> ให้ widget ที่ไม่เปลี่ยน — ในจอนี้มีการใช้ <code>const</code> ถูกที่หลายจุด รวมถึงกล่องข้อความ “รับสินค้าครบแล้ว” ที่ทั้งก้อนเป็น <code>const Row</code></p></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>ปิดปุ่มแล้วกันสแกนซ้ำได้</td><td>เครื่องสแกนยิงผ่านช่องข้อความ ไม่ผ่านปุ่ม</td></tr>
+<tr><td>ไม่ต้องล้างผลเก่าก่อนโหลดใหม่</td><td>ผู้ใช้อาจกดต่อจากข้อมูลผิดใบ</td></tr>
+<tr><td>ข้อมูลบนจอตรงกับเซิร์ฟเวอร์เสมอ</td><td><code>_reloadPO()</code> ล้มเหลวแล้วเงียบ</td></tr>
+<tr><td>ปิดปุ่มดีกว่าเอาปุ่มออก</td><td>ขึ้นกับว่าเรารู้แน่หรือแค่เดา</td></tr>
+<tr><td><code>const</code> เป็นแค่เรื่องสไตล์</td><td>ทำให้ข้ามการสร้าง widget ใหม่จริง</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “ยิงบาร์โค้ด PO แล้วบางทีขึ้นใบเก่า ต้องยิงใหม่อีกรอบ”</p><ol><li>อธิบายว่าเกิดได้อย่างไร</li><li>เขียนโค้ดแก้ที่ครอบคลุมทุกกรณี ไม่ใช่แค่กันกดซ้ำ</li><li>จะทดสอบว่าแก้ได้จริงอย่างไร ในเมื่อเทสต์ของโปรเจกต์นี้ยังเขียนไม่ได้</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>t=0.0s  ยิง PO-A → _scanPO() เรียก getPO('PO-A')
+t=0.5s  ผู้ใช้เห็นว่ายังไม่ขึ้น ยิง PO-B → _scanPO() เรียก getPO('PO-B')
+t=2.0s  คำตอบของ PO-B กลับมาก่อน → setState(_po = PO-B)   ← ถูกต้อง
+t=3.5s  คำตอบของ PO-A กลับมาทีหลัง → setState(_po = PO-A)  ← ทับของใหม่</code></pre><p>คำขอที่ยิงก่อนไม่จำเป็นต้องกลับมาก่อน — เส้นทางเครือข่ายต่างกัน เซิร์ฟเวอร์ประมวลผลนานไม่เท่ากัน</p><p>ผู้ใช้จึงเห็น “ใบเก่า” ซึ่งที่จริงคือใบที่ยิงก่อนหน้า</p><p><strong>ข้อ 2 — แก้ให้ครอบคลุม</strong></p><p>การกันกดซ้ำ (<code>if (_loadingPo) return;</code>) แก้ได้เฉพาะเคสนี้ แต่ไม่แก้กรณีที่ผู้ใช้กดยกเลิกแล้วยิงใหม่ ทางที่ครอบคลุมกว่าคือ<strong>ทิ้งคำตอบที่ล้าสมัย</strong></p><pre class="code-vs"><code>int _requestSeq = 0;
+
+Future&lt;void&gt; _scanPO() async {
+  final poId = _poController.text.trim().toUpperCase();
+  if (poId.isEmpty) {
+    showErrorDialog(context, message: 'กรุณาใส่ PO ID');
+    return;
+  }
+
+  final seq = ++_requestSeq;        // จองหมายเลขของคำขอนี้
+  setState(() {
+    _loadingPo = true;
+    _po = null;
+  });
+
+  final result = await _api.getPO(poId);
+
+  if (!mounted) return;
+  // มีคำขอใหม่กว่าเกิดขึ้นแล้ว — คำตอบนี้ล้าสมัย ทิ้งไปเงียบ ๆ
+  if (seq != _requestSeq) return;
+
+  if (!result.success) {
+    setState(() =&gt; _loadingPo = false);
+    showErrorDialog(context, message: result.error!);
+    return;
+  }
+
+  setState(() {
+    _po = result.data!;
+    _loadingPo = false;
+  });
+}</code></pre><p>รูปแบบนี้ตรงกับที่ 12.9 ใช้กับเหตุการณ์ที่มาไม่เรียงลำดับ — ให้แต่ละคำขอมีหมายเลข แล้วยอมรับเฉพาะคำตอบของหมายเลขล่าสุด</p><table><thead><tr><th>ครอบคลุมกรณี</th><th>กันกดซ้ำอย่างเดียว</th><th>ใช้หมายเลข</th></tr></thead><tbody>
+<tr><td>ยิงซ้ำระหว่างรอ</td><td>ได้</td><td>ได้</td></tr>
+<tr><td>ยิงใบใหม่ระหว่างรอใบเก่า</td><td>ได้ (แต่ผู้ใช้ยิงไม่ได้เลย)</td><td>ได้ และยิงใบใหม่ได้ทันที</td></tr>
+<tr><td>คำตอบมาสลับลำดับ</td><td><strong>ไม่ได้</strong></td><td>ได้</td></tr>
+</tbody></table><p>ควรใช้ทั้งสองอย่าง — หมายเลขกันผลลัพธ์ผิด ส่วนการกันกดซ้ำลดคำขอที่ไม่จำเป็น</p><p><strong>ข้อ 3 — ทดสอบอย่างไร</strong></p><p>16.6 อธิบายว่าจอเทสต์ไม่ได้เพราะ <code>ApiService()</code> เป็น singleton แต่ตรรกะนี้ทดสอบได้ถ้าดึงออกมา</p><pre class="code-vs"><code>// แยกตัวกันคำตอบล้าสมัยออกมาเป็นของที่ทดสอบได้
+class LatestOnly {
+  int _seq = 0;
+
+  /// คืน token สำหรับคำขอใหม่
+  int begin() =&gt; ++_seq;
+
+  /// คำตอบของ token นี้ยังใช้ได้ไหม
+  bool isCurrent(int token) =&gt; token == _seq;
+}</code></pre><pre class="code-vs"><code>test('คำตอบของคำขอเก่าต้องถูกทิ้ง', () {
+  final gate = LatestOnly();
+  final first = gate.begin();
+  final second = gate.begin();
+
+  expect(gate.isCurrent(first), isFalse);
+  expect(gate.isCurrent(second), isTrue);
+});</code></pre><p>ส่วนการทดสอบด้วยมือบนเครื่องจริง ทำได้โดยจำลองเน็ตช้าตามที่ 15.11 แนะนำ แล้วยิงสองใบติดกัน</p><p><strong>ข้อสังเกตที่สำคัญกว่าคำตอบ:</strong> อาการที่ผู้ใช้แจ้งคือ “ขึ้นใบเก่า” ซึ่งฟังเหมือนปัญหาแคช แต่ที่จริงเป็นเรื่องลำดับของคำตอบ — คำอธิบายของผู้ใช้บอก<strong>สิ่งที่เห็น</strong> ไม่ใช่สาเหตุ และการเชื่อคำอธิบายนั้นตรง ๆ จะพาไปหาแคชที่ไม่มีอยู่จริง</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>จอ 166 บรรทัด state สี่ตัว และสถานะที่เป็นไปได้จริงมีสามชุด</li><li>ล้าง <code>_po = null</code> ก่อนยิง — กันผู้ใช้กดต่อจากข้อมูลผิดใบ</li><li>ทำครบทั้ง <code>trim</code>, <code>toUpperCase</code>, ตรวจว่าง, ตรวจ <code>mounted</code></li><li>ปุ่มถูกปิดตอนโหลด แต่ช่องข้อความยังรับการสแกนได้ — คำขอซ้อนกันได้</li><li>คำตอบที่กลับมาทีหลังชนะเสมอ แม้จะเป็นคำขอที่ยิงก่อน</li><li>แก้ด้วยหมายเลขคำขอ ดีกว่ากันกดซ้ำอย่างเดียว</li><li><code>_reloadPO()</code> ล้มเหลวแล้วเงียบ ทำให้ตัวเลขบนจอไม่ตรงกับความจริง</li><li>เอาปุ่มออกเมื่อรู้แน่ ปล่อยให้กดได้เมื่อแค่เดาจากข้อมูลที่อาจเก่า</li></ul></div><p><strong>บทหน้า:</strong> สี่ widget ย่อยที่แสดงข้อมูล PO และวิธีที่มันจัดการกับรายการที่ยาวมาก</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>

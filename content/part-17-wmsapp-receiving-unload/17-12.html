@@ -1,22 +1,201 @@
-<div class="note"><strong>Progress ต้องมาจาก line identity:</strong> จำนวน part card หรือจำนวนครั้งที่ scan ไม่เท่ากับจำนวนงานสำเร็จ ให้คำนวณจาก session items และ confirmed line IDs เท่านั้น</div>
-<section><h2>1. Scan pallet</h2><p>trim palletId, reject ค่าว่าง, lock ระหว่าง request แล้วเรียก <code>POST /unload/open-session</code> พร้อม operatorId หาก scan pallet ใหม่ต้องถามยืนยันเมื่อ session เดิมยังมีงาน pending</p></section>
-<section><h2>2. Build progress</h2><pre class="code-vs"><code>totalCount = session.items.length
-confirmedCount = items.where(
-  (x) =&gt; status[x.lineId] == 'CONFIRMED'
-).length
-allConfirmed = totalCount &gt; 0 &amp;&amp; confirmedCount == totalCount</code></pre><p>นิยาม empty session แยกจาก completed เพื่อไม่แสดงสำเร็จทั้งที่ไม่มีข้อมูล</p></section>
-<section><h2>3. Scan part</h2><p>ค้นหา item ที่ partId ตรงและยัง PENDING ถ้ามีหนึ่งรายการเลือกได้ทันที ถ้ามีหลาย lot ให้แสดงตัวเลือกที่มี lot, condition และ qty เพื่อยืนยัน identity ก่อนกรอกจำนวน/serial</p></section>
-<section><h2>4. Serial item</h2><p>serial ที่ scan ต้องอยู่ใน <code>item.serialNumbers</code>, ไม่ซ้ำใน local set และจำนวนต้องตรงยอดที่จะ unload การใช้ Set ช่วย duplicate lookup แต่ควรเก็บ List เพิ่มหากลำดับ scan มีความหมายต่อ audit/UI</p></section>
-<section><h2>5. Non-serial item</h2><p>parse qty แบบปลอดภัย ตรวจ finite/integer ตามหน่วยธุรกิจ, มากกว่า 0 และไม่เกินยอด line ปัจจุบัน ข้อความผิดควรระบุค่าที่รับได้ ไม่ใช่เพียง “invalid quantity”</p></section>
-<section><h2>6. Confirm unload</h2><pre class="code-vs"><code>POST /unload/confirm-unload
-{
-  "sessionId": session.sessionId,
-  "palletId": session.pallet.id,
-  "partId": item.partId,
-  "lineId": item.lineId,
-  "operatorId": operatorId,
-  "serialNumbers": serials,
-  "qtyUnloaded": qty
-}</code></pre></section>
-<section><h2>7. Return pallet</h2><p><code>return-pallet-to-asis</code> เป็น transition ปิดงานที่มีผลต่อ inventory ต้องยืนยัน allConfirmed ตามกติกา, ป้องกันกดซ้ำ และใช้ผลจาก API เป็นหลัก การหน่วงเวลา 5 วินาทีใน UI ไม่ใช่หลักฐานว่า backend ทำงานเสร็จ ควรใช้ status/polling หรือ operation result</p></section>
-<section><h2>8. Concurrency tests</h2><div class="success">จำลองสองเครื่องเปิด pallet เดียวกัน, line ถูก confirm จากอีกเครื่อง, partial unload สร้าง line ใหม่, session หมดอายุ และ return pallet ชนกับ confirm โดยคาดหวัง conflict ที่ refresh แล้วทำต่อได้</div></section>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–60 นาที</span><span>ลงมือทำ: อ่าน _buildSessionBody() และ getter ที่คำนวณความคืบหน้า</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.11, 9.3 (แหล่งความจริงเดียว)<br><strong>จบบทนี้แล้วจะทำได้:</strong> เห็นความต่างระหว่างการเก็บค่าไว้กับการคำนวณจากแหล่งเดียว และอ่านหน้าจอที่ประกอบจากเงื่อนไขหลายชั้น</div>
+
+<section><h2>1. getter ที่คำนวณจากแหล่งเดียว</h2><pre class="code-vs"><code>int get _confirmedCount =&gt;
+    _partStatus.values.where((status) =&gt; status == 'CONFIRMED').length;
+
+int get _totalCount =&gt; _partStatus.length;
+
+bool get _allConfirmed =&gt; _totalCount &gt; 0 &amp;&amp; _confirmedCount == _totalCount;</code></pre><p>ทั้งสามค่าคำนวณจาก <code>_partStatus</code> ตัวเดียว ไม่ได้เก็บแยก</p><table><thead><tr><th></th><th>คำนวณ (โค้ดนี้)</th><th>เก็บแยกแล้วซิงก์</th></tr></thead><tbody>
+<tr><td>ไม่ตรงกันได้ไหม</td><td><strong>ไม่ได้</strong></td><td>ได้ ถ้าลืมซิงก์</td></tr>
+<tr><td>ต้องจำอะไรตอนแก้</td><td>แค่แก้ <code>_partStatus</code></td><td>ต้องแก้ทุกตัวที่เกี่ยว</td></tr>
+<tr><td>ต้นทุน</td><td>วนรายการทุกครั้งที่อ่าน</td><td>อ่านทันที</td></tr>
+</tbody></table><p>เทียบกับ <code>ScanPartScreen</code> ที่เก็บจำนวนไว้สองที่แล้วต้องซิงก์เอง (17.5) — ที่นี่ปัญหานั้นเกิดไม่ได้เลย</p><div class="note"><strong>ต้นทุนที่แถวสุดท้ายบอกไว้ต้องมองให้เป็น</strong> — <code>_confirmedCount</code> วนทั้ง <code>_partStatus</code> ทุกครั้งที่ถูกอ่าน และใน <code>build()</code> ถูกอ่านหลายครั้ง<br>พาเลทหนึ่งมีสินค้าไม่กี่สิบรายการ การวนสิบครั้งต่อการวาดหนึ่งเฟรมยังไม่รู้สึกอะไร<br><strong>ถ้ารายการเป็นหลักพัน ค่อยเปลี่ยนไปคำนวณครั้งเดียวแล้วส่งต่อ</strong> — และตอนนั้นก็ยังคำนวณจากแหล่งเดียวอยู่ ไม่ใช่กลับไปเก็บแยก</div><p>ค่าที่ได้ถูกส่งเข้า widget ที่แสดงผล</p><pre class="code-vs"><code>UnloadProgressBar(
+  confirmedCount: _confirmedCount,
+  totalCount: _totalCount,
+  allConfirmed: _allConfirmed,
+)</code></pre><p>และ widget นั้นคำนวณสัดส่วนเองอีกที</p><pre class="code-vs"><code>final progress = totalCount == 0 ? 0.0 : confirmedCount / totalCount;</code></pre><p><code>totalCount == 0</code> ถูกดักไว้ — ถ้าไม่ดัก จะได้ <code>NaN</code> ซึ่ง <code>LinearProgressIndicator</code> จะโยนข้อผิดพลาดออกมา</p><p>เกิดจริงตอนเปิดแผ่นครั้งแรกก่อนสแกนพาเลท ซึ่ง <code>_partStatus</code> ยังว่าง</p></section>
+
+<section><h2>2. หน้าจอที่ประกอบจากเงื่อนไขหกชั้น</h2><pre class="code-vs"><code>Widget _buildSessionBody() {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (_sessionOpen) ...[_buildProgressBar(), const SizedBox(height: 16)],
+      if (!_sessionOpen) _buildPalletScanSection(),
+      if (_session != null) _buildPalletInfoSection(),
+      if (_sessionOpen) _buildPartScanSection(),
+      if (_partStatus.isNotEmpty) _buildItemsList(),
+      if (_scannedLineId != null) ...[
+        PrimaryButton(label: 'ยืนยัน Unload: ...', ...),
+        DangerButton(label: 'ยกเลิก', ...),
+      ],
+      if (_sessionOpen) ...[ ...ปุ่มคืนพาเลท... ],
+    ],
+  );
+}</code></pre><p>แต่ละบรรทัดตรวจเงื่อนไขของตัวเอง ไม่มีโครง if/else ใหญ่ ๆ</p><table><thead><tr><th>เงื่อนไข</th><th>ควบคุมอะไร</th></tr></thead><tbody>
+<tr><td><code>_sessionOpen</code></td><td>แถบความคืบหน้า, ช่องสแกน Part, ปุ่มคืนพาเลท</td></tr>
+<tr><td><code>!_sessionOpen</code></td><td>ช่องสแกนพาเลท</td></tr>
+<tr><td><code>_session != null</code></td><td>ข้อมูลพาเลท</td></tr>
+<tr><td><code>_partStatus.isNotEmpty</code></td><td>รายการสินค้า</td></tr>
+<tr><td><code>_scannedLineId != null</code></td><td>ปุ่มยืนยันและยกเลิก</td></tr>
+</tbody></table><p>รูปแบบนี้ทำให้เพิ่มส่วนใหม่ง่าย — แค่เพิ่มบรรทัดพร้อมเงื่อนไข</p><p>ราคาที่จ่ายคือ<strong>ต้องอ่านทุกบรรทัดถึงจะรู้ว่าสถานะหนึ่งแสดงอะไรบ้าง</strong></p><pre class="code-vs"><code>// เปิด session แล้ว ยังไม่สแกน Part → เห็นอะไรบ้าง
+_sessionOpen = true, _session != null, _partStatus ไม่ว่าง, _scannedLineId = null
+  → แถบความคืบหน้า ✓
+  → ช่องสแกนพาเลท ✗
+  → ข้อมูลพาเลท ✓
+  → ช่องสแกน Part ✓
+  → รายการสินค้า ✓
+  → ปุ่มยืนยัน ✗
+  → ปุ่มคืนพาเลท ✓</code></pre><p>สังเกตว่า <code>_sessionOpen</code> กับ <code>_session != null</code> เกือบจะบอกเรื่องเดียวกัน</p><pre class="code-vs"><code>UnloadSession? _session;
+bool _sessionOpen = false;</code></pre><p>ค้นดูว่าตั้งค่าที่ไหนบ้าง</p><table><thead><tr><th>ที่</th><th><code>_session</code></th><th><code>_sessionOpen</code></th></tr></thead><tbody>
+<tr><td><code>_scanPallet()</code> สำเร็จ</td><td>มีค่า</td><td><code>true</code></td></tr>
+<tr><td><code>_reloadSession()</code></td><td>มีค่าใหม่</td><td><strong>ไม่แตะ</strong></td></tr>
+<tr><td><code>_resetForNextPallet()</code></td><td><code>null</code></td><td><code>false</code></td></tr>
+</tbody></table><p>ทั้งสองตัวเปลี่ยนพร้อมกันเสมอ — <code>_sessionOpen</code> จึงเป็นข้อมูลซ้ำที่คำนวณได้</p><pre class="code-vs"><code>bool get _sessionOpen =&gt; _session != null;</code></pre><p>เปลี่ยนเป็น getter แล้วจะเหลือแหล่งความจริงเดียว และเป็นการแก้ที่เข้ากับ getter สามตัวในหัวข้อแรก</p></section>
+
+<section><h2>3. ปุ่มที่แสดงเฉพาะเมื่อมีความหมาย</h2><pre class="code-vs"><code>if (_scannedLineId != null) ...[
+  const SizedBox(height: 12),
+  PrimaryButton(
+    label: 'ยืนยัน Unload: ${_scannedItemLabel()}',
+    icon: Icons.check,
+    onPressed: _canConfirmScanned() ? _confirmScannedPart : null,
+  ),
+  const SizedBox(height: 8),
+  DangerButton(
+    label: 'ยกเลิก',
+    icon: Icons.close,
+    onPressed: () {
+      setState(() {
+        _scannedLineId = null;
+        _scannedSerials.clear();
+      });
+      _partFocus.requestFocus();
+    },
+  ),
+],</code></pre><p>ปุ่มยืนยันมีชื่อสินค้าอยู่ในป้าย — ผู้ใช้เห็นว่ากำลังจะยืนยันอะไรก่อนกด</p><p>และ <strong>มีปุ่มยกเลิกจริง ๆ</strong></p><div class="note"><strong>เทียบกับ <code>ScanPartScreen</code> ที่ 17.5 ชี้ว่าไม่มีทางยกเลิกการเลือกสินค้า</strong> — ที่นี่มีปุ่มชัดเจน ล้างทั้ง <code>_scannedLineId</code> และ <code>_scannedSerials</code> แล้วคืนโฟกัสให้สแกนใหม่ได้ทันที<br>สามบรรทัดนี้คือสิ่งที่ <code>ScanPartScreen</code> ขาดไป</div><p>ปุ่มยืนยันถูกปิดตามเงื่อนไข</p><pre class="code-vs"><code>bool _canConfirmScanned() {
+  final item = _currentScannedItem();
+  if (item == null) return false;
+  if (item.serialRequire) return _scannedSerials.length == item.qty;
+  return true;
+}</code></pre><p>ของที่ต้องสแกน S/N ต้องครบทุกตัวถึงจะกดได้ — เข้มกว่า <code>LoadToBasketScreen</code> ใน 17.10 ที่ปุ่ม “ถัดไป” ตรวจแค่ว่ามีอย่างน้อยหนึ่ง</p><table><thead><tr><th>จอ</th><th>เงื่อนไข</th><th>ยอมให้โหลดบางส่วนไหม</th></tr></thead><tbody>
+<tr><td>UnloadSession</td><td><code>== item.qty</code></td><td>ไม่</td></tr>
+<tr><td>LoadToBasket</td><td><code>isNotEmpty</code></td><td>ได้</td></tr>
+</tbody></table><p>ความต่างนี้อาจตั้งใจ — การถ่ายของจากพาเลทต้องตรงกับที่ระบบบันทึกไว้ ส่วนการโหลดเข้าตะกร้าแบ่งหลายรอบได้</p><p>แต่ถ้าเป็นความตั้งใจ ควรมีคอมเมนต์บอก เพราะคนที่มาอ่านทีหลังจะเห็นว่าไม่สม่ำเสมอแล้วอาจ “แก้” ให้เหมือนกัน</p></section>
+
+<section><h2>4. สแกน Part แล้วเลือกให้อัตโนมัติ</h2><pre class="code-vs"><code>// สแกน Part ID — แสดงทุก Lot ของ Part นั้นในลิสต์เสมออยู่แล้ว (ไม่ popup เลือก lot)
+// ถ้ามีหลาย Lot ที่ยัง PENDING เลือก lot แรกที่เจอไปก่อน
+// ผู้ใช้แตะการ์ด lot อื่นในลิสต์เพื่อสลับได้เอง
+void _scanPart() {
+  final partId = _partController.text.trim().toUpperCase();
+  if (partId.isEmpty) return;
+
+  final matches = _session?.items.where((i) =&gt; i.partId == partId).toList() ?? [];
+
+  if (matches.isEmpty) {
+    showErrorDialog(context, message: 'Part $partId ไม่อยู่ใน Pallet นี้');
+    _partController.clear();
+    return;
+  }
+
+  final pending = matches.where((i) =&gt; _partStatus[i.lineId] != 'CONFIRMED').toList();
+
+  if (pending.isEmpty) {
+    showWarningSnackbar(context, 'Part $partId ยืนยันไปแล้วทุก Lot');
+    _partController.clear();
+    return;
+  }
+
+  setState(() {
+    _scannedLineId = pending.first.lineId;
+    _scannedSerials.clear();
+    _partController.clear();
+  });
+}</code></pre><p>คอมเมนต์สามบรรทัดบนหัวอธิบายการตัดสินใจครบ — ทำไมไม่ popup และผู้ใช้จะสลับล็อตอย่างไร</p><table><thead><tr><th>สถานการณ์</th><th>ผลลัพธ์</th><th>วิธีบอกผู้ใช้</th></tr></thead><tbody>
+<tr><td>ไม่มี Part นี้บนพาเลท</td><td>ไม่เลือกอะไร</td><td>กล่องแดง</td></tr>
+<tr><td>มีแต่ยืนยันครบทุกล็อตแล้ว</td><td>ไม่เลือกอะไร</td><td><strong>แถบเหลือง</strong></td></tr>
+<tr><td>มีล็อตที่ยังไม่ยืนยัน</td><td>เลือกล็อตแรก</td><td>รายการนั้นถูกไฮไลต์</td></tr>
+</tbody></table><p>แถวกลางใช้แถบเหลืองไม่ใช่กล่องแดง เพราะไม่ใช่ความผิดพลาด — ผู้ใช้แค่สแกนของที่ทำไปแล้ว ซึ่งเกิดบ่อยเมื่อทำงานเร็ว</p><p>เป็นการแยกระดับเดียวกับที่ 17.6 ทำกับการสแกน S/N ซ้ำ</p><p>สังเกตว่า <code>_partController.clear()</code> ถูกเรียกทั้งสามทาง แต่เขียนซ้ำสามที่</p><pre class="code-vs"><code>// ทำแบบ LoadToBasketScreen จะสั้นกว่าและลืมไม่ได้
+void _scanPart() {
+  final partId = _partController.text.trim().toUpperCase();
+  _partController.clear();          // ← ล้างทันที ทุกทางออกได้ฟรี
+  if (partId.isEmpty) return;
+  ...</code></pre></section>
+
+<section><h2>5. firstWhere ที่ไม่มีทางออก</h2><pre class="code-vs"><code>UnloadItem? _currentScannedItem() {
+  final lineId = _scannedLineId;
+  if (lineId == null || _session == null) return null;
+  return _session!.items.firstWhere((i) =&gt; i.lineId == lineId);
+}</code></pre><p>ตรวจ <code>null</code> สองตัวแล้ว แต่ <code>firstWhere</code> ไม่มี <code>orElse</code></p><table><thead><tr><th>ถ้าไม่เจอ <code>lineId</code> ในรายการ</th></tr></thead><tbody>
+<tr><td>โยน <code>StateError: No element</code></td></tr>
+<tr><td>ชนิดที่คืนเป็น <code>UnloadItem?</code> ซึ่งบอกว่าอาจไม่มี — แต่ที่จริงจะพังแทน</td></tr>
+</tbody></table><p>เกิดได้เมื่อไร ต้องดูว่า <code>_scannedLineId</code> กับ <code>_session!.items</code> เปลี่ยนไม่พร้อมกันได้ไหม</p><pre class="code-vs"><code>Future&lt;void&gt; _confirmScannedPart() async {
+  ...
+  setState(() {
+    _scannedLineId = null;        // ← ล้างก่อน
+    _scannedSerials.clear();
+  });
+  await _reloadSession();         // ← แล้วค่อยโหลดใหม่
+  ...</code></pre><p>ลำดับนี้ปลอดภัย — ล้างก่อนโหลด</p><p>แต่ <code>_selectLine()</code> ที่ผู้ใช้แตะการ์ดเอง</p><pre class="code-vs"><code>void _selectLine(int lineId) {
+  if (_partStatus[lineId] == 'CONFIRMED') return;
+  if (_scannedLineId == lineId) return;
+  setState(() {
+    _scannedLineId = lineId;
+    _scannedSerials.clear();
+  });
+}</code></pre><p><code>lineId</code> มาจากรายการที่กำลังแสดงอยู่ จึงต้องมีอยู่จริงเสมอ</p><div class="note"><strong>สรุป: ปัจจุบันยังไม่พัง</strong> เพราะทุกเส้นทางตั้ง <code>_scannedLineId</code> จากรายการที่มีอยู่ และล้างก่อนโหลดใหม่<br>แต่ความปลอดภัยขึ้นกับลำดับที่ถูกเขียนไว้ ไม่ได้ขึ้นกับชนิดข้อมูล — เพิ่มเส้นทางใหม่ที่ผิดลำดับเมื่อไรก็พัง<br>เขียนให้ตรงกับชนิดที่ประกาศไว้ได้ในบรรทัดเดียว<pre class="code-vs"><code>return _session!.items.where((i) =&gt; i.lineId == lineId).firstOrNull;</code></pre>ตอนนี้ <code>UnloadItem?</code> หมายความตามที่เขียนไว้จริง และผู้เรียกที่ตรวจ <code>null</code> อยู่แล้วก็ทำงานถูกทันที</div></section>
+
+<section><h2>6. สิ่งที่แผ่นนี้ทำได้ดีกว่าจออื่น</h2><table><thead><tr><th>เรื่อง</th><th>ที่นี่</th><th>ที่อื่น</th></tr></thead><tbody>
+<tr><td>ปุ่มยกเลิกการเลือก</td><td>มี</td><td>ScanPart ไม่มี (17.5)</td></tr>
+<tr><td>คืน <code>Map</code> ของตัวควบคุม</td><td>ครบสามทาง</td><td>สามจออื่นไม่คืนเลย</td></tr>
+<tr><td>ค่าที่คำนวณจากแหล่งเดียว</td><td>ใช่</td><td>ScanPart เก็บสองที่ (17.5)</td></tr>
+<tr><td>ปุ่มยืนยันต้องครบจำนวน</td><td>ใช่</td><td>LoadToBasket ยอมบางส่วน (17.10)</td></tr>
+<tr><td>คอมเมนต์อธิบายการตัดสินใจ</td><td>สามจุด</td><td>น้อยกว่า</td></tr>
+<tr><td>สถานะกู้ได้เมื่อปิดกลางทาง</td><td>ได้ (อยู่ที่เซิร์ฟเวอร์)</td><td>LoadToBasket หายหมด (17.10)</td></tr>
+</tbody></table><p>ส่วนที่ยังเหมือนกับจออื่น</p><table><thead><tr><th>ปัญหาร่วม</th><th>เจอที่</th></tr></thead><tbody>
+<tr><td>S/N ที่สแกนค้างหายเมื่อปิด</td><td>17.7, 17.10, ที่นี่</td></tr>
+<tr><td>ยิงคำขอไม่สำเร็จแล้วไม่บอกว่าไม่รู้ผล</td><td>ทุกจอ</td></tr>
+<tr><td><code>ApiService()</code> สร้างในจอ</td><td>ทุกจอ</td></tr>
+</tbody></table><p>สังเกตว่าแผ่นนี้เรียก <code>ApiService()</code> สี่ครั้ง ไม่ได้เก็บไว้เป็นฟิลด์เหมือนจออื่น</p><pre class="code-vs"><code>final result = await ApiService().openUnloadSession(...);
+final result = await ApiService().openUnloadSession(...);
+final result = await ApiService().confirmUnload(...);
+final results = await Future.wait([ApiService().returnPalletToAsis(...), ...]);</code></pre><p>ได้ผลเหมือนกันเพราะเป็น singleton (16.6) แต่ทำให้เห็นชัดว่าจอนี้ผูกกับ <code>ApiService</code> ที่กี่จุด — ซึ่งเป็นข้อมูลที่มีประโยชน์ตอนจะแยกชั้นใน Part 23</p></section>
+
+<section><h2>7. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td>getter ที่วนรายการช้าเกินไป</td><td>ที่ขนาดนี้ไม่รู้สึก และไม่มีทางไม่ตรง</td></tr>
+<tr><td><code>0 / 0</code> ได้ 0</td><td>ได้ <code>NaN</code> ซึ่งทำให้ progress bar พัง</td></tr>
+<tr><td><code>firstWhere</code> คืน null เมื่อไม่เจอ</td><td>โยน <code>StateError</code> — ต้องใช้ <code>firstOrNull</code></td></tr>
+<tr><td>ชนิด <code>T?</code> รับประกันว่าไม่พัง</td><td>ในเมธอดนี้ยังพังได้ทั้งที่ประกาศเป็น nullable</td></tr>
+<tr><td>สองฟิลด์ที่เปลี่ยนพร้อมกันเสมอต้องมีทั้งคู่</td><td>ตัวหนึ่งควรเป็น getter</td></tr>
+</tbody></table></section>
+
+<section><h2>8. แบบฝึกหัด</h2><p>ทีมอยากให้แผ่นนี้บอกได้ว่า “เหลืออีกกี่ชิ้น” ไม่ใช่แค่ “เหลืออีกกี่รายการ”</p><ol><li>ตอนนี้แถบความคืบหน้านับอะไร และต่างจากจำนวนชิ้นอย่างไร</li><li>เพิ่มการนับชิ้นโดยไม่สร้างแหล่งความจริงใหม่</li><li>ควรแสดงทั้งสองตัวเลขไหม หรือแทนที่</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1</strong></p><pre class="code-vs"><code>int get _confirmedCount =&gt; _partStatus.values.where((s) =&gt; s == 'CONFIRMED').length;
+int get _totalCount =&gt; _partStatus.length;</code></pre><p>นับ<strong>รายการ</strong> (line) ไม่ใช่<strong>ชิ้น</strong> (qty)</p><table><thead><tr><th>พาเลทมี</th><th>แถบบอกว่า</th><th>ความจริง</th></tr></thead><tbody>
+<tr><td>รายการ A: 2 ชิ้น (ยืนยันแล้ว)</td><td rowspan="3">1 จาก 3 = 33%</td><td rowspan="3">2 จาก 112 ชิ้น = 1.8%</td></tr>
+<tr><td>รายการ B: 100 ชิ้น</td></tr>
+<tr><td>รายการ C: 10 ชิ้น</td></tr>
+</tbody></table><p>ตัวเลข 33% ทำให้ผู้ใช้คิดว่าทำไปหนึ่งในสามแล้ว ทั้งที่ยังไม่ถึง 2%</p><p>บนพาเลทที่จำนวนชิ้นต่อรายการต่างกันมาก ตัวเลขนี้ทำให้ประเมินเวลาผิด</p><p><strong>ข้อ 2 — เพิ่มโดยไม่สร้างแหล่งใหม่</strong></p><p>ข้อมูลจำนวนชิ้นมีอยู่แล้วใน <code>_session!.items</code> ไม่ต้องเก็บเพิ่ม</p><pre class="code-vs"><code>/// จำนวนชิ้นทั้งหมดบนพาเลท — คำนวณจาก session เสมอ
+int get _totalQty =&gt;
+    _session?.items.fold&lt;int&gt;(0, (sum, i) =&gt; sum + i.qty) ?? 0;
+
+/// จำนวนชิ้นที่ยืนยันแล้ว — นับเฉพาะรายการที่สถานะ CONFIRMED
+int get _confirmedQty =&gt;
+    _session?.items
+        .where((i) =&gt; _partStatus[i.lineId] == 'CONFIRMED')
+        .fold&lt;int&gt;(0, (sum, i) =&gt; sum + i.qty) ??
+    0;</code></pre><p>ทั้งสองอ่านจาก <code>_session</code> กับ <code>_partStatus</code> ซึ่งเป็นแหล่งเดิม — ไม่มีอะไรใหม่ให้ซิงก์</p><div class="note"><strong>มีกับดักที่ต้องรู้:</strong> <code>_reloadSession()</code> ทำให้ <code>items</code> เปลี่ยนหลังยืนยันบางส่วน (17.11)<br>ถ้าผู้ใช้ยืนยัน 3 จาก 10 ชิ้น เซิร์ฟเวอร์จะสร้างรายการใหม่สำหรับ 7 ชิ้นที่เหลือ แล้วรายการเดิมกลายเป็น 3 ชิ้นที่ CONFIRMED<br><code>_totalQty</code> จึงยังเท่าเดิม (3 + 7 = 10) และ <code>_confirmedQty</code> ได้ 3 — <strong>ถูกต้องพอดี</strong> เพราะคำนวณจากข้อมูลสด<br>ถ้าเก็บ <code>_totalQty</code> ไว้ตอนเปิด session แล้วไม่อัปเดต ตัวเลขจะเพี้ยนทันทีที่มีการยืนยันบางส่วน — นี่คือเหตุผลที่การคำนวณชนะการเก็บอีกครั้ง</div><p><strong>ข้อ 3 — แสดงทั้งสองหรือแทนที่</strong></p><table><thead><tr><th>ทางเลือก</th><th>ข้อดี</th><th>ข้อเสีย</th></tr></thead><tbody>
+<tr><td>แทนที่ด้วยจำนวนชิ้น</td><td>ตัวเลขเดียว ไม่สับสน</td><td>เสียข้อมูลว่าเหลือกี่รายการให้เดินไปหยิบ</td></tr>
+<tr><td>แสดงทั้งสอง</td><td>ครบ</td><td>ตัวเลขเยอะบนจอเล็ก</td></tr>
+<tr><td>แถบใช้ชิ้น ข้อความบอกรายการ</td><td><strong>สมดุล</strong></td><td>ต้องออกแบบให้อ่านง่าย</td></tr>
+</tbody></table><pre class="code-vs"><code>UnloadProgressBar(
+  // แถบใช้จำนวนชิ้น — สะท้อนงานที่เหลือจริง
+  confirmedCount: _confirmedQty,
+  totalCount: _totalQty,
+  allConfirmed: _allConfirmed,
+  // ข้อความรองบอกจำนวนรายการ — บอกว่าต้องเดินไปหยิบอีกกี่จุด
+  subtitle: 'เหลืออีก ${_totalCount - _confirmedCount} รายการ',
+)</code></pre><p><strong>เหตุผลที่เลือกทางที่สาม:</strong> สองตัวเลขตอบคำถามคนละข้อ</p><table><thead><tr><th>คำถามของผู้ใช้</th><th>ตอบด้วย</th></tr></thead><tbody>
+<tr><td>“อีกนานไหมกว่าจะเสร็จ”</td><td>จำนวนชิ้น</td></tr>
+<tr><td>“ต้องเดินไปหยิบอีกกี่จุด”</td><td>จำนวนรายการ</td></tr>
+</tbody></table><p>แถบยาว ๆ เหมาะกับคำถามแรกเพราะอ่านจากมุมตาได้ ส่วนคำถามที่สองเป็นตัวเลขที่อ่านตอนวางแผน</p><p><strong>สิ่งที่ต้องตรวจก่อนปล่อย:</strong> <code>_allConfirmed</code> ยังคำนวณจากรายการอยู่</p><pre class="code-vs"><code>bool get _allConfirmed =&gt; _totalCount &gt; 0 &amp;&amp; _confirmedCount == _totalCount;</code></pre><p>ซึ่งถูกต้องและไม่ควรเปลี่ยน — “ครบทุกรายการ” กับ “ครบทุกชิ้น” ต้องเกิดพร้อมกันอยู่แล้ว และการนับรายการเชื่อถือได้กว่าเพราะไม่ขึ้นกับว่าเซิร์ฟเวอร์แตกรายการอย่างไร</p></details></section>
+
+<section><h2>9. สรุป</h2><div class="success"><ul><li>สาม getter คำนวณจาก <code>_partStatus</code> ตัวเดียว — ไม่มีทางไม่ตรงกัน</li><li><code>totalCount == 0</code> ถูกดักก่อนหาร ไม่งั้นได้ <code>NaN</code></li><li>หน้าจอประกอบจากเงื่อนไขหกชั้น เพิ่มส่วนใหม่ง่ายแต่ต้องอ่านทุกบรรทัด</li><li><code>_sessionOpen</code> เป็นข้อมูลซ้ำที่ควรเป็น getter ของ <code>_session != null</code></li><li>มีปุ่มยกเลิกการเลือกจริง ซึ่ง <code>ScanPartScreen</code> ขาดไป</li><li>ปุ่มยืนยันต้องมี S/N ครบจำนวน เข้มกว่า <code>LoadToBasketScreen</code></li><li>สแกน Part ที่ยืนยันครบแล้วใช้แถบเหลือง ไม่ใช่กล่องแดง</li><li><code>_currentScannedItem()</code> ประกาศคืน nullable แต่ใช้ <code>firstWhere</code> ที่โยนได้</li><li>ความคืบหน้านับรายการ ไม่ใช่ชิ้น — ทำให้ประเมินเวลาผิดเมื่อจำนวนต่อรายการต่างกันมาก</li></ul></div><p><strong>บทหน้า:</strong> โมเดลและ API ของ basket และการเปรียบเทียบวิธีที่สองโดเมนออกแบบสัญญากับเซิร์ฟเวอร์</p></section>

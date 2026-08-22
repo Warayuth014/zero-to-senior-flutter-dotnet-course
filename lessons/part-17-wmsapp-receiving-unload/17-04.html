@@ -4,16 +4,166 @@
 <title>PO Info &amp; Steps</title><link rel="stylesheet" href="../../assets/course.css"></head>
 <body><div class="lesson">
 <header class="hero"><span class="badge">17-04 · Real Codebase</span><h1>PO Info &amp; Steps</h1><p>Part 17: wmsapp Receiving</p></header>
-<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">POResponse</a></li><li><a href="#section-2">POItem</a></li><li><a href="#section-3">PoInfoCard</a></li><li><a href="#section-4">PoItemsList</a></li><li><a href="#section-5">Step indicator</a></li><li><a href="#section-6">Status logic</a></li><li><a href="#section-7">Snapshot freshness</a></li><li><a href="#section-8">Contract tests</a></li></ol></nav>
-<div class="note"><strong>PO preview คือ decision context:</strong> ผู้ใช้ต้องเห็น supplier, status และยอด ordered/received/remainingต่อ line ก่อนเริ่มรับ แต่ข้อมูลนี้ยังเป็น snapshotและ serverต้อง revalidateตอน command</div>
-<section id="section-1"><h2>1. POResponse</h2><p>เก็บ poId, supplierId/name, status, createdAt, itemsและ pendingLines โดย parser fallbackวันที่ invalidเป็น <code>DateTime.now()</code> ซึ่งทำให้ข้อมูลเสียดูเหมือนปัจจุบัน ควร fail/nullableพร้อม diagnostics</p></section>
-<section id="section-2"><h2>2. POItem</h2><p>identity <code>id</code>ทำหน้าที่ line/lot ID, มี part/owner/brand/description/image, serialRequire, qtyสามค่า, status, condition, lotNumber/expiredDate</p></section>
-<section id="section-3"><h2>3. PoInfoCard</h2><p>สรุป header document/supplier/status/date ช่วยแยกเอกสารก่อน scan ใช้ status badge/color presentation แต่ไม่ควร encode business transitionจากสี</p></section>
-<section id="section-4"><h2>4. PoItemsList</h2><p>renderรายการและ quantity progressต่อ item จุดตรวจคือ listยาวต้อง lazy/scrollเหมาะกับ PDA, stable keyด้วย item.idและ thumbnailไม่ resolve futureซ้ำทุก rebuild</p></section>
-<section id="section-5"><h2>5. Step indicator</h2><p><code>PoStepIndicator</code>ประกอบ dots/linesเพื่อสื่อขั้น PO → Part → Pallet เป็น static contextในหน้า Scan PO ไม่ใช่ state machine source of truth อย่าใช้ตำแหน่ง visualกำหนด allowed command</p></section>
-<section id="section-6"><h2>6. Status logic</h2><pre class="code-vs"><code>if (po.status != 'RECEIVED') show Start;
-else show completed banner;</code></pre><p>unknown/lowercase/new statusจะเปิด Startโดย default เสี่ยงกว่า enum/allowed-setแบบ fail closed</p></section>
-<section id="section-7"><h2>7. Snapshot freshness</h2><p>หลัง ScanPart routeกลับ reload PO แต่ระหว่างเปิดหน้าคนอุปกรณ์อื่นอาจรับ lineเดียวกัน Serverต้อง check remaining/versionและตอบ conflict; UI refresh/แจ้งผู้ใช้แทนถือ snapshotเป็น lock</p></section>
-<section id="section-8"><h2>8. Contract tests</h2><div class="success">itemsว่าง/หลาย lot, qty partial/complete/over, serial/non-serial, pendingLines, unknown status, invalid date, null image/lotและ Thai text พร้อม snapshotจาก .NETจริง</div></section>
+<nav class="toc" aria-label="สารบัญบทเรียน"><h2>สารบัญบทเรียน</h2><ol><li><a href="#section-1">สี่ไฟล์ที่แตกออกมา</a></li><li><a href="#section-2">ตัวชี้ขั้นตอนที่ไม่รับค่า</a></li><li><a href="#section-3">รายการสินค้าที่ไม่ใช่ ListView</a></li><li><a href="#section-4">รายละเอียดในแต่ละแถว</a></li><li><a href="#section-5">RichText กับ Text ต่างกันอย่างไร</a></li><li><a href="#section-6">ข้อผิดพลาดที่พบบ่อย</a></li><li><a href="#section-7">แบบฝึกหัด</a></li><li><a href="#section-8">สรุป</a></li></ol></nav>
+<div class="meta"><span>ระดับ: กลาง</span><span>ใช้เวลา: 45–55 นาที</span><span>ลงมือทำ: เปิด scan_po/widgets/ ทั้งสี่ไฟล์</span></div>
+<div class="note"><strong>ต้องผ่านอะไรมาก่อน:</strong> 17.3, Part 2 (เลย์เอาต์), 16.10 (PartThumbnail)<br><strong>จบบทนี้แล้วจะทำได้:</strong> อ่าน widget ย่อยที่แตกออกมาแล้ว และรู้ว่ารายการที่ไม่ใช้ <code>ListView</code> จะพังตอนไหน</div>
+
+<section id="section-1"><h2>1. สี่ไฟล์ที่แตกออกมา</h2><table><thead><tr><th>ไฟล์</th><th>บรรทัด</th><th>รับค่าอะไร</th></tr></thead><tbody>
+<tr><td><code>po_items_list.dart</code></td><td>129</td><td><code>List&lt;POItem&gt;</code></td></tr>
+<tr><td><code>po_step_indicator.dart</code></td><td>71</td><td>ไม่รับอะไร</td></tr>
+<tr><td><code>po_info_card.dart</code></td><td>43</td><td><code>POResponse</code></td></tr>
+<tr><td><code>po_search_card.dart</code></td><td>41</td><td>controller + loading + callback</td></tr>
+</tbody></table><p>ทั้งสี่เป็น <code>StatelessWidget</code> — ไม่ถือสถานะเอง รับค่าเข้ามาแล้ววาด นี่คือรูปแบบที่ถูกต้องสำหรับส่วนที่แตกออกจากจอ</p><div class="note"><strong>ทดสอบว่าแตกถูกไหมด้วยคำถามเดียว:</strong> widget นี้ต้องรู้เรื่อง <code>ApiService</code> ไหม<br>ถ้าไม่ต้อง แปลว่าแตกถูก — ทั้งสี่ไฟล์นี้ไม่มีไฟล์ไหน import <code>api_service.dart</code> เลย</div></section>
+
+<section id="section-2"><h2>2. ตัวชี้ขั้นตอนที่ไม่รับค่า</h2><pre class="code-vs"><code>class PoStepIndicator extends StatelessWidget {
+  const PoStepIndicator({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        _StepDot(number: 1, label: 'สแกน PO', active: true),
+        _StepLine(),
+        _StepDot(number: 2, label: 'รับสินค้า', active: false),
+      ],
+    );
+  }
+}</code></pre><p>ทั้งก้อนเป็น <code>const</code> — Flutter สร้างครั้งเดียวแล้วใช้ตัวเดิมตลอด ไม่ว่า <code>build()</code> ของจอจะทำงานกี่ครั้ง</p><p>สังเกตสองคลาสข้างล่างที่ขึ้นต้นด้วยขีดล่าง</p><pre class="code-vs"><code>class _StepDot extends StatelessWidget { ... }
+class _StepLine extends StatelessWidget { ... }</code></pre><table><thead><tr><th>ผลของขีดล่าง</th></tr></thead><tbody>
+<tr><td>ใช้ได้เฉพาะในไฟล์นี้ — ไม่มีใครเผลอเอาไปใช้ที่อื่น</td></tr>
+<tr><td>เปลี่ยนหรือลบได้โดยไม่ต้องค้นทั้งโปรเจกต์</td></tr>
+<tr><td>อ่านไฟล์เดียวแล้วเข้าใจครบ ไม่ต้องเปิดไฟล์อื่น</td></tr>
+</tbody></table><p>เป็นรูปแบบที่ควรทำตาม — widget ย่อยที่ใช้ที่เดียวควรอยู่ในไฟล์เดียวกันและเป็น private</p><p>ข้อจำกัดที่ต้องรู้: <code>active: true</code> ถูกฝังไว้ ถ้าวันหนึ่งอยากให้ตัวชี้บอกขั้นตอนจริง ต้องรับค่าเข้ามาและจะเสียความเป็น <code>const</code> ไป</p><pre class="code-vs"><code>// ถ้าจะทำให้รู้ขั้นตอน
+class PoStepIndicator extends StatelessWidget {
+  final int currentStep;
+  const PoStepIndicator({super.key, required this.currentStep});
+
+  @override
+  Widget build(BuildContext context) =&gt; Row(     // const หายไป
+    children: [
+      _StepDot(number: 1, label: 'สแกน PO', active: currentStep &gt;= 1),
+      const _StepLine(),
+      _StepDot(number: 2, label: 'รับสินค้า', active: currentStep &gt;= 2),
+    ],
+  );
+}</code></pre><p>ราคาที่จ่ายเล็กมากในจอนี้ แต่หลักการที่ได้คือ <strong>ทุกค่าที่รับเข้ามาแลกมาด้วยการเสีย <code>const</code></strong> จึงควรรับเฉพาะค่าที่ต้องเปลี่ยนจริง</p></section>
+
+<section id="section-3"><h2>3. รายการสินค้าที่ไม่ใช่ ListView</h2><pre class="code-vs"><code>return WmsCard(
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('รายการสินค้า', ...),
+      const SizedBox(height: 12),
+      ...items.map(
+        (item) =&gt; Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          ...
+        ),
+      ),
+    ],
+  ),
+);</code></pre><p><code>...items.map(...)</code> กระจายทุกรายการเข้าไปใน <code>Column</code> — <strong>ทุกแถวถูกสร้างและวาดพร้อมกันทั้งหมด</strong> ไม่ว่าจะเห็นบนจอหรือไม่</p><table><thead><tr><th></th><th><code>Column</code> + spread</th><th><code>ListView.builder</code></th></tr></thead><tbody>
+<tr><td>สร้าง widget</td><td>ทุกแถวเสมอ</td><td>เฉพาะที่เห็นบนจอ</td></tr>
+<tr><td>เลื่อนได้เอง</td><td>ไม่ได้ ต้องมี <code>SingleChildScrollView</code> ครอบ</td><td>ได้</td></tr>
+<tr><td>ซ้อนใน <code>Column</code> อื่น</td><td>ได้เลย</td><td>ต้องกำหนดความสูงหรือใช้ <code>shrinkWrap</code></td></tr>
+<tr><td>เหมาะกับ</td><td>รายการสั้นที่รู้ว่าไม่ยาว</td><td>รายการที่ยาวได้</td></tr>
+</tbody></table><p>ในจอนี้เลือก <code>Column</code> เพราะรายการสินค้าอยู่กลางหน้าที่มีของอื่นอยู่บนล่าง และทั้งหน้าถูกครอบด้วย <code>SingleChildScrollView</code> อยู่แล้ว</p><p>คำถามคือ PO หนึ่งใบมีสินค้ากี่รายการ</p><table><thead><tr><th>จำนวนรายการ</th><th>ผล</th></tr></thead><tbody>
+<tr><td>5–20</td><td>ทำงานได้ดี</td></tr>
+<tr><td>50</td><td>เริ่มหน่วงตอนเปิด</td></tr>
+<tr><td>200</td><td><strong>ค้างชัดเจน</strong> — และรูป 200 ใบถูกโหลดพร้อมกัน</td></tr>
+</tbody></table><div class="note"><strong>ปัญหานี้ทบกับ 16.10</strong> — แต่ละแถวมี <code>PartThumbnail</code> ที่ไม่มี <code>cacheWidth</code> ที่ 4.2 MB ต่อรูป<br>PO ที่มี 50 รายการจะพยายามคลายรูป 50 ใบพร้อมกัน = 210 MB ซึ่งเป็นตัวเลขเดียวกับที่ 16.10 บอกว่าระบบเริ่มปิดแอปทิ้ง<br>ต่างจาก <code>ListView.builder</code> ที่โหลดเฉพาะแถวที่เห็น ตรงนี้โหลดทั้งหมดแม้ผู้ใช้จะไม่เลื่อนลงไปดูเลย</div><p>แก้ได้สองระดับ</p><pre class="code-vs"><code>// ระดับที่ 1 — แก้ที่ PartThumbnail (16.10) ลดจาก 4.2 MB เหลือ 50 KB ต่อรูป
+// 50 รายการ → 2.5 MB ซึ่งรับได้
+
+// ระดับที่ 2 — ถ้ารายการยาวจริง เปลี่ยนเป็น ListView
+ListView.builder(
+  shrinkWrap: true,                              // ให้สูงเท่าเนื้อหา
+  physics: const NeverScrollableScrollPhysics(), // ให้ตัวนอกเลื่อนแทน
+  itemCount: items.length,
+  itemBuilder: (_, i) =&gt; _buildItemRow(items[i]),
+)</code></pre><p><code>shrinkWrap: true</code> ทำให้ <code>ListView</code> วัดความสูงจากเนื้อหาทั้งหมด ซึ่ง<strong>ยังสร้างทุกแถวอยู่ดี</strong> — ได้แค่ความเป็นระเบียบ ไม่ได้ประโยชน์เรื่องประสิทธิภาพ</p><p>ถ้าต้องการประโยชน์จริง ต้องให้รายการมีความสูงจำกัดและเลื่อนเอง</p><pre class="code-vs"><code>SizedBox(
+  height: 400,                    // จำกัดความสูง → สร้างเฉพาะที่เห็น
+  child: ListView.builder(
+    itemCount: items.length,
+    itemExtent: 76,               // บอกความสูงต่อแถว → ข้ามการวัด (14.13)
+    itemBuilder: (_, i) =&gt; _buildItemRow(items[i]),
+  ),
+)</code></pre><p>แต่แลกมาด้วยรายการที่มีแถบเลื่อนของตัวเองซ้อนอยู่ในหน้าที่เลื่อนได้ ซึ่งใช้งานยากบนหน้าจอเล็ก — เป็นการแลกที่ต้องคุยกับผู้ใช้จริงก่อนตัดสิน</p></section>
+
+<section id="section-4"><h2>4. รายละเอียดในแต่ละแถว</h2><pre class="code-vs"><code>decoration: BoxDecoration(
+  color: AppTheme.background(context),
+  borderRadius: BorderRadius.circular(8),
+  border: Border.all(
+    color: item.status == 'RECEIVED'
+        ? AppTheme.success.withValues(alpha: 0.3)
+        : Colors.grey.withValues(alpha: 0.2),
+  ),
+),</code></pre><p>ขอบสีเขียวจาง ๆ บอกว่ารายการไหนรับครบแล้ว — อ่านได้จากมุมตาโดยไม่ต้องอ่านตัวเลข</p><pre class="code-vs"><code>Text('${item.qtyReceived}/${item.qtyOrdered}')</code></pre><p>แสดงเป็นเศษส่วนแทนที่จะแสดงแค่จำนวนที่เหลือ — ผู้ใช้เห็นทั้งความคืบหน้าและเป้าหมายในที่เดียว</p><p>และมีการซ่อนสิ่งที่ไม่มีค่า</p><pre class="code-vs"><code>if (item.lotNumber != null &amp;&amp; item.lotNumber!.isNotEmpty) ...[
+  Icon(MdiIcons.tagOutline, ...),
+  const SizedBox(width: 2),
+  RichText(...),
+  const SizedBox(width: 8),
+],
+StatusBadge(item.condition),</code></pre><p>ตรวจทั้ง <code>null</code> และสตริงว่าง — เป็นรูปแบบที่ถูก และการใส่ <code>...[</code> ทำให้ทั้งไอคอน ข้อความ และช่องว่างหายไปพร้อมกัน ไม่เหลือช่องว่างลอย</p><p>ส่วนที่น่าสังเกตคือคำที่ใช้</p><pre class="code-vs"><code>const TextSpan(text: 'Batch No', style: TextStyle(fontWeight: FontWeight.bold)),
+TextSpan(text: ' : ${item.lotNumber!}'),</code></pre><table><thead><tr><th>ในโค้ด</th><th>บนหน้าจอ</th></tr></thead><tbody>
+<tr><td><code>lotNumber</code></td><td>Batch No</td></tr>
+<tr><td><code>condition</code></td><td>ป้าย FG / PW</td></tr>
+</tbody></table><p>ชื่อในโค้ดกับคำที่ผู้ใช้เห็นไม่ตรงกัน — ไม่ผิด เพราะฝั่ง .NET ใช้คำว่า lot ส่วนหน้างานเรียก batch แต่<strong>ต้องรู้ไว้ตอนคุยกับผู้ใช้</strong> เพราะผู้ใช้ที่แจ้งว่า “Batch No ไม่ขึ้น” หมายถึงฟิลด์ <code>lotNumber</code></p></section>
+
+<section id="section-5"><h2>5. RichText กับ Text ต่างกันอย่างไร</h2><pre class="code-vs"><code>RichText(
+  text: TextSpan(
+    style: TextStyle(fontSize: 11, color: AppTheme.textGrey(context)),
+    children: [
+      const TextSpan(text: 'Batch No', style: TextStyle(fontWeight: FontWeight.bold)),
+      TextSpan(text: ' : ${item.lotNumber!}'),
+    ],
+  ),
+),</code></pre><p>ใช้เมื่อต้องการให้ข้อความบรรทัดเดียวมีหลายรูปแบบ — ที่นี่คือหัวข้อตัวหนากับค่าตัวปกติ</p><table><thead><tr><th>ทำแบบนี้</th><th>ผลที่ต่าง</th></tr></thead><tbody>
+<tr><td><code>RichText</code></td><td>ตัดบรรทัดเป็นก้อนเดียว หัวข้อกับค่าอยู่ติดกันเสมอ</td></tr>
+<tr><td><code>Row</code> ที่มีสอง <code>Text</code></td><td>ตัดบรรทัดแยกกัน อาจหลุดคนละบรรทัดเมื่อพื้นที่แคบ</td></tr>
+</tbody></table><div class="note"><strong>กับดักของ <code>RichText</code> ที่ต้องรู้:</strong> ไม่รับ style จากธีมโดยอัตโนมัติเหมือน <code>Text</code> — ถ้าไม่ระบุ <code>style</code> ที่ <code>TextSpan</code> ชั้นนอก จะได้ฟอนต์เริ่มต้นของระบบแทน Sarabun ซึ่งบน PDA จะเห็นสระไทยเพี้ยนทันที<br>ในโค้ดนี้ระบุ <code>style</code> ไว้ที่ชั้นนอกแล้ว จึงปลอดภัย — แต่ระบุแค่ขนาดกับสี ส่วนฟอนต์ตกทอดมาจาก <code>DefaultTextStyle</code> ของธีม<br>ถ้าจะให้แน่นอน ใช้ <code>Text.rich(...)</code> แทน ซึ่งรับ style จากธีมเหมือน <code>Text</code> ทุกประการ</div><pre class="code-vs"><code>// เขียนแบบนี้ปลอดภัยกว่าและสั้นกว่า
+Text.rich(
+  TextSpan(children: [
+    const TextSpan(text: 'Batch No', style: TextStyle(fontWeight: FontWeight.bold)),
+    TextSpan(text: ' : ${item.lotNumber!}'),
+  ]),
+  style: TextStyle(fontSize: 11, color: AppTheme.textGrey(context)),
+)</code></pre></section>
+
+<section id="section-6"><h2>6. ข้อผิดพลาดที่พบบ่อย</h2><table><thead><tr><th>เข้าใจผิด</th><th>ที่จริง</th></tr></thead><tbody>
+<tr><td><code>...items.map()</code> สร้างเฉพาะที่เห็น</td><td>สร้างทุกแถวเสมอ</td></tr>
+<tr><td><code>shrinkWrap: true</code> ทำให้ประหยัดขึ้น</td><td>ยังสร้างทุกแถว ได้แค่ความเป็นระเบียบ</td></tr>
+<tr><td><code>RichText</code> ใช้ฟอนต์ของธีม</td><td>ต้องระบุเอง หรือใช้ <code>Text.rich</code></td></tr>
+<tr><td>ชื่อฟิลด์ในโค้ดตรงกับคำที่ผู้ใช้พูด</td><td><code>lotNumber</code> คือ “Batch No” บนจอ</td></tr>
+<tr><td>widget ที่แตกออกมาต้องรับ callback เสมอ</td><td>สามในสี่ไฟล์นี้รับแค่ข้อมูล</td></tr>
+</tbody></table></section>
+
+<section id="section-7"><h2>7. แบบฝึกหัด</h2><p>ผู้ใช้แจ้งว่า “PO ใบใหญ่ ๆ เปิดแล้วแอปค้างไปสิบวินาที บางทีเด้งออก”</p><ol><li>อธิบายสาเหตุโดยแยกเป็นสองส่วน</li><li>เรียงลำดับการแก้ตามอัตราส่วนผลลัพธ์ต่อความเสี่ยง</li><li>ถ้าแก้ข้อแรกแล้วยังไม่พอ ต้องคุยอะไรกับผู้ใช้ก่อนแก้ข้อถัดไป</li></ol><details><summary>แนวคำตอบ</summary><p><strong>ข้อ 1 — สองส่วนที่ทบกัน</strong></p><table><thead><tr><th>ส่วน</th><th>สาเหตุ</th><th>อาการ</th></tr></thead><tbody>
+<tr><td>เวลา</td><td><code>Column</code> สร้างทุกแถวพร้อมกัน</td><td>ค้างตอนเปิด</td></tr>
+<tr><td>หน่วยความจำ</td><td><code>PartThumbnail</code> ไม่มี <code>cacheWidth</code></td><td>เด้งออก</td></tr>
+</tbody></table><p>สังเกตว่าอาการสองอย่างมาจากคนละสาเหตุ — แก้อย่างเดียวจะได้ผลครึ่งเดียว</p><p>คำนวณ PO ที่มี 60 รายการ</p><table><thead><tr><th></th><th>ตอนนี้</th></tr></thead><tbody>
+<tr><td>widget ที่สร้าง</td><td>60 แถว × ~12 widget = ~720</td></tr>
+<tr><td>รูปที่ขอโหลด</td><td>60 ใบพร้อมกัน</td></tr>
+<tr><td>หน่วยความจำจากรูป</td><td>60 × 4.2 MB = <strong>252 MB</strong></td></tr>
+</tbody></table><p><strong>ข้อ 2 — ลำดับการแก้</strong></p><table><thead><tr><th>ลำดับ</th><th>แก้อะไร</th><th>ผล</th><th>ความเสี่ยง</th></tr></thead><tbody>
+<tr><td>1</td><td>ใส่ <code>cacheWidth</code> ที่ <code>PartThumbnail</code></td><td>252 MB → 3 MB</td><td>ต่ำมาก — บรรทัดเดียว หน้าตาไม่เปลี่ยน</td></tr>
+<tr><td>2</td><td>เอา <code>FutureBuilder</code> ออก</td><td>ลดงานต่อ build</td><td>ต่ำ — แก้สองไฟล์</td></tr>
+<tr><td>3</td><td>เปลี่ยนเป็น <code>ListView</code> ที่จำกัดความสูง</td><td>สร้างเฉพาะที่เห็น</td><td><strong>สูง — หน้าตาเปลี่ยน</strong></td></tr>
+</tbody></table><p>ข้อ 1 ให้ผลมากที่สุดและเสี่ยงน้อยที่สุด — ทำก่อนเสมอ และแก้ที่เดียวได้ผลกับทั้ง 12 จุดที่ใช้ <code>PartThumbnail</code></p><p>ข้อ 3 อยู่ท้ายสุดไม่ใช่เพราะยาก แต่เพราะ<strong>เปลี่ยนวิธีที่ผู้ใช้ใช้งาน</strong></p><p><strong>ข้อ 3 — ต้องคุยอะไรก่อน</strong></p><p>คำถามที่ต้องได้คำตอบก่อนแก้</p><table><thead><tr><th>คำถาม</th><th>ทำไมต้องรู้</th></tr></thead><tbody>
+<tr><td>PO ใบใหญ่ที่สุดมีกี่รายการ</td><td>ถ้าสูงสุด 30 ข้อ 1–2 อาจพอ ไม่ต้องแตะข้อ 3</td></tr>
+<tr><td>ผู้ใช้เลื่อนดูทั้งรายการก่อนกดเริ่มไหม</td><td>ถ้าดูทั้งหมด รายการที่มีแถบเลื่อนซ้อนจะน่ารำคาญ</td></tr>
+<tr><td>ต้องเห็นทั้งใบพร้อมกันเพื่อตัดสินใจอะไรไหม</td><td>ถ้าต้อง การจำกัดความสูงจะขัดการทำงาน</td></tr>
+</tbody></table><p>ถ้าคำตอบคือ “ผู้ใช้แค่ดูผ่าน ๆ แล้วกดเริ่มรับ” การจำกัดความสูงไม่กระทบอะไร</p><p>ถ้าคำตอบคือ “หัวหน้ากะต้องตรวจทั้งใบก่อนอนุมัติ” ต้องหาทางอื่น เช่นแสดงเป็นรายการเต็มแต่โหลดรูปเฉพาะที่เห็น</p><pre class="code-vs"><code>// ทางสายกลาง — คงเลย์เอาต์เดิม แต่ไม่โหลดรูปที่ยังไม่เห็น
+// (แสดงไอคอนก่อน แล้วโหลดรูปเมื่อแถวเข้ามาในจอ)
+VisibilityDetector(
+  key: ValueKey(item.partId),
+  onVisibilityChanged: (info) {
+    if (info.visibleFraction &gt; 0) setState(() =&gt; _visible.add(item.partId));
+  },
+  child: _visible.contains(item.partId)
+      ? PartThumbnail(imageUrl: item.imageUrl)
+      : const SizedBox(width: 40, height: 40),
+)</code></pre><p>วิธีนี้ต้องเพิ่มไลบรารี ซึ่งขัดกับสิ่งที่ 16.11 ชี้ว่าโปรเจกต์นี้ตั้งใจใช้ไลบรารีน้อย — ต้องชั่งน้ำหนักและคุยกับทีม ไม่ใช่ตัดสินใจเอง</p><p><strong>ข้อสรุป:</strong> ปัญหาประสิทธิภาพส่วนใหญ่แก้ได้ด้วยการเปลี่ยนที่ผู้ใช้ไม่เห็น — ทำให้ครบก่อน แล้วค่อยพิจารณาการเปลี่ยนที่ผู้ใช้เห็น และการเปลี่ยนแบบหลังต้องถามผู้ใช้ก่อน ไม่ใช่ตัดสินจากตัวเลขอย่างเดียว</p></details></section>
+
+<section id="section-8"><h2>8. สรุป</h2><div class="success"><ul><li>สี่ widget ย่อยเป็น <code>StatelessWidget</code> ทั้งหมด และไม่มีตัวไหนรู้จัก <code>ApiService</code></li><li>ตัวชี้ขั้นตอนทั้งก้อนเป็น <code>const</code> — สร้างครั้งเดียวตลอดอายุแอป</li><li>widget ย่อยที่ใช้ที่เดียวควรเป็น private และอยู่ในไฟล์เดียวกัน</li><li>ทุกค่าที่รับเข้ามาแลกมาด้วยการเสีย <code>const</code></li><li><code>...items.map()</code> ใน <code>Column</code> สร้างทุกแถวเสมอ — รวมถึงโหลดรูปทุกใบพร้อมกัน</li><li>ปัญหานี้ทบกับ <code>PartThumbnail</code> ที่ไม่มี <code>cacheWidth</code></li><li><code>shrinkWrap: true</code> ไม่ได้ทำให้ประหยัดขึ้น</li><li><code>RichText</code> ไม่รับ style จากธีม ควรใช้ <code>Text.rich</code></li><li>ชื่อฟิลด์ในโค้ด (<code>lotNumber</code>) กับคำที่ผู้ใช้เห็น (Batch No) ไม่ตรงกัน</li></ul></div><p><strong>บทหน้า:</strong> <code>ScanPartScreen</code> — 27 ฟิลด์ใน State และเครื่องสถานะที่ไม่มีใครเขียนไว้เป็นลายลักษณ์อักษร</p></section>
 
 </div><script src="../../assets/course.js"></script></body></html>
